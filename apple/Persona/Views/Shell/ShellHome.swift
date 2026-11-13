@@ -104,6 +104,7 @@ struct ShellHome: View {
             }
             .background(Theme.pageBackground.ignoresSafeArea(edges: .bottom))
         }
+        .keepsHeightUnderUndockedKeyboard() // the composer stays at the bottom under a floating keyboard (#2565)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { room.pageAtRest($0) }
         .navigationTitle(model.assistantShownName)
         .task(id: launcher) { if pending == nil { await model.warmAssistant(launcher: launcher) } }

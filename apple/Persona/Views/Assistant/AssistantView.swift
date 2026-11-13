@@ -840,6 +840,7 @@ struct AssistantHome: View {
             // machine chips scrolled under them read through.
             .background(Theme.groupedPage.ignoresSafeArea(edges: .bottom))
         }
+        .keepsHeightUnderUndockedKeyboard() // the composer stays at the bottom under a floating keyboard (#2565)
         .navigationTitle("Persona")
         .task(id: launcher) { if pending == nil { await model.warmAssistant(launcher: launcher) } }
         .modifier(ReadinessRefresh())

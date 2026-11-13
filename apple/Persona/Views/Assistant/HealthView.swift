@@ -128,6 +128,7 @@ struct HealthView: View {
             .background(Theme.groupedPage.ignoresSafeArea(edges: .bottom))
         }
         .background(Theme.groupedPage)
+        .keepsHeightUnderUndockedKeyboard() // the composer stays at the bottom under a floating keyboard (#2565)
         .pageTitle(String(localized: "Health"))
         .fileUploadPicker(isPresented: $showReports) { uploadReports($0) }
         #if DEBUG
