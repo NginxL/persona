@@ -12,6 +12,7 @@
   "err_description": "档位说明最多 {max} 个字符，不能包含空字符。",
   "err_purpose": "未知类别 {purpose}。可用类别：{purposes}。",
   "err_runtime": "模型档位不能更改主对话运行方式。",
+  "err_config_dir": "模型档位不能更改新主对话使用的 Claude 配置。",
   "err_value": "{where} 的 {field} 无效。",
   "err_launcher_missing": "供应商 {launcher} 已不可用，请恢复后再切换或回滚。",
   "err_launcher_model": "供应商 {launcher} 必须有默认模型。",

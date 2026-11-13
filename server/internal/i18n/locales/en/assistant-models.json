@@ -116,6 +116,8 @@
   "err_api_as_launcher": "This use points to a direct API connection that cannot run as a launcher",
   "err_runtime_invalid": "Runtime must be cli or agentsdk",
   "err_runtime_assistant_only": "Only the main chat can choose a runtime",
+  "err_config_dir_invalid": "The profile for new conversations must be private or legacy",
+  "err_config_dir_assistant_only": "Only the main chat can choose the profile its new conversations start in",
   "use_delegate": "Deciding whether to answer an agent's question for you",
   "source_delegate_default": "Same connection as triage ({provider}), on {model}",
   "source_delegate_connection": "Same connection as triage ({provider})",

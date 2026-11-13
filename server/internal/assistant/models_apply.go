@@ -58,6 +58,28 @@ func (s *Service) applyModelOn(ctx context.Context, id string, params map[string
 	return s.finishModel(ctx, id, params, b)
 }
 
+// withNewConversationProfile puts the profile the main chat's settings start new conversations in (#4633) into a new
+// conversation's params (assistant.send, assistant.warm): only when the start names none of its own, and only for
+// Claude Code, the one agent with profiles. True when it did, so a node too old for config_dir can be asked again
+// without it. Nothing else is told it: an existing conversation keeps the profile it was started in.
+func (s *Service) withNewConversationProfile(ctx context.Context, machine, purpose string, params map[string]any) bool {
+	if _, asked := params["config_dir"]; asked {
+		return false
+	}
+	b, err := s.resolveModel(ctx, purpose)
+	if err != nil || b.ConfigDir == "" {
+		return false
+	}
+	if used, _ := params["launcher"].(string); used != "" && used != "claude" {
+		// One hidden from the pickers still runs what it runs (withUnhidden, as startOn reads it).
+		if agent := s.launcherAgent(withUnhidden(ctx, used), machine, used); agent != "" && agent != "claude" {
+			return false
+		}
+	}
+	params["config_dir"] = b.ConfigDir
+	return true
+}
+
 // applyPickedModel is applyModel for a launcher/model picked for one send (the chat's menu): with no model the
 // launcher's own default stays, instead of the purpose's configured one.
 func (s *Service) applyPickedModel(ctx context.Context, params map[string]any) error {
@@ -117,6 +139,8 @@ func (s *Service) finishModel(ctx context.Context, id string, params map[string]
 	if b.Effort != "" {
 		params["effort"] = b.Effort
 	}
+	// The profile new conversations start in is not what a running process runs on (#4633): choosing one restarts nothing.
+	b.ConfigDir = ""
 	raw, _ := json.Marshal(b)
 	sum := sha256.Sum256(append([]byte(s.modelBindingFingerprint(ctx, b)), raw...))
 	params["model_fingerprint"] = hex.EncodeToString(sum[:])

@@ -252,6 +252,21 @@ so creating or resuming sessions is impossible without it and returns `503 assis
 - If node cannot run the SDK (no Node 22+, bridge, or claude), it falls back to CLI and includes `runtime_fallback` in session status.
 - A binding without a model means the launcher's default, on a resume too (#2487). Claude Code resumes a session on the model it last ran on unless `--model` or a model variable (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL`) names one; a `model` in its settings does not. So when node resumes a conversation the hub resolved with no model, it passes what a new session of that launcher would use: the `model` from Claude Code's settings, else `default`. It passes nothing when the launcher names a model itself or when its start cannot be seen (a managed launcher, a wrapper script); see `node/assistant_resume_model.go`.
 
+## Main chat's profile for new conversations (#4633)
+
+“Main Chat” adds “New chats' Claude profile”. It decides which Claude config directory a conversation the user starts gets when the start names none (`docs/assistant/assistant.md`, “New conversations”). The choices:
+
+- `private` (the default, stored as none): Persona's own profile, `<PERSONA_HOME>/profiles/<launcher>`.
+- `legacy`: this computer's existing Claude Code setup, resolved once per conversation the way an explicit `config_dir: "legacy"` is. That is the setup the node's service environment, a login shell's `CLAUDE_CONFIG_DIR`, a launcher's own profile or the machine's `claude_start_dir` names, else `~/.claude`.
+
+It is the Settings side of #4633's decision: reusing an existing profile means choosing it, and nothing is copied between profiles. A machine whose only sign-in is a gateway and token in `~/.claude/settings.json`'s `env`, or an OAuth login in `~/.claude`, picks `legacy` here, and its new main chats start signed in.
+
+- **Where it applies**: only `assistant` offers it, as `config_dirs: ["private", "legacy"]` with `config_dir` in its `fields`. Agents, API purposes and a task's own purpose do not accept it, and PATCH returns 400 `err_config_dir_assistant_only`. A value other than `private` / `legacy` returns 400 `err_config_dir_invalid`. The main chat's other uses inherit it through the binding; a provider change keeps it, as it keeps the runtime.
+- **What reads it**: `startOn` (`withNewConversationProfile`) puts it in `assistant.send` when the start names no `config_dir`, is not a guest's, and runs on Claude Code. A launcher known to run another agent gets none, the same rule as #6467. The warm spare for the next new conversation (`assistant.warm`) gets it too, since a spare is adopted only in the same profile (`node/assistant_spare.go`).
+- **What it leaves alone**: a start that names its own profile (the hub's own conversations' `legacy`, a meeting room's, an API caller's) and existing conversations, which keep the profile they were started in. Messages never carry it, and it is not in `model_fingerprint`, so choosing it restarts no running process. Model profiles leave it as they leave the runtime: a switch and its rollback keep the choice, and a model profile that sets it is refused (`err_config_dir`).
+- **Older nodes**: one too old to be told a profile (`node_outdated`) gets the start, or the warm-up, again without it, and the conversation starts where it always has.
+- **Clients**: the web edits it in the Main chat editor next to “Runtime”, for a Claude Code provider only, and shows it under what runs now. The Apple and Android editors do not show it yet. They send sparse PATCHes, so they leave a saved choice as it is.
+
 ## A conversation's own model (#5033)
 
 The model panel of a Persona chat switches that conversation to another launcher, model or reasoning effort, and the choice stays with the conversation: its next messages run on it, on every device, until the user switches again or goes back to the default (the user's ask on 2026-11-12). Model configuration › Main chat stays the default: a conversation without a pick follows it (the main chat, a scheduled task's own conversation, a leader conversation and the background supervisor) or keeps what it runs (the others), as before.
@@ -430,7 +445,7 @@ Saving one item:
 }
 ```
 
-Only `assistant` may write `runtime` (see “Main-chat runtime”).
+Only `assistant` may write `runtime` (see “Main-chat runtime”) and `config_dir` (`"private"` or `"legacy"`, see “Main chat's profile for new conversations”).
 
 “Information screening” (`inbox.triage`) also governs plugins: plugins using the Inbox without their own fallback require it to be callable before they can be enabled. With such plugins enabled, a change making it unusable returns 422 `triage_model_in_use`,
 listing plugin names (clearing a selection still saves normally if fallback to `manager.json`'s `ai` / `inbox.triage_ai` or automatic selection remains callable; `docs/extensions/extensions.md`, “General rules for the Inbox”).

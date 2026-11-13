@@ -45,8 +45,8 @@ func modelProfileChanges(p ModelProfile, records map[string]modelRecord, stored 
 		if !ok {
 			continue
 		}
-		r := records[id] // a copy: the runtime is cleared on it only
-		r.Binding.Runtime = ""
+		r := records[id] // a copy: the runtime and the new conversations' profile are cleared on it only
+		r.Binding.Runtime, r.Binding.ConfigDir = "", ""
 		if r.Binding != b {
 			changes = append(changes, id)
 		}

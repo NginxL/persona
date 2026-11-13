@@ -679,16 +679,23 @@ func (s *Service) warm(launcher string) {
 		return
 	}
 	params := map[string]any{"cwd": cwd, "launcher": launcher}
+	profiled := false
 	if picked {
 		err = s.applyPick(ctx, params, pick)
-	} else {
-		err = s.applyModel(ctx, "assistant", params)
+	} else if err = s.applyModel(ctx, "assistant", params); err == nil {
+		// The spare is adopted only by a new conversation in the same profile (node/assistant_spare.go).
+		profiled = s.withNewConversationProfile(ctx, machine, "assistant", params)
 	}
 	if err != nil {
 		s.logf("warm model: %v", err)
 		return
 	}
-	if err := s.call(ctx, machine, DeviceAssistantWarm, params, nil); err != nil {
+	err = s.call(ctx, machine, DeviceAssistantWarm, params, nil)
+	if profiled && nodeOutdated(err) {
+		delete(params, "config_dir")
+		err = s.call(ctx, machine, DeviceAssistantWarm, params, nil)
+	}
+	if err != nil {
 		s.logf("warm assistant: %v", err)
 	}
 }

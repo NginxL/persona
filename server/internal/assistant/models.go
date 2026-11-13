@@ -24,6 +24,16 @@ import (
 // assistantRuntimes is what GET /model-config offers for the main chat's runtime.
 var assistantRuntimes = []string{proto.AssistantRuntimeCLI, proto.AssistantRuntimeAgentSDK}
 
+// The Claude profiles GET /model-config offers for the main chat's new conversations (#4633): Persona's own profile
+// (the default, stored as none) or this computer's existing Claude Code setup, resolved as the node resolves
+// config_dir "legacy" (docs/assistant/assistant.md). Selecting one copies nothing between profiles.
+const (
+	assistantConfigDirPrivate = "private"
+	assistantConfigDirLegacy  = "legacy"
+)
+
+var assistantConfigDirs = []string{assistantConfigDirPrivate, assistantConfigDirLegacy}
+
 type modelRecord struct {
 	Revision int64        `json:"revision"`
 	Binding  ModelBinding `json:"binding"`
@@ -72,7 +82,8 @@ type ModelPurpose struct {
 	Limit         *ai.Pause    `json:"limit,omitempty"` // the connection is held: quota used up or busy (ai/limit.go)
 	Fields        []string     `json:"fields"`
 	ProviderIDs   []string     `json:"provider_ids"`
-	Runtimes      []string     `json:"runtimes,omitempty"` // assistant only: the runtimes it can run on
+	Runtimes      []string     `json:"runtimes,omitempty"`    // assistant only: the runtimes it can run on
+	ConfigDirs    []string     `json:"config_dirs,omitempty"` // assistant only: the profiles its new conversations can start in
 }
 
 // launch is the purpose's execution form, independent of its provider or runtime.
@@ -109,7 +120,7 @@ func agentsOverride(id string) bool { return id == purposeAgent || id == purpose
 // modelPurposes are the uses; Name, Group and Uses hold catalog names (assistant-models), read in a language by
 // localized.
 var modelPurposes = []ModelPurpose{
-	{ID: "assistant", Group: "group_default", Kind: "launcher", Runtimes: assistantRuntimes, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}}},
+	{ID: "assistant", Group: "group_default", Kind: "launcher", Runtimes: assistantRuntimes, ConfigDirs: assistantConfigDirs, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}}},
 	{ID: "agent.new", Group: "group_default", Kind: "launcher", Uses: []ModelUse{{Name: "use_new_agent"}, {Name: "use_inbox_agent"}, {Name: "use_lark_agent"}}},
 	{ID: "kb", Group: "group_default", Kind: "api", Uses: []ModelUse{{Name: "use_translate"}, {Name: "use_draft"}, {Name: "use_knowledge"}, {Name: "use_projects"}, {Name: "use_titles"}}},
 	{ID: "inbox.triage", Group: "group_default", Kind: "api", Uses: []ModelUse{{Name: "use_triage"}, {Name: "use_importance"}, {Name: "use_reply_or_agent"}}},

@@ -12,6 +12,7 @@
   "err_description": "説明は最大 {max} 文字で、ヌル文字は使えません。",
   "err_purpose": "不明なカテゴリ {purpose}。カテゴリ：{purposes}。",
   "err_runtime": "プロファイルでメイン会話のランタイムは変更できません。",
+  "err_config_dir": "プロファイルで新しいメイン会話の Claude プロファイルは変更できません。",
   "err_value": "{where} の {field} が無効です。",
   "err_launcher_missing": "プロバイダー {launcher} がありません。切り替えや復元の前に戻してください。",
   "err_launcher_model": "プロバイダー {launcher} に既定モデルが必要です。",

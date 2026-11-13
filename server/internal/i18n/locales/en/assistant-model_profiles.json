@@ -12,6 +12,7 @@
   "err_description": "The profile description must be at most {max} characters and contain no null characters.",
   "err_purpose": "Unknown category {purpose}. Categories: {purposes}.",
   "err_runtime": "Profiles cannot change the main conversation runtime.",
+  "err_config_dir": "Profiles cannot change which Claude profile new main conversations start in.",
   "err_value": "Invalid {field} in {where}.",
   "err_launcher_missing": "Provider {launcher} is no longer available. Restore it before switching or rolling back.",
   "err_launcher_model": "Provider {launcher} must have a default model.",

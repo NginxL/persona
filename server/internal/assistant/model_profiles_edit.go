@@ -38,6 +38,9 @@ func checkModelProfile(p *ModelProfile, stored []storedLauncher) error {
 		if b.Runtime != "" {
 			return i18n.Err("assistant-model_profiles.err_runtime")
 		}
+		if b.ConfigDir != "" {
+			return i18n.Err("assistant-model_profiles.err_config_dir")
+		}
 		for field, v := range map[string]string{"provider": b.Provider, "model": b.Model} {
 			if !validProfileValue(v) {
 				return i18n.Err("assistant-model_profiles.err_value", i18n.Args{"where": id, "field": field})

@@ -306,6 +306,8 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if _, err := s.finishMainChatModel(ctx, machine, purpose, params, false); err != nil {
 		return proto.Session{}, err
 	}
+	// A guest's profile is its own: the main chat's setting is for the user's conversations only.
+	fromSetting := p.GuestTools == nil && s.withNewConversationProfile(ctx, machine, purpose, params)
 	used, _ := params["launcher"].(string)
 	// A profile is Claude Code's: the node refuses a config_dir for any other agent before starting it (#6467). Judged
 	// here, by the launcher the start finally runs on, not the one asked for: the model configuration and a fallback
@@ -328,6 +330,10 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 		SessionID string `json:"session_id"`
 	}
 	err = s.call(ctx, machine, DeviceAssistantSend, params, &res)
+	if fromSetting && nodeOutdated(err) {
+		delete(params, "config_dir") // a node too old to be told a profile starts it where it always has
+		err = s.call(ctx, machine, DeviceAssistantSend, params, &res)
+	}
 	s.startRefused(ctx, machine, used, err) // Claude Code or the launcher missing: the readiness's claude step
 	if err != nil {
 		if d, ok := s.device(ctx, machine); ok {

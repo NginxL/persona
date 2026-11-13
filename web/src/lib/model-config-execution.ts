@@ -87,17 +87,32 @@ export function runtimeChoices(p: ModelPurpose, agent?: string): { id: string; l
   return RUNTIMES.filter((r) => p.runtimes?.includes(r.id));
 }
 
+/** The profiles a main chat's new conversations can start in (#4633), in the order the choice offers them. */
+const CONFIG_DIRS = ["private", "legacy"] as const;
+
+/** "New chats' Claude profile"'s options: the ones the hub offers (and this client knows), for Claude Code only. */
+export function configDirChoices(p: ModelPurpose, agent?: string): { id: string; label: string }[] {
+  if (!p.config_dirs?.length || (agent && agent !== "claude")) return [];
+  return CONFIG_DIRS.filter((id) => p.config_dirs?.includes(id)).map((id) => ({ id, label: configDirLabel(id) }));
+}
+
+export function configDirLabel(id: string | undefined): string {
+  return id === "legacy" ? t("settings-modelconfiguration.config_dir_legacy") : t("settings-modelconfiguration.config_dir_private");
+}
+
 export const modelConfiguration = (manager?: string) => api<ModelConfigurationBody>("/model-config", { headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 export function draftFor(p: ModelPurpose): ModelDraft {
   const runtime = runtimeChoices(p).length ? p.override?.runtime || p.effective?.runtime || "cli" : "";
-  return { provider: p.override?.provider ?? "", model: p.override?.model ?? "", effort: p.override?.effort ?? "", runtime };
+  const draft: ModelDraft = { provider: p.override?.provider ?? "", model: p.override?.model ?? "", effort: p.override?.effort ?? "", runtime };
+  if (configDirChoices(p).length) draft.config_dir = p.override?.config_dir || p.effective?.config_dir || "private";
+  return draft;
 }
 
 export function chooseProvider(draft: ModelDraft, provider: string): ModelDraft {
-  return draft.provider === provider ? draft : { provider, model: "", effort: "", runtime: draft.runtime };
+  return draft.provider === provider ? draft : { ...draft, provider, model: "", effort: "" };
 }
 
-export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, "runtime">): boolean {
+export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, "runtime" | "config_dir">): boolean {
   return (p.fields ?? ["provider", "model"]).includes(field);
 }
 
@@ -113,6 +128,7 @@ export function modelPatch(p: ModelPurpose, draft: ModelDraft): Record<string, s
     if (supportsField(p, field)) patch[field] = draft[field].trim() || null;
   }
   if (runtimeChoices(p).length && draft.runtime) patch.runtime = draft.runtime;
+  if (configDirChoices(p).length && draft.config_dir) patch.config_dir = draft.config_dir;
   return patch;
 }
 

@@ -214,6 +214,10 @@ type ModelBinding struct {
 	Model    string `json:"model,omitempty"`
 	Effort   string `json:"effort,omitempty"`
 	Runtime  string `json:"runtime,omitempty"` // main chat only: cli (default) or agentsdk; kept across a provider change
+	// ConfigDir is the main chat's only: the Claude profile its new conversations start in (#4633). None is Persona's
+	// own profile (the default); "legacy" is this computer's existing Claude Code setup. Kept across a provider change;
+	// an existing conversation keeps the profile it was started in.
+	ConfigDir string `json:"config_dir,omitempty"`
 }
 
 // NotifyRequest is notify.request's params.

@@ -140,7 +140,8 @@ type fakeHub struct {
 	failSendOnce   map[string]error    // session.send_once fails with these, by "machine/session"
 	failInterrupt  error               // session.interrupt fails with it
 	failAssistant  error               // assistant.send fails with it (a launcher that cannot start)
-	// refuseConfigDir: assistant.send with a config_dir fails as the hub refuses it for a node too old for one
+	// refuseConfigDir: assistant.send or assistant.warm with a config_dir fails as the hub refuses it for a node too old
+	// for one
 	refuseConfigDir bool
 	// elsewhere: the conversations in another profile than meetingProfile, by id: a resume that asks for a config_dir
 	// fails, as the node refuses to move a conversation to another profile
@@ -242,6 +243,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)
+	if p.Method == DeviceAssistantWarm && f.refuseConfigDir && strings.Contains(string(p.Params), `"config_dir"`) {
+		return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
+	}
 	if p.Method == "session.interrupt" && f.failInterrupt != nil {
 		return nil, f.failInterrupt
 	}

@@ -116,6 +116,8 @@
   "err_api_as_launcher": "这个用途引用的直接 API 接入不能作为启动器运行",
   "err_runtime_invalid": "运行方式只能是 cli 或 agentsdk",
   "err_runtime_assistant_only": "只有主对话可以选择运行方式",
+  "err_config_dir_invalid": "新对话的配置只能是 private 或 legacy",
+  "err_config_dir_assistant_only": "只有主对话可以选择新对话用哪个配置",
   "use_delegate": "Agent 的提问先判断要不要替你答",
   "source_delegate_default": "跟「信息筛选」同一个接入（{provider}），模型 {model}",
   "source_delegate_connection": "跟「信息筛选」同一个接入（{provider}）",

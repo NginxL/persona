@@ -116,6 +116,8 @@
   "err_api_as_launcher": "この用途の直接API接続はランチャーとして実行できません",
   "err_runtime_invalid": "実行方式はcliまたはagentsdkにしてください",
   "err_runtime_assistant_only": "実行方式を選べるのはメインチャットだけです",
+  "err_config_dir_invalid": "新しい会話のプロファイルは private または legacy にしてください",
+  "err_config_dir_assistant_only": "新しい会話のプロファイルを選べるのはメインチャットだけです",
   "use_delegate": "エージェントの質問に代わりに答えるかの判断",
   "source_delegate_default": "振り分けと同じ接続（{provider}）、モデルは {model}",
   "source_delegate_connection": "振り分けと同じ接続（{provider}）",
