@@ -2336,6 +2336,20 @@ a Mac (macOS 14, region China): Tiananmen Gate searched by name came back at (39
 a snapshot, the same point shifted to GCJ-02 (39.91059, 116.40371) landed in an alley 550 m east, and a walking route
 drawn from MapKit's own points followed the streets. Check on a phone in the mainland before adding any conversion.
 
+## MapKit walking steps describe the maneuver at the end of each step's line (2026-11-14, #6936)
+
+`MKRoute.Step.instructions` is what to do where that step's `polyline` ends, not where it starts. A walking route Apple
+Maps gave for two points in central Shanghai (979 m, 12 steps, asked from a Mac with the language set to Chinese) read:
+a first step "路线导航开始" ("start the route") with no length and a one-point line, then "右转" over 24 m whose line, at its
+end, turns right into the next step's line, "左转" over 268 m that turns left at its end, and so on, to a last step
+"到达目的地" ("arrive at the destination") whose line ends at the destination. All five turns agreed with the angle
+between one step's last segment and the next step's first. Taking the instruction for the step's start shows every
+arrow and says every "in 40 m, turn left" one step early, the arrow pointing the opposite way of the words at the
+corners. So: the next maneuver is the instruction of the step being walked, its distance is to that step's end, its
+arrow is the turn from that step's last segment into the next step's first, and the last step is arriving. Steps carry
+no maneuver type; read the turn off the lines. The instructions are terse in the mainland ("右转" without a street name
+is common). Check a route from another region before relying on the same reading there (#6672 has the code that used it).
+
 ## A sidebar place has more than one way in (2026-11-13, #6599)
 
 The drawer's places (Inbox, Machines, Knowledge…) keep their stacks through `AssistantView.show` (`ShellPlaces`,
