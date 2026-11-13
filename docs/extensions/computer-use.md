@@ -443,7 +443,7 @@ input, the clipboard and as the fallback; only the picture moves to video. The p
 Mac whose node advertises `screen_video`, which a node does once it has the helper (the picture switcher in ⋯ stays
 hidden otherwise); until then every client shows RFB. The web, the Mac app and Android don't decode video yet.
 
-- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `PersonaScreenKit`): a Swift helper app inside
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenKit`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
   with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
   Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
@@ -483,10 +483,13 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     before it would show a picture switcher they can't use. `screen.dial` works either way.
 - **Hub** (`GET …/screen/video/connect?pair=…`): a binary WebSocket with the same checks as `…/ports/5900/connect`
   (full device, `cua` or `ego` on), counted against the same 64 streams per machine. It calls `screen.dial` and relays
-  the bytes without parsing them.
+  the bytes without parsing them. The iOS app's screen-sharing stream carries the pair it will bind to
+  (`…/ports/5900/connect?pair=…`, `RFBWebSocket`): 16 random bytes in hex, a new one each connection, so no other
+  stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
-  are skipped by length, so either side may add more. `PersonaScreenKit` is the codec, shared with the app's client.
+  are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
+  package for macOS and iOS) is the codec, shared by the helper and the app's client.
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
   delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
   delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.

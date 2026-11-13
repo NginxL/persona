@@ -10,6 +10,7 @@ from pathlib import Path
 import plistlib
 import re
 import shlex
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -17,6 +18,27 @@ import yaml
 
 
 APPLE = Path(__file__).resolve().parents[1]
+_APPLE_FILES = None
+
+
+def apple_files():
+    """The repository's files under apple/: tracked, or new and not ignored (#7026).
+
+    Build output (DerivedData under apple/build/), local generated projects and other files git ignores are not the
+    repository's, so they are never checked, wherever a checkout puts them. Without git (an unpacked archive) every file
+    is checked, as before.
+    """
+    global _APPLE_FILES
+    if _APPLE_FILES is None:
+        try:
+            listed = subprocess.run(
+                ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."],
+                cwd=APPLE, capture_output=True, check=True).stdout.decode("utf-8").split("\0")
+            paths = [APPLE / name for name in dict.fromkeys(listed) if name]
+            _APPLE_FILES = sorted(path for path in paths if path.is_file() or path.is_symlink())
+        except (OSError, subprocess.CalledProcessError):
+            _APPLE_FILES = sorted(path for path in APPLE.rglob("*") if path.is_file() or path.is_symlink())
+    return _APPLE_FILES
 
 
 def unique_pairs(pairs):
@@ -145,7 +167,7 @@ class PersonaOnlyTests(unittest.TestCase):
         migration = APPLE / "Shared/NativeStateMigration.swift"
         former = "jar" + "vis"
         allowed = {migration.resolve()}
-        for path in APPLE.rglob("*.swift"):
+        for path in (path for path in apple_files() if path.suffix == ".swift"):
             if former in path.read_text(encoding="utf-8").lower():
                 self.assertIn(path.resolve(), allowed, path.relative_to(APPLE))
         text = migration.read_text(encoding="utf-8")
@@ -169,7 +191,7 @@ class PersonaOnlyTests(unittest.TestCase):
             check_yaml_keys(yaml.compose("schemes:\n  Persona: {}\n  Persona: {}\n"))
 
     def test_yaml_has_unique_keys_and_build_conditions(self):
-        for path in sorted(APPLE.rglob("*")):
+        for path in apple_files():
             if path.suffix not in {".yml", ".yaml"}:
                 continue
             with self.subTest(path=path.relative_to(APPLE)):
@@ -207,7 +229,9 @@ class PersonaOnlyTests(unittest.TestCase):
         for target, module in modules.items():
             self.assertEqual(targets[target]["settings"]["base"]["PRODUCT_MODULE_NAME"], module)
         self.assertIn("*.py", targets["PersonaTests"]["sources"][0]["excludes"])
-        for path in APPLE.glob("*.xcodeproj"):
+        projects = {APPLE / path.relative_to(APPLE).parts[0] for path in apple_files()
+                    if path.relative_to(APPLE).parts[0].endswith(".xcodeproj")}
+        for path in sorted(projects):
             self.assertEqual(path.name, "Persona.xcodeproj")
             self.assertFalse(path.is_symlink(), "project aliases must not return")
 
@@ -215,7 +239,7 @@ class PersonaOnlyTests(unittest.TestCase):
         registered = set()
         expected = {"Persona/Resources/Info.plist", "Mac/Resources/Info.plist",
                     "Vision/Resources/Info.plist", "PersonaLink/Info.plist", "PersonaWatch/Info.plist"}
-        for path in sorted(APPLE.rglob("*")):
+        for path in apple_files():
             if path.suffix not in {".plist", ".entitlements"}:
                 continue
             relative = path.relative_to(APPLE).as_posix()
@@ -294,7 +318,7 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertNotIn("try IntentSupport.client", intent)
 
     def test_json_and_string_catalogs_have_unique_keys(self):
-        for path in sorted(APPLE.rglob("*")):
+        for path in apple_files():
             if path.suffix in {".json", ".xcstrings"}:
                 with self.subTest(path=path.relative_to(APPLE)):
                     json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_pairs)
@@ -393,7 +417,7 @@ class PersonaOnlyTests(unittest.TestCase):
         compatibility = APPLE / "PersonaLink/Sources/PersonaLink/NativeCompatibility.swift"
         self.assertTrue(compatibility.is_symlink())
         self.assertEqual(compatibility.resolve(), (APPLE / "Shared/NativeStateMigration.swift").resolve())
-        for path in APPLE.rglob("*.swift"):
+        for path in (path for path in apple_files() if path.suffix == ".swift"):
             with self.subTest(path=path.relative_to(APPLE)):
                 text = path.read_text(encoding="utf-8")
                 self.assertNotRegex(text, r'"persona"\s*,\s*"persona"')

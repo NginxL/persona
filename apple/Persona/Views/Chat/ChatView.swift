@@ -5190,7 +5190,7 @@ struct Composer: View, Equatable {
     /// The model name the composer title and the modes menu row both show for the main chat, from the one effective
     /// setup (#6911 M7): the two surfaces never name different models.
     private var assistantEffectiveName: String? {
-        assistantEffective.map { AssistantModelChoice.displayName($0, response: model.cachedAssistantLaunchers(key.machineRef)) }
+        assistantEffective.flatMap { AssistantModelChoice.displayName($0, response: model.cachedAssistantLaunchers(key.machineRef)) }
     }
 
     @ViewBuilder private var extensionPrompts: some View {

@@ -15,10 +15,11 @@ nonisolated protocol RFBTransport: AnyObject, Sendable {
 nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
 
-    init(api: APIClient, machine: String) {
-        var comps = URLComponents(url: api.url("/api/v1/machines/\(machine)/ports/5900/connect"), resolvingAgainstBaseURL: false)!
-        comps.scheme = comps.scheme == "https" ? "wss" : "ws"
-        var req = URLRequest(url: comps.url!)
+    /// - Parameter pair: ties this screen-sharing stream to a later video stream of the same Mac (#3954): the node follows
+    ///   Screen Sharing's sign-in on it, and opens video only for a pair that signed in. Hubs and nodes from before the
+    ///   video channel ignore it.
+    init(api: APIClient, machine: String, pair: String? = nil) {
+        var req = URLRequest(url: Self.url(api.url("/api/v1/machines/\(machine)/ports/5900/connect"), pair: pair))
         api.config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
         req.timeoutInterval = 15
@@ -26,6 +27,22 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
         task.delegate = HubRedirects.shared
         task.maximumMessageSize = 64 << 20
         task.resume()
+    }
+
+    /// The WebSocket URL for the hub's `http(s)` one, with `pair` when there is one.
+    static func url(_ http: URL, pair: String?) -> URL {
+        var comps = URLComponents(url: http, resolvingAgainstBaseURL: false)!
+        comps.scheme = comps.scheme == "https" ? "wss" : "ws"
+        if let pair, !pair.isEmpty {
+            comps.queryItems = (comps.queryItems ?? []) + [URLQueryItem(name: "pair", value: pair)]
+        }
+        return comps.url!
+    }
+
+    /// A pair for one connection: 16 random bytes in hex, so no other stream can bind video to it by guessing.
+    static func newPair() -> String {
+        var rng = SystemRandomNumberGenerator()
+        return (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &rng)) }.joined()
     }
 
     func send(_ bytes: [UInt8]) async throws { try await task.send(.data(Data(bytes))) }
