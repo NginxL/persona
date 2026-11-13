@@ -59,9 +59,5 @@
   "save_note_plugin": "保存只是改设置：不会调用模型，也不会打断正在跑的任务。这里的语音模型只是 Persona 的默认值，扩展自己的供应商和凭据不变。",
   "runtime": "运行方式",
   "runtime_hint": "Agent SDK 需要那台电脑有 Node 22+，缺了会自动用 CLI",
-  "config_dir": "新对话的 Claude 配置",
-  "config_dir_private": "Persona 专用",
-  "config_dir_legacy": "这台电脑的",
-  "config_dir_hint": "选「这台电脑的」，新对话就沿用在那台电脑上运行 claude 时的登录和设置，包括 ~/.claude 里的网关；已开始的对话保持不变",
   "supervise_description": "跟进并验收 Persona 派出的任务，让主对话随时能回你。可以用比主对话更便宜或更强的模型。"
 }

@@ -3,7 +3,7 @@ import {
   modelPurpose, modelSummary, runtimeFallbackText,
   type ModelProvider, type ModelPurpose,
 } from "./model-config";
-import { agentsOverride, catalogLists, chooseProvider, configDirChoices, draftFor, executionForm, modelConfiguration, modelPatch, providersFor, purposeDescription, purposeGroups, runtimeChoices, saveModelPurpose, withPurposeAfter } from "./model-config-execution";
+import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, modelPatch, providersFor, purposeDescription, purposeGroups, runtimeChoices, saveModelPurpose, withPurposeAfter } from "./model-config-execution";
 
 const purpose: ModelPurpose = {
   id: "lark.agent", name: "飞书 /agent", group: "对话", kind: "launcher", revision: 3,
@@ -34,19 +34,6 @@ describe("用途配置", () => {
     expect(modelPatch(purpose, { provider: " other ", model: "", effort: " low ", runtime: "" })).toEqual({ revision: 3, provider: "other", model: null, effort: "low" });
     expect(modelPatch({ ...purpose, fields: ["model"] }, { provider: "ignored", model: "", effort: "high", runtime: "" })).toEqual({ revision: 3, model: null });
     expect(modelPatch({ ...purpose, fields: [] }, draftFor(purpose))).toEqual({ revision: 3 });
-  });
-  it("offers the main chat's profile for new conversations only when the hub does, for Claude Code (#4633)", () => {
-    const main: ModelPurpose = { ...purpose, id: "assistant", override: {}, effective: { provider: "launcher.claude" }, config_dirs: ["private", "legacy"] };
-    expect(configDirChoices(main).map((c) => c.id)).toEqual(["private", "legacy"]);
-    expect(configDirChoices(main, "codex")).toEqual([]);
-    expect(configDirChoices({ ...main, config_dirs: undefined })).toEqual([]); // an older hub
-    expect(draftFor(main).config_dir).toBe("private");
-    expect(draftFor({ ...main, override: { config_dir: "legacy" } }).config_dir).toBe("legacy");
-    expect("config_dir" in draftFor(purpose)).toBe(false);
-    const draft = { ...draftFor(main), config_dir: "legacy" };
-    expect(chooseProvider(draft, "other").config_dir).toBe("legacy"); // a provider change keeps it, as the hub does
-    expect(modelPatch(main, draft)).toMatchObject({ revision: 3, config_dir: "legacy" });
-    expect(modelPatch(purpose, { ...draftFor(purpose), config_dir: "legacy" })).not.toHaveProperty("config_dir");
   });
   it("uses server capability candidates and keeps a referenced hidden provider", () => {
     expect(providersFor(purpose, providers).map((p) => p.id)).toEqual(["strong", "other"]);

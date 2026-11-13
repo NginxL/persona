@@ -22592,8 +22592,7 @@ if VOICE_MODE:  # iOS's protocol 2 beside the script above (docs/assistant/voice
 
 
 # ---------- area: model defaults (#2455) ----------
-# MOCK_MODEL_DEFAULTS=1: the main chat has a "Runtime" (cli / agentsdk, saved in its binding; "cli" is stored as none)
-# and "New chats' Claude profile" (#4633: private / legacy, saved in its binding; "private" is stored as none),
+# MOCK_MODEL_DEFAULTS=1: the main chat has a "Runtime" (cli / agentsdk, saved in its binding; "cli" is stored as none),
 # GET /api/v1/machines/{mid}/launchers carries `default` (?purpose=, "New Agent"'s agent.new when absent), and the main
 # conversation asked for the Agent SDK but runs on the CLI (runtime_fallback).
 MODEL_DEFAULTS = os.environ.get("MOCK_MODEL_DEFAULTS") == "1"
@@ -22613,11 +22612,6 @@ def model_configuration(include_uses=False):
                 binding.pop("runtime")
         purpose["runtimes"] = ["cli", "agentsdk"]
         purpose["fields"] = purpose["fields"] + ["runtime"]
-        for binding in (purpose["override"], purpose["effective"]):
-            if binding.get("config_dir") == "private":
-                binding.pop("config_dir")
-        purpose["config_dirs"] = ["private", "legacy"]
-        purpose["fields"] = purpose["fields"] + ["config_dir"]
     return catalog
 
 
