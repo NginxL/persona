@@ -10724,6 +10724,9 @@ def inbox_list(query):
 
 # What each bulk "Handled" / "Undo" asked for (POST /api/v1/inbox/done), kept at /mock/inbox_bulk.
 INBOX_BULK = []
+# Open unless /mock/inbox_done_hold: then GET /api/v1/inbox/done with `before` waits for /mock/inbox_done_release (#6661).
+INBOX_DONE_GATE = threading.Event()
+INBOX_DONE_GATE.set()
 
 
 def inbox_bulk(body):
@@ -23120,6 +23123,10 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/kb_updates": return self.send_json({"updates": KB_UPDATES})
         if p == "/mock/inbox_drafts": return self.send_json({"drafts": INBOX_DRAFTS})
         if p == "/mock/inbox_bulk": return self.send_json({"requests": INBOX_BULK})
+        if p in ("/mock/inbox_done_hold", "/mock/inbox_done_release"):  # Done's group pages held / let go (#6661)
+            if p.endswith("hold"): INBOX_DONE_GATE.clear()
+            else: INBOX_DONE_GATE.set()
+            return self.send_json({"held": not INBOX_DONE_GATE.is_set()})
         if p == "/mock/prefs_fail":  # MOCK_PREFS_FAIL at run time: ?on=1 fails Settings › Notifications' read, ?on=0 lets Retry through
             PREFS_FAIL[0] = q.get("on", ["1"])[0] == "1"
             return self.send_json({"fail": PREFS_FAIL[0]})
@@ -23324,6 +23331,10 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(days) if days else self.send_json({"error": "tz must be a time zone name"}, 400)
         if p == "/api/v1/inbox/done":
             if os.environ.get("MOCK_INBOX_HISTORY") == "none": return self.send_json({"error": "not found"}, 404)
+            # A page asked from a moment (`before`: a Done group's, an older page) waits while /mock/inbox_done_hold holds
+            # them, until /mock/inbox_done_release (at most 60 s); the list's first page does not: Jump To a group still
+            # loading (#6661, docs/operations/testing.md)
+            if (q.get("before") or [""])[0]: INBOX_DONE_GATE.wait(60)
             other = other_manager(self)  # the history is each manager's own: the others have none here
             if other: return self.send_json(*other[1]) if other[1] else self.send_json({"items": []})
             return self.send_json(inbox_done(q))

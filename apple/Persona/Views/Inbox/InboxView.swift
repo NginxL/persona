@@ -81,6 +81,9 @@ struct InboxPage: View {
     @State private var scrollTarget: String?
     /// Done groups that loaded their first page by themselves on opening (#2969): once while the page is up.
     @State private var autoLoaded: Set<String> = []
+    /// Jump To waiting for its group's first page before it scrolls there. The next Jump To or a drag of the list cancels
+    /// it, so a page that comes late does not move the list away from where it went since (#6661).
+    @State private var jumping: Task<Void, Never>?
     @State private var composing: ComposeDraft?
     @State private var editingDraft: InboxItem? // Edit on the AI Twin's draft
     @State private var answering: Interaction? // a card on no session, open by itself (#4059)
@@ -689,6 +692,7 @@ struct InboxPage: View {
             }
         }
         .listStyle(.plain)
+        .onScrollPhaseChange { _, phase in if phase == .interacting { jumping?.cancel() } }
         .themedPage()
         .refreshable { await store.refresh() }
         .overlay { if store.loading && store.items.isEmpty { ProgressView() } }
@@ -757,19 +761,29 @@ struct InboxPage: View {
             autoLoaded.insert(key)
             store.loadDoneGroup(key, range: g.range)
         }
-        Task { @MainActor in
+        jumping?.cancel()
+        jumping = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             var first = g.group.items.first?.key
             // up to 5 s for its first page: then the group's first item, newest first, as Done lists it
-            for _ in 0..<50 where first == nil {
+            for _ in 0..<Self.jumpWaitTries where first == nil && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 if store.groupLoading.contains(key) { continue }
                 first = store.history.filter { InboxGroups.timeKey($0.doneAt, now: .now, recent: true) == key }
                     .max { ($0.doneAt ?? .distantPast) < ($1.doneAt ?? .distantPast) }?.key
             }
-            guard let first else { return }
+            guard let first, !Task.isCancelled else { return }
             withAnimation(Theme.Motion.standard) { proxy.scrollTo(first, anchor: .top) }
         }
+    }
+
+    /// Jump To's wait for a group's first page, in tenths of a second: 5 s. DEBUG `-inboxJumpWait <seconds>` waits longer,
+    /// for a UI test to act while it waits (#6661): XCUITest's taps and drags each take seconds on a busy machine.
+    private static var jumpWaitTries: Int {
+        #if DEBUG
+        if UserDefaults.standard.object(forKey: "inboxJumpWait") != nil { return Int(UserDefaults.standard.double(forKey: "inboxJumpWait") * 10) }
+        #endif
+        return 50
     }
 
     /// A section title that opens / closes the section, with an optional action on the right (List headers take no

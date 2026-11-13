@@ -640,6 +640,8 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   and Fold all / Unfold all.
   On iOS each title a finger taps (a section's and its Mark all seen / Clear all, a group's and, selecting, its tick, Done's and its Jump To) is at least 44 pt tall,
   its header or row adding no room above or below it (#6576, `InboxTitleTargetUITests`); a tap on Jump To opens its menu and leaves Done's fold beside it alone.
+  A Jump To still waiting for its group's first page gives way to what comes after it: the next Jump To, or the user dragging the list, cancels it, so the
+  page coming late does not take the list from where it was sent since (iOS, #6661, `InboxJumpToRaceUITests`).
 - **Done's history**: past what the list holds (its 3 days, at most 200 done items), Done reads each manager's `GET /api/v1/inbox/done` ("History" under "Lifecycle"; 100 a page; on iOS the default manager's).
   Items the hub didn't stamp with a manager get the default one when there are several, so the per-manager filter keeps them. Done from history reopens through the item's own manager.
   - **With day counts** (#2969; "Days" under "Lifecycle", #2967): when the list is shown the apps ask for the counts in this device's zone, and Done lists every group they name
