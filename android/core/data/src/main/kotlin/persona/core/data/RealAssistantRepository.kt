@@ -421,7 +421,9 @@ private fun directionOf(data: JsonObject): Direction? {
                         t.array("agents").mapNotNull { (it as? JsonObject)?.let(::directionAgentOf) })
                 }
             }
-        })
+        },
+        // #6626: the hub's; a hub without it (it always sends it, false too) spins on a working task, as before
+        running = (data["running"] as? JsonPrimitive)?.booleanOrNull ?: (count("working") > 0))
 }
 
 private fun directionAgentOf(data: JsonObject): DirectionAgent? {

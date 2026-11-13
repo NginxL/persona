@@ -69,6 +69,11 @@ func (h *Manager) pagePrepare(s pageRenderState, fence bool, request string) (*u
 		}
 	}
 	raw, _ := json.Marshal(map[string]any{"protocol": 1, "session": s.id, "epoch": s.epoch, "version": version, "root_key": n.RootKey, "view": fitted})
+	if s.tree.Decodes(raw) {
+		// The same page drawn again (raw carries the version, so it is the
+		// same one): decoding raw would give s.tree itself, which sends nothing.
+		return s.tree, nil, nil
+	}
 	next, err := uistream.DecodeSnapshot(raw)
 	if err != nil {
 		return nil, nil, err

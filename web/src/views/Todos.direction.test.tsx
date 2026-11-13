@@ -38,10 +38,10 @@ const todo = (id: string, title: string, extra: Partial<Todo> = {}): Todo => ({ 
 const counts = (working = 0, needs_you = 0) => ({ working, needs_you, stuck: 0, review: 0 });
 const TREE: DirectionTree = {
   directions: [
-    { id: "lead-b", name: "Infrastructure", counts: counts(1, 0), tasks: [{ id: "t-infra", title: "Infra", state: "working" }, { id: "t-done", title: "Shipped", state: "working" }] },
-    { id: "lead-empty", name: "Nothing yet", counts: counts(), tasks: [] },
-    { id: "lead-a", name: "Product", counts: counts(1, 1), tasks: [{ id: "t-ask", title: "Ask", state: "needs_you" }, { id: "t-card", title: "Card", state: "working" }] },
-    { id: "main", name: "", secretary: true, counts: counts(1, 0), tasks: [{ id: "t-own", title: "Own", state: "working" }] },
+    { id: "lead-b", name: "Infrastructure", counts: counts(1, 0), running: true, tasks: [{ id: "t-infra", title: "Infra", state: "working" }, { id: "t-done", title: "Shipped", state: "working" }] },
+    { id: "lead-empty", name: "Nothing yet", counts: counts(), running: false, tasks: [] },
+    { id: "lead-a", name: "Product", counts: counts(1, 1), running: false, tasks: [{ id: "t-ask", title: "Ask", state: "needs_you" }, { id: "t-card", title: "Card", state: "working" }] },
+    { id: "main", name: "", secretary: true, counts: counts(1, 0), running: false, tasks: [{ id: "t-own", title: "Own", state: "working" }] },
   ],
 };
 const TODOS = [todo("t-card", "Card"), todo("t-ask", "Ask"), todo("t-infra", "Infra"), todo("t-own", "Own"), todo("t-done", "Shipped", { done_at: at })];
@@ -83,12 +83,15 @@ describe("To-dos grouped by 常驻", () => {
     const [infra, product, secretary] = sections();
     expect(infra.querySelector("button")!.textContent).toContain("Infrastructure");
     expect(secretary.querySelector("button")!.textContent).toContain(t("lib-todo-tree.secretary"));
-    // the hub's counts on the title, and its rows in the tree's order (needs you first), not the page's own
-    expect(product.querySelector("button")!.textContent).toContain(countsLabel({ working: 1, needs_you: 1 }, t));
-    // the sidebar's shape: only the parts above zero
-    expect(infra.querySelector("[data-direction-counts]")!.getAttribute("title")).toBe(t("sidebar.leader_working", { count: 1 }));
-    // a direction with a task running carries the same working arc as a conversation running its own turn (#6230)
+    // what it has going on the title as the sidebar's 常驻 rows show it (#6626), and its rows in the tree's order (needs
+    // you first), not the page's own: Product waits on you and nothing under it runs (its working task's Agents stopped)
+    expect(product.querySelector("button")!.textContent).toContain(countsLabel({ needs_you: 1 }, t));
+    expect(product.querySelector("[data-direction-counts] [data-shape=\"arc\"]")).toBeNull();
+    // something runs under Infrastructure: the same working arc as a conversation running its own turn (#6230), and
+    // no "在做 N" beside it (one meaning, one expression)
     expect(infra.querySelector("[data-direction-counts] [data-shape=\"arc\"][data-state=\"working\"]")).not.toBeNull();
+    expect(infra.querySelector("[data-direction-counts]")!.textContent).toBe("");
+    expect(infra.querySelector("button")!.textContent).not.toContain("在做");
     const text = product.textContent ?? "";
     expect(text.indexOf("Ask")).toBeGreaterThan(-1);
     expect(text.indexOf("Ask")).toBeLessThan(text.indexOf("Card"));
@@ -176,7 +179,7 @@ describe("To-dos grouped by 常驻", () => {
 
   it("is not offered with no leader, and a saved choice shows by status", async () => {
     localStorage.setItem("persona.todos.grouping", "direction");
-    tree.current = { directions: [{ id: "main", name: "", secretary: true, counts: counts(1), tasks: [{ id: "t-own", title: "Own", state: "working" }] }] };
+    tree.current = { directions: [{ id: "main", name: "", secretary: true, counts: counts(1), running: false, tasks: [{ id: "t-own", title: "Own", state: "working" }] }] };
     await render();
     expect(option(t("todos.grouping_direction"))).toBeUndefined();
     expect(option(t("todos.grouping_status"))?.getAttribute("aria-checked")).toBe("true");

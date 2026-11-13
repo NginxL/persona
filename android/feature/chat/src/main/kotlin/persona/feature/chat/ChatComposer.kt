@@ -408,25 +408,31 @@ fun ChatComposer(
         trailing = {
             if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
             // The mic stays (iOS ShellComposerBar): more can be dictated after what is typed. Send beside it once there is
-            // something to send, else a stop while the agent works; nothing else while the box is empty.
+            // something to send, else a stop while the agent works; nothing else while the box is empty. On Glass the button
+            // changing grows and shrinks as iOS's does (ComposerActionSlot, #4210 T3).
             dictate?.let { JIconButton(PhIcons.Microphone, stringResource(R.string.chat_composer_dictate), it, enabled = !sending) }
-            when {
-                blockedLabel != null && enabled -> BlockedSendButton(blockedLabel, onBlocked)
-                hasContent -> SendButton(onClick = ::send, enabled = canSend, loading = sending)
-                working && canInterrupt -> {
-                    SendButton(onClick = {
-                        if (service != null) {
-                            interruptPending = true
-                            scope.launch {
-                                try { service.interrupt(session); onNotice(resources.getString(R.string.chat_composer_interrupt_requested)) }
-                                catch (e: CancellationException) { throw e }
-                                catch (_: Exception) { onNotice(resources.getString(R.string.chat_composer_interrupt_unknown)) }
-                            }
+            if (blockedLabel != null && enabled) BlockedSendButton(blockedLabel, onBlocked)
+            else ComposerActionSlot(
+                when {
+                    hasContent -> ComposerAction(SendKind.Send, enabled = canSend, loading = sending)
+                    working && canInterrupt -> ComposerAction(SendKind.Stop, enabled = !sending && !interruptPending && service != null)
+                    dictate == null -> ComposerAction(SendKind.Send, enabled = false, loading = sending)
+                    else -> null
+                },
+                // A lambda, not `::send`: references to a local function compare equal whatever they capture, so the slot was
+                // skipped and kept calling the `send` from before a quote joined the draft (New chat's first message lost it).
+                onSend = { send() },
+                onStop = {
+                    if (service != null) {
+                        interruptPending = true
+                        scope.launch {
+                            try { service.interrupt(session); onNotice(resources.getString(R.string.chat_composer_interrupt_requested)) }
+                            catch (e: CancellationException) { throw e }
+                            catch (_: Exception) { onNotice(resources.getString(R.string.chat_composer_interrupt_unknown)) }
                         }
-                    }, enabled = !sending && !interruptPending && service != null, kind = SendKind.Stop)
-                }
-                dictate == null -> SendButton(onClick = onSend, enabled = false, loading = sending)
-            }
+                    }
+                },
+            )
         },
         accessory = {
             if (state.oldVersion) Text(stringResource(R.string.chat_composer_old_version), style = PersonaTheme.type.caption,

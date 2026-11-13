@@ -154,9 +154,12 @@ data class ChatLinkContext(
     val id: String = UUID.randomUUID().toString(),
     /** A quoted message's id in its chat ([kind] `quote`, iOS `ContextRef.msg`): one quote per message. */
     val msg: String = "",
+    /** Which part of the message is quoted ([PART_SELECTION]: words picked in "Select", iOS `ContextRef.part`); empty: all of it. */
+    val part: String = "",
 ) {
     fun xml(): String = "<persona-context kind=\"${if (kind == "edit" || kind == QUOTE) kind else "context"}\" title=\"${escape(title)}\" url=\"${escape(url)}\"" +
-        (if (msg.isEmpty()) "" else " msg=\"${escape(msg)}\"") + ">\n" + contextBody(text) + "\n</persona-context>"
+        (if (msg.isEmpty()) "" else " msg=\"${escape(msg)}\"") + (if (part.isEmpty()) "" else " part=\"${escape(part)}\"") +
+        ">\n" + contextBody(text) + "\n</persona-context>"
 
     companion object {
         /**
@@ -178,7 +181,9 @@ data class ChatLinkContext(
         const val QUOTE = "quote"
         /** The author of the user's own quoted message on the wire, whatever the app's language (iOS writes and reads the Chinese "me"). */
         const val QUOTE_ME = "我" // i18n-ignore: on the wire in every language, iOS writes and reads it
-        fun quote(text: String, from: String, msg: String) = ChatLinkContext(QUOTE, from, "", text.trim(), msg = msg)
+        /** [ChatLinkContext.part] of a quote of the words picked in a selected message (iOS `ContextRef.selectionPart`). */
+        const val PART_SELECTION = "selection"
+        fun quote(text: String, from: String, msg: String, part: String = "") = ChatLinkContext(QUOTE, from, "", text.trim(), msg = msg, part = part)
 
         private val tags = Regex("<persona-context\\b([^>]*)>([\\s\\S]*?)</persona-context>\\s*")
         private val attributes = Regex("([a-z]+)=\"([^\"]*)\"")
@@ -190,7 +195,7 @@ data class ChatLinkContext(
             val refs = tags.findAll(text).map { tag ->
                 val attrs = attributes.findAll(tag.groupValues[1]).associate { it.groupValues[1] to unescape(it.groupValues[2]) }
                 ChatLinkContext(attrs["kind"] ?: "context", attrs["title"].orEmpty(), attrs["url"].orEmpty(), unescape(tag.groupValues[2].trim()),
-                    msg = attrs["msg"].orEmpty())
+                    msg = attrs["msg"].orEmpty(), part = attrs["part"].orEmpty())
             }.toList()
             return refs to tags.replace(text, "").trim()
         }
@@ -217,23 +222,36 @@ internal fun linkMessage(draft: String, contexts: List<ChatLinkContext>, resourc
     else contexts.joinToString("\n") { it.xml() } + "\n\n" + draft.ifBlank { resources.getString(R.string.chat_links_context_default) }
 
 /**
- * [ChatLinkContext]s kept across a configuration change: six values each after a [CONTEXTS_V2] mark (the quoted
- * message's id the sixth); five each, without it, as saved before quotes had one.
+ * [ChatLinkContext]s kept across a configuration change: seven values each after a [CONTEXTS_V3] mark (the quoted
+ * part the seventh); six after [CONTEXTS_V2] (the quoted message's id the sixth); five each, without a mark, as saved
+ * before quotes had one.
  */
 internal val ChatLinkContextsSaver = listSaver<List<ChatLinkContext>, String>(
-    save = { refs -> listOf(CONTEXTS_V2) + refs.flatMap { listOf(it.kind, it.title, it.url, it.text, it.id, it.msg) } },
+    save = { refs -> listOf(CONTEXTS_V3) + refs.flatMap { listOf(it.kind, it.title, it.url, it.text, it.id, it.msg, it.part) } },
     restore = { values ->
-        if (values.firstOrNull() == CONTEXTS_V2) values.drop(1).chunked(6).filter { it.size == 6 }.map { ChatLinkContext(it[0], it[1], it[2], it[3], it[4], it[5]) }
-        else values.chunked(5).filter { it.size == 5 }.map { ChatLinkContext(it[0], it[1], it[2], it[3], it[4]) }
+        when (values.firstOrNull()) {
+            CONTEXTS_V3 -> values.drop(1).chunked(7).filter { it.size == 7 }.map { ChatLinkContext(it[0], it[1], it[2], it[3], it[4], it[5], it[6]) }
+            CONTEXTS_V2 -> values.drop(1).chunked(6).filter { it.size == 6 }.map { ChatLinkContext(it[0], it[1], it[2], it[3], it[4], it[5]) }
+            else -> values.chunked(5).filter { it.size == 5 }.map { ChatLinkContext(it[0], it[1], it[2], it[3], it[4]) }
+        }
     },
 )
 
 private const val CONTEXTS_V2 = "contexts-v2"
+private const val CONTEXTS_V3 = "contexts-v3"
 
-/** [contexts] with [quote] added (iOS `bindMenu`): a message quoted already is not quoted twice. */
+/**
+ * [contexts] with [quote] added (iOS `bindMenu`, `ContextRef.adding`): a message quoted already is not quoted twice. A message
+ * goes over the box once as a whole and once for each part picked from it ([ChatLinkContext.part]; the same words not twice).
+ */
 internal fun withQuote(contexts: List<ChatLinkContext>, quote: ChatLinkContext): List<ChatLinkContext> =
-    if (quote.msg.isNotEmpty() && contexts.any { it.kind == ChatLinkContext.QUOTE && it.msg == quote.msg }) contexts else contexts + quote
+    if (quote.msg.isNotEmpty() && contexts.any {
+        it.kind == ChatLinkContext.QUOTE && it.msg == quote.msg && it.part == quote.part && (quote.part.isEmpty() || it.text == quote.text)
+    }) contexts else contexts + quote
 
-/** "Quote" on a message of this chat: the user's own is by [ChatLinkContext.QUOTE_ME] in every language, else by [agent]. */
-internal fun messageQuote(text: String, user: Boolean, agent: String, msg: String): ChatLinkContext =
-    ChatLinkContext.quote(text, if (user) ChatLinkContext.QUOTE_ME else agent, msg)
+/**
+ * "Quote" on a message of this chat: the user's own is by [ChatLinkContext.QUOTE_ME] in every language, else by [agent]. [part]:
+ * [ChatLinkContext.PART_SELECTION] when [text] is words picked in it.
+ */
+internal fun messageQuote(text: String, user: Boolean, agent: String, msg: String, part: String = ""): ChatLinkContext =
+    ChatLinkContext.quote(text, if (user) ChatLinkContext.QUOTE_ME else agent, msg, part)

@@ -1143,10 +1143,14 @@ internal val RepoLevel.kind: String @Composable get() = stringResource(when (thi
     RepoLevel.MainCheckout -> R.string.agents_repo_main_checkout
     RepoLevel.Worktree -> R.string.agents_repo_worktree
 })
-internal val RepoLevel.icon get() = when (this) {
+/**
+ * The level's leading icon. Non-main worktrees carry none: their name and the extra indentation identify them, as on
+ * the web sidebar; [AgentSpaceHeader] already treats a null icon as no mark.
+ */
+internal val RepoLevel.icon: PhIcon? get() = when (this) {
     RepoLevel.Repository -> PhIcons.Folder
     RepoLevel.MainCheckout -> PhIcons.House
-    RepoLevel.Worktree -> PhIcons.GitBranch
+    RepoLevel.Worktree -> null
 }
 /** The grouping's own icon, as iOS's `DevGrouping.symbol`. */
 private val AgentGrouping.icon: PhIcon get() = when (this) {

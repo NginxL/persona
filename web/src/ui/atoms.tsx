@@ -520,8 +520,9 @@ export function Menu({
     // pointerdown, not mousedown: lifting the finger after a long press that opened the menu sends a compatibility
     // mousedown at the finger, outside the menu, which closed it at once. A tap outside still closes it.
     const down = (e: PointerEvent) => {
-      const t = e.target as Element | null;
-      if (t?.closest?.(`[data-menu="${CSS.escape(id)}"]`) || anchor?.contains(t as Node)) return;
+      // A pointer target may be window/document, not an Element: only an actual Node can go to contains.
+      const t = e.target;
+      if ((t instanceof Element && t.closest(`[data-menu="${CSS.escape(id)}"]`)) || (t instanceof Node && anchor?.contains(t))) return;
       onClose();
     };
     const key = (e: KeyboardEvent) => {

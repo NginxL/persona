@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_dm_reply",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:01:00Z",
+        "sender": {
+          "id": "ou_example_user",
+          "id_type": "open_id",
+          "sender_type": "user",
+          "name": "Example User"
+        },
+        "content": "{\"text\": \"Example reply\"}",
+        "chat_id": "oc_example_dm",
+        "deleted": false,
+        "updated": false
+      },
+      {
+        "message_id": "om_example_dm_question",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:00:00Z",
+        "sender": {
+          "id": "ou_example_peer",
+          "id_type": "open_id",
+          "sender_type": "user",
+          "name": "Example Peer"
+        },
+        "content": "{\"text\": \"Example question\"}",
+        "chat_id": "oc_example_dm",
+        "deleted": false,
+        "updated": false
+      }
+    ],
+    "total": 2,
+    "has_more": false
+  }
+}

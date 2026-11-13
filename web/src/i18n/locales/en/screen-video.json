@@ -1,0 +1,10 @@
+{
+  "menu": "Picture",
+  "picture_video": "Video (smooth, light)",
+  "picture_vnc": "VNC (compatible)",
+  "quality": "Quality",
+  "quality_auto": "Auto",
+  "quality_sharper": "Sharper",
+  "quality_smoother": "Smoother",
+  "picture_current": "Picture: {current}"
+}

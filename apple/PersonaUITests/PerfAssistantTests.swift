@@ -36,6 +36,22 @@ final class PerfAssistantTests: PerfTestCase {
         measureIdle(push: "say?stream=1&steps=40&ms=80&text=" + q, seconds: 5)
     }
 
+    /// Real replies streamed at the cadence a phone gets them (#6651): the model's recorded token times
+    /// (`scripts/mock/stream_traces/`), sent as the node sends them (`node=trail`; `PERSONA_PERF_STREAM_NODE=lead` for the
+    /// node before #6651). The frames record the gaps between visible text changes (`StreamCadence`).
+    @MainActor func testStreamingTraceMarkdown() throws {
+        openMain()
+        measureIdle(push: "say?trace=markdown&node=" + Self.streamNode, seconds: 24)
+    }
+
+    /// A long reply of plain paragraphs, likewise.
+    @MainActor func testStreamingTraceProse() throws {
+        openMain()
+        measureIdle(push: "say?trace=prose&node=" + Self.streamNode, seconds: 44)
+    }
+
+    static var streamNode: String { ProcessInfo.processInfo.environment["PERSONA_PERF_STREAM_NODE"] ?? "trail" }
+
     /// The main conversation at rest while agents' sessions churn (pushes for other pages).
     @MainActor func testMainConversationIdleUnderPushes() throws {
         openMain()

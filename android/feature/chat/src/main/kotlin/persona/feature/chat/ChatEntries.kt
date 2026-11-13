@@ -39,6 +39,8 @@ interface ChatServices {
     fun sessions(): SessionsRepository
     fun chatWiring(): ChatWiringSource
     fun inboxTrays(): AssistantInboxTrays
+    /** The current assistant's snapshot, whose `leaders` drive the leader-conversation background fold (#6595). */
+    fun assistantRepository(): AssistantRepository
 }
 
 /** Every service in a binding belongs to the same pairing generation. */
@@ -190,6 +192,9 @@ fun ChatDestination(
     val assistantManagement = remember(wiring?.assistantManagement, managerId) {
         wiring?.assistantManagement?.forManager(managerId)
     }
+    // The hub's leader conversations fold their background rounds in the Assistant tab too (#6595): the repository's
+    // snapshot follows the selected manager, the same one this assistant surface belongs to.
+    val assistantSnapshot by services.assistantRepository().assistant.collectAsStateWithLifecycle()
     val style = renderStyle ?: if (route.kind == persona.core.navigation.ConversationKind.Assistant ||
         metadata.any { it.key == session && it.assistant }) ChatRenderStyle.Assistant else ChatRenderStyle.Agent
     val sharingManager = metadata.firstOrNull { it.key == session }?.manager?.takeIf { it.isNotBlank() }
@@ -216,6 +221,7 @@ fun ChatDestination(
                 files = wiring?.files, ports = wiring?.ports, onHandToPersona = handToPersona,
                 tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
                 assistantManagement = assistantManagement,
+                leaderConversations = assistantSnapshot.leaders.toSet(),
                 agentShares = sharing,
                 inboxTrays = services.inboxTrays(), inboxScope = wiring?.scope?.path,
                 waiting = elsewhere?.waiting.orEmpty(), onOpenRequest = elsewhere?.open),

@@ -55,6 +55,12 @@ interface InboxAssistantTransport {
     suspend fun handOff(itemId: String, text: String, clientId: String): JsonObject =
         throw UnsupportedOperationException("Inbox hand-off route unavailable")
     /**
+     * Records an item's hand-off to the Agent [session] that accepted its existing outbox message
+     * (`POST /api/v1/inbox/{id}/handoff` with `kind=agent` and no text), answering the hub's object. A blank [title] is omitted.
+     */
+    suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject =
+        throw UnsupportedOperationException("Inbox Agent hand-off route unavailable")
+    /**
      * Acts on an item's suggestion (`POST /api/v1/inbox/{id}/suggestion`, inbox phase 1): [action] is confirm, reject or
      * instruct, [version] the suggestion's as shown, [text] the edited text (confirm) or the words (instruct). Answers
      * the item; throws [InboxSuggestionStale] with the current item when the hub has a newer suggestion (409).

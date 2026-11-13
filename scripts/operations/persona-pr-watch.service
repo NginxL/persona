@@ -1,0 +1,19 @@
+[Unit]
+Description=Persona maintainer PR review watcher
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=<absolute path to the trusted watcher source>/scripts/operations
+Environment=PR_WATCH_CONFIG=<absolute path to the private configuration>
+ExecStart=/usr/bin/python3 -I pr_watch.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

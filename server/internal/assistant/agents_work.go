@@ -497,7 +497,8 @@ func (s *Service) loadWork(ctx context.Context) bool {
 			up = s.cardsUp(ctx)
 		}
 		if ix, ok := up[e.InteractionID]; ok && !now.After(e.TurnAt.Add(workCardTTL)) {
-			ix.CanCancel = true // The manager can retire its own cards, including cards restored from older hubs.
+			ix = markWorkCardDefers(ix) // older hubs did not say which choices the manager settles locally
+			ix.CanCancel = true         // The manager can retire its own cards, including cards restored from older hubs.
 			cards[e.InteractionID] = ix
 			continue
 		}

@@ -533,8 +533,22 @@ nonisolated struct APIClient: Sendable {
     // MARK: Endpoints
 
     struct MachinesResponse: Decodable { var machines: [Machine] }
-    /// A machine's launchers and what runs with none picked (`default`, #2455; nil from an older hub).
-    struct LaunchersResponse: Decodable, Sendable { var launchers: [Launcher]; var `default`: LauncherDefault? }
+    /// A machine's launchers and what runs with none picked (`default`, #2455; nil from an older hub). With
+    /// `purpose=assistant` (#5033) it also carries `unavailable`: launchers and providers that can't run the main chat.
+    struct LaunchersResponse: Decodable, Sendable {
+        var launchers: [Launcher]
+        var `default`: LauncherDefault?
+        var unavailable: [UnavailableLauncher]?
+    }
+
+    /// The body of PUT /api/v1/assistant/conversations/{id}/model (#5033): the pick kept for one conversation.
+    struct ConversationModelBody: Encodable, Sendable {
+        var launcher: String
+        var model: String?
+        var effort: String?
+        var machineID: String
+        enum CodingKeys: String, CodingKey { case launcher, model, effort, machineID = "machine_id" }
+    }
     nonisolated struct SessionsResponse: Decodable, Sendable { var sessions: [Session] }
     struct SessionResponse: Decodable { var session: Session }
     struct ItemsResponse: Decodable, Sendable {
@@ -702,8 +716,20 @@ nonisolated struct APIClient: Sendable {
     func stamp(_ list: [Interaction]) -> [Interaction] { group.isEmpty ? list : list.map { var i = $0; i.group = group; return i } }
     func stamp(_ s: Session) -> Session { var s = s; s.group = group; return s }
     func stamp(_ k: SessionKey) -> SessionKey { var k = k; k.group = group; return k }
-    func launcherList(machine: String) async throws -> LaunchersResponse {
-        try await get("/api/v1/machines/\(machine)/launchers", as: LaunchersResponse.self)
+    func launcherList(machine: String, purpose: String? = nil) async throws -> LaunchersResponse {
+        try await get("/api/v1/machines/\(machine)/launchers",
+                      query: purpose.map { ["purpose": $0] } ?? [:], as: LaunchersResponse.self)
+    }
+    /// Keeps a pick (launcher, optional model and effort) for one of the assistant's conversations (#5033): its next
+    /// messages run on it, on every device, until it is changed or follows the default again (`deleteConversationModel`).
+    func putConversationModel(machine: String, conversation: String, body: ConversationModelBody) async throws {
+        _ = try await request("PUT",
+                              "/api/v1/assistant/conversations/\(conversation.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? conversation)/model",
+                              body: body)
+    }
+    /// The conversation follows Model configuration › Main chat again (DELETE …/conversations/{id}/model, #5033).
+    func deleteConversationModel(machine: String, conversation: String) async throws {
+        try await delete("/api/v1/assistant/conversations/\(conversation.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? conversation)/model")
     }
     /// The models the launcher's agent lists in its /model menu (New Agent's model picker). The node starts the CLI to
     /// ask (a few seconds, kept 10 minutes); refresh asks it again.

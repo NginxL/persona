@@ -484,6 +484,25 @@ func (r *Runner) ListMessages(ctx context.Context, chatID, thread, before string
 	return page, nil
 }
 
+// GetChat reads one chat's own record (`im chats get`): its mode (group,
+// topic, p2p) and name. The message lists carry neither (lark-cli 1.0.98 to
+// 1.0.100); only a search result does, for the chats it found.
+func (r *Runner) GetChat(ctx context.Context, chatID string) (Chat, error) {
+	if chatID == "" {
+		return Chat{}, errors.New("chat_id is required")
+	}
+	out, err := r.execute(ctx, []string{"im", "chats", "get", "--chat-id", chatID}, outputJSON)
+	if err != nil {
+		return Chat{}, err
+	}
+	var chat Chat
+	if err := decodeData(out, &chat); err != nil {
+		return Chat{}, cliError(KindOther, errors.New("invalid chat JSON"))
+	}
+	chat.ChatID = chatID
+	return chat, nil
+}
+
 // ListDirectChats lists the user's direct (p2p) chats, most recently active
 // first. It needs the user identity, like every Inbox read.
 func (r *Runner) ListDirectChats(ctx context.Context, limit int) (ChatList, error) {

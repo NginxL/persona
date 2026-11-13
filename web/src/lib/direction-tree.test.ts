@@ -30,13 +30,14 @@ const TREE: DirectionTree = {
       id: "lead-a",
       name: "Product",
       counts: counts(1, 1),
+      running: true,
       tasks: [
         { id: "t1", title: "Ask", state: "needs_you", agents: [{ machine_id: "m", session_id: "s1", title: "one", state: "needs_you", children: [{ machine_id: "m", session_id: "s2", title: "two", state: "working" }] }] },
         { id: "t2", title: "Build", state: "working", agents: [{ machine_id: "m", session_id: "gone", title: "gone", state: "", children: [{ machine_id: "m", session_id: "s3", title: "three", state: "working" }] }] },
       ],
     },
-    { id: "lead-b", name: "Infra", counts: counts(), tasks: [] },
-    { id: "main", name: "", secretary: true, counts: counts(1), tasks: [{ id: "t3", title: "Own", state: "working", agents: [] }] },
+    { id: "lead-b", name: "Infra", counts: counts(), running: false, tasks: [] },
+    { id: "main", name: "", secretary: true, counts: counts(1), running: false, tasks: [{ id: "t3", title: "Own", state: "working", agents: [] }] },
   ],
 };
 
@@ -54,6 +55,13 @@ describe("direction tree", () => {
     expect(normalizeTree(null)).toEqual({ directions: [] });
     // a count that is not a finite number is 0, never drawn as "null"
     expect(normalizeTree({ directions: [{ id: "b", counts: { working: null, needs_you: "3", stuck: Infinity, review: 1 } }] }).directions[0].counts).toEqual(counts(0, 0, 0, 1));
+    // running (#6626) as the hub sent it, whatever the counts; from a hub without it, whether it counts a working task
+    const running = (d: object) => normalizeTree({ directions: [{ id: "r", ...d }] }).directions[0].running;
+    expect(running({ counts: { working: 3 }, running: false })).toBe(false);
+    expect(running({ counts: { needs_you: 1 }, running: true })).toBe(true);
+    expect(running({ counts: { working: 1 } })).toBe(true);
+    expect(running({ counts: { needs_you: 1 } })).toBe(false);
+    expect(running({ counts: { working: 1 }, running: "yes" })).toBe(true);
     // not started (#5846) is kept as the hub sent it, and counted
     const planned = normalizeTree({ directions: [{ id: "c", counts: { planned: 2 }, tasks: [{ id: "p", title: "P", state: "planned" }] }] }).directions[0];
     expect(planned.tasks?.[0].state).toBe("planned");
@@ -81,7 +89,7 @@ describe("direction tree", () => {
     expect(directionStateName("planned")).toBe("未开始");
     expect(DIRECTION_STATE_TONE.planned).toBe("text-ink-3");
     expect(directionTitle(TREE.directions[2])).toBe("书记官");
-    expect(directionTitle({ id: "x", name: "", counts: counts() }, "Title")).toBe("Title");
+    expect(directionTitle({ id: "x", name: "", counts: counts(), running: false }, "Title")).toBe("Title");
   });
 
   it("builds the Agents tree: direction › task › agent › child, agents it does not hold last, empty directions left out", () => {
@@ -89,7 +97,7 @@ describe("direction tree", () => {
     const tree = buildDirectionAgentTree(TREE, all, [{ id: "m", online: true } as Machine], undefined, Date.parse("2026-11-11T00:00:00Z"));
     expect(tree.projects.map((p) => p.key)).toEqual(["direction-agents:lead-a"]);
     const [a] = tree.projects;
-    expect(a.direction).toEqual({ counts: counts(1, 1), secretary: false });
+    expect(a.direction).toEqual({ counts: counts(1, 1), running: true, secretary: false });
     expect(a.todos.map((td) => [td.todoId, td.taskState, td.state])).toEqual([["t1", "needs_you", "needs_you"], ["t2", "working", "working"]]);
     // s2 nests under s1; the agent the list lacks gives its place to its child
     expect(a.todos[0].agents.map((n) => [n.session.session_id, n.children.map((c) => c.session.session_id)])).toEqual([["s1", ["s2"]]]);
@@ -116,7 +124,7 @@ describe("direction tree", () => {
     expect(tree.projects.map((p) => p.key)).toEqual(["direction-agents:lead-a", "direction-agents:main"]);
     const secretary = tree.projects.at(-1)!;
     expect(secretary.name).toBe("书记官");
-    expect(secretary.direction).toEqual({ counts: counts(1), secretary: true });
+    expect(secretary.direction).toEqual({ counts: counts(1), running: false, secretary: true });
     expect(secretary.todos.map((td) => td.todoId)).toEqual(["t3"]);
     expect(secretary.todos[0].agents.map((n) => n.session.session_id)).toEqual(["s4"]);
     // a listed agent the tree does not hold stays in the loose groups

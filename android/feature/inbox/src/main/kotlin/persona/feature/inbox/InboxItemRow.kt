@@ -6,6 +6,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.material3.Text
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
+import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.inbox.*
 import persona.core.navigation.LocalDetailKey
@@ -28,16 +30,13 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
     val doneLabel = stringResource(if (done) R.string.inbox_move_back else R.string.inbox_done)
     val handOffLabel = stringResource(R.string.inbox_hand_to_ai)
     if (menu) JActionSheet(title = item.title, onDismiss = { menu = false }, actions = buildList {
-        add(JAction(doneLabel, PhIcons.Check, enabled = !busy, onClick = onDone))
+        add(JAction(doneLabel, doneIcon(done), enabled = !busy, onClick = onDone))
         add(JAction(handOffLabel, PhIcons.Robot, onClick = onHandOff))
         // What the item can be muted by, the name with each (iOS `rowMenu`): its repository, chat or sender; then a rule for each.
         addAll(muteAndRuleActions(res, record, onMute, onRule))
     })
     val selecting = selection?.selecting == true
-    JSwipeActions(
-        start = if (busy || selecting) null else SwipeAction(doneLabel, PhIcons.Check, Status.Unread, onDone),
-        end = if (selecting) null else SwipeAction(handOffLabel, PhIcons.Robot, Status.Working, onHandOff),
-    ) {
+    JSwipeActions(end = inboxRowSwipe(doneLabel, done, busy, selecting, onDone)) {
         MessageItem(sender = item.sender.orEmpty().ifBlank { item.title }, title = if (groupEvent) record.groupName ?: stringResource(R.string.inbox_kind_group)
                 else translated?.subject?.ifBlank { null } ?: item.title,
             heading = item.title.takeIf { groupEvent },
@@ -98,5 +97,20 @@ internal fun ReplyStatus(state: ReplyComposerState) {
     state.error?.let { JNotice(androidx.compose.ui.res.stringResource(it.text), status = Status.NeedsYou) }
 }
 
-/** As iOS InboxStore: filing an item as "Done" buzzes success at once, putting it back a light tap. */
-internal fun doneHaptic(done: Boolean): Haptic = if (done) Haptic.Success else Haptic.Tap
+/**
+ * A row's one swipe, from the end as iOS's trailing full swipe (`InboxView`): Done in the positive tone, and Move Back with the
+ * undo arrow in the accent tone on a done item. None while a write for the row is out ([busy]) or items are being picked
+ * ([selecting]). The hand-off is not a swipe: it is in the long-press sheet.
+ */
+internal fun inboxRowSwipe(label: String, done: Boolean, busy: Boolean, selecting: Boolean, onDone: () -> Unit): SwipeAction? =
+    if (busy || selecting) null
+    else SwipeAction(label, doneIcon(done), Status.Unread, onDone, tone = if (done) SwipeTone.Accent else SwipeTone.Positive)
+
+/** Done is the check mark and Move Back the undo arrow, on the swipe and in the long-press sheet alike (iOS `Theme.Icon.done` / `undo`). */
+internal fun doneIcon(done: Boolean): PhIcon = if (done) PersonaIcons.undo else PersonaIcons.done
+
+/**
+ * As iOS InboxStore: one item filed or put back gives a light tap (`setDone(_ item:)`); many at once (Mark all as seen, Clear
+ * all) buzz success when filed and tap when put back (`run`), so a count of them is felt.
+ */
+internal fun doneHaptic(done: Boolean, single: Boolean = false): Haptic = if (done && !single) Haptic.Success else Haptic.Tap

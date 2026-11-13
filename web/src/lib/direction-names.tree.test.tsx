@@ -9,14 +9,14 @@ import { useDirectionTree } from "./direction-tree";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const tree = (working: number) => ({
+const tree = (running: boolean) => ({
   directions: [
-    { id: "lead-a", name: "Product", counts: { working, needs_you: 1, stuck: 0, review: 0 }, tasks: [] },
+    { id: "lead-a", name: "Product", counts: { working: 1, needs_you: 1, stuck: 0, review: 0 }, running, tasks: [] },
     { id: "main", name: "", secretary: true, counts: { working: 9, needs_you: 9, stuck: 0, review: 0 }, tasks: [] },
   ],
 });
 
-let seen: { names?: ReadonlyMap<string, string>; counts?: ReadonlyMap<string, { working: number; needs_you: number }>; tree?: unknown } = {};
+let seen: { names?: ReadonlyMap<string, string>; counts?: ReadonlyMap<string, { running: boolean; needs_you: number }>; tree?: unknown } = {};
 function Probe() {
   seen = { names: useDirectionNames("lead-a\u0000Growth"), counts: useLeaderCounts(), tree: useDirectionTree() };
   return null;
@@ -29,8 +29,8 @@ afterEach(() => {
 
 describe("the 常驻 names and counts", () => {
   it("come from the one direction tree: one GET for the sidebar and the tree's screens, and follow its reads", async () => {
-    let working = 2;
-    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/directions/tree") ? tree(working) : {}), { headers: { "Content-Type": "application/json" } }));
+    let running = true;
+    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/directions/tree") ? tree(running) : {}), { headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetch);
     const host = document.createElement("div");
     const root = createRoot(host);
@@ -38,14 +38,15 @@ describe("the 常驻 names and counts", () => {
     await act(async () => { await readDirectionTree(); });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(seen.names?.get("lead-a")).toBe("Product");
-    expect(seen.counts?.get("lead-a")).toEqual({ working: 2, needs_you: 1 });
+    expect(seen.counts?.get("lead-a")).toEqual({ running: true, needs_you: 1 });
     expect(seen.counts?.has("main")).toBe(false);
     expect((seen.tree as { directions: unknown[] }).directions).toHaveLength(2);
     // a directions push: one more GET, and the counts follow
-    working = 0;
+    running = false;
     await act(async () => { await readDirectionTree(true); });
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(seen.counts?.get("lead-a")).toEqual({ working: 0, needs_you: 1 });
+    // what runs under it is the tree's running (#6626), not its working count, which stayed 1
+    expect(seen.counts?.get("lead-a")).toEqual({ running: false, needs_you: 1 });
     act(() => root.unmount());
   });
 

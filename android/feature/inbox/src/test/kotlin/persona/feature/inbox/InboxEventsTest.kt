@@ -21,6 +21,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.buildInboxList
 import persona.core.domain.inbox.InboxListSettings
 import persona.core.navigation.ChatRoute
+import persona.core.navigation.RouteSource
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Locale
@@ -107,12 +108,12 @@ class InboxEventsTest {
         val byId = chat.event.chain.associateBy { it.id }
         assertEquals(ChainTarget.Page(LarkRoute("oc_demo3", "lark:oc_demo3:300", 300)), chainTarget(byId.getValue("c1"), chat))
         assertEquals(ChainTarget.Inline, chainTarget(byId.getValue("c2"), chat))
-        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo3")), chainTarget(byId.getValue("c3"), chat))
+        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo3", source = RouteSource.InboxItem("lark:oc_demo3:300"))), chainTarget(byId.getValue("c3"), chat))
         assertEquals(ChainTarget.Inline, chainTarget(byId.getValue("c4"), chat))
         assertEquals(ChainTarget.Page(LarkRoute("oc_demo3", "lark:oc_demo3:300", 305)), chainTarget(byId.getValue("c5"), chat))
         val mail = record("mail:a1:ci:77")
         assertEquals(ChainTarget.Page(MailRoute("mail:a1:ci:77")), chainTarget(mail.event.chain.first(), mail))
-        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo4")), chainTarget(mail.event.chain.last(), mail))
+        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo4", source = RouteSource.InboxItem("mail:a1:ci:77"))), chainTarget(mail.event.chain.last(), mail))
         fun entry(link: InboxChainLink?, detail: String? = null) = InboxChainEntry("x", kind = "sent", link = link, detail = detail)
         assertEquals(ChainTarget.Url("https://example.com/pr/1"), chainTarget(entry(InboxChainLink("source", url = "https://example.com/pr/1")), chat))
         assertEquals(ChainTarget.Source, chainTarget(entry(InboxChainLink("source")), chat))

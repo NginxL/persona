@@ -721,7 +721,7 @@ export interface Question {
   header?: string;
   multi_select?: boolean;
   /** Missing or null for a question asked in free text (Codex request_user_input; a Go nil slice, #1573). */
-  options?: { label: string; description?: string }[] | null;
+  options?: { label: string; description?: string; action?: "defer" | (string & {}) }[] | null;
 }
 
 export interface DialogOption {

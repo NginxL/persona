@@ -459,7 +459,7 @@ fun TodosScreen(
                                 onClick = { toggled = if (folded) toggled - foldKey else toggled + foldKey },
                                 open = !folded,
                                 action = {
-                                    JDirectionCounts(direction.counts)
+                                    JDirectionCounts(direction)
                                     Spacer(Modifier.width(Tokens.Space.s))
                                     JIcon(if (folded) PersonaIcons.expand else PersonaIcons.collapse, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3)
                                 },

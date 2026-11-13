@@ -56,6 +56,9 @@ data class HandOffTarget(val machineId: String, val sessionId: String, val title
     val key: String get() = "$machineId/$sessionId"
 }
 
+/** "Also mark done" starts off for every [target]; an explicit [userChoice] survives target changes. */
+internal fun handOffMarkDone(target: HandOffTarget?, userChoice: Boolean? = null): Boolean = userChoice ?: false
+
 /**
  * Live, non-assistant sessions, newest first, at most [limit]. Sessions that cannot take a message (read-only ones
  * from other runtimes) drop out once sessions say so; until then being live is the test.

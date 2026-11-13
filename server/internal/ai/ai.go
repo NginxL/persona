@@ -171,6 +171,13 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 		copied.Timeout = 0
 		hc = &copied
 	}
+	var found *probeAnswer // this request finds out whether a pause is over: the gate goes at its 200 (limit.go)
+	if probe && hc != nil {
+		found = &probeAnswer{next: hc.Transport, g: g}
+		copied := *hc
+		copied.Transport = found
+		hc = &copied
+	}
 	var reply Reply
 	var answered bool
 	switch c.cfg.API {
@@ -184,7 +191,7 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 	if reply.Model == "" {
 		reply.Model = c.cfg.Model
 	}
-	return reply, g.done(probe, answered, err)
+	return reply, g.done(probe && !(found != nil && found.let.Load()), answered, err)
 }
 
 // apiEndpoint preserves deployment prefixes and accepts bases with or without /v1.

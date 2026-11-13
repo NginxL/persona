@@ -3,7 +3,7 @@
     <string name="inbox_title">受信トレイ</string>
     <string name="inbox_retry">再試行</string>
     <string name="inbox_done">対応済み</string>
-    <string name="inbox_move_back">受信トレイに戻す</string>
+    <string name="inbox_move_back">戻す</string>
     <string name="inbox_hand_to_ai">AIに任せる</string>
     <string name="inbox_ai_draft">AI下書き</string>
     <string name="inbox_ai_summary">AI要約</string>

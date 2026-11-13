@@ -11,6 +11,7 @@ import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.navigation.ChatRoute
+import persona.core.navigation.RouteSource
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -112,6 +113,10 @@ internal sealed interface ChainTarget {
     data object None : ChainTarget
 }
 
+/** A conversation opened from this item; its source lets the shell keep Back pointed at the item. */
+internal fun inboxConversationRoute(machineId: String, sessionId: String, itemId: String) =
+    ChatRoute(machineId, sessionId, source = RouteSource.InboxItem(itemId))
+
 internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarget {
     val inline = if (!entry.detail.isNullOrBlank() || entry.messages.isNotEmpty()) ChainTarget.Inline else ChainTarget.None
     val link = entry.link ?: return inline
@@ -126,7 +131,7 @@ internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarg
             }
         }
         "session" -> if (!link.machineId.isNullOrBlank() && !link.sessionId.isNullOrBlank())
-            ChainTarget.Page(ChatRoute(link.machineId!!, link.sessionId!!)) else inline
+            ChainTarget.Page(inboxConversationRoute(link.machineId!!, link.sessionId!!, record.item.id)) else inline
         "item" -> link.id?.takeIf { it.isNotBlank() }?.let { ChainTarget.Item(it) } ?: inline
         else -> inline
     }

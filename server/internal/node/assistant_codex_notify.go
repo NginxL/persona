@@ -150,14 +150,10 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 	case "item/agentMessage/delta":
 		p.mu.Lock()
 		p.partial.WriteString(ev.Delta)
-		text := p.partial.String()
-		due := time.Since(p.lastDelta) > 80*time.Millisecond
-		if due {
-			p.lastDelta = time.Now()
-		}
+		text := n.partialGrewLocked(p)
 		p.lastActive = time.Now()
 		p.mu.Unlock()
-		if due {
+		if text != "" {
 			n.emitDelta(p.id, text)
 		}
 	case "thread/compacted":

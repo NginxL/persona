@@ -85,7 +85,7 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
     setError(""); setDraft({ id: value.id, url: value.canonical_url, provider: value.provider, name: value.name ?? "", aliases: value.aliases?.join(", ") ?? "", purpose: value.purpose ?? "" });
   };
   const field = (key: "url" | "name" | "aliases" | "purpose", label: string, max: number) => (
-    <label className="block text-[12.5px] text-ink-2">{label}
+    <label className="block text-xs text-ink-2">{label}
       <input className={`${settingsInputClass} mt-1`} value={draft![key]} maxLength={max} disabled={!!busy} autoComplete="off" spellCheck={false}
         onChange={(e) => { setDraft({ ...draft!, [key]: e.target.value }); if (key === "url") setError(""); }} />
     </label>
@@ -100,50 +100,50 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
         <Button tone="quiet" disabled={!!busy} onClick={() => void load()}>{t("settings-repositories.refresh")}</Button>
       </div>
       {!!busy && <Loading label={t(busy === "save" ? needsCheck ? "settings-repositories.checking" : "settings-repositories.saving" : "common.loading")} />}
-      {error && !draft && !removing && <p role="alert" className="text-[12.5px] text-red">{error}</p>}
-      {rows?.length === 0 && <p className="text-[13px] text-ink-3">{t("settings-repositories.empty")}</p>}
+      {error && !draft && !removing && <p role="alert" className="text-xs text-red">{error}</p>}
+      {rows?.length === 0 && <p className="text-meta text-ink-3">{t("settings-repositories.empty")}</p>}
       {rows?.map((value) => <div key={value.id} className="space-y-1 border-t border-line pt-3" data-repository={value.id}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="min-w-0 break-words text-[13px] font-medium text-ink">{value.name || value.path}</span>
+          <span className="min-w-0 break-words text-meta font-medium text-ink">{value.name || value.path}</span>
           <div className="flex gap-1">
             <Button tone="quiet" disabled={!!busy} onClick={() => edit(value)}>{t("settings-repositories.edit")}<span className="sr-only"> {value.name || value.path}</span></Button>
             <Button tone="quiet" disabled={!!busy} onClick={() => { setError(""); setRemoving(value); }}>{t("settings-repositories.unbind")}<span className="sr-only"> {value.name || value.path}</span></Button>
           </div>
         </div>
-        <p className="break-all font-mono text-[11.5px] text-ink-2">{value.canonical_url}</p>
-        {value.aliases?.length ? <p className="text-[12px] text-ink-2">{t("settings-repositories.aliases")}: {value.aliases.join(", ")}</p> : null}
-        {value.purpose && <p className="break-words text-[12.5px] text-ink-2">{value.purpose}</p>}
-        <p className="text-[11.5px] text-ink-3">{t("settings-repositories.verified", { time: new Date(value.verified_at).toLocaleString() })}</p>
+        <p className="break-all font-mono text-xs text-ink-2">{value.canonical_url}</p>
+        {value.aliases?.length ? <p className="text-label text-ink-2">{t("settings-repositories.aliases")}: {value.aliases.join(", ")}</p> : null}
+        {value.purpose && <p className="break-words text-xs text-ink-2">{value.purpose}</p>}
+        <p className="text-xs text-ink-3">{t("settings-repositories.verified", { time: new Date(value.verified_at).toLocaleString() })}</p>
       </div>)}
     </div>}
     <Dialog open={!!draft} onClose={() => { if (!busy) { setDraft(null); setError(""); } }} title={t(draft?.id ? "settings-repositories.edit_title" : "settings-repositories.bind")}
       footer={<><Button disabled={!!busy} onClick={() => { setDraft(null); setError(""); }}>{t("common.cancel")}</Button><Button tone="primary" busy={busy === "save"} disabled={!!busy || !identity} onClick={() => void save()}>{t(draft?.id ? "settings-repositories.save" : "settings-repositories.check_save")}</Button></>}>
       {draft && <div className="space-y-3">
         {field("url", t("settings-repositories.url"), 2048)}
-        <label className="block text-[12.5px] text-ink-2">{t("settings-repositories.provider")}
+        <label className="block text-xs text-ink-2">{t("settings-repositories.provider")}
           <select className={`${settingsInputClass} mt-1`} value={draft.provider} disabled={!!busy} onChange={(e) => { setDraft({ ...draft, provider: e.target.value }); setError(""); }}>
             <option value="">{t("settings-repositories.detect")}</option><option value="github">GitHub / GitHub Enterprise</option><option value="gitlab">GitLab</option>
           </select>
         </label>
-        {identity && <div data-repository-preview role="status" aria-live="polite" className="rounded-control bg-field p-3 text-[12px] text-ink-2">
+        {identity && <div data-repository-preview role="status" aria-live="polite" className="rounded-control bg-field p-3 text-label text-ink-2">
           <p>{identity.provider} · {identity.instance_url}</p><p className="break-all font-mono">{identity.path}</p>
           <p className="break-all font-mono">{identity.canonical_url}</p>
           <p>{t(needsCheck ? "settings-repositories.unchecked" : "settings-repositories.edit_check")}</p>
         </div>}
-        {draft.url && !identity && <p role="status" className="text-[12px] text-ink-2">{t("settings-repositories.invalid_url")}</p>}
+        {draft.url && !identity && <p role="status" className="text-label text-ink-2">{t("settings-repositories.invalid_url")}</p>}
         {field("name", t("settings-repositories.name"), 80)}
         {field("aliases", t("settings-repositories.aliases"), 809)}
         {field("purpose", t("settings-repositories.purpose"), 500)}
-        <p className="text-[11.5px] leading-relaxed text-ink-3">{t("settings-repositories.check_hint")}</p>
+        <p className="text-xs leading-relaxed text-ink-3">{t("settings-repositories.check_hint")}</p>
         {busy === "save" && <Loading label={t(needsCheck ? "settings-repositories.checking" : "settings-repositories.saving")} />}
-        {error && <p role="alert" className="text-[12.5px] text-red">{error}</p>}
+        {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>}
     </Dialog>
     <Dialog open={!!removing} onClose={() => { if (!busy) { setRemoving(null); setError(""); } }} title={t("settings-repositories.unbind_title")}
       footer={<><Button disabled={!!busy} onClick={() => { setRemoving(null); setError(""); }}>{t("common.cancel")}</Button><Button tone="danger" busy={busy === "unbind"} disabled={!!busy} onClick={() => void unbind()}>{t("settings-repositories.unbind_title")}</Button></>}>
-      <p className="break-all font-mono text-[12px] text-ink">{removing?.canonical_url}</p>
-      <p className="mt-3 text-[13px] leading-relaxed text-ink-2">{t("settings-repositories.unbind_hint")}</p>
-      {error && <p role="alert" className="mt-3 text-[12.5px] text-red">{error}</p>}
+      <p className="break-all font-mono text-label text-ink">{removing?.canonical_url}</p>
+      <p className="mt-3 text-meta leading-relaxed text-ink-2">{t("settings-repositories.unbind_hint")}</p>
+      {error && <p role="alert" className="mt-3 text-xs text-red">{error}</p>}
     </Dialog>
   </Group>;
 }

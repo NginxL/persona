@@ -1,6 +1,7 @@
 // End-to-end check of the leader conversations in the sidebar (#3623, #4331, #4873, #6214, docs/web/web.md "Persona chats"): with
 // the hub's `assistant.leaders` set, a fresh browser shows Persona chats as the leaders, the 常驻 group, in the hub's order
-// under each one's name from GET /api/v1/assistant/leaders with what it has open (在做 N · 等你 N), then 最近, the newest
+// under each one's name from GET /api/v1/assistant/leaders with what waits on you (等你 N; what runs under it is the row's
+// arc, never 在做 N, #6626), then 最近, the newest
 // 5 other chats (a fresh browser's default, #5146 / #6228) whoever opened them except the scheduled tasks' own chats, the hub's
 // own with their origin's mark (#5195); every other chat is under 全部对话; the 最近 heading folds its rows and keeps that
 // (#6228); New chat is the compose icon on the section's title; a lead's menu has 取消常驻 (no 置顶 anywhere) which asks a second time
@@ -105,7 +106,7 @@ async function rowsBecome(page, want, ms = 5000) {
 
 const browser = await chromium.launch(executable ? { executablePath: executable } : { channel: "chrome" });
 const counted = new Map(((await hub("/assistant/directions/tree")).directions ?? []).filter((d) => !d.secretary).map((d) => [d.id, d.counts]));
-const label = (c) => [c?.working ? `在做 ${c.working}` : "", c?.needs_you ? `等你 ${c.needs_you}` : ""].filter(Boolean).join(" · ");
+const label = (c) => (c?.needs_you ? `等你 ${c.needs_you}` : "");
 try {
   for (const theme of ["light", "dark"]) {
     for (const width of [1280, 390]) {
@@ -116,7 +117,7 @@ try {
       for (const id of leaders) {
         const text = await page.locator(`aside a[href^="/persona/${id}"]`).first().textContent();
         if (!names.get(id) || !text.includes(names.get(id))) fail(`${where}: leader ${id} does not show its name ${names.get(id)}: ${text}`);
-        if (label(counted.get(id)) && !text.includes(label(counted.get(id)))) fail(`${where}: leader ${id} does not say ${label(counted.get(id))}: ${text}`);
+        if ((label(counted.get(id)) && !text.includes(label(counted.get(id)))) || text.includes("在做")) fail(`${where}: leader ${id} does not say just ${label(counted.get(id)) || "its name"}: ${text}`);
       }
       const hs = await headings(page);
       if (JSON.stringify(hs) !== JSON.stringify(["常驻", "最近"])) fail(`${where}: group titles are ${hs.join(" | ")}`);

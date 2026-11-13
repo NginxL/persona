@@ -95,9 +95,8 @@ func TestLiveHerdrResumesThroughTheLauncher(t *testing.T) {
 		}
 		waitWithin(t, 60*time.Second, a.name+" detected as claude", func() bool {
 			g, err := c.AgentGet(ctx, a.pane)
-			return err == nil && g.Agent == "claude"
+			return err == nil && g.Agent == "claude" && g.AgentStatus == "idle"
 		})
-		time.Sleep(3 * time.Second) // the prompt box drawn
 		_ = c.PaneRun(ctx, a.pane, "Reply with the single word ok.")
 		waitWithin(t, 90*time.Second, a.name+"'s transcript", func() bool {
 			m, _ := filepath.Glob(filepath.Join(a.profile, "projects", "*", a.id+".jsonl"))
@@ -111,12 +110,9 @@ func TestLiveHerdrResumesThroughTheLauncher(t *testing.T) {
 			t.Fatalf("%s: resume command not recorded against this server (%q, server %q)", a.name, got.Server, c.ServerID())
 		}
 	}
-	time.Sleep(2 * time.Second) // herdr saves the session
-
 	for round := 1; round <= 2; round++ {
 		before := c.ServerID()
 		t.Logf("LIVE restart %d: %s", round, cli("session", "stop", session))
-		time.Sleep(2 * time.Second)
 		if err := n.ensureHerdr(ctx, "live restart"); err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +121,19 @@ func TestLiveHerdrResumesThroughTheLauncher(t *testing.T) {
 		if err := attach.Start(); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(12 * time.Second)
+		waitWithin(t, 90*time.Second, "both agents resumed on the new server", func() bool {
+			for _, a := range agents {
+				g, err := c.AgentGet(ctx, a.pane)
+				if err != nil || g.Agent != "claude" {
+					return false
+				}
+				out, _ := exec.Command("sh", "-c", "ps -eo args | grep -F -- '--resume "+a.id+"' | grep -v grep").Output()
+				if !strings.Contains(string(out), "--mcp-config "+filepath.Join(n.dir, "mcp.json")) {
+					return false
+				}
+			}
+			return true
+		})
 		_ = attach.Process.Kill()
 		_ = attach.Wait()
 		if c.ServerID() == before {
@@ -175,6 +183,5 @@ func TestLiveHerdrResumesThroughTheLauncher(t *testing.T) {
 			})
 		}
 		t.Logf("LIVE restart %d: both commands reported again to the new server", round)
-		time.Sleep(2 * time.Second)
 	}
 }

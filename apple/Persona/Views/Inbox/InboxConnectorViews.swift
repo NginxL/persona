@@ -17,7 +17,7 @@ struct InboxConnectorDetailView: View {
     }
 
     var body: some View {
-        if thread.loaded && (thread.unavailable || thread.chat.map { !$0.isChat && !$0.isGitHub } == true) {
+        if thread.loaded && (thread.unavailable || thread.chat.map { !Self.isConversation($0, source: item.source) } == true) {
             InboxConnectorTextView(item: item, problem: thread.failure, reread: reread)
         } else if thread.chat?.isGitHub == true {
             GitHubThreadView(model: thread, item: item)
@@ -25,10 +25,17 @@ struct InboxConnectorDetailView: View {
                 .navigationBarTitleDisplayMode(.inline)
         } else {
             ConnectorThreadView(model: thread, source: item.accountName)
-                .navigationTitle(thread.chat?.name ?? item.title)
+                .navigationTitle(thread.chat.flatMap { $0.name.isEmpty ? nil : $0.name } ?? item.title)
                 .navigationSubtitle(ThreadLayout.subtitle(thread.chat, source: item.accountName))
                 .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    /// A page drawn as a conversation: a chat's, or GitHub's thread. A Lark one from a hub that could not say its kind
+    /// (lark-cli's message list says nothing of the chat, and such a hub sent an empty kind) is a chat too, as the web
+    /// takes it: before, it opened as the item's plain text, every message of the chat run together.
+    static func isConversation(_ chat: ThreadChat, source: String) -> Bool {
+        chat.isChat || chat.isGitHub || source == "larkcli" && chat.kind.isEmpty
     }
 
     /// The text page's Retry reads the conversation page again first and says whether that page now takes the text's

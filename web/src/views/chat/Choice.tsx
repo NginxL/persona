@@ -10,10 +10,10 @@ export function DigitHint({ n }: { n: number }) {
   return <span aria-hidden data-key-hint className="mt-[2px] flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-[5px] bg-field font-mono text-[10.5px] text-ink-2 shadow-hairline">{n}</span>;
 }
 
-export function Choice({ on, multi, label, desc, pick, hint, onClick }: { on: boolean; multi?: boolean; label: string; desc?: string; /** The assistant recommends it (its `delegate.recommend`, #544). */ pick?: boolean; /** The digit that picks this option, while the card has keyboard focus. */ hint?: number; onClick: () => void }) {
+export function Choice({ on, multi, label, desc, pick, hint, disabled = false, onClick }: { on: boolean; multi?: boolean; label: string; desc?: string; /** The assistant recommends it (its `delegate.recommend`, #544). */ pick?: boolean; /** The digit that picks this option, while the card has keyboard focus. */ hint?: number; disabled?: boolean; onClick: () => void }) {
   const shown = optionDisplay(label);
   return (
-    <button type="button" aria-pressed={on} onClick={onClick} className="touch-hit -mx-1.5 flex items-start gap-2 rounded-control px-1.5 py-1.5 text-left transition-colors duration-100 hover:bg-hover">
+    <button type="button" aria-pressed={on} disabled={disabled} onClick={onClick} className="touch-hit -mx-1.5 flex items-start gap-2 rounded-control px-1.5 py-1.5 text-left transition-colors duration-100 enabled:hover:bg-hover disabled:opacity-40">
       {hint !== undefined && <DigitHint n={hint} />}
       <span
         className={cx(

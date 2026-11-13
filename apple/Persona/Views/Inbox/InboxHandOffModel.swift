@@ -5,7 +5,8 @@ import Observation
 /// and the send. Persona's main conversation is the default: the item's hand-off (`POST /api/v1/inbox/{id}/handoff`)
 /// puts the item and the ask there and links the item to it, so that conversation may write back to the item. An older
 /// hub or manager answers 404 / 405, and the main chat gets the text as before. A new Persona conversation and a running
-/// Agent get it as a message. Sending never moves the app: `open()` goes to where it went. The detail page's
+/// Agent get it as a message; once delivered, their session is recorded on the item without sending again, and a record
+/// failure does not change the hand-off. Sending never moves the app: `open()` goes to where it went. The detail page's
 /// `InboxHandOffBar` queues a send behind an Undo window (`queue`); `InboxHandOffSheet` sends at once and opens.
 @MainActor @Observable
 final class InboxHandOffModel {
@@ -60,6 +61,8 @@ final class InboxHandOffModel {
         var load: (String) async throws -> InboxItem
         /// The main chat's hand-off (item id, text, client id): the conversation it went to.
         var handOff: (String, String, UUID) async throws -> SessionKey
+        /// Records an already-delivered new conversation or Agent hand-off (item id, session, kind, title, client id).
+        var record: (String, SessionKey, InboxHandoffRecordKind, String, UUID) async throws -> Void
         /// Shows the message as sent in that conversation under the client id, which its transcript copy carries.
         var showMain: (SessionKey, String, UUID) -> Void
         /// An older hub's main chat: sends the text there as a plain message (starting the conversation when there is
@@ -79,8 +82,9 @@ final class InboxHandOffModel {
     var target: Target = .main {
         didSet { if !doneChosen { markDone = Self.marksDone(target) } }
     }
-    /// Also Mark as Done: off for the main chat, which may still write back to the item and file it there; on for the
-    /// others, which never do. Switching targets follows that until the user sets it.
+    /// Also Mark as Done is off for every target: handing a matter to a conversation or Agent starts work rather than
+    /// finishing it, and an Agent's stop is reported back to this item. Switching targets keeps that default until the
+    /// user explicitly chooses otherwise.
     private(set) var markDone = false
     private(set) var sending = false
     /// Why the last send failed.
@@ -104,6 +108,10 @@ final class InboxHandOffModel {
     /// that says nothing about a try under that id (`saysNothing`) and, once a try may have gone (`mayHaveGone`), through
     /// every answer short of success, a missing route included. Another ask or a reopened sheet is a new hand-off.
     @ObservationIgnored private var attempt: Attempt?
+    /// The item title prepared for New Agent, used if its session title is not listed when the record goes out.
+    @ObservationIgnored private var newAgentTitle: String?
+    /// Stable for one New Agent preparation and consumed by its first Start callback.
+    @ObservationIgnored private var newAgentClientID: UUID?
     @ObservationIgnored private let itemID: String
     @ObservationIgnored private let deps: Deps
 
@@ -138,6 +146,11 @@ final class InboxHandOffModel {
                 let answer = try await api().inboxHandoff(id, text: text, clientID: clientID)
                 if let it = answer.item { InboxStore.shared.put(it, manager: item.manager) }
                 return answer.session
+            },
+            record: { id, key, kind, title, clientID in
+                // A new conversation uses the item title; an Agent uses its actual session title when it is listed.
+                let sessionTitle = kind == .agent ? model.session(key)?.displayTitle : nil
+                try await api().inboxHandoffRecord(id, session: key, kind: kind, title: sessionTitle ?? title, clientID: clientID)
             },
             showMain: { key, text, clientID in
                 model.showSent(key, text: text, images: [], id: clientID)
@@ -193,7 +206,7 @@ final class InboxHandOffModel {
             markDone: { InboxStore.shared.setDone(item, true, haptic: false) }))
     }
 
-    static func marksDone(_ target: Target) -> Bool { target != .main }
+    static func marksDone(_: Target) -> Bool { false }
 
     /// Whether a hand-off can go to this Agent now: one that takes messages, still live, on a computer that is online.
     static func takes(_ session: Session, online: (MachineRef) -> Bool) -> Bool {
@@ -227,17 +240,21 @@ final class InboxHandOffModel {
     }
 
     /// Reads the item for New Agent's page with `ask` as the first message; nil when it couldn't be read (`error` says
-    /// why, with no Retry: nothing went). Also Mark as Done is the user's choice, else on, as for every Agent target.
+    /// why, with no Retry: nothing went). Also Mark as Done is the user's choice, else off, as for every target.
     func newAgent(ask: String, group: String) async -> NewAgentPrefill? {
         guard !sending, !preparing else { return nil }
         preparing = true
         error = nil
         lastAsk = nil
+        newAgentTitle = nil
+        newAgentClientID = nil
         defer { preparing = false }
         do {
             let it = try await deps.load(itemID)
+            newAgentTitle = it.title
+            newAgentClientID = UUID()
             return NewAgentPrefill(card: InboxHandOffSheet.contextRef(it), prompt: ask, nameHint: it.title, group: group,
-                                   markDone: doneChosen ? markDone : true)
+                                   markDone: doneChosen ? markDone : false)
         } catch {
             self.error = error.isOffline ? String(localized: "Can't reach the hub")
                 : error.isTimeout ? String(localized: "The request timed out. Try again later.") : error.shown
@@ -245,15 +262,35 @@ final class InboxHandOffModel {
         }
     }
 
-    /// New Agent's page started an Agent with the item (#5933): `open()` goes there, and the item is filed when asked.
+    /// New Agent's page started an Agent with the item (#5933): `open()` goes there, the item is filed when asked, and
+    /// the session is recorded on the item without sending another message.
     func started(_ key: SessionKey, markDone: Bool) {
         sent = (.agent(key), key)
+        if let title = newAgentTitle, let clientID = newAgentClientID {
+            record(.agent(key), key, title: title, clientID: clientID)
+        }
+        newAgentTitle = nil
+        newAgentClientID = nil
         if markDone { deps.markDone() }
     }
 
     func setMarkDone(_ on: Bool) {
         markDone = on
         doneChosen = true
+    }
+
+    /// Records only after delivery, without holding up the result. An older hub's missing-text response, or any other
+    /// record failure, leaves the successful hand-off and its UI untouched.
+    private func record(_ target: Target, _ key: SessionKey, title: String, clientID: UUID) {
+        let kind: InboxHandoffRecordKind
+        switch target {
+        case .main: return
+        case .newChat: kind = .conversation
+        case .agent: kind = .agent
+        }
+        // Capture immutable values and the dependency, not mutable model state: the record outlives the page and model.
+        let itemID = itemID, record = deps.record
+        Task { try? await record(itemID, key, kind, title, clientID) }
     }
 
     /// Goes to the conversation the last send went to.
@@ -321,11 +358,14 @@ final class InboxHandOffModel {
         lastAsk = ask
         defer { sending = false }
         let text: String
+        var itemTitle: String?
         if target == .main, let pending = attempt, pending.ask == ask {
             text = pending.text
         } else {
             do {
-                text = InboxHandOffSheet.message(try await deps.load(itemID), ask: ask)
+                let item = try await deps.load(itemID)
+                itemTitle = item.title
+                text = InboxHandOffSheet.message(item, ask: ask)
             } catch {
                 // Nothing went yet: it never says to look in the chat.
                 self.error = error.isOffline ? String(localized: "Can't reach the hub")
@@ -350,6 +390,7 @@ final class InboxHandOffModel {
                 filed = result.filed
                 sent = (target, key)
             }
+            if let sent { record(sent.target, sent.key, title: itemTitle ?? ask, clientID: UUID()) }
             if markDone && !filed { deps.markDone() }
             return true
         } catch {

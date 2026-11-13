@@ -28,13 +28,14 @@ const TREE: DirectionTree = {
       id: "lead-a",
       name: "Product",
       counts: counts(1, 1),
+      running: true,
       tasks: [
         { id: "t-ask", title: "Pick the icon", state: "needs_you", agents: [{ machine_id: "mac", session_id: "s1", title: "Icon work", state: "needs_you", children: [{ machine_id: "mac", session_id: "s2", title: "Sub agent", state: "working" }] }] },
         { id: "t-run", title: "Write tests", state: "working", agents: [] },
       ],
     },
-    { id: "lead-b", name: "Infrastructure", counts: counts(0, 0), tasks: [] },
-    { id: "main", name: "", secretary: true, counts: counts(1, 0), tasks: [{ id: "t-own", title: "Own task", state: "stuck", agents: [] }] },
+    { id: "lead-b", name: "Infrastructure", counts: counts(0, 0), running: false, tasks: [] },
+    { id: "main", name: "", secretary: true, counts: counts(1, 0), running: false, tasks: [{ id: "t-own", title: "Own task", state: "stuck", agents: [] }] },
   ],
 };
 let leaders: string[] | undefined;
@@ -85,13 +86,16 @@ async function renderSidebar() {
 }
 
 describe("the 常驻 rows' disclosure", () => {
-  it("starts folded on #4610's row, with its name and its two counts, and no row for the secretary", async () => {
+  it("starts folded on #4610's row, with its name and what it has going, and no row for the secretary", async () => {
     await renderSidebar();
     const rows = [...host.querySelectorAll<HTMLElement>("[data-direction]")].map((el) => el.dataset.direction);
     expect(rows).toEqual(["lead-a", "lead-b"]);
     const lead = direction("lead-a")!;
     expect(lead.querySelector('a[href="/persona/lead-a"]')!.textContent).toContain("Product");
-    expect(lead.querySelector('a[href="/persona/lead-a"]')!.textContent).toContain("在做 1 · 等你 1");
+    // its tasks waiting on you in words, what runs under it as the arc alone (#6626)
+    expect(lead.querySelector('a[href="/persona/lead-a"]')!.textContent).toContain("等你 1");
+    expect(lead.querySelector('a[href="/persona/lead-a"]')!.textContent).not.toContain("在做");
+    expect(lead.querySelector('a[href="/persona/lead-a"] [data-shape="arc"][data-state="working"]')).not.toBeNull();
     expect(host.textContent).not.toContain("书记官");
     expect(disclosure("lead-a").getAttribute("aria-expanded")).toBe("false");
     // #6214: the fold says the action in words, and flips to "collapse" once open

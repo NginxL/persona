@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "operation": "inbox_row_meta",
+  "description": "The row's third line and the detail header's small line: where it happens, then who said the newest line and what. where equal to sender (a direct chat) is said once. Without where each app keeps today's line. The separator between who and what is the app's localized one (': ' in English, a full-width colon in Chinese and Japanese); ' · ' joins where.",
+  "cases": [
+    {
+      "name": "group_where_sender",
+      "description": "A group: where, then who said the newest line.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "r-1",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "preview": "Can we move it to Friday?",
+          "count": 1,
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "where": "Launch group",
+          "sender": "Alex"
+        }
+      },
+      "expected": {
+        "meta": {
+          "en": "Launch group · Alex: Can we move it to Friday?",
+          "zh-Hans": "Launch group · Alex：Can we move it to Friday?",
+          "ja": "Launch group · Alex：Can we move it to Friday?"
+        }
+      }
+    },
+    {
+      "name": "direct_where_is_sender",
+      "description": "A direct chat: where is the other person, who is the same person, so it is said once.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "r-2",
+          "source": "chat",
+          "kind": "dm",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Lunch on Friday",
+          "preview": "Can we move it to Friday?",
+          "count": 1,
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "where": "Alex",
+          "sender": "Alex"
+        }
+      },
+      "expected": {
+        "meta": {
+          "en": "Alex: Can we move it to Friday?",
+          "zh-Hans": "Alex：Can we move it to Friday?",
+          "ja": "Alex：Can we move it to Friday?"
+        }
+      }
+    },
+    {
+      "name": "where_no_sender",
+      "description": "No sender: where, then the line.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "r-3",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "preview": "Can we move it to Friday?",
+          "count": 1,
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "where": "Launch group"
+        }
+      },
+      "expected": {
+        "meta": {
+          "en": "Launch group · Can we move it to Friday?",
+          "zh-Hans": "Launch group · Can we move it to Friday?",
+          "ja": "Launch group · Can we move it to Friday?"
+        }
+      }
+    },
+    {
+      "name": "repo_where",
+      "description": "A repository from a connector: where is the repository.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "r-4",
+          "source": "code",
+          "kind": "review_requested",
+          "account": "code",
+          "account_name": "Code host",
+          "title": "Fix the login retry",
+          "preview": "please take a look",
+          "count": 1,
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "where": "example-org/example-repo",
+          "sender": "bob"
+        }
+      },
+      "expected": {
+        "meta": {
+          "en": "example-org/example-repo · bob: please take a look",
+          "zh-Hans": "example-org/example-repo · bob：please take a look",
+          "ja": "example-org/example-repo · bob：please take a look"
+        }
+      }
+    },
+    {
+      "name": "no_where_unchanged",
+      "description": "No where (an older hub, mail): the row's third line stays as each app draws it today; not compared here.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "r-5",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "preview": "Can we move it to Friday?",
+          "count": 1,
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "sender": "Alex"
+        }
+      },
+      "expected": {
+        "meta": null
+      }
+    }
+  ]
+}

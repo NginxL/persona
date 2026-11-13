@@ -90,9 +90,14 @@ class ModelPillTest {
     /** Records what the pill asks the hub. */
     private class Hub : AssistantManagement {
         val asked = mutableListOf<String>()
+        var launcherListReads = 0
+            private set
         override suspend fun config() = AssistantConfig(machineId = "box", launcher = "claude", main = "main")
-        override suspend fun assistantLauncherList(machineId: String) = AssistantLaunchers(
-            listOf(AgentLauncher("claude"), AgentLauncher("team", displayName = "Team API")), LauncherDefault("claude", "opus", "high"))
+        override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers {
+            launcherListReads++
+            return AssistantLaunchers(
+                listOf(AgentLauncher("claude"), AgentLauncher("team", displayName = "Team API")), LauncherDefault("claude", "opus", "high"))
+        }
         override suspend fun launcherModels(machineId: String, launcher: String) = when (launcher) {
             "claude" -> LauncherModels("claude", listOf(AgentModel("default", "Default", resolved = "claude-opus-5-5", isDefault = true),
                 AgentModel("opus", "Opus 5.5", resolved = "claude-opus-5-5")))
@@ -144,5 +149,40 @@ class ModelPillTest {
         rule.onNode(hasDialogText("Undo pick"), useUnmergedTree = true).performClick()
         rule.waitUntil(5_000) { hub.asked.size == 2 }
         assertEquals("DELETE c2", hub.asked.last())
+    }
+
+    @Test fun aHubPushThatBumpsTheRevisionReReadsTheEffectiveMainChatModel() {
+        val hub = Hub()
+        val first = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"c3","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-haiku-5-5","effort":"high","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(first, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.waitUntil(5_000) { hub.launcherListReads >= 1 }
+        val afterMount = hub.launcherListReads
+        // the same revision re-renders nothing again (the page-life cache stands)
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(first, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        assertEquals(afterMount, hub.launcherListReads)
+        // a hub push with a new revision forces a fresh read so the pill matches the effective model (#6542)
+        val pushed = first.copy(rev = 4)
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(pushed, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.waitUntil(5_000) { hub.launcherListReads > afterMount }
     }
 }

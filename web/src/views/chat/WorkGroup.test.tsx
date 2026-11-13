@@ -210,10 +210,10 @@ describe("thought rows (cindy's ThinkingActivityRow, #5155)", () => {
 describe("the user's bubble and the answer", () => {
   const msg = (text: string) => ({ id: "u#0", text, images: [], contexts: [] });
 
-  it("on the right, at most 488 wide, 12 px corners", () => {
+  it("on the right, fits its column up to 488 wide, 12 px corners", () => {
     const html = renderToStaticMarkup(<UserBubble msg={msg("你好")} mid="m" sid="s" />);
     expect(html).toContain("ml-auto");
-    expect(html).toContain("max-w-[488px]");
+    expect(html).toContain("max-w-[min(100%,488px)]");
     expect(html).toContain("rounded-[12px]");
     expect(html).not.toContain("展开");
     expect(html).not.toContain("data-fold-scroll");

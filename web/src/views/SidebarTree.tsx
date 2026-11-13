@@ -101,8 +101,8 @@ const TreeProjectSection = memo(function TreeProjectSection({ k, name, state, fo
       title={<SectionTitle icon={direction ? (direction.secretary ? "person" : "target") : "folder"} name={name} />}
       folded={folded}
       onToggle={toggle}
-      // a pinned direction (#4352) says its two counts instead of one state word
-      right={direction ? <DirectionCountsText counts={direction.counts} /> : <TreeStateText state={state} />}
+      // a pinned direction (#4352) shows what it has going (its arc, its 等你 N, #6626) instead of one state word
+      right={direction ? <DirectionCountsText direction={direction} /> : <TreeStateText state={state} />}
     >
       {todos.map((td) => <TreeTodoRows key={td.key} td={td} {...p} activeKey={within(td.sessions, p.activeKey)} />)}
     </Section>

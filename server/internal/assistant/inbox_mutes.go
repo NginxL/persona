@@ -112,7 +112,7 @@ func (b *inboxBook) applyMutes(now time.Time) []*inboxWrite {
 // fileMuted keeps done_by=read for compatibility, but records the mute as the cause. Under b.mu.
 func (b *inboxBook) fileMuted(it *InboxItem, at time.Time, name string) {
 	it.done(at, "read")
-	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted")})
+	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted"), By: DoneByMuted})
 	it.Reason = b.mutedReason(name)
 }
 

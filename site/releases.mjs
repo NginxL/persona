@@ -54,7 +54,7 @@ const COMPONENTS = ["personad", "persona-hub", "persona-manager", "persona-node"
 const CHECKSUMS = new Set(["SHA256SUMS", "latest.json", "android.json", "BUILD.json", "ARTIFACTS.md", "VERSION"]);
 
 // classifyAsset says what a release file is, from its name alone:
-//   app        Persona-<v>-android.apk                     { platform: "android" }
+//   app        Persona-<v>-android.apk / -harmony.hap    { platform: "android" | "harmony" }
 //   computer   Persona-<v>-<os>-<arch>.tar.gz / .zip       { platform: "macos" | "linux" | "windows", arch }
 //   web        Persona-<v>-web.tar.gz                      { platform: "web" }
 //   component  <component>-<os>-<arch>[.exe].gz / .zip     { component, platform, arch }
@@ -65,6 +65,7 @@ export function classifyAsset(name, version) {
   const v = version.replace(/[.+]/g, "\\$&");
   let m;
   if (name === `Persona-${version}-android.apk`) return { kind: "app", platform: "android" };
+  if (name === `Persona-${version}-harmony.hap`) return { kind: "app", platform: "harmony" };
   if (name === `Persona-${version}-web.tar.gz`) return { kind: "web", platform: "web" };
   if ((m = new RegExp(`^Persona-${v}-(darwin|linux|windows)-(amd64|arm64)\\.(tar\\.gz|zip)$`).exec(name))) {
     return { kind: "computer", platform: OS[m[1]], arch: m[2] };
@@ -126,7 +127,7 @@ export function summarizeNotes(body) {
 }
 
 // Areas people use come first in the highlights; build, test and release plumbing never appears there.
-const VISIBLE_AREAS = new Set(["assistant", "ios", "apple", "watch", "watchos", "vision", "carplay", "android", "web", "chat",
+const VISIBLE_AREAS = new Set(["assistant", "ios", "apple", "watch", "watchos", "vision", "carplay", "android", "harmony", "web", "chat",
   "inbox", "tasks", "todos", "kb", "knowledge", "voice", "recording", "mail", "extensions", "agents", "health", "link"]);
 const PLUMBING = new Set(["release", "releases", "ci", "test", "tests", "build", "deps", "scripts", "mock", "docs", "lint",
   "tokens", "dev", "tooling", "privacy", "hooks", "workflow", "i18n", "site"]);

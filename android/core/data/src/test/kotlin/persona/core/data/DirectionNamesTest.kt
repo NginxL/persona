@@ -56,15 +56,16 @@ class DirectionNamesTest {
     // #4352: the tree lists the current directions in order, then the secretary group (skipped), each with its counts.
     @Test fun theTreeListsTheDirectionsWithTheirNamesAndCounts() {
         val tree = directionTreeOf(json("""{"directions": [
-            {"id": "a", "name": " Growth ", "counts": {"working": 2, "needs_you": 1, "stuck": 0, "review": 3}},
-            {"id": "b", "name": "", "counts": {"working": 0, "needs_you": 0, "stuck": 1, "review": 0}},
+            {"id": "a", "name": " Growth ", "counts": {"working": 0, "needs_you": 1, "stuck": 0, "review": 3}, "running": true},
+            {"id": "b", "name": "", "counts": {"working": 2, "needs_you": 0, "stuck": 1, "review": 0}, "running": false},
             {"id": "", "name": "Nobody"},
             {"id": "m", "name": "", "secretary": true, "counts": {"working": 9, "needs_you": 9, "stuck": 9, "review": 9}}
         ]}"""))!!
         assertEquals(listOf("a", "b"), tree.ids)
         assertEquals(mapOf("a" to "Growth"), tree.names)
-        // The lead rows' counts read the same tree the snapshot holds (one parse, #4352).
-        assertEquals(mapOf("a" to LeaderCounts(working = 2, needsYou = 1), "b" to LeaderCounts()),
+        // The lead rows read the same tree the snapshot holds (one parse, #4352): what runs is the hub's `running`, not
+        // the working count (b counts two working tasks with nothing at work, #6626).
+        assertEquals(mapOf("a" to LeaderCounts(running = true, needsYou = 1), "b" to LeaderCounts()),
             AssistantSnapshot(directionTree = tree).leaderCounts)
         assertNull("an answer without directions is no tree", directionTreeOf(json("{}")))
     }

@@ -1110,7 +1110,7 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
         <Icon name={direction.secretary ? "person" : "target"} size={12} stroke={2} className="shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1 truncate font-semibold">{title}</span>
-        <DirectionCountsText counts={direction.counts} />
+        <DirectionCountsText direction={direction} />
       </button>
       {!folded && (
         <div className="flex flex-col gap-1 pl-2 pt-0.5">

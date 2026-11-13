@@ -114,11 +114,11 @@ class AssistantTest {
         val leadB = Session(machineId = "demo", sessionId = "lead-b", title = "1110 | 探索 | 支付", origin = "user")
         val snapshot = AssistantSnapshot(main.key, listOf(main, mine, leadB, leadA),
             leaders = listOf("lead-a", "gone", "lead-b"), directionNames = mapOf("lead-a" to "Growth"),
-            directionTree = DirectionTree(listOf(Direction("lead-a", counts = DirectionCounts(working = 1, needsYou = 2, stuck = 4)))))
+            directionTree = DirectionTree(listOf(Direction("lead-a", counts = DirectionCounts(working = 1, needsYou = 2, stuck = 4), running = true))))
         val result = conversationGroups(snapshot, "", words)
         assertEquals(listOf(leadA, leadB), result.directions)
         assertEquals("Growth", result.names["lead-a"])
-        assertEquals(LeaderCounts(working = 1, needsYou = 2), result.counts["lead-a"])
+        assertEquals(LeaderCounts(running = true, needsYou = 2), result.counts["lead-a"])
         assertEquals(listOf(mine), result.others)
         // a search finds a direction by its name
         assertEquals(listOf(leadA), conversationGroups(snapshot, "growth", words).directions)
@@ -166,11 +166,11 @@ class AssistantTest {
         assertEquals(listOf(kept), result.others)
     }
 
-    // #4331: a leader's row says what it has open, only the parts that are not zero.
-    @Test fun leaderCountsSayWhatIsOpen() {
-        assertEquals("在做 1 · 等你 2", leaderCountsLabel(LeaderCounts(working = 1, needsYou = 2), resources))
-        assertEquals("在做 3", leaderCountsLabel(LeaderCounts(working = 3), resources))
+    // #4331, #6626: a leader's row says in words only what waits on you; what runs under it is its spinner alone.
+    @Test fun leaderCountsSayWhatWaitsOnYou() {
+        assertEquals("等你 2", leaderCountsLabel(LeaderCounts(running = true, needsYou = 2), resources))
         assertEquals("等你 1", leaderCountsLabel(LeaderCounts(needsYou = 1), resources))
+        assertNull("only running: the spinner says it, no words", leaderCountsLabel(LeaderCounts(running = true), resources))
         assertNull("nothing open: no line", leaderCountsLabel(LeaderCounts(), resources))
         assertNull(leaderCountsLabel(null, resources))
     }

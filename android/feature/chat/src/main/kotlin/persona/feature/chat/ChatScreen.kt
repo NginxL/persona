@@ -486,8 +486,17 @@ private fun ChatPage(
         composer.focusRequest++
     }
     val swipeQuote by rememberUpdatedState(quoteTarget)
+    // Quote in the menu of a selected message's words quotes the words picked (iOS Select Text › Quote).
+    val quoteWords: (MessageTarget, String) -> Unit = { target, words ->
+        linkContexts = withQuote(linkContexts, messageQuote(words, target.user, session?.agentLabel ?: "Claude", target.id, ChatLinkContext.PART_SELECTION))
+        composer.focusRequest++
+    }
+    val pickedQuote by rememberUpdatedState(quoteWords)
     val menuWrites = messageMenuWrites(readOnly, session)
-    LaunchedEffect(menuWrites) { messageMenu.quote = if (menuWrites) ({ target: MessageTarget -> swipeQuote(target) }) else null }
+    LaunchedEffect(menuWrites) {
+        messageMenu.quote = if (menuWrites) ({ target: MessageTarget -> swipeQuote(target) }) else null
+        messageMenu.quoteWords = if (menuWrites) ({ target: MessageTarget, words: String -> pickedQuote(target, words) }) else null
+    }
     // "Branch to new chat" (#2137) from a reply, "Rewind to here" (#2436) on your message: the menu's session-wide extras (web ⋯).
     var forking by remember { mutableStateOf(false) }
     var rewindBusy by remember { mutableStateOf(false) }
@@ -1151,7 +1160,7 @@ private fun ChatPage(
                                     }
                                 }
                             }
-                            ChatList(state = chatList, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(
+                            ChatList(state = chatList, modifier = Modifier.fillMaxSize().endSelectionOnTapOutside(messageMenu), contentPadding = PaddingValues(
                                 start = horizontalPadding, end = horizontalPadding,
                                 top = padding.calculateTopPadding() + 12.dp.dense,
                                 bottom = padding.calculateBottomPadding() + 12.dp.dense,

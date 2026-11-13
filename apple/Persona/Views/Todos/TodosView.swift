@@ -237,7 +237,7 @@ struct TodosView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: Theme.Space.s)
-                    DirectionCountsLine(counts: d.direction.counts)
+                    DirectionCountsLine(direction: d.direction)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)

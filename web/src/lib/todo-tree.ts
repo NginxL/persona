@@ -54,8 +54,8 @@ export interface TreeProject {
   todos: TreeTodo[];
   sessions: Session[];
   folded: boolean;
-  /** A pinned direction of the direction tree (#4352) in place of a project: its counts on the title line. */
-  direction?: { counts: DirectionCounts; secretary: boolean };
+  /** A pinned direction of the direction tree (#4352) in place of a project: what it has going on the title line. */
+  direction?: { counts: DirectionCounts; running: boolean; secretary: boolean };
 }
 
 /** The group of agents on no to-do, "Not on a to-do": its agents directly under it, no repository rows (#6458). */

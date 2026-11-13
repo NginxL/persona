@@ -225,8 +225,9 @@ function ToolLoopCard({ ix }: { ix: Interaction }) {
   );
 }
 
-function QuestionCard({ ix }: { ix: Interaction }) {
+function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean }) {
   const qs = ix.questions ?? [];
+  const localOnly = ix.tool_name === "persona_triage" && !canApprove;
   const [qi, setQi] = useState(0);
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [custom, setCustom] = useState<Record<number, string>>({});
@@ -244,12 +245,12 @@ function QuestionCard({ ix }: { ix: Interaction }) {
   const keys = useCardKeys({
     digit: (n) => {
       const o = q?.options?.[n - 1];
-      if (!o || busy) return false;
+      if (!o || busy || (localOnly && o.action !== "defer")) return false;
       toggle(o.label);
       return true;
     },
     enter: () => {
-      if (busy || (last ? !all : !answered(qi))) return false;
+      if (busy || (last ? !all : !(answered(qi) && allowed(qi)))) return false;
       if (last) void send();
       else advance();
     },
@@ -262,9 +263,14 @@ function QuestionCard({ ix }: { ix: Interaction }) {
   const context = delegateLines(ix.delegate).filter((l) => !(l.key === "recommend" && onOptions));
   const last = qi === qs.length - 1;
   const answered = (i: number) => (picked[i]?.length ?? 0) > 0 || Boolean(custom[i]?.trim());
-  const all = qs.every((_, i) => answered(i));
+  // A card that became read-only after a pick must not submit that now-disabled answer. Only explicit defer choices
+  // remain valid; the custom field and every message-sending option are disabled below.
+  const allowed = (i: number) => !localOnly || ((picked[i]?.length ?? 0) > 0 && !custom[i]?.trim() &&
+    (picked[i] ?? []).every((label) => qs[i].options?.some((o) => o.label === label && o.action === "defer")));
+  const all = qs.every((_, i) => answered(i) && allowed(i));
 
   const send = async () => {
+    if (!all) return;
     setBusy(true);
     const answers: Record<string, string> = {};
     qs.forEach((x, i) => {
@@ -275,6 +281,7 @@ function QuestionCard({ ix }: { ix: Interaction }) {
   };
 
   const toggle = (label: string) => {
+    if (localOnly && !q.options?.some((o) => o.label === label && o.action === "defer")) return;
     setCustom((c) => ({ ...c, [qi]: "" }));
     setPicked((cur) => {
       const have = cur[qi] ?? [];
@@ -319,7 +326,7 @@ function QuestionCard({ ix }: { ix: Interaction }) {
             )}
             {q.multi_select && <span className="text-[11.5px] text-ink-3">{t("chat-interactions.multi_select")}</span>}
           </span>
-          <SendArrow ready={last ? all : answered(qi)} busy={busy} kbd={keys.focused} label={last ? t("chat-interactions.send_answer") : t("chat-interactions.next_question")} onClick={() => (last ? void send() : advance())} />
+          <SendArrow ready={last ? all : answered(qi) && allowed(qi)} busy={busy} kbd={keys.focused} label={last ? t("chat-interactions.send_answer") : t("chat-interactions.next_question")} onClick={() => (last ? void send() : advance())} />
         </>
       }
     >
@@ -350,12 +357,13 @@ function QuestionCard({ ix }: { ix: Interaction }) {
       )}
       <div key={qi} className="flex flex-col gap-0.5" style={{ animation: `fade-up 300ms ${EASE} both` }}>
         {(q.options ?? []).map((o, i) => (
-          <Choice key={o.label} on={(picked[qi] ?? []).includes(o.label)} multi={q.multi_select} label={o.label} desc={o.description} pick={picks[qi]?.includes(o.label)} hint={keys.focused && i < 9 ? i + 1 : undefined} onClick={() => toggle(o.label)} />
+          <Choice key={o.label} on={(picked[qi] ?? []).includes(o.label)} multi={q.multi_select} label={o.label} desc={o.description} pick={picks[qi]?.includes(o.label)} hint={keys.focused && i < 9 ? i + 1 : undefined} disabled={localOnly && o.action !== "defer"} onClick={() => toggle(o.label)} />
         ))}
         <label className="-mx-1.5 flex items-center gap-2 rounded-control px-1.5 py-1.5 transition-colors focus-within:bg-hover hover:bg-hover">
           <span aria-hidden className="size-4 shrink-0" />
           <input
             value={custom[qi] ?? ""}
+            disabled={localOnly}
             onChange={(e) => {
               setCustom((c) => ({ ...c, [qi]: e.target.value }));
               if (e.target.value) setPicked((p) => ({ ...p, [qi]: [] }));
@@ -1192,10 +1200,11 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
   // summary, which the store's complete rows never have)
   const child = useChildRow(ix.machine_id, ix.session_id);
   const canApprove = useStore(() => interactionCanAnswer(ix, child ?? getSession(ix.machine_id, ix.session_id)));
+  const managerWork = ix.kind === "question" && ix.tool_name === "persona_triage";
   // an answer still on its way (the hub away, apiOp retrying) holds the card, also after leaving the chat and coming back
   const { pending, line } = usePendingLine(ix);
   const card = ix.kind === "question" && ix.tool_name === "persona_tool_loop" ? <ToolLoopCard key={ix.id} ix={ix} />
-    : ix.kind === "question" ? <QuestionCard ix={ix} />
+    : ix.kind === "question" ? <QuestionCard ix={ix} canApprove={canApprove} />
     : ix.kind === "plan" ? <PlanCard ix={ix} />
     : isSecretRun(ix) ? <SecretRunCard key={ix.id} ix={ix} />
     : isSecretHandoff(ix) ? <SecretHandoffCard key={ix.id} ix={ix} />
@@ -1206,14 +1215,15 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
   const from = ix.folded_under && (ix.kind !== "permission" || isSecretRun(ix) || isSecretHandoff(ix)) ? permissionFrom(ix) : "";
   // data-card: which card this is, for the sync scenarios (spec/fixtures/sync); `contents` keeps the layout as it was.
   // The fieldset is always there (switching it in would remount the card): disabled, it stops every answer and the
-  // card's keys (lib/card-keys.ts) while the session can't be approved here or an answer is on its way
+  // card's keys (lib/card-keys.ts) while the session can't be approved here or an answer is on its way. A manager work
+  // card stays mounted for its local defer/dismiss actions; QuestionCard disables every message-sending control instead.
   return (
     <div data-card={ix.id} className="contents">
       <AskedByVoice.Provider value={asked}>
         <SendingAnswer.Provider value={line}>
           <AskedFrom.Provider value={from}>
             {/* a question a supervisor passed up may carry a suggested rule: its line goes under the card (#5802) */}
-            <fieldset disabled={!canApprove || pending} className={canApprove ? "contents" : undefined}>{card}</fieldset>
+            <fieldset disabled={pending || (!canApprove && !managerWork)} className={canApprove ? "contents" : undefined}>{card}</fieldset>
             {underCard.line?.(canApprove ? ix : { ...ix, disabled: true })}
           </AskedFrom.Provider>
         </SendingAnswer.Provider>

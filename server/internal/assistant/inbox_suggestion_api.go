@@ -82,8 +82,9 @@ func (s *Service) inboxSuggestionRoutes() {
 	})
 }
 
-// actOnSuggestion confirms, rejects or answers the item's current suggestion, at the version the user saw. full is
-// false for an answer-only device (the watch): it may only confirm a reply or a conclusion, as text.
+// actOnSuggestion confirms, rejects or answers the item's current suggestion, at the version the user saw. An
+// instruction at version 0 is also accepted when no suggestion is current. full is false for an answer-only device
+// (the watch): it may only confirm a reply or a conclusion, as text.
 func (s *Service) actOnSuggestion(ctx context.Context, id string, in suggestionReq, full bool) (InboxItem, error) {
 	enabled := s.inboxConfig(ctx).Agent.Enabled
 	b := &s.inbox
@@ -98,35 +99,42 @@ func (s *Service) actOnSuggestion(ctx context.Context, id string, in suggestionR
 	case !it.open():
 		b.mu.Unlock()
 		return InboxItem{}, errInboxItemDone
-	case g == nil || g.Version != in.Version:
+	case g == nil && (in.Version != 0 || in.Action != suggestInstruct):
+		out := it.listed()
+		b.mu.Unlock()
+		return out, errSuggestionStale
+	case g != nil && g.Version != in.Version:
 		out := it.listed()
 		b.mu.Unlock()
 		return out, errSuggestionStale
 	}
-	text := g.Text
+	text := ""
+	if g != nil {
+		text = g.Text
+	}
 	if in.Text != nil && strings.TrimSpace(*in.Text) != "" {
 		text = strings.TrimSpace(*in.Text)
 	}
-	if !full && (in.Action != suggestConfirm || g.Kind == SuggestAgent || g.Handback || len(g.Changes) > 0 || assistantwire.AsksAgent(text)) {
+	if !full && (g == nil || in.Action != suggestConfirm || g.Kind == SuggestAgent || g.Handback || len(g.Changes) > 0 || assistantwire.AsksAgent(text)) {
 		b.mu.Unlock()
 		return InboxItem{}, errAnswerOnly
 	}
-	if g.Conversation != nil {
+	if g != nil && g.Conversation != nil {
 		return s.actOnHandedSuggestion(ctx, it, g, in, text) // it lets b.mu go
 	}
 	w := beginWrite(it)
-	if it.Agent == nil { // an old draft's item: its conversation's bookkeeping starts here
+	if it.Agent == nil { // an old draft's item, or a first instruction: its conversation's bookkeeping starts here
 		it.Agent = &InboxAgent{State: AgentSkipped}
 	}
 	now := time.Now()
 	l := b.userLang()
-	edited := text != g.Text
+	edited := g != nil && text != g.Text
 	// The suggestion is taken now, under the lock: a second confirmation of it (another device, a retry) is stale.
 	it.Suggestion = nil
 	if it.Agent.State == AgentDrafted {
 		it.Agent.State = AgentSkipped
 	}
-	execute := in.Action == suggestConfirm && !g.Handback
+	execute := g != nil && in.Action == suggestConfirm && !g.Handback
 	switch {
 	case in.Action == suggestReject:
 		b.chainAdd(it, rejectedEntry(l, g.Text, now))

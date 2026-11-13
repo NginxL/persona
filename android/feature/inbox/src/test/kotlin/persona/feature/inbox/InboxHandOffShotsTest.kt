@@ -33,6 +33,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
+import persona.core.navigation.RouteSource
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
@@ -52,11 +53,11 @@ class InboxHandOffShotsTest {
         }
     }
 
-    @Test fun targetDefaultsFollowSelectionUntilTheSwitchIsChosen() {
+    @Test fun targetChangesKeepTheSwitchOffUntilItIsChosen() {
         show()
         rule.onNode(isToggleable()).assertIsOff()
         rule.onNodeWithText("Example agent").performClick()
-        rule.onNode(isToggleable()).assertIsOn()
+        rule.onNode(isToggleable()).assertIsOff()
         rule.onNodeWithText("Persona").performClick()
         rule.onNode(isToggleable()).assertIsOff()
         rule.onNode(isToggleable()).performClick().assertIsOn()
@@ -74,22 +75,37 @@ class InboxHandOffShotsTest {
         rule.onNodeWithText("Send", substring = false).performClick()
         rule.waitForIdle()
         assertTrue(dismissed)
-        assertEquals(listOf(ChatRoute("hub", "main", ConversationKind.Assistant)), navigator.routes)
+        assertEquals(listOf(ChatRoute("hub", "main", ConversationKind.Assistant,
+            source = RouteSource.InboxItem("mail:example"))), navigator.routes)
         assertTrue(navigator.tabs.isEmpty())
         assertEquals(0, repository.doneCalls)
     }
 
-    @Test fun agentTargetMarksDoneAndOpensAgentConversation() {
+    @Test fun agentTargetDoesNotMarkDoneByDefaultAndOpensAgentConversation() {
         show()
         rule.onNodeWithText("Example agent").performClick()
         rule.onNodeWithText("Send", substring = false).performClick()
         rule.waitForIdle()
         assertTrue(dismissed)
-        assertEquals(1, repository.doneCalls)
+        assertEquals(0, repository.doneCalls)
         assertEquals("laptop", repository.requests.single().machineId)
         assertEquals("agent", repository.requests.single().sessionId)
-        assertEquals(listOf(ChatRoute("laptop", "agent", ConversationKind.Agent)), navigator.routes)
+        assertEquals("Example agent", repository.requests.single().targetTitle)
+        assertEquals(listOf(ChatRoute("laptop", "agent", ConversationKind.Agent,
+            source = RouteSource.InboxItem("mail:example"))), navigator.routes)
         assertTrue(navigator.tabs.isEmpty())
+    }
+
+    @Test fun agentTargetMarksDoneWhenExplicitlyChosen() {
+        show()
+        rule.onNodeWithText("Example agent").performClick()
+        rule.onNode(isToggleable()).performClick().assertIsOn()
+        rule.onNodeWithText("Send", substring = false).performClick()
+        rule.waitForIdle()
+        assertTrue(dismissed)
+        assertEquals(1, repository.doneCalls)
+        assertEquals(listOf(ChatRoute("laptop", "agent", ConversationKind.Agent,
+            source = RouteSource.InboxItem("mail:example"))), navigator.routes)
     }
 
     @Test fun oldHubFallbackSelectsPersona() {
@@ -123,7 +139,7 @@ class InboxHandOffShotsTest {
         remembering.handOffMemory.value = listOf(HandOffMemoryEntry("mail|sender:me@example.com", "agent:laptop/agent"))
         rule.setContent { PersonaTheme(reduceMotion = true) { InboxHandOffSheet(remembering, remembering.record, navigator, onDismiss = { dismissed = true }) } }
         rule.waitForIdle()
-        rule.onNode(isToggleable()).assertIsOn()
+        rule.onNode(isToggleable()).assertIsOff()
         rule.onNodeWithText("Last time").assertExists()
         rule.onNodeWithText("Persona").performClick()
         rule.onNodeWithText("Send", substring = false).performClick()
@@ -167,6 +183,7 @@ class InboxHandOffShotsTest {
             rule.runOnIdle { style = s; dark = d }
             rule.waitForIdle()
             rule.onNodeWithText("Last time").assertExists()
+            rule.onNode(isToggleable()).assertIsOff()
             val window = listOf(isDialog(), isPopup()).first { rule.onAllNodes(it).fetchSemanticsNodes().isNotEmpty() }
             val bitmap = rule.onAllNodes(window).onLast().captureToImage().asAndroidBitmap()
             File(dir, "inbox-handoff-last-time-${s.key}-${if (d) "dark" else "light"}.png").outputStream().use {

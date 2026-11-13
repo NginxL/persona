@@ -195,7 +195,7 @@ func (n *Node) addCodexWaitLocked(w *codexWait) {
 	n.codexWaiting[w.pane] = w
 	if !n.codexWaitLooking {
 		n.codexWaitLooking = true
-		go n.lookForCodexThreads()
+		go n.lookForCodexThreads(codexWaitTick)
 	}
 }
 
@@ -438,10 +438,11 @@ func (n *Node) codexTitleThread(a host.Agent) string {
 	return n.codexPublicID(home, found[0])
 }
 
-// lookForCodexThreads looks for the waiting rows' threads every codexWaitTick until none waits.
-func (n *Node) lookForCodexThreads() {
+// lookForCodexThreads looks for the waiting rows' threads every `every` (codexWaitTick, read by the caller) until none
+// waits.
+func (n *Node) lookForCodexThreads(every time.Duration) {
 	for tick := 0; ; tick++ {
-		time.Sleep(codexWaitTick)
+		time.Sleep(every)
 		n.mu.Lock()
 		if len(n.codexWaiting) == 0 {
 			n.codexWaitLooking = false

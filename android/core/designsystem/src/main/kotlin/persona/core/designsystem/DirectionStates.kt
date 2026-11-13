@@ -1,22 +1,19 @@
 package persona.core.designsystem
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import persona.core.contracts.CoreText
 import persona.core.contracts.Direction
-import persona.core.contracts.DirectionCounts
 import persona.core.contracts.DirectionTaskState
 import persona.core.designsystem.icons.PersonaIcons
 
@@ -48,26 +45,22 @@ fun JDirectionStateLabel(state: DirectionTaskState, modifier: Modifier = Modifie
 }
 
 /**
- * A direction's counts as the drawer's 常驻 row says them (`counts.working`, `counts.needs_you` of the hub's tree, the
- * words of leaderCountsLabel): only the parts above zero, "2 working · 1 need you", nothing at all when both are zero.
- * Quiet caption text; the Needs you part takes the needs-you colour.
+ * What a direction has going, as the drawer's 常驻 row shows it (#6626): the working spinner while anything under it
+ * runs ([Direction.running], the hub's one rule), then its tasks waiting on you in the needs-you colour ("1 need you",
+ * the words of leaderCountsLabel); nothing at all when neither. Never "N working" beside the spinner: one meaning, one
+ * expression.
  */
 @Composable
-fun JDirectionCounts(counts: DirectionCounts, modifier: Modifier = Modifier) {
-    val palette = PersonaTheme.palette
-    val working = counts.working.takeIf { it > 0 }?.let { CoreText.of(CoreText.Key.DirectionCountWorking, it).text() }
-    val needsYou = counts.needsYou.takeIf { it > 0 }?.let { CoreText.of(CoreText.Key.DirectionCountNeedsYou, it).text() }
-    if (working == null && needsYou == null) return
-    val needsYouColor = palette.status(Status.NeedsYou).text
-    val text = remember(working, needsYou, needsYouColor) {
-        buildAnnotatedString {
-            working?.let(::append)
-            if (working != null && needsYou != null) append(" · ")
-            needsYou?.let { withStyle(SpanStyle(color = needsYouColor)) { append(it) } }
+fun JDirectionCounts(direction: Direction, modifier: Modifier = Modifier) {
+    val needsYou = direction.counts.needsYou.takeIf { it > 0 }?.let { CoreText.of(CoreText.Key.DirectionCountNeedsYou, it).text() }
+    if (!direction.running && needsYou == null) return
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+        if (direction.running) JStatusDot(Status.Working, spinning = true, breathes = false)
+        needsYou?.let {
+            Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.status(Status.NeedsYou).text, maxLines = 1,
+                softWrap = false, overflow = TextOverflow.Ellipsis)
         }
     }
-    Text(text, modifier, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, softWrap = false,
-        overflow = TextOverflow.Ellipsis)
 }
 
 /**

@@ -89,6 +89,7 @@ All three use `.shellTopBarScaled()`, so the font stops growing at `Theme.Shell.
   Before, it was removed as soon as the strip stopped and the press on its switcher went nowhere; animations are slower under BeautifulUI, and `testQuickTapsEndOnTheLast` hit this almost every time (the third tap was lost).
 - **The page not in front**: a page takes touches and is read by VoiceOver only when "the strip is at rest on it and page is this page"; `tabIsActive` follows page (half a drag isn't a page change).
   Only the front page's top bar is drawn; during a slide there's only the shell's.
+- **The drawer's places** keep their stacks and switch under the open drawer before it closes; tasks open over the drawer (`ShellPlaces`, `docs/design/sidebar-navigation.md`, #6599).
 - **Navigation stacks and the drawer** stay in their own pages: each page's `path` has its own rules (search results collapse the search before pushing, the space page's depth table…). The shell only needs "is the current page at root",
   and `ShellState.atRoot` picks it by page. That value arrives via SwiftUI state and occasionally lags: swiping right from the left edge inside a chat pushed on Agents, the strip took the gesture
   and flipped to the assistant while the chat was still pushed (3 of 24 runs in the matrix). So the strip's and drawer's drags ask UIKit again when they start: if the navigation stack under the finger has a pushed page, they yield to its back gesture

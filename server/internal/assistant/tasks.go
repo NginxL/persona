@@ -123,6 +123,10 @@ type PlanTask struct {
 	planIndex int
 	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
 	preservePermission bool
+	// admissionRelease, once the admission gate passed, releases this start's held machine/direction slot. It is kept
+	// across the whole start (not the session.start RPC alone) and run when the agent is linked or the start failed for
+	// good, so the slot stays counted through the metrics/ledger gap. Never serialized (admission.go).
+	admissionRelease func()
 }
 
 // Readonly starts conservatively in plan. The launcher fit changes Claude to bypassPermissions while preserving Codex's sandbox.

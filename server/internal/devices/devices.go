@@ -644,6 +644,13 @@ func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMess
 	if len(params) == 0 {
 		params = json.RawMessage(`{}`)
 	}
+	if p.Method == "session.send" {
+		var err error
+		params, err = d.prepareSessionSkills(params)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if refusesHandoff(p.Method, params) {
 		return nil, errHandoffRefused
 	}

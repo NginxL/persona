@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,12 +46,18 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
         .let { if (hideCloseout) persona.core.domain.sort.stripCloseout(it) else it }
     val model = remember(text, item.from, user) { messageModel(text, item.from, user) }
     val uri = LocalUriHandler.current
-    Column(Modifier.fillMaxWidth().messageMenu(MessageTarget(item.id, model.plain, user, model.editText(), time = item.ts))) {
+    val target = MessageTarget(item.id, model.plain, user, model.editText(), time = item.ts)
+    Column(Modifier.fillMaxWidth().messageMenu(target)) {
         MessageContextGroup(model.contexts, "${item.id}/contexts", uri::openUri, alignEnd = user)
         AttachedFileCards(model.attached, alignEnd = user)
         // a reply still being written: its quotes do not fold yet (#2984)
         CompositionLocalProvider(LocalReplyStreaming provides (update?.streaming == true)) {
-            MessageParts(model.parts, user, item.id, boxed = boxed, streaming = update?.streaming == true)
+            // "Select" selects these words where they are
+            SelectableWords(target) {
+                Column(Modifier.fillMaxWidth()) {
+                    MessageParts(model.parts, user, item.id, boxed = boxed, streaming = update?.streaming == true)
+                }
+            }
         }
         if (cut) FullTextButton(item) { whole = it } else ReaderEntry(text)
         if (update?.streaming == true) StreamingCursor()
@@ -69,7 +76,7 @@ private fun StreamingCursor() {
     val transition = rememberInfiniteTransition(label = "streaming-cursor")
     val alpha by transition.animateFloat(1f, 0f,
         infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "cursor-alpha")
-    Text("▍", Modifier.alpha(alpha), color = PersonaTheme.palette.accent, style = PersonaTheme.type.body)
+    DisableSelection { Text("▍", Modifier.alpha(alpha), color = PersonaTheme.palette.accent, style = PersonaTheme.type.body) }
 }
 
 @Composable
@@ -175,9 +182,11 @@ internal fun MergedUserBubble(items: List<Item>, updates: Map<String, ChatTextUp
                 AttachedPhotoRow(photos)
                 if (parts.isNotEmpty()) Spacer(Modifier.height(Tokens.Space.s))
             }
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                MessageParts(parts, true, items.firstOrNull()?.id.orEmpty(), onLastLine)
-                if (streaming) StreamingCursor()
+            SelectableWords(target.takeIf { menu }) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    MessageParts(parts, true, items.firstOrNull()?.id.orEmpty(), onLastLine)
+                    if (streaming) StreamingCursor()
+                }
             }
         }
     }

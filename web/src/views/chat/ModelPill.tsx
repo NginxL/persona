@@ -232,6 +232,14 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   useEffect(() => {
     if (mid) void readAssistantLaunchers(mid);
   }, [mid]);
+  // A long-open page must still show the effective Main chat model after a hub-side change (#6542): a push that bumps
+  // this conversation's revision re-reads the picker, so the pill can't keep an old model the hub no longer resolves.
+  const lastRev = useRef<number | undefined>(session?.rev);
+  useEffect(() => {
+    if (!mid || session?.rev === undefined || session.rev === lastRev.current) return;
+    lastRev.current = session.rev;
+    void readAssistantLaunchers(mid, { again: true });
+  }, [mid, session?.rev]);
   // a pick of this page's that the list no longer offers (gone, or it can't run the assistant) goes back to the default,
   // its model and effort with it: on the new-conversation page they would otherwise go with the start
   useEffect(() => {

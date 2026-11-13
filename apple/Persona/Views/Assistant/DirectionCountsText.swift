@@ -1,15 +1,11 @@
 import Foundation
 
-/// A direction's work under its row in the sidebar (#4331): "N working · N need you", only the parts that are not
-/// zero, and nothing while it holds nothing.
+/// What a direction's row says in words (#4331, #6626): "N need you" while its to-dos wait on you, nothing otherwise.
+/// What runs under it is the row's activity mark alone (`DirectionTree.Direction.running`), never "N working" as well:
+/// one meaning, one expression.
 nonisolated enum DirectionCountsText {
-    /// The line, or nil when neither part is non-zero.
-    static func label(working: Int, needsYou: Int) -> String? {
-        switch (working > 0, needsYou > 0) {
-        case (true, true): return String(localized: "\(working) working · \(needsYou) need you")
-        case (true, false): return String(localized: "\(working) working")
-        case (false, true): return String(localized: "\(needsYou) need you")
-        case (false, false): return nil
-        }
+    /// The words, or nil when nothing waits on you.
+    static func label(needsYou: Int) -> String? {
+        needsYou > 0 ? String(localized: "\(needsYou) need you") : nil
     }
 }

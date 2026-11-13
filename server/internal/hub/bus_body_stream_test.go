@@ -27,10 +27,11 @@ import (
 // comes, http.request_streamed with the body read from the relay (bus.ReadBody, as the assistant's BusHub does)
 // unless turn says to turn it down with a code.
 type bodyManager struct {
-	mu   sync.Mutex
-	got  []assistantwire.HTTPRequest // as the route would see them: Body filled, BodyStream as it came
-	how  []string                    // the method each came with
-	turn string                      // "": take the stream; else answer http.request_streamed with this code
+	mu        sync.Mutex
+	got       []assistantwire.HTTPRequest // as the route would see them: Body filled, BodyStream as it came
+	how       []string                    // the method each came with
+	turn      string                      // "": take the stream; else answer http.request_streamed with this code
+	onRequest func()
 }
 
 func (m *bodyManager) requests() ([]string, []assistantwire.HTTPRequest) {
@@ -60,6 +61,12 @@ func connectBodyManager(t *testing.T, h *Hub, srv *httptest.Server, client *http
 		var p assistantwire.HTTPRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
+		}
+		m.mu.Lock()
+		notify := m.onRequest
+		m.mu.Unlock()
+		if notify != nil {
+			notify()
 		}
 		if method == assistantwire.MethodHTTPStreamed {
 			m.mu.Lock()
@@ -214,9 +221,12 @@ func TestTurnedDownStreamGoesInline(t *testing.T) {
 // slowConn reads at most rate bytes a second, like a manager behind a slow link.
 type slowConn struct {
 	net.Conn
-	rate  int
-	start time.Time
-	read  int
+	rate   int
+	start  time.Time
+	read   int
+	reads  int
+	mu     sync.Mutex
+	onBody func()
 }
 
 func (c *slowConn) Read(p []byte) (int, error) {
@@ -225,8 +235,22 @@ func (c *slowConn) Read(p []byte) (int, error) {
 	}
 	n, err := c.Conn.Read(p)
 	c.read += n
+	if c.onBody != nil {
+		c.mu.Lock()
+		c.reads++
+		found := c.reads >= 16
+		notify := c.onBody
+		if found {
+			c.onBody = nil
+		}
+		c.mu.Unlock()
+		if found {
+			notify()
+		}
+	}
 	if ahead := time.Duration(float64(c.read)/float64(c.rate)*float64(time.Second)) - time.Since(c.start); ahead > 0 {
-		time.Sleep(ahead)
+		timer := time.NewTimer(ahead)
+		<-timer.C
 	}
 	return n, err
 }
@@ -251,13 +275,33 @@ func TestLargeBodyDoesNotHoldUpTheBus(t *testing.T) {
 	smallWait := func(streams bool) time.Duration {
 		t.Helper()
 		h, srv := bodyHub(t)
-		connectBodyManager(t, h, srv, slowClient(rate), streams, &bodyManager{})
+		started := make(chan struct{})
+		m := &bodyManager{}
+		var begin sync.Once
+		if streams {
+			m.onRequest = func() { begin.Do(func() { close(started) }) }
+		}
+		client := slowClient(rate)
+		transport := client.Transport.(*http.Transport)
+		dial := transport.DialContext
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := dial(ctx, network, addr)
+			if c != nil && !streams {
+				c.(*slowConn).onBody = func() { begin.Do(func() { close(started) }) }
+			}
+			return c, err
+		}
+		connectBodyManager(t, h, srv, client, streams, m)
 		done := make(chan string, 1)
 		go func() {
 			code, out := putRecording(t, h, srv, "big", body)
 			done <- jsonInt(code) + " " + out
 		}()
-		time.Sleep(300 * time.Millisecond) // the body is on its way to the manager
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("streams %v: the large body did not reach the manager", streams)
+		}
 		start := time.Now()
 		if code, out := putRecording(t, h, srv, "small", []byte(`{}`)); code != http.StatusOK {
 			t.Fatalf("streams %v: the small call: %d %s", streams, code, out)

@@ -51,6 +51,10 @@ export interface Direction {
   name: string;
   secretary?: boolean;
   counts: DirectionCounts;
+  /** Something under it is at work right now: an Agent of one of its tasks, or one under it, whose session is working,
+   *  whatever the task's state (the hub's one rule, #6626). Every direction row's activity mark spins on it, the
+   *  working count is not shown. A hub without it: whether it counts a working task, as the rows read it before. */
+  running: boolean;
   tasks?: DirectionTask[];
 }
 
@@ -66,15 +70,19 @@ export function normalizeTree(raw: unknown): DirectionTree {
   return {
     directions: list
       .filter((d): d is Direction => !!d && typeof d.id === "string")
-      .map((d) => ({
-        id: d.id,
-        name: typeof d.name === "string" ? d.name : "",
-        ...(d.secretary ? { secretary: true } : {}),
-        counts: normalizeCounts(d.counts),
-        tasks: (Array.isArray(d.tasks) ? d.tasks : [])
-          .filter((td): td is DirectionTask => !!td && typeof td.id === "string")
-          .map((td) => ({ id: td.id, title: td.title ?? "", state: DIRECTION_TASK_STATES.includes(td.state) ? td.state : "working", agents: (Array.isArray(td.agents) ? td.agents : []).filter(validAgent).map(agent) })),
-      })),
+      .map((d) => {
+        const counts = normalizeCounts(d.counts);
+        return {
+          id: d.id,
+          name: typeof d.name === "string" ? d.name : "",
+          ...(d.secretary ? { secretary: true } : {}),
+          counts,
+          running: typeof (d as { running?: unknown }).running === "boolean" ? d.running : counts.working > 0,
+          tasks: (Array.isArray(d.tasks) ? d.tasks : [])
+            .filter((td): td is DirectionTask => !!td && typeof td.id === "string")
+            .map((td) => ({ id: td.id, title: td.title ?? "", state: DIRECTION_TASK_STATES.includes(td.state) ? td.state : "working", agents: (Array.isArray(td.agents) ? td.agents : []).filter(validAgent).map(agent) })),
+        };
+      }),
   };
 }
 

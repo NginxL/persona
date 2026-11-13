@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Outgoing } from "./Composer";
+import type { MentionSource } from "./ComposerPanel";
 import type { Item, Session } from "../../lib/types";
 import { getFeedState, setRoute } from "../../lib/feed";
 import { outboxKey, type OutboxEntry } from "../../lib/outbox";
@@ -10,6 +11,7 @@ import { ChatView, ComposerSource, footerRows } from "./ChatView";
 
 const captured = vi.hoisted(() => ({
   onSend: undefined as ((out: Outgoing) => Promise<boolean>) | undefined,
+  mention: undefined as MentionSource | undefined,
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle" } as Session,
   items: [] as Item[],
   /** The chat's outbox (lib/outbox.ts), by outboxKey. */
@@ -26,8 +28,9 @@ vi.mock("./Composer", async (importOriginal) => {
   const { useLinkManager } = await import("../../lib/manager-choice");
   return {
     ...await importOriginal<typeof import("./Composer")>(),
-    Composer: ({ onSend }: { onSend: (out: Outgoing) => Promise<boolean> }) => {
+    Composer: ({ onSend, mention }: { onSend: (out: Outgoing) => Promise<boolean>; mention?: MentionSource }) => {
       captured.onSend = onSend;
+      captured.mention = mention;
       captured.linkManager = useLinkManager();
       return <div data-testid="composer" />;
     },
@@ -105,6 +108,9 @@ let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   setRoute("c1", null);
   captured.onSend = undefined;
+  captured.mention = undefined;
+  delete captured.session.manager;
+  delete captured.session.agent;
   captured.items = [];
   captured.outbox = {};
   captured.error = "";
@@ -122,6 +128,15 @@ afterEach(() => {
 });
 
 describe("ChatView composer task routing", () => {
+  it("wires ordinary Agent catalogs to the session's manager and preserves the selected ref in its send", async () => {
+    captured.session.manager = "helper-agent";
+    captured.session.agent = "codex";
+    const text = '<persona-context kind="skill" ref="opaque-session-skill">review</persona-context>\nReview this';
+    expect(await sender(false)({ text, images: [] })).toBe(true);
+    expect(captured.mention?.skills).toMatchObject({ agent: true, manager: "helper-agent", session: "c1" });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).text).toContain('ref="opaque-session-skill"');
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).text).toContain("Review this");
+  });
   it.each(["Look at this", ""])("rejects a routed image with text %j without delivering to Persona or dropping the route", async (text) => {
     setRoute("c1", "task1");
     const out = { text, images: [image] };

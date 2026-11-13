@@ -42,6 +42,7 @@ import { lastEditablePrompt, promptsOf, rewindBlock, rewindDone, rewindSession, 
 import { EDIT_SEND_SETTLE_MS } from "../../lib/edit-last-key";
 import { sendDraft } from "../../lib/drafts";
 import { chatLines, freshWords, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
+import { foldsBackgroundRounds } from "../../lib/background-fold";
 import type { Interaction, Item, Session, Subagent } from "../../lib/types";
 import { anchoredScroll, followsAgain, isScrollbarPress, jumpLabel, leavesOnKey, leavesOnScrollbarDrag, leavesOnTouch, leavesOnWheel, followsAfterUnfold, UNFOLD_PAUSE, type ScrollAnchor } from "../../lib/disclosure";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Menu, toast, useMenu, useNow, type MenuItem } from "../../ui/atoms";
@@ -147,8 +148,9 @@ const ChatSearch = lazyDialog(() => import("./ChatSearch").then((m) => m.ChatSea
 const LinkTodoDialog = lazyDialog(() => import("../LinkTodoDialog").then((m) => m.LinkTodoDialog));
 const SharingDialog = lazyOverlay(() => import("../../sharing/SharingDialog").then((m) => m.default));
 const TerminalPanel = lazy(() => loadTerminal().then((m) => ({ default: m.TerminalPanel })));
-// only on an Agent's page opened from a conversation's hand-off card (#5096): not part of the first screen
+// Full pages opened from a conversation's hand-off card or belonging to an Inbox item load their way-back strip on demand.
 const HandoffBack = lazy(() => import("./HandoffBack").then((m) => ({ default: m.HandoffBack })));
+const InboxBack = lazy(() => import("./InboxBack").then((m) => ({ default: m.InboxBack })));
 // the plan's pill and its flyout load once a plan wants it shown, off the first screen
 const PlanPill = lazy(() => import("./PlanCard").then((m) => ({ default: m.PlanPill })));
 // "Wrap up: <item>" over the main conversation's composer (#5932): with the hand-off card's chunk, not the first screen's
@@ -281,8 +283,13 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   landAt?: string;
 }) {
   const { session, detail, retry: retryDetail } = useRuntimeSession(mid, sid);
-  // opened from a conversation's hand-off card (#5096): the way back to it, until put away
-  const [cameFrom, setCameFrom] = useState<HandoffFrom | undefined>(() => (inPage && !assistant ? handoffFrom() : undefined));
+  // The main conversation is always Persona (#1313): not its first message, the node's title for it.
+  const mainConversation = useStore((s) => s.assistant?.main);
+  const isMain = Boolean(assistant && (mainCache || sid === mainConversation));
+  // Full Agent pages and non-main Persona conversations may offer a way back; side panels, Team panels and the main chat do not.
+  const backPage = Boolean(!embedded && !chrome && (inPage || (assistant && !isMain)));
+  // A conversation's hand-off strip wins over the Inbox item's when both are present; null keeps it hidden after ✕.
+  const [cameFrom, setCameFrom] = useState<HandoffFrom | null | undefined>(() => (backPage ? handoffFrom() : undefined));
   // the main conversation, with a hub that clears its context in place: /clear in its command list (#5095)
   const clears = useStore((s) => Boolean(assistant) && s.assistant?.main === sid && hubHas(s.features, CLEAR_MAIN_FEATURE));
   // an archived agent (lib/agent-archives.ts) is not in the lists: its chat says so and offers Restore
@@ -455,9 +462,6 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     () => (switchable ? setView("term") : navigate({ name: "session", mid, sid, view: "term" })),
     [switchable, setView, mid, sid],
   );
-  // The main conversation is always Persona (#1313): not its first message, the node's title for it.
-  const mainConversation = useStore((s) => s.assistant?.main);
-  const isMain = Boolean(assistant && (mainCache || sid === mainConversation));
   // No row for this chat yet is not "you may not write": the box takes typing and says it is connecting, or, when the hub
   // answered that the session is gone, says that instead. Only the main conversation may already send; every other chat
   // waits for its row, because the node would start an Agent for an id nobody has. A lookup that found nothing leaves
@@ -579,11 +583,12 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // the assistant works on any computer, so its @ menu offers workspaces too
   const shownManager = useShownManager();
   const skillLauncher = usePickedLauncher(conversationKey(mid, sid));
-  const assistantLauncher = useStore((s) => s.assistant?.launcher);
-  const skillEnvironment = JSON.stringify([session?.launcher, session?.model_pick, assistantLauncher]);
+  const assistantLauncher = useStore((s) => assistant ? s.assistant?.launcher : undefined);
+  const skillManager = useStore((s) => session?.manager ?? s.machines.find((m) => m.id === mid)?.manager) ?? shownManager;
+  const skillEnvironment = JSON.stringify([session?.launcher, session?.model_pick, session?.pending_switch, session?.source_kind, assistantLauncher]);
   const mention = useMemo(() => ({ cwd: session?.cwd, self: draftKey, files: () => chatFiles(items.current), workspaces: Boolean(assistant),
-    skills: assistant ? { manager: session?.manager ?? shownManager, session: sid, launcher: skillLauncher, environment: skillEnvironment } : undefined,
-  }), [session?.cwd, session?.manager, draftKey, assistant, shownManager, sid, skillLauncher, skillEnvironment]);
+    skills: { manager: skillManager, session: sid, launcher: assistant ? skillLauncher : undefined, environment: skillEnvironment, agent: !assistant },
+  }), [session?.cwd, skillManager, draftKey, assistant, sid, skillLauncher, skillEnvironment]);
 
   // a sent message stays as a "sending" bubble until the transcript has it (lib/echo.ts): an item the hub tied to it
   // (any kind, a notice too), or else a latest user message with its words; one that answered one answers no other
@@ -1186,8 +1191,11 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // a line that comes out the same as last time keeps its object, so a push re-renders only the lines it changed
   // (lib/stable-lines.ts); the task index likewise, or every row reading the context would render again
   const lastLines = useRef<ChatLine[] | undefined>(undefined);
-  // the main conversation folds rounds it did not start from the user (docs/assistant/assistant.md "Background rounds")
-  const foldBackground = useStore((s) => s.assistant?.main_background_folded) !== false && isMain;
+  // the main conversation and the leader conversations fold rounds their user did not start: another conversation's
+  // relay, a scheduled patrol, a follow-up (docs/assistant/assistant.md "Background rounds", #6595). On a cold load the
+  // AssistantInfo has not arrived but the cached main id has: keep the main chat folded (the absent switch means on).
+  const foldBackground = useStore((s) =>
+    foldsBackgroundRounds(sid, s.assistant ?? (mainCache ? { main: mainCache.scope } : undefined)));
   const lines = useMemo(
     () => stabilizeLines(lastLines.current, chatLines(earlier.liveItems, { live: lastLive && !outgoing, background: foldBackground })),
     [earlier.liveItems, lastLive, outgoing, foldBackground],
@@ -1812,7 +1820,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       />}
       {isMain && !embedded && <MainRuntimeSlot sid={sid} />}
       {!embedded && banner}
-      {cameFrom && <Suspense fallback={null}><HandoffBack from={cameFrom} onDismiss={() => setCameFrom(undefined)} /></Suspense>}
+      {backPage && (cameFrom ? <Suspense fallback={null}><HandoffBack from={cameFrom} onDismiss={() => setCameFrom(null)} /></Suspense> : cameFrom === undefined ? <Suspense fallback={null}><InboxBack key={`${mid}/${sid}`} mid={mid} sid={sid} session={session} /></Suspense> : null)}
       {/* a known session keeps its chat: a failed background read is retried quietly (runtime-session.ts) */}
       {archivedHere ? <ArchivedNotice session={archivedHere} /> : noDetails && <SessionDetailNotice error={detail.error} retry={retryDetail} />}
 

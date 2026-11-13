@@ -35,6 +35,7 @@
     <string name="chat_mention_quote_last">It last said: %1$s</string>
     <string name="chat_quote_yours">Quoting your message</string>
     <string name="chat_quote_from">Quoting %1$s</string>
+    <string name="chat_quote_selection">Quoting selected text · %1$s</string>
     <string name="chat_quote_session">Quoting session %1$s</string>
     <string name="chat_failure_retry">Retry</string>
     <string name="chat_host_open_feishu">Open in Lark</string>

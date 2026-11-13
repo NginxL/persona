@@ -263,6 +263,38 @@ nonisolated struct DetectedEngine: Codable, Hashable, Identifiable, Sendable {
     var note: String?
 }
 
+/// What a Mac can do for the live-screen hardware video channel (#3954, docs/extensions/computer-use.md "Live screen
+/// video"): the capture-and-encode helper Persona Screen is present (`version` > 0), which codecs it can encode, and
+/// whether Screen Recording is granted for it. Absent from a Mac without the helper or from an older node, so the app
+/// simply keeps showing RFB. `advertised` is the test the Picture / Quality switcher uses: the node offers the channel
+/// at all, so there is a control worth showing.
+nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
+    /// The wire protocol version the helper speaks; 0 or absent means no video.
+    var version = 0
+    /// The codecs the helper can encode, in preference order ("hevc", "h264").
+    var codecs: [String] = []
+    /// Screen Recording for Persona Screen: granted | missing | unknown. Missing keeps the phone on RFB.
+    var permission: String? = nil
+
+    enum CodingKeys: String, CodingKey { case version, codecs, permission }
+
+    init(version: Int = 0, codecs: [String] = [], permission: String? = nil) {
+        self.version = version
+        self.codecs = codecs
+        self.permission = permission
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 0
+        codecs = (try? c.decodeIfPresent([String].self, forKey: .codecs)) ?? []
+        permission = try c.decodeIfPresent(String.self, forKey: .permission)
+    }
+
+    /// The node offers the video channel at all: the Picture / Quality switcher appears only then (#3954).
+    var advertised: Bool { version > 0 }
+}
+
 /// A Mac the assistant may operate through Cua Driver (the hub's plugin cua, docs/extensions/computer-use.md). `enabled`: the user
 /// turned it on for this machine; the rest is what its node found when last asked, and only for an enabled one.
 nonisolated struct MachineComputer: Codable, Hashable, Sendable {
@@ -290,10 +322,12 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     var chatgpt = false
     /// The Mac's displays as arranged in its System Settings, read with `screenSharing` (empty from an older node).
     var displays: [MachineDisplay] = []
+    /// The live-screen hardware video channel this Mac can carry (#3954); nil from a Mac without the helper or an older node.
+    var screenVideo: MachineScreenVideo? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, daemon, accessibility, desktop, ready, note, job, backend, chatgpt, displays
-        case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock"
+        case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock", screenVideo = "screen_video"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, daemon: Bool = false, accessibility: String? = nil,
@@ -331,6 +365,8 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
         chatgpt = try c.decodeIfPresent(Bool.self, forKey: .chatgpt) ?? false
         // An unreadable list only costs the display choice, not the machine.
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
+        // An unreadable channel only costs the video switcher, not the machine (the page stays on RFB).
+        screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
     }
 
     /// The node has said how it is (a never-asked one has neither a verdict nor a note).
@@ -359,10 +395,12 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
     var job: ComputerJob? = nil
     /// As `MachineComputer.displays`.
     var displays: [MachineDisplay] = []
+    /// As `MachineComputer.screenVideo` (#3954): a Mac the plugin ego is on for shares the same live screen and helper.
+    var screenVideo: MachineScreenVideo? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, imported, analytics, ready, note, job, displays
-        case setUp = "set_up", screenSharing = "screen_sharing"
+        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, setUp: Bool = false, imported: Bool = false,
@@ -392,6 +430,7 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
         screenSharing = try c.decodeIfPresent(Bool.self, forKey: .screenSharing) ?? false
         job = try? c.decodeIfPresent(ComputerJob.self, forKey: .job)
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
+        screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
     }
 
     /// The node has said how it is.
@@ -541,6 +580,37 @@ extension Launcher {
     /// refuses them with a reason too.
     var runsAssistant: Bool {
         assistant == true || (baseURL != "(traex)" && (agent == nil || agent == "" || agent == "claude" || agent == "codex"))
+    }
+}
+
+/// The launcher / model / effort picked for one of the assistant's conversations, which its next messages run on
+/// (#5033, `model_pick` on the session; docs/assistant/model-config.md "A conversation's own model"). Absent: the
+/// conversation follows Model configuration › Main chat (the main one) or keeps what it started with.
+nonisolated struct ModelPick: Codable, Hashable, Sendable {
+    var launcher: String
+    var model: String?
+    var effort: String?
+}
+
+/// A launcher or provider the main chat can't run on a machine, and why in the hub's words
+/// (`unavailable` of `GET …/machines/{id}/launchers?purpose=assistant`, #5033).
+nonisolated struct UnavailableLauncher: Codable, Identifiable, Hashable, Sendable {
+    var name: String
+    var displayName: String?
+    /// launcher | api
+    var kind: String?
+    var agent: String?
+    /// A direct API provider's protocol: messages | responses | chat.
+    var api: String?
+    /// The hub's machine-readable refusal code (`launcher_out_of_scope`, `api_protocol`…).
+    var code: String?
+    /// The refusal, in the request's language.
+    var reason: String
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, kind, agent, code, reason
+        case displayName = "display_name", api
     }
 }
 
@@ -767,6 +837,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// The levels `effort` may be set to when they are not Claude Code's (`SessionModes.effortOptions`): a Codex thread
     /// the hub drives through its app-server, where only the effort changes (node/codex_effort.go). Nil elsewhere.
     var efforts: [String]? = nil
+    /// The launcher / model / effort picked for this assistant conversation (#5033, `model_pick`); nil: it follows the
+    /// Main chat default or keeps what it runs. Only the manager names it, on assistant conversations.
+    var modelPick: ModelPick? = nil
     /// What the model saw in the agent's latest reply, and the model's window (#3289, node: `context_tokens` /
     /// `context_window`, #2430); nil while the node cannot tell (no reply yet, a window it does not know, an older node).
     var contextTokens: Int? = nil
@@ -1109,6 +1182,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
+        case modelPick = "model_pick"
         case canFork = "can_fork"
         case sourceKind = "source_kind", sourceThreadID = "source_thread_id", sourceInstanceID = "source_instance_id",
              parentThreadID = "parent_thread_id", readOnlyReason = "read_only_reason"

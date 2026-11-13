@@ -17,7 +17,7 @@ import type { ContextRef } from "./links";
 import { connectorOpenTitle } from "./connectors";
 import { contextBody } from "./context-body";
 import { larkPath } from "./lark-accounts";
-import { baseName } from "./format";
+import { baseName, uuid } from "./format";
 import { conversationPage } from "./conversation-page";
 import type { Route } from "./router";
 import { isResumed } from "./reconnect";
@@ -661,6 +661,26 @@ export function handOffContext(it: InboxItem): ContextRef {
 export async function handOffToMain(item: InboxItem, text: string, clientID: string): Promise<InboxHandoff> {
   const r = await api<{ session: InboxHandoff }>(`${itemPath(item.id)}/handoff`, { method: "POST", json: { text, client_id: clientID }, headers: itemRequest(item) });
   return r.session;
+}
+
+/** Best-effort record of a hand-off the client already delivered itself; no text means the manager must not send it again.
+ *  Old managers reject a record-only request (400, or 404 / 405 without the route). Every failure is quiet: delivery
+ *  already succeeded, so recording never interrupts the close and navigation that follow it. */
+export async function recordHandOff(item: InboxItem, session: Pick<Session, "machine_id" | "session_id">, kind: "agent" | "conversation", title?: string): Promise<void> {
+  try {
+    await api<void>(`${itemPath(item.id)}/handoff`, {
+      method: "POST",
+      json: {
+        session: { machine_id: session.machine_id, session_id: session.session_id },
+        kind,
+        title: title ?? "",
+        client_id: uuid(),
+      },
+      headers: itemRequest(item),
+    });
+  } catch {
+    // A missing record is not a failed hand-off; do not toast, retry or change the dialog.
+  }
 }
 
 // ── Feishu messages (docs/protocol/protocol.md "Lark API") ──────

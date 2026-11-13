@@ -89,17 +89,20 @@ struct ChatLines {
     /// away: every sentence of a running turn moved the chat up two lines and down three (2026-11-04).
     /// Supervision folding is independent of the optional conversation layout, and only enabled for Persona chats.
     var foldSupervision = false
-    /// Background rounds fold too (docs/apple/ios.md "Background rounds"): only the main conversation, with the hub's
-    /// `main_background_folded` on. Needs `foldSupervision`.
+    /// Background rounds fold too (docs/apple/ios.md "Background rounds"): the main conversation and the leader
+    /// conversations (`AssistantInfo.leaders`, #6595), with the hub's `main_background_folded` on. Needs `foldSupervision`.
     var foldBackground = false
     var openSupervision: Set<String> = []
     var openAllSupervision = false
     var active = false
 
-    /// Whether a chat folds background rounds: an assistant chat that is the main conversation, with the switch on.
-    static func foldsBackground(assistant: Bool, conversation: String, main: String?, on: Bool) -> Bool {
-        guard assistant, on, let main, !main.isEmpty else { return false }
-        return conversation == main
+    /// Whether a chat folds background rounds: an assistant chat that is the main conversation or one of the hub's
+    /// leader conversations, with the switch on.
+    static func foldsBackground(assistant: Bool, conversation: String, main: String?, on: Bool,
+                                leaders: Set<String> = []) -> Bool {
+        guard assistant, on, !conversation.isEmpty else { return false }
+        if let main, !main.isEmpty, conversation == main { return true }
+        return leaders.contains(conversation)
     }
 
     /// The sources whose rounds are background rounds: a supervising conversation's message, a follow-up, a scheduled run.

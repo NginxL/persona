@@ -43,12 +43,17 @@ func TestManagerFrameIsTheTreesFrame(t *testing.T) {
 
 func managerFrame(t testing.TB, view string) []byte {
 	t.Helper()
+	return managerFrameAt(t, view, 1)
+}
+
+func managerFrameAt(t testing.TB, view string, version int64) []byte {
+	t.Helper()
 	var v any
 	if err := json.Unmarshal([]byte(view), &v); err != nil {
 		t.Fatal(err)
 	}
 	fitted, _ := json.Marshal(v)
-	raw, err := json.Marshal(map[string]any{"protocol": 1, "session": "session-a", "epoch": "epoch-a", "version": int64(1),
+	raw, err := json.Marshal(map[string]any{"protocol": 1, "session": "session-a", "epoch": "epoch-a", "version": version,
 		"root_key": "page", "view": json.RawMessage(fitted)})
 	if err != nil {
 		t.Fatal(err)

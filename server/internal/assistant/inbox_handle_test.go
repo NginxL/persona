@@ -382,6 +382,49 @@ func TestInboxSuggestionToolRules(t *testing.T) {
 	}
 }
 
+// A late suggestion on a filed item is refused without changing anything; a recap alone is still kept.
+func TestInboxSuggestionOnFiledItem(t *testing.T) {
+	h, _, it := handledHub(t)
+	done := time.Now().Add(-time.Minute).UTC()
+	h.inbox.mu.Lock()
+	h.inbox.file(it, done, "user")
+	it.Recap = "Before filing"
+	before := string(itemState(it))
+	h.inbox.mu.Unlock()
+
+	assertUnchanged := func(t *testing.T) {
+		t.Helper()
+		h.inbox.mu.Lock()
+		after := string(itemState(it))
+		h.inbox.mu.Unlock()
+		if after != before {
+			t.Fatalf("the filed item changed:\nbefore: %s\nafter:  %s", before, after)
+		}
+	}
+	for _, kind := range []string{SuggestReply, SuggestAgent, SuggestConclusion} {
+		t.Run(kind, func(t *testing.T) {
+			args := fmt.Sprintf(`{"kind":%q,"text":"A late suggestion","recap":"Must not replace the recap"}`, kind)
+			if _, err := suggestTool(t, h, args); !errors.Is(err, errSuggestFiled) {
+				t.Fatalf("filed item accepted %s: %v", kind, err)
+			}
+			assertUnchanged(t)
+		})
+	}
+	if _, err := h.runTool(context.Background(), "server", "s1", "inbox_draft", json.RawMessage(`{"text":"A late draft"}`)); !errors.Is(err, errSuggestFiled) {
+		t.Fatalf("inbox_draft on a filed item: %v", err)
+	}
+	assertUnchanged(t)
+
+	if out, err := suggestTool(t, h, `{"recap":"After filing"}`); err != nil || out != "The recap is updated." {
+		t.Fatalf("recap only on a filed item: %q %v", out, err)
+	}
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if it.Recap != "After filing" || it.DoneAt == nil || !it.DoneAt.Equal(done) {
+		t.Fatalf("recap only: recap %q, done at %v", it.Recap, it.DoneAt)
+	}
+}
+
 // An old draft (stored before suggestions) is listed as a reply suggestion, version 1, and can be confirmed.
 func TestInboxLegacyDraftIsASuggestion(t *testing.T) {
 	h := agentHub(t)

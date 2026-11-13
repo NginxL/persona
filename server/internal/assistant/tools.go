@@ -434,6 +434,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Effort, _ = run["effort"].(string)
 			tier, runs = "", "" // the tier's launcher is not what runs
 		}
+		// The admission gate refuses a too-busy computer before the user is asked to approve anything.
+		if err := s.checkAgentStart(ctx, am.ID); err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
 		branch := strings.TrimSpace(a.Worktree.Branch)
 		where := am.Name + " · " + a.Cwd
 		if branch != "" {
@@ -540,6 +544,13 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		lctx, lcancel := context.WithTimeout(sctx, agentStartListTimeout)
 		knownIDs := s.knownSessionIDs(lctx, am.ID)
 		lcancel()
+		// Last look on the machine it will really start on (a health detour may have changed am): re-check and hold
+		// its admission slot across the session.start call.
+		release, err := s.admitAgentStart(sctx, am.ID)
+		if err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
+		defer release()
 		s.setPlanThen(ctx, am.ID, params)
 		var values *handoffValues
 		if hand != nil {

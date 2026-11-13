@@ -11,8 +11,10 @@ import "../views/theme"; // follows the system's light / dark while open (index.
 import { ensureSubtleAES } from "./aes";
 import { displayChoice, framing, keepPointerIn, layoutDisplays, machineDisplays, setDisplayChoice, type MachineDisplay, type Rect, type Size } from "./displays";
 import { accountOf, keepLabel, keysymsOf, screenSocket, toApp, type ScreenTarget } from "./screen";
+import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, videoAdvertised, type ScreenPicture, type ScreenQuality } from "./video";
 
 type DisplayMenuView = typeof import("./DisplayMenu").default;
+type ScreenMenuView = typeof import("./ScreenMenu").default;
 
 type Phase =
   | { kind: "checking" }
@@ -22,7 +24,7 @@ type Phase =
   | { kind: "live" }
   | { kind: "closed"; why: string };
 
-type Computer = { enabled?: boolean; screen_sharing?: boolean; displays?: unknown };
+type Computer = { enabled?: boolean; screen_sharing?: boolean; displays?: unknown; screen_video?: unknown };
 /** A sign-in sent to the Mac: typed (and to keep or not), or the one the app kept (saved). */
 type Credentials = { account: string; password: string; remember: boolean; saved: boolean };
 type MachineRow = { id: string; name: string; home?: string; online: boolean };
@@ -57,6 +59,12 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   const [choice, setChoice] = useState(() => displayChoice(target.mid));
   const stageRef = useRef<HTMLElement>(null);
   const clip = useRef<HTMLDivElement>(null);
+  // The hardware video channel (#3954): the Picture / Quality switcher appears only when this Mac's node advertises it,
+  // so no Mac shows a control it can't use — as the iOS app gates it (AppModel.advertisesVideo). The choice is kept per
+  // Mac in this browser (video.ts). Input always rides RFB; only the picture path changes.
+  const [hasVideo, setHasVideo] = useState(false);
+  const [picture, setPicture] = useState<ScreenPicture>(() => pictureChoice(target.mid) ?? "vnc");
+  const [quality, setQuality] = useState<ScreenQuality>(() => qualityChoice(target.mid));
 
   // What the hub says first: why there would be nothing to connect to.
   useEffect(() => {
@@ -74,6 +82,7 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         const on = await sharing(target);
         if (!gone) {
           setDisplays(machineDisplays(on.displays));
+          setHasVideo(videoAdvertised(on.screen_video));
           setPhase({ kind: "connecting" });
           setGo(true);
         }
@@ -237,6 +246,29 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
     setDisplayChoice(target.mid, id);
   };
 
+  // The picture menu is a chunk of its own, as the Displays menu is (its words stay off the first screen's catalog),
+  // fetched only for a Mac whose node advertises the video channel; one that would not load just leaves the page on RFB.
+  const [ScreenMenu, setScreenMenu] = useState<ScreenMenuView | null>(null);
+  useEffect(() => {
+    if (ScreenMenu || target.embedded || !hasVideo) return;
+    let gone = false;
+    import("./ScreenMenu").then(
+      (m) => !gone && setScreenMenu(() => m.default),
+      () => {},
+    );
+    return () => {
+      gone = true;
+    };
+  }, [ScreenMenu, hasVideo, target.embedded]);
+  const choosePicture = (p: ScreenPicture) => {
+    setPicture(p);
+    setPictureChoice(target.mid, p);
+  };
+  const chooseQuality = (q: ScreenQuality) => {
+    setQuality(q);
+    setQualityChoice(target.mid, q);
+  };
+
   // In the app (#1343) the app draws the name, the state and "View only" / "Take control" around the page: it hears the phase, and
   // says "Take control" through window.personaScreen.
   useEffect(() => {
@@ -312,6 +344,9 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
           <span className="ml-2 text-[11.5px] font-normal text-ink-3">{live ? (control ? t("screen-screenview.in_control") : t("screen-screenview.view_only")) : phaseLabel(phase)}</span>
         </p>
         {offering && DisplayMenu && <DisplayMenu offered={offered} shown={shown?.id ?? null} onChoose={choose} onOpen={reask} />}
+        {live && !target.embedded && hasVideo && ScreenMenu && (
+          <ScreenMenu picture={picture} quality={quality} onPicture={choosePicture} onQuality={chooseQuality} />
+        )}
         {live && (
           <div role="group" aria-label={t("screen-screenview.mode_label")} className="flex shrink-0 rounded-control bg-field p-0.5">
             {[false, true].map((on) => (

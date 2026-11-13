@@ -172,7 +172,65 @@ func workCard(machine string, c proto.Session, w proto.WorkState, id string) pro
 	if c.Agent != "" && c.Agent != "claude" {
 		ix.Agent, ix.AgentLabel = c.Agent, c.AgentLabel
 	}
+	return markWorkCardDefers(ix)
+}
+
+// markWorkCardDefers makes the answers the manager settles without messaging the agent explicit to clients. Built-in
+// labels and restored legacy cards predate option actions; marking them here keeps those cards dismissible too.
+func markWorkCardDefers(ix proto.Interaction) proto.Interaction {
+	ix.Questions = append([]proto.Question(nil), ix.Questions...)
+	for i, q := range ix.Questions {
+		q.Options = append([]proto.QuestionOption(nil), q.Options...)
+		for j, o := range q.Options {
+			if o.Action != "" || q.MultiSelect {
+				continue
+			}
+			local := deferredWorkOption(q, o.Label)
+			switch canonicalAnswer(o.Label) {
+			case answerSkip, answerNotNow, answerStop, answerHold:
+				local = true
+			}
+			if local {
+				q.Options[j].Action = proto.QuestionOptionDefer
+			}
+		}
+		ix.Questions[i] = q
+	}
 	return ix
+}
+
+// workResolutionSends reports whether this answer reaches sendToSession. Dismiss, defer and an external wait finish
+// in the manager; continue, retry and custom answers need a running agent. resolveAnswer uses this before claiming a
+// card, so a stopped agent refuses only the answers that would send it a message.
+func workResolutionSends(ix proto.Interaction, r proto.Resolution) bool {
+	if r.Cancel || r.Dismiss {
+		return false
+	}
+	items := 0
+	only := map[string]bool{}
+	for _, q := range ix.Questions {
+		a := strings.TrimSpace(r.Answers[q.Question])
+		if a == "" {
+			continue
+		}
+		items++
+		if deferredWorkOption(q, a) {
+			only[answerSkip] = true
+		} else {
+			only[canonicalAnswer(a)] = true
+		}
+	}
+	if items == 0 {
+		return false
+	}
+	if len(only) == 1 {
+		for _, a := range []string{answerSkip, answerNotNow, answerStop, answerHold, answerWait} {
+			if only[a] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // openCard puts w's questions on a card for c (the next snapshot carries it). Returns the card's id.

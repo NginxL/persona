@@ -102,15 +102,20 @@ are on in one click, and still reach every other device, component and earlier v
 
 - **Layout**: a "ticket" for the latest stable version (the version large in the brand face, its date, feature and fix
   counts) with the download for the visitor's device; one card per device (iPhone and Apple
-  Watch through TestFlight, Android, Mac, Windows, Linux, and the web app, which has no download: its card and tab give
+  Watch through TestFlight, Android, HarmonyOS phones and foldables, Mac, Windows, Linux, and the web app, which has no download: its card and tab give
   the three steps to open it from the hub, sign in with a connected phone and install it as an app, `WEB_GUIDE` in
   `model.js`, matching `docs/operations/getting-started.md`); components and checksum files behind a
   disclosure; and the version history, newest first, each version expandable to its highlights and packages with a link
   to its full notes on GitHub. Same palette, type, top bar and footer as the home page; light and dark, with every color
   a variable at the top of its CSS (the extensions page's night set).
 - **The visitor's device** (`site/public/releases/model.js`, `detectPlatform`) picks the ticket's selected device tab
-  (a row of tabs switches the ticket to any other device) and the highlighted card. Chromium's architecture hint corrects the guess; Safari reports Intel on Apple silicon, so a Mac
+  (a row of tabs switches the ticket to any other device) and the highlighted card. HarmonyOS / OpenHarmony user agents
+  are recognized before Android or Linux. Chromium's architecture hint corrects the guess; Safari reports Intel on Apple silicon, so a Mac
   defaults to Apple silicon and both files are always shown. iPads asking for the desktop site count as iPhone.
+- **HarmonyOS**: the native phone/foldable client is visible beside Android. `Persona-<version>-harmony.hap` is a
+  first-class app asset (formal release only, once signing is configured); when no signed HAP has been published, the card and ticket link to the source-build guide
+  instead of claiming a package exists. A debug or unsigned HAP must not be attached to satisfy this presentation.
+  Production identity, signing and DevEco toolchain configuration are separate release prerequisites (#6734).
 - **A release still uploading**: when the latest version has no file for a device, the page offers the newest stable
   release that has one and says so ("v0.4.0's Mac package is still uploading…"). Prereleases are listed in the history
   but never offered as a download.

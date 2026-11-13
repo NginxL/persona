@@ -141,6 +141,21 @@ describe("parseUserText", () => {
     expect(p.contexts).toEqual([{ kind: "edit", title: "Doc & co", url: "https://x", text: "sel" }]);
   });
 
+  it("never renders the hub's interject note as an owner-bubble quote (#6595)", () => {
+    const interject =
+      '<persona-context kind="context" title="插话" url="">\n用户在你这一轮还没做完时发来下面这条消息。\n</persona-context>\n先停一下，帮我查个东西';
+    const p = parseUserText(interject);
+    expect(p.text).toBe("先停一下，帮我查个东西");
+    expect(p.contexts).toEqual([]);
+    // a normal picked context right beside it still parses
+    const mixed = `${interject}\n<persona-context kind="context" title="需求文档" url="https://x">摘要</persona-context>`;
+    const q = parseUserText(mixed);
+    expect(q.text).toBe("先停一下，帮我查个东西");
+    expect(q.contexts.map((c) => c.title)).toEqual(["需求文档"]);
+    // only the exact interject title is dropped; another context titled differently stays
+    expect(parseUserText('<persona-context kind="context" title="插话记录" url="">x</persona-context>问').contexts).toHaveLength(1);
+  });
+
   it("pulls out persona-context tags, alongside older persona-context ones (#3182)", () => {
     const p = parseUserText(
       '<persona-context kind="context" title="新" url="">a</persona-context>\n<persona-context kind="edit" title="旧">b</persona-context>\n问题',

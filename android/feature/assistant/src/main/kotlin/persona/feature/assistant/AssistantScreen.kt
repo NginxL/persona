@@ -1497,7 +1497,7 @@ internal fun AssistantDrawer(
                         onDiagnostics = onDiagnostics?.let { action -> { action(session) } },
                         leader = true, onLeader = onLeader?.let { action -> { action(session) } },
                         counts = leaderCountsLabel(groups.counts[session.sessionId], resources),
-                        working = (groups.counts[session.sessionId]?.working ?: 0) > 0,
+                        working = groups.counts[session.sessionId]?.running == true,
                         named = groups.names[session.sessionId], disclosure = disclosure)
                 }
             }
@@ -1598,7 +1598,7 @@ private fun ConversationRow(
     // [named]: a direction's name, shown instead of its leader conversation's title
     val title = named ?: session.conversationTitle(conversationWords())
     // One activity mark for the whole row (#6230): an own needs-you / unread / working turn still wins; otherwise a lead
-    // with work running under it spins.
+    // with anything running under it (the tree's `running`, an Agent at work, #6626) spins.
     val ownStatus = session.conversationStatus()
     val leadActive = working && ownStatus != Status.NeedsYou && ownStatus != Status.Unread && ownStatus != Status.Working
     // A hub title's day and kind ("1101 | Fix | ") in the quiet ink, so the topic is what the eye finds (iOS `titleText`); Glass.

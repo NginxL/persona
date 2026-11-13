@@ -125,7 +125,6 @@
     <string name="designsystem_core_direction_planned">未着手</string>
     <string name="designsystem_core_direction_secretary">書記官</string>
     <string name="designsystem_core_direction_untitled">チャット</string>
-    <string name="designsystem_core_direction_count_working">作業中 %1$d</string>
     <string name="designsystem_core_direction_count_needs_you">対応待ち %1$d</string>
     <string name="designsystem_core_inbox_action">要対応</string>
     <string name="designsystem_core_inbox_fyi">参考</string>

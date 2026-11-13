@@ -40,5 +40,17 @@
   "dispatch_notes": "{from_machine} の {from} が依頼（dispatch_start）：{machine} · {cwd}",
   "adopt_failed": "監督下に置けませんでした：{reason}",
   "interrupt_summary": "{agent} · {machine} を止める",
-  "start_remedy_notice": "開始できませんでした：「{title}」。{reason}"
+  "start_remedy_notice": "開始できませんでした：「{title}」。{reason}",
+  "admission_no_metrics": "このコンピューターはリソース指標をまだ報告していません。",
+  "admission_stale": "このコンピューターのリソース指標が古くなっています。",
+  "admission_no_load": "このコンピューターの負荷が報告されていません。",
+  "admission_no_cores": "このコンピューターのコア数が報告されていません。",
+  "admission_memory_ambiguous": "このコンピューターのメモリー値が欠落しているか判別できません。",
+  "admission_memory": "空きメモリーは {available} しかなく、上限 {limit} を下回っています。",
+  "admission_procs": "claude プロセスが既に {count} 個実行中で、上限 {limit} に達しています。",
+  "admission_load": "負荷 {load} がコア数 {cores} × {multiplier} を超えています。",
+  "admission_direction_full": "この方向のエージェントは既に {running} 個実行中で、上限 {limit} に達しています。",
+  "admission_refused": "コンピューター {machine} ではこのエージェントを開始できません：{reason}{recommend}",
+  "admission_recommend": " 推奨コンピューター：{machine}。",
+  "admission_reroute": "{from} から {to} に変更しました：{reason}"
 }

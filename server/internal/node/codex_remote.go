@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
@@ -577,6 +578,10 @@ func (n *Node) attachCodex(ctx context.Context, id string) error {
 }
 
 func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Image) error {
+	selected, err := n.sessionSelectedSkills(ctx, id, text)
+	if err != nil {
+		return err
+	}
 	c, t, err := n.codexOwner(id)
 	if errors.Is(err, errCodexNoOwner) {
 		if src, ok := n.codexSource(id); ok && codexDesktopChat(src) {
@@ -589,20 +594,33 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	if err = c.join(ctx, id, true); err != nil {
 		return refusal("codex_read_only", err.Error(), nil)
 	}
+	if len(selected) > 0 {
+		selected, err = n.sessionSelectedSkills(ctx, id, text)
+		if err != nil {
+			return err
+		}
+	}
 	paths, err := n.saveImages(images)
 	if err != nil {
 		return refusal("bad_image", err.Error(), nil)
 	}
 	input := []map[string]any{}
+	for _, skill := range selected {
+		input = append(input, map[string]any{"type": "skill", "name": skill.Name, "path": skill.Path})
+	}
 	if text != "" {
 		input = append(input, map[string]any{"type": "text", "text": text, "text_elements": []any{}})
 	}
 	for _, p := range paths {
 		input = append(input, map[string]any{"type": "localImage", "path": p})
 	}
+	previous := c
 	c, t, err = n.codexOwner(id)
 	if err != nil {
 		return refusal("codex_read_only", err.Error(), nil)
+	}
+	if len(selected) > 0 && c != previous {
+		return skillSelectionError(assistantskills.ErrReference)
 	}
 	params := map[string]any{"threadId": t.id, "input": input}
 	method := "turn/start"

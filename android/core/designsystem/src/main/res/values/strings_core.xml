@@ -140,7 +140,6 @@
     <string name="designsystem_core_direction_planned">Not started</string>
     <string name="designsystem_core_direction_secretary">Secretary</string>
     <string name="designsystem_core_direction_untitled">Chat</string>
-    <string name="designsystem_core_direction_count_working">%1$d working</string>
     <string name="designsystem_core_direction_count_needs_you">%1$d need you</string>
     <string name="designsystem_core_inbox_action">Needs you</string>
     <string name="designsystem_core_inbox_fyi">FYI</string>

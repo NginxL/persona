@@ -304,9 +304,9 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   const go = useGo(onNavigate);
 
   // A lead's row is an ordinary conversation row under the 常驻 heading (#6214): no pin glyph of its own, so it never
-  // reads as a button. Its "在做 N · 等你 N" counts stay on hover and the ⋯ has its own reserved end slot (keepTrailing).
+  // reads as a button. Its "等你 N" stays on hover and the ⋯ has its own reserved end slot (keepTrailing).
   const directionRow = (c: Session) => (
-    <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={directionLabel(directionNames, c.session_id, conversationTitle(c))} hint={countsLabel(counts.get(c.session_id), t) || undefined} hintFull showState={false} workingMark={(counts.get(c.session_id)?.working ?? 0) > 0} keepTrailing onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
+    <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={directionLabel(directionNames, c.session_id, conversationTitle(c))} hint={countsLabel(counts.get(c.session_id), t) || undefined} hintFull showState={false} workingMark={counts.get(c.session_id)?.running ?? false} keepTrailing onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
   );
 
   const recentRow = (c: Session) => (
@@ -357,8 +357,14 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
             // the end of the section's title, as on the phone's sidebar, folded or not
             right={
               <>
-                {/* folded, only the two numbers stay: what the leaders have Working and Waiting on you */}
-                {personaFolded && countsLabel(leaderTotal, t) && <span className="truncate text-[11px] tabular-nums text-ink-3">{countsLabel(leaderTotal, t)}</span>}
+                {/* folded, what the leaders have going stays: the working arc while anything under one runs, and their
+                    tasks waiting on you (#6626: the arc, never "在做 N" as well) */}
+                {personaFolded && (leaderTotal.running || countsLabel(leaderTotal, t)) && (
+                  <span data-direction-counts data-running={leaderTotal.running || undefined} className="flex min-w-0 items-center gap-1 text-[11px] tabular-nums text-ink-3">
+                    {leaderTotal.running && <StatusMark state="working" size="sm" />}
+                    <span className="truncate">{countsLabel(leaderTotal, t)}</span>
+                  </span>
+                )}
                 <SectionAdd icon="compose" label={t("sidebar.new_chat")} to={{ name: "persona-new" }} go={go} active={activeKey === "j:new"} />
               </>
             }

@@ -128,6 +128,20 @@ it("retains the exact reference through queue pullback and refused sends", async
   expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
 });
 
+it("uses the ordinary session catalog and retains its selection on a refused send", async () => {
+  render({ ...source, skills: { ...source.skills!, agent: true } });
+  await type("@security");
+  await waitForOptions(1);
+  expect(api.mock.calls[0][0]).toBe("/sessions/computer/chat/skills");
+  key("Enter");
+  await type("Review the change");
+  onSend.mockImplementationOnce(async () => false);
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+  expect(onSend.mock.calls[0][0].text).toContain('ref="a"');
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  expect(box().value).toBe("Review the change");
+});
+
 it("keeps existing file rows reachable beside a large skill catalog and searches beyond the empty preview", async () => {
   api.mockImplementationOnce(async () => ({ catalog_version: 1, complete: true,
     skills: Array.from({ length: 50 }, (_, i) => ({ ...skills[0], id: `skill-${i}`, name: `review-${i}` })),

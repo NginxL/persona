@@ -641,6 +641,9 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 		Port int    `json:"port"`
 		// The live screen (5900) is being watched: the Mac stays awake until it closes (awake.go).
 		KeepAwake bool `json:"keep_awake"`
+		// Pair ties this 5900 stream to a later screen.dial for the video channel (#3954); the node follows Screen
+		// Sharing's login on it. Empty for every other port and for 5900 without the video channel.
+		Pair string `json:"pair"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Port <= 0 || p.Port > 65535 {
 		return nil, errors.New("port.dial: need id and port")
@@ -662,6 +665,9 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 	}
 	if p.KeepAwake {
 		c = &watchedConn{Conn: c, done: awake.watch()}
+	}
+	if p.Port == screenPort && p.Pair != "" {
+		c = n.screens.observe(p.Pair, c) // follow Screen Sharing's login so screen.dial can bind to it (#3954)
 	}
 	n.streams.Start(p.ID, c)
 	return map[string]any{}, nil

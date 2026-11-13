@@ -4,7 +4,8 @@ import XCTest
 /// Clear All, each group's title and, while selecting, its tick, Done's title and its Jump To. Most were as tall as their
 /// text, 16 to 18 pt; a title alone in its header filled the header, 40 pt (#5414). Each is measured on every screen from
 /// the top of the list to the end of Done, and the ones that fold or pick are tapped `edge` points from their middle. Jump
-/// To shares Done's row with Done's own button: a tap on it opens its menu and leaves Done open. Against
+/// To shares Done's row with Done's own button: a tap on it opens its menu and leaves Done open. A group's tick is a finger
+/// wide as well (#6658), and a tap beside its glyph picks. Against
 /// scripts/mock/mock_hub.py (its inbox has waiting agents, items in every tier and Done's groups):
 ///   PORT=<port> MOCK_MANAGERS=0 python3 scripts/mock/mock_hub.py
 ///   TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>
@@ -60,6 +61,11 @@ final class InboxTitleTargetUITests: XCTestCase {
         shot("selecting")
         for _ in 0..<4 { collect([Self.tick], into: &ticks); app.swipeUp() }
         assertFingerTall(ticks, [Self.tick])
+        // and a finger wide, its glyph where it was (#6658)
+        for (key, frame) in ticks.sorted(by: { $0.key < $1.key }) {
+            print("INBOX-TICK \(key): \(frame.width) × \(frame.height) pt at x \(frame.minX)")
+            XCTAssertGreaterThanOrEqual(frame.width, Self.floor, "\(key) is \(frame.width) pt wide")
+        }
     }
 
     /// Near their edges, a section's title folds and opens the section, Done's title opens and folds Done, Jump To opens its
@@ -137,6 +143,10 @@ final class InboxTitleTargetUITests: XCTestCase {
         let before = picked()
         tap(tick, dy: Self.edge)
         XCTAssertTrue(wait { self.picked() != before }, "a tap near a group tick's bottom edge picked nothing (\(before) picked)")
+        // beside its glyph, in the header's inset (#6658): it unpicks the group again
+        let after = picked()
+        tap(tick, dx: -18, dy: 0)
+        XCTAssertTrue(wait { self.picked() != after }, "a tap 18 pt left of a group tick's middle did nothing (\(after) picked)")
     }
 
     // MARK: -
@@ -191,9 +201,9 @@ final class InboxTitleTargetUITests: XCTestCase {
         return f.height > 1 && f.minY >= top && f.maxY <= bottom
     }
 
-    /// Taps `e` `dy` points from its middle.
-    @MainActor private func tap(_ e: XCUIElement, dy: CGFloat) {
-        e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: dy)).tap()
+    /// Taps `e` `dx`, `dy` points from its middle.
+    @MainActor private func tap(_ e: XCUIElement, dx: CGFloat = 0, dy: CGFloat) {
+        e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: dx, dy: dy)).tap()
     }
 
     /// The group titles below Done's: Done's groups, listed while it is open.

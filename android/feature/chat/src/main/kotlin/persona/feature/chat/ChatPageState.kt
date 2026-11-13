@@ -256,8 +256,8 @@ internal fun rememberChatPageTrays(key: SessionKey, chrome: ChatChromeBindings, 
             catch (_: Exception) { /* A failed read retains the last confirmed schedule list. */ }
         }
     }
-    // #4314 "Fold background rounds": the hub's switch (until read, the value last read this run, else on; on for a hub without it) and the main
-    // conversation's id. Only the main conversation folds; read again each time the page opens.
+    // #4314 "Fold background rounds" (#6595 widens it to the leader conversations): the hub's switch (until read, the
+    // value last read this run, else on; on for a hub without it), the main conversation and the hub's leader ids.
     var foldSetting by remember(chrome.assistantManagement, key) { mutableStateOf(BackgroundFoldSetting.lastKnown(key.sessionId)) }
     LaunchedEffect(chrome.assistantManagement, connection) {
         if (renderStyle != ChatRenderStyle.Assistant) return@LaunchedEffect
@@ -272,8 +272,10 @@ internal fun rememberChatPageTrays(key: SessionKey, chrome: ChatChromeBindings, 
     }
     val mainConversation by (chrome.tasks?.mainConversation ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) })
         .collectAsStateWithLifecycle()
-    val foldsBackground = renderStyle.compactToolSummary && foldSetting.on &&
-        key.sessionId == (mainConversation ?: foldSetting.main)
+    val foldsBackground = renderStyle.compactToolSummary &&
+        persona.core.domain.tasks.BackgroundFolding.foldsConversation(
+            key.sessionId, mainConversation ?: foldSetting.main, foldSetting.on, chrome.leaderConversations,
+        )
     LaunchedEffect(chrome.inboxTrays, chrome.inboxScope, assistantTrays.expanded) {
         if (renderStyle == ChatRenderStyle.Assistant && assistantTrays.expanded == AssistantTray.NeedsYou) {
             try { chrome.inboxScope?.let { chrome.inboxTrays?.refresh(it) } }

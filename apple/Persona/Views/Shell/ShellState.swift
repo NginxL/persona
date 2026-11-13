@@ -162,8 +162,9 @@ enum ShellPage: Hashable, Sendable {
 }
 
 /// What the Assistant page pushes by value for the shell (the inbox and the machines push values of their own on top).
+/// Every place the sidebar opens is one, so what it pushes by value is part of the path it keeps (`ShellPlaces`).
 enum ShellRoute: Hashable, Sendable {
-    case inbox, todos, machines
+    case inbox, todos, machines, profile, routines, knowledge, recordings
     case extensionPage(ExtensionNavRoute)
 }
 

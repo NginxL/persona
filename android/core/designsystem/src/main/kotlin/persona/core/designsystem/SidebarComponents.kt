@@ -38,7 +38,7 @@ fun JSidebarHistoryRow(
     titleAccessory: (@Composable () -> Unit)? = null,
     /** Drawn before the ⋯ (a 常驻 lead's caret that folds its to-dos open, #4352); null: nothing. */
     trailingAccessory: (@Composable () -> Unit)? = null,
-    /** A lead whose Agents work while its own conversation is idle spins the working mark anyway (#6230). */
+    /** A lead with anything at work under it while its own conversation is idle spins the working mark anyway (#6230, #6626). */
     working: Boolean = false,
 ) {
     JRow(title, onClick = onClick, onLongClick = onMenu, selected = selected, chevron = false, subtitle = hint,

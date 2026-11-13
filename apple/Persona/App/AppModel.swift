@@ -299,9 +299,6 @@ final class AppModel {
     /// good answer count as stale.
     @ObservationIgnored private var directionTreeAsk = 0
     @ObservationIgnored private var directionTreeLanded = 0
-    /// How much work each direction holds, by leader conversation id: the tree's `counts` (the secretary group left
-    /// out), for the sidebar's "N working · N need you" under each name. Empty from a hub without the tree.
-    var directionCounts: [String: DirectionTree.Counts] { directionTree?.leaderCounts ?? [:] }
     @ObservationIgnored private var assistantRetryInFlight: Task<Void, Never>?
     /// The assistant conversation shown in the Chat tab (persisted across launches).
     ///
@@ -366,6 +363,9 @@ final class AppModel {
     @ObservationIgnored private(set) var launcherCache: [MachineRef: [Launcher]] = [:]
     /// What each machine's launcher pickers run with none picked (`LauncherDefault`), loaded with `launcherCache`.
     @ObservationIgnored private(set) var launcherDefaults: [MachineRef: LauncherDefault] = [:]
+    /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
+    /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
+    @ObservationIgnored private(set) var assistantLauncherCache: [MachineRef: APIClient.LaunchersResponse] = [:]
 
     /// The hub-level group's client: for pages about the hub (Persona, Inbox, its settings). A session's, a machine's
     /// or an interaction's requests go to its own group (`api(_:)`). The assistant's routes go to the manager the Persona
@@ -963,6 +963,13 @@ final class AppModel {
         if let c = m.computer, c.enabled, c.screenSharing, !c.displays.isEmpty { return c.displays }
         if let b = m.browser, b.enabled, b.screenSharing { return b.displays }
         return []
+    }
+    /// Whether this Mac's node advertises the live-screen hardware video channel (#3954), from whichever extension shows
+    /// its screen. The Picture / Quality switcher appears only then, so no Mac shows a control it cannot use.
+    func screenVideoAdvertised(_ ref: MachineRef) -> Bool { machine(ref).map(Self.advertisesVideo) ?? false }
+    nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
+        (m.computer.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
+            || (m.browser.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
     }
     nonisolated static func showsScreen(_ m: Machine) -> Bool {
         (m.computer.map { $0.enabled && $0.screenSharing } ?? false) || (m.browser.map { $0.enabled && $0.screenSharing } ?? false)
@@ -3163,6 +3170,7 @@ final class AppModel {
     func launcherDefaultsChanged() {
         launcherCache = [:]
         launcherDefaults = [:]
+        assistantLauncherCache = [:]
     }
 
     /// The list a start picks from (New Agent, Run Agent Here): always read again, and the cache with it. Each launcher's
@@ -3178,6 +3186,69 @@ final class AppModel {
         launcherCache[machine] = r.launchers
         launcherDefaults[machine] = r.default
         return r.launchers
+    }
+
+    /// The main chat's picker data (`GET …/launchers?purpose=assistant`, #5033): the launchers that can run the
+    /// assistant on this machine, the effective Main chat default (`default`, what the next message runs with no pick),
+    /// and the ones that can't with why. Cached until Model Settings change or a `refresh`.
+    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false) async throws -> APIClient.LaunchersResponse {
+        if !refresh, let cached = assistantLauncherCache[machine] { return cached }
+        guard let api = api(machine.group) else { return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil) }
+        let r = try await api.launcherList(machine: machine.id, purpose: "assistant")
+        assistantLauncherCache[machine] = r
+        return r
+    }
+
+    /// Keeps a launcher / model / effort pick for the assistant conversation `key` (#5033, PUT
+    /// …/assistant/conversations/{id}/model): drawn at once, put back with the hub's words if it says no. The pick
+    /// holds from the next message, on every device.
+    @discardableResult
+    func keepConversationModel(_ key: SessionKey, pick: ModelPick) async -> Bool {
+        guard let api = api(key.group) else { return false }
+        let before = session(key)?.modelPick
+        patchSession(key) { $0.modelPick = pick }
+        do {
+            try await api.putConversationModel(machine: key.machineID, conversation: key.sessionID,
+                                                body: APIClient.ConversationModelBody(launcher: pick.launcher, model: pick.model,
+                                                                                      effort: pick.effort, machineID: key.machineID))
+            Haptics.success()
+            return true
+        } catch {
+            patchSession(key) { $0.modelPick = before }
+            show(error)
+            Haptics.error()
+            return false
+        }
+    }
+
+    /// The conversation follows Model configuration › Main chat again (DELETE …/conversations/{id}/model, #5033).
+    @discardableResult
+    func dropConversationModel(_ key: SessionKey) async -> Bool {
+        guard let api = api(key.group) else { return false }
+        let before = session(key)?.modelPick
+        patchSession(key) { $0.modelPick = nil }
+        do {
+            try await api.deleteConversationModel(machine: key.machineID, conversation: key.sessionID)
+            Haptics.success()
+            return true
+        } catch {
+            patchSession(key) { $0.modelPick = before }
+            show(error)
+            Haptics.error()
+            return false
+        }
+    }
+
+    /// Whether the connected hub keeps a conversation's own model pick (`assistant_model_pick`, #5033); an older hub
+    /// keeps nothing and the app leaves the model row read-only.
+    func keepsConversationModelPick(_ group: String) -> Bool {
+        features(group).contains("assistant_model_pick")
+    }
+
+    /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).
+    /// The composer title reads this so it shows the effective Main chat model, not only the running process's last one.
+    func cachedAssistantLaunchers(_ machine: MachineRef) -> APIClient.LaunchersResponse? {
+        assistantLauncherCache[machine]
     }
 
 

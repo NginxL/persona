@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -542,6 +543,20 @@ fun JAvatar(
 }
 
 /**
+ * True inside a container that selects its whole content as one: the words of a message "Select" has selected in place
+ * (`MessageSelection.kt` in feature/chat). A block that would open a [SelectionContainer] of its own, a code block
+ * ([SelectableOnItsOwn]), joins that one, so a single selection runs across the message; and what a tap on text does
+ * (copying inline code) stands down.
+ */
+val LocalSelectionAbove = staticCompositionLocalOf { false }
+
+/** [content] selectable on its own, in a [SelectionContainer] of its own, unless a container above it covers it ([LocalSelectionAbove]). */
+@Composable
+fun SelectableOnItsOwn(content: @Composable () -> Unit) {
+    if (LocalSelectionAbove.current) content() else SelectionContainer { content() }
+}
+
+/**
  * Text the reader can long-press to select and copy (a link, an address shown to hand on), with no surface of its own;
  * [style] and [color] come from the theme like any [Text].
  */
@@ -580,7 +595,7 @@ fun JCodeBlock(
         .then(if (PersonaTheme.style == AppStyle.Brief) Modifier.border(1.dp, palette.line, shape) else Modifier)
     val inset = 14.dp.dense
     val text: @Composable (Modifier) -> Unit = { m ->
-        SelectionContainer {
+        SelectableOnItsOwn {
             Text(
                 code, style = if (small) PersonaTheme.type.codeSmall else PersonaTheme.type.code, color = palette.ink, maxLines = maxLines, overflow = TextOverflow.Ellipsis,
                 onTextLayout = onTextLayout, modifier = m.padding(inset),
@@ -589,7 +604,8 @@ fun JCodeBlock(
     }
     if (header == null) text(modifier.then(box))
     else Column(modifier.then(box)) {
-        header()
+        // the title bar is not code: a selection of the message leaves its language and Copy out
+        DisableSelection { header() }
         text(Modifier.fillMaxWidth())
     }
 }

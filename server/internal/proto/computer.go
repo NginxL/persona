@@ -40,6 +40,24 @@ type Computer struct {
 	// Job: installing Cua Driver or asking for its permissions from the app (computer.install / computer.grant),
 	// the one running or the last one since the node started.
 	Job *ComputerJob `json:"job,omitempty"`
+	// ScreenVideo: this Mac can carry the live screen as a hardware video channel next to RFB (#3954,
+	// docs/extensions/computer-use.md "Live screen video"). Absent from a node without Persona Screen, or an old node,
+	// so an old app simply keeps showing RFB.
+	ScreenVideo *ScreenVideo `json:"screen_video,omitempty"`
+}
+
+// ScreenVideo is what a Mac can do for the iOS live-screen hardware video channel (#3954): the capture-and-encode
+// helper Persona Screen is present and, when the app opens video, the node binds it to the signed-in RFB stream. The
+// app opens video only when this is present and the permission is granted; otherwise it stays on RFB. Produced on a
+// real Mac by the node (the helper's presence and its Screen Recording permission); absent means RFB only.
+type ScreenVideo struct {
+	// Version: the wire protocol version the helper speaks (design-3954.protocol.md). 0 or absent: no video.
+	Version int `json:"version"`
+	// Codecs the helper can encode, in preference order: "hevc", "h264".
+	Codecs []string `json:"codecs,omitempty"`
+	// Permission: Screen Recording for Persona Screen, granted | missing | unknown. "missing" keeps the phone on RFB
+	// and offers to allow again; only input on that Mac answers macOS's question.
+	Permission string `json:"permission,omitempty"`
 }
 
 // Browser is a Mac's ego lite, the agent browser the assistant may drive (the built-in plugin ego,
@@ -63,6 +81,8 @@ type Browser struct {
 	Displays      []Display    `json:"displays,omitempty"` // as in Computer
 	Job           *ComputerJob `json:"job,omitempty"`
 	Checked       time.Time    `json:"checked,omitempty"`
+	// ScreenVideo: as in Computer (#3954). A Mac the plugin ego is on for shares the same live screen and helper.
+	ScreenVideo *ScreenVideo `json:"screen_video,omitempty"`
 }
 
 // Display is one of a Mac's displays: its frame in points in the global display space (origin at the top-left corner

@@ -112,6 +112,8 @@
   "codex_first_placeholder": "First message to Codex",
   "handoff_from": "Came from {title} · click to return",
   "handoff_dismiss": "Hide the way back",
+  "inbox_back_title": "Back to “{title}”",
+  "inbox_back_generic": "Back to this Inbox item",
   "team": "Team",
   "team_needs_you": "Team: a worker needs you",
   "more_actions": "More actions",

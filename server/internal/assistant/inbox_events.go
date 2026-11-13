@@ -37,7 +37,24 @@ const (
 	ChainFailed      = "failed"
 	ChainConcluded   = "concluded"
 	ChainDone        = "done" // filed (by the user, read elsewhere, the manager): not in the contract's table, drawn generically
+	// Following up (docs/assistant/inbox.md "Following up"): drawn from text with a generic icon by apps from before.
+	ChainReopened     = "reopened"      // new messages reopened a handled event
+	ChainWaiting      = "waiting"       // the processing conversation waits on the other side, until a time to look again
+	ChainCheck        = "check"         // it was looked at again when that time came
+	ChainAgentStopped = "agent_stopped" // an Agent started for it stopped, with its last words
+	ChainReported     = "reported"      // a step the assistant or an Agent says it took, which the program did not see
 )
+
+// Where a chain entry's step happened (InboxChainEntry.Via): a source's id (the item's Source, or another source's),
+// or one of these. Absent on entries from before: the apps go by the kind.
+const (
+	ViaAgent     = "agent"     // an Agent session
+	ViaAssistant = "assistant" // the manager or its processing conversation
+	ViaUser      = "user"      // the user, in Persona
+)
+
+// DoneByMuted is a done chain entry's By value for filing by a mute. It is not a done_by value: muted items keep done_by "read".
+const DoneByMuted = "muted"
 
 const (
 	chainMax         = 50  // entries kept, the newest
@@ -65,6 +82,10 @@ type InboxChainEntry struct {
 	Sender   string              `json:"sender,omitempty"`
 	Messages []InboxChainMessage `json:"messages,omitempty"`
 	Link     *InboxChainLink     `json:"link,omitempty"`
+	Via      string              `json:"via,omitempty"`
+	// By is how a done entry filed the item, as a value rather than words: a done_by, or "muted" (filed by a mute,
+	// whose done_by is read). The state key tells done_muted from done_read by it.
+	By string `json:"by,omitempty"`
 }
 
 // InboxChainMessage is one message of a received batch.
@@ -342,7 +363,7 @@ func (b *inboxBook) file(it *InboxItem, at time.Time, by string) {
 		key = "done_manager"
 	}
 	if key != "" {
-		b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain."+key)})
+		b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain."+key), By: by})
 	}
 }
 

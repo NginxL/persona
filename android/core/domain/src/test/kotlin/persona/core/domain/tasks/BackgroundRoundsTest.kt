@@ -187,4 +187,43 @@ class BackgroundRoundsTest {
         val off = JsonCodec.decodeFromString(AssistantConfig.serializer(), """{"machine_id":"m","main_background_folded":false}""")
         assertFalse(off.backgroundFolded)
     }
+
+    @Test fun leaderConversationsFoldExactlyLikeTheMainConversation() {
+        val leaders = setOf("lead-1", "lead-2")
+        // the main conversation and every leader fold while the switch is on
+        assertTrue(BackgroundFolding.foldsConversation("main", "main", on = true, leaders))
+        assertTrue(BackgroundFolding.foldsConversation("lead-1", "main", on = true, leaders))
+        assertTrue(BackgroundFolding.foldsConversation("lead-2", "main", on = true, leaders))
+        // an ordinary side conversation never folds
+        assertFalse(BackgroundFolding.foldsConversation("side", "main", on = true, leaders))
+        // the switch off disables both the main and the leaders
+        assertFalse(BackgroundFolding.foldsConversation("main", "main", on = false, leaders))
+        assertFalse(BackgroundFolding.foldsConversation("lead-1", "main", on = false, leaders))
+        // a missing main still lets a leader fold; a blank conversation id never does
+        assertTrue(BackgroundFolding.foldsConversation("lead-1", null, on = true, leaders))
+        assertFalse(BackgroundFolding.foldsConversation("", "main", on = true, leaders))
+        // no leaders from an older hub: only the main folds
+        assertTrue(BackgroundFolding.foldsConversation("main", "main", on = true, emptySet()))
+        assertFalse(BackgroundFolding.foldsConversation("lead-1", "main", on = true, emptySet()))
+    }
+
+    @Test fun aLeaderConversationFoldsTheSameRoundsTheMainChatDoes() {
+        // the gate on for a leader id drives the same folding: relayed and patrol rounds fold, the owner's stays open
+        val items = listOf(
+            user(1, "Check the build", MessageSource("conversation", "w1", "Release desk")),
+            use(2, "Read"), result(3, 2), reply(4, "Build is green"),
+            user(5, "Scheduled prompt", MessageSource("patrol", title = "Half-hour patrol"),
+                Injected(kind = "followup", state = "daily", title = "Half-hour patrol", line = "Scheduled task started")),
+            reply(6, "Nothing new"),
+            user(7, "A real request", queued = null).copy(clientMsgId = "owner-1"), reply(8, "On it"),
+        )
+        val folded = project(items, BackgroundFolding(rounds = true)).foreground
+        val rounds = folds(folded)
+        assertEquals(listOf("conversation", "patrol"), rounds.map { it.source.kind })
+        // the owner's exchange remains a normal foreground row, not a folded round
+        assertTrue(folded.any { line -> (line as? ChatLine.Row)?.row?.item?.item?.clientMsgId == "owner-1" })
+        // folding off keeps every exchange open
+        val open = project(items, BackgroundFolding(rounds = false)).foreground
+        assertTrue(folds(open).isEmpty())
+    }
 }

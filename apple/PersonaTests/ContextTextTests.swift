@@ -86,4 +86,24 @@ struct ContextTextTests {
             #expect(xml.hasSuffix("</persona-context>"))
         }
     }
+
+    /// The hub's mid-turn interject note is model instructions, never a quote in the owner's bubble (#6595): the phone
+    /// drops the block while keeping the owner's words, and a picked context beside it still parses.
+    @Test func theInterjectNoteIsNeverAnOwnerBubbleQuote() {
+        let interject =
+            #"<persona-context kind="context" title="插话" url="">\#n用户在你这一轮还没做完时发来下面这条消息。\#n</persona-context>\#n先停一下，帮我查个东西"#
+        let parsed = ContextRef.parse(interject)
+        #expect(parsed.refs.isEmpty)
+        #expect(parsed.rest == "先停一下，帮我查个东西")
+        // the watch shows the owner's words with no 「〔插话〕」 mark
+        #expect(WatchText.shown(interject) == "先停一下，帮我查个东西")
+        // a normal picked context next to it still becomes a quote
+        let mixed = interject + #"\#n<persona-context kind="context" title="需求文档" url="https://x">摘要</persona-context>"#
+        let both = ContextRef.parse(mixed)
+        #expect(both.refs.map(\.title) == ["需求文档"])
+        #expect(both.rest == "先停一下，帮我查个东西")
+        // only the exact title is dropped; a similarly named context stays
+        let similar = #"<persona-context kind="context" title="插话记录" url="">x</persona-context>\#n问"#
+        #expect(ContextRef.parse(similar).refs.count == 1)
+    }
 }

@@ -8,12 +8,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * A current leader's open tasks (#4352), from `GET /api/v1/assistant/directions/tree`'s `counts`: [working] in its
- * Working section, [needsYou] waiting on the user. Both zero when it has none.
+ * What a current leader's row shows of its direction (#4352, #6626), from `GET /api/v1/assistant/directions/tree`:
+ * [running], anything under it at work (its row's one activity mark), and [needsYou], its tasks waiting on the user (its
+ * 「等你 N」). No working count: the mark says it.
  */
 @Serializable
 data class LeaderCounts(
-    val working: Int = 0,
+    val running: Boolean = false,
     @SerialName("needs_you") val needsYou: Int = 0,
 )
 
@@ -47,11 +48,11 @@ data class AssistantSnapshot(
     val backgroundSupervisor: String? = null,
 ) {
     /**
-     * Each current leader's open tasks (the tree's `counts`, #4352), by conversation id: its row says 「在做 N · 等你 N」.
-     * The secretary group is not a leader; empty from an older hub.
+     * What each current leader's row shows (the tree's `running` and `counts.needs_you`, #4352, #6626), by conversation
+     * id: its spinner while anything under it runs, 「等你 N」. The secretary group is not a leader; empty from an older hub.
      */
     val leaderCounts: Map<String, LeaderCounts>
-        get() = directionTree?.leaders.orEmpty().associate { it.id to LeaderCounts(it.counts.working, it.counts.needsYou) }
+        get() = directionTree?.leaders.orEmpty().associate { it.id to LeaderCounts(it.running, it.counts.needsYou) }
 }
 
 /** The assistant's spaces besides its own (docs/assistant/health.md): their names on the wire (`space`). */

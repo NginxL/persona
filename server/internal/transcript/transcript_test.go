@@ -1113,3 +1113,34 @@ func TestAsyncAgentIDAfterWarning(t *testing.T) {
 		t.Fatalf("finished agent still running: %+v", meta.Background)
 	}
 }
+
+// Claude Code queues its own system notices like typed input (a cross-session message held and then released, #6590):
+// they are not something the user wrote, so they stay out of the queue the apps show, and they still take their place
+// in it, so a dequeue drops the entry it dropped.
+func TestQueuedSystemNoticeIsNotAUserMessage(t *testing.T) {
+	const notice = "[Cross-session delivery notice] Your message to another session was approved and released to that session (recipient: peer-1; msg_id: m1)"
+	var m Meta
+	parse := func(line string) { ParseLine(1, []byte(line), &m) }
+	queue := func(op, content string) string {
+		b, _ := json.Marshal(map[string]any{"type": "queue-operation", "operation": op, "content": content})
+		return string(b)
+	}
+	parse(queue("enqueue", notice))
+	if len(m.Queue) != 0 {
+		t.Fatalf("a system notice is shown as a queued message: %q", m.Queue)
+	}
+	parse(queue("enqueue", "A"))
+	if len(m.Queue) != 1 || m.Queue[0] != "A" {
+		t.Fatalf("queue = %q, want only what the user typed", m.Queue)
+	}
+	parse(`{"type":"queue-operation","operation":"dequeue"}`) // the notice was first in the queue
+	if len(m.Queue) != 1 || m.Queue[0] != "A" {
+		t.Fatalf("after the notice was taken, queue = %q", m.Queue)
+	}
+	parse(queue("enqueue", notice))
+	parse(queue("remove", notice))
+	parse(queue("popAll", "A"))
+	if len(m.Queue) != 0 {
+		t.Fatalf("queue = %q, want it empty", m.Queue)
+	}
+}

@@ -78,12 +78,31 @@ export function leaderItem(s: Session, leader: boolean, deps: ConversationMenuDe
   };
 }
 
+/** Archive is the same reversible action in a sidebar row and the open conversation's title menu (#6565). */
+export function conversationArchiveItem(s: Session, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem {
+  const title = sessionTitle(s);
+  return {
+    key: "archive",
+    label: t("conversation-menu.archive"),
+    icon: "archive",
+    onSelect: async () => {
+      try {
+        await deps.archive(s);
+        // Undo puts it back as it was (an open conversation stays open: its page reads the machine's sessions)
+        deps.notify(t("conversation-menu.archived", { title }), "ok", { label: t("conversation-menu.undo"), run: () => void undoArchive(s, title, deps) });
+      } catch (e) {
+        deps.notify(errorText(e), "error");
+      }
+      reread(deps);
+    },
+  };
+}
+
 /** `leader`: the conversation is a leader (常驻) now. `builtIn`: it is the background supervisor, which the hub keeps
  *  listed and running: no 设为常驻, Rename, Archive or End. */
 export function conversationMenuItems(s: Session, o: { main: boolean; leader?: boolean; builtIn?: boolean }, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem[] {
   const copy: MenuItem = { key: "copy", label: t("conversation-menu.copy_id"), icon: "copy", accel: "c", onSelect: () => void deps.copy(s.session_id) };
   if (o.builtIn) return [copy];
-  const title = sessionTitle(s);
   const own: MenuItem[] = o.main
     ? []
     : [
@@ -104,21 +123,7 @@ export function conversationMenuItems(s: Session, o: { main: boolean; leader?: b
             },
           },
         },
-        {
-          key: "archive",
-          label: t("conversation-menu.archive"),
-          icon: "archive",
-          onSelect: async () => {
-            try {
-              await deps.archive(s);
-              // Undo puts it back as it was (an open conversation stays open: its page reads the machine's sessions)
-              deps.notify(t("conversation-menu.archived", { title }), "ok", { label: t("conversation-menu.undo"), run: () => void undoArchive(s, title, deps) });
-            } catch (e) {
-              deps.notify(errorText(e), "error");
-            }
-            reread(deps);
-          },
-        },
+        conversationArchiveItem(s, deps),
       ];
   return [
     ...own,

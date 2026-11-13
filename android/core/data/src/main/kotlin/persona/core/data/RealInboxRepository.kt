@@ -580,6 +580,17 @@ class RealInboxRepository(
         if (!machine.isNullOrBlank() && !session.isNullOrBlank()) {
             val key = SessionKey(machine, session)
             checkNotNull(messageSender) { "agent message sender not wired" }.send(key, request.text, request.operationId)
+            // The message is already accepted: open it now and record the hand-off without holding the sheet open.
+            scope.launch {
+                quietly {
+                    val transport = requireTransport()
+                    val old = recordOf(request.itemId)
+                    val hubItemId = old?.hubItemId ?: request.itemId
+                    asItem(old) {
+                        transport.recordAgentHandOff(hubItemId, key, request.targetTitle.orEmpty(), request.operationId)
+                    }
+                }
+            }
             return key
         }
         // Main-chat hand-offs need a receipt from the item's manager, not merely a local queue entry.

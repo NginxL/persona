@@ -260,6 +260,7 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	route("GET /api/v1/machines/{mid}/codex/{sid}/takeover", d.prepareCodexTakeover)
+	route("GET /api/v1/sessions/{mid}/{sid}/skills", d.getSessionSkills)
 	route("POST /api/v1/machines/{mid}/codex/{sid}/takeover", d.commitCodexTakeover)
 	route("PUT /api/v1/machines/{mid}/engine", d.putEngine)
 	route("GET /api/v1/machines/{mid}/herdr", d.getHerdr)

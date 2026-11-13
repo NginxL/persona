@@ -149,7 +149,6 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.DirectionPlanned -> R.string.designsystem_core_direction_planned
     CoreText.Key.DirectionSecretary -> R.string.designsystem_core_direction_secretary
     CoreText.Key.DirectionUntitled -> R.string.designsystem_core_direction_untitled
-    CoreText.Key.DirectionCountWorking -> R.string.designsystem_core_direction_count_working
     CoreText.Key.DirectionCountNeedsYou -> R.string.designsystem_core_direction_count_needs_you
     CoreText.Key.InboxAction -> R.string.designsystem_core_inbox_action
     CoreText.Key.InboxFyi -> R.string.designsystem_core_inbox_fyi

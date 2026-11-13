@@ -157,12 +157,35 @@ import Testing
         }
     }
 
-    @Test func onlyTheMainAssistantConversationFolds() {
+    @Test func onlyTheMainAndLeaderAssistantConversationsFold() {
         #expect(ChatLines.foldsBackground(assistant: true, conversation: "main", main: "main", on: true))
         #expect(!ChatLines.foldsBackground(assistant: true, conversation: "side", main: "main", on: true))
         #expect(!ChatLines.foldsBackground(assistant: true, conversation: "main", main: "main", on: false))
         #expect(!ChatLines.foldsBackground(assistant: false, conversation: "main", main: "main", on: true))
         #expect(!ChatLines.foldsBackground(assistant: true, conversation: "", main: nil, on: true))
+        // A leader conversation folds exactly like the main one; another side conversation never does (#6595).
+        #expect(ChatLines.foldsBackground(assistant: true, conversation: "lead-1", main: "main", on: true, leaders: ["lead-1", "lead-2"]))
+        #expect(ChatLines.foldsBackground(assistant: true, conversation: "lead-2", main: "main", on: true, leaders: ["lead-1", "lead-2"]))
+        #expect(!ChatLines.foldsBackground(assistant: true, conversation: "side", main: "main", on: true, leaders: ["lead-1"]))
+        #expect(!ChatLines.foldsBackground(assistant: true, conversation: "lead-1", main: "main", on: false, leaders: ["lead-1"]))
+        // A missing main still lets a leader fold, and an empty conversation id never does.
+        #expect(ChatLines.foldsBackground(assistant: true, conversation: "lead-1", main: nil, on: true, leaders: ["lead-1"]))
+        #expect(!ChatLines.foldsBackground(assistant: true, conversation: "", main: nil, on: true, leaders: [""]))
+    }
+
+    @Test func aLeaderConversationFoldsTheSameRoundsTheMainChatDoes() throws {
+        // The gate on for a leader id drives the same builder option; a relayed round and a patrol round fold while the
+        // owner's own exchange stays a normal line.
+        var owner = item(5, role: "user", text: "A real request"); owner.clientMsgID = "owner-1"
+        let items = [relayed(1), item(2), scheduled(3, state: "daily"), item(4), owner, item(6)]
+        let lines = build(items, background: true)
+        let folds = lines.compactMap { line -> MessageSource? in if case .supervision(_, _, _, let source) = line.content { return source } else { return nil } }
+        #expect(folds.map(\.kind) == ["conversation", "patrol"])
+        // the owner's exchange stays outside the folded rounds
+        #expect(lines.contains { line in if case .row = line.content { true } else { false } })
+        // The same transcript with folding off keeps every exchange open.
+        let open = build(items, background: false)
+        #expect(open.allSatisfy { line in if case .supervision = line.content { false } else { true } })
     }
 
     @Test func supervisionRoundsAreUnchanged() throws {

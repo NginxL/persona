@@ -366,6 +366,9 @@ struct SessionModesMenu: View {
     var setsEffortOnly = false
     /// "Other Model…" where a model can be picked: the composer opens `SessionTypedModelSheet` (#1644).
     var otherModel: (() -> Void)? = nil
+    /// The main Persona chat: opens its conversation model sheet (#6542, the per-conversation pick, #5033). Nil on
+    /// older hubs, which keep the row read-only.
+    var assistantPick: (() -> Void)? = nil
     /// A mode picked here goes through the page's `requestMode` (`SessionModeBar.pick`); nil applies it at once.
     var pick: ((String) -> Void)? = nil
 
@@ -412,6 +415,16 @@ struct SessionModesMenu: View {
                         Text(m.name)
                     }
                 }
+            } else if let assistantPick {
+                // The main Persona chat (#6542): the row opens its conversation model sheet (pick kept on the hub, #5033).
+                Button(action: assistantPick) {
+                    Label {
+                        Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
+                    } icon: {
+                        ThemedIcon(Theme.Icon.agentChat)
+                    }
+                }
+                .accessibilityIdentifier("sessionModes.assistantModel")
             } else {
                 Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model")) // what it runs; changed where it was started
             }

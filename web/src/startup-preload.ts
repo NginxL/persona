@@ -241,27 +241,17 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
  * 477,447 B, 67 B over the budget before; this change takes it to 477,525 B, +78 B: lib/side-sessions.ts's
  * arrangement, the paged list's use of it for its order and the Earlier split, and a row's parent identity in
  * lib/runtime-list.ts; 31 B of room).
- * And 108 B for the foldable sidebar Recent on top of current main (#6228, measured 2026-11-13 on main at eaa68818e:
- * first screen en 474,144 B, ja 477,860 B, zh-Hans 475,147 B — main already 304 B over the 477,556 B ceiling; this branch
- * adds 108 B to each, en 474,252 B, ja 477,968 B, zh-Hans 475,255 B — the foldable Recent heading and its kept-on-device
- * folded state). It reuses the existing `Collapse` / `useFold` fold path and the section heading's chevron, so it adds no
- * new helper or lazy boundary, and the Scheduled-task exclusion is a constant-time check inside the existing pure
- * `recentConversations`. The ceiling moves to the measured ja 477,968 B, 0 B of room; the idle tier is unaffected because
- * the fold stays on the first screen.
- * And 162 B for restoring expanded Needs you title navigation and hydrating off-page question sessions (#6432:
- * main at f0c995f923 measured ja 477,957 B; sharing the header's label and chevron takes this fix to 478,119 B,
- * +162 B, keeping main's 11 B of room). Keep only this feature's measured allowance on top of main's changes.
- * And 172 B for the Agents fold-all button that acts on the list under the controls, and a to-do's first five decisions
- * (#6447: ja 478,291 B against 478,119 B on main at 2e57ac117: the button's rule (fold the groups to their headings,
- * open a list folded under its title, no button where there is nothing to fold to), its two icons (corners in for
- * Collapse all, out for Expand all) and its name as the tooltip, less the two list-menu items it replaces and the
- * Recent row's ⓘ words, and the decisions' words in the to-dos' catalog; main's 11 B of room stay).
  * And 394 B for the existing round-aware task-decision route and completed-task ownership (#5929),
  * retaining that feature allocation when merging the latest main.
  */
 // #6575: verified runtime checkout display membership adds 79 B to the first screen on main at 2e57ac117
 // (ja 478,119 B to 478,198 B). Carry that measured feature allowance onto the current main budget.
-export const FIRST_SCREEN_BUDGET = 478_775;
+// #6542: the main chat model pill's revision-driven re-read adds ~10 B (ja measured 477,984 B on its own base), but
+// #6741 measured en 475,060 B, ja 478,757 B, zh-Hans 476,047 B after later main landed; the hub measured ja 478,776 B.
+// #6753's stopped-Agent dismissal adds 131 B to each language (ja 478,888 B, en 475,191 B, zh-Hans 476,178 B).
+// #6759's Agent skills selection adds 49 B more to ja (478,937 B; en 475,240 B, zh-Hans 476,227 B).
+// The 31 B room covers the hub's small build-environment difference.
+export const FIRST_SCREEN_BUDGET = 478_968;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;
@@ -442,6 +432,7 @@ export function firstScreenOverBudget(bytes: [string, number][], budget = FIRST_
  * is queued (ChatView hasQueue), so preloading it at idle on every cold start never served a first open; it now loads
  * on intent like the other lazy pages. That takes the tier to 40,467 B measured on this machine, 4,116 B under the
  * ceiling, so the budget is held here at 44,583 B — not raised to cover the drift, which the move removes instead.
+ * #6542's model-pill re-read adds ~4 B to this tier, still far under the cap after the queue-panel reduction.
  * Every other lazy page loads on intent, not at idle; raise it on purpose, in the change that needs it.
  */
 // Preserve the 7 B feature allowance while retaining main's queue-panel idle reduction.

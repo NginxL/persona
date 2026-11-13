@@ -20,20 +20,20 @@ describe("direction names", () => {
   });
 });
 
-describe("a lead's counts (#4331)", () => {
-  const tt = (key: string, o: { count: number }) => `${key === "sidebar.leader_working" ? "在做" : "等你"} ${o.count}`;
-  it("are read for current leaders only", () => {
-    const c = leaderCounts([{ id: "a", counts: { working: 2, needs_you: 1 } }, { id: "b", ended: true, counts: { working: 1, needs_you: 0 } }, { id: "c" }]);
-    expect([...c.entries()]).toEqual([["a", { working: 2, needs_you: 1 }]]);
+describe("what a lead's row shows of its direction (#4331, #6626)", () => {
+  const tt = (key: string, o: { count: number }) => `${key === "sidebar.leader_needs_you" ? "等你" : key} ${o.count}`;
+  it("is read for current leaders only", () => {
+    const c = leaderCounts([{ id: "a", counts: { running: true, needs_you: 1 } }, { id: "b", ended: true, counts: { running: true, needs_you: 0 } }, { id: "c" }]);
+    expect([...c.entries()]).toEqual([["a", { running: true, needs_you: 1 }]]);
   });
-  it("say the parts that are not zero, nothing when both are", () => {
-    expect(countsLabel({ working: 2, needs_you: 1 }, tt)).toBe("在做 2 · 等你 1");
-    expect(countsLabel({ working: 0, needs_you: 3 }, tt)).toBe("等你 3");
-    expect(countsLabel({ working: 0, needs_you: 0 }, tt)).toBe("");
+  it("says only what waits on you: what runs is the row's arc, never words as well", () => {
+    expect(countsLabel({ needs_you: 3 }, tt)).toBe("等你 3");
+    expect(countsLabel({ needs_you: 0 }, tt)).toBe("");
     expect(countsLabel(undefined, tt)).toBe("");
   });
-  it("add up for the folded section", () => {
-    const c = new Map([["a", { working: 2, needs_you: 1 }], ["b", { working: 1, needs_you: 0 }]]);
-    expect(totalCounts(c, ["a", "b", "gone"])).toEqual({ working: 3, needs_you: 1 });
+  it("adds up for the folded section: running when any lead runs", () => {
+    const c = new Map([["a", { running: false, needs_you: 1 }], ["b", { running: true, needs_you: 2 }]]);
+    expect(totalCounts(c, ["a", "b", "gone"])).toEqual({ running: true, needs_you: 3 });
+    expect(totalCounts(c, ["a"])).toEqual({ running: false, needs_you: 1 });
   });
 });

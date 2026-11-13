@@ -112,6 +112,8 @@
   "codex_first_placeholder": "给 Codex 的第一条消息",
   "handoff_from": "从「{title}」跳来 · 点这里返回",
   "handoff_dismiss": "关闭返回提示",
+  "inbox_back_title": "回到「{title}」",
+  "inbox_back_generic": "回到收件箱里的这件事",
   "team": "协同",
   "team_needs_you": "协同：有子 Agent 在等你",
   "more_actions": "更多操作",

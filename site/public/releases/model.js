@@ -4,6 +4,7 @@
 export const GITHUB_RELEASES = "https://github.com/nwverse/persona/releases";
 export const DOWNLOAD_ORIGIN = GITHUB_RELEASES + "/download/";
 export const TESTFLIGHT = "https://testflight.apple.com/join/vsjfy3hE";
+export const HARMONY_GUIDE = "https://github.com/nwverse/persona/blob/main/harmony/README.md";
 
 // The devices, in the order the page lists them. arches: the files offered, the usual one first.
 export const DEVICES = [
@@ -11,6 +12,8 @@ export const DEVICES = [
     what: "主力 App：和助手聊天，看每个 Agent 做到哪了，替它们拿主意。手表版随 iPhone 版一起提供。", store: true },
   { id: "android", short: "Android", name: "Android", sub: "APK 安装包 · Android 11 及以上",
     what: "和 iPhone 版一样：聊天、看进度、回答 Agent 的问题，通知也能直接处理。", arches: [""] },
+  { id: "harmony", short: "鸿蒙", name: "鸿蒙", sub: "原生手机与折叠屏 · HarmonyOS 7",
+    what: "原生 ArkUI：聊天、Agents、收件箱和文件。正式安装包发布后可直接下载，现在也可从源码构建。", arches: [""] },
   { id: "macos", short: "Mac", name: "Mac", sub: "Apple 芯片和 Intel 芯片",
     what: "装在电脑上：可以当 hub，替你保管所有数据；也可以连上 hub，让这台电脑跑 Agent。",
     caveat: "还没有经过苹果公证。打开时如果被拦下，到「系统设置 › 隐私与安全性」里点「仍要打开」。", arches: ["arm64", "amd64"] },
@@ -55,6 +58,7 @@ export function detectPlatform(nav) {
   const hint = String((nav && nav.userAgentData && nav.userAgentData.platform) || "");
   const touch = nav && nav.maxTouchPoints > 1;
   if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touch)) return { platform: "ios", arch: "" };
+  if (/HarmonyOS|OpenHarmony|OHOS/i.test(ua) || /HarmonyOS|OpenHarmony|OHOS/i.test(hint)) return { platform: "harmony", arch: "" };
   if (/Android/i.test(ua) || /Android/i.test(hint)) return { platform: "android", arch: "" };
   if (/Mac/.test(hint) || /Macintosh|Mac OS X/.test(ua)) return { platform: "macos", arch: "arm64" };
   if (/Windows/.test(hint) || /Windows/.test(ua)) return { platform: "windows", arch: /ARM64|aarch64/i.test(ua) ? "arm64" : "amd64" };
@@ -77,7 +81,7 @@ export function isDirectDownload(asset) {
 
 function matches(asset, platform, arch) {
   if (!isDirectDownload(asset)) return false;
-  if (platform === "android") return asset.kind === "app" && asset.platform === "android";
+  if (platform === "android" || platform === "harmony") return asset.kind === "app" && asset.platform === platform;
   if (platform === "web") return asset.kind === "web";
   return asset.kind === "computer" && asset.platform === platform && asset.arch === arch;
 }
@@ -137,7 +141,7 @@ export function formatAge(iso, now = Date.now()) {
 // Areas from the notes' "feat(<area>)", in words a visitor knows; others are not shown.
 const AREAS = {
   ios: "iPhone", apple: "Apple", watch: "Apple Watch", watchos: "Apple Watch", vision: "Vision Pro", carplay: "CarPlay",
-  android: "Android", web: "网页版", assistant: "助手", chat: "聊天", inbox: "收件箱", tasks: "任务", todos: "待办",
+  android: "Android", harmony: "鸿蒙", web: "网页版", assistant: "助手", chat: "聊天", inbox: "收件箱", tasks: "任务", todos: "待办",
   kb: "知识库", knowledge: "知识库", voice: "语音", recording: "录音", mail: "邮件", extensions: "扩展", site: "官网",
   agents: "Agent", sidebar: "侧边栏", health: "健康", link: "Persona Link", hub: "hub", server: "hub", node: "电脑",
 };

@@ -4,7 +4,8 @@
 // works out (the name given, else the project's, else the title without its "MMDD | kind | " prefix).
 // Asked again whenever the leaders or their titles change; until it answers, or on a hub that cannot, a row shows its title.
 // Names and counts come from the hub's direction tree (GET /api/v1/assistant/directions/tree, #4352): each current
-// direction in the leaders' order with its name and `counts` (Working and Waiting on you are shown, #4331). The tree is
+// direction in the leaders' order with its name, its `counts` (Waiting on you is shown, #4331) and whether anything
+// under it runs (`running`, the row's activity mark; the working count is not shown, #6626). The tree is
 // read and held in one place, lib/direction-tree.ts (the To-dos page and the Agents list draw the same one); this module
 // only takes the names and counts from it whenever it changes. The hub sends `directions` whenever the tree changes (a
 // leader made or ended anywhere, a name, a task's state), and the page reads the tree again then (readDirectionTree), so
@@ -12,22 +13,14 @@
 // /api/v1/assistant/leaders and there are no counts.
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
-import { DIRECTION_TREE_PATH, directionTreeNow, readDirectionTreeOnce, refreshDirectionTree, resetDirectionTree, subscribeDirectionTree } from "./direction-tree";
+import { DIRECTION_TREE_PATH, directionTreeNow, readDirectionTreeOnce, refreshDirectionTree, resetDirectionTree, subscribeDirectionTree, type DirectionTree } from "./direction-tree";
 
 export const LEADERS_PATH = "/assistant/leaders";
 export const TREE_PATH = DIRECTION_TREE_PATH;
 
-/** A direction as the tree lists it (only what the sidebar reads). */
-interface TreeDirection {
-  id: string;
-  name?: string;
-  secretary?: boolean;
-  counts?: Partial<LeaderCounts>;
-}
-
 /** The tree's directions as leaders: the secretary group left out. */
-export function treeLeaders(tree: { directions?: TreeDirection[] } | undefined): LeaderInfo[] {
-  return (tree?.directions ?? []).filter((d) => d.id && !d.secretary).map((d) => ({ id: d.id, name: d.name, counts: { working: d.counts?.working ?? 0, needs_you: d.counts?.needs_you ?? 0 } }));
+export function treeLeaders(tree: DirectionTree | undefined): LeaderInfo[] {
+  return (tree?.directions ?? []).filter((d) => d.id && !d.secretary).map((d) => ({ id: d.id, name: d.name, counts: { running: d.running, needs_you: d.counts.needs_you } }));
 }
 
 export interface LeaderInfo {
@@ -39,9 +32,10 @@ export interface LeaderInfo {
   counts?: LeaderCounts;
 }
 
-/** A leader's open tasks in the To-dos page's Working and Waiting on you sections. */
+/** What a leader's row shows of its direction (#6626): whether anything under it runs (the row's one activity mark, the
+ *  tree's `running`) and how many of its open tasks wait on you (its 等你 N). No working count: the mark says it. */
 export interface LeaderCounts {
-  working: number;
+  running: boolean;
   needs_you: number;
 }
 
@@ -64,24 +58,24 @@ export function directionLabel(names: ReadonlyMap<string, string>, id: string, t
 export function leaderCounts(list: readonly LeaderInfo[] | undefined): Map<string, LeaderCounts> {
   const out = new Map<string, LeaderCounts>();
   for (const l of list ?? []) {
-    if (l.id && !l.ended && l.counts) out.set(l.id, { working: l.counts.working ?? 0, needs_you: l.counts.needs_you ?? 0 });
+    if (l.id && !l.ended && l.counts) out.set(l.id, { running: l.counts.running === true, needs_you: l.counts.needs_you ?? 0 });
   }
   return out;
 }
 
-/** What a direction's row says at its end: "在做 N · 等你 N", the parts that are not zero; "" with nothing open. */
-export function countsLabel(c: LeaderCounts | undefined, t: (key: string, o: { count: number }) => string): string {
-  if (!c) return "";
-  return [c.working > 0 ? t("sidebar.leader_working", { count: c.working }) : "", c.needs_you > 0 ? t("sidebar.leader_needs_you", { count: c.needs_you }) : ""].filter(Boolean).join(" · ");
+/** What a direction's row says at its end: "等你 N" while tasks wait on you, else "". What runs under it is the row's
+ *  activity mark alone, never words as well (#6626: one meaning, one expression). */
+export function countsLabel(c: Pick<LeaderCounts, "needs_you"> | undefined, t: (key: string, o: { count: number }) => string): string {
+  return c && c.needs_you > 0 ? t("sidebar.leader_needs_you", { count: c.needs_you }) : "";
 }
 
-/** The counts of every leader added up (the folded section's tally). */
+/** Every leader's together (the folded section's tally): running when any runs, the tasks waiting on you added up. */
 export function totalCounts(counts: ReadonlyMap<string, LeaderCounts>, ids: readonly string[]): LeaderCounts {
-  const out = { working: 0, needs_you: 0 };
+  const out = { running: false, needs_you: 0 };
   for (const id of ids) {
     const c = counts.get(id);
     if (c) {
-      out.working += c.working;
+      out.running ||= c.running;
       out.needs_you += c.needs_you;
     }
   }

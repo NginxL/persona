@@ -218,13 +218,23 @@ export function viewFeedbackOnly(it: Item): boolean {
   return it.role === "user" && it.kind === "text" && !!it.text?.includes("<persona-view-errors") && !withoutViewErrors(it.text).trim();
 }
 
+/** The hub's mid-turn interject note (server/internal/prompts/assistant/interject.md): instructions for the model
+ *  inside `<persona-context kind="context" title="插话">`, never a quote the owner picked, so it never renders as one.
+ *  The title is pinned by server/internal/node/assistant_interject_test.go. */
+export const INTERJECT_TITLE = "插话"; // i18n-ignore: canonical hub prompt title
+
+/** A persona-context block that is the hub's interject note rather than user-picked context. */
+export function isInterjectContext(attrs: { kind?: string; title?: string }): boolean {
+  return (attrs.kind ?? "context") === "context" && attrs.title === INTERJECT_TITLE;
+}
+
 export function parseUserText(raw: string): { text: string; contexts: Context[]; files: AttachedFile[]; photos: string[] } {
   const contexts: Context[] = [];
   const files: AttachedFile[] = [];
   const photos: string[] = [];
   let text = withoutViewErrors(raw).replace(CONTEXT_RE, (_, attrs: string, body: string) => {
     const { kind, title, url, ...rest } = tagAttrs(attrs);
-    if (kind === "skill-instructions") return "";
+    if (kind === "skill-instructions" || isInterjectContext({ kind, title })) return "";
     contexts.push({ kind: kind ?? "context", title, url, text: body.trim(), ...(Object.keys(rest).length ? { attrs: rest } : {}) });
     return "";
   });

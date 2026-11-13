@@ -160,12 +160,13 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
     }
     // Clean up all / Mark all as seen / Clear all, and their Undo: one request for them all (the hub skips the ones that took new
     // messages since this list), shown at once, then a notice with Undo when something was filed.
-    fun markAll(targets: List<persona.core.contracts.api.InboxDoneTarget>, action: InboxBulkAction, undoable: Boolean = true) {
+    // [single]: the targets are one row (a conversation's records), which feels as one item does, not as many at once.
+    fun markAll(targets: List<persona.core.contracts.api.InboxDoneTarget>, action: InboxBulkAction, undoable: Boolean = true, single: Boolean = false) {
         val done = action != InboxBulkAction.Reopen
         val asked = targets.filter { it.id !in pending }
         if (asked.isEmpty()) return
         asked.forEach { pending[it.id] = done; failedCompletions.remove(it.id) }
-        haptics(doneHaptic(done))
+        haptics(doneHaptic(done, single))
         scope.launch {
             try {
                 val result = repository.bulk(asked, action)
@@ -189,7 +190,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
         val action = if (done) InboxBulkAction.Done else InboxBulkAction.Reopen
         pending[id] = done
         failedCompletions.remove(id)
-        haptics(doneHaptic(done))
+        haptics(doneHaptic(done, single = true))
         scope.launch {
             try { repository.setDone(id, done) }
             catch (e: CancellationException) { throw e }
@@ -473,7 +474,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                         done = done, busy = conversation.records.any { it.item.id in pending },
                         onHandOff = { handingOff = conversation.itemId },
                         onDone = { markAll(conversation.records.filter { it.item.isDone == done }.map { persona.core.contracts.api.InboxDoneTarget(it.item.id, it.item.version) },
-                            if (done) InboxBulkAction.Reopen else InboxBulkAction.Done, undoable = false) },
+                            if (done) InboxBulkAction.Reopen else InboxBulkAction.Done, undoable = false, single = true) },
                         selection = selection)
                 } ?: records[row.id]?.let { record ->
                     val done = pending[record.item.id] ?: record.item.isDone

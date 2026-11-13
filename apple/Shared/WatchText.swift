@@ -5,6 +5,9 @@ import Foundation
 /// placeholders become one 「图片」 mark, sent videos 「视频」, pasted-content tags go) and without Markdown's marks (`##`, `**`, backticks,
 /// fences, quotes, link targets; list dashes become •): the watch draws plain text, and the marks were shown as typed.
 nonisolated enum WatchText {
+    /// The hub's mid-turn interject note title (server/internal/prompts/assistant/interject.md, pinned by
+    /// assistant_interject_test.go): model instructions, never a context mark on the watch (#6595).
+    private static let interjectTitle = "插话" // i18n-ignore: canonical hub prompt title
     private static let context = try! NSRegularExpression(
         pattern: "<" + HubNaming.contextPattern + #"\b(?:[^>]*?title="([^"]*)")?[^>]*>[\s\S]*?</"# + HubNaming.contextPattern + #">\s*"#)
     /// The marks a phone shows for what the watch cannot draw, in the interface language.
@@ -44,9 +47,15 @@ nonisolated enum WatchText {
         let ns = text as NSString
         let blocks = context.matches(in: text, range: NSRange(location: 0, length: ns.length))
         var t = context.stringByReplacingMatches(in: text, range: NSRange(location: 0, length: ns.length), withTemplate: "")
-        if let first = blocks.first {
+        // The hub's interject note (prompts/assistant/interject.md) is model instructions, not a context the owner
+        // picked: it is stripped above like every context block but never becomes a mark (#6595).
+        let shownBlocks = blocks.filter { match in
+            guard match.range(at: 1).location != NSNotFound else { return true }
+            return ns.substring(with: match.range(at: 1)) != interjectTitle
+        }
+        if let first = shownBlocks.first {
             let title = first.range(at: 1).location == NSNotFound ? "" : ns.substring(with: first.range(at: 1))
-            t = (blocks.count == 1 && !title.isEmpty ? "〔\(title)〕\n" : String(localized: "[\(blocks.count) context items]") + "\n") + t
+            t = (shownBlocks.count == 1 && !title.isEmpty ? "〔\(title)〕\n" : String(localized: "[\(shownBlocks.count) context items]") + "\n") + t
         }
         for (pattern, with) in rules {
             t = t.replacingOccurrences(of: pattern, with: with, options: .regularExpression)

@@ -35,6 +35,8 @@ type errSuggestion struct{ msg string }
 
 func (e errSuggestion) Error() string { return e.msg }
 
+var errSuggestFiled = errSuggestion{"this inbox item is already filed, so the suggestion was not submitted and the user cannot see it; end this turn"}
+
 // check holds a suggestion to the rules before anything is kept.
 func (in *suggestIn) check() error {
 	in.Kind, in.Text, in.Outcome = strings.TrimSpace(in.Kind), strings.TrimSpace(in.Text), strings.TrimSpace(in.Outcome)
@@ -112,6 +114,10 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 			b.mu.Unlock()
 			return "", nil, nil, errNotProcessing
 		}
+	}
+	if from == nil && in.Kind != "" && !it.open() {
+		b.mu.Unlock()
+		return "", nil, nil, errSuggestFiled
 	}
 	for _, ch := range in.Changes {
 		if it.Doc == nil || !docOffers(*it.Doc, ch) {
@@ -215,7 +221,7 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 // inboxDraft keeps the reply drafted in conversation sessionID (inbox_draft, the older name): suggest with kind reply.
 func (s *Service) inboxDraft(ctx context.Context, sessionID, text, note string, proposed []DocChange) (string, *DocChange, error) {
 	id, refused, err := s.suggest(ctx, sessionID, suggestIn{Kind: SuggestReply, Text: text, Note: note, Changes: proposed})
-	if err != nil && !errors.Is(err, errInboxNotPersisted) {
+	if err != nil && !errors.Is(err, errInboxNotPersisted) && !errors.Is(err, errSuggestFiled) {
 		return "", nil, nil
 	}
 	return id, refused, err

@@ -360,6 +360,14 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
 	defer s.releaseTaskWorkspace(t.TodoID)
+	// The admission claim (if the gate took one) is released when this start body ends either way: on success the
+	// agent is linked into the todo by then so the ledger's direction count carries it, and on failure nothing runs.
+	defer func() {
+		if t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission

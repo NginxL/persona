@@ -11,7 +11,7 @@ import {
 import { conversationRoute, docChangeLine, isDone, itemKey, itemRoute, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
 import { otherManager } from "../../lib/manager-choice";
 import { openLink } from "../../lib/links";
-import { navigate, type Route } from "../../lib/router";
+import { type Route } from "../../lib/router";
 import { openFromInbox } from "../../lib/inbox-nav";
 import { useStore } from "../../lib/store";
 import { t } from "../../i18n";
@@ -137,7 +137,7 @@ function HandlingLine({ item }: { item: InboxItem }) {
   const word = handlingWord(item);
   const to = h.machine_id && h.session_id ? conversation(h.machine_id, h.session_id) : undefined;
   const open = to && (
-    <button type="button" onClick={() => navigate(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
+    <button type="button" onClick={() => openFromInbox(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
       {t("inbox-inboxevent.open_conversation")}
       <Icon name="chevronRight" size={11} stroke={2.4} />
     </button>

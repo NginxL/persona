@@ -152,6 +152,34 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if !m.Reachable {
 		return "", "", machineOffline(m.Name)
 	}
+	// The resource/direction admission gate (admission.go): fixed tasks are refused here, flexible tasks may have
+	// been moved to a less loaded machine. The claim is stored on the task and held until its agent is linked or the
+	// start fails for good (runPlanTaskStart), so it still counts while metrics and the ledger catch up.
+	release, err := s.admitTaskStart(ctx, t)
+	if err != nil {
+		return "", "", err
+	}
+	t.admissionRelease = release
+	defer func() {
+		// A failure before the caller takes ownership of the claim releases it here; the success path keeps it on the
+		// task for runPlanTaskStart to release after linking.
+		if err != nil && t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
+	if m.ID != t.Machine { // a flexible reroute inside the gate: every later step must use the machine it landed on
+		m, ok = s.machineByName(ctx, t.Machine)
+		if !ok {
+			return "", "", fmt.Errorf("unknown machine %q", t.Machine)
+		}
+		if err := s.leaderOnWorkMachine(t, m); err != nil {
+			return "", "", err
+		}
+		if !m.Reachable {
+			return "", "", machineOffline(m.Name)
+		}
+	}
 	// On the computer it landed on (a flexible task may have moved): a default it lacks gives way to one it has, a
 	// launcher the plan named that it lacks is refused before any tab opens (#2640). Before the health check below,
 	// which is then about the launcher that will run.

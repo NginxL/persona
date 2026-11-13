@@ -225,15 +225,15 @@ class AssistantDrawerShotsTest {
         rule.onAllNodesWithText("工作中").assertCountEquals(1)
     }
 
-    // #6230: one spinning activity mark. A lead whose own conversation is idle while the Agents under it work spins in
-    // every style; a lead with nothing running keeps its quiet row.
+    // #6230, #6626: one spinning activity mark. A lead whose own conversation is idle while something under it runs (the
+    // tree's `running`) spins in every style, with no 「在做 N」 beside it; a lead with nothing running keeps its quiet row.
     @Test fun anIdleLeadWithAgentsWorkingSpins() {
         var style by mutableStateOf(AppStyle.Glass)
         val idleLead = Session(machineId = "hub", sessionId = "l9", title = "1110 | 探索 | 基建", status = "idle",
             updatedAt = minutesAgo(8), lastText = "等待下一轮。")
         val groups = ConversationGroups(main, listOf(idleLead), recent,
             names = mapOf("l9" to "基建"),
-            counts = mapOf("l9" to LeaderCounts(working = 2, needsYou = 0)))
+            counts = mapOf("l9" to LeaderCounts(running = true, needsYou = 0)))
         rule.setContent {
             PersonaTheme(darkTheme = false, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
@@ -242,7 +242,7 @@ class AssistantDrawerShotsTest {
                 }
             }
         }
-        rule.onNodeWithText("在做 2").assertExists()
+        rule.onNodeWithText("在做", substring = true).assertDoesNotExist()
         for (s in AppStyle.entries) {
             style = s
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
@@ -262,7 +262,7 @@ class AssistantDrawerShotsTest {
         val leadB = Session(machineId = "hub", sessionId = "l2", title = "1110 | 探索 | 支付", status = "idle", updatedAt = minutesAgo(20))
         val groups = ConversationGroups(main, listOf(leadA, leadB), recent,
             names = mapOf("l1" to "增长", "l2" to "支付"),
-            counts = mapOf("l1" to LeaderCounts(working = 2, needsYou = 1), "l2" to LeaderCounts(needsYou = 3)))
+            counts = mapOf("l1" to LeaderCounts(running = true, needsYou = 1), "l2" to LeaderCounts(needsYou = 3)))
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
@@ -273,8 +273,10 @@ class AssistantDrawerShotsTest {
         }
         rule.onNodeWithText("常驻").assertExists()
         rule.onNodeWithText("增长").assertExists()
-        rule.onNodeWithText("在做 2 · 等你 1").assertExists()
+        // what waits on you in words, never 「在做 N」 (#6626: what runs is the spinner)
+        rule.onNodeWithText("等你 1").assertExists()
         rule.onNodeWithText("等你 3").assertExists()
+        rule.onNodeWithText("在做", substring = true).assertDoesNotExist()
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()

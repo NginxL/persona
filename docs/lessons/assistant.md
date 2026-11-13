@@ -459,3 +459,24 @@ check, such as a verbatim quote from the chosen candidate.
 - A legacy `bot` Inbox kind is not enough to reject a human Lark conversation (#5680). Check its explicit sender
   identity, keep forwarded notification text as content, and apply one eligibility predicate before both URL routing
   and the model judge. Correct old excluded links through the bounded maintenance write, with rollback on save failure.
+
+- A streamed reply is only as smooth as its slowest stage, and the model's output is bursty (#6651): Claude's
+  `text_delta`s come a few dozen characters at a time about every 350 ms, up to 2 s apart. A leading-edge throttle
+  ("send if 80 ms passed since the last send") holds back the rest of every burst until the next one, and a client that
+  draws whatever arrived shows one jump per burst however fast it renders. Throttles that drop in-between values need a
+  trailing send; a typewriter effect has to pace by the stream's average rate, not the last burst, or it finishes each
+  burst early and waits. Measure on recorded streams (`scripts/mock/stream_traces/`, `/mock/say?trace=…`) and report the
+  gaps between visible text changes and the added lag, not only frames: an evenly timed mock stream hides all of this.
+
+## "Busy" must mean a request is out, and one probe must not strand the rest (#6698)
+
+A report said Inbox triage stayed "the model is at its concurrency limit" forever after a short upstream outage,
+with nothing in flight, and suspected a slot released only on success. The gate (`server/internal/ai/limit.go`)
+pairs every `admit` with a `done` and no error path skips it (`TestEveryExitGivesItsSlotBack`); what kept the
+status wrong was how a pause ended. One request went out to find out and every other was put off at once, until
+that request's whole streamed answer had been read: a round right after a pause sorted one item and reported the
+rest as busy until a later round, and a 404 or 5xx during the outage showed as busy too, because only the probe
+reached the upstream. When one request finds something out for many, let the others wait for the finding (bounded
+by their own deadlines) and act on the first signal that settles it (the 200), not on the end of the work. Before
+fixing a suspected leak, count: a stress test over every exit path with the counter read afterwards settles it
+faster than reading the code again.

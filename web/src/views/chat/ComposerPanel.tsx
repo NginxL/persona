@@ -30,8 +30,8 @@ export interface MentionSource {
   files: () => string[];
   /** Offer the hub's workspaces (GET /workspaces): the Persona assistant, which works on any computer. */
   workspaces?: boolean;
-  /** Assistant-only catalog. The environment key invalidates rows when the effective launcher/profile changes. */
-  skills?: { manager: string; session?: string; launcher?: string; environment: string };
+  /** Execution catalog. Ordinary Agents use session-owned facts; environment changes invalidate visible rows. */
+  skills?: { manager: string; session?: string; launcher?: string; environment: string; agent?: boolean };
 }
 
 export type MentionRow =

@@ -87,13 +87,15 @@ private fun ASTNode.inLink(): Boolean {
 }
 
 /** Inline code a tap copies (#2984), drawn as code (the body's color on its well), not as a link; inside a link (a path
- *  that opens) it stays the link's. */
-internal fun copyingCode(style: SpanStyle, copy: (String) -> Unit): MarkdownAnnotator = markdownAnnotator { content, child ->
+ *  that opens) it stays the link's. With no [copy] it is only drawn, the same: the words of a message selected in place
+ *  take the tap (#4210). */
+internal fun copyingCode(style: SpanStyle, copy: ((String) -> Unit)?): MarkdownAnnotator = markdownAnnotator { content, child ->
     if (child.type != MarkdownElementTypes.CODE_SPAN || child.inLink()) return@markdownAnnotator false
     val words = codeSpanWords(child.getTextInNode(content).toString())
     // the style on the words themselves too: a link's styles draw no background. A thin space each side, as the
     // library pads its own inline code.
-    withLink(LinkAnnotation.Clickable("copy-code", TextLinkStyles(style)) { copy(words) }) {
+    if (copy == null) withStyle(style) { append("\u2009$words\u2009") }
+    else withLink(LinkAnnotation.Clickable("copy-code", TextLinkStyles(style)) { copy(words) }) {
         withStyle(style) { append("\u2009$words\u2009") }
     }
     true

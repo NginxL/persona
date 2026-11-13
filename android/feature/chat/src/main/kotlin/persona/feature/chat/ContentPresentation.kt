@@ -10,6 +10,7 @@ import persona.core.domain.lines.ChatLine
 import persona.core.domain.ComputerSteps
 import persona.core.domain.MessageContext
 import persona.core.domain.decodeXmlEntities
+import persona.core.domain.isInterjectContext
 import persona.core.domain.lines.WorkItem
 import persona.core.domain.messageText
 import persona.core.domain.parseContexts
@@ -65,7 +66,10 @@ internal data class MessageModel(
 }
 
 internal fun messageModel(raw: String, from: String? = null, user: Boolean = false): MessageModel {
-    val (contexts, written) = parseContexts(raw)
+    // The hub's interject note is model instructions, never a quote chip in the owner's bubble (#6595); parseContexts
+    // already strips the block from the written text, so only drop it from the rendered contexts.
+    val (parsedContexts, written) = parseContexts(raw)
+    val contexts = parsedContexts.filterNot(MessageContext::isInterjectContext)
     // Only the exact tag the hub ends a card's answer with, only on the user's own message.
     val card = if (user) persona.core.domain.views.PersonaActionTag.split(written) else null
     val (attached, text) = parseAttachedFiles(card?.first ?: written)

@@ -2,6 +2,7 @@ package persona.android.navigation
 
 import androidx.navigation3.runtime.NavKey
 import persona.core.navigation.*
+import persona.feature.inbox.InboxEventRoute
 import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.MailRoute
@@ -16,7 +17,18 @@ class ShellPanesTest {
         AppTab.Persona to mutableListOf(AssistantRoute), AppTab.Agents to mutableListOf(AgentsRoute),
     )
     private var selected = AppTab.Persona
-    private val navigator = AppNavigator(stacks, { selected }, { selected = it })
+    private val navigator = AppNavigator(stacks, { selected }, { selected = it }, chatTab = { route ->
+        route.kind?.let { if (it == ConversationKind.Assistant) AppTab.Persona else AppTab.Agents }
+    }, openAssistant = { chat, select ->
+        assistantHomeTarget(chat, embeddedAssistant = true) { null }?.let {
+            if (select) {
+                val stack = stacks.getValue(AppTab.Persona)
+                while (stack.size > 1) stack.removeAt(stack.lastIndex)
+                selected = AppTab.Persona
+            }
+            true
+        } ?: false
+    })
     private fun marked(tab: AppTab) = detailOf(stacks.getValue(tab))
 
     @Test fun deepLinkedSettingsPagesAreMarkedInTheList() {
@@ -48,6 +60,16 @@ class ShellPanesTest {
         assertEquals(AppTab.Agents, selected)
         assertEquals(chat, marked(AppTab.Agents))
         assertEquals(SettingsPageRoute(SettingsPage.Notifications), marked(AppTab.Persona))
+    }
+
+    @Test fun anInboxConversationIsTheDetailUntilBackReturnsToItsEvent() {
+        val event = InboxEventRoute("item")
+        val chat = ChatRoute("machine", "assistant", ConversationKind.Assistant, RouteSource.InboxItem("item"))
+        navigator.navigate(event)
+        navigator.navigate(chat)
+        assertEquals(chat, marked(AppTab.Persona))
+        navigator.back()
+        assertEquals(event, marked(AppTab.Persona))
     }
 
     @Test fun pagesOpenedUnderAnotherKeyMarkTheirSettingsRow() {

@@ -30,6 +30,24 @@ describe("answerCard", () => {
     expect(apiOp).not.toHaveBeenCalled();
   });
 
+  it("a stopped Agent's work card sends only local defer/dismiss answers", async () => {
+    session = { machine_id: "m", session_id: "a", status: "offline", capabilities: { read: true, terminal: true, approve: false, send: false } } as Session;
+    const work: Interaction = {
+      ...ix, kind: "question", tool_name: "persona_triage",
+      questions: [{ question: "What next?", options: [{ label: "Continue" }, { label: "Leave it", action: "defer" }] }],
+    };
+    for (const answer of ["Continue", "A custom reply"]) {
+      expect(await answerCard(work, { answers: { "What next?": answer } })).toEqual({ ok: false, error: "此会话不允许审批" });
+    }
+    expect(await answerCard({ ...ix, tool_name: "persona_triage" }, { dismiss: true })).toEqual({ ok: false, error: "此会话不允许审批" }); // a permission card is unchanged, even with the same tool name
+    expect(apiOp).not.toHaveBeenCalled();
+
+    apiOp.mockResolvedValue({});
+    expect(await answerCard(work, { answers: { "What next?": "Leave it" } })).toEqual({ ok: true, already: false });
+    expect(await answerCard(work, { dismiss: true })).toEqual({ ok: true, already: false });
+    expect(apiOp).toHaveBeenCalledTimes(2);
+  });
+
   it("答上：发到卡片的 resolve，卡片记下答了什么", async () => {
     apiOp.mockResolvedValue({});
     expect(await answerCard(ix, denyBody())).toEqual({ ok: true, already: false });

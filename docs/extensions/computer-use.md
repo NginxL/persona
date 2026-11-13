@@ -435,7 +435,44 @@ displays to offer; on a narrow screen the button keeps only its icon). The rules
   - VNC (`ScreenEntry`) on the machine page and in tool details opens the same thing (PiP or full page).
 - **Readable tools** (#1323, `ComputerSteps`): tool details show a step summary first (consecutive clicks become "tap AC → 6 → × → 7 → =", Calculator key names become symbols), then screenshot and VNC. Original JSON is tucked into Raw Input, visible only when expanded. Titles use machine display names (MacBook), resolving by id or name (same as hub), falling back to the tool's text if unknown. Truncate at the end if it doesn't fit (file paths still truncate in the middle).
 
-## Locking, preventing sleep and per-App approval (plan, #1507, decided)
+### Live screen video (#3954)
+
+A hardware video channel next to RFB, so the phone shows a Mac's screen at a fraction of today's bitrate for the same
+picture (from #3067's frames: 0.27–0.31 Mbit/s as HEVC at SSIM ≥ 0.98, against 2.1–2.6 as ZRLE). RFB stays open for
+input, the clipboard and as the fallback; only the picture moves to video. Off by default behind DEBUG
+`-showScreenVideo NO` until the PoC passes its gates; the web, the Mac app and Android keep RFB.
+
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `PersonaScreenKit`): a Swift helper app inside
+  Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
+  with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
+  Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
+  (`open -g -n -b <id>.screen --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
+  per stream, whose first line is the token. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits.
+- **Node** (`screen.dial {id, pair, keep_awake}`): starts the helper and joins its socket to the stream, or refuses
+  with `video_unavailable` (no helper or no permission), `not_signed_in` (no RFB stream with this `pair` past Screen
+  Sharing's SecurityResult) or `busy` (two streams already open). It binds the video to the signed-in 5900 stream
+  carrying the same `pair` and follows that handshake's security types (30, 2, 1) to confirm the login; video ends when
+  that RFB stream closes. `keep_awake` works as it does for 5900 (`node/awake.go`).
+- **Hub** (`GET …/screen/video/connect?pair=…`): a binary WebSocket with the same checks as `…/ports/5900/connect`
+  (full device, `cua` or `ego` on), counted against the same 64 streams per machine. It calls `screen.dial` and relays
+  the bytes without parsing them.
+- **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
+  `frame`, `heartbeat`, `paused`, `resumed`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
+  are skipped by length, so either side may add more. `PersonaScreenKit` is the codec, shared with the app's client.
+- **Adaptation**: the phone reports when each frame arrived; the helper turns that into a queueing delay and cuts the
+  bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The phone caps it: 12 Mbit/s
+  on Wi-Fi, 4 on cellular, 1.5 in Low Data Mode; 15 fps in Low Power Mode or a serious thermal state.
+- **Switching**: RFB signs in first and shows until the first video frame decodes; the phone then stops asking RFB for
+  updates (Screen Sharing encodes nothing meanwhile). It returns to RFB within about a second on any of: the stream
+  closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
+  doubling to 5 min, and at once when the helper reports the Mac unlocked (`resumed`).
+- **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
+  the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
+  System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
+  binding); no password travels anywhere new. `computer.status` / `browser.status` gain `screen_video {version, codecs,
+  permission}` (absent from an old node or one without the helper, so an old app keeps RFB).
+
+
 
 Reference: Computer Use settings in the Codex desktop app. The main session read only the UI strings in its package, took no code, and found:
 - Locked use;

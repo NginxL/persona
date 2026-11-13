@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -97,7 +100,7 @@ class InboxConversationSwipeTest {
         override suspend fun downloadFile(file: LarkPart.File): String = error("not used")
     }
 
-    private fun screen(inbox: FakeInbox, feedback: FeedbackGate? = null, dark: Boolean = false) {
+    private fun screen(inbox: FakeInbox, feedback: FeedbackGate? = null, dark: Boolean = false, haptic: HapticFeedback? = null) {
         inbox.conversationInbox.value = InboxConversations(inbox, "synthetic-pairing", owner, ReplyComposers(inbox, owner))
         rule.setContent { PersonaTheme(reduceMotion = true, darkTheme = dark) {
             val snackbar = remember { SnackbarHostState() }
@@ -105,7 +108,7 @@ class InboxConversationSwipeTest {
                 snackbar.currentSnackbarData?.dismiss()
                 launch { snackbar.showSnackbar(notice.message, actionLabel = notice.action?.label) }
             } }
-            CompositionLocalProvider(LocalAppFeedback provides feedback) {
+            CompositionLocalProvider(LocalAppFeedback provides feedback, LocalHapticFeedback provides (haptic ?: LocalHapticFeedback.current)) {
                 Box(Modifier.testTag("inbox-shot").background(PersonaTheme.palette.background)) {
                     InboxScreen(inbox, navigator)
                     SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter))
@@ -115,8 +118,14 @@ class InboxConversationSwipeTest {
         rule.waitForIdle()
     }
     private fun row() = rule.onNode(hasText("Synthetic conversation") and hasClickAction())
-    private fun swipe(right: Boolean) {
-        row().performTouchInput { if (right) swipeRight() else swipeLeft() }
+    /** The row's one swipe, from the end (iOS's trailing swipe): Done, or Move Back on a done conversation. */
+    private fun swipeDone() {
+        row().performTouchInput { swipeLeft() }
+        rule.waitForIdle()
+    }
+    /** Towards the start, where the row has no action any more. */
+    private fun swipeTowardsTheStart() {
+        row().performTouchInput { swipeRight() }
         rule.waitForIdle()
     }
 
@@ -133,7 +142,7 @@ class InboxConversationSwipeTest {
         val notices = mutableListOf<String>()
         owner.launch(start = CoroutineStart.UNDISPATCHED) { feedback.notices.collect { notices += it.message } }
         screen(inbox, feedback, dark)
-        repeat(3) { swipe(true) }
+        repeat(3) { swipeDone() }
         screenshot("success-${if (dark) "dark" else "light"}")
         println("SWIPE_UI_METRIC gestures=3 writes=${inbox.calls.size} notices=${notices.size}")
         rule.runOnIdle { assertEquals(3, inbox.calls.size); assertEquals("Successful swipes stay silent", 0, notices.size) }
@@ -148,7 +157,7 @@ class InboxConversationSwipeTest {
         val notices = mutableListOf<String>()
         owner.launch(start = CoroutineStart.UNDISPATCHED) { feedback.notices.collect { notices += it.message } }
         screen(inbox, feedback)
-        repeat(3) { swipe(true) }
+        repeat(3) { swipeDone() }
         screenshot("failure-retry-light")
         rule.onNodeWithText("previous state is back", substring = true).assertExists()
         rule.runOnIdle { assertEquals(3, inbox.calls.size); assertEquals(0, notices.size) }
@@ -167,7 +176,7 @@ class InboxConversationSwipeTest {
     @Test fun completingUnreadConversationLeavesOpenSectionsAndSurvivesRefresh() {
         val inbox = FakeInbox(listOf(record("a").copy(read = false), record("b").copy(read = false)))
         screen(inbox)
-        swipe(true)
+        swipeDone()
         rule.runOnIdle {
             assertTrue(inbox.snapshot.value.records.all { it.item.isDone && !it.read })
             assertEquals(InboxConversationSection.Done, inbox.conversationInbox.value!!.state.value.rows.single().section)
@@ -188,7 +197,7 @@ class InboxConversationSwipeTest {
         val inbox = FakeInbox(listOf(record("a").copy(read = false)))
         inbox.response = { _, _ -> throw IllegalStateException("Synthetic write failure") }
         screen(inbox)
-        swipe(true)
+        swipeDone()
         row().assertExists()
         rule.onNodeWithText("previous state is back", substring = true).assertExists()
         rule.runOnIdle {
@@ -279,7 +288,7 @@ class InboxConversationSwipeTest {
     @Test fun rightSwipeFilesEveryDisplayedVersionThenReopensWithTheSameSemantics() {
         val inbox = FakeInbox(listOf(record("a"), record("b")))
         screen(inbox)
-        swipe(true)
+        swipeDone()
         rule.runOnIdle {
             assertEquals(1, inbox.calls.size)
             assertEquals(setOf(InboxDoneTarget("a", "version-a"), InboxDoneTarget("b", "version-b")), inbox.calls[0].first.toSet())
@@ -287,7 +296,7 @@ class InboxConversationSwipeTest {
             assertTrue(inbox.snapshot.value.records.all { it.item.isDone })
             assertEquals(InboxConversationSection.Done, inbox.conversationInbox.value!!.state.value.rows.single().section)
         }
-        swipe(true)
+        swipeDone()
         rule.runOnIdle {
             assertEquals(InboxBulkAction.Reopen, inbox.calls.last().second)
             assertTrue(inbox.snapshot.value.records.none { it.item.isDone })
@@ -295,11 +304,27 @@ class InboxConversationSwipeTest {
         }
     }
 
+    // One row is one item to the person swiping it, though its conversation holds two records: a light tap, as iOS's
+    // single-item setDone, whichever way it goes. (Many at once, the bulk bar's Mark done, still buzz success.)
+    @Test fun swipingOneConversationRowIsATapBothWays() {
+        val played = mutableListOf<HapticFeedbackType>()
+        val inbox = FakeInbox(listOf(record("a"), record("b")))
+        screen(inbox, haptic = object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) { played += hapticFeedbackType }
+        })
+        swipeDone()
+        swipeDone()
+        rule.runOnIdle {
+            assertEquals(2, inbox.calls.size)
+            assertEquals(listOf(Haptic.Tap.feedbackType(), Haptic.Tap.feedbackType()), played)
+        }
+    }
+
     @Test fun filteredSwipeCannotFileHiddenItemsInTheSameConversation() {
         val inbox = FakeInbox(listOf(record("a").let { it.copy(item = it.item.copy(preview = "Visible match")) },
             record("b").let { it.copy(item = it.item.copy(preview = "Hidden event")) }), query = "Visible")
         screen(inbox)
-        swipe(true)
+        swipeDone()
         rule.runOnIdle {
             assertEquals(listOf(InboxDoneTarget("a", "version-a")), inbox.calls.single().first)
             assertFalse(inbox.snapshot.value.records.single { it.item.id == "b" }.item.isDone)
@@ -309,7 +334,7 @@ class InboxConversationSwipeTest {
     @Test fun filingAMixedConversationDoesNotFileAlreadyCompletedEventsAgain() {
         val inbox = FakeInbox(listOf(record("a"), record("b").let { it.copy(item = it.item.copy(doneAt = "2026-11-08T00:00:00Z")) }))
         screen(inbox)
-        swipe(true)
+        swipeDone()
         rule.runOnIdle { assertEquals(listOf(InboxDoneTarget("a", "version-a")), inbox.calls.single().first) }
     }
 
@@ -344,31 +369,54 @@ class InboxConversationSwipeTest {
             InboxBulkResult(changed = listOf("a"), failed = listOf("b"))
         }
         screen(inbox)
-        swipe(true)
+        swipeDone()
         rule.onNodeWithText("previous state is back", substring = true).assertExists()
         rule.runOnIdle {
             assertEquals(InboxConversationSection.ReadPending, inbox.conversationInbox.value!!.state.value.rows.single().section)
         }
-        swipe(true)
+        swipeDone()
         rule.runOnIdle {
             assertEquals(2, inbox.calls.size)
             assertEquals(listOf(InboxDoneTarget("b", "version-b")), inbox.calls.last().first)
         }
     }
 
-    @Test fun leftSwipeOpensTheExistingConsentSheetWithoutExecutingOrFiling() {
-        val inbox = FakeInbox(listOf(record("a")))
-        screen(inbox)
-        swipe(false)
-        rule.onNodeWithText("What should it do").assertExists()
-        rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
+    /**
+     * The hand-off is not a swipe: a long-press starts a selection of this row (#2576) and the bar's More holds what the
+     * long-press offered before (Hand to AI, mutes, rules); a row that cannot be picked has the sheet itself.
+     */
+    private fun handOffFromTheLongPress() {
+        row().performTouchInput { longClick() }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("More").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Hand to AI").performClick()
+        rule.waitForIdle()
     }
 
-    @Test fun filteredLeftSwipeUsesTheVisibleItemOnlyAfterConsentAndKeepsTheRetryOperationId() {
+    @Test fun noSwipeHandsTheConversationOffAndTheLongPressStillDoes() {
+        val inbox = FakeInbox(listOf(record("a")))
+        screen(inbox)
+        swipeTowardsTheStart()
+        rule.onNodeWithText("What should it do").assertDoesNotExist()
+        rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
+        // The swipe it has files, never hands off.
+        swipeDone()
+        rule.onNodeWithText("What should it do").assertDoesNotExist()
+        rule.runOnIdle { assertEquals(1, inbox.calls.size); assertTrue(inbox.handoffs.isEmpty()) }
+        // Reopened by the same swipe, then the long-press's Hand to AI opens the consent sheet, filing nothing.
+        swipeDone()
+        val filings = inbox.calls.size
+        handOffFromTheLongPress()
+        rule.onNodeWithText("What should it do").assertExists()
+        rule.runOnIdle { assertEquals(filings, inbox.calls.size); assertTrue(opened.isEmpty()) }
+    }
+
+    @Test fun theLongPressHandOffUsesTheVisibleItemOnlyAfterConsentAndKeepsTheRetryOperationId() {
         val inbox = FakeInbox(listOf(record("a").let { it.copy(item = it.item.copy(preview = "Hidden event")) },
             record("b").let { it.copy(item = it.item.copy(preview = "Visible match")) }), query = "Visible")
         screen(inbox)
-        swipe(false)
+        handOffFromTheLongPress()
         rule.onNodeWithText("What should it do").assertExists()
         rule.runOnIdle { assertTrue(inbox.handoffs.isEmpty()); assertTrue(inbox.calls.isEmpty()) }
         rule.onNodeWithText("Send").performClick()
@@ -385,14 +433,14 @@ class InboxConversationSwipeTest {
         }
     }
 
-    @Test fun pendingBlocksBothDirectionsAndAFailureRestoresTheRowAndReportsIt() {
+    @Test fun pendingBlocksTheSwipeAndAFailureRestoresTheRowAndReportsIt() {
         val inbox = FakeInbox(listOf(record("a")))
         val result = CompletableDeferred<InboxBulkResult>()
         inbox.response = { _, _ -> result.await() }
         screen(inbox)
-        swipe(true)
-        swipe(true)
-        swipe(false)
+        swipeDone()
+        swipeDone()
+        swipeTowardsTheStart()
         rule.runOnIdle { assertEquals(1, inbox.calls.size); assertTrue("Pending swipes must not navigate", opened.isEmpty()) }
         rule.runOnIdle { result.completeExceptionally(IllegalStateException("Synthetic failure")) }
         rule.waitForIdle()
@@ -400,11 +448,11 @@ class InboxConversationSwipeTest {
         row().assertExists()
         rule.runOnIdle { assertFalse(inbox.snapshot.value.records.single().item.isDone) }
         inbox.response = { items, _ -> InboxBulkResult(failed = items.map { it.id }) }
-        swipe(true)
+        swipeDone()
         rule.onNodeWithText("previous state is back", substring = true).assertExists()
         rule.runOnIdle { assertEquals(2, inbox.calls.size) }
         inbox.response = { _, _ -> throw UnsupportedOperationException("Synthetic unsupported operation") }
-        swipe(true)
+        swipeDone()
         rule.onNodeWithText("previous state is back", substring = true).assertExists()
         rule.runOnIdle { assertEquals(3, inbox.calls.size); assertFalse(inbox.snapshot.value.records.single().item.isDone) }
 
@@ -438,29 +486,30 @@ class InboxConversationSwipeTest {
         rule.waitForIdle()
     }
 
-    @Test fun slowDragsHonorTheHistoricalThresholdAndCancelSpringsBackInBothDirections() {
+    @Test fun slowDragsHonorTheHistoricalThresholdAndCancelSpringsBackAndTheStartSideDoesNothing() {
         val inbox = FakeInbox(listOf(record("a")))
         inbox.response = { items, _ -> InboxBulkResult(failed = items.map { it.id }) }
         screen(inbox)
         val origin = row().fetchSemanticsNode().boundsInRoot.left
-        for (direction in listOf(1f, -1f)) {
-            drag(direction * .10f) // 40 dp: below the shared component's 56 dp threshold.
-            rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
-            rule.onNodeWithText("What should it do").assertDoesNotExist()
-            assertEquals(origin, row().fetchSemanticsNode().boundsInRoot.left, 1f)
-            drag(direction * .40f, release = false)
+        // Towards the start there is no action: the row does not even follow the finger.
+        for (fraction in listOf(.10f, .30f, .40f)) {
+            drag(fraction)
             rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
             rule.onNodeWithText("What should it do").assertDoesNotExist()
             assertEquals(origin, row().fetchSemanticsNode().boundsInRoot.left, 1f)
         }
-        drag(.30f) // 120 dp: over the threshold, including touch slop.
+        drag(-.10f) // 40 dp: below the shared component's 56 dp threshold.
+        rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
+        assertEquals(origin, row().fetchSemanticsNode().boundsInRoot.left, 1f)
+        drag(-.40f, release = false)
+        rule.runOnIdle { assertTrue(inbox.calls.isEmpty()); assertTrue(opened.isEmpty()) }
+        assertEquals(origin, row().fetchSemanticsNode().boundsInRoot.left, 1f)
+        drag(-.30f) // 120 dp: over the threshold, including touch slop.
         rule.runOnIdle { assertEquals(1, inbox.calls.size) }
         assertEquals(origin, row().fetchSemanticsNode().boundsInRoot.left, 1f)
-        drag(-.30f)
-        rule.onNodeWithText("What should it do").assertExists()
     }
 
-    @Test fun emptyRowsHaveNoGestureOrActionAndEveryStyleDrawsBothDirections() {
+    @Test fun emptyRowsHaveNoGestureOrActionAndEveryStyleDrawsTheEndSwipe() {
         var records by mutableStateOf(emptyList<InboxRecord>())
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
@@ -479,16 +528,18 @@ class InboxConversationSwipeTest {
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             rule.waitForIdle()
-            for (right in listOf(true, false)) {
+            // From the end the row opens Done; towards the start it opens nothing, and nothing is drawn behind it.
+            for (towardsTheEnd in listOf(true, false)) {
                 row().performTouchInput {
                     down(center)
-                    moveTo(center + androidx.compose.ui.geometry.Offset(if (right) width * .08f else -width * .08f, 0f), 100)
-                    moveTo(center + androidx.compose.ui.geometry.Offset(if (right) width * .35f else -width * .35f, 0f), 500)
+                    moveTo(center + androidx.compose.ui.geometry.Offset(if (towardsTheEnd) -width * .08f else width * .08f, 0f), 100)
+                    moveTo(center + androidx.compose.ui.geometry.Offset(if (towardsTheEnd) -width * .35f else width * .35f, 0f), 500)
                 }
                 rule.waitForIdle()
+                if (towardsTheEnd) rule.onNodeWithText("Done").assertExists() else rule.onNodeWithText("Done").assertDoesNotExist()
                 val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
                 val dir = File("build/reports/tests/inbox-swipe-shots").also { it.mkdirs() }
-                File(dir, "${s.name}-${if (d) "dark" else "light"}-${if (right) "right" else "left"}.png").outputStream().use {
+                File(dir, "${s.name}-${if (d) "dark" else "light"}-${if (towardsTheEnd) "end" else "start"}.png").outputStream().use {
                     assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
                 }
                 row().performTouchInput { cancel() }

@@ -149,7 +149,9 @@ nonisolated final class LiftScrolled {
         skip = 1
         #if os(macOS)
         let t = Tick(self)
-        let l = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in MainActor.assumeIsolated { t.fire(timer) } }
+        // The timer is not handed into the main-actor closure (Swift 6 reads that as a race): the tick keeps it weakly.
+        let l = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { t.fire() } }
+        t.timer = l
         RunLoop.main.add(l, forMode: .common)
         #else
         let l = CADisplayLink(target: Tick(self), selector: #selector(Tick.tick))
@@ -180,8 +182,11 @@ nonisolated final class LiftScrolled {
         init(_ frames: LiftFrames) { self.frames = frames }
 
         #if os(macOS)
-        func fire(_ timer: Timer) {
-            guard let frames else { return timer.invalidate() }
+        /// The timer firing it, which the run loop keeps.
+        weak var timer: Timer?
+
+        func fire() {
+            guard let frames else { timer?.invalidate(); return }
             MainActor.assumeIsolated { frames.tick() }
         }
         #else

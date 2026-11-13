@@ -12,6 +12,7 @@ let host: HTMLDivElement | null = null;
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal("CSS", { escape: (value: string) => value });
   window.matchMedia = ((query: string) => ({
     // NARROW is a max-width query: a phone matches it, a desktop does not
     matches: narrow && query.includes("max-width"),
@@ -31,6 +32,7 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
+  vi.unstubAllGlobals();
 });
 
 function open(onClose: () => void) {
@@ -65,5 +67,22 @@ describe("menu and Back", () => {
     const before = history.length;
     open(vi.fn());
     expect(history.length).toBe(before);
+  });
+
+  it("closes for a window-target pointer event, but not for its own anchor or menu", () => {
+    narrow = false;
+    const onClose = vi.fn();
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+    root = createRoot(anchor);
+    act(() => root!.render(<Menu anchor={anchor} onClose={onClose} items={[{ key: "a", label: "文件", onSelect: () => {} }]} />));
+    act(() => anchor.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => document.querySelector('[role="menuitem"]')!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(onClose).not.toHaveBeenCalled();
+    // window is an EventTarget but not a DOM Node: never pass it to Node.contains (the Inbox history test does this).
+    act(() => window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    anchor.remove();
   });
 });
