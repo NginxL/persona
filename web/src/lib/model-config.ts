@@ -9,6 +9,9 @@ export interface ModelBinding {
   effort?: string;
   /** Main chat only (#2455): how it runs Claude, "cli" or "agentsdk"; absent is the CLI. */
   runtime?: string;
+  /** Main chat only (#4633): the Claude profile its new conversations start in, "legacy" (this computer's own); absent
+   *  is Persona's own profile. */
+  config_dir?: string;
 }
 
 export interface ModelProvider {
@@ -46,6 +49,8 @@ export interface ModelPurpose {
   provider_ids?: string[];
   /** Main chat only: the runtimes it can run on (an older hub: none, no "Runtime" row). */
   runtimes?: string[];
+  /** Main chat only (#4633): the profiles its new conversations can start in (an older hub: none, no row). */
+  config_dirs?: string[];
 }
 
 export interface ModelConfigurationBody {
@@ -62,6 +67,8 @@ export interface ModelDraft {
   effort: string;
   /** "" when the purpose has no runtime choice. */
   runtime: string;
+  /** Set only when the purpose offers a profile choice (#4633): "private" or "legacy". */
+  config_dir?: string;
 }
 
 /** The runtimes this client can name, in the order "Runtime" offers them. */

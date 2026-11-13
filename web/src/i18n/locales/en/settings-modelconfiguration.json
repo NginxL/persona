@@ -59,5 +59,9 @@
   "save_note_plugin": "Saving only changes the configuration. It doesn't send a model request or interrupt running tasks. The voice model is Persona's default choice and doesn't change the extension's own provider or credentials.",
   "runtime": "Runtime",
   "runtime_hint": "The Agent SDK needs Node 22+ on that computer; without it the CLI is used",
+  "config_dir": "New chats' Claude profile",
+  "config_dir_private": "Persona's own",
+  "config_dir_legacy": "This computer's",
+  "config_dir_hint": "“This computer's” starts new chats with the sign-in and settings claude uses there, a gateway in ~/.claude included. Chats already started keep theirs.",
   "supervise_description": "Follows up and reviews the tasks Persona hands out, so the main chat stays free to answer you. It can run on a cheaper or a stronger model than the main chat."
 }

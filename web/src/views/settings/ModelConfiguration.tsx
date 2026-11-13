@@ -5,7 +5,7 @@ import {
   providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel,
   type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
-import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, providersFor, purposeDescription, purposeGroups, purposeLaunch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter } from "../../lib/model-config-execution";
+import { agentsOverride, catalogLists, chooseProvider, configDirChoices, configDirLabel, draftFor, executionForm, modelConfiguration, providersFor, purposeDescription, purposeGroups, purposeLaunch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter } from "../../lib/model-config-execution";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
@@ -209,6 +209,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
   const effectiveAgent = providerAgent(effectiveProvider, p?.effective?.provider);
   const chosenAgent = (launcherList.provider === listProvider && launcherList.list?.agent) || providerAgent(chosen, draft.provider || p?.effective?.provider);
   const runtimes = p ? runtimeChoices(p, chosenAgent) : [];
+  const configDirs = p ? configDirChoices(p, chosenAgent) : [];
   const previewForm = p ? executionForm({ ...p, effective: { ...p.effective, provider: draft.provider || p.effective?.provider, runtime: draft.runtime || p.effective?.runtime } }, data?.providers, machines) : undefined;
   const listMachine = machines.find((m) => m.id === launcherList.machine)?.name ?? launcherList.machine;
   const save = async (restore = false) => {
@@ -216,7 +217,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
     setBusy(true);
     setError("");
     try {
-      const r = await saveModelPurpose(p, restore ? { provider: "", model: "", effort: "", runtime: draft.runtime } : draft, manager);
+      const r = await saveModelPurpose(p, restore ? { provider: "", model: "", effort: "", runtime: draft.runtime, config_dir: draft.config_dir } : draft, manager);
       if (!alive.current) return;
       setData(r);
       setDraft(draftFor(r.purpose));
@@ -248,6 +249,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
           <Row label={t("settings-modelconfiguration.provider")} mono><span className="max-w-[220px] truncate">{providerName(p.effective?.provider, data?.providers) ?? t("settings-modelconfiguration.not_configured")}</span></Row>
           <Row label={t("settings-modelconfiguration.model")} mono><span className="max-w-[220px] truncate">{p.effective?.model || t("settings-modelconfiguration.provider_default")}</span></Row>
           {runtimes.length > 0 && <Row label={t("settings-modelconfiguration.runtime")}><span>{runtimeLabel(p.effective?.runtime, effectiveAgent)}</span></Row>}
+          {configDirChoices(p, effectiveAgent).length > 0 && <Row label={t("settings-modelconfiguration.config_dir")}><span>{configDirLabel(p.effective?.config_dir)}</span></Row>}
           {p.status && <Row label={t("settings-modelconfiguration.status")}><Pill>{p.status}</Pill></Row>}
         </Group>
         {supportsField(p, "provider") && <label className="block">
@@ -308,6 +310,12 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
           <Segmented label={t("settings-modelconfiguration.runtime")} value={chosenAgent === "claude" ? draft.runtime : "cli"} options={runtimes.map((r) => ({ v: r.id, label: r.label }))}
             onChange={(runtime) => { if (!busy && chosenAgent === "claude") setDraft((d) => ({ ...d, runtime })); }} />
           {chosenAgent === "claude" && <span className="mt-1 block text-[11px] text-ink-3">{t("settings-modelconfiguration.runtime_hint")}</span>}
+        </div>}
+        {configDirs.length > 0 && <div className="block">
+          <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.config_dir")}</span>
+          <Segmented label={t("settings-modelconfiguration.config_dir")} value={draft.config_dir ?? "private"} options={configDirs.map((c) => ({ v: c.id, label: c.label }))}
+            onChange={(config_dir) => { if (!busy) setDraft((d) => ({ ...d, config_dir })); }} />
+          <span className="mt-1 block text-[11px] text-ink-3">{t("settings-modelconfiguration.config_dir_hint")}</span>
         </div>}
         <p className="text-[11.5px] leading-relaxed text-ink-3">{p.kind === "plugin" ? t("settings-modelconfiguration.save_note_plugin") : t("settings-modelconfiguration.save_note")}</p>
       </div>}
