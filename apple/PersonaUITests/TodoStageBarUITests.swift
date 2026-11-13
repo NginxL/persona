@@ -4,8 +4,8 @@ import XCTest
 /// MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 (PERSONA_MOCK_HUB): on the chat's task card (the widget task, on Develop) and on
 /// the detail page of the to-do 「天气 App 发 1.3 版」 (on Develop), in zh-Hans, English and Japanese, light and dark. At
 /// both sizes the bar is one element that says the stage and lies within the window: the interface stops growing at
-/// xxxLarge (#6813), so at the largest size it is drawn as at xxxLarge, not in its accessibility layout of six dots of
-/// their own (#5892; #6448 removes that layout). `TEST_RUNNER_PERSONA_SHOTS=<dir>` keeps the screenshots
+/// xxxLarge (#6813), so at the largest size it is drawn as at xxxLarge; its accessibility layout of six dots of their
+/// own (#5892) is gone (#7083). `TEST_RUNNER_PERSONA_SHOTS=<dir>` keeps the screenshots
 /// (`stagebar-<place>-<language>-<size>-<scheme>.png`); `TEST_RUNNER_PERSONA_PHASE=before` takes them on an older build,
 /// checking nothing.
 final class TodoStageBarUITests: XCTestCase {
