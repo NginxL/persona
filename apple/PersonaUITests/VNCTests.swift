@@ -867,6 +867,95 @@ final class VNCTests: XCTestCase {
         more("鼠标模式")
     }
 
+    // MARK: #6333
+
+    /// The small window's source (DEBUG -showPiPSource shows it; the simulators have no picture in picture): it lies
+    /// exactly over the page's picture, where the system's transition starts and Restore ends, upright and turned by
+    /// the rotate button. With the page closed, the source goes; the Mac's VNC opened straight into the small window
+    /// puts it in the top trailing corner, not the bottom-left one a copy of the picture used to pop up from.
+    @MainActor func testTheSourceLiesOverThePicture() throws {
+        let (app, vnc) = try signedInMachinePage(["-showPiPSource", "YES"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let window = app.windows.firstMatch
+        let source = app.descendants(matching: .any)["vnc-pip-source"].firstMatch
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 10), "the source:\n\(app.debugDescription)")
+        func over(_ when: String) {
+            let picture = Self.fit(CGSize(width: 480, height: 300), in: screen.frame), s = source.frame
+            XCTAssertEqual(s.minX, picture.minX, accuracy: 1.5, "\(when): the source \(s) over the picture \(picture)")
+            XCTAssertEqual(s.minY, picture.minY, accuracy: 1.5, "\(when): the source \(s) over the picture \(picture)")
+            XCTAssertEqual(s.width, picture.width, accuracy: 1.5, "\(when): the source \(s) over the picture \(picture)")
+            XCTAssertEqual(s.height, picture.height, accuracy: 1.5, "\(when): the source \(s) over the picture \(picture)")
+        }
+        func turned(_ wide: Bool) -> XCTWaiter.Result {
+            let p = NSPredicate { _, _ in (window.frame.width > window.frame.height) == wide }
+            return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: p, object: nil)], timeout: 10)
+        }
+        rest()
+        over("upright")
+        app.buttons["vnc-rotate"].tap()
+        XCTAssertEqual(turned(true), .completed, "on its side: \(window.frame)")
+        rest(2)
+        over("on its side")
+        app.buttons["vnc-rotate"].tap()
+        XCTAssertEqual(turned(false), .completed, "upright again: \(window.frame)")
+        rest(2)
+        over("upright again")
+
+        app.buttons["screen-close"].tap()
+        XCTAssertTrue(source.waitForNonExistence(timeout: 10), "the page closed without the small window: the source goes")
+        XCTAssertTrue(vnc.waitForExistence(timeout: 10))
+        sleep(3) // the page's connection goes 2 s after it lets go (VNC.release): VNC makes a new one
+        vnc.tap() // kept: straight into the small window
+        XCTAssertTrue(source.waitForExistence(timeout: 10), "the small window's source:\n\(app.debugDescription)")
+        let w = window.frame, s = source.frame
+        XCTAssertLessThan(s.maxY, w.midY, "in the top half: \(s) in \(w)")
+        XCTAssertGreaterThan(s.midX, w.midX, "on the trailing side: \(s) in \(w)")
+    }
+
+    /// Into the small window from the page and back, twice, for a screen recording of the transition (#6333; the host
+    /// records between hold-vnc-rec-start and -end). Needs the system's picture in picture, which the iPhone simulators
+    /// lack: a stock iPad simulator, with TEST_RUNNER_PERSONA_PIP_ROUNDS=1.
+    @MainActor func testPictureInPictureRoundTrips() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_PIP_ROUNDS"] == "1" else {
+            throw XCTSkip("needs picture in picture (a stock iPad simulator) and TEST_RUNNER_PERSONA_PIP_ROUNDS=1")
+        }
+        let (app, _) = try signedInMachinePage()
+        let on = app.descendants(matching: .any)["vnc-pip-on"].firstMatch, button = app.buttons["vnc-pip"].firstMatch
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        // SpringBoard's small window is a window of its own (identifier PIP-SBInteractionPassThroughView on iOS 27).
+        let pip = springboard.windows.matching(NSPredicate(format: "identifier BEGINSWITH 'PIP' OR label == 'Picture in Picture' OR label == '画中画'")).firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 10), "no Picture in Picture on this device:\n\(app.debugDescription)")
+        sleep(2)
+        hold("vnc-rec-start")
+        for round in 1...2 {
+            button.tap()
+            XCTAssertTrue(on.waitForExistence(timeout: 20), "round \(round): the small window:\n\(app.debugDescription)")
+            XCTAssertTrue(pip.waitForExistence(timeout: 10), "round \(round): the system's small window:\n\(springboard.debugDescription)")
+            sleep(3)
+            pip.tap() // its controls
+            restoreButton(springboard, in: pip.frame, round: round).tap()
+            XCTAssertTrue(on.waitForNonExistence(timeout: 15), "round \(round): back on the page")
+            XCTAssertTrue(live(app), "round \(round): the page, live")
+            sleep(3)
+        }
+        hold("vnc-rec-end")
+    }
+
+    /// The small window's button back to the app, among the controls a tap on it shows (not Close, which ends it). Every
+    /// button there goes in the log, so a system that names it differently says what to look for.
+    @MainActor private func restoreButton(_ springboard: XCUIApplication, in frame: CGRect, round: Int) -> XCUIElement {
+        let back = NSPredicate(format: "label CONTAINS[c] 'restore' OR identifier CONTAINS[c] 'restore' OR label CONTAINS[c] '还原' OR label CONTAINS[c] 'full screen' OR label CONTAINS[c] '全屏'")
+        let match = springboard.buttons.matching(back).firstMatch
+        if match.waitForExistence(timeout: 3) { return match }
+        let near = springboard.buttons.allElementsBoundByIndex.filter { $0.exists && frame.insetBy(dx: -8, dy: -8).intersects($0.frame) }
+        let listed = near.map { "\($0.identifier) | \($0.label) | \($0.frame)" }.joined(separator: "\n")
+        print("PIP-CONTROLS round \(round):\n\(listed)")
+        let other = near.first { b in !["close", "关闭", "stop", "play", "pause", "skip", "播放", "暂停"].contains { b.label.lowercased().contains($0) || b.identifier.lowercased().contains($0) } }
+        XCTAssertNotNil(other, "round \(round): no button back to the app on the small window:\n\(listed)\n\(springboard.debugDescription)")
+        return other!
+    }
+
     /// The DEBUG readout of the page's picture (VNCScreenUIView.place): its zoom (1: fitted) and where the pointer is
     /// drawn, in the view's points.
     @MainActor private func readout(_ screen: XCUIElement) -> (zoom: Double, at: CGPoint) {

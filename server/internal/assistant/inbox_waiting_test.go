@@ -375,6 +375,8 @@ func TestInboxReplyWithAConversationWaits(t *testing.T) {
 	}
 	// Delivery empties Pending after the send (keepToldSince), so wait for that rather than read it at once.
 	deadline := time.Now().Add(5 * time.Second)
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		h.inbox.mu.Lock()
 		pending, startedNow := len(it.Agent.Pending), it.Agent.StartedAt
@@ -392,7 +394,7 @@ func TestInboxReplyWithAConversationWaits(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the notice was not delivered: %d notes pending", pending)
 		}
-		time.Sleep(5 * time.Millisecond)
+		<-poll.C
 	}
 	// Listed, it is in progress waiting, not filed.
 	h.inbox.mu.Lock()

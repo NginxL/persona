@@ -2426,6 +2426,25 @@ different flags (testable imports), so each rebuilds swift-syntax from scratch a
 that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder inside it; git ignores that folder, but
 `scripts/test/test_script_layout.py` walks ignored files too and fails on the git hook samples in it, so delete it.
 
+## Picture in Picture zooms from its source's frame; iPad simulators have it (2026-11-13, #6333)
+
+- The system's transition into the small window starts at the content source layer's frame, wherever that is, and
+  Restore's ends there. A source parked out of sight (VNC's sat behind the content in the bottom-left corner) shows as a
+  small copy of the picture popping up there first. Keep the source exactly over the picture people are looking at
+  while it is up (`VNCPiPPlacement`), close the page at `willStart` (not `didStart`) so the picture never shows twice,
+  and call Restore's completion only once the page has drawn its picture again (`VNCPiPRestore`, with a time limit
+  on a timer off the main thread: a page opening under load held the main thread 10 s, so the system waited 10 s,
+  and in that run the next start never reached `didStart`). Hide the page's picture with a short fade, not at once: the system's copy appears a few
+  frames after `willStart`. With the source that large, the system sometimes draws the small window's first frames
+  (about 0.1 s) at the size the window last had, in the top-left of the transition, before the picture fills it: a
+  fresh `contentSource`, or a new controller and layer for each start, did not change it (iPad simulator; the old
+  small source hid it). Look at a couple of round trips frame by frame before blaming the source.
+- `isPictureInPictureSupported()` is false on iPhone simulators, slim or stock, but true on a stock iPad simulator
+  (`sim-boot.sh --profile stock`): record the system's transition there; how it feels on a phone still needs a device.
+- On an iPad simulator the hardware keyboard takes over once XCUITest types, hiding the on-screen keyboard: a form
+  that rose above it slides down, and a tap aimed at its button lands on whatever moved there. Submit with `"\n"` (the
+  field's `onSubmit`), or wait for the layout to settle before tapping.
+
 ## A UI test's scroll drags whatever is under the finger (2026-11-13, #6783)
 
 `TodoStageBarUITests` scrolled the to-do's page by dragging from the middle of the window. Before the interface stopped
