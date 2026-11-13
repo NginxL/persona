@@ -221,7 +221,12 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   const assistant = useStore((s) => s.assistant);
   const kept = useStore((s) => hubHas(s.features, ASSISTANT_MODEL_PICK_FEATURE));
   const mid = session?.machine_id ?? assistant?.machine_id ?? "";
-  const chat: AssistantChat = { session, isMain: Boolean(session && assistant?.main === session.session_id), kept, config: assistant?.launcher };
+  const isMain = Boolean(session && assistant?.main === session.session_id);
+  // Only the main conversation has a per-conversation model pick (#6911): a leader, the background supervisor or
+  // another assistant conversation shows no pill and follows the default or what it started with. No session is the
+  // new-main-chat page, whose pick goes with the main conversation's start.
+  if (session && !isMain) return null;
+  const chat: AssistantChat = { session, isMain, kept, config: assistant?.launcher };
   const key = assistantPickKey(chat);
   // this page's picks (an older hub, the new-conversation page) draw it again
   const picked = usePickedLauncher(key);

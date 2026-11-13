@@ -1209,7 +1209,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			// still there (stopped.go).
 			ctx = n.inKeptTerminal(ctx, p.ResumeSessionID, r.cwd)
 		}
-		s, err := n.start(ctx, r.cwd, r.launcher, p.Prompt, p.ResumeSessionID, p.WorkspaceID, r.mode, r.effort, r.tab, "", p.AgentType, r.execution)
+		// A hub that named the session id gets exactly that session (the async branch above already does): the hub
+		// uses it to reconcile a start whose answer never comes back by exact id. Only Claude starts run under a
+		// caller's id; the other agents pick their own inside n.start, which leaves an empty id to that path. An old
+		// hub sends nothing, so the behavior there is unchanged.
+		newID := ""
+		if validID(p.SessionID) {
+			newID = p.SessionID
+		}
+		s, err := n.start(ctx, r.cwd, r.launcher, p.Prompt, p.ResumeSessionID, p.WorkspaceID, r.mode, r.effort, r.tab, newID, p.AgentType, r.execution)
 		if err == nil && p.ResumeSessionID != "" {
 			n.forkStarted(p.ResumeSessionID)
 		}
@@ -1788,8 +1796,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return map[string]any{"ok": true, "name": name}, nil
-	case "worktree.rename":
-		return ok(n.renameWorktree(ctx, p.Kind, p.WorkspaceID, p.Name))
+	case "worktree.rename": // its refusals in the request's language (the hub sends it)
+		return ok(n.renameWorktree(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Name))
 	case "session.rename":
 		return ok(n.renameSession(ctx, p.SessionID, p.TabName, p.Title))
 	case "todo.sync_session_tokens":

@@ -43,7 +43,6 @@
   "start_remedy_notice": "没开起来：「{title}」。{reason}",
   "admission_no_metrics": "这台电脑还没有上报过资源指标。",
   "admission_stale": "这台电脑的资源指标已经过期。",
-  "admission_no_load": "这台电脑没有上报负载。",
   "admission_no_cores": "这台电脑没有上报核数。",
   "admission_memory_ambiguous": "这台电脑的内存数据缺失或无法判断。",
   "admission_memory": "可用内存只剩 {available}，低于闸线 {limit}。",

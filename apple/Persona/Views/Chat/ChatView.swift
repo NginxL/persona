@@ -4913,8 +4913,18 @@ struct FeishuLink: View {
 
 struct SuggestionPill: View {
     var text: String
+    var risky: Bool = false
     var fill: () -> Void
     var send: () -> Void
+
+    /// One policy for every direct-send affordance. The frozen Mac and unverified visionOS keep their existing behavior.
+    var directSend: (() -> Void)? {
+        #if os(iOS)
+        return risky ? nil : send
+        #else
+        return send
+        #endif
+    }
 
     var body: some View {
         Button {
@@ -4934,14 +4944,30 @@ struct SuggestionPill: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button { Haptics.success(); send() } label: { Label("Send Now", systemImage: "arrow.up.circle") }
+            if let directSend {
+                Button { Haptics.success(); directSend() } label: { Label("Send Now", systemImage: "arrow.up.circle") }
+            }
             Button(action: fill) { Label("Fill In", systemImage: Theme.Icon.insert) }
         } preview: {
             Text(text).font(Theme.Font.body).padding(Theme.Space.l).frame(maxWidth: 320, alignment: .leading)
         }
         .accessibilityLabel("Claude suggests: \(text)")
-        .accessibilityHint("Fills the input box. Touch and hold to send right away.")
-        .accessibilityAction(named: "Send Now", send)
+        .modifier(SuggestionAccessibility(send: directSend))
+    }
+}
+
+/// Risky suggestions have no direct-send accessibility action and do not advertise one. Safe suggestions keep both.
+private struct SuggestionAccessibility: ViewModifier {
+    var send: (() -> Void)?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let send {
+            content
+                .accessibilityHint("Fills the input box. Touch and hold to send right away.")
+                .accessibilityAction(named: "Send Now", send)
+        } else {
+            content.accessibilityHint("Fills the input box.")
+        }
     }
 }
 
@@ -5149,16 +5175,22 @@ struct Composer: View, Equatable {
         return s.canSend && s.canTerminal && s.paneID != nil && !s.isCodex && !s.isTraex && !s.assistant
     }
 
-    /// The main Persona conversation: its model row opens the conversation model sheet (#6542), never the terminal
-    /// session's `/model` menu (the headless assistant has no terminal to type into).
-    private var isAssistantChat: Bool { model.session(key)?.assistant == true }
+    /// The main Persona conversation, named by the hub's assistant snapshot: the only conversation with a
+    /// per-conversation model pick (#6911). A leader, the background supervisor or another assistant conversation
+    /// carries the assistant flag too, so that flag alone can't gate the picker.
+    private var isMainAssistantChat: Bool { model.assistantMain == key }
     /// The hub keeps a conversation's own model pick (#5033); an older hub keeps nothing and the row stays read-only.
-    private var assistantModelPickAvailable: Bool { isAssistantChat && model.keepsConversationModelPick(key.group) }
+    private var assistantModelPickAvailable: Bool { isMainAssistantChat && model.keepsConversationModelPick(key.group) }
     /// What the main chat's next message runs on: its own pick, then the Main chat default, then the running process's
     /// last model while the picker has not answered (the 11-13 Haiku/Opus divergence fix).
     private var assistantEffective: AssistantModelChoice.Effective? {
-        guard isAssistantChat else { return nil }
+        guard isMainAssistantChat else { return nil }
         return AssistantModelChoice.effective(session: model.session(key), response: model.cachedAssistantLaunchers(key.machineRef))
+    }
+    /// The model name the composer title and the modes menu row both show for the main chat, from the one effective
+    /// setup (#6911 M7): the two surfaces never name different models.
+    private var assistantEffectiveName: String? {
+        assistantEffective.map { AssistantModelChoice.displayName($0, response: model.cachedAssistantLaunchers(key.machineRef)) }
     }
 
     @ViewBuilder private var extensionPrompts: some View {
@@ -5278,8 +5310,7 @@ struct Composer: View, Equatable {
     /// model (pick > Main chat default > running), so a hub-side change shows after the picker refreshes (#6542).
     private var modesTitle: SessionModes.ComposerTitle? {
         let effort = setsModes || setsEffortOnly
-        if isAssistantChat, let effective = assistantEffective {
-            let name = AssistantModelChoice.displayName(effective, response: model.cachedAssistantLaunchers(key.machineRef))
+        if let name = assistantEffectiveName {
             return SessionModes.composerTitle(model: name, effort: effort ? SessionModes.effortLabel(model.session(key)?.effort) : nil)
         }
         return SessionModesMenu.title(model.session(key), setsModes: effort) ?? (effort || canPickModel ? .init(model: String(localized: "Model [Assistant View c98e11]")) : nil)
@@ -5375,7 +5406,7 @@ struct Composer: View, Equatable {
                     .transition(.opacity)
             }
             if let suggestion, !inCall {
-                SuggestionPill(text: suggestion) {
+                SuggestionPill(text: suggestion, risky: model.session(key)?.suggestionRisky == true) {
                     text = suggestion
                     selection = TextSelection(insertionPoint: suggestion.endIndex) // keep typing after it
                     focused = true
@@ -5463,7 +5494,8 @@ struct Composer: View, Equatable {
                 } modes: {
                     SessionModesMenu(key: key, session: model.session(key), picksModel: canPickModel, setsModes: setsModes,
                                      setsEffortOnly: setsEffortOnly, otherModel: canPickModel ? { typingModel = true } : nil,
-                                     assistantPick: assistantModelPickAvailable ? { showAssistantModel = true } : nil, pick: pickMode)
+                                     assistantPick: assistantModelPickAvailable ? { showAssistantModel = true } : nil,
+                                     assistantModelName: assistantEffectiveName, pick: pickMode)
                 }
             } else if AppStyle.current.usesBeautifulUI {
                 // The BeautifulUI style's prompt bar; every other style keeps the original input line.

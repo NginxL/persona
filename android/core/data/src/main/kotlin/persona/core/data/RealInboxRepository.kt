@@ -599,6 +599,49 @@ class RealInboxRepository(
         return outcome
     }
 
+    override suspend fun inboxLine(item: InboxRecord): InboxLineage? {
+        val transport = requireTransport()
+        val body = try {
+            asItem(item) { transport.tree("inbox", item.hubItemId) }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            if (e is UnsupportedOperationException || hubCodedFailure(e)?.status in setOf(404, 405)) return null
+            throw e
+        }
+        if (!owns(transport)) throw CancellationException("Pairing changed")
+        fun parent(data: JsonObject): InboxParentRef? {
+            val kind = data.optional("kind") ?: return null
+            val id = data.optional("id") ?: return null
+            if (kind.isBlank() || id.isBlank()) return null
+            return InboxParentRef(kind, id, data.optional("by"))
+        }
+        val node = body.obj("node")?.let(::parent) ?: InboxParentRef("inbox", item.hubItemId)
+        val ancestors = body.array("ancestors").mapNotNull { entry ->
+            (entry as? JsonObject)?.let { raw -> parent(raw)?.let { InboxLineAncestor(it, raw.obj("item")?.let { data -> lineageRecord(data, transport, item) }) } }
+        }
+        val children = body.array("children").mapNotNull { (it as? JsonObject)?.let { data -> lineageRecord(data, transport, item) } }
+        return InboxLineage(node, body.obj("item")?.let { data -> lineageRecord(data, transport, item) }, ancestors, children)
+    }
+
+    override suspend fun setInboxParent(item: InboxRecord, parent: InboxParentRef?) {
+        val transport = requireTransport()
+        val result = asItem(item) { transport.setParent(item.hubItemId, parent) }
+        if (!owns(transport)) throw CancellationException("Pairing changed")
+        val data = result.obj("item") ?: result
+        if (data.optional("id") == item.hubItemId) refreshLock.withLock {
+            replaceRecord(lineageRecord(data, transport, item))
+        }
+    }
+
+    /** A tree is one manager's line: raw hub ids become the same app ids as the merged list, never request targets. */
+    private fun lineageRecord(data: JsonObject, transport: InboxAssistantTransport, owner: InboxRecord): InboxRecord {
+        val hubId = data.string("id")
+        val appId = InboxItemKey.appId(hubId, owner.manager)
+        val previous = current.value.records.firstOrNull { it.item.id == appId } ?: owner.takeIf { it.item.id == appId }
+        val parsed = record(data, transport, previous)
+        return parsed.copy(item = parsed.item.copy(id = appId), manager = owner.manager)
+    }
+
     override suspend fun handOff(request: InboxHandOffRequest): SessionKey? {
         require(request.itemId.isNotBlank() && request.text.isNotBlank() && request.operationId.isNotBlank())
         scope.coroutineContext.ensureActive()

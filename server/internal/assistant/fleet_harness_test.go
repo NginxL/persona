@@ -44,6 +44,8 @@ type fleetNode struct {
 	name, home, trust string
 	sessions          []proto.Session
 	connected         time.Time
+	// away: its node is not connected (Summary and List say not reachable); its sessions stay as last listed.
+	away bool
 	// call answers the node's methods (nil: {}); calls are the ones it got.
 	call  func(method string, params json.RawMessage) (any, error)
 	calls []fleetCall
@@ -128,7 +130,7 @@ func (d *fleetDevs) List() []devices.Summary {
 	var out []devices.Summary
 	for _, id := range d.order {
 		n := d.machines[id]
-		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: true, Reachable: true})
+		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: !n.away, Reachable: !n.away})
 	}
 	return out
 }
@@ -147,7 +149,7 @@ func (d *fleetDevs) Summary(id string) (devices.Summary, bool) {
 	if n == nil || !slices.Contains(d.order, id) {
 		return devices.Summary{}, false
 	}
-	return devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: true, Reachable: true}, true
+	return devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: !n.away, Reachable: !n.away}, true
 }
 
 func (d *fleetDevs) Sessions(id string) ([]proto.Session, bool) {

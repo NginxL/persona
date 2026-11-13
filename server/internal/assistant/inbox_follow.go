@@ -30,6 +30,7 @@ type InboxFollow struct {
 const (
 	NowConfirmReply   = "confirm_reply"   // a reply suggestion waits for the user
 	NowConfirmAgent   = "confirm_agent"   // an Agent suggestion waits for the user to start it
+	NowConfirmTodo    = "confirm_todo"    // a to-do suggestion waits for the user to add it (#6480)
 	NowDecide         = "decide"          // a suggestion handed back: the user decides
 	NowQueued         = "queued"          // queued for the AI
 	NowLooking        = "looking"         // the AI is looking
@@ -99,6 +100,8 @@ func (it *InboxItem) nowKey() string {
 			return NowConfirmReply
 		case SuggestAgent:
 			return NowConfirmAgent
+		case SuggestTodo:
+			return NowConfirmTodo
 		}
 	}
 	// A conclusion suppresses processing in status() too: it falls through to follow-up and tier rather than looking

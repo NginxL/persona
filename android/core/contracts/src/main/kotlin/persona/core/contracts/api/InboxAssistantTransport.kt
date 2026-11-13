@@ -69,6 +69,11 @@ interface InboxAssistantTransport {
      */
     suspend fun suggestion(itemId: String, version: Long, action: String, text: String?, clientId: String): JsonObject =
         throw UnsupportedOperationException("Inbox suggestions unavailable")
+    /** An item's ancestors and direct children (`GET /api/v1/inbox/tree/{kind}/{id...}`). */
+    suspend fun tree(kind: String, id: String): JsonObject = throw UnsupportedOperationException("Inbox tree unavailable")
+    /** Sets [itemId]'s parent, or clears it when [parent] is null (`PUT /api/v1/inbox/{id}/parent`). */
+    suspend fun setParent(itemId: String, parent: InboxParentRef?): JsonObject =
+        throw UnsupportedOperationException("Inbox parent route unavailable")
     suspend fun replyMail(itemId: String, text: String, clientId: String, target: MailReplyTarget): JsonObject =
         throw UnsupportedOperationException("Checked mail replies unavailable")
     suspend fun messages(feedId: String, around: Long? = null, before: String? = null, after: String? = null): JsonObject

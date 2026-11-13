@@ -95,6 +95,11 @@ type InboxItem struct {
 	TitleBy string       `json:"title_by,omitempty"`
 	Follow  *InboxFollow `json:"follow,omitempty"`
 	Now     string       `json:"now,omitempty"`
+	// MergedFrom lists the rows merged into this one by hand (listed); MergedInto, on such a row, names this one and hides
+	// it (kept, not listed). PreMergeTier is the tier this row had before (inbox_merge.go, #6480).
+	MergedFrom   []InboxMergeRef `json:"merged_from,omitempty"`
+	MergedInto   string          `json:"merged_into,omitempty"`
+	PreMergeTier string          `json:"pre_merge_tier,omitempty"`
 	// Parent is what the item grew out of: another item, a todo or an agent session (inbox_parent.go, #2128).
 	Parent *InboxParent `json:"parent,omitempty"`
 	// Folder is the "/"-separated folder path the item is filed under ("" none); FolderBy says who filed it, "model"
@@ -180,7 +185,8 @@ type InboxMail struct {
 	Thread    string      `json:"thread"`           // normalized subject: replies join the same item
 }
 
-func (it *InboxItem) open() bool { return it.DoneAt == nil }
+// open: not filed, and not a member of a merged row (inbox_merge.go): a member is hidden and its survivor stands for it.
+func (it *InboxItem) open() bool { return it.DoneAt == nil && it.MergedInto == "" }
 
 // conversationOf is where a chat item opens in its messaging source: the source is the connector's id ("lark", the
 // Lark extension's source of the same id), the account the one the apps would pass as ol_account.

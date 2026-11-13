@@ -139,6 +139,7 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
         }
         error?.let { message -> item("event-error") { StatusText(message, isError = true) } }
         eventChain(record, ::go)
+        item("event-line") { InboxLineSection(repository, record, navigator) }
         if (record.event.related.isNotEmpty()) {
             item("event-related-header") { JSectionHeader(stringResource(R.string.inbox_event_related), count = record.event.related.size) }
             itemsIndexed(record.event.related, key = { _, it -> "event-related:${it.id}" }) { index, related ->

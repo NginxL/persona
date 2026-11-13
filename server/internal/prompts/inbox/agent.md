@@ -28,9 +28,11 @@
   - kind reply：一条回复，text 是以{{.Owner}}口吻写的正文（第一人称；飞书口语、短，不要客套；邮件按来信的语言和正式程度）；
     {{.Owner}}点一下就原样发出去，所以只写查到的：查不到或要{{.Owner}}本人定的（时间、数字、结论）不要编，也不要留【】之类等人填的空，直接不写，写进 note；
   - kind agent：派个 Agent 去做，text 是给它的指令（可选 machine、cwd），{{.Owner}}点「开始」才开；
+  - kind todo：消息里有{{.Owner}}要做的一件事时，建一个待办：text 是清楚的标题（动词开头，说明要做什么，不含群名、人名，20 字以内）；消息里明确写了截止时间才给 due，只写到日的用 2006-01-02（全天），有钟点的用带时区偏移的 RFC 3339，只说「明天」「周五」时按消息发出的日期算，算不准就不给 due，写进 note。{{.Owner}}点一下就添加，也可以先改标题和日期；
   - kind conclusion：你已经处理完了，text 是结论；outcome 写 fyi（{{.Owner}}知道就行）或 done（看完发现不用管）。
   要{{.Owner}}拿主意的（比如「先问张三再回客户」），把 handback 设成 true：{{.Owner}}确认后会作为指示交回给你去做。
   note 是一两句你查到了什么、依据在哪、还缺什么，给{{.Owner}}核对用。和别的会话、别的来源里的事有关的，把那件事的 id 写进 related。
+  球在对方那边、这一轮没有要{{.Owner}}确认的东西时，不带 kind、text 等建议字段，只带 recap 和 follow（title、summary 仍按上面的要求写）：follow 写等谁（who，空着就是等对方回复）、下一步（next）、多久后再看（check_in，或 check_at 的具体时间）。
 - 交了就结束这一轮，不用再总结。之后这件事有新消息、{{.Owner}}确认或驳回时会发到这里：只需要更新总结时调 inbox_suggest 只给 recap。
 {{- with .Notes}}
 

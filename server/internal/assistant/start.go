@@ -527,7 +527,7 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 		return proto.Session{}, err
 	}
 	if carried != nil {
-		s.keepStartPick(ctx, &sess, carried.Launcher, carried.Model, carried.Effort)
+		s.keepStartPick(ctx, &sess, carried.Launcher, carried.Model, carried.Effort, true)
 	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v)
@@ -861,8 +861,9 @@ func (s *Service) startRoutes() {
 			apierr.Call(w, err)
 			return
 		}
-		if in.Purpose == "" && in.Guest == nil {
-			s.keepStartPick(ctx, &sess, in.Launcher, in.Model, in.Effort) // its later messages keep what it started on
+		if in.Purpose == "" && in.Guest == nil && in.Main {
+			// Only the main conversation keeps its start as a per-conversation pick (#6911).
+			s.keepStartPick(ctx, &sess, in.Launcher, in.Model, in.Effort, in.Main)
 		}
 		if in.ReportTasks && !in.Main {
 			s.markReporter(ctx, sess.MachineID, sess.SessionID)

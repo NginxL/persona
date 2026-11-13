@@ -86,6 +86,13 @@ export function defaultSocketPath() {
  * @property {(params: {cwd: string, repo_root: string}) => Promise<{checkouts: string}>} [prepareWorkspace] - the
  *   folder createWorkspace puts worktrees of that repository in (repo_root: its main checkout), for the dialog to show;
  *   caps.workspaces takes both.
+ * @property {(params: {workspace_id?: string, space_id?: string, title: string}) => Promise<{workspace?: object,
+ *   space_name?: string}>} [renameWorkspace] - with caps.workspaces: a workspace's title (workspace_id; resolves to its
+ *   row as it is now), or the name of the space its sessions are grouped in (space_id; resolves to the name the space
+ *   shows now). Neither renames a branch, a folder or a session.
+ * @property {(params: {workspace_id: string}) => Promise<{archived_at?: string}>} [archiveWorkspace] - with
+ *   caps.workspaces: the workspace leaves the runtime's list, its sessions archived with it, and a worktree the runtime
+ *   made is removed from the disk (its branch stays). The node has checked what the user confirmed first.
  * @property {() => boolean} [hasLocalClient] - the runtime's own UI is open (the policy gives it first turn).
  * @property {(sessionId: string, watching: boolean, o?: { transcript: boolean }) => void} [watchChanged] - the phone
  *   started (or stopped) watching a session: a runtime that follows a session only while it is watched (Paseo's
@@ -818,6 +825,12 @@ export function createRuntime(driver, options) {
         return need(keepsWorkspaces && driver.prepareWorkspace, 'workspaces')(params)
       case 'workspace.create':
         return need(keepsWorkspaces && driver.createWorkspace, 'workspaces')(params)
+      case 'workspace.rename':
+        need(keepsWorkspaces && driver.createWorkspace, 'workspaces')
+        return need(driver.renameWorkspace, 'workspace.rename')(params)
+      case 'workspace.archive':
+        need(keepsWorkspaces && driver.createWorkspace, 'workspaces')
+        return need(driver.archiveWorkspace, 'workspace.archive')(params)
     }
     throw new RpcError(`unknown method ${method}`, 'unsupported')
   }

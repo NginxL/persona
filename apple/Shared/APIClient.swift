@@ -1286,6 +1286,9 @@ nonisolated struct APIClient: Sendable {
         /// value in effect. Off (the default) means the built-in background supervisor follows up the tasks no leader
         /// supervises; nil from a hub without the background supervisor, which hides the switch.
         var mainSupervisesOwnTasks: Bool?
+        /// Suggest the next message after replies in open chats (#4696). Off by default; nil from a hub without the
+        /// setting, which hides the switch.
+        var nextSuggestions: Bool?
         /// The background supervisor's session id once the hub has made it (read-only); nil until then and from an
         /// older hub.
         var backgroundSupervisor: String?
@@ -1295,6 +1298,7 @@ nonisolated struct APIClient: Sendable {
             case mainBackgroundFolded = "main_background_folded"
             case meetingAttendanceDefault = "meeting_attendance_default", timezonePicked = "timezone_picked"
             case mainSupervisesOwnTasks = "main_supervises_own_tasks", backgroundSupervisor = "background_supervisor"
+            case nextSuggestions = "next_suggestions"
         }
 
         /// Whether conversation `id` is the built-in background supervisor (#5083): listed with the scheduled tasks'
@@ -1379,19 +1383,22 @@ nonisolated struct APIClient: Sendable {
         var mainBackgroundFolded: Bool?
         var meetingAttendanceDefault: String?
         var mainSupervisesOwnTasks: Bool?
+        var nextSuggestions: Bool?
         enum CodingKeys: String, CodingKey {
             case launcher, timezone, notes
             case machineID = "machine_id", mainTasksQuiet = "main_tasks_quiet", meetingAttendanceDefault = "meeting_attendance_default"
             case mainBackgroundFolded = "main_background_folded", mainSupervisesOwnTasks = "main_supervises_own_tasks"
+            case nextSuggestions = "next_suggestions"
         }
     }
     func setAssistant(machine: String? = nil, launcher: String? = nil, timezone: String? = nil, notes: String? = nil,
                       mainTasksQuiet: Bool? = nil, mainBackgroundFolded: Bool? = nil,
-                      meetingAttendanceDefault: String? = nil, mainSupervisesOwnTasks: Bool? = nil) async throws -> AssistantState {
+                      meetingAttendanceDefault: String? = nil, mainSupervisesOwnTasks: Bool? = nil,
+                      nextSuggestions: Bool? = nil) async throws -> AssistantState {
         owned(try JSON.decoder.decode(AssistantState.self, from: try await request("PUT", "/api/v1/assistant",
             body: AssistantConfigBody(machineID: machine, launcher: launcher, timezone: timezone, notes: notes, mainTasksQuiet: mainTasksQuiet,
                                       mainBackgroundFolded: mainBackgroundFolded, meetingAttendanceDefault: meetingAttendanceDefault,
-                                      mainSupervisesOwnTasks: mainSupervisesOwnTasks))))
+                                      mainSupervisesOwnTasks: mainSupervisesOwnTasks, nextSuggestions: nextSuggestions))))
     }
     /// The Chat tab is open: the hub gets a claude process ready so the first message starts at once. With no launcher
     /// chosen the field is omitted and the hub warms its own default (#4200: the client never sends a made-up name).

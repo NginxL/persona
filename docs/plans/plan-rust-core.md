@@ -2,8 +2,9 @@
 
 Move the client logic that has no UI (sync and continuity, list state, counts, protocol decoding, and later storage)
 out of Swift, Kotlin and ArkTS into one Rust library, and keep each client's UI native: SwiftUI, Jetpack Compose and
-ArkUI. The maintainer made the open decisions on 2026-11-13 ("Decisions" at the end). Nothing here is built yet; the
-first code is a vertical slice whose measurements decide whether the migration goes on.
+ArkUI. The maintainer made the open decisions on 2026-11-13 and added the iOS-reference decision later that day
+("Decisions" at the end). The first code is a vertical slice whose measurements decide whether the migration goes on;
+its workspace and Android host replay have landed, and the three-platform binding work remains.
 
 **Who it serves**: everyone who uses the phone apps, indirectly. Nothing the user sees changes. They get the same
 counts and the same chat on every phone, fixes that reach every client at once, and less per-chunk work while a
@@ -52,6 +53,26 @@ fixtures first, then each implementation.
   replaying the fixtures.
 - **The frozen Mac app** links the core only where shared Swift code requires it, to keep building (`docs/apple/mac.md`).
 - **Persona Link and the watch.**
+
+### The iOS reference
+
+**Behavior, state machines and data flow follow iOS.** The shared core does not establish a new client behavior, and
+another client's existing implementation is not the reference. `continuity` was initially ported from Android, so its
+Rust implementation and the shared fixtures must be checked against the current iOS `ChatStore` before the iOS binding
+can be accepted. Where they differ, add a fixture from the observed iOS behavior and change the core to match; do not
+change iOS to accommodate the port. If the audit finds an actual iOS bug, file that separately rather than silently
+changing the contract here.
+
+**Android and HarmonyOS match iOS's interaction and visual result.** The existing native-style and theme choices are
+not deleted: within the corresponding iOS style, they follow its hierarchy, states and motion while staying native to
+each OS. Whole-screen alignment and paired screenshots use the existing #4194 work. Phase 1 adds bindings and replay
+only; it does not change any existing screen.
+
+**Performance targets come from measured iOS.** Record the current iOS first-frame, streaming, scrolling and memory
+numbers on the same named device, build and workload used for the binding comparison. The fixed dispatch/drain ceilings
+below remain additional limits, not substitutes for the iOS baseline. Android and HarmonyOS are compared with that
+baseline using equivalent workloads; simulator and host timings are labelled and never presented as physical-device
+results. Until an iOS measurement exists, the corresponding comparative cell stays "not measured", never "passed".
 
 ## Architecture
 
@@ -238,7 +259,9 @@ What never crosses the boundary:
   reference implementation is the core. `spec/README.md` currently says "behavior follows the current iOS
   implementation"; its domain table gains a column naming the reference, and moved domains name the core.
 - **Each client** replays the moved domain's fixtures through its real binding during the slice, to prove the
-  binding. After that, a smoke subset per client is enough, since the logic is one implementation.
+  binding. iOS also replays the full suite while its native `ChatStore` is still the behavioral reference, so a fixture
+  gap cannot be hidden by agreeing with the Rust port. After that, a smoke subset per client is enough, since the logic
+  is one implementation.
 - **The web app and Go** keep replaying the fixtures of their own implementations, so all implementations of a rule
   are still checked against one source.
 - **A new core lane in `scripts/ci/`** (core.sh) runs `cargo fmt --check`, `clippy -D warnings`, `cargo test --locked`, the
@@ -253,7 +276,7 @@ What never crosses the boundary:
 | --- | --- | --- |
 | 0 | This plan; the decisions below | Decisions recorded here |
 | 1 | Workspace, toolchain, runtime thread, codec generator, the three bindings, CI lane, and `continuity` (decision 3) end to end on all three clients | Every client replays the continuity fixtures through its binding; the go / no-go table is filled in |
-| 2 | The chat's item list driven by `continuity` patches, raw transport bytes decoded in Rust, then `sync` | Patches drive the real chat list on each client within the performance budgets |
+| 2 | The chat's item list driven by `continuity` patches, raw transport bytes decoded in Rust, then `sync`; iOS's native adapter and shadow run come first | Patches drive the real chat list on each client within the performance budgets, with the same iOS behavior and measured reference on each |
 | 3 | The domains with the most drift, one issue each: `needs-you` / `attention` / `entries` once #5974 settles the definition, `lines` and `answer` (turn folding, the answer across wakes), `sort` / `recents`, `wire` (tolerant decoding, D5), streaming assembly (#4044) | Each domain: shadow run, then old code deleted |
 | 4 | Storage in the core: the per-hub caches and the snapshot that launch draws from (D6), files first (decision 4) | Cold launch draws from the snapshot before any sync |
 
@@ -274,17 +297,20 @@ Phase 1 (#6871) lands in several PRs.
 - **Still to come.**
   - iOS: the `PersonaCore` package and its XCTest replay.
   - HarmonyOS: the NAPI module and the on-device replay.
-  - Android: device libraries.
-  - The go / no-go measurements.
+  - Android: device libraries, 16 KB page alignment and per-ABI size measurements.
+  - Continuity: compare the initial port with the iOS reference, add the missing boundary fixture and correct any
+    differences before calling the slice three-platform consistent.
+  - The go / no-go measurements, with the iOS baseline named for every comparative measurement.
   - License notices, with the first build that ships the library in an app.
 
 ### Migration rules (each domain)
 
-1. **Fixtures first.** The domain's fixtures cover the rules each client implements today. Gaps found while porting
-   become new cases, checked against the current implementations. Expectations are never generated from the code under
-   test.
+1. **Fixtures first.** The domain's fixtures cover the rules the current iOS implementation follows today. Compare
+   Android and HarmonyOS with that reference; gaps found while porting become new cases checked against iOS.
+   Expectations are never generated from the code under test, including the initial Android-derived continuity port.
 2. **Core next.** The core passes them in `cargo test`.
-3. **Adapter.** Each client puts its current implementation and the core behind one protocol or interface.
+3. **Adapter.** iOS puts its current implementation and the core behind one protocol first, with the native path kept
+   as the shadow-run reference. Android and HarmonyOS follow the same adapter contract.
 4. **Shadow run.** For one TestFlight and internal-testing cycle, DEBUG and test builds run both implementations and
    report mismatches to diagnostics. A report holds the domain, the rule and the shape of the input, never content.
    Release builds use the core only after the shadow run is clean.
@@ -343,4 +369,16 @@ negligible, the option that is better in the long term.**
      on a nightly toolchain, which tier-3 targets need.
    - **Revisit** both when their Rust targets reach tier 2.
 6. **Go / no-go limits: tightened** to the table above. Download size added ≤ 1 MB, a main-thread `dispatch` p99
-   ≤ 50 µs, a frame's `drain` p99 ≤ 1 ms, no later frames on screen than today, and memory checked.
+   ≤ 50 µs, a frame's `drain` p99 ≤ 1 ms, no later frames on screen than today, and memory checked. Comparative
+   targets come from measured iOS under the same workload; missing iOS evidence leaves the comparison open.
+7. **iOS is the unified clients' reference.** Added by the maintainer on 2026-11-13, and applies to every earlier
+   decision and phase here.
+   - **Behavior.** Shared behavior, state machines and data flow match iOS. Audit the initial Android-derived
+     `continuity` port, add fixtures for differences and fix the port before iOS binding acceptance; iOS is not changed
+     to match an existing port or fixture.
+   - **UI and interaction.** Android and HarmonyOS follow iOS's interaction and visual result in their native UI
+     toolkits and existing styles. Phase 1 changes no screen; cross-client UI differences are separate scoped PRs with
+     paired screenshots, not incidental binding changes.
+   - **Performance.** First frame, streaming, scrolling and memory targets use measured iOS numbers with the device,
+     build and workload recorded. Fixed FFI budgets still apply. Do not infer a device result from a host or simulator
+     measurement.

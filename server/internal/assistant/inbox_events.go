@@ -26,6 +26,7 @@ const (
 // Chain entry kinds (InboxChainEntry.Kind).
 const (
 	ChainReceived    = "received"
+	ChainMerged      = "merged" // rows merged by hand, or split again (inbox_merge.go)
 	ChainTriaged     = "triaged"
 	ChainHandling    = "handling"
 	ChainSent        = "sent"
@@ -68,6 +69,7 @@ const (
 	LinkSource  = "source"
 	LinkSession = "session"
 	LinkItem    = "item"
+	LinkTodo    = "todo" // a to-do the row was turned into (inbox_todo.go, #6480)
 )
 
 // InboxChainEntry is one key call on an event.

@@ -8772,6 +8772,40 @@
         }
       }
     },
+    "%lld more files" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld more file"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld more files"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 个文件"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ほか %lld 個のファイル"
+          }
+        }
+      }
+    },
     "%lld more idle" : {
       "localizations" : {
         "en" : {
@@ -17001,6 +17035,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分诊之后"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "After a reply in a chat you have open, a small model suggests what you might send next, above the empty message box. Claude Code in a terminal keeps its own suggestions. Uses one extra model call per reply; the model is set under Model configuration › Next-message suggestions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After a reply in a chat you have open, a small model suggests what you might send next, above the empty message box. Claude Code in a terminal keeps its own suggestions. Uses one extra model call per reply; the model is set under Model configuration › Next-message suggestions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開いているチャットで返信のたびに、小さなモデルが次に送りそうなメッセージを空の入力欄の上に提案します。ターミナルの Claude Code は自身の提案を使い続けます。返信ごとにモデル呼び出しが1回増えます。使うモデルは「モデル設定 › 次のメッセージの候補」で設定します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在你打开的对话里，每次回复后由小模型在空输入框上方建议你可能要发的下一句。终端里的 Claude Code 仍用它自己的建议。每次回复多一次模型调用；所用模型在「模型配置 › 下一句建议」里设置。"
           }
         }
       },
@@ -61253,6 +61310,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已填写，点保存"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Fills the input box." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fills the input box."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力欄に挿入します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "填入输入框"
           }
         }
       },
@@ -139172,6 +139252,29 @@
         }
       }
     },
+    "Suggest the Next Message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggest the Next Message"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次のメッセージを提案"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议下一句"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Suggested Agent task" : {
       "localizations" : {
         "en" : {
@@ -179698,6 +179801,98 @@
       },
       "extractionState" : "manual"
     },
+    "lark.filter.all" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべて"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "消息"
+          }
+        }
+      }
+    },
+    "lark.filter.continue" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Looking"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検索を続ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续查找"
+          }
+        }
+      }
+    },
+    "lark.filter.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No unread chats"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未読のチャットはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无未读会话"
+          }
+        }
+      }
+    },
+    "lark.filter.unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unread"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未読"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未读"
+          }
+        }
+      }
+    },
     "lark.searchChats" : {
       "comment" : "Search field over the Lark chats list",
       "extractionState" : "extracted_with_value",
@@ -184224,6 +184419,213 @@
           }
         }
       }
+    },
+    "Separate [Navigation Layout]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Separate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分开"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Sidebar [Navigation Layout]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidebar"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドバー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "侧边栏"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Assistant and Agents each have a page, switched at the top. On iPad they are the Persona and Agents tabs." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant and Agents each have a page, switched at the top. On iPad they are the Persona and Agents tabs."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アシスタントと Agents がそれぞれ 1 ページずつあり、上部で切り替えます。iPad では Persona と Agents のタブです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "助手和 Agents 各占一页，在顶部切换。iPad 上是 Persona 和 Agents 两个标签。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "The main chat, pages, Persona chats and Agents are all in one sidebar, as in the web app. On iPhone it slides in from the left; on iPad it stays on the left." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The main chat, pages, Persona chats and Agents are all in one sidebar, as in the web app. On iPhone it slides in from the left; on iPad it stays on the left."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メインチャット、ページ、Persona のチャット、Agents をひとつのサイドバーにまとめます（Web 版と同じ）。iPhone では左からスライドして開き、iPad では左側に常に表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主对话、页面、Persona 对话和 Agents 都在一个侧边栏里，和网页版一样。iPhone 上从左边滑出，iPad 上常驻在左边。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Navigation" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navigation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ナビゲーション"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导航"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Only this device. It applies at once; open chats and drafts stay as they are." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only this device. It applies at once; open chats and drafts stay as they are."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この端末だけに適用され、すぐに反映されます。開いているチャットや下書きはそのまま残ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只改这台设备，马上生效；打开的对话和草稿都会保留。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Pages [Sidebar Layout]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ページ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Persona Chats [Sidebar Layout]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona Chats"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona のチャット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 对话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Shows the Agents that need you [Sidebar Layout]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the Agents that need you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応が必要な Agents を表示します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示需要你的 Agents"
+          }
+        }
+      },
+      "extractionState" : "manual"
     }
   },
   "version" : "1.0"

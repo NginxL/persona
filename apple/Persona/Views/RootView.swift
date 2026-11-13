@@ -52,6 +52,21 @@ struct RootView: View {
     private let away = false
     #endif
 
+    #if os(iOS)
+    /// Settings › Appearance › Navigation (#6332): Separate (the default) or Sidebar.
+    @StoredValue(NavigationLayout.key) private var navigation: NavigationLayout = .separate
+    #endif
+
+    /// The Sidebar layout instead of the tabs at regular width (#6332): where it is built (`NavigationLayout.offered`).
+    /// The iPhone-width shell stays the shell for now.
+    private var usesSidebar: Bool {
+        #if os(iOS)
+        navigation == .sidebar && NavigationLayout.offered && !usesShell
+        #else
+        false
+        #endif
+    }
+
     /// The iPhone-width shell; regular-width and other platforms keep their own navigation.
     private var usesShell: Bool {
         #if os(visionOS)
@@ -116,7 +131,9 @@ struct RootView: View {
                 #if os(visionOS)
                 RootTabs().visionShell()
                 #elseif os(iOS)
-                if usesShell { ShellView().modifier(BuiltTreeRoot()) } else { RootTabs().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
+                if usesShell { ShellView().modifier(BuiltTreeRoot()) }
+                else if usesSidebar { SidebarRoot().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
+                else { RootTabs().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
                 #else
                 RootTabs()
                 #endif
@@ -291,6 +308,24 @@ struct RootView: View {
 }
 
 #if os(iOS)
+/// The Sidebar layout at regular width (Settings › Appearance › Navigation, #6332; docs/apple/ios.md「Sidebar layout」): the
+/// Agents page's split with the whole sidebar as its list column (`UnifiedSidebarColumn`) and the Persona conversation
+/// as the page beside it, every pick in the sidebar opening over that. The iPad's routes and Settings as the tabs'
+/// (`PadRouter`, `PadRoutes`), with a route to Persona going back to the conversation.
+@MainActor private struct SidebarRoot: View {
+    @State private var pad = PadRouter(unified: true)
+    @State private var unified = UnifiedSidebar()
+
+    var body: some View {
+        #if DEBUG || PERF_SIGNPOST
+        let _ = PerfTrace.body("SidebarRoot")
+        #endif
+        ChatsView()
+            .environment(\.unifiedSidebar, unified)
+            .modifier(PadRoutes(router: pad))
+    }
+}
+
 /// Where the iPad's routes to Inbox and Settings land without their tabs: every route in the app still
 /// sets `AppModel.selectedTab` (notifications, Siri, the inbox's rows…). `.mail` opens the inbox on the Persona tab's page,
 /// beside its sidebar; `.settings` the sheet, over the tab that was in front. As the iPhone's shell does (`ShellState.route`).
@@ -299,6 +334,16 @@ struct RootView: View {
     private(set) var request: (page: ShellPage, serial: Int)?
     /// The tab in front, for Settings to go back to.
     @ObservationIgnored private var front = AppTab.assistant
+    /// The Sidebar layout (#6332): no tabs, one page beside the sidebar. A route to Persona goes back to the conversation
+    /// (an Agent's chat or a place may be in front), and Messages opens beside the sidebar.
+    @ObservationIgnored let unified: Bool
+    /// Set while this router sets the tab itself: that new tab is only noted, not routed again (Inbox, then Persona,
+    /// would otherwise go back from the inbox it just opened).
+    @ObservationIgnored private var settingTab = false
+
+    init(unified: Bool = false) {
+        self.unified = unified
+    }
 
     func show(_ page: ShellPage) {
         request = (page, (request?.serial ?? 0) + 1)
@@ -315,17 +360,31 @@ struct RootView: View {
     }
 
     func route(_ t: AppTab, in model: AppModel) {
+        if settingTab { front = t; return }
         switch t {
         case .mail:
             show(.inbox)
             front = .assistant
-            model.selectedTab = .assistant
+            setTab(.assistant, in: model)
         case .settings:
             model.shellSettings = true
-            model.selectedTab = front
+            setTab(front, in: model)
+        case .assistant where unified:
+            front = t
+            show(.conversation)
+        case .feishu where unified:
+            show(.messages)
+            front = .assistant
+            setTab(.assistant, in: model)
         default:
             front = t
         }
+    }
+
+    private func setTab(_ t: AppTab, in model: AppModel) {
+        settingTab = true
+        model.selectedTab = t
+        settingTab = false
     }
 }
 

@@ -148,8 +148,9 @@ class AppleRenameTests(unittest.TestCase):
         self.assertRegex(selection, r'#if os\(visionOS\)[\s\S]*?return false')
         # Active compact width still selects the shell; #2836 holds that width while iOS snapshots the app away.
         self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#else\s+return false')
-        self.assertIn('if usesShell { ShellView()', root)
-        self.assertIn('} else { RootTabs()', root)
+        # The shell first, then the Sidebar layout when it is chosen (#6939), else the tabs.
+        self.assertRegex(root, r'if usesShell \{ ShellView\(\)[^\n]*\n\s+else if usesSidebar \{ SidebarRoot\(\)[^\n]*\n'
+                               r'\s+else \{ RootTabs\(\)')
         self.assertIn('RootTabs().visionShell()', root)
         tabs = root.split('private struct RootTabs: View {', 1)[1].split('\n#if os(iOS)', 1)[0]
         self.assertIn('TabView(selection: Binding(get: { model.selectedTab }, set: { model.selectHomeTab($0) }))', tabs)
@@ -160,7 +161,9 @@ class AppleRenameTests(unittest.TestCase):
         for name in ('Assistant', 'Agents', 'Inbox', 'Settings'):
             self.assertRegex(root, r'private struct ' + name + r'RootTab: TabContent')
         routes = root.split('final class PadRouter: TabRouter {', 1)[1].split('private struct PadRoutes:', 1)[0]
-        self.assertRegex(routes, r'func route\(_ t: AppTab, in model: AppModel\)\s*\{\s*switch t')
+        # While the router sets the tab itself it only notes which is in front (#6939).
+        self.assertRegex(routes, r'func route\(_ t: AppTab, in model: AppModel\)\s*\{\s*'
+                                 r'if settingTab \{ front = t; return \}\s*switch t')
         self.assertIn('show(.inbox)', routes)
         self.assertIn('model.shellSettings = true', routes)
 

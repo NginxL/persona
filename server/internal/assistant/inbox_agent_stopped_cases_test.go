@@ -178,7 +178,6 @@ func TestOppInboxAgentStopMarkerEvictedByTheChainCapDoesNotRepeat(t *testing.T) 
 	}
 	before := len(h.f.sentToAgents())
 	h.inboxAgentTurnSettled(context.Background(), "box", "s-sub")
-	time.Sleep(50 * time.Millisecond) // a wake goes out from its own goroutine
 	if got := len(h.f.sentToAgents()); got != before {
 		t.Fatalf("a stop whose chain entries were evicted woke the conversation again: %d sends → %d", before, got)
 	}

@@ -31,6 +31,10 @@
   "concluded": "Assistant’s conclusion",
   "done_user": "You marked it done",
   "done_dismissed": "You dismissed it",
+  "done_todo": "Added to your to-dos",
+  "merged_from": "Merged from {n} rows",
+  "unmerged": "Split into separate rows again",
+  "merged_away": "Merged into another row",
   "done_read": "Read elsewhere, done",
   "done_muted": "Muted, done",
   "done_manager": "Assistant checked: nothing to do",
@@ -40,8 +44,15 @@
   "failed_start": "The handling conversation couldn’t start",
   "suggested_reply": "Assistant suggests a reply",
   "suggested_agent": "Assistant suggests starting an Agent",
+  "suggested_todo": "Assistant suggests adding a to-do",
   "suggested_handback": "Assistant suggests a next step for you to decide",
   "confirmed_agent": "You confirmed: an Agent started",
   "failed_agent": "The Agent couldn’t start",
-  "handed_main": "Handed to Persona’s main chat"
+  "handed_main": "Handed to Persona’s main chat",
+  "handed_agent": "Handed to Agent “{title}”",
+  "handed_agent_generic": "Handed to an Agent",
+  "handed_conversation": "Handed to “{title}”",
+  "handed_conversation_generic": "Handed to a conversation",
+  "waiting_who": "Waiting for {who} · look again {at}",
+  "waiting_reply": "Waiting for a reply · look again {at}"
 }

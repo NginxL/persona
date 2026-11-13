@@ -149,9 +149,14 @@ func (n *Node) worktreeStatus(ctx context.Context, kind, cwd string) (proto.Work
 		return st, nil // the main checkout, not a linked worktree
 	}
 	st.Worktree = true
-	// A runtime's worktree is its workspace too: removing only the checkout (worktree.remove) would leave the runtime a
-	// workspace in a folder that is gone, so it is not offered as one of Persona's.
-	st.Ours = !runtime && within(realPath(st.Path), realPath(st.Checkouts))
+	// A runtime's worktree is its workspace too: Persona's to remove only when it is the folder of a worktree workspace
+	// the runtime made, which worktree.remove then has the runtime archive (runtimeAgentWorktreeRemove); removing only
+	// the checkout would leave the runtime a workspace in a folder that is gone.
+	if runtime {
+		_, st.Ours = rt.ownedWorktreeAt(st.Path)
+	} else {
+		st.Ours = within(realPath(st.Path), realPath(st.Checkouts))
+	}
 	if out, err := git(ctx, st.Path, "status", "--porcelain"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if strings.TrimSpace(line) != "" {
@@ -199,6 +204,11 @@ func absGit(ctx context.Context, dir, option string) (string, error) {
 // deleting a branch with commits the main checkout's branch lacks, unless the user confirmed it (force).
 func (n *Node) worktreeRemove(ctx context.Context, kind, path string, deleteBranch, force bool) (proto.WorktreeRemoved, error) {
 	var res proto.WorktreeRemoved
+	if _, runtime, _ := n.worktreeRuntime(ctx, kind); runtime { // the checks and the runtime's archive, inside the hub's 90 s
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, runtimeRemoveDeadline)
+		defer cancel()
+	}
 	p := proto.ExpandHome(strings.TrimSpace(path), n.home)
 	st, err := n.worktreeStatus(ctx, kind, p)
 	if err != nil {
@@ -216,6 +226,9 @@ func (n *Node) worktreeRemove(ctx context.Context, kind, path string, deleteBran
 	if deleteBranch && st.Unmerged > 0 && !force {
 		return res, refusal("worktree_unmerged", "the branch has commits that are not on the main branch",
 			map[string]any{"unmerged": st.Unmerged, "main_branch": st.MainBranch})
+	}
+	if rt, runtime, _ := n.worktreeRuntime(ctx, kind); runtime { // ours: a worktree workspace the runtime made
+		return n.runtimeAgentWorktreeRemove(ctx, rt, st, deleteBranch, force)
 	}
 	args := []string{"worktree", "remove"}
 	if force {

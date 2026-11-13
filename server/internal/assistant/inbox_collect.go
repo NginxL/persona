@@ -102,6 +102,7 @@ func (s *Service) InboxCollected(ctx context.Context, r assistantwire.InboxRound
 		b.roundWrite(it)
 	}
 	changed = append(changed, b.roundMuted(b.applyMutes(now))...)
+	changed = b.followMerged(append(changed, b.releaseMembers()...), now)
 	changed, todo := b.sortBatch(batch, changed, now)
 	b.applyRuledPolicies(changed)
 	b.settleRound()

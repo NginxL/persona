@@ -123,6 +123,8 @@ class PersonaInstallTests(unittest.TestCase):
                     env['PATH'] = f'{uname.parent}:{env["PATH"]}'
                 for key in ('BASH_ENV', 'ENV', 'ZDOTDIR', 'XDG_CONFIG_HOME'):  # nothing of the machine's own setup
                     env.pop(key, None)
+                # Nor its language: install.sh answers in LC_ALL's, then LANG's, and the tests read English (#6938).
+                env.update({'LANG': 'C', 'LC_ALL': ''})
                 env.update(extra or {})
                 if answers is not None:  # with a terminal: install.sh asks, and these answer
                     argv = ['sh', str(script), *args]

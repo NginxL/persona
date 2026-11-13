@@ -18,6 +18,9 @@ struct AssistantTopBar: View {
     /// The column is out. On a phone's tabs (iPhone Duo open) its own button folds it, at its top, so this one is only
     /// there to bring it back (#2623).
     var sidebarShown = false
+    /// The Sidebar layout (#6332): with its column folded away, the button carries how many Agents need the user (the
+    /// sidebar is where they are); off elsewhere.
+    var sidebarCounts = false
     /// A phone's tabs (iPhone Duo open): the Assistant | Agents switch in the face's place (#2623).
     @Environment(\.pageTabSwitch) private var pageTabSwitch
     var openSidebar: () -> Void
@@ -232,6 +235,7 @@ struct AssistantTopBar: View {
                         openSidebar()
                     }
                 }
+                .overlay(alignment: .topTrailing) { if sidebarCounts && !sidebarShown { SidebarWaitingBadge() } }
                 .transition(.identity)
             }
             Spacer(minLength: 8)

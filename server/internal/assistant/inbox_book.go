@@ -225,7 +225,7 @@ func (x *threadIndex) openFor(thread string) (open, done *InboxItem) {
 		if !x.under(it, thread) {
 			continue
 		}
-		if it.open() {
+		if it.DoneAt == nil { // a member of a merged row is collected into as any open row (inbox_merge.go)
 			if open == nil || newerItem(it, open) {
 				open = it
 			}

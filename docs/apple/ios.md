@@ -400,8 +400,22 @@ Chat page:
   Currently text parsing; Claude Code also provides `apiErrorStatus`, `error`, `requestId` fields, preferred once hub reads them. DEBUG `-showErrorDetails YES` opens by default.
   Screenshots mock `MOCK_API_ERRORS=1`, assistant main and review chats.
 - Refusal fallback (#4489, the iOS half of #2528; web #4487, Android #4488): a notice with `model_refusal` is a line of its own after the exchange (`RefusalNotice`; `ChatStore` puts it with the turn's trailing rows, never in the work row): the upstream refused, which model Claude Code switched from and to (or that no switch is recorded), "later turns may keep using it" for scope `session`, the category, the explanation and the refusal's own words. Models go by their short names (`SessionModes.modelName`), where the web shows ids. While the session has `model_fallback`, a card above the composer (`ModelFallbackCard`, a `ReadinessCard`) names both models and the error since: a terminal session gets only the "type /model in Claude Code" step; a Persona conversation gets **Switch Back** (zh-Hans 回到配置的模型, ja 元に戻す; `POST …/restore-model`, refusals said in words by `ModelFallbackText.restoreError`), and the main conversation also **New Main Chat** (the card's own key, ja 新しいチャット: at the largest text size, stacked, the longer Japanese and English words still ended in "…", `docs/design/DESIGN_SYSTEM.md` 1.2 rule 3 (a), #5202). While `model_restore` is pending the card says only that the next start uses the configured model, and names it. The API error card offers no Retry while `turn_error_code` is `model_fallback_unavailable`. Items keep the refusal's words as their text, never an older hub's whole record line (`Item.publicRefusal`); `ChatCache` went to `chats-v17` so notices cached without `model_refusal` are dropped. In a Persona conversation (`plainRefusals`, set by `ChatView` from `session.assistant`; #5202) the line is one sentence with the model's short name and the record under a closed Details, and the card's title says which model answers now, with the configured model while pending; the rest goes under `ReadinessCard`'s Details. Tests: `ModelFallbackTests`, `ModelFallbackUITests` (mock `MOCK_MODEL_FALLBACK=1 MOCK_MAIN_ACTIONS=1`).
-- Claude suggestions (`SuggestionPill`): session `suggestion`, not working, empty input shows "✦ Suggestion … Use" above (AI purple, not accent), also placeholder;
-  tap fills editable input, long-press Send now. Typing hides it. Headless assistant has no TUI/suggestions; mock `MOCK_SUGGESTION=1`, review session.
+- Suggested next message (`SuggestionPill`): with session `suggestion`, an idle chat and an empty input, the shared Agent / Persona
+  composer shows "✦ Suggestion … Use" above it (AI purple, not accent). This includes the main Persona conversation and other
+  assistant chats; there is no assistant-specific rendering path. Tap or Fill In puts the text in the editable composer without
+  sending. A non-risky suggestion also keeps long-press Send Now and its VoiceOver custom action / hint. With
+  `suggestion_risky: true`, it is fill-in only: no Send Now menu item or direct-send accessibility action, and the hint does not
+  advertise one; the ordinary composer Send still works after review. Missing, null or malformed risk values decode as false.
+  Typing hides the pill. Mock `MOCK_SUGGESTION=1` covers the review Agent; `MOCK_NEXT_SUGGESTIONS=1` covers a safe main-Persona
+  pill, a risky assistant pill, safe Agents and the native switch. Tests: `SuggestionRiskTests`, `SuggestionTests`.
+- Settings › Assistant › **Suggest the Next Message** (#4696) reads and sparsely writes `next_suggestions` through
+  `GET/PUT /api/v1/assistant`. It is off by default on a supporting hub; an older hub that omits the field keeps it nil and hides
+  the row. `NextSuggestionsModel` (an `@Observable` model with `AssistantDeps`, tested against `FakeHub`) loads the current
+  assistant's value, shows a change optimistically, accepts the response and rolls back on failure, fencing late work across an
+  assistant or hub switch. The English title uses Apple Title Case while the web keeps **Suggest the next message** in sentence
+  case; the zh-Hans and ja titles and the footer in all three languages match the web. Tests: `NextSuggestionsModelTests`,
+  `AssistantSettingsModelTests.testNextSuggestionsSwitch`; a separate untouched-mock run proves the default is off, and the
+  legacy-mock case waits for the app's successful-read probe before proving the row is absent.
 - Sending clears input immediately and displays Sending bubble (`ChatStore.pending`), request background; same text in transcript
   or queue replaces it, failure red with retry/delete. No waiting on network anywhere.
 - Sent images: hub appends paths in `<attached_images>`, App parses square thumbnails above text (file API from session computer,
@@ -548,7 +562,7 @@ Chat page:
   Other answer… first number for Type something then text+Enter (`Resolution.preKeys`), Chat instead sends Chat about this number; raw terminal,
   keys/input under View terminal; unparseable dialog shows terminal directly. DEBUG `-showSampleScreen YES`.
   A command's permission prompt (the hub's `dialog.command`, #5266) reads as a tool approval instead: "Claude Wants to Run a Command", the agent's words,
-  the command (`ScreenCommandAskBody`, three rows until Show All, two in Beautiful UI), the warning in plain words (Show Original: Claude Code's own), the countdown running
+  the command (`ScreenCommandAskBody`, eight lines until Show All N Lines opens it whole, fewer when the card is short, two in Beautiful UI; `CardCode`, #6605), the warning in plain words (Show Original: Claude Code's own), the countdown running
   (`ScreenCountdown`), Deny / Allow for its No / Yes (`ScreenParser.Dialog.allowDeny`). Mock: `MOCK_SCREEN_DANGER=before|after`.
 - Interaction panel above input: questions (`QuestionForm`, iOS grouped list, question + rounded choice group, terminal-style numbered circles become checks, "(Recommended)" shown as Recommended badge but original sent; Other answer… last row becomes input on tap; single-question single-choice submits immediately, multiple title "Heading · 1/2", small Previous / Next / Submit below, auto-next after single choice; `-showSampleQuestion YES`), plans (Markdown + full screen, Approve and run automatically /
   Approve and auto-accept edits / Request changes with feedback), permissions (Allow / Deny / Always allow this session), terminal (screen + parsed choices + keys + text).
@@ -611,6 +625,9 @@ Only at iPhone compact width; iPad, open iPhone Duo, Mac and watch remain unchan
 Routing stays unchanged: all navigation still writes `AppModel.selectedTab` (notifications, Siri, hand to Persona, Inbox rows…); the shell treats `.assistant` / `.chats` as its pages,
 `.mail` as "push Inbox on Assistant", `.settings` as "open Settings sheet", then returns to the original page. Foreground page has one source, `ShellState.page`;
 writing `selectedTab` forwards immediately to the shell (not through `onChange`), and switch segments and dragging use it too: see `docs/apple/shell.md`.
+
+Inbox-linked conversations use `InboxChatRoute` wherever `ShellDestinations` is enabled: the iPhone shell, regular-width iPad / open Duo (`padPlaces`), and the unified Sidebar layout (`embedded`). `pushInboxChat` is supplied under exactly the same condition and injected directly on every destination, as is `feishuOpen`, because an iPad split does not forward the root content's environment to those pages. It appends to `navPath` (the unified Sidebar's host path there, the current place's `NavigationPath` otherwise), so `ShellPlaces` saves that exact path, including `InboxChatRoute`, whenever the place is left. so `ShellPlaces` saves that exact path, including `InboxChatRoute`, whenever the place is left. The pushed `ChatView` does not yet expose the new place-sidebar button in its custom `devChrome`; that integration is follow-up work. This covers the timeline's handling and Agent rows, the draft's processing view, Hand to AI's View (main, new chat or Agent) and New Agent completion, Thread Agent rows (including an Agent inside a to-do sheet, which closes before the push), waiting-Agent rows in the inbox and on the new-chat page, and a summary started from an inbox source chat. Back, including the left-edge swipe, returns to the item, inbox list or new-chat page that opened it. A waiting card pushes only when its `ix.sessionKey.group` is the current hub's group and keeps that key unchanged; another group's card keeps `model.open`, which selects its own group's Persona for an assistant conversation. Sessionless cards still open as sheets, pushed chats keep `ChatView`'s default style, and Mac / Vision / classic layouts keep their previous destinations because the closure is nil.
+A chat pushed over the new-chat page is discarded when `assistantCurrent` changes, because New Chat is not a `ShellPlaces` place. `AssistantCurrentNavigation` keeps pushed pages when the app automatically changes no current conversation to the main one (`old == nil`, nonnil `new == assistantMain`), including manager reconnects; an explicit user reveal still goes to the root. A real hub-group change forgets every saved place and clears the old hub's inbox and item pages, while initial pairing (`nil → group`) and reconnects do not. `InboxBackNavigationTests` covers these rules and every route fallback; `InboxBackTests` covers phone and wide edge-swipe return paths.
 
 UI tests always use `launchPinned()` to fix the style (the run's, unless the test passes `-ui.style` itself, #5683) and `launchPersona()` for clean Demo Mode startup, without overriding the app's default navigation.
 Shell tests: `ShellTests`, `ShellAvatarTests` (top-left avatar and Inbox badge), `ShellPagerTests` (paging), `ShellSwitchTests`, `ShellSearchTests`. DEBUG: `-openShellPage inbox|machines|routines|knowledge|profile`; `-showShellPagerAt 0.3` holds the strip 30% across for screenshots; `-showHomeState empty|error` (new-chat page: nothing needs you / a failed-start notice, for screenshots).
@@ -710,7 +727,7 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
   - `SplitDividerTests` (`-openSplitFresh YES` starts both lists at the system's width).
 - **Readable width**: chats and the Persona home page are at most 760pt wide (`ChatView.readableWidth`), centered when wider; the top bar still spans the full width.
 - **No screen dimensions**: the screens have different sizes and ratios; never use `UIScreen.main`. The long-press message action bar stays within the chat area (`MessageMenu.area`
-  coordinate space); interaction forms have a maximum height of 55% of their container (`containerRelativeFrame`), except a lone question card above the composer that grows past half the page (`docs/design/DESIGN_SYSTEM.md` 4.8, #6277); image scaling uses the view's `traitCollection.displayScale`.
+  coordinate space); interaction forms have a maximum height of 55% of their container (`containerRelativeFrame`) and never more than lets the card fit the cards' area, so a lone card never scrolls there too (#6605), except a lone question card above the composer that grows past half the page (`docs/design/DESIGN_SYSTEM.md` 4.8, #6277); question, permission, plan and terminal dialog forms keep their answers outside their one scroll area (`CardForm`); image scaling uses the view's `traitCollection.displayScale`.
 - **Toolbar buttons need both titles and icons** (`Label("新建会话", systemImage: …)`, "New chat"): vertical bars show only icons, and overflow menus show titles;
   icon-only buttons become blank menu items.
 - **Vertical side bars**: when the system places bars at the side (outer screen, inner landscape; non-nil `toolbarVerticalEdge`, iOS 27.1 onward), the Agents chat page no longer draws its own header buttons;
@@ -789,6 +806,50 @@ One App for iPhone and iPad (`TARGETED_DEVICE_FAMILY` 1,2). Previously only 1, g
 - Tests: `IPadLayoutTests` (iPad simulator only: native full-screen portrait / landscape, wide enough sidebar, chats open on the right); `InboxSplitTests` (split layout:
   switching between Lark chats shows the new chat's own messages and draft on the right, switching back preserves the draft). XCUITest's own landscape screenshots are rotated;
   inspect landscape by holding with `TEST_RUNNER_PERSONA_HOLD=<seconds>` and capturing with `simctl io screenshot`.
+
+## Sidebar layout (#6332)
+
+Settings › Appearance › Navigation chooses how the app lays out Persona and the Agents (`NavigationLayout`, this device's
+own UserDefaults key `app.navigation`, applied at once, Settings staying on its page): **Separate**, the default and
+everything above unchanged (the Assistant | Agents switch on an iPhone, the Persona | Agents tabs on an iPad), or
+**Sidebar**, the web sidebar's structure in one column. The owner asked for it on 2026-11-13. The Sidebar layout is
+built for the iPad's regular width first (`NavigationLayout.offered`: the row shows on an iPad only); the iPhone's drawer
+follows in #6332's second part. The Mac (frozen) and Apple Vision Pro keep their own navigation.
+
+- **The column** (`UnifiedSidebarColumn`, `Persona/Views/Shell/UnifiedSidebar.swift`), in the web's order: the assistant
+  (its switcher) and Search; the main conversation held at the top while the rest scrolls (as the web's, #5581); one
+  list, the Agents list (`AgentsList`, `sidebarRows`) with the Persona sidebar's rows over its own
+  (`AssistantSidebar(part: .rows)`): **Pages** (Recordings, Inbox, To-dos, Scheduled Tasks, Knowledge, Health, Machines,
+  Messages when it is on, the extensions' pages) and **Persona Chats** (✎ New Chat on the heading, Pinned, Recent, All
+  Chats), each heading folding its section (remembered, `sidebar.fold.places` / `sidebar.fold.chats`; folded Pages keeps
+  the Inbox and To-dos counts); then the Agents' heading with the list's ⋯, Personal Agents and New Session, the quick
+  filters and the grouping, Needs You and the groups, the same rows as the Agents page. At the foot: "N need you ↓"
+  (`SidebarNeedsJump`, the count the Separate layout's switch and tabs show, `agentsWaiting`) in a band of its own above
+  the usage, so it never covers a row; a tap scrolls the list to the Agents' Needs You, the arrow says which way it is.
+  Then the two fullest subscription accounts (`SidebarUsageStrip`, `UsageWindows.top`; a tap opens Machines), New Chat
+  and Settings. The parts share their search and dialogs through `AssistantSidebarUI`, presented around the column
+  (`AssistantSidebarPresenters`): a sheet on a list row went with the row as it scrolled away. Search's words filter
+  Persona's chats and the Agents under them.
+- **The page beside it**: the Agents page's split (`ChatsView` under `\.unifiedSidebar`, `SidebarRoot` in `RootView`),
+  whose detail starts at the Persona conversation: `AssistantView` without a stack of its own (`embedded`), pushing on
+  the split's one path (`\.unifiedPath`). A pick in the sidebar replaces what is over the conversation, as the web's
+  routes: an Agent's chat (its row, a card), a place (`ShellRoute` / `SidebarRoute`, the split's first page without a back),
+  the conversation itself (its row, `ShellPage.conversation`). Every page the Persona page opens is a value there, never a
+  flag, so the next pick does not land under it. The conversation's sidebar button folds and brings back the split's
+  column (`SplitShowList.hide`). The shaded row follows what is beside the sidebar (`UnifiedSidebar.atRoot`,
+  `shownPlace`).
+- **Routes** (`PadRouter(unified: true)`): notifications, links, Live Activities, widgets, quick actions and Siri /
+  Shortcuts set `AppModel.selectedTab` and `openChat` as in the Separate layout and land on the same chat or page: an
+  Agent's chat opens beside the sidebar (the Agents list takes `openChat` as before); `.assistant` goes back to the
+  conversation (`ShellPage.conversation`); `.mail` opens the inbox and keeps it (the router's own tab change is only
+  noted); `.feishu` opens Messages; `.settings` is the sheet over what is in front. Choosing Agents by itself
+  (`agentsListReveal`) scrolls the sidebar to the Agents' heading and leaves the page beside it. `selectedTab` follows
+  what is in front, so a relaunch goes back to the Agent's chat that was open.
+- The Separate layout's views take the same code with the Sidebar layout's parts off: the whole `AssistantSidebar`,
+  `RootTabs` and the shell are drawn as before (pixel comparisons in #6332's PR).
+- Tests: `SidebarLayoutRoutingTests` (the router), `SidebarLayoutTests` (iPad UI: the column, a pick replacing the
+  page, the routes). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout; `-openAppearance navigation` opens
+  the setting's page.
 
 ## Home-screen quick actions (#3199)
 

@@ -1720,11 +1720,14 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const wait = useMemo(() => (outgoing || awaiting ? null : backgroundWaitLine(session)), [outgoing, awaiting, session]);
   // ✓ Done only for a turn that finished: one waiting on you, stopped or cut off by an error keeps its last words
   const done = turnDone(state, session, lastLine, tr.items);
-  // In a Persona conversation the live work line in the message stream already says the turn is at work (its "Working…"
-  // header, spinner and clock), so the dock does not repeat it while that line is on screen (#6230). The bar stays for
-  // background workflows, background waits and subagents (lastLive is false then; the stream only shows their quiet
-  // fold rows), and for Agent chats, whose dock keeps the full cindy status bar.
-  const running = session && !(assistant && lastLive) ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={background} wait={wait} subtasks={subtasks && !outgoing && !awaiting} /> : null;
+  // In a Persona conversation the message stream already carries the turn's state for its whole life — the sending /
+  // preparing feedback while the message is on its way, then the live work line ("Working…", spinner and clock) once the
+  // hub accepts it — so the dock never repeats the foreground turn (#6230). The dock bar stays only for work that outlives
+  // the turn (a background workflow, background wait or subagent: `backgroundOnly`, where the stream shows only quiet fold
+  // rows) and, unchanged, for Agent chats, whose dock keeps the full cindy status bar. Gating on the foreground/background
+  // phase (not on the live line being mounted) keeps the bar out even while a transcript loads or a state push is in flight.
+  const dockBarShown = !assistant || backgroundOnly;
+  const running = session && dockBarShown ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={background} wait={wait} subtasks={subtasks && !outgoing && !awaiting} /> : null;
   // at the top of the composer's card, as cindy's pending queue (#5327); a phone on its side keeps it to one line beside
   // the run's status. The same element while nothing in it changes: the composer is memoized.
   const hasQueue = queued.length > 0;

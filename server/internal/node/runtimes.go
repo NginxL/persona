@@ -125,8 +125,10 @@ type runtimeConn struct {
 	resume       map[string][]string
 	transcripts  map[string]string
 	codexThreads map[string]string
-	// workspaces are its own workspaces, as its last runtime.workspaces said (caps.workspaces, runtimeworkspaces.go).
-	workspaces []runtimeWorkspace
+	// workspaces are its own workspaces, as its last runtime.workspaces said (caps.workspaces, runtimeworkspaces.go);
+	// workspacesSaid: it said them on this connection (a workspace missing from them is gone).
+	workspaces     []runtimeWorkspace
+	workspacesSaid bool
 	// daemon is its id in daemons.json when the node dialed it (daemons.go), "" for a runtime on the socket.
 	daemon string
 	// pid is the process at the other end of the runtime socket; 0 when not known (a daemon's link, the Orca bridge,

@@ -152,16 +152,11 @@ describe("a Persona chat's pill on a hub that keeps picks", () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("relay runs Codex; this conversation runs on Claude Code"), "error");
   });
 
-  it("an effort set on the model that runs is kept with it; another chat's pick is undone rather than followed", async () => {
+  it("hides the pill on a conversation the hub does not name as the main one (#6911)", async () => {
     getState().assistant!.main = "other";
     await show(chat({ launcher: "relay", model: "claude-haiku-5-5" }));
-    await open();
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_own", { setup: "relay · Haiku 5.5" }));
-    expect(await act(() => panel.props!.onApplyCurrent!({ effort: "max" }))).toBe(true);
-    expect(sent("PUT")).toEqual([{ launcher: "relay", model: "haiku", effort: "max", machine_id: mid() }]);
-    act(() => root.render(<AssistantModelPill session={getSession(mid(), "c1")!} />));
-    await flush();
-    expect(strip()!.querySelector("button")!.textContent).toBe(t("chat-modelpill.undo_pick"));
+    expect(pill()).toBeNull();
+    expect(calls.some((c) => c.url.includes("/assistant/conversations/c1/model"))).toBe(false);
   });
 
   it("Codex's Fast goes through the speed request", async () => {

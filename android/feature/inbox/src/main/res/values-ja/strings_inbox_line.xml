@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="inbox_line_title">経緯</string>
+    <string name="inbox_line_kind_inbox">イベント</string>
+    <string name="inbox_line_kind_todo">ToDo</string>
+    <string name="inbox_line_kind_session">エージェントのセッション</string>
+    <string name="inbox_line_next">次へ</string>
+    <!-- The web's wording; iOS uses the longer equivalent 「受信トレイにはもうありません」. -->
+    <string name="inbox_line_gone">受信トレイにありません</string>
+    <string name="inbox_line_not_same">別の件です</string>
+    <string name="inbox_line_not_same_done">別の件として記録しました</string>
+</resources>

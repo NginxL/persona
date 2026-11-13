@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="inbox_line_title">线索</string>
+    <string name="inbox_line_kind_inbox">事件</string>
+    <string name="inbox_line_kind_todo">待办</string>
+    <string name="inbox_line_kind_session">Agent 会话</string>
+    <string name="inbox_line_next">下一步</string>
+    <string name="inbox_line_gone">已不在收件箱里</string>
+    <string name="inbox_line_not_same">不是同一件事</string>
+    <string name="inbox_line_not_same_done">已标为不是同一件事</string>
+</resources>

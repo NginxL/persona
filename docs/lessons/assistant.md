@@ -498,3 +498,44 @@ tied a transcript line to its id, so the owner sent it again; a send in doubt no
 after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts` allows 5 s for the clocks, not
 `CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
 in ChatView). A refusal never settles by words.
+
+## Name the thing an event is about, and keep what was done for it (#5718)
+
+Completion handling started only on a session list going from `working` to `done` / `idle`, and remembered "this stretch
+had its receipt" in memory. A node whose inventory never said `working` for Codex left finished turns with no receipt, no
+judgment and no supervision message; a manager restart forgot the receipt and wrote a second one when the same end was told
+again; a stale `working` row arriving after the end judged the same reply twice. Three faults, one cause: the work was
+keyed to the event that told of the turn, not to the turn.
+
+- Key the side effect to what it is about (here to-do, machine, session and the runtime's own turn end), give its row an
+  id derived from that key, and let the database refuse the second write.
+- Keep each later step on that key too (judged, told), so a process that stops between two steps resumes at the next one
+  instead of starting over or stopping for good.
+- Do not make a status transition the only trigger for something that must happen. Statuses are another component's
+  guess; reconcile from the record of what happened (the transcript) in a sweep that already runs, and bound what the
+  sweep reads per tick.
+- A reservation taken before a check must be given back on every path that leaves without doing the work, or one failed
+  check consumes the work for good (the second look at the task's agents failing on a dropped link).
+- When such a ledger is new, decide what it does with everything that happened before it existed. Here a turn that ended
+  before the ledger was first kept is recorded as seen and nothing is made of it; otherwise the first sweep after an
+  upgrade would have judged every stopped task again.
+- A recovery path changes state last. The first version took the start nobody heard (stage back, check cleared, review
+  wait cleared) and then ran the end's handler, which could still refuse: a cancelled task or a usage-limit wait lost its
+  state for an end that was never handled. Run every refusal of the path being recovered first, and only then the
+  missing step.
+- Every way a recovery look can end without doing the work needs an answer to "will looking again help?". Never (the
+  task refuses this end): record it and stop. Not until something changes (a usage-limit wait, a computer that is away):
+  do not look. Perhaps (the node did not answer): back off, and start over when the row moves. A boolean "not done"
+  that retries every tick reads the same transcript for hours.
+- Compare rows by what says the thing changed. The transcript's size says it was written to; the row's time can move
+  on a later list with nothing written, and a row compared on both was never the same row twice.
+- A mutex that is held across database calls must not be reachable from under a hot lock. The ledger's mutex is
+  held across its reads and writes; a counter that happened to live under it was read and set with the task lock
+  held, so one stuck write would have parked every user of the task lock behind it. Before putting a field under a
+  lock, ask who reads it and what they hold: in-memory state that a hot path needs gets a lock that is held across
+  nothing, and the order is written on the struct in one sentence a reader can check. Test it by stalling the store,
+  not by reading the code.
+
+## Reconciling a lost start needs an exact id, not a shape match (2026-11-13, #6908)
+
+When `session.start` never answers, the hub lists the machine and adopts the session its start probably created. The first version guessed from shape: not in the pre-start snapshot, `StartedByPersona`, same launcher and cwd, a fresh sign of life, newest wins. Three rows are indistinguishable by shape: a session the owner started by hand also carries `StartedByPersona` (the app's start path stamps it), and two workspace-none tasks run in the same directory with no workspace claim between them, so each could adopt the other's session — and nothing excluded a session already linked to another open todo. A heuristic over mutable, shared signals (`UpdatedAt`, cwd) cannot identify one specific start. The fix carries the identity instead: the hub generates a v4 UUID and sends it on the existing `session.start` `session_id`, the node starts Claude with `--session-id <id>` on every Claude path (the sync terminal path had been passing an empty id), and adoption matches that exact id first with no other condition. The heuristic is only the fallback for a node too old to honor the field, and even then it skips every session in `todos.activeBySession` and fails closed when the todo book cannot load. Lesson: when an action's result can be lost, make the request carry a unique correlation token and match on that; keep a heuristic only as a version-compatibility fallback, and have it exclude resources already claimed elsewhere rather than merely rank candidates.

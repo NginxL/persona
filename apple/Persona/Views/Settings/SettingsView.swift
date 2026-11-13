@@ -365,6 +365,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openTriageSettings") { p.append(SettingsPage.triage) }
         else if d.string(forKey: "openKnowledgeSelection") != nil { p.append(SettingsPage.knowledgeSelection) } // (rule | chat | doc: with that sheet)
         else if d.string(forKey: "openAppearance") == "layout" { p.append(SettingsPage.layout) } // Layout (#2530)
+        else if d.string(forKey: "openAppearance") == "navigation" { p.append(SettingsPage.navigation) } // Navigation (#6332)
         else if d.string(forKey: "openAppearance") == "language" { p.append(SettingsPage.language) } // Language and dictation (#5005)
         else if let a = d.string(forKey: "openAppearance"), a != "chat" { // persona (or YES, or icon: the icon is the Avatar's) | color | style | scheme
             p.append(a == "color" ? SettingsPage.themeColor : a == "style" ? SettingsPage.style
@@ -407,6 +408,8 @@ enum SettingsPage: Hashable {
     case triage
     /// Settings › Appearance › Layout (#2530): how the Agents list draws its agents.
     case layout
+    /// Settings › Appearance › Navigation (#6332): Separate or Sidebar (`NavigationLayout`).
+    case navigation
     /// Settings › Knowledge Selection (docs/assistant/knowledge.md "Selection"): what the knowledge base reads and keeps.
     case knowledgeSelection
     /// Settings › hub: the hubs paired, by group (docs/protocol/multi-hub.md).
@@ -506,9 +509,11 @@ private struct SettingsDestinations: ViewModifier {
         case .language: LanguageSettingsPage()
         #if os(iOS)
         case .layout: LayoutSettingsPage()
+        case .navigation: NavigationSettingsPage()
         case .knowledgeSelection: KnowledgeSelectionView()
         #else
         case .layout: EmptyView()
+        case .navigation: EmptyView()
         case .knowledgeSelection: EmptyView()
         #endif
         #if os(iOS) || os(visionOS)

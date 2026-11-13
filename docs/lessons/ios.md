@@ -1772,6 +1772,24 @@ no initial Working row so the message shifted by one row, and pending local remo
 - `-ui.scheme light|dark` makes the app icon follow the appearance, and SpringBoard's "You have changed the icon"
   alert covers the screenshot and takes taps: dismiss it through `com.apple.springboard` after launch.
 
+## One scroll in a pending card, its answers outside it (2026-11-13, #6605)
+
+- A permission, plan or terminal-dialog card put its whole form in a `ScrollView` capped at 55% of the container, under
+  the cards' area capped at half the page: a long command made the card taller than the area, so the command scrolled in
+  the card and the card in the area, with the answers last. #4839 had fixed the same for question cards only. Every form
+  now takes the area's cap (`formCap` includes `areaCap`), and the ones with answers keep them under their one scroll area
+  (`CardForm`). Check a new card kind against both caps, not only the page's 55%.
+- Fit a card by giving up lines of its long part, not by scrolling: `CardBodyStack` is a `Layout` (not a VStack, which a
+  scroll view offers no height to share) that offers the part marked `givesCardRoom()` what the others leave of the cap,
+  and `CardFold` shows the whole lines of that (never under two). The cut comes from layout, not from measured state, so
+  nothing goes back and forth; the fold only measures whether it cut anything, to show Show All.
+- In the app target (default MainActor isolation) a `LayoutValueKey` must be `nonisolated`: a `Layout` reads it off its
+  subviews in a nonisolated context, and the main-actor conformance fails to compile ("main actor-isolated conformance
+  … cannot be used in nonisolated context"). Plain `Layout` structs compile as they are.
+- Screenshots straight from `simctl` (no UI test): a relaunch of a fresh install brings back the notification question,
+  and `simctl openurl persona://open?…` first asks "Open in Persona?". Take each shot from the first launch on a freshly
+  erased simulator, or from a UI test that dismisses SpringBoard's alert (never by the label 允许 alone: the cards have one).
+
 ## A view that places itself over the whole screen gets no keyboard avoidance (2026-11-10, #3004)
 
 Superseded for the + panel by #4312: it is a system sheet now, its bar a `safeAreaInset` that the system's keyboard

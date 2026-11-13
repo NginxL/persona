@@ -86,9 +86,11 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
             // On the whole split, not the detail stack: its pages are built from the destinations the sidebar
             // registered, in the sidebar's environment.
             .environment(\.splitDetail, SplitDetail(isFirstPage: path.count <= 1, listHidden: columns == .detailOnly, pageSwitch: pageSwitch))
-            .environment(\.splitShowList, SplitShowList { [columns = $columns] in
+            .environment(\.splitShowList, SplitShowList(show: { [columns = $columns] in
                 withAnimation(Theme.Motion.layout) { columns.wrappedValue = SplitColumns.shown }
-            })
+            }, hide: { [columns = $columns] in
+                withAnimation(Theme.Motion.layout) { columns.wrappedValue = .detailOnly }
+            }))
             #endif
         } else {
             NavigationStack(path: $path) {
@@ -195,9 +197,11 @@ extension EnvironmentValues {
     @Entry var splitShowList: SplitShowList?
 }
 
-/// Brings a `SplitNavigation`'s list column back.
+/// Brings a `SplitNavigation`'s list column back, or (the Sidebar layout's Persona page, its sidebar button, #6332)
+/// folds it away.
 struct SplitShowList {
     var show: () -> Void
+    var hide: (() -> Void)? = nil
 }
 
 /// Appends a value to a `SplitNavigation`'s path.

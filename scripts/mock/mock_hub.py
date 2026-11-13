@@ -346,9 +346,11 @@ def mock_workspaces():
     if os.environ.get("MOCK_PASEO"):
         for wid, title, path, branch in [(w, t, PASEO_ROOT if tree is None else PASEO_TREES + tree, b)
                                          for w, t, tree, b in PASEO_WORKSPACES] + PASEO_MADE:
+            # every worktree here is one Paseo made (owned): the ones Delete worktree is offered for (#6297)
             result.append({"id": "catalog-" + wid, "machine_id": "server", "source": "paseo", "source_id": wid, "title": title,
                            "cwd": path, "branch": branch, "workspace_kind": "git", "is_main": path == PASEO_ROOT,
-                           "project_id": "prj_app", "project_name": "app", "project_path": PASEO_ROOT,
+                           **({} if path == PASEO_ROOT else {"owned": True}),
+                           "project_id": PASEO_PROJECT["id"], "project_name": PASEO_PROJECT["name"], "project_path": PASEO_ROOT,
                            "online": True, "available": True, "last_seen": ago()})
     return list({(w["machine_id"], w["source"], w["source_id"]): w for w in result}.values())
 
@@ -9007,6 +9009,60 @@ if os.environ.get("MOCK_SCREEN_DANGER") in ("before", "after"):
                    + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend",
          "dialog": _danger})
 
+# MOCK_LONG_ASKS=1 (#6605): pending cards whose command or plan runs far past the cards' area, one long card per
+# conversation and two on one. The review agent: a terminal prompt read without its command (the dialog's detail is the
+# agent's words and the 52-line command, Yes / No), as a hub reads one whose header scrolled off. The blog agent: a Bash
+# permission with the same command. The orders agent: a 60-line plan. The release agent: the command as a hub reads it
+# now (command, description, warning, countdown) and a second long Bash permission. None of them is a chat
+# PendingCardsTests opens, so one mock with MOCK_AGENTS=1 serves both.
+def _long_ask_cmd():
+    rows = ["set -euo pipefail", "cd ./fixtures", "python3 -I - <<'EOF'", "import json, pathlib",
+            "root = pathlib.Path('.')", "seen = {}"]
+    for n in range(1, 15):
+        rows += ["p%d = root / 'city-%02d.json'" % (n, n),
+                 "d%d = json.loads(p%d.read_text()) if p%d.exists() else {'hours': []}" % (n, n, n),
+                 "seen['city-%02d'] = len(d%d['hours'])  # hours of rain to check" % (n, n)]
+    rows += ["print(json.dumps(seen, indent=2, sort_keys=True))", "EOF",
+             "swift test --filter ForecastFormatTests 2>&1 | tail -20", "git status --short ./fixtures | head -40"]
+    return "\n".join(rows)
+
+
+if os.environ.get("MOCK_LONG_ASKS") == "1":
+    _long_cmd = _long_ask_cmd()
+    _long_desc = "Check every city fixture's rain hours and run the formatter's tests"
+    _long_plan = "## 天气小组件的降雨时间线\n\n" + "\n".join(
+        "%d. 第 %d 步：把第 %d 个城市的小时数据接到时间线上，补上对应的格式化测试，跑一遍确认没有回归" % (n, n, n)
+        for n in range(1, 41)) + "\n\n## 不做的事\n\n" + "\n".join("- 第 %d 件先不做的事：留到下一轮再说" % n for n in range(1, 16))
+    INTERACTIONS.extend([
+        {"id": "scr_macbook_review_long", "machine_id": "macbook", "session_id": REVIEW, "session_title": "检查 PR #42 的改动",
+         "cwd": "/Users/me/code/weather", "kind": "screen", "created_at": ago(minutes=1), "expires_at": later(hours=24),
+         "screen": " " + _long_desc + "\n " + _long_cmd.replace("\n", "\n ") + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel",
+         "dialog": {"question": "Do you want to proceed?", "detail": _long_desc + "\n" + _long_cmd, "rev": "6605a0000001",
+                    "options": [{"key": "1", "label": "Yes", "keys": ["1"]}, {"key": "2", "label": "No", "keys": ["2"]}]}},
+        {"id": "ix_blog_long_bash", "machine_id": "studio", "session_id": BLOG, "session_title": "博客迁移到 Astro",
+         "cwd": "/Users/me/code/blog", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "Bash", "tool_use_id": "toolu_long_bash", "summary": _long_cmd,
+         "tool_input": {"command": _long_cmd, "description": _long_desc}},
+        {"id": "ix_orders_long_plan", "machine_id": "server", "session_id": ORDERS, "session_title": "排查 /orders 接口变慢",
+         "cwd": "/home/me/code/shop-api", "kind": "plan", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "ExitPlanMode", "tool_use_id": "toolu_long_plan", "plan": _long_plan},
+        {"id": "scr_macbook_release_long", "machine_id": "macbook", "session_id": RELEASE, "session_title": "整理发布说明",
+         "cwd": "/Users/me/code/weather", "kind": "screen", "created_at": ago(minutes=2), "expires_at": later(hours=24),
+         "screen": " Bash command\n " + _long_desc + "\n │ " + _long_cmd.replace("\n", "\n │ ")
+                   + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend",
+         "dialog": {"question": "Do you want to proceed?", "rev": "6605a0000002", "detail": "Bash command\n" + _long_desc + "\n" + _long_cmd,
+                    "command": _long_cmd, "description": _long_desc, "risk": "delete",
+                    "warning": "Dangerous rm operation not ruled out — the shell may read this command differently than it was parsed",
+                    "deadline": "Claude Code will automatically block this request in 4:59, to avoid holding up an unattended session",
+                    "deadline_action": "deny",
+                    "deadline_at": (datetime.now(timezone.utc) + timedelta(seconds=299)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "options": [{"key": "1", "label": "Yes", "keys": ["1"]}, {"key": "2", "label": "No", "keys": ["2"]}]}},
+        {"id": "ix_release_long_bash", "machine_id": "macbook", "session_id": RELEASE, "session_title": "整理发布说明",
+         "cwd": "/Users/me/code/weather", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "Bash", "tool_use_id": "toolu_long_bash_2", "summary": _long_cmd,
+         "tool_input": {"command": _long_cmd, "description": _long_desc}},
+    ])
+
 # MOCK_SCREEN_MULTI=1: a multi-select AskUserQuestion read off the terminal (Claude Code 2.1.316), the second of
 # three questions: two boxes already ticked at the computer, a few words in its free-text field, "Next" to send it.
 # /mock/reset puts it back unanswered (MultiSelectCardTests: each case starts from the card).
@@ -9694,6 +9750,80 @@ def worktree_route(h, p, body):
     parent = body.get("parent_workspace_id") or body.get("workspace_id", "")
     if body.get("kind") == "orca": WORKSPACE_LINEAGE[mid, wid] = parent
     return h.send_json({"workspace_id": wid, "parent_workspace_id": parent, "tab_id": wid + ":t1", "pane": wid + ":p1", "terminal": "pane:" + wid + ":p1", "path": path, "branch": branch})
+
+
+# MOCK_PASEO=1 (#6297): Rename and Delete worktree on Paseo's rows, and Rename space on its project, answered as the node
+# answers them (node/runtimeworkspaces_manage.go): a title, the project's name (its agents' space_name, the catalog's
+# project_name), and a deletion previewed, then confirmed with the preview's token, only of a worktree Paseo made (the
+# main checkout is refused); the login flow's worktree has two uncommitted changes, which the dialog asks to confirm.
+# Recorded at GET /mock/node_actions.
+PASEO_PROJECT = {"id": "prj_app", "name": "app"}
+PASEO_PREVIEWS, PASEO_DIRTY = {}, {"wks_5a1e000000000002": 2}
+
+
+def _paseo_path(row):
+    """A Paseo workspace row's folder: PASEO_WORKSPACES name a folder under its worktrees root (None: the main checkout),
+    PASEO_MADE the whole path."""
+    return row[2] if row in PASEO_MADE else PASEO_ROOT if row[2] is None else PASEO_TREES + row[2]
+
+
+def _paseo_failed(h, detail):
+    """A node's refusal as the hub writes it (docs/protocol/protocol.md "Error body"): the node's words in detail."""
+    return h.send_json({"error": "The request could not be completed. Open details for the diagnostic.", "code": "internal", "detail": detail}, 502)
+
+
+def paseo_worktree_route(h, p, body):
+    """POST /api/v1/machines/{mid}/worktree/{rename,delete} of a Paseo row (#6297)."""
+    mid, verb = p.split("/")[4], p.split("/")[6]
+    NODE_ACTIONS.append({"machine": mid, "route": "worktree/" + verb, **body})
+    wid = str(body.get("workspace_id", ""))
+    found = next(((rows, i) for rows in (PASEO_WORKSPACES, PASEO_MADE) for i, row in enumerate(rows) if row[0] == wid), None)
+    if verb == "rename":
+        if not found:
+            return _paseo_failed(h, "Paseo no longer lists this workspace; refresh and try again")
+        rows, i = found
+        rows[i] = (wid, str(body.get("name", "")).strip()) + tuple(rows[i][2:])
+        return h.send_json({"ok": True})
+    token = str(body.get("preview_token", ""))
+    if body.get("preview"):
+        if not found:
+            return _paseo_failed(h, "The workspace or its changes differ from the preview; review a new preview")
+        rows, i = found
+        path = _paseo_path(rows[i])
+        if path == PASEO_ROOT:
+            return _paseo_failed(h, "The repository's main checkout cannot be deleted")
+        token = "paseo-preview-%d" % (len(PASEO_PREVIEWS) + 1)
+        PASEO_PREVIEWS[token] = wid
+        return h.send_json({"workspace_id": wid, "kind": "paseo", "host_id": "local", "instance_id": "paseo-mock", "path": path,
+                            "branch": rows[i][3], "dirty": PASEO_DIRTY.get(wid, 0), "folder": False, "preview_token": token})
+    if PASEO_PREVIEWS.get(token) != wid:
+        return _paseo_failed(h, "Preview this exact workspace again before deleting it")
+    if body.get("reconcile"):
+        return h.send_json({"workspace_id": wid, "removed": not found, "state": "present" if found else "removed"})
+    if not found:
+        return _paseo_failed(h, "Deletion was already sent; reconcile its status before any further action")
+    if PASEO_DIRTY.get(wid) and not body.get("force"):
+        return _paseo_failed(h, "The worktree has uncommitted changes")
+    rows, i = found
+    del rows[i]
+    SESSIONS[:] = [s for s in SESSIONS if not (s.get("space_kind") == "paseo" and s.get("workspace_id") == wid)]  # archived with it
+    return h.send_json({"workspace_id": wid, "removed": True, "state": "removed", **({"branch_deleted": True} if body.get("delete_branch") else {})})
+
+
+def paseo_space_route(h, p, body):
+    """POST /api/v1/machines/{mid}/spaces/{id}/rename of Paseo's project, by its id or one of its workspaces' (#6297): its
+    agents and the catalog show the new name; the hub answers it as pins.go does. False when the id is no Paseo one."""
+    sid = p.split("/")[6]
+    if sid != PASEO_PROJECT["id"] and not any(row[0] == sid for row in PASEO_WORKSPACES + PASEO_MADE):
+        return False
+    NODE_ACTIONS.append({"machine": p.split("/")[4], "route": "spaces/rename", "workspace_id": sid, **body})
+    name = str(body.get("name", "")).strip()
+    PASEO_PROJECT["name"] = name
+    for s in SESSIONS:
+        if s.get("space_kind") == "paseo" and s.get("space_id") == PASEO_PROJECT["id"]:
+            s["space_name"] = name
+    h.send_json({"ok": True, "name": name})
+    return True
 
 
 # MOCK_AGENT_WORKTREE=1 (#6115): a new agent in a worktree of its own. worktree/status says a folder under
@@ -12653,6 +12783,31 @@ def fs_find(mid):
 
 def fs_get(h, p, q):
     """GET /api/v1/lark/… and /mock/lark with MOCK_LARK (True when handled; the rest falls through)."""
+    # The unread switch must cross a whole read-only page, not filter just the first screen (#6553).
+    if os.environ.get("MOCK_LARK_UNREAD") and p in ("/api/v1/lark/conversations", "/api/v1/lark/pinned"):
+        pages = max(1, min(16, int(os.environ.get("MOCK_LARK_UNREAD_PAGES", "1"))))
+        rows = [dict(id="read-%03d" % n, name="Project archive %02d" % n, is_group=True, unread=0,
+                     at_me=False, muted=False, preview="Notes are up to date.", is_mine=False,
+                     updated_at="2026-01-02T12:00:00Z", pinned=n == 1) for n in range(1, pages * 60 + 1)]
+        rows += [dict(id=feed, name=name, is_group=True, unread=count, marked_unread=marked,
+                      at_me=False, muted=False, preview="A new update is waiting.", is_mine=False,
+                      updated_at="2026-01-01T12:00:00Z", pinned=feed == "f1")
+                 for feed, name, count, marked in [("f3", "Design review", 3, False),
+                                                  ("f2", "Weekend plans", 0, True),
+                                                  ("f1", "Release notes", 1, False)]]
+        if p.endswith("pinned"):
+            rows = [row for row in rows if row.get("pinned")]
+        elif q.get("scope", ["chats"])[0] == "unread":
+            rows = [row for row in rows if row["unread"] or row.get("marked_unread")]
+        cursor, limit = int(q.get("cursor", ["0"])[0] or "0"), int(q.get("limit", ["60"])[0])
+        if cursor:
+            delay = max(0, min(3, float(os.environ.get("MOCK_LARK_UNREAD_PAGE_DELAY", "0"))))
+            if delay:
+                print(f"lark-unread-page-start cursor={cursor}", flush=True)
+                time.sleep(delay)
+        h.send_json({"conversations": rows[cursor:cursor + limit], "account_id": LARK_ACCOUNT_ID,
+                     "next_cursor": str(cursor + limit) if cursor + limit < len(rows) else ""})
+        return True
     if p == "/mock/lark":
         h.send_json(FS_LOG); return True
     if p.startswith("/api/v1/lark/media/"):
@@ -12674,6 +12829,14 @@ def fs_get(h, p, q):
         h.end_headers(); h.wfile.write(data)
         return True
     if p == "/api/v1/lark/conversations":
+        # Optimized before/after list-scroll measurements use the same paginated synthetic workload (#6553).
+        if os.environ.get("MOCK_LARK_LIST"):
+            rows = FS_CONVS + [dict(FS_CONVS[-1], id="list-%03d" % n, name="Archive %03d" % n)
+                               for n in range(min(2000, int(os.environ["MOCK_LARK_LIST"])))]
+            cursor, limit = int(q.get("cursor", ["0"])[0] or "0"), int(q.get("limit", ["60"])[0])
+            h.send_json({"conversations": rows[cursor:cursor + limit], "account_id": LARK_ACCOUNT_ID,
+                         "next_cursor": str(cursor + limit) if cursor + limit < len(rows) else ""})
+            return True
         h.send_json({"conversations": FS_CONVS, "next_cursor": ""}); return True
     if p.startswith("/api/v1/lark/conversations/") and p.endswith("/messages"):
         h.send_json(fs_page(p.split("/")[5], q)); return True
@@ -15529,15 +15692,33 @@ ITEMS["hlth0004-0000-4000-8000-000000000004"] = (
 )
 # Assistant screenshots with the shared renderer: a read-only persona-view and a legacy persona-card, leaving other mock modes unchanged.
 if os.environ.get("MOCK_EXTENSION_CARDS") == "1":
-    _view = {"sections": [{"title": "本周概览", "items": [
+    # A card needs its `fallback` (the words a client that can't draw it shows): without one it is drawn as text.
+    _view = {"fallback": "本周概览：会议记录已整理。", "sections": [{"title": "本周概览", "items": [
         {"type": "markdown", "text": "**会议记录已整理**，可以查看摘要。"},
         {"type": "row", "title": "周会摘要", "icon": "doc", "action": {"id": "must-not-run"}},
         {"type": "button", "title": "不应运行", "action": {"id": "must-not-run"}},
         {"type": "link", "title": "查看说明", "url": "https://example.com/guide"}]}]}
     _legacy = {"type": "stat", "title": "今天步数", "value": 8432, "unit": "步", "note": "这是演示数据"}
     _fence = lambda language, data: "```" + language + "\n" + json.dumps(data, ensure_ascii=False) + "\n```"
-    ITEMS[ASK1] = [it("user", "text", 2, text="把今天的概览放到卡片里"),
-                   it("assistant", "text", 1, text=_fence("persona-view", _view) + "\n\n" + _fence("persona-card", _legacy))]
+    # UI version 4's code-hosting components in a card (#827): drawn read-only by ExtensionCodeSummary, now that cards
+    # report UI version 6 and the hub sends them as they are.
+    _code = {"fallback": "合并请求 #42：登录页支持“记住我”，3 个文件。", "sections": [{"title": "合并请求 #42", "items": [
+        {"type": "header", "title": "登录页支持“记住我”", "subtitle": "remember-me → main · 3 个提交"},
+        {"type": "breadcrumb", "crumbs": [{"title": "app"}, {"title": "web"}, {"title": "login.tsx"}]},
+        {"type": "file_tree", "entries": [
+            {"path": "web/login.tsx", "kind": "file", "status": "modified", "additions": 24, "deletions": 6},
+            {"path": "web/session.ts", "kind": "file", "status": "added", "additions": 41, "deletions": 0},
+            {"path": "web/old-login.css", "kind": "file", "status": "deleted", "additions": 0, "deletions": 18}]},
+        {"type": "code", "path": "web/session.ts", "language": "ts",
+         "text": "export function remember(days: number) {\n  const until = Date.now() + days * 86_400_000\n  return { until }\n}"},
+        {"type": "comment_thread", "comments": [
+            {"author": "评审人", "at": "2026-11-12T09:30:00Z", "body": "“记住我”默认关着比较稳妥。"},
+            {"author": "作者", "at": "2026-11-12T10:05:00Z", "body": "好，已经改成默认关。"}]},
+        {"type": "composer", "name": "reply", "placeholder": "回复", "buttons": [{"title": "发送", "action": {"id": "must-not-run"}}]}]}]}
+    ITEMS[ASK1] = [it("user", "text", 4, text="把今天的概览放到卡片里"),
+                   it("assistant", "text", 3, text=_fence("persona-view", _view) + "\n\n" + _fence("persona-card", _legacy)),
+                   it("user", "text", 2, text="合并请求 #42 现在怎么样了"),
+                   it("assistant", "text", 1, text=_fence("persona-view", _code))]
 
 if os.environ.get("MOCK_SPLIT_TABS"):
     ITEMS.update(split_tabs_items())
@@ -22398,7 +22579,7 @@ MOCK_HELP = [
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",
     "MOCK_CHILD_SESSIONS=1  The Paseo computer (MOCK_PASEO) with its agent's four created agents (one waiting for you, one working with a Codex subagent of its own, one done, one failed) and an agent whose creator is not listed: the hub folds them (folded_under / children) and the lead's chat draws a card for each (#5120)",
-    "MOCK_PASEO=1  A computer that enables Paseo beside herdr: a project with its main checkout, two titled worktree workspaces and one with no agent, all in the workspace catalog (New worktree… makes one in Paseo's folder, #6295), an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
+    "MOCK_PASEO=1  A computer that enables Paseo beside herdr: a project with its main checkout, two titled worktree workspaces and one with no agent, all in the workspace catalog (New worktree… makes one in Paseo's folder, #6295; Rename, Delete worktree and Rename space as the node answers them, the login flow's worktree with two uncommitted changes, #6297), an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
     "MOCK_LIVE_STEP=bash|command|reads|parallel|thinking|thinking-folded  The widget chat a minute into a turn whose newest step is still going: the running work line names it (#2987)",
     "MOCK_TOOL_OUTCOMES=1  A turn whose tool results carry outcomes: a failed test run (exit code, the cut output's end), a denied edit, a refused write, an interrupted and a timed-out command; only the failure is red (#4303)",
     "MOCK_PERMISSION_DIFF=1  Two chats wait on a Claude Code permission card for an Edit (longer than the card's preview) and a Write; the card shows the change (#4621)",
@@ -23928,6 +24109,12 @@ class H(BaseHTTPRequestHandler):
             return node_action(self, p, json.loads(self.last_body or b"{}"))
         if (os.environ.get("MOCK_TERMINAL_PANES") or os.environ.get("MOCK_PASEO")) and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(prepare|create)", p):
             return worktree_route(self, p, json.loads(self.last_body or b"{}"))
+        if os.environ.get("MOCK_PASEO") and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(rename|delete)", p) \
+                and json.loads(self.last_body or b"{}").get("kind") == "paseo":
+            return paseo_worktree_route(self, p, json.loads(self.last_body or b"{}"))
+        if os.environ.get("MOCK_PASEO") and re.fullmatch(r"/api/v1/machines/[^/]+/spaces/[^/]+/rename", p) \
+                and paseo_space_route(self, p, json.loads(self.last_body or b"{}")):
+            return
         if AGENT_WORKTREE and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(status|add|remove)", p):
             return agent_worktree_route(self, p, json.loads(self.last_body or b"{}"))
         if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/spaces/[^/]+/rename", p):

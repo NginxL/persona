@@ -97,7 +97,7 @@ const (
 	DeviceSessionRename = "session.rename" // {session_id, title} → {ok}
 	DeviceAssistantSend = "assistant.send" // {session_id, text, resume_only?, permission_mode?, …model} → {session_id}
 	DeviceSessionSend   = "session.send"   // {session_id, text} → {}
-	DeviceSessionStart  = "session.start"  // {cwd, prompt, launcher?, model?, permission_mode?, tab_name?, workspace_id?} → {session}
+	DeviceSessionStart  = "session.start"  // {cwd, prompt, launcher?, model?, permission_mode?, tab_name?, workspace_id?, session_id?} → {session}; session_id names the new session (Claude), for an exact reconciliation when the answer is lost
 	// DeviceSessionModes: {session_id, launcher?, from?, model?, effort?, permission_mode?} → {}; a launcher other than
 	// the session's own is a switch to it, carried out by a session.send with apply_switch (docs/protocol/protocol.md).
 	DeviceSessionModes = "session.modes"

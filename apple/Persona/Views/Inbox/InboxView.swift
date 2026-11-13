@@ -55,10 +55,23 @@ extension InboxView {
     static func short(_ email: String) -> String { InboxPage.short(email) }
 }
 
+/// A waiting session pushes only on its own hub's Assistant stack. Another group's card keeps the old open, which
+/// selects that group's Persona for an assistant conversation instead of leaving a foreign route on this hub's stack.
+@MainActor enum InboxWaitingOpen {
+    static func session(_ key: SessionKey, currentHub: String?, push: ((InboxChatRoute) -> Void)?, open: () -> Void) {
+        if let push, key.group == currentHub {
+            push(InboxChatRoute(key: key, manager: nil))
+        } else {
+            open()
+        }
+    }
+}
+
 /// The inbox's page itself, in whatever stack shows it: Inbox's own (InboxView), or the shell's Assistant page (pushed from
 /// the drawer, docs/apple/ios.md「New shell」), which passes `embedded` so the page brings its destinations and link handling.
 struct InboxPage: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.pushInboxChat) private var pushChat
     @Binding var path: NavigationPath
     @ObservedObject var accountState: InboxAccountState
     var embedded = false
@@ -830,7 +843,7 @@ struct InboxPage: View {
     private func open(_ ix: Interaction) {
         // A card on no session has no chat: it opens by itself (#4059).
         if ix.isSessionless { answering = ix; return }
-        model.open(ix.sessionKey) // in its own group (another group's Persona: that group's)
+        InboxWaitingOpen.session(ix.sessionKey, currentHub: model.hub?.group, push: pushChat, open: { model.open(ix.sessionKey) })
     }
 
     @ViewBuilder private func row(_ it: InboxItem) -> some View {
@@ -1356,11 +1369,27 @@ struct InboxDetailView: View {
     }
 }
 
+/// Values a destination needs directly: an outer NavigationStack / NavigationSplitView does not reliably forward them
+/// to pushed pages on iPad. Both are optional on Mac, Vision and the classic layouts, preserving their fallbacks.
+struct InboxDestinationEnvironment: ViewModifier {
+    var chat: ((InboxChatRoute) -> Void)? = nil
+    var openFeishu: ((FeishuRoute) -> Void)? = nil
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.pushInboxChat, chat)
+            .environment(\.feishuOpen, openFeishu)
+    }
+}
+
 /// The pages the inbox opens, in either layout (`SplitNavigation`).
 struct InboxDestinations: ViewModifier {
     var accounts: [MailAccount]
+    var inboxChat: ((InboxChatRoute) -> Void)? = nil
+    var openFeishu: ((FeishuRoute) -> Void)? = nil
     @Environment(AppModel.self) private var model
-    @Environment(\.feishuOpen) private var feishuOpen
+    @Environment(\.feishuOpen) private var inheritedFeishuOpen
+    private var routeOpen: ((FeishuRoute) -> Void)? { openFeishu ?? inheritedFeishuOpen }
 
     // Links on these pages open in the app (feishuHandlesLinks) wherever the stack is: the shell pushes them onto its
     // own stack, where the inbox page's handler does not reach. Those on an item's pages, and on a document or post
@@ -1372,15 +1401,18 @@ struct InboxDestinations: ViewModifier {
             // and draft under the new chat's title (#885).
             .navigationDestination(for: InboxItem.self) {
                 InboxDetailView(item: $0, accounts: accounts).id($0.id).splitDetailPage()
-                    .feishuHandlesLinks(feishuOpen, manager: model.linkManager($0.manager))
+                    .feishuHandlesLinks(routeOpen, manager: model.linkManager($0.manager))
+                    .modifier(InboxDestinationEnvironment(chat: inboxChat, openFeishu: routeOpen))
             }
             .navigationDestination(for: FeishuRoute.self) {
-                FeishuRouteView(route: $0).splitDetailPage().feishuHandlesLinks(feishuOpen, manager: $0.manager)
+                FeishuRouteView(route: $0).splitDetailPage().feishuHandlesLinks(routeOpen, manager: $0.manager)
+                    .modifier(InboxDestinationEnvironment(chat: inboxChat, openFeishu: routeOpen))
             }
             // view original and the chain's links of an event (inbox phase 1).
             .navigationDestination(for: InboxSourceRoute.self) {
                 InboxSourcePage(route: $0, accounts: accounts).splitDetailPage()
-                    .feishuHandlesLinks(feishuOpen, manager: model.linkManager($0.item.manager))
+                    .feishuHandlesLinks(routeOpen, manager: model.linkManager($0.item.manager))
+                    .modifier(InboxDestinationEnvironment(chat: inboxChat, openFeishu: routeOpen))
             }
             .extensionPushDestination()
     }

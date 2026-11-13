@@ -74,6 +74,13 @@ wide symbol must scale down), in the style's icon language (`docs/apple/icons.md
 2. A new Swift file that draws sidebar rows goes into `SidebarMetricsTests.files`.
 3. Screenshot it in en and zh-Hans, light and dark (iPhone, iPad, Mac, web as it applies) and look at it.
 
+## The Sidebar layout's headings
+
+The Sidebar layout (#6332, `docs/apple/ios.md` "Sidebar layout (#6332)") heads its sections with a fold button: the name in
+`captionStrong`, a chevron, what the folded section still counts, and the section's own buttons (Persona Chats' ✎). The
+button is a sidebar row by size (`Theme.Sidebar.rowPadding`, `Theme.Sidebar.row`), so a finger always finds it and the
+words sit as the rows' do; the fold is remembered on the device (`sidebar.fold.places`, `sidebar.fold.chats`).
+
 ## Pinned directions
 
 The leader conversations (`assistant.leaders`) are the group headed **Pinned** (zh-Hans 常驻, ja 常駐; the catalog key

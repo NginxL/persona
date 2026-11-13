@@ -27,6 +27,10 @@
   "concluded": "アシスタントの結論",
   "done_user": "処理済みにしました",
   "done_dismissed": "無視しました",
+  "done_todo": "ToDoに追加しました",
+  "merged_from": "{n}件をまとめました",
+  "unmerged": "元の項目に戻しました",
+  "merged_away": "別の項目にまとめました",
   "done_read": "ほかで既読、処理済み",
   "done_muted": "ミュート済み、対応済み",
   "done_manager": "アシスタント確認済み：対応不要",
@@ -36,8 +40,15 @@
   "failed_start": "対応の会話を開始できませんでした",
   "suggested_reply": "アシスタントが返信を提案",
   "suggested_agent": "アシスタントが Agent の起動を提案",
+  "suggested_todo": "アシスタントがToDoの追加を提案しています",
   "suggested_handback": "アシスタントが提案、判断をお願いします",
   "confirmed_agent": "確認しました：Agent を起動",
   "failed_agent": "Agent を起動できませんでした",
-  "handed_main": "Persona のメインチャットに渡しました"
+  "handed_main": "Persona のメインチャットに渡しました",
+  "handed_agent": "Agent「{title}」に渡しました",
+  "handed_agent_generic": "Agent に渡しました",
+  "handed_conversation": "「{title}」に渡しました",
+  "handed_conversation_generic": "会話に渡しました",
+  "waiting_who": "{who}待ち · {at}に再確認",
+  "waiting_reply": "返信待ち · {at}に再確認"
 }

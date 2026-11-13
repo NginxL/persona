@@ -496,8 +496,9 @@ two sources (`server/internal/assistant/suggest_next.go`):
 
 Rules for the hub-made one:
 
-- **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web), **off by
-  default**. Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
+- **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web and Settings ›
+  Assistant on iOS/iPadOS), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
+  Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
   (`promptSuggestionEnabled`) is untouched by it.
 - **When**: once per turn, when a turn ends well (working to done or idle in the node's list) and an app has the chat open at that moment
   (the hub watches the session for it: `Devices.Watched`). Every app with the chat open shows the same one. A new turn or a message going
@@ -510,8 +511,11 @@ Rules for the hub-made one:
 - **Risky suggestions** (either source): one that names a command, a path, a link, a secret-looking string or one of the risky actions
   of the Agents' safety boundary (`riskyWords`: delete, push, deploy, send…) carries `suggestion_risky: true`. The apps fill it in but
   show no one-tap send.
-- **Clients**: the web shows the strip in every chat, assistant conversations included, and drops the arrow for a risky one. iOS and
-  Android still show the strip only where they did, and do not read `suggestion_risky` yet (follow-up issue).
+- **Clients**: the web and iOS/iPadOS show the strip in Agent and assistant conversations, the main Persona conversation included,
+  through their existing shared composer. A risky one has no one-tap send: iOS/iPadOS retains tap / Fill In and the preview but omits
+  Send Now, the VoiceOver direct-send action and its long-press-send hint; filling never sends, and the ordinary composer Send remains
+  available after review. Non-risky actions are unchanged. Android still shows the strip only where it did and does not read
+  `suggestion_risky` yet (follow-up issue).
 
 ## Main chat, knowledge base, and context flow
 
@@ -1510,7 +1514,9 @@ DSH details (permission preset mapping, persistent `dsh web`): `docs/integration
 ## Profile and avatar
 
 - Persona tab top-right avatar opens `AssistantProfileView`: identity / machine, Online / Working, three "Up Next" items,
-  proactive work (scheduled tasks, run history), knowing you (About Me, memory), settings (Skills, Run on, Working directory; model in Settings › Model Configuration › Main chat, #1291), accessible data. Settings › Assistant opens the same page.
+  proactive work (scheduled tasks, run history), knowing you (About Me, memory), settings (Skills, Run on, Working directory;
+  next-message suggestions on a supporting hub, off by default and hidden when the field is absent; model in Settings › Model
+  Configuration › Main chat, #1291), accessible data. Settings › Assistant opens the same page.
 - Scheduled tasks: "Up Next" timeline (large times on the left, like Reminders), "Scheduled tasks" (daily / interval, natural rules "Every weekday at 9:00 AM", "Every 30 minutes"),
   "One-time follow-ups"; rows show icon, next run, nondefault execution ("claude-fast · Auto · Low effort", Allow Everything red), last result, switch; swipe delete, long-press Run now,
   recent runs. Shared editor: repeat (Once / Daily / Interval), prompt, execution (model, permission, effort), Continue original chat (toggle off for new chats each run),

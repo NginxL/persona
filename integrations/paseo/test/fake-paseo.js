@@ -75,6 +75,10 @@ export async function startFakePaseo(t, o = {}) {
     agents: new Map((o.agents ?? []).map((e) => [e.agent.id, { agent: e.agent, project: e.project ?? null }])),
     workspaces: new Map((o.workspaces ?? []).map((d) => [d.id, d])), // id → descriptor (archived ones leave)
     worktreesRoot: o.worktreesRoot ?? '/tmp/paseo-worktrees', // where workspace.create puts a worktree
+    projects: new Set(o.projects ?? []), // project ids with no workspace (a rename finds them)
+    renamed: [], // ['workspace' | 'project', id, the title or custom name set]
+    archivedWorkspaces: [], // ids archive_workspace_request archived
+    onArchiveWorkspace: undefined, // (descriptor) => the disk part of an archive (a test's; a throw is Paseo's error)
     timelines: new Map(), // agent id → { epoch, entries }
     conns: [],
     requests: [], // every session request, in order
@@ -188,6 +192,45 @@ export async function startFakePaseo(t, o = {}) {
         delete d.project
         f.upsertWorkspace(d)
         return reply(c, 'workspace.create.response', { requestId: id, workspace: d, setupTerminalId: null, error: null })
+      }
+      case 'workspace.title.set.request': {
+        // Paseo 0.14 handleWorkspaceTitleSetRequest: an empty title clears it; the workspace's descriptor is sent again.
+        const d = f.workspaces.get(msg.workspaceId)
+        if (!d) return reply(c, 'workspace.title.set.response', { requestId: id, workspaceId: msg.workspaceId, accepted: false, title: null, error: 'Workspace not found' })
+        const title = msg.title?.trim() || null
+        f.renamed.push(['workspace', msg.workspaceId, title])
+        reply(c, 'workspace.title.set.response', { requestId: id, workspaceId: msg.workspaceId, accepted: true, title, error: null })
+        f.upsertWorkspace({ ...d, title, name: title ?? 'main', ...(d.project ? { project: { ...d.project, workspaceName: title ?? 'main' } } : {}) })
+        return
+      }
+      case 'project.rename.request': {
+        // handleProjectRenameRequest: the project's customName, then every workspace of the project sent again.
+        const of = [...f.workspaces.values()].filter((d) => d.projectId === msg.projectId)
+        if (!of.length && !f.projects.has(msg.projectId)) {
+          return reply(c, 'project.rename.response', { requestId: id, projectId: msg.projectId, accepted: false, customName: null, error: 'Project not found' })
+        }
+        const customName = msg.customName?.trim() || null
+        f.renamed.push(['project', msg.projectId, customName])
+        reply(c, 'project.rename.response', { requestId: id, projectId: msg.projectId, accepted: true, customName, error: null })
+        for (const d of of) {
+          f.upsertWorkspace({ ...d, projectDisplayName: customName ?? d.projectDisplayName, projectCustomName: customName,
+            ...(d.project ? { project: { ...d.project, projectName: customName ?? d.project.projectName } } : {}) })
+        }
+        return
+      }
+      case 'archive_workspace_request': {
+        // handleArchiveWorkspaceRequest: archiving shown first (archivingAt), its agents archived, the record archived,
+        // and a worktree Paseo made removed from the disk (f.onArchiveWorkspace does that part here).
+        const d = f.workspaces.get(msg.workspaceId)
+        if (!d) return reply(c, 'archive_workspace_response', { requestId: id, workspaceId: msg.workspaceId, archivedAt: null, error: `Workspace not found: ${msg.workspaceId}` })
+        f.upsertWorkspace({ ...d, archivingAt: new Date().toISOString() })
+        for (const [agentId, e] of f.agents) if (e.agent.workspaceId === msg.workspaceId) f.archive(agentId)
+        f.archivedWorkspaces.push(msg.workspaceId)
+        f.removeWorkspace(msg.workspaceId)
+        Promise.resolve().then(() => f.onArchiveWorkspace?.(d)).then(
+          () => reply(c, 'archive_workspace_response', { requestId: id, workspaceId: msg.workspaceId, archivedAt: new Date().toISOString(), error: null }),
+          (err) => reply(c, 'archive_workspace_response', { requestId: id, workspaceId: msg.workspaceId, archivedAt: null, error: err.message }))
+        return
       }
       case 'fetch_agent_request': {
         // An archived agent's record is still there; a deleted one is a null agent, not an error.
