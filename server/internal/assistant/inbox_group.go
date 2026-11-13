@@ -672,7 +672,7 @@ func fallbackEventTitle(title, where string) string {
 	if where == "" {
 		return title
 	}
-	rest, ok := strings.CutPrefix(title, where+"：")
+	rest, ok := strings.CutPrefix(title, where+"：") // i18n-ignore: the connector's fallback title separator, matched as written
 	if !ok {
 		return title
 	}

@@ -450,18 +450,23 @@ func exactShape(source any, typ reflect.Type) error {
 func parseNode(raw []byte, kind, rootKey string) *node {
 	var props map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &props)
+	n := &node{kind: kind, props: props, key: rootKey}
+	// The children's field comes out before the other properties are made
+	// canonical: each child makes its own properties canonical, and canonical
+	// is idempotent, so the subtree is not encoded again at every level.
+	field := n.childField()
+	var children []json.RawMessage
+	if field != "" {
+		_ = json.Unmarshal(props[field], &children)
+		delete(props, field)
+	}
 	for k, v := range props {
 		props[k] = canonical(v, false)
 	}
-	n := &node{kind: kind, props: props, key: rootKey}
 	if kind != "view" {
 		_ = json.Unmarshal(props["key"], &n.key)
 	}
-	field := n.childField()
 	if field != "" {
-		var children []json.RawMessage
-		_ = json.Unmarshal(props[field], &children)
-		delete(props, field)
 		childKind := map[string]string{"view": "section", "section": "item", "item": "tile"}[kind]
 		for _, child := range children {
 			n.children = append(n.children, parseNode(child, childKind, ""))
