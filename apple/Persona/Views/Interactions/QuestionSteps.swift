@@ -21,6 +21,25 @@ nonisolated enum QuestionSteps {
         return labels.isEmpty ? nil : labels.joined(separator: ", ")
     }
 
+    /// How long a single-select pick waits before it moves on: long enough to see its tick land. `-questionStepPause
+    /// <ms>` (DEBUG) stretches it, so a UI test can tap again within it.
+    static var pause: Duration {
+        #if DEBUG
+        let ms = UserDefaults.standard.integer(forKey: "questionStepPause")
+        if ms > 0 { return .milliseconds(ms) }
+        #endif
+        return .milliseconds(250)
+    }
+
+    /// Where a single-select pick made on page `from` steps once its pause is over (#6549): to the next question, only
+    /// while the card is still on `from` (`now`), never past the last one. Another tap within the pause (a second
+    /// option, or Next / Previous) steps nowhere more: each pick used to step on its own, so a question was skipped, or
+    /// the card went past the last one onto a page with none.
+    static func next(after from: Int, now: Int, count: Int) -> Int? {
+        guard now == from, from + 1 < count else { return nil }
+        return from + 1
+    }
+
     /// The review: a row per question, its header (else the question itself) and its answer, nil when it has none.
     static func rows(_ questions: [Question], answers: [Int: String]) -> [ScreenReviewRow] {
         questions.enumerated().map { i, q in

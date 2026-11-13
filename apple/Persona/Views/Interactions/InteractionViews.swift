@@ -704,7 +704,13 @@ struct QuestionForm: View {
         if questions.count == 1 {
             submit() // one question, one choice: the tap is the answer
         } else if page < questions.count - 1 {
-            Task { try? await Task.sleep(for: .milliseconds(250)); withAnimation(Theme.Motion.standard) { page += 1 } }
+            let from = page // another tap within the pause steps nowhere more (QuestionSteps.next, #6549)
+            Task {
+                try? await Task.sleep(for: QuestionSteps.pause)
+                if let next = QuestionSteps.next(after: from, now: page, count: questions.count) {
+                    withAnimation(Theme.Motion.standard) { page = next }
+                }
+            }
         }
     }
 

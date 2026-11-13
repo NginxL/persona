@@ -29,7 +29,8 @@ final class PendingCardsTests: XCTestCase {
         app.launchPinned()
     }
 
-    private func launchMainQuestion(_ scheme: String? = nil, hubKey: String = "PERSONA_MOCK_HUB", largestText: Bool = false) {
+    private func launchMainQuestion(_ scheme: String? = nil, hubKey: String = "PERSONA_MOCK_HUB", largestText: Bool = false,
+                                    extra: [String] = []) {
         let hub = ProcessInfo.processInfo.environment[hubKey]!
         _ = try? Data(contentsOf: URL(string: hub + "/mock/reset")!)
         app = XCUIApplication()
@@ -38,6 +39,7 @@ final class PendingCardsTests: XCTestCase {
                                "-openAssistant", Self.askLong, "-openChatsFresh", "YES"]
         if let scheme { app.launchArguments += ["-ui.scheme", scheme] }
         if largestText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launchArguments += extra
         app.launchPinned()
     }
 
@@ -286,6 +288,43 @@ final class PendingCardsTests: XCTestCase {
             XCTAssertGreaterThan(resolutionCount("ix_ask_long", hub: hub), before, "review Submit did not resolve the card")
             app.terminate()
         }
+    }
+
+    /// Another tap within a single-select pick's pause steps no further (#6549): each pick stepped on its own, so a second
+    /// tap within it (the option again, or Next) skipped a question, and on question 5 went past the last one. XCUITest
+    /// waits between taps longer than the 250 ms pause, so `-questionStepPause` stretches it to 3 s.
+    /// `MOCK_ASK_LONG=review` (six questions of one option each), as `testLongReviewActionsAreVisibleWithoutScrolling`:
+    ///   PORT=18799 MOCK_AGENTS=1 MOCK_ASK_LONG=review python3 scripts/mock/mock_hub.py &   (PERSONA_REVIEW_HUB)
+    func testAnotherTapWithinThePauseStepsNoFurther() throws {
+        _ = try XCTUnwrap(ProcessInfo.processInfo.environment["PERSONA_REVIEW_HUB"])
+        launchMainQuestion(hubKey: "PERSONA_REVIEW_HUB", extra: ["-questionStepPause", "3000"])
+        func option(_ n: Int) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "第 \(n) 个答案")).firstMatch
+        }
+        XCTAssertTrue(option(1).waitForExistence(timeout: 10), "no question card")
+        // the option twice within its pause: one step
+        option(1).tap()
+        option(1).tap()
+        sleep(5) // past both pauses and the step's animation
+        shot("pause-same-option-twice")
+        XCTAssertTrue(option(2).exists && !option(3).exists, "a second tap within the pause skipped question 2")
+        // an option, then Next within its pause: Next's step only
+        option(2).tap()
+        app.buttons["下一题"].firstMatch.tap()
+        sleep(5)
+        shot("pause-then-next")
+        XCTAssertTrue(option(3).exists && !option(4).exists, "the pick stepped again after Next and skipped question 3")
+        for n in 3...4 {
+            option(n).tap()
+            XCTAssertTrue(option(n + 1).waitForExistence(timeout: 6), "question \(n + 1) did not come")
+        }
+        // the second-to-last question: never past the last one
+        option(5).tap()
+        option(5).tap()
+        sleep(5)
+        shot("pause-last-question")
+        XCTAssertTrue(option(6).exists, "a second tap within the pause went past the last question")
+        app.terminate()
     }
 
     func testThreeCardsScrollUnderTheHeader() {

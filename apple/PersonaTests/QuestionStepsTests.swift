@@ -32,6 +32,18 @@ struct QuestionStepsTests {
         #expect(QuestionSteps.shown(questions[2], picked: [], typed: " ") == nil)
     }
 
+    /// A single-select pick steps once, from the page it was made on (#6549): two taps within its pause made two steps.
+    @Test func aPickStepsOnceFromItsOwnPage() {
+        #expect(QuestionSteps.next(after: 0, now: 0, count: 3) == 1)
+        // the second tap's pause ends after the first one stepped: nowhere
+        #expect(QuestionSteps.next(after: 0, now: 1, count: 3) == nil)
+        // never past the last question
+        #expect(QuestionSteps.next(after: 1, now: 1, count: 3) == 2)
+        #expect(QuestionSteps.next(after: 2, now: 2, count: 3) == nil)
+        // Previous within the pause: the card stays where it went
+        #expect(QuestionSteps.next(after: 1, now: 0, count: 3) == nil)
+    }
+
     @Test func aRowPerQuestionAndTheOneLeftHasNoAnswer() {
         let rows = QuestionSteps.rows(questions, answers: [0: "Preview", 1: "iPhone"])
         #expect(rows.map(\.index) == [0, 1, 2])
