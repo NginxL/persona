@@ -634,7 +634,8 @@ func (s *Service) inboxRepliedAt(ctx context.Context, ids []string) map[string]t
 	return out
 }
 
-// inboxFiledAt is when those of the inbox items ids that are filed (not open) were filed.
+// inboxFiledAt is when those of the inbox items ids that were filed were filed. An unfinished merged member has no
+// filing time of its own, although open is false for it.
 func (s *Service) inboxFiledAt(ctx context.Context, ids []string) map[string]time.Time {
 	b := &s.inbox
 	out := map[string]time.Time{}
@@ -644,7 +645,7 @@ func (s *Service) inboxFiledAt(ctx context.Context, ids []string) map[string]tim
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, id := range ids {
-		if it := b.items[id]; it != nil && !it.open() {
+		if it := b.items[id]; it != nil && it.DoneAt != nil {
 			out[id] = *it.DoneAt
 		}
 	}

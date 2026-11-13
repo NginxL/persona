@@ -28,6 +28,9 @@ import SwiftUI
     private(set) var cursor: RFBClient.Cursor?
     /// What the Mac last put on its clipboard (ServerCutText).
     private(set) var macClipboard: String?
+    /// This connection's pair (#3954): the video channel binds to it, and only once Screen Sharing accepted the sign-in on
+    /// it. A new one each connection; not observed, since only opening video reads it.
+    @ObservationIgnored private(set) var pair: String?
     /// Frames a second shown, and how long the last one took from the mock's Screen Sharing to here (its stamp).
     private(set) var fps: Double = 0
     private(set) var latency: Double?
@@ -65,7 +68,9 @@ import SwiftUI
             if AppModel.shared.api(ref.group) == nil { phase = .closed(String(localized: "Can't reach the hub")) }
             return
         }
-        run(RFBClient(transport: RFBWebSocket(api: api, machine: ref.id)) { [weak self] in await self?.credentials() })
+        let pair = RFBWebSocket.newPair()
+        self.pair = pair
+        run(RFBClient(transport: RFBWebSocket(api: api, machine: ref.id, pair: pair)) { [weak self] in await self?.credentials() })
     }
 
     /// Follows this client and starts it: start's over the hub's relay, or a test's over a scripted transport.

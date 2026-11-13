@@ -544,6 +544,7 @@ For every component: use the design-system one, not a lookalike. Counts are appr
 | `NoticeBanner` | persistent in-page notice, neutral, caution or danger, one action | `apple/Persona/DesignSystem/Notice.swift:7` |
 | `DispatchHandoffCard` | one card per dispatched task in the chat: ↳ well, title, New / Already Active / Resumed badge, last-active time and state, ↗; a failed start says why in red; one tappable element (`dispatch.task.<id>`) | `apple/Persona/Views/Assistant/Tasks/DispatchHandoffCard.swift` |
 | `PlanBriefView` | a plan task's brief before Start: who asked (two lines), one summary line, Show All for the goal, criteria, time and limits | `apple/Persona/Views/Assistant/Tasks/PlanBriefView.swift` |
+| `CardForm`, `CardFold`, `CardCode`, `CardPlan` | a pending card's form: what it asks in one scroll area over its answers, which stay in view; a long command, terminal text or plan folded to its first lines (fewer when the card is short), the last one fading, Show All N Lines / Show Full Text opening it whole (section 4.8, #6605) | `apple/Persona/Views/Interactions/CardFold.swift` |
 | `ReadinessCard` | what the main conversation still needs | `apple/Persona/DesignSystem/ReadinessCard.swift:8` |
 | `PlaceMapCard` | where the phone is, or the places a location tool found, as a map under the turn's work line | `apple/Persona/Views/Assistant/Tasks/PlaceMap.swift` |
 
@@ -1412,6 +1413,19 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
 - **Background rounds and supervisors** (#4314, `docs/assistant/assistant.md` "Background rounds"): in the main conversation a round another conversation, a scheduled task or a follow-up started reuses the quiet supervision record, one muted line `@<source> · Background round` that always opens, never a new component; a round that asked or told the user stays shown. While that switch is on, the composer's Needs you groups rows under the conversation supervising them, this one's first, with a plain caption header and no other change: the same rows, order within a group and count.
 - **Room** (web, #4656): an open tray of requests takes the room its cards need, up to most of the visible height (the assistant's Needs you / In progress tray lets the dock grow to 82% of it while open), never a fixed short box. Its header (title, All, Expand, Close) stays and only its list scrolls; a card's answer row stays at the list's bottom edge with a hairline over what scrolls under it. **Expand** in the header fills the chat column for going through many requests, the composer still on screen; the same button, **Restore size**, or closing the tray gives the room back.
 - **Card text**: the title names the request and what happens next, in the same words on every client: the request titles in section 5.6. The body gives only what the decision needs: the command, the plan's summary, the question and its choices. Commands render formatted, never as raw JSON.
+- **One scroll, the answers in view** (iOS and iPadOS, #6605): a card scrolls in one place at most. A lone card fits the
+  cards' area (half the page), so the area never scrolls under it; several scroll in the area, as above. Inside a card
+  what it asks (the tool, the question, the agent's words, the command, the plan) is in one scroll area and its answers
+  sit under it, in view without scrolling: Deny / Allow and Always, Yes / No and up to four short choices of a terminal
+  dialog, a plan's buttons, a question's Previous / Next / Submit (#4839), Send in Beautiful UI's card. A long command,
+  a terminal's text under its question and a plan fold to their first lines (eight; six for a plan in Beautiful UI and a
+  few for its commands), the last one fading as a long message's does, with **Show All N Lines** (a plan: **Show Full
+  Text**) under them in the fold control the chat's long text uses; it opens the whole text in a full-screen sheet where
+  it scrolls and copies (the chat's full tool output sheet, the plan's sheet). When the card is short (a small phone, the
+  largest text sizes, the keyboard up) the fold shows fewer whole lines, never fewer than two, and the answers keep
+  their place; only past that does what it asks scroll. Before, a long command scrolled in the card and the card in the
+  area: two scrolls, the answers last. A question's options with descriptions, more than four choices or check boxes
+  scroll with the question, as question cards do.
 - **A file tool's change** (#4621): an approval for Edit, MultiEdit or Write shows the file and the change as the chat draws
   the call once it runs (`PermissionDiffView`: the file header with +N −N, then each edit's `DiffView`), eight rows of each
   diff until Show All and four at the accessibility sizes, so the card's choices stay in view. A card that carries only the
@@ -1419,8 +1433,8 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
 - **A command asked about on the terminal** (#5266): a permission prompt the hub reads off an Agent's screen (Claude
   Code's own safety check in bypass mode, "Bash command … Do you want to proceed?") is a tool approval, titled as one
   ("Claude is waiting for your approval"), with "Claude wants to run a command" in place of the terminal's question. Its
-  body: the agent's own words for the command, the command in code type (three rows on iOS until Show All; the web shows
-  four, and the toggle only when the rows cut something), the warning in plain words ("Can't confirm this command won't
+  body: the agent's own words for the command, the command in code type (on iOS folded as above, eight lines until Show
+  All N Lines, #6605; the web shows four, and the toggle only when the rows cut something), the warning in plain words ("Can't confirm this command won't
   delete files", a generic line for a warning there are no words for) with Claude Code's own warning and countdown under
   Show original, and the countdown as a line that runs ("Denied automatically in 1:44", then what happens when it ran
   out). iOS draws the time with `Text(timerInterval:)` and switches to the words for the end after one sleep until then,

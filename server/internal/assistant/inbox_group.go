@@ -210,8 +210,8 @@ func (s *Service) noteGroupWhy(id, why string) {
 }
 
 // groupEvents are the events of a conversation as the events tool answers: the open ones, then done ones within
-// groupDoneFor that are not noise and have fewer than groupDoneCountMax messages, newest first, at most groupEventsMax;
-// query keeps those whose title, summary or meta has it.
+// groupDoneFor that are not noise and have fewer than groupDoneCountMax messages, newest first, at most groupEventsMax.
+// Hidden members of merged rows are never candidates; query keeps those whose title, summary or meta has it.
 func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	b := &s.inbox
 	b.mu.Lock()
@@ -220,8 +220,10 @@ func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	q := strings.ToLower(strings.TrimSpace(query))
 	var list []*InboxItem
 	for _, it := range b.items {
-		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) ||
-			!it.open() && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
+		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) || it.MergedInto != "" {
+			continue
+		}
+		if it.DoneAt != nil && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(it.Title+"\n"+it.Summary+"\n"+string(it.Meta)), q) {
@@ -238,7 +240,7 @@ func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	out := make([]groupEvent, 0, min(len(list), groupEventsMax))
 	for _, it := range list[:min(len(list), groupEventsMax)] {
 		out = append(out, groupEvent{ID: it.ID, Title: it.Title, Summary: it.Summary, Tier: it.Tier, Version: inboxVersion(it),
-			Done: !it.open(), Meta: it.Meta})
+			Done: it.DoneAt != nil, Meta: it.Meta})
 	}
 	return out
 }
@@ -670,7 +672,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 	if it != nil && it.Last == thing.Last {
 		return nil
 	}
-	wasDone := it != nil && !it.open()
+	wasDone := it != nil && it.DoneAt != nil
 	var prev inboxSeen
 	if it != nil {
 		prev = seenOf(it)

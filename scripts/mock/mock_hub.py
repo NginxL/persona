@@ -9009,6 +9009,60 @@ if os.environ.get("MOCK_SCREEN_DANGER") in ("before", "after"):
                    + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend",
          "dialog": _danger})
 
+# MOCK_LONG_ASKS=1 (#6605): pending cards whose command or plan runs far past the cards' area, one long card per
+# conversation and two on one. The review agent: a terminal prompt read without its command (the dialog's detail is the
+# agent's words and the 52-line command, Yes / No), as a hub reads one whose header scrolled off. The blog agent: a Bash
+# permission with the same command. The orders agent: a 60-line plan. The release agent: the command as a hub reads it
+# now (command, description, warning, countdown) and a second long Bash permission. None of them is a chat
+# PendingCardsTests opens, so one mock with MOCK_AGENTS=1 serves both.
+def _long_ask_cmd():
+    rows = ["set -euo pipefail", "cd ./fixtures", "python3 -I - <<'EOF'", "import json, pathlib",
+            "root = pathlib.Path('.')", "seen = {}"]
+    for n in range(1, 15):
+        rows += ["p%d = root / 'city-%02d.json'" % (n, n),
+                 "d%d = json.loads(p%d.read_text()) if p%d.exists() else {'hours': []}" % (n, n, n),
+                 "seen['city-%02d'] = len(d%d['hours'])  # hours of rain to check" % (n, n)]
+    rows += ["print(json.dumps(seen, indent=2, sort_keys=True))", "EOF",
+             "swift test --filter ForecastFormatTests 2>&1 | tail -20", "git status --short ./fixtures | head -40"]
+    return "\n".join(rows)
+
+
+if os.environ.get("MOCK_LONG_ASKS") == "1":
+    _long_cmd = _long_ask_cmd()
+    _long_desc = "Check every city fixture's rain hours and run the formatter's tests"
+    _long_plan = "## 天气小组件的降雨时间线\n\n" + "\n".join(
+        "%d. 第 %d 步：把第 %d 个城市的小时数据接到时间线上，补上对应的格式化测试，跑一遍确认没有回归" % (n, n, n)
+        for n in range(1, 41)) + "\n\n## 不做的事\n\n" + "\n".join("- 第 %d 件先不做的事：留到下一轮再说" % n for n in range(1, 16))
+    INTERACTIONS.extend([
+        {"id": "scr_macbook_review_long", "machine_id": "macbook", "session_id": REVIEW, "session_title": "检查 PR #42 的改动",
+         "cwd": "/Users/me/code/weather", "kind": "screen", "created_at": ago(minutes=1), "expires_at": later(hours=24),
+         "screen": " " + _long_desc + "\n " + _long_cmd.replace("\n", "\n ") + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel",
+         "dialog": {"question": "Do you want to proceed?", "detail": _long_desc + "\n" + _long_cmd, "rev": "6605a0000001",
+                    "options": [{"key": "1", "label": "Yes", "keys": ["1"]}, {"key": "2", "label": "No", "keys": ["2"]}]}},
+        {"id": "ix_blog_long_bash", "machine_id": "studio", "session_id": BLOG, "session_title": "博客迁移到 Astro",
+         "cwd": "/Users/me/code/blog", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "Bash", "tool_use_id": "toolu_long_bash", "summary": _long_cmd,
+         "tool_input": {"command": _long_cmd, "description": _long_desc}},
+        {"id": "ix_orders_long_plan", "machine_id": "server", "session_id": ORDERS, "session_title": "排查 /orders 接口变慢",
+         "cwd": "/home/me/code/shop-api", "kind": "plan", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "ExitPlanMode", "tool_use_id": "toolu_long_plan", "plan": _long_plan},
+        {"id": "scr_macbook_release_long", "machine_id": "macbook", "session_id": RELEASE, "session_title": "整理发布说明",
+         "cwd": "/Users/me/code/weather", "kind": "screen", "created_at": ago(minutes=2), "expires_at": later(hours=24),
+         "screen": " Bash command\n " + _long_desc + "\n │ " + _long_cmd.replace("\n", "\n │ ")
+                   + "\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend",
+         "dialog": {"question": "Do you want to proceed?", "rev": "6605a0000002", "detail": "Bash command\n" + _long_desc + "\n" + _long_cmd,
+                    "command": _long_cmd, "description": _long_desc, "risk": "delete",
+                    "warning": "Dangerous rm operation not ruled out — the shell may read this command differently than it was parsed",
+                    "deadline": "Claude Code will automatically block this request in 4:59, to avoid holding up an unattended session",
+                    "deadline_action": "deny",
+                    "deadline_at": (datetime.now(timezone.utc) + timedelta(seconds=299)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "options": [{"key": "1", "label": "Yes", "keys": ["1"]}, {"key": "2", "label": "No", "keys": ["2"]}]}},
+        {"id": "ix_release_long_bash", "machine_id": "macbook", "session_id": RELEASE, "session_title": "整理发布说明",
+         "cwd": "/Users/me/code/weather", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+         "tool_name": "Bash", "tool_use_id": "toolu_long_bash_2", "summary": _long_cmd,
+         "tool_input": {"command": _long_cmd, "description": _long_desc}},
+    ])
+
 # MOCK_SCREEN_MULTI=1: a multi-select AskUserQuestion read off the terminal (Claude Code 2.1.316), the second of
 # three questions: two boxes already ticked at the computer, a few words in its free-text field, "Next" to send it.
 # /mock/reset puts it back unanswered (MultiSelectCardTests: each case starts from the card).

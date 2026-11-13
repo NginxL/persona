@@ -1772,6 +1772,24 @@ no initial Working row so the message shifted by one row, and pending local remo
 - `-ui.scheme light|dark` makes the app icon follow the appearance, and SpringBoard's "You have changed the icon"
   alert covers the screenshot and takes taps: dismiss it through `com.apple.springboard` after launch.
 
+## One scroll in a pending card, its answers outside it (2026-11-13, #6605)
+
+- A permission, plan or terminal-dialog card put its whole form in a `ScrollView` capped at 55% of the container, under
+  the cards' area capped at half the page: a long command made the card taller than the area, so the command scrolled in
+  the card and the card in the area, with the answers last. #4839 had fixed the same for question cards only. Every form
+  now takes the area's cap (`formCap` includes `areaCap`), and the ones with answers keep them under their one scroll area
+  (`CardForm`). Check a new card kind against both caps, not only the page's 55%.
+- Fit a card by giving up lines of its long part, not by scrolling: `CardBodyStack` is a `Layout` (not a VStack, which a
+  scroll view offers no height to share) that offers the part marked `givesCardRoom()` what the others leave of the cap,
+  and `CardFold` shows the whole lines of that (never under two). The cut comes from layout, not from measured state, so
+  nothing goes back and forth; the fold only measures whether it cut anything, to show Show All.
+- In the app target (default MainActor isolation) a `LayoutValueKey` must be `nonisolated`: a `Layout` reads it off its
+  subviews in a nonisolated context, and the main-actor conformance fails to compile ("main actor-isolated conformance
+  … cannot be used in nonisolated context"). Plain `Layout` structs compile as they are.
+- Screenshots straight from `simctl` (no UI test): a relaunch of a fresh install brings back the notification question,
+  and `simctl openurl persona://open?…` first asks "Open in Persona?". Take each shot from the first launch on a freshly
+  erased simulator, or from a UI test that dismisses SpringBoard's alert (never by the label 允许 alone: the cards have one).
+
 ## A view that places itself over the whole screen gets no keyboard avoidance (2026-11-10, #3004)
 
 Superseded for the + panel by #4312: it is a system sheet now, its bar a `safeAreaInset` that the system's keyboard
@@ -2407,3 +2425,22 @@ different flags (testable imports), so each rebuilds swift-syntax from scratch a
 (Xcode 27.2), which is why `scripts/ci/apple.sh` builds the lint from a fixed copy beside its build output. An editor
 that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder inside it; git ignores that folder, but
 `scripts/test/test_script_layout.py` walks ignored files too and fails on the git hook samples in it, so delete it.
+
+## Picture in Picture zooms from its source's frame; iPad simulators have it (2026-11-13, #6333)
+
+- The system's transition into the small window starts at the content source layer's frame, wherever that is, and
+  Restore's ends there. A source parked out of sight (VNC's sat behind the content in the bottom-left corner) shows as a
+  small copy of the picture popping up there first. Keep the source exactly over the picture people are looking at
+  while it is up (`VNCPiPPlacement`), close the page at `willStart` (not `didStart`) so the picture never shows twice,
+  and call Restore's completion only once the page has drawn its picture again (`VNCPiPRestore`, with a time limit
+  on a timer off the main thread: a page opening under load held the main thread 10 s, so the system waited 10 s,
+  and in that run the next start never reached `didStart`). Hide the page's picture with a short fade, not at once: the system's copy appears a few
+  frames after `willStart`. With the source that large, the system sometimes draws the small window's first frames
+  (about 0.1 s) at the size the window last had, in the top-left of the transition, before the picture fills it: a
+  fresh `contentSource`, or a new controller and layer for each start, did not change it (iPad simulator; the old
+  small source hid it). Look at a couple of round trips frame by frame before blaming the source.
+- `isPictureInPictureSupported()` is false on iPhone simulators, slim or stock, but true on a stock iPad simulator
+  (`sim-boot.sh --profile stock`): record the system's transition there; how it feels on a phone still needs a device.
+- On an iPad simulator the hardware keyboard takes over once XCUITest types, hiding the on-screen keyboard: a form
+  that rose above it slides down, and a tap aimed at its button lands on whatever moved there. Submit with `"\n"` (the
+  field's `onSubmit`), or wait for the layout to settle before tapping.

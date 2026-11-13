@@ -26,6 +26,7 @@ READING_FILES = {
     "Views/Inbox/ConnectorThread/GitHubThreadView.swift": "a thread comment's body",
     "Views/Inbox/Lark/LarkMessageContent.swift": "a Lark message's text",
     "Views/Interactions/InteractionViews.swift": "a plan awaiting approval",
+    "Views/Interactions/CardFold.swift": "a plan's first lines in its approval card (CardPlan, #6605)",
     "Views/Mail/MailViews.swift": "an email's body",
     "Views/Knowledge/KnowledgeView.swift": "a knowledge page's body",
     "Views/Todos/TodoDetailView.swift": "a to-do's notes, read and edited",

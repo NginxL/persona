@@ -553,6 +553,16 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		lctx, lcancel := context.WithTimeout(sctx, agentStartListTimeout)
 		knownIDs := s.knownSessionIDs(lctx, am.ID)
 		lcancel()
+		// A Claude start takes the session id the hub picks (node session.start's session_id, used by --session-id):
+		// if its answer never comes back, the reconciliation matches this exact id instead of guessing from launcher
+		// and directory (a hand-started session and another workspace-none task look just like it). Other agents pick
+		// their own ids, so they keep the heuristic fallback (session_adopt.go). The id is generated once, so an
+		// ultracode refusal's retry still names the same session.
+		expectID := ""
+		if agent == "claude" {
+			expectID = newStartSessionID()
+			params["session_id"] = expectID
+		}
 		// Last look on the machine it will really start on (a health detour may have changed am): re-check and hold
 		// its admission slot across the session.start call.
 		release, err := s.admitAgentStart(sctx, am.ID)
@@ -596,7 +606,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if startResultUnknown(err) {
 				// The node may already have the session and a running agent although the answer never came back:
 				// do not report failure (the model would start it again, duplicating the run).
-				return s.startedWithoutAnswer(ctx, self, am, picked, a.Cwd, a.Prompt, params["tab_name"], note, knownIDs), nil
+				return s.startedWithoutAnswer(ctx, self, am, picked, a.Cwd, a.Prompt, params["tab_name"], note, expectID, knownIDs), nil
 			}
 			return "", err
 		}
@@ -639,9 +649,10 @@ func startResultUnknown(err error) bool {
 
 // startedWithoutAnswer answers an agent_start whose result is unknown. A list showing the new session the node
 // built (not present before the start) adopts and links it like an answered start; otherwise (or when the pre-start
-// list failed) the model gets neutral text: check the Agents list first and never start a second copy.
-func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, cwd, prompt string, tab any, note string, knownIDs map[string]bool) string {
-	if sess, ok := s.adoptStartedSession(ctx, m, launcher, cwd, knownIDs); ok {
+// list failed) the model gets neutral text: check the Agents list first and never start a second copy. expectID is
+// the session id the hub asked this start to use, for an exact reconciliation (session_adopt.go).
+func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
+	if sess, ok := s.adoptStartedSession(ctx, m, launcher, cwd, expectID, knownIDs); ok {
 		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID); ok {
 			return fmt.Sprintf("Started on %s in %s: session %s (the start took longer than the wait; the session was "+
 				"confirmed from the machine's own list), a task of this conversation (its card is in the conversation; "+
@@ -669,49 +680,8 @@ func (s *Service) knownSessionIDs(ctx context.Context, machine string) map[strin
 	return ids
 }
 
-// adoptStartedSession finds the new session an unanswered start created: not in knownIDs, hub-started, a
-// non-assistant agent of the same launcher and directory, fresh sign of life; newest wins. It lists twice, since
-// the hub's held sessions can lag the node by a changed event. nil knownIDs (the pre-start list failed): nothing.
-//
-// Limit: two unanswered starts in the same directory and launcher at the same instant cannot be told apart, so one
-// could adopt the other's session (a mislabeled card, never a duplicate agent); newest-wins is the best guess and
-// the neutral fallback stays safe otherwise.
-func (s *Service) adoptStartedSession(ctx context.Context, m Device, launcher, cwd string, knownIDs map[string]bool) (proto.Session, bool) {
-	if knownIDs == nil {
-		return proto.Session{}, false
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return proto.Session{}, false
-			case <-time.After(agentStartAdoptRetry):
-			}
-		}
-		lctx, cancel := context.WithTimeout(ctx, agentStartListTimeout)
-		list, err := s.sessions(lctx, m.ID)
-		cancel()
-		if err != nil {
-			return proto.Session{}, false
-		}
-		var best proto.Session
-		found := false
-		for _, sess := range list {
-			if knownIDs[sess.SessionID] || !sess.StartedByPersona || sess.Assistant || sess.Launcher != launcher ||
-				(sess.Cwd != cwd && sess.WorkspaceCwd != cwd) || sess.UpdatedAt.IsZero() {
-				continue
-			}
-			if time.Since(sess.UpdatedAt) > agentStartAdoptWindow || found && !sess.UpdatedAt.After(best.UpdatedAt) {
-				continue
-			}
-			best, found = sess, true
-		}
-		if found {
-			return best, true
-		}
-	}
-	return proto.Session{}, false
-}
+// adoptStartedSession lives in session_adopt.go: exact match on the start's own session id, then a heuristic that
+// never takes a session already linked to an open todo.
 
 // ---- ask_user ----
 
