@@ -254,7 +254,10 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // #6295: Paseo's workspaces add 11 B (ja 478,937 B on main at 8919ac022 to 478,948 B; en 475,240 B to 475,251 B,
 // zh-Hans 476,227 B to 476,238 B): New worktree on a Paseo Git row, the engine sent with an agent's worktree status, add
 // and remove, and no herdr ID to copy on a runtime's space. The budget moves by the same 11 B, keeping that 31 B room.
-export const FIRST_SCREEN_BUDGET = 478_979;
+// #6480: a to-do suggestion kind (its title, button and toast in lib-inbox-events, which the first screen's suggestion
+// rows and toasts name) and a merged row's list of sources raise the first screen to ja 479,163 B (en 475,454 B, zh-Hans 476,439 B), 184 B over the
+// old budget, which moves by 215 B. Merge and to-do texts are in lib-inbox-actions, outside the first screen. The 31 B room stays.
+export const FIRST_SCREEN_BUDGET = 479_194;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;

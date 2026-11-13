@@ -51,5 +51,7 @@
   "admission_direction_full": "この方向のエージェントは既に {running} 個実行中で、上限 {limit} に達しています。",
   "admission_refused": "コンピューター {machine} ではこのエージェントを開始できません：{reason}{recommend}",
   "admission_recommend": " 推奨コンピューター：{machine}。",
-  "admission_reroute": "{from} から {to} に変更しました：{reason}"
+  "admission_reroute": "{from} から {to} に変更しました：{reason}",
+  "admission_queued": "順番待ちです。hub が自動で再試行します：{reason}",
+  "admission_queue_timeout": "{limit} 待っても開始できなかったため、開始を中止します。最後の理由：{reason}"
 }

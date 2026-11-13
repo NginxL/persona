@@ -25,6 +25,15 @@ class AssistantSearchRuleTests(unittest.TestCase):
             with self.subTest(case["name"]):
                 self.assertEqual(mock["search_index_text"](case["item"]), case["index"])
 
+    def test_a_cut_snippet_keeps_its_ranges(self):
+        # NFKC makes the leading "…" three dots: the ranges still point at the match in the snippet as sent (#7045)
+        mock = runpy.run_path(str(HERE / "mock_hub.py"))
+        body = "早" * 60 + "照片同步脚本（Ｍac）😀 Ａfter"
+        snippet, ranges = mock["search_snippet"](body, ["照片同步脚本", "after"])
+        self.assertTrue(snippet.startswith("…"))
+        utf16 = snippet.encode("utf-16-le")
+        self.assertEqual([utf16[a * 2:b * 2].decode("utf-16-le") for a, b in ranges], ["照片同步脚本", "Ａfter"])
+
 
 class AssistantSearchMockTests(unittest.TestCase):
     @classmethod

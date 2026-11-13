@@ -14,7 +14,7 @@
   "sent_lark": "Lark メッセージを送信",
   "sent_mail": "メールを送信",
   "sent_comment": "コメントを投稿",
-  "sent_other": "返信を送信",
+  "sent_reply": "返信を送信",
   "agent": "サブセッションを開始：{title}",
   "agent_stopped": "Agent が停止しました",
   "agent_stopped_failed": "Agent が失敗しました",

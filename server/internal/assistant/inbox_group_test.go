@@ -271,7 +271,10 @@ func TestInboxGroupByTheModel(t *testing.T) {
 		t.Fatalf("%d model calls", len(calls))
 	}
 	sys := calls[0].System
-	for _, want := range []string{"示例 meta 说明：messages 是这件事的消息", "示例来源规则：接口变更都需要我", "noise（噪音）", "最多 4 次"} {
+	quotaClause := "这个会话里还开着的事（最多 " + fmt.Sprint(groupOpenMax) + " 件）和 " +
+		fmt.Sprint(int(groupDoneFor/(24*time.Hour))) + " 天内处理过的事（最多 " + fmt.Sprint(groupDoneMax) +
+		" 件），开着的在前（id、title、summary、tier、version、done、meta）"
+	for _, want := range []string{"示例 meta 说明：messages 是这件事的消息", "示例来源规则：接口变更都需要我", "noise（噪音）", "最多 4 次", quotaClause} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q:\n%s", want, sys)
 		}
@@ -605,6 +608,42 @@ func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 	}
 }
 
+// Only a fallback-new event loses a redundant conversation-name prefix; model titles and existing events stay unchanged.
+func TestInboxGroupTitlePrefixOnlyChangesFallbackNewEvents(t *testing.T) {
+	tests := []struct {
+		name, where, title, want string
+		byModel, existing        bool
+	}{
+		{name: "matching prefix", where: "示例群", title: "示例群：周四评审改期", want: "周四评审改期"},
+		{name: "conversation name only", where: "示例群", title: "示例群", want: "示例群"},
+		{name: "empty remainder", where: "示例群", title: "示例群：", want: "示例群："},
+		{name: "ascii colon", where: "示例群", title: "示例群: 周四评审改期", want: "示例群: 周四评审改期"},
+		{name: "no conversation", title: "示例群：周四评审改期", want: "示例群：周四评审改期"},
+		{name: "other conversation", where: "示例群", title: "别的群：周四评审改期", want: "别的群：周四评审改期"},
+		{name: "model title", where: "示例群", title: "示例群：周四评审改期", want: "示例群：周四评审改期", byModel: true},
+		{name: "existing event", where: "示例群", title: "示例群：兜底标题", want: "示例 A 方案评审", existing: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &groupLark{placed: map[string]bool{}}
+			h, _ := groupHub(t, g, nil)
+			planned := plannedEvent{messages: []string{"m1060"}, title: tc.title, tier: TierFYI}
+			if tc.existing {
+				planned.existing = "lark:F1:1051"
+			}
+			thing, err := g.GroupAppend(context.Background(), connector.GroupAppend{Thread: "chat:F1", Event: planned.existing, Messages: planned.messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			thing.Tags = []connector.Tag{{Key: connector.TagChat, Name: tc.where}}
+			got := h.putEvent(sourceOf(g), "chat:F1", planned, thing, tc.byModel)
+			if got == nil || got.Title != tc.want {
+				t.Fatalf("event %+v, want title %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Fallback appends preserve an existing event's triage whether the model or rules originally sorted it. In particular,
 // noise stays folded and an urgent event stays urgent; only the message count and version advance.
 func TestInboxGroupFallbackKeepsExistingTriage(t *testing.T) {
@@ -921,7 +960,7 @@ func TestInboxGroupAnswerChecks(t *testing.T) {
 }
 
 // The events tool: the conversation's events only (not another chat whose id starts the same), open ones first,
-// done ones within three days, at most ten; a query narrows them.
+// recent done ones included and old done ones excluded; a query narrows them.
 func TestInboxGroupEvents(t *testing.T) {
 	h, _ := admitHub(t, nil)
 	now := time.Now()
@@ -949,11 +988,186 @@ func TestInboxGroupEvents(t *testing.T) {
 	if got := ids(h.groupEvents("lark", "chat:F1", "乙")); !slices.Equal(got, []string{"b"}) {
 		t.Fatalf("query %v", got)
 	}
-	if got := h.groupEvents("lark", "chat:F2", ""); len(got) != groupEventsMax {
+	if got := h.groupEvents("lark", "chat:F2", ""); len(got) != groupOpenMax {
 		t.Fatalf("%d listed", len(got))
 	}
 	if got := h.groupEvents("github", "chat:F1", ""); len(got) != 0 {
 		t.Fatalf("another connector's: %v", ids(got))
+	}
+}
+
+func addGroupCandidate(h *inboxHub, id, title string, at time.Time, done bool) {
+	it := &InboxItem{ID: id, Title: title, Tier: TierFYI, Count: 1, UpdatedAt: at,
+		Group: &InboxGroup{Connector: "lark", Thread: "chat:F1"}}
+	if done {
+		it.DoneAt = &at
+	}
+	h.inbox.items[id] = it
+}
+
+func groupCandidateIDs(events []groupEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, event.ID)
+	}
+	return ids
+}
+
+// Open and recently done events have independent quotas. Each retained group is newest first, with all open events first.
+func TestInboxGroupEventsIndependentQuotas(t *testing.T) {
+	tests := []struct {
+		name               string
+		open, done         int
+		wantOpen, wantDone int
+	}{
+		{name: "open events do not consume the done quota", open: 12, done: 4, wantOpen: groupOpenMax, wantDone: 4},
+		{name: "done events do not consume the open quota", open: 3, done: 9, wantOpen: 3, wantDone: groupDoneMax},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := admitHub(t, nil)
+			now := time.Now()
+			add := func(prefix string, count int, done bool, start time.Time) []string {
+				ids := make([]string, 0, count)
+				for i := range count {
+					id := fmt.Sprintf("%s-%02d", prefix, i)
+					at := start.Add(-time.Duration(i) * time.Minute)
+					addGroupCandidate(h, id, "示例", at, done)
+					ids = append(ids, id)
+				}
+				return ids
+			}
+			open := add("open", tc.open, false, now)
+			done := add("done", tc.done, true, now.Add(-time.Hour))
+			want := slices.Clone(open[:tc.wantOpen])
+			want = append(want, done[:tc.wantDone]...)
+
+			got := h.groupEvents("lark", "chat:F1", "")
+			if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+				t.Fatalf("candidates %v, want %v", ids, want)
+			}
+			for i, event := range got {
+				if wantDone := i >= tc.wantOpen; event.Done != wantDone {
+					t.Errorf("candidate %d %s: done %v, want %v", i, event.ID, event.Done, wantDone)
+				}
+			}
+		})
+	}
+}
+
+// Equal activity times use the same id tie-break as newerItem, so repeated candidate lists keep their exact order.
+func TestInboxGroupEventsEqualActivityOrder(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	for _, id := range []string{"open-a", "open-b"} {
+		addGroupCandidate(h, id, "示例", now, false)
+	}
+	doneAt := now.Add(-time.Hour)
+	for _, id := range []string{"done-a", "done-b"} {
+		addGroupCandidate(h, id, "示例", doneAt, true)
+	}
+	want := []string{"open-b", "open-a", "done-b", "done-a"}
+	for range 20 {
+		if ids := groupCandidateIDs(h.groupEvents("lark", "chat:F1", "")); !slices.Equal(ids, want) {
+			t.Fatalf("candidates %v, want the deterministic order %v", ids, want)
+		}
+	}
+}
+
+// Query filtering happens before either cap: newer non-matches take no slots, and both matching groups still truncate.
+func TestInboxGroupEventsQueryPrecedesIndependentCaps(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	wantOpen := make([]string, 0, groupOpenMax)
+	for i := 0; i < groupOpenMax+2; i++ {
+		id := fmt.Sprintf("open-%02d", i)
+		title := "unrelated"
+		if i > 0 {
+			title = "needle open"
+			if i <= groupOpenMax {
+				wantOpen = append(wantOpen, id)
+			}
+		}
+		addGroupCandidate(h, id, title, now.Add(-time.Duration(i)*time.Minute), false)
+	}
+	wantDone := make([]string, 0, groupDoneMax)
+	for i := 0; i < groupDoneMax+2; i++ {
+		id := fmt.Sprintf("done-%02d", i)
+		title := "unrelated"
+		if i > 0 {
+			title = "needle done"
+			if i <= groupDoneMax {
+				wantDone = append(wantDone, id)
+			}
+		}
+		addGroupCandidate(h, id, title, now.Add(-time.Hour-time.Duration(i)*time.Minute), true)
+	}
+	want := append(wantOpen, wantDone...)
+
+	got := h.groupEvents("lark", "chat:F1", "needle")
+	if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+		t.Fatalf("query candidates %v, want %v", ids, want)
+	}
+	var open, done int
+	for _, event := range got {
+		if event.Done {
+			done++
+		} else {
+			open++
+		}
+	}
+	if open != groupOpenMax || done != groupDoneMax {
+		t.Fatalf("query retained %d open and %d done, want %d and %d", open, done, groupOpenMax, groupDoneMax)
+	}
+}
+
+// The fallback receives the same independently capped candidates as the model, including done events that an aggregate
+// open-first cap would have hidden. IDs, order, done flags and meta all match groupEvents.
+func TestInboxGroupFallbackGetsIndependentCandidates(t *testing.T) {
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, Title: "示例结构分组"}}}}
+	h, _ := groupHub(t, g, nil)
+	now := time.Now()
+	for i := 1; i < groupOpenMax; i++ {
+		addGroupCandidate(h, fmt.Sprintf("open-%02d", i), "示例", now.Add(-time.Duration(i+1)*time.Hour), false)
+	}
+	for i := 1; i <= groupDoneMax; i++ {
+		at := now.Add(-24*time.Hour - time.Duration(i)*time.Hour)
+		addGroupCandidate(h, fmt.Sprintf("done-%02d", i), "示例", at, true)
+	}
+	want := h.groupEvents("lark", "chat:F1", "")
+	var open, done int
+	for _, event := range want {
+		if event.Done {
+			done++
+		} else {
+			open++
+		}
+	}
+	if open != groupOpenMax || done != groupDoneMax {
+		t.Fatalf("fixture retained %d open and %d done, want %d and %d", open, done, groupOpenMax, groupDoneMax)
+	}
+
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.fallbacks) != 1 {
+		t.Fatalf("%d fallback calls", len(g.fallbacks))
+	}
+	got := g.fallbacks[0].Events
+	if len(got) != len(want) {
+		t.Fatalf("fallback received %d candidates, want %d", len(got), len(want))
+	}
+	metaText := func(meta json.RawMessage) string {
+		if len(meta) == 0 {
+			return "null" // JSON carries an absent RawMessage as null across the connector call.
+		}
+		return string(meta)
+	}
+	for i, event := range want {
+		if got[i].ID != event.ID || got[i].Done != event.Done || metaText(got[i].Meta) != metaText(event.Meta) {
+			t.Errorf("fallback candidate %d = %+v, want %+v", i, got[i], event)
+		}
 	}
 }
 
@@ -1939,5 +2153,44 @@ func TestInboxGroupDMFallbackNewHandledKeepsTier(t *testing.T) {
 	}
 	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
 		t.Fatalf("the rewrite opened another event: %v", h.inbox.items)
+	}
+}
+
+// The events tool's quotas never hide an open event: ten open events stay ten when many done ones are eligible too, and
+// the done side fills its own six slots from the newest eligible ones, not from slots the open side left over.
+func TestInboxGroupEventsOpenQuotaSurvivesManyDone(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	for i := range 10 {
+		addGroupCandidate(h, fmt.Sprintf("open-%02d", i), "示例", now.Add(-time.Duration(i)*time.Minute), false)
+	}
+	for i := range 12 {
+		at := now.Add(-24*time.Hour - time.Duration(i)*time.Minute)
+		addGroupCandidate(h, fmt.Sprintf("done-%02d", i), "示例", at, true)
+	}
+	got := h.groupEvents("lark", "chat:F1", "")
+	want := make([]string, 0, groupOpenMax+groupDoneMax)
+	for i := range groupOpenMax {
+		want = append(want, fmt.Sprintf("open-%02d", i))
+	}
+	for i := range groupDoneMax {
+		want = append(want, fmt.Sprintf("done-%02d", i))
+	}
+	if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+		t.Fatalf("candidates %v, want %v", ids, want)
+	}
+}
+
+// The prompt's numbers come from the constants: changing the constant changes the rendered prompt, and rendering zero
+// values (as a caller that forgets them would) shows the numbers unset rather than silently keeping the old sentence.
+func TestInboxGroupPromptNumbersBindToConstants(t *testing.T) {
+	text := prompts.RenderInboxGroup(prompts.InboxGroup{MaxCalls: groupCalls, NewMax: groupNewMax,
+		OpenMax: groupOpenMax, DoneMax: groupDoneMax, DoneDays: int(groupDoneFor / (24 * time.Hour))})
+	want := fmt.Sprintf("还开着的事（最多 %d 件）和 %d 天内处理过的事（最多 %d 件）", groupOpenMax, int(groupDoneFor/(24*time.Hour)), groupDoneMax)
+	if !strings.Contains(text, want) {
+		t.Fatalf("prompt lacks %q:\n%s", want, text)
+	}
+	if strings.Contains(text, "最多 10 件（id") {
+		t.Errorf("the old hard-coded sentence is still in the template:\n%s", text)
 	}
 }

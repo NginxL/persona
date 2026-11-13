@@ -33,6 +33,9 @@ type InboxGroup struct {
 	Rules           string // the user's own rules, trimmed: the batch's source's (InboxThing.Rules), else inbox.rules
 	MaxCalls        int    // tool calls the batch may make
 	NewMax          int    // new events one batch may open
+	OpenMax         int    // open events the events tool may list
+	DoneMax         int    // handled events the events tool may list
+	DoneDays        int    // days within which handled events are listed
 	// Language is the titles' and summaries' language by its own name ("English", "Japanese" in Japanese); "" leaves the title's
 	// unsaid and the summary in Chinese, as before i18n.
 	Language string

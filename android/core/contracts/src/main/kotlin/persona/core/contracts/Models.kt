@@ -785,6 +785,8 @@ data class Injected(
     val line: String = "",
     /** followup once | daily | interval: what the task asks. */
     val detail: String? = null,
+    /** system/supervise: info | triage | user — "user" must stay visible in the chat (web `supervisionVisible`); older hubs omit it. */
+    val level: String? = null,
 )
 
 object InjectedSerializer : WireSerializer<Injected>(Injected.generatedSerializer())

@@ -64,5 +64,15 @@
   "loading_older": "読み込み中…",
   "older_failed": "以前の項目を読み込めませんでした：{error}",
   "subscriptions": "購読",
-  "sources": "受信箱のソース"
+  "sources": "受信箱のソース",
+  "merge": "まとめる",
+  "merged_from": "{count}件をまとめ済み",
+  "todo_hour": "1時間後",
+  "todo_today": "今日、終日",
+  "todo_pick": "日時を選ぶ",
+  "todo_none": "期限なし",
+  "todo_title": "ToDoに追加（{count}件）",
+  "todo_add": "追加",
+  "todo_add_short": "ToDoに追加",
+  "todo_due": "期限"
 }

@@ -36,8 +36,9 @@ import (
 const (
 	groupCalls        = 4                  // call allowances per batch (tools and a possible correction)
 	groupNewMax       = 3                  // new events the prompt suggests for one batch; also sizes the output budget
-	groupEventsMax    = 10                 // events the events tool lists
-	groupDoneFor      = 3 * 24 * time.Hour // how long a done event is still listed
+	groupOpenMax      = 10                 // open events the events tool lists, independently of done events
+	groupDoneMax      = 6                  // recent done events the events tool lists, independently of open events
+	groupDoneFor      = 3 * 24 * time.Hour // how long a done event is still listed; keep whole days so DoneDays matches
 	groupDoneCountMax = 50                 // 50 is a starting value with no supporting measurements; done events at this count are not candidates
 	groupConcurrency  = 4                  // batches related at once (the others wait for the next round)
 	groupAttempts     = 3                  // tries of one event's append
@@ -209,39 +210,48 @@ func (s *Service) noteGroupWhy(id, why string) {
 	}
 }
 
-// groupEvents are the events of a conversation as the events tool answers: the open ones, then done ones within
-// groupDoneFor that are not noise and have fewer than groupDoneCountMax messages, newest first, at most groupEventsMax.
-// Hidden members of merged rows are never candidates; query keeps those whose title, summary or meta has it.
+// groupEvents are the events of a conversation as the events tool answers: at most groupOpenMax open ones, then at
+// most groupDoneMax done ones within groupDoneFor that are not noise and have fewer than groupDoneCountMax messages.
+// Each group is newest first and has its own quota; query keeps those whose title, summary or meta has it before either
+// cap. Hidden members of merged rows are never candidates.
 func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	cutoff := time.Now().Add(-groupDoneFor)
 	q := strings.ToLower(strings.TrimSpace(query))
-	var list []*InboxItem
+	var open, done []*InboxItem
 	for _, it := range b.items {
 		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) || it.MergedInto != "" {
 			continue
 		}
-		if it.DoneAt != nil && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
+		isOpen := it.DoneAt == nil // merged members, the other way open() is false, are skipped above
+		if !isOpen && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(it.Title+"\n"+it.Summary+"\n"+string(it.Meta)), q) {
 			continue
 		}
-		list = append(list, it)
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].open() != list[j].open() {
-			return list[i].open()
+		if isOpen {
+			open = append(open, it)
+		} else {
+			done = append(done, it)
 		}
-		return list[i].UpdatedAt.After(list[j].UpdatedAt)
-	})
-	out := make([]groupEvent, 0, min(len(list), groupEventsMax))
-	for _, it := range list[:min(len(list), groupEventsMax)] {
-		out = append(out, groupEvent{ID: it.ID, Title: it.Title, Summary: it.Summary, Tier: it.Tier, Version: inboxVersion(it),
-			Done: it.DoneAt != nil, Meta: it.Meta})
 	}
+	newestFirst := func(list []*InboxItem) {
+		sort.Slice(list, func(i, j int) bool { return newerItem(list[i], list[j]) })
+	}
+	newestFirst(open)
+	newestFirst(done)
+	out := make([]groupEvent, 0, min(len(open), groupOpenMax)+min(len(done), groupDoneMax))
+	appendEvents := func(list []*InboxItem, limit int) {
+		for _, it := range list[:min(len(list), limit)] {
+			out = append(out, groupEvent{ID: it.ID, Title: it.Title, Summary: it.Summary, Tier: it.Tier, Version: inboxVersion(it),
+				Done: it.DoneAt != nil, Meta: it.Meta})
+		}
+	}
+	appendEvents(open, groupOpenMax)
+	appendEvents(done, groupDoneMax)
 	return out
 }
 
@@ -290,7 +300,8 @@ func (s *Service) askGroup(ctx context.Context, c assistantwire.InboxSource, t c
 	}
 	hello := s.hello(ctx)
 	system := prompts.RenderInboxGroup(prompts.InboxGroup{Owner: hello.Owner, MetaDescription: strings.TrimSpace(c.MetaDescription),
-		Rules: rules, MaxCalls: groupCalls, NewMax: groupNewMax, Language: answerLanguage(hello.Locale)})
+		Rules: rules, MaxCalls: groupCalls, NewMax: groupNewMax, OpenMax: groupOpenMax, DoneMax: groupDoneMax,
+		DoneDays: int(groupDoneFor / (24 * time.Hour)), Language: answerLanguage(hello.Locale)})
 	seen := map[string]groupEvent{} // every event the model was shown: the only ones its answer may name
 	for _, e := range events {
 		seen[e.ID] = e
@@ -655,6 +666,22 @@ func keepsWords(it *InboxItem) bool {
 	return it.TitleBy == TitleByAssistant || it.TitleBy == TitleByUser
 }
 
+// fallbackEventTitle removes a redundant conversation-name prefix only when a real title remains.
+func fallbackEventTitle(title, where string) string {
+	title = strings.TrimSpace(title)
+	if where == "" {
+		return title
+	}
+	rest, ok := strings.CutPrefix(title, where+"：") // i18n-ignore: the connector's fallback title separator, matched as written
+	if !ok {
+		return title
+	}
+	if rest = strings.TrimSpace(rest); rest != "" {
+		return rest
+	}
+	return title
+}
+
 // putEvent keeps an event the connector wrote (or the hub composed), under the item's id: the model's title, summary
 // and tier, or under the fallback a new event's title and rule tier with "By rule". Ordinary fallback messages joining an
 // existing event leave its title, summary, tier, reason, urgency and triager unchanged; a rewritten direct-chat join may
@@ -763,7 +790,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 		if tier == "" {
 			tier = b.fallbackEventTier(thing, it)
 		}
-		if t := strings.TrimSpace(e.title); t != "" {
+		if t := fallbackEventTitle(e.title, it.Where); t != "" {
 			it.Title = t
 		}
 		it.Summary, it.Tier, it.Reason, it.TriagedBy, it.TitleBy = "", tier, b.byRules(), "rules", TitleByRules

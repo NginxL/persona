@@ -14,7 +14,7 @@
   "sent_lark": "发了飞书消息",
   "sent_mail": "发了邮件",
   "sent_comment": "发了评论",
-  "sent_other": "发了回复",
+  "sent_reply": "发了回复",
   "agent": "开了子会话：{title}",
   "agent_stopped": "Agent 停了",
   "agent_stopped_failed": "Agent 失败了",

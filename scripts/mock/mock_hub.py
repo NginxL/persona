@@ -18169,22 +18169,35 @@ def search_fold(s):
     return unicodedata.normalize("NFKC", s).lower()
 
 
+def search_fold_map(s):
+    """`s` folded a character at a time (`search_fold`), and for each folded character the index of the one it came
+    from: NFKC makes "…" three dots, so a cut snippet's folded text is longer than it (the manager's searchFoldRunes)."""
+    out, src = [], []
+    for i, ch in enumerate(s):
+        f = search_fold(ch)
+        out.append(f)
+        src.extend([i] * len(f))
+    return "".join(out), src
+
+
 def search_snippet(body, words):
     """The text around the first match on one line, "…" where cut, and every match's UTF-16 [start, end)."""
     start, end = 0, min(len(body), 120)
-    low = search_fold(body)
+    low, src = search_fold_map(body)
     for w in words:
         at = low.find(w)
-        if at >= 0 and len(low) == len(body):
-            start, end = max(0, at - 40), min(len(body), at + len(w) + 80)
+        if at >= 0:
+            first, last = src[at], src[at + len(w) - 1]
+            start, end = max(0, first - 40), min(len(body), last + 1 + 80)
             break
     snippet = ("…" if start else "") + " ".join(x.strip() for x in body[start:end].splitlines() if x.strip()) + ("…" if end < len(body) else "")
-    marked, low = [False] * len(snippet), search_fold(snippet)
+    marked = [False] * len(snippet)
+    low, src = search_fold_map(snippet)
     for w in words:
-        i = low.find(w) if len(low) == len(snippet) else -1
+        i = low.find(w)
         while i >= 0:
             for j in range(i, i + len(w)):
-                marked[j] = True
+                marked[src[j]] = True
             i = low.find(w, i + len(w))
     utf16 = [0]
     for ch in snippet:
@@ -19349,6 +19362,19 @@ LIVE = []  # (send, subscribed session ids) of each open WebSocket
 # GET /api/v1/messaging lists the source lark, /api/v1/messaging/lark/… answers in the protocol's shapes, the feature
 # messaging is on, every {type: lark} push goes out as {type: messaging} too.
 MOCK_MESSAGING = os.environ.get("MOCK_MESSAGING") == "1"
+# Settings › Inbox Sources › Source Relationships (`GET /api/v1/subscriptions/-/graph`, SourcesGraphView): one
+# extension's reads, two sources and the Inbox; `-openSourcesGraph YES`, then tap `graph.source.news` for its sheet.
+SOURCES_GRAPH = {
+    "extensions": [{"id": "mail", "name": "Mail", "line": "Two accounts"}],
+    "reads": [{"id": "mail.inbox", "extension": "mail", "title": "Inbox", "direct": True},
+              {"id": "mail.lists", "extension": "mail", "title": "Mailing lists", "push": True}],
+    "sources": [{"id": "news", "read": "mail.lists", "name": "Newsletters", "icon": "", "line": "Daily at 9:00",
+                 "badge": {"text": "On", "tone": "positive"}, "reading": True, "to": ["inbox"], "state": "active",
+                 "ask": "persona://assistant?q=newsletters"},
+                {"id": "work", "read": "mail.inbox", "name": "Work mail", "icon": "", "line": "As it arrives",
+                 "reading": True, "to": ["inbox"], "state": "active"}],
+    "destinations": [{"id": "inbox", "name": "Inbox", "line": "What needs you"}],
+}
 if MOCK_MESSAGING:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import lark_messaging
@@ -22993,6 +23019,7 @@ class H(BaseHTTPRequestHandler):
         if preview_route and preview_route(self, "GET", p, q): return
         if p == "/api/v1/assistant/conversations/" + ASK1 + "/always":
             return self.send_json({"grants": ALWAYS_GRANTS})
+        if p == "/api/v1/subscriptions/-/graph": return self.send_json(SOURCES_GRAPH)
         if recordings_route(self, "GET", p): return
         if custom_models_route(self, "GET", p, q): return
         if managers_route(self, "GET", p): return

@@ -18,7 +18,7 @@
   "sent_lark": "Sent a Lark message",
   "sent_mail": "Sent an email",
   "sent_comment": "Posted a comment",
-  "sent_other": "Sent a reply",
+  "sent_reply": "Sent a reply",
   "agent": "Started a sub-session: {title}",
   "agent_stopped": "Agent stopped",
   "agent_stopped_failed": "Agent failed",

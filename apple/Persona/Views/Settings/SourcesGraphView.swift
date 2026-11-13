@@ -503,9 +503,6 @@ private struct SourcesGraphDetails: View {
                         Text("Open Settings [Source Relationships]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                     }
                     .themedButton()
-                    // In the text color: the accent on the glass button's gray read at 2.4:1 in dark, under the 3:1
-                    // StyleSpecTests holds the accent to.
-                    .tint(Theme.primaryText)
                     .accessibilityIdentifier("graph.open")
                 }
             }

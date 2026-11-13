@@ -156,13 +156,36 @@ extension View {
             // visionOS has no .glassProminent: its windows are glass already, and the system's prominent style is the filled one.
             if prominent { buttonStyle(.borderedProminent).modifier(DimWhenDisabled()) } else { buttonStyle(.bordered) }
             #else
-            if prominent { buttonStyle(.glassProminent).modifier(DimWhenDisabled()) } else { buttonStyle(.glass) }
+            if prominent { buttonStyle(.glassProminent).modifier(DimWhenDisabled()) } else { buttonStyle(.glass).modifier(LabelOffItsFill()) }
             #endif
         case .bordered:
-            if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
+            if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered).modifier(LabelOffItsFill()) }
         case .soft:
             buttonStyle(SoftButtonStyle(prominent: prominent))
         }
+    }
+}
+
+/// A secondary glass or bordered button's label, pushed away from the fill under it (#6157): blended with it, lighter in
+/// dark (screen), darker in light (multiply), and the more so the lighter that fill is. The glass's fill is the system's
+/// and turns lighter in a sheet in dark; Lark's is a wash of the label's own color. In the plain tint the label read at
+/// 2.0:1 on a panel in a dark sheet and 2.7:1 for coral in light Lark, under the 3:1 `StyleSpecTests` holds the accent
+/// to. `ButtonContrastUITests` measures it on every fill the app puts one on. Disabled buttons keep the system's look; the
+/// Mac (frozen) and visionOS draw theirs unchanged.
+private struct LabelOffItsFill: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var enabled
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if enabled {
+            content.foregroundStyle(.tint.blendMode(scheme == .dark ? .screen : .multiply))
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 

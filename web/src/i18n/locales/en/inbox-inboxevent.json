@@ -18,5 +18,9 @@
   "entry_collapse": "Collapse",
   "message_sender": "{sender}: ",
   "related": "Related",
-  "manager_done": "Handled by the assistant"
+  "manager_done": "Handled by the assistant",
+  "todo_title": "To-do title",
+  "todo_day": "Due day",
+  "todo_time": "Due time",
+  "todo_all_day": "All day"
 }
