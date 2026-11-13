@@ -82,10 +82,12 @@ final class TodoStageBarUITests: XCTestCase {
     }
 
     /// Scrolls the page by `dy` points (positive: the content moves up), dragged slowly and held at the end so it stops
-    /// there instead of flinging past.
+    /// there instead of flinging past. Dragged by the page's margin at the screen's leading edge, where no row has a
+    /// control: from the middle of the window it turned the to-do's Due date wheel at the largest size, and the stage
+    /// bar never came into view (#6783).
     @MainActor private func scroll(_ app: XCUIApplication, by dy: CGFloat) {
-        let center = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        center.press(forDuration: 0.05, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -dy)), withVelocity: .slow,
+        let margin = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+        margin.press(forDuration: 0.05, thenDragTo: margin.withOffset(CGVector(dx: 0, dy: -dy)), withVelocity: .slow,
                      thenHoldForDuration: 0.3)
     }
 

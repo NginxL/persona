@@ -2369,3 +2369,19 @@ synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTrans
   Reading and mutating the same `@Observable` property there (such as `&+= 1` via `_modify`) subscribes the representable to
   its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
   pure setter assignment.
+
+## A UI test's scroll drags whatever is under the finger (2026-11-13, #6783)
+
+At the accessibility text sizes `FormDatePicker` is a wheel across its row (#6108). `TodoStageBarUITests` scrolled the
+to-do's page by dragging from the middle of the window, and at AX5 the page could stop with the Due date's wheel under
+the middle: every later drag turned the wheel (moving the mock's due date by weeks) instead of scrolling, and the stage
+bar never came fully into view. Where the page stops depends on the language and the iOS version: on iOS 27.0 only
+Japanese failed, on 27.2 zh-Hans already did.
+
+- Scroll a form or list in a UI test by dragging its margin at the screen's leading edge
+  (`coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: …))`), where no row draws a control. The middle of the
+  screen holds a different row in each language and text size.
+- Not the trailing edge: the chat list's edge navigator lives there (#2615). A quick vertical drag from the leading edge
+  starts neither the back swipe nor the drawer.
+- A test that must not change what it reads (the mock's to-dos are shared by the whole run) can check that: here the
+  to-do's `due_at` in `GET /api/v1/todos/todo_weather` before and after the run.
