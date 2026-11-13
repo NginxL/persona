@@ -53,10 +53,11 @@ enum Keyboard {
     }
 
     /// Whether a keyboard frame (the screen's coordinates) is undocked: an on-screen keyboard, taller than a hardware
-    /// keyboard's bar, ending above the bottom of the screen. Nil for a frame with no height, a keyboard going away
-    /// (undocking also moves the docked one off the screen, after the floating one's frame came): it says neither.
+    /// keyboard's bar, ending above the bottom of the screen. Nil for a keyboard going away, a frame with no height or
+    /// wholly below the screen: it says neither (undocking also moves the docked keyboard off the screen, after the
+    /// floating one's frame came).
     nonisolated static func undocked(_ frame: CGRect, screen: CGRect?) -> Bool? {
-        guard let screen, frame.height > 0, frame.width > 0 else { return nil }
+        guard let screen, frame.height > 0, frame.width > 0, frame.minY < screen.maxY else { return nil }
         return frame.height > least && frame.maxY < screen.maxY - 1
     }
 

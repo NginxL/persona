@@ -13,26 +13,23 @@ final class FloatingKeyboardTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("only an iPad's keyboard floats") }
         guard ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] != nil else {
             throw XCTSkip("needs the isolated composer mock hub (PERSONA_MOCK_HUB)")
         }
     }
 
     override func tearDown() {
-        if let app {
-            dock()
-            if (testRun?.totalFailureCount ?? 0) > 0 {
-                let tree = XCTAttachment(string: app.debugDescription)
-                tree.name = "floating keyboard tree"
-                tree.lifetime = .keepAlways
-                add(tree)
-            }
+        if let app, (testRun?.totalFailureCount ?? 0) > 0 {
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = "floating keyboard tree"
+            tree.lifetime = .keepAlways
+            add(tree)
         }
         super.tearDown()
     }
 
-    @MainActor private func open(_ route: [String]) {
+    @MainActor private func open(_ route: [String]) throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("only an iPad's keyboard floats") }
         let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"]!
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app = XCUIApplication()
@@ -43,6 +40,8 @@ final class FloatingKeyboardTests: XCTestCase {
         app.terminate()
         app.launchArguments = ["-pairURL", pair, "-holdChromeOpen", "YES", "-sideBars", "NO", "-dev.openChat", ""] + route
         app.launchPinned()
+        // However the test ends, the keyboard docks again: it would stay floating for whatever runs next.
+        addTeardownBlock { @MainActor [self] in dock() }
         XCTAssertTrue(field.waitForExistence(timeout: 20), "the page did not open")
         sleep(2)
     }
@@ -121,13 +120,13 @@ final class FloatingKeyboardTests: XCTestCase {
         XCTAssertEqual(add.frame.maxY, docked, accuracy: 1, "\(page): docked again, the composer is not on the keyboard")
     }
 
-    @MainActor func testAgentsChat() {
-        open(["-app.tab", "chats", "-tab", "dev", "-openSession", agent])
+    @MainActor func testAgentsChat() throws {
+        try open(["-app.tab", "chats", "-tab", "dev", "-openSession", agent])
         check("agents chat")
     }
 
-    @MainActor func testPersonasNewConversation() {
-        open(["-app.tab", "assistant", "-tab", "assistant", "-newAssistant", "YES"])
+    @MainActor func testPersonasNewConversation() throws {
+        try open(["-app.tab", "assistant", "-tab", "assistant", "-newAssistant", "YES"])
         check("new conversation")
     }
 }
