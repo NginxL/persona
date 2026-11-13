@@ -38,7 +38,75 @@ var (
 	// siblings holds, for each schema node with a $ref, its other keywords
 	// but description (refSiblings). Filled with refs, read-only after.
 	siblings map[unsafe.Pointer]map[string]any
+	// present holds, for each schema node of the loaded schemas (and each
+	// refSiblings rest), which keywords check reads it has. Filled with refs,
+	// read-only after.
+	present map[unsafe.Pointer]keywords
 )
+
+// keywords is a set of the schema keywords check reads, one bit each, so a
+// node is asked only for the keywords it has: most carry two or three of them.
+type keywords uint32
+
+const (
+	kwRef keywords = 1 << iota
+	kwAllOf
+	kwAnyOf
+	kwNot
+	kwOneOf
+	kwType
+	kwConst
+	kwEnum
+	kwMinLength
+	kwMaxLength
+	kwPattern
+	kwMinimum
+	kwMaximum
+	kwMinItems
+	kwMaxItems
+	kwUniqueItems
+	kwItems
+	kwProperties
+	kwRequired
+	kwMinProperties
+	kwMaxProperties
+	kwAdditionalProperties
+	kwPropertyNames
+)
+
+var keywordBits = map[string]keywords{
+	"$ref": kwRef, "allOf": kwAllOf, "anyOf": kwAnyOf, "not": kwNot, "oneOf": kwOneOf, "type": kwType,
+	"const": kwConst, "enum": kwEnum, "minLength": kwMinLength, "maxLength": kwMaxLength, "pattern": kwPattern,
+	"minimum": kwMinimum, "maximum": kwMaximum, "minItems": kwMinItems, "maxItems": kwMaxItems,
+	"uniqueItems": kwUniqueItems, "items": kwItems, "properties": kwProperties, "required": kwRequired,
+	"minProperties": kwMinProperties, "maxProperties": kwMaxProperties,
+	"additionalProperties": kwAdditionalProperties, "propertyNames": kwPropertyNames,
+}
+
+// keywordsOf is the keywords s has, from present for the loaded schemas.
+func keywordsOf(s map[string]any) keywords {
+	if k, ok := present[mapKey(s)]; ok {
+		return k
+	}
+	return keywordsIn(s)
+}
+
+// member is s[name] when s has the keyword bit (have is keywordsOf(s)), else
+// nil without looking: check's keywords are all absent from most nodes.
+func member(s map[string]any, have, bit keywords, name string) any {
+	if have&bit == 0 {
+		return nil
+	}
+	return s[name]
+}
+
+func keywordsIn(s map[string]any) keywords {
+	var k keywords
+	for name := range s {
+		k |= keywordBits[name]
+	}
+	return k
+}
 
 type refSite struct{ ref, here string }
 
@@ -69,6 +137,7 @@ func loadSchemas() {
 	}
 	refs = map[refSite]refTarget{}
 	siblings = map[unsafe.Pointer]map[string]any{}
+	present = map[unsafe.Pointer]keywords{}
 	for name, doc := range files {
 		collectRefs(doc, name)
 	}
@@ -80,8 +149,11 @@ func loadSchemas() {
 func collectRefs(node any, here string) {
 	switch value := node.(type) {
 	case map[string]any:
+		present[mapKey(value)] = keywordsIn(value)
 		if _, ok := value["$ref"].(string); ok {
-			siblings[mapKey(value)] = refSiblingsOf(value)
+			rest := refSiblingsOf(value)
+			siblings[mapKey(value)] = rest
+			present[mapKey(rest)] = keywordsIn(rest)
 		}
 		for key, member := range value {
 			if key == "$ref" {
@@ -305,7 +377,8 @@ func (c *checker) check(s map[string]any, v any, here string) {
 	if c.full() || s == nil {
 		return
 	}
-	if ref, ok := s["$ref"].(string); ok {
+	kw := keywordsOf(s)
+	if ref, ok := member(s, kw, kwRef, "$ref").(string); ok {
 		target, f := resolve(ref, here)
 		if target == nil {
 			c.add("the schema has no %s", ref)
@@ -317,12 +390,12 @@ func (c *checker) check(s map[string]any, v any, here string) {
 		}
 		return
 	}
-	if all, ok := s["allOf"].([]any); ok {
+	if all, ok := member(s, kw, kwAllOf, "allOf").([]any); ok {
 		for _, option := range all {
 			c.check(option.(map[string]any), v, here)
 		}
 	}
-	if anyOf, ok := s["anyOf"].([]any); ok {
+	if anyOf, ok := member(s, kw, kwAnyOf, "anyOf").([]any); ok {
 		passing := false
 		for _, option := range anyOf {
 			sub := c.trialOf()
@@ -336,14 +409,14 @@ func (c *checker) check(s map[string]any, v any, here string) {
 			c.add("no matching anyOf branch")
 		}
 	}
-	if forbidden, ok := s["not"].(map[string]any); ok {
+	if forbidden, ok := member(s, kw, kwNot, "not").(map[string]any); ok {
 		sub := c.trialOf()
 		sub.check(forbidden, v, here)
 		if !sub.failed() {
 			c.add("matches forbidden schema")
 		}
 	}
-	if one, ok := s["oneOf"].([]any); ok {
+	if one, ok := member(s, kw, kwOneOf, "oneOf").([]any); ok {
 		if disc, ok := s["x-discriminator"].(string); ok {
 			obj, _ := v.(map[string]any)
 			tag := obj[disc]
@@ -380,14 +453,14 @@ func (c *checker) check(s map[string]any, v any, here string) {
 		}
 		// All oneOf forms also retain their sibling type/properties constraints.
 	}
-	if t, ok := s["type"].(string); ok && !isType(t, v) {
+	if t, ok := member(s, kw, kwType, "type").(string); ok && !isType(t, v) {
 		c.add("not of type %s", t)
 		return
 	}
-	if want, ok := s["const"]; ok && !equal(v, want) {
+	if want := member(s, kw, kwConst, "const"); kw&kwConst != 0 && !equal(v, want) {
 		c.add("not %s", show(want))
 	}
-	if enum, ok := s["enum"].([]any); ok {
+	if enum, ok := member(s, kw, kwEnum, "enum").([]any); ok {
 		in := false
 		for _, e := range enum {
 			if equal(v, e) {
@@ -401,39 +474,39 @@ func (c *checker) check(s map[string]any, v any, here string) {
 	switch x := v.(type) {
 	case string:
 		n := utf8.RuneCountInString(x)
-		if m, ok := num(s["minLength"]); ok && float64(n) < m {
+		if m, ok := num(member(s, kw, kwMinLength, "minLength")); ok && float64(n) < m {
 			c.add("shorter than %v", m)
 		}
-		if m, ok := num(s["maxLength"]); ok && float64(n) > m {
+		if m, ok := num(member(s, kw, kwMaxLength, "maxLength")); ok && float64(n) > m {
 			c.add("longer than %v", m)
 		}
-		if p, ok := s["pattern"].(string); ok {
+		if p, ok := member(s, kw, kwPattern, "pattern").(string); ok {
 			if re := pattern(p); re == nil || !re.MatchString(x) {
 				c.add("%s does not match %s", show(x), p)
 			}
 		}
 	case float64:
-		if m, ok := num(s["minimum"]); ok && x < m {
+		if m, ok := num(member(s, kw, kwMinimum, "minimum")); ok && x < m {
 			c.add("below %v", m)
 		}
-		if m, ok := num(s["maximum"]); ok && x > m {
+		if m, ok := num(member(s, kw, kwMaximum, "maximum")); ok && x > m {
 			c.add("above %v", m)
 		}
 	case json.Number:
-		if cmp, ok := compareNumber(x, s["minimum"]); ok && cmp < 0 {
-			c.add("below %s", show(s["minimum"]))
+		if cmp, ok := compareNumber(x, member(s, kw, kwMinimum, "minimum")); ok && cmp < 0 {
+			c.add("below %s", show(member(s, kw, kwMinimum, "minimum")))
 		}
-		if cmp, ok := compareNumber(x, s["maximum"]); ok && cmp > 0 {
-			c.add("above %s", show(s["maximum"]))
+		if cmp, ok := compareNumber(x, member(s, kw, kwMaximum, "maximum")); ok && cmp > 0 {
+			c.add("above %s", show(member(s, kw, kwMaximum, "maximum")))
 		}
 	case []any:
-		if m, ok := num(s["minItems"]); ok && float64(len(x)) < m {
+		if m, ok := num(member(s, kw, kwMinItems, "minItems")); ok && float64(len(x)) < m {
 			c.add("fewer than %v items", m)
 		}
-		if m, ok := num(s["maxItems"]); ok && float64(len(x)) > m {
+		if m, ok := num(member(s, kw, kwMaxItems, "maxItems")); ok && float64(len(x)) > m {
 			c.add("more than %v items", m)
 		}
-		if s["uniqueItems"] == true {
+		if member(s, kw, kwUniqueItems, "uniqueItems") == true {
 			seen := map[string]bool{}
 			for i, e := range x {
 				if k := show(e); seen[k] {
@@ -445,26 +518,26 @@ func (c *checker) check(s map[string]any, v any, here string) {
 				}
 			}
 		}
-		items, _ := s["items"].(map[string]any)
+		items, _ := member(s, kw, kwItems, "items").(map[string]any)
 		for i, e := range x {
 			c.checkAt(items, e, here, step{item: i, kind: itemStep})
 		}
 	case map[string]any:
-		props, _ := s["properties"].(map[string]any)
-		if req, ok := s["required"].([]any); ok {
+		props, _ := member(s, kw, kwProperties, "properties").(map[string]any)
+		if req, ok := member(s, kw, kwRequired, "required").([]any); ok {
 			for _, k := range req {
 				if _, has := x[k.(string)]; !has {
 					c.add("no %s", k)
 				}
 			}
 		}
-		if m, ok := num(s["minProperties"]); ok && float64(len(x)) < m {
+		if m, ok := num(member(s, kw, kwMinProperties, "minProperties")); ok && float64(len(x)) < m {
 			c.add("fewer than %v properties", m)
 		}
-		if m, ok := num(s["maxProperties"]); ok && float64(len(x)) > m {
+		if m, ok := num(member(s, kw, kwMaxProperties, "maxProperties")); ok && float64(len(x)) > m {
 			c.add("more than %v properties", m)
 		}
-		extra := s["additionalProperties"]
+		extra := member(s, kw, kwAdditionalProperties, "additionalProperties")
 		start := len(c.keys)
 		for k := range x {
 			c.keys = append(c.keys, k)
@@ -474,7 +547,7 @@ func (c *checker) check(s map[string]any, v any, here string) {
 			// Checking a member appends its own object's names after these, and
 			// may move the buffer, so each name is read from c.keys as it is.
 			k := c.keys[start+i]
-			if names, ok := s["propertyNames"].(map[string]any); ok {
+			if names, ok := member(s, kw, kwPropertyNames, "propertyNames").(map[string]any); ok {
 				c.checkAt(names, k, here, step{kind: keyStep})
 			}
 			if p, ok := props[k].(map[string]any); ok {

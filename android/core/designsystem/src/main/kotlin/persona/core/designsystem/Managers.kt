@@ -158,7 +158,7 @@ fun JManagerAvatar(
                         val radius = HomeTokens.assistantPresenceDot.toPx() / 2
                         val ring = HomeTokens.assistantPresenceRing.toPx()
                         val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
-                        drawCircle(androidx.compose.ui.graphics.Color.Black, radius + ring, center,
+                        drawCircle(androidx.compose.ui.graphics.Color.Transparent, radius + ring, center,
                             blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
                         drawCircle(dot, radius, center)
                     }
@@ -179,6 +179,9 @@ fun JManagerAvatar(
         if (alert) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd), breathes = false) // still, as iOS's `AssistantWaitingDot`
     }
 }
+
+/** BlendMode.Clear uses only the source alpha; RGB must not become an opaque cutout color. */
+private val AvatarPresenceCutout = Tokens.System.Light.primary.copy(alpha = 0f)
 
 /**
  * The default assistant's head: the chosen look's face (PersonaFace), not the first-letter monogram, so changing the
@@ -201,7 +204,7 @@ fun JDefaultManagerFace(
                         val radius = HomeTokens.assistantPresenceDot.toPx() / 2
                         val ring = HomeTokens.assistantPresenceRing.toPx()
                         val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
-                        drawCircle(androidx.compose.ui.graphics.Color.Black, radius + ring, center,
+                        drawCircle(AvatarPresenceCutout, radius + ring, center,
                             blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
                         drawCircle(dot, radius, center)
                     }

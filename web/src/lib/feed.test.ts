@@ -217,6 +217,32 @@ describe("routing the next message to a task", () => {
     await refreshTodos();
   };
 
+  it("addresses the original decision round and refreshes its card after a chat answer", async () => {
+    await tasks("task-decision");
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ todos: [] }) });
+    vi.stubGlobal("fetch", fetcher);
+    setRoute("decision-chat", "task-decision", "2026-11-10T12:00:00.123456Z");
+    expect(await sendRouted("decision-chat", "Use the alternative, but keep the current limits.")).toBe(true);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      todo_id: "task-decision", asked_at: "2026-11-10T12:00:00.123456Z",
+      text: "Use the alternative, but keep the current limits.",
+    });
+    expect(getFeedState().routes["decision-chat"]).toBeUndefined();
+    expect(fetcher.mock.calls.some(([url]) => url === "/api/v1/todos")).toBe(true);
+  });
+
+  it("keeps the decision round attached when its answer fails to send", async () => {
+    await tasks("task-decision");
+    const fetcher = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => JSON.stringify({ error: "offline" }) });
+    vi.stubGlobal("fetch", fetcher);
+    setRoute("decision-retry", "task-decision", "2026-11-10T12:00:00Z");
+    await expect(sendRouted("decision-retry", "Use the alternative.")).rejects.toThrow("offline");
+    expect(getFeedState().routes["decision-retry"]).toEqual({ todoId: "task-decision", askedAt: "2026-11-10T12:00:00Z" });
+    setRoute("decision-retry", null);
+  });
+
   it("keeps the route after a 503 so the retry still goes to the task", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 503, text: async () => JSON.stringify({ error: "temporarily unavailable" }) })

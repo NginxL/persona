@@ -258,7 +258,7 @@ struct AssistantProfileView: View {
                         renameError = nil
                         renaming = true
                     } label: {
-                        Image(systemName: Theme.Icon.edit)
+                        ThemedIcon(Theme.Icon.edit)
                             .font(Theme.Font.heading)
                             .foregroundStyle(.secondary)
                             .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
@@ -311,14 +311,14 @@ struct AssistantProfileView: View {
     private static let quietTitle = String(localized: "Notify Only in Main Chat")
     private static let quietFooter = String(localized: "Tasks started from the main chat stay out of the Dynamic Island, notifications, and badges. Persona tells you in the main chat when they finish, need your answer, or fail. Only affects tasks started from now on.")
 
-    /// The main conversation folds its background rounds (docs/apple/ios.md "Background rounds"); nil (no switch) from a
-    /// hub without the setting.
+    /// The main conversation and the leader conversations fold their background rounds (docs/apple/ios.md
+    /// "Background rounds", #6595); nil (no switch) from a hub without the setting.
     private var backgroundFolded: Binding<Bool>? {
         guard let on = model.assistantConfig?.mainBackgroundFolded else { return nil }
         return Binding(get: { on }, set: { v in Task { await model.setMainBackgroundFolded(v) } })
     }
     private static let foldTitle = String(localized: "Fold background rounds")
-    private static let foldFooter = String(localized: "Rounds that another conversation, a scheduled task or a follow-up started in the main chat show as one line you can open. Rounds that ask or tell you something stay shown.")
+    private static let foldFooter = String(localized: "Rounds that another conversation, a scheduled task or a follow-up started in the main chat or a leader conversation show as one line you can open. Rounds that ask or tell you something stay shown.")
 
     /// The main conversation follows up its own tasks instead of the background supervisor (#5083,
     /// docs/assistant/unified-entry.md "Background supervisor"); nil (no switch) from a hub without the setting.

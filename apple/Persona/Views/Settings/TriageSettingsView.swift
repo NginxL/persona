@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Settings › Session Triage (`TriageSettingsModel`): the triage and its model, then the three things it may do, then the
+/// Settings › Session Triage (`TriageSettingsModel`): the triage and its model, then what it may do (asking for a
+/// closeout among them, on a hub that knows it and not on the frozen Mac app), then the
 /// reminder for a question seen and not answered (apart from the triage). Each switch shows under it what it changes, off
 /// against on or as steps in time (`TriageExampleView`, #1413).
 struct TriageSettingsView: View {
@@ -39,6 +40,15 @@ struct TriageSettingsView: View {
                     toggle(\.wake, String(localized: "Wake on Time"), String(localized: "Wakes an agent waiting on a deploy, CI or another agent to check again"), Theme.Icon.wakeUp, id: "triage-wake") {
                         TriageExampleView(kind: .wake, replyMinutes: replyMinutes)
                     }
+                    // Ask for a Closeout (#3612). A hub that does not know the switch names none: no row. The native Mac
+                    // app is frozen (docs/apple/mac.md) and draws no closeout, so it gets no switch for one either.
+                    #if !os(macOS)
+                    if model?.switches?.closeout != nil {
+                        toggle(\.asksCloseout, String(localized: "Ask for a Closeout"), String(localized: "Holds an agent's stop once to ask what's done, merged, deployed and missing"), Theme.Icon.closeout, id: "triage-closeout") {
+                            TriageExampleView(kind: .closeout, replyMinutes: replyMinutes)
+                        }
+                    }
+                    #endif
                 } header: {
                     Text("After Triage")
                 } footer: {

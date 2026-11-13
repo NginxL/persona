@@ -244,7 +244,7 @@ struct TaskBoardSheet: View {
             Section {
                 ForEach(rows, id: \.todo.id) { row in
                     if let ask = row.todo.openAsk {
-                        BriefAcceptRow(row: ask.row(for: row.todo), group: AppModel.shared.hub?.group ?? "", open: {
+                        TodoAskRow(todo: row.todo, ask: ask, group: AppModel.shared.hub?.group ?? "", open: {
                             store.openAfterBoard = row.todo.id
                             store.showBoard = false
                         })
@@ -323,6 +323,12 @@ struct TaskBoardSheet: View {
         if store.state(todo) == .needsYou, let asks = TaskAsk.line(store.interactions(todo)) {
             return place.isEmpty ? asks : place + " · " + asks
         }
+        #if !os(macOS)
+        // Nobody is working on it (#3618): the hub's finding first, where the line is not cut, then where it ran.
+        if store.state(todo) != .needsYou, let nobody = todo.orphanedLine {
+            return place.isEmpty ? nobody : nobody + " · " + place
+        }
+        #endif
         guard let now = TaskNow(lead: lead, working: store.state(todo) == .working) else { return place }
         return place + " · " + now.text
     }

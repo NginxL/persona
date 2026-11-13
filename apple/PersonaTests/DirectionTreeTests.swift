@@ -10,7 +10,7 @@ import Testing
 struct DirectionTreeTests {
     private static let json = """
     {"directions":[
-      {"id":"lead-a","name":"Product","counts":{"working":1,"needs_you":1,"stuck":0,"review":1},
+      {"id":"lead-a","name":"Product","counts":{"working":1,"needs_you":1,"stuck":0,"review":1},"running":true,
        "tasks":[
          {"id":"t1","title":"Ship it","state":"needs_you","agents":[
            {"machine_id":"m","session_id":"s1","title":"Builder","agent":"claude","state":"needs_you","children":[
@@ -18,7 +18,7 @@ struct DirectionTreeTests {
          {"id":"t2","title":"Check it","state":"review","agents":[]},
          {"id":"t3","title":"Later","state":"thinking"}]},
       {"id":"lead-b","name":"Ops","counts":{"working":0,"needs_you":0},"tasks":[]},
-      {"id":"main","name":"","secretary":true,"counts":{"working":1,"needs_you":0,"stuck":1,"review":0},
+      {"id":"main","name":"","secretary":true,"counts":{"working":1,"needs_you":0,"stuck":1,"review":0},"running":false,
        "tasks":[{"id":"t4","title":"","state":"stuck","agents":[{"machine_id":"m","session_id":"s4","state":""}]}]}
     ]}
     """
@@ -77,10 +77,23 @@ struct DirectionTreeTests {
         #expect(lead.counts.planned == 2)
         #expect(lead.tasks.map(\.state) == [.working, .planned])
         #expect(lead.tasks[1].state.text == "未开始")
-        // The folded row's two counts ignore planned, as on the web.
-        #expect(lead.counts.label == "在做 1")
+        // The row's words ignore planned, as on the web; nothing waits on you here.
+        #expect(lead.counts.label == nil)
         let older = try JSON.decoder.decode(DirectionTree.Counts.self, from: Data(#"{"working":1}"#.utf8))
         #expect(older.planned == 0)
+    }
+
+    /// #6626: a direction runs when an Agent under it is at work, as the hub sends it, whatever its counts; from a hub
+    /// without `running`, when it counts a working to-do (what the rows read before).
+    @Test func runningIsTheHubsAndAnOlderHubReadsTheWorkingCount() throws {
+        func running(_ direction: String) throws -> Bool {
+            try JSON.decoder.decode(DirectionTree.Direction.self, from: Data(direction.utf8)).running
+        }
+        #expect(try running(#"{"id":"a","counts":{"working":3},"running":false}"#) == false)
+        #expect(try running(#"{"id":"a","counts":{"needs_you":1},"running":true}"#) == true)
+        #expect(try running(#"{"id":"a","counts":{"working":1}}"#) == true)
+        #expect(try running(#"{"id":"a","counts":{"needs_you":1}}"#) == false)
+        #expect(try running(#"{"id":"a"}"#) == false)
     }
 
     @Test func fetchesTheTreeAndAnOlderHubHasNone() async throws {
@@ -109,9 +122,10 @@ struct DirectionTreeTests {
         #expect(DirectionTree.TaskState.stuck.text == "卡住")
         #expect(DirectionTree.TaskState.review.text == "待验收")
         #expect(DirectionTree.TaskState.planned.text == "未开始")
-        // A direction's counts are the sidebar's lead-row words (#4331), only the non-zero parts.
-        #expect(DirectionTree.Counts(working: 2, needsYou: 1).label == "在做 2 · 等你 1")
-        #expect(DirectionTree.Counts(working: 3).label == "在做 3")
+        // A direction's words are the sidebar's lead-row words (#4331): what waits on you, never 「在做 N」 (#6626: what
+        // runs is the row's spinner alone).
+        #expect(DirectionTree.Counts(working: 2, needsYou: 1).label == "等你 1")
+        #expect(DirectionTree.Counts(working: 3).label == nil)
         #expect(DirectionTree.Counts(needsYou: 4, stuck: 9).label == "等你 4")
         #expect(DirectionTree.Counts(stuck: 1, review: 1).label == nil)
         let t = try Self.tree()
@@ -124,15 +138,16 @@ struct DirectionTreeTests {
     // MARK: The sidebar
 
     /// The sidebar lists the leaders alone (the main conversation's row stands for the secretary group), with the
-    /// names and counts the lead rows show.
+    /// names, counts and running the lead rows show.
     @Test func leadersNamesAndCountsForTheSidebar() throws {
         let t = try Self.tree()
         #expect(t.leader("lead-a")?.name == "Product")
         #expect(t.leader("main") == nil, "the secretary group is not a leader's")
         #expect(t.leaders.map(\.id) == ["lead-a", "lead-b"])
         #expect(t.leaderNames == ["lead-a": "Product", "lead-b": "Ops"])
-        #expect(t.leaderCounts["lead-a"] == DirectionTree.Counts(working: 1, needsYou: 1, stuck: 0, review: 1))
-        #expect(t.leaderCounts["main"] == nil)
+        #expect(t.leader("lead-a")?.counts == DirectionTree.Counts(working: 1, needsYou: 1, stuck: 0, review: 1))
+        #expect(t.leader("lead-a")?.running == true)
+        #expect(t.leader("lead-b")?.running == false, "an older hub's direction with no working to-do")
         #expect(t.withTasks.map(\.id) == ["lead-a", "main"])
     }
 

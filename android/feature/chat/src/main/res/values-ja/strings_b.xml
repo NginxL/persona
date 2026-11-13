@@ -244,7 +244,6 @@
     <string name="chat_links_context_default">上の内容を参考にしてください。</string>
     <string name="chat_menu_copied">コピーしました</string>
     <string name="chat_menu_no_share">共有できるアプリがありません</string>
-    <string name="chat_menu_select_title">テキストを選択</string>
     <string name="chat_menu_copy">コピー</string>
     <string name="chat_menu_select">選択</string>
     <string name="chat_menu_quote">引用</string>

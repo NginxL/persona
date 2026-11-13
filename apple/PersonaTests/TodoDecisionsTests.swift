@@ -237,4 +237,82 @@ struct TodoDecisionsTests {
         await model.markSupersedes(try #require(model.decision("d3")), old: "d2")
         #expect(sink.errors.count == 1 && sink.toasts.isEmpty)
     }
+
+    // MARK: How many show (#6447)
+
+    /// `n` decisions in effect, oldest first.
+    private static func long(_ n: Int) -> String {
+        let items = (1...n).map { i in
+            #"{"id":"d\#(i)","todo_id":"t1","question":"Q\#(i)?","choice":"C\#(i)","source":"manual","supersedes_id":"","superseded_by":""}"#
+        }
+        return #"{"decisions":["# + items.joined(separator: ",") + "]}"
+    }
+
+    private func loaded(_ n: Int) async -> (FakeHub, TodoDecisionsModel) {
+        let hub = FakeHub()
+        hub.on("GET", Self.path, json: Self.long(n))
+        let model = make(hub)
+        await model.load()
+        return (hub, model)
+    }
+
+    @Test func showsTheFirstFiveEveryOneOrNone() {
+        let list = Array(1...12)
+        #expect(TodoDecisionsLogic.firstCount == 5)
+        #expect(TodoDecisionsLogic.shown(list, .first) == [1, 2, 3, 4, 5])
+        #expect(TodoDecisionsLogic.shown(list, .all) == list)
+        #expect(TodoDecisionsLogic.shown(list, .folded).isEmpty)
+        #expect(TodoDecisionsLogic.shown([1, 2], .first) == [1, 2], "a short list shows whole")
+    }
+
+    @Test func opensAtTheFirstFiveWithShowAllUnderThem() async {
+        let (_, model) = await loaded(12)
+        #expect(model.display == .first && !model.folded)
+        #expect(model.shown.map(\.id) == ["d1", "d2", "d3", "d4", "d5"])
+        #expect(model.hasMore)
+        model.toggleMore()
+        #expect(model.shown.count == 12 && model.hasMore, "Show First 5 under them all")
+        model.toggleMore()
+        #expect(model.shown.count == 5)
+    }
+
+    @Test func foldsAwayAndShowsThemWholeWithTheCountKeptAndNoRead() async {
+        let (hub, model) = await loaded(12)
+        model.toggleFold()
+        #expect(model.folded && model.shown.isEmpty && !model.hasMore)
+        #expect(model.current.count == 12, "the header's count stays")
+        model.toggleFold()
+        #expect(!model.folded && model.display == .all && model.shown.count == 12)
+        #expect(hub.sent("GET", Self.path).count == 1, "folding asks nothing of the hub")
+    }
+
+    @Test func aShortListHasNoShowAllAndAnEmptyOneNothingToFold() async {
+        let (_, short) = await loaded(3)
+        #expect(short.shown.count == 3 && !short.hasMore)
+        short.toggleFold()
+        #expect(short.folded && short.shown.isEmpty)
+
+        let hub = FakeHub()
+        hub.on("GET", Self.path, json: #"{"decisions":[]}"#)
+        let empty = make(hub)
+        await empty.load()
+        empty.display = .folded
+        #expect(!empty.folded && !empty.hasMore, "nothing in the list: nothing is folded")
+    }
+
+    @Test func anotherTodoOpensAtTheFirstFiveAgain() async {
+        let (_, model) = await loaded(12)
+        model.toggleFold()
+        model.select("t1")
+        #expect(model.folded, "the same to-do keeps how it is shown")
+        model.select("t2")
+        #expect(model.display == .first)
+    }
+
+    @Test func recordingOneShowsTheWholeList() async {
+        let (hub, model) = await loaded(12)
+        hub.on("POST", Self.path) { _ in Data(#"{"decision":{"id":"d13","question":"Q","choice":"C"}}"#.utf8) }
+        #expect(await model.add(question: "Q", choice: "C", reason: "", supersedes: nil))
+        #expect(model.display == .all, "the new one, last, is in view")
+    }
 }

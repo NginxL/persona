@@ -114,18 +114,19 @@ type fleetBook struct {
 
 // fleetReport is what the session lists are decorated with from the assistant's snapshot.
 type fleetReport struct {
-	mu       sync.RWMutex
-	got      bool
-	sessions map[string]SessionView // by session id
-	work     map[[2]string]proto.WorkState
-	workOn   bool
-	links    map[[2]string]TodoLink
-	quiet    map[[2]string]bool
-	marks    map[[2]string][]string  // conversation → the channels its messages came from, newest first
-	turns    map[[2]string]time.Time // conversation → when a channel's turn in it was answered (zero: followed now)
-	inbox    map[string]bool         // the inbox agents' conversations
-	tasks    []TaskView              // the scheduled tasks (nil: not read yet)
-	profile  *Profile                // its settings as the hub's features need them (nil: not read yet)
+	mu        sync.RWMutex
+	got       bool
+	sessions  map[string]SessionView // by session id
+	work      map[[2]string]proto.WorkState
+	workOn    bool
+	links     map[[2]string]TodoLink
+	completed map[[2]string]TodoLink
+	quiet     map[[2]string]bool
+	marks     map[[2]string][]string  // conversation → the channels its messages came from, newest first
+	turns     map[[2]string]time.Time // conversation → when a channel's turn in it was answered (zero: followed now)
+	inbox     map[string]bool         // the inbox agents' conversations
+	tasks     []TaskView              // the scheduled tasks (nil: not read yet)
+	profile   *Profile                // its settings as the hub's features need them (nil: not read yet)
 }
 
 // fleetStore is what of the store the fleet keeps (db.DB); a store without it keeps nothing.

@@ -2,6 +2,39 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## A Debug build on an iPhone has a 1 MB main-thread stack (#6735)
+
+A Debug build installed on an iPhone crashed every time it opened on Agents: `EXC_BAD_ACCESS` in the main thread's stack
+guard, with Swift runtime metadata frames on top (`swift_getTypeByMangledName`, `_swift_getKeyPath`) under
+`View.listSectionSpacing` in `AgentsList.styledAgentList`. Those were only the last ~26 frames; the stack had gone to the
+page's own frames. Unoptimized, a function reserves a stack slot on entry for every opaque (`some View`) intermediate of a
+modifier chain, and each intermediate holds everything before it, so the slots add up like a triangle: `observedAgentList`
+reserved 422 KB on entry for its ~45 modifiers. The device's main thread has 1008 KB (the crash report's
+`vmRegionInfo`); the simulator's has 8 MB, and Release specializes and reuses the storage, so neither the simulator, CI
+nor TestFlight showed it. Measured with `AgentsListStackTests` in the simulator: the page's first render reached 941 KB
+before the fix and 448 KB after.
+
+- Erase a long chain in a few places (`AnyView(...)` at the stage boundaries): each segment then starts small. An erased
+  type is the same on every update, so identity and state stay. The same tool as the Mac's cold-start split
+  (`docs/lessons/macos.md`). Erasing only the big view at the bottom of the chain helped little (941 → 747 KB): the
+  modifiers' own storage (bindings, closures, ids) made most of the triangle.
+- A crash in the stack guard with runtime frames on top: count the frames before reading it as recursion. Few frames
+  mean big frames; look for the app's functions underneath, and measure where the stack goes (record the stack address
+  at a few points) rather than guessing.
+- `StackPeak.measure` (in `AgentsListStackTests`) paints the unused stack, runs the render, and finds the lowest word
+  overwritten. Keep a page under half the device's stack (512 KB).
+
+## An edit menu needs the selection's rect, not just a point (#6005)
+
+- If `UIEditMenuInteraction.presentEditMenu(with:)` gets only a `sourcePoint` and its delegate has no
+  `editMenuInteraction(_:targetRectFor:)`, the system doesn't know how tall the selection is or where its handles are.
+  In the lifted message it put the menu just under the selection's top edge, covering the selected word and its end
+  handle, so the handle couldn't be dragged. Return the selection's rect, clipped to what shows and padded for each
+  handle's knob (the start handle's above the first line, the end handle's below the last). The system then places
+  the menu above that rect, or below it when there is no room.
+- To check this in a UI test, a DEBUG value reports the selected lines and the handle views
+  (`UITextSelectionHandleView`) in window coordinates. Compare them with the frame of the edit menu's items.
+
 ## Selecting the words of a long lifted answer (#5291)
 
 - A `LazyVStack` opened at item N in a scroll view still lays out items 0 and 1 first, then walks the items between
@@ -2302,3 +2335,37 @@ the same frame as Core Location. Converting to GCJ-02, as older posts advise, mo
 a Mac (macOS 14, region China): Tiananmen Gate searched by name came back at (39.90919, 116.39746) and sat on the gate in
 a snapshot, the same point shifted to GCJ-02 (39.91059, 116.40371) landed in an alley 550 m east, and a walking route
 drawn from MapKit's own points followed the streets. Check on a phone in the mainland before adding any conversion.
+
+## A sidebar place has more than one way in (2026-11-13, #6599)
+
+The drawer's places (Inbox, Machines, Knowledge…) keep their stacks through `AssistantView.show` (`ShellPlaces`,
+`docs/design/sidebar-navigation.md`). The iPhone shell's rows all reach `show`, but the iPad's sidebar column wires its own
+closures in `AssistantView.sidebar(column:)`, and Knowledge, Scheduled Tasks, Profile and Health there still set the old
+`show…` flags: Machines was never left, so choosing it again counted as choosing the place in front and popped it. A new
+way into a place goes through `show`, and a UI test walks it on the iPad too (`testAPlaceKeepsItsStackBesideTheIPadColumn`).
+Against a mock hub XCUITest calls the shell's switch not hittable under the status window, which takes no touches: tap it
+with `ShellFinger` and check the probe, never `isHittable` (`DrawerSwipeTests` failed on `main` for this).
+
+## A modal sheet presented on RootView's window relays out the chat under it (2026-11-13, #6235)
+
+Presenting a `UISheetPresentationController` (`detents = [.medium(), .large()]`) on the shell window's `rootViewController`
+(`UIHostingController<RootView>`) dims `tintAdjustmentMode` and updates the modal card backing traits on `RootView`'s
+hosting view. Inside `-[UISheetPresentationController _sheetLayoutInfoLayout:]` → `-[UIView layoutBelowIfNeeded]`, UIKit
+synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTranscript`, `ChatFooter`, `ShellSwitch`,
+`ShellComposerBar`) and re-rasterizes its text layers on both open and close, even when the sheet itself is empty.
+
+- Present reusable modal panels in a dedicated scene `UIWindow` (`AttachSheetWindow` in
+  `apple/Persona/Views/Chat/AttachSheet.swift`, `windowLevel = .normal + 0.25`, below `ScreenWindow` and `ToastWindow`)
+  whose `rootViewController` is a bare `UIViewController`, so the sheet dims an empty `UIView` and `ChatView` evaluates
+  zero bodies.
+- Copy `overrideUserInterfaceStyle` and `tintColor` from the shell window, call `Keyboard.dismiss()` before `makeKey()` so
+  closing the sheet does not restore the composer's keyboard, and hide the sheet window plus restore `makeKey()` to the
+  previous key window (only if the sheet window is still key) before running any follow-up presentation on the shell window.
+- Keep one stable `UIHostingController` `rootView` fed by an `@Observable` state object instead of reassigning `vc.rootView`,
+  defer a cold `LazyVGrid` mount to a later frame via `LiftFrames` (`apple/Persona/Views/Chat/MessageLift.swift`, skipping one
+  display-link tick), cap warm retention to a single controller across the process, reset the `ScrollView` identity after a
+  scrolled dismissal so off-screen cell state is freed, and evict warm resources on memory warnings.
+- `UIViewRepresentable.updateUIView` runs inside an active `@Observable` tracking scope (`PlatformViewChild.updateValue()`).
+  Reading and mutating the same `@Observable` property there (such as `&+= 1` via `_modify`) subscribes the representable to
+  its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
+  pure setter assignment.

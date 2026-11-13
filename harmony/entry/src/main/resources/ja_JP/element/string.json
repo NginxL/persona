@@ -1,0 +1,4440 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Persona モバイルクライアント"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Persona ワークスペース"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Persona"
+    },
+    {
+      "name": "persona",
+      "value": "Persona"
+    },
+    {
+      "name": "agents",
+      "value": "Agents"
+    },
+    {
+      "name": "inbox",
+      "value": "受信トレイ"
+    },
+    {
+      "name": "settings",
+      "value": "設定"
+    },
+    {
+      "name": "welcome",
+      "value": "Hub に接続"
+    },
+    {
+      "name": "connect",
+      "value": "接続"
+    },
+    {
+      "name": "pair",
+      "value": "ペアリング"
+    },
+    {
+      "name": "pair_code",
+      "value": "ペアリングコード"
+    },
+    {
+      "name": "hub_address",
+      "value": "Hub アドレス"
+    },
+    {
+      "name": "verify",
+      "value": "識別情報を確認"
+    },
+    {
+      "name": "trust",
+      "value": "信頼して接続"
+    },
+    {
+      "name": "hub",
+      "value": "ワークスペース"
+    },
+    {
+      "name": "manager",
+      "value": "マネージャー"
+    },
+    {
+      "name": "experience",
+      "value": "ローカルで試す"
+    },
+    {
+      "name": "main_chat",
+      "value": "メインチャット"
+    },
+    {
+      "name": "new_chat",
+      "value": "新しいチャット"
+    },
+    {
+      "name": "recent",
+      "value": "最近"
+    },
+    {
+      "name": "automatic",
+      "value": "自動"
+    },
+    {
+      "name": "todos",
+      "value": "タスク"
+    },
+    {
+      "name": "knowledge",
+      "value": "ナレッジ"
+    },
+    {
+      "name": "search",
+      "value": "検索"
+    },
+    {
+      "name": "search_sessions",
+      "value": "セッションを検索"
+    },
+    {
+      "name": "all",
+      "value": "すべて"
+    },
+    {
+      "name": "needs_you",
+      "value": "確認待ち"
+    },
+    {
+      "name": "working",
+      "value": "実行中"
+    },
+    {
+      "name": "done",
+      "value": "完了"
+    },
+    {
+      "name": "unread",
+      "value": "未読"
+    },
+    {
+      "name": "empty",
+      "value": "まだありません"
+    },
+    {
+      "name": "no_results",
+      "value": "一致する項目はありません"
+    },
+    {
+      "name": "loading",
+      "value": "読み込み中"
+    },
+    {
+      "name": "retry",
+      "value": "再試行"
+    },
+    {
+      "name": "refresh",
+      "value": "更新"
+    },
+    {
+      "name": "offline",
+      "value": "オフライン"
+    },
+    {
+      "name": "online",
+      "value": "接続済み"
+    },
+    {
+      "name": "read_only",
+      "value": "読み取り専用"
+    },
+    {
+      "name": "send",
+      "value": "送信"
+    },
+    {
+      "name": "sending",
+      "value": "送信中"
+    },
+    {
+      "name": "message",
+      "value": "メッセージ"
+    },
+    {
+      "name": "stop",
+      "value": "停止"
+    },
+    {
+      "name": "cancel",
+      "value": "キャンセル"
+    },
+    {
+      "name": "confirm",
+      "value": "確認"
+    },
+    {
+      "name": "save",
+      "value": "保存"
+    },
+    {
+      "name": "add",
+      "value": "追加"
+    },
+    {
+      "name": "create",
+      "value": "作成"
+    },
+    {
+      "name": "edit",
+      "value": "編集"
+    },
+    {
+      "name": "delete",
+      "value": "削除"
+    },
+    {
+      "name": "close",
+      "value": "閉じる"
+    },
+    {
+      "name": "back",
+      "value": "戻る"
+    },
+    {
+      "name": "more",
+      "value": "その他"
+    },
+    {
+      "name": "title",
+      "value": "タイトル"
+    },
+    {
+      "name": "content",
+      "value": "内容"
+    },
+    {
+      "name": "name",
+      "value": "名前"
+    },
+    {
+      "name": "new_agent",
+      "value": "新しい Agent"
+    },
+    {
+      "name": "task",
+      "value": "タスク"
+    },
+    {
+      "name": "machine",
+      "value": "コンピューター"
+    },
+    {
+      "name": "directory",
+      "value": "ディレクトリ"
+    },
+    {
+      "name": "launcher",
+      "value": "ランチャー"
+    },
+    {
+      "name": "model",
+      "value": "モデル"
+    },
+    {
+      "name": "permissions",
+      "value": "権限モード"
+    },
+    {
+      "name": "effort",
+      "value": "推論レベル"
+    },
+    {
+      "name": "manual",
+      "value": "変更前に確認"
+    },
+    {
+      "name": "low",
+      "value": "低"
+    },
+    {
+      "name": "medium",
+      "value": "中"
+    },
+    {
+      "name": "high",
+      "value": "高"
+    },
+    {
+      "name": "chat",
+      "value": "チャット"
+    },
+    {
+      "name": "files",
+      "value": "ファイル"
+    },
+    {
+      "name": "git",
+      "value": "Git"
+    },
+    {
+      "name": "terminal",
+      "value": "ターミナル"
+    },
+    {
+      "name": "reply",
+      "value": "返信"
+    },
+    {
+      "name": "confirm_send",
+      "value": "この返信を送信しますか？"
+    },
+    {
+      "name": "process",
+      "value": "対応済みにする"
+    },
+    {
+      "name": "reopen",
+      "value": "再開"
+    },
+    {
+      "name": "handoff",
+      "value": "Persona に依頼"
+    },
+    {
+      "name": "source",
+      "value": "ソース"
+    },
+    {
+      "name": "remove",
+      "value": "取り除く"
+    },
+    {
+      "name": "attachment",
+      "value": "添付"
+    },
+    {
+      "name": "attach",
+      "value": "添付"
+    },
+    {
+      "name": "photo",
+      "value": "写真"
+    },
+    {
+      "name": "file",
+      "value": "ファイル"
+    },
+    {
+      "name": "upload",
+      "value": "アップロード"
+    },
+    {
+      "name": "download",
+      "value": "ファイルを保存"
+    },
+    {
+      "name": "preview",
+      "value": "プレビュー"
+    },
+    {
+      "name": "open",
+      "value": "開く"
+    },
+    {
+      "name": "approve",
+      "value": "承認"
+    },
+    {
+      "name": "deny",
+      "value": "拒否"
+    },
+    {
+      "name": "answer",
+      "value": "回答"
+    },
+    {
+      "name": "question",
+      "value": "質問"
+    },
+    {
+      "name": "plan",
+      "value": "計画"
+    },
+    {
+      "name": "start",
+      "value": "開始"
+    },
+    {
+      "name": "request_updated",
+      "value": "このリクエストは更新されました"
+    },
+    {
+      "name": "already_handled",
+      "value": "処理済み"
+    },
+    {
+      "name": "result_unknown",
+      "value": "結果を確認中"
+    },
+    {
+      "name": "failed",
+      "value": "操作を完了できませんでした"
+    },
+    {
+      "name": "saved",
+      "value": "保存しました"
+    },
+    {
+      "name": "sent",
+      "value": "送信済み"
+    },
+    {
+      "name": "pending",
+      "value": "保留中"
+    },
+    {
+      "name": "completed",
+      "value": "完了"
+    },
+    {
+      "name": "work_summary",
+      "value": "作業の詳細"
+    },
+    {
+      "name": "tool",
+      "value": "ツール"
+    },
+    {
+      "name": "collapse",
+      "value": "ナビゲーションを折りたたむ"
+    },
+    {
+      "name": "expand",
+      "value": "ナビゲーションを展開"
+    },
+    {
+      "name": "appearance",
+      "value": "外観"
+    },
+    {
+      "name": "system",
+      "value": "システム"
+    },
+    {
+      "name": "light",
+      "value": "ライト"
+    },
+    {
+      "name": "dark",
+      "value": "ダーク"
+    },
+    {
+      "name": "style",
+      "value": "スタイル"
+    },
+    {
+      "name": "notifications",
+      "value": "通知"
+    },
+    {
+      "name": "message_alerts",
+      "value": "メッセージ通知"
+    },
+    {
+      "name": "system_permission",
+      "value": "システム権限"
+    },
+    {
+      "name": "not_requested",
+      "value": "未要求"
+    },
+    {
+      "name": "allow_notifications",
+      "value": "通知を許可"
+    },
+    {
+      "name": "machines",
+      "value": "コンピューター"
+    },
+    {
+      "name": "add_computer",
+      "value": "コンピューターを追加"
+    },
+    {
+      "name": "generate_code",
+      "value": "初回コードを生成"
+    },
+    {
+      "name": "expires",
+      "value": "有効期限"
+    },
+    {
+      "name": "pending_trust",
+      "value": "確認待ち"
+    },
+    {
+      "name": "confirm_computer",
+      "value": "自分のコンピューターです"
+    },
+    {
+      "name": "reject",
+      "value": "拒否"
+    },
+    {
+      "name": "install",
+      "value": "インストール"
+    },
+    {
+      "name": "install_instructions",
+      "value": "インストール手順"
+    },
+    {
+      "name": "models",
+      "value": "モデル設定"
+    },
+    {
+      "name": "schedules",
+      "value": "スケジュール"
+    },
+    {
+      "name": "extensions",
+      "value": "拡張機能"
+    },
+    {
+      "name": "connectors",
+      "value": "コネクター"
+    },
+    {
+      "name": "channels",
+      "value": "チャンネル"
+    },
+    {
+      "name": "translation",
+      "value": "翻訳"
+    },
+    {
+      "name": "triage",
+      "value": "会話の振り分け"
+    },
+    {
+      "name": "ledger",
+      "value": "代理送信履歴"
+    },
+    {
+      "name": "phone",
+      "value": "このスマートフォン"
+    },
+    {
+      "name": "privacy",
+      "value": "プライバシー"
+    },
+    {
+      "name": "storage",
+      "value": "ストレージ"
+    },
+    {
+      "name": "language",
+      "value": "言語"
+    },
+    {
+      "name": "clear_cache",
+      "value": "メッセージキャッシュを削除"
+    },
+    {
+      "name": "disconnect",
+      "value": "切断"
+    },
+    {
+      "name": "forget_hub",
+      "value": "ワークスペースを削除"
+    },
+    {
+      "name": "diagnostics",
+      "value": "接続診断"
+    },
+    {
+      "name": "copy",
+      "value": "コピー"
+    },
+    {
+      "name": "branch",
+      "value": "ブランチ"
+    },
+    {
+      "name": "stage",
+      "value": "ステージ"
+    },
+    {
+      "name": "unstage",
+      "value": "ステージ解除"
+    },
+    {
+      "name": "commit",
+      "value": "コミット"
+    },
+    {
+      "name": "push",
+      "value": "プッシュ"
+    },
+    {
+      "name": "pull",
+      "value": "プル"
+    },
+    {
+      "name": "fetch",
+      "value": "フェッチ"
+    },
+    {
+      "name": "switch_branch",
+      "value": "ブランチを切替"
+    },
+    {
+      "name": "stash",
+      "value": "スタッシュ"
+    },
+    {
+      "name": "stash_pop",
+      "value": "スタッシュを適用"
+    },
+    {
+      "name": "rename",
+      "value": "名前を変更"
+    },
+    {
+      "name": "control",
+      "value": "制御を取得"
+    },
+    {
+      "name": "release",
+      "value": "制御を解除"
+    },
+    {
+      "name": "control_confirm",
+      "value": "このターミナルを制御しますか？"
+    },
+    {
+      "name": "voice",
+      "value": "音声チャット"
+    },
+    {
+      "name": "listening",
+      "value": "聞いています"
+    },
+    {
+      "name": "muted",
+      "value": "マイクをミュート中"
+    },
+    {
+      "name": "mute",
+      "value": "ミュート"
+    },
+    {
+      "name": "unmute",
+      "value": "ミュート解除"
+    },
+    {
+      "name": "hang_up",
+      "value": "通話を終了"
+    },
+    {
+      "name": "ended",
+      "value": "会話が終了しました"
+    },
+    {
+      "name": "restart",
+      "value": "再開"
+    },
+    {
+      "name": "health",
+      "value": "ヘルス"
+    },
+    {
+      "name": "timeline",
+      "value": "タイムライン"
+    },
+    {
+      "name": "tags",
+      "value": "タグ"
+    },
+    {
+      "name": "status",
+      "value": "状態"
+    },
+    {
+      "name": "purpose",
+      "value": "用途"
+    },
+    {
+      "name": "enabled",
+      "value": "有効"
+    },
+    {
+      "name": "disabled",
+      "value": "無効"
+    },
+    {
+      "name": "unsupported",
+      "value": "この Hub では利用できません"
+    },
+    {
+      "name": "permission_denied",
+      "value": "拒否済み"
+    },
+    {
+      "name": "identity_changed",
+      "value": "Hub の識別情報が変わりました。再ペアリングしてください。"
+    },
+    {
+      "name": "invalid_endpoint",
+      "value": "有効な HTTPS Hub アドレスを入力してください"
+    },
+    {
+      "name": "connection_failed",
+      "value": "接続できません。入力は保持されます。"
+    },
+    {
+      "name": "unsafe_endpoint",
+      "value": "この接続の安全性を確認できません"
+    },
+    {
+      "name": "pin_unavailable",
+      "value": "証明書の指紋を確認できません"
+    },
+    {
+      "name": "required",
+      "value": "必須"
+    },
+    {
+      "name": "secret",
+      "value": "シークレット"
+    },
+    {
+      "name": "unknown_field",
+      "value": "このフィールドはこのスマートフォンで承認できません"
+    },
+    {
+      "name": "pending_action",
+      "value": "再試行の前に前回の結果を確認してください"
+    },
+    {
+      "name": "no_computer",
+      "value": "コンピューターを接続"
+    },
+    {
+      "name": "no_model",
+      "value": "アシスタントモデルを設定"
+    },
+    {
+      "name": "local_demo",
+      "value": "ローカル体験"
+    },
+    {
+      "name": "leave_demo",
+      "value": "Hub に接続"
+    },
+    {
+      "name": "about",
+      "value": "情報"
+    },
+    {
+      "name": "version",
+      "value": "バージョン"
+    },
+    {
+      "name": "mail",
+      "value": "メール"
+    },
+    {
+      "name": "projects",
+      "value": "プロジェクト"
+    },
+    {
+      "name": "chats",
+      "value": "チャット"
+    },
+    {
+      "name": "people",
+      "value": "人物"
+    },
+    {
+      "name": "docs",
+      "value": "文書"
+    },
+    {
+      "name": "meetings",
+      "value": "会議"
+    },
+    {
+      "name": "events",
+      "value": "イベント"
+    },
+    {
+      "name": "recordings",
+      "value": "録音"
+    },
+    {
+      "name": "current_value",
+      "value": "現在の値"
+    },
+    {
+      "name": "select_purpose",
+      "value": "用途を選択"
+    },
+    {
+      "name": "model_provider",
+      "value": "プロバイダー"
+    },
+    {
+      "name": "model_id",
+      "value": "モデル ID"
+    },
+    {
+      "name": "permission_mode",
+      "value": "権限モード"
+    },
+    {
+      "name": "reasoning_effort",
+      "value": "推論の強さ"
+    },
+    {
+      "name": "no_capability",
+      "value": "このセッションではこの設定を利用できません"
+    },
+    {
+      "name": "no_configuration",
+      "value": "利用できる設定がありません"
+    },
+    {
+      "name": "machine_details",
+      "value": "コンピューターの詳細"
+    },
+    {
+      "name": "new_pairing_code",
+      "value": "新しいペアリングコードを作成"
+    },
+    {
+      "name": "expires_at",
+      "value": "有効期限"
+    },
+    {
+      "name": "confirm_trust",
+      "value": "このコンピューターを信頼しますか？"
+    },
+    {
+      "name": "connector_status",
+      "value": "コネクターの状態"
+    },
+    {
+      "name": "extension_status",
+      "value": "拡張機能の状態"
+    },
+    {
+      "name": "features",
+      "value": "機能"
+    },
+    {
+      "name": "load_more",
+      "value": "さらに読み込む"
+    },
+    {
+      "name": "auto_continue",
+      "value": "エラー時に自動続行"
+    },
+    {
+      "name": "wake",
+      "value": "時間になったら起動"
+    },
+    {
+      "name": "decide",
+      "value": "判断カード"
+    },
+    {
+      "name": "reply_reminder",
+      "value": "既読で未返信なら通知"
+    },
+    {
+      "name": "default",
+      "value": "デフォルトを使用"
+    },
+    {
+      "name": "acceptEdits",
+      "value": "編集を許可"
+    },
+    {
+      "name": "auto",
+      "value": "自動"
+    },
+    {
+      "name": "bypassPermissions",
+      "value": "権限確認をスキップ"
+    },
+    {
+      "name": "xhigh",
+      "value": "非常に高い"
+    },
+    {
+      "name": "max",
+      "value": "最大"
+    },
+    {
+      "name": "checked_no_effect",
+      "value": "対象を確認し、操作が反映されていないことを確認しました。新しい操作を許可しますか？"
+    },
+    {
+      "name": "checked",
+      "value": "手動で確認済み"
+    },
+    {
+      "name": "account",
+      "value": "アカウント"
+    },
+    {
+      "name": "archive",
+      "value": "アーカイブ"
+    },
+    {
+      "name": "cached",
+      "value": "キャッシュ"
+    },
+    {
+      "name": "clear",
+      "value": "消去"
+    },
+    {
+      "name": "dependencies_unresolved",
+      "value": "依存関係が未解決"
+    },
+    {
+      "name": "details",
+      "value": "詳細"
+    },
+    {
+      "name": "every_minutes",
+      "value": "間隔（分）"
+    },
+    {
+      "name": "extension_market",
+      "value": "拡張機能マーケット"
+    },
+    {
+      "name": "operation",
+      "value": "操作"
+    },
+    {
+      "name": "review",
+      "value": "確認"
+    },
+    {
+      "name": "run_at",
+      "value": "実行日時"
+    },
+    {
+      "name": "run_now",
+      "value": "今すぐ実行"
+    },
+    {
+      "name": "run_started",
+      "value": "実行開始"
+    },
+    {
+      "name": "sign_in",
+      "value": "ログイン"
+    },
+    {
+      "name": "sign_out",
+      "value": "ログアウト"
+    },
+    {
+      "name": "test",
+      "value": "テスト"
+    },
+    {
+      "name": "time",
+      "value": "時刻"
+    },
+    {
+      "name": "unbind",
+      "value": "バインド解除"
+    },
+    {
+      "name": "via",
+      "value": "経由"
+    },
+    {
+      "name": "waiting",
+      "value": "待機中"
+    },
+    {
+      "name": "weekdays",
+      "value": "曜日"
+    },
+    {
+      "name": "once",
+      "value": "一度"
+    },
+    {
+      "name": "daily",
+      "value": "毎日"
+    },
+    {
+      "name": "interval",
+      "value": "間隔"
+    },
+    {
+      "name": "upgrade",
+      "value": "アップグレード"
+    },
+    {
+      "name": "continue",
+      "value": "続行"
+    },
+    {
+      "name": "check_status",
+      "value": "状態を確認"
+    },
+    {
+      "name": "agent",
+      "value": "Agent"
+    },
+    {
+      "name": "conversation",
+      "value": "会話"
+    },
+    {
+      "name": "running",
+      "value": "実行中"
+    },
+    {
+      "name": "needs_consent",
+      "value": "同意が必要"
+    },
+    {
+      "name": "succeeded",
+      "value": "完了"
+    },
+    {
+      "name": "canceled",
+      "value": "キャンセル済み"
+    },
+    {
+      "name": "image",
+      "value": "画像"
+    },
+    {
+      "name": "attach_live",
+      "value": "ライブに参加"
+    },
+    {
+      "name": "feedback",
+      "value": "フィードバック"
+    },
+    {
+      "name": "other",
+      "value": "その他の回答"
+    },
+    {
+      "name": "workspace",
+      "value": "ワークスペース"
+    },
+    {
+      "name": "latest",
+      "value": "最新のメッセージ"
+    },
+    {
+      "name": "ignored",
+      "value": "無視済み"
+    },
+    {
+      "name": "parent_folder",
+      "value": "親フォルダー"
+    },
+    {
+      "name": "path",
+      "value": "パス"
+    },
+    {
+      "name": "symlink",
+      "value": "シンボリックリンク"
+    },
+    {
+      "name": "takeover",
+      "value": "引き継ぐ"
+    },
+    {
+      "name": "session_tools_binary_file",
+      "value": "この形式のプレビューは利用できません"
+    },
+    {
+      "name": "session_tools_changes",
+      "value": "変更"
+    },
+    {
+      "name": "session_tools_clean",
+      "value": "変更なし"
+    },
+    {
+      "name": "session_tools_control_active",
+      "value": "操作中"
+    },
+    {
+      "name": "session_tools_control_busy",
+      "value": "別の端末が操作中"
+    },
+    {
+      "name": "session_tools_control_off",
+      "value": "操作なし"
+    },
+    {
+      "name": "session_tools_control_starting",
+      "value": "操作権を要求中"
+    },
+    {
+      "name": "session_tools_file_read_failed",
+      "value": "選択したファイルを読み込めません"
+    },
+    {
+      "name": "session_tools_first_entries",
+      "value": "先頭の項目"
+    },
+    {
+      "name": "session_tools_no_diff",
+      "value": "差分なし"
+    },
+    {
+      "name": "session_tools_no_upstream",
+      "value": "上流ブランチなし"
+    },
+    {
+      "name": "session_tools_not_repository",
+      "value": "Git リポジトリではありません"
+    },
+    {
+      "name": "session_tools_staged",
+      "value": "ステージ済み"
+    },
+    {
+      "name": "session_tools_synced",
+      "value": "最新です"
+    },
+    {
+      "name": "session_tools_terminal_input",
+      "value": "ターミナル入力"
+    },
+    {
+      "name": "session_tools_terminal_waiting",
+      "value": "ターミナルを待機中"
+    },
+    {
+      "name": "session_tools_transfer_limit",
+      "value": "転送は 32 MiB を超えています"
+    },
+    {
+      "name": "session_tools_truncated",
+      "value": "さらに読み込む"
+    },
+    {
+      "name": "session_tools_unstaged",
+      "value": "未ステージ"
+    },
+    {
+      "name": "session_tools_view_only",
+      "value": "表示のみ"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "音声会話とナレッジの録音に使用します。"
+    },
+    {
+      "name": "contacts_reason",
+      "value": "Persona が連絡先を検索し、承認後に作成または更新することを許可します。"
+    },
+    {
+      "name": "calendar_read_reason",
+      "value": "カレンダーツールで予定を確認するために使用します。"
+    },
+    {
+      "name": "calendar_write_reason",
+      "value": "リクエストを確認後、予定を保存するために使用します。"
+    },
+    {
+      "name": "location_reason",
+      "value": "位置ツールでおおよその位置を取得するために使用します。"
+    },
+    {
+      "name": "clipboard_reason",
+      "value": "クリップボードツールでテキストを読み込むために使用します。"
+    },
+    {
+      "name": "phone_tools_connected",
+      "value": "接続済み"
+    },
+    {
+      "name": "phone_tools_offline",
+      "value": "未接続"
+    },
+    {
+      "name": "phone_tools_registered",
+      "value": "ツール"
+    },
+    {
+      "name": "contacts",
+      "value": "連絡先"
+    },
+    {
+      "name": "calendar",
+      "value": "カレンダー"
+    },
+    {
+      "name": "location",
+      "value": "位置情報"
+    },
+    {
+      "name": "clipboard",
+      "value": "クリップボード"
+    },
+    {
+      "name": "permission_granted",
+      "value": "許可済み"
+    },
+    {
+      "name": "permission_not_determined",
+      "value": "未許可"
+    },
+    {
+      "name": "permission_invalid",
+      "value": "利用不可"
+    },
+    {
+      "name": "permission_unavailable",
+      "value": "権限を利用できません"
+    },
+    {
+      "name": "allow",
+      "value": "許可"
+    },
+    {
+      "name": "open_settings",
+      "value": "設定を開く"
+    },
+    {
+      "name": "cache_unavailable",
+      "value": "キャッシュを利用できません"
+    },
+    {
+      "name": "voice_unavailable",
+      "value": "音声を利用できません"
+    },
+    {
+      "name": "voice_ready",
+      "value": "準備完了"
+    },
+    {
+      "name": "voice_idle",
+      "value": "準備完了"
+    },
+    {
+      "name": "voice_protocol_unsupported",
+      "value": "未対応の音声バージョンです"
+    },
+    {
+      "name": "voice_needs_setup",
+      "value": "音声の設定が必要です"
+    },
+    {
+      "name": "voice_connecting",
+      "value": "接続中"
+    },
+    {
+      "name": "voice_starting_audio",
+      "value": "音声を準備中"
+    },
+    {
+      "name": "voice_listening",
+      "value": "聞き取り中"
+    },
+    {
+      "name": "voice_paused",
+      "value": "一時停止中"
+    },
+    {
+      "name": "voice_waking",
+      "value": "再開中"
+    },
+    {
+      "name": "voice_reconnecting",
+      "value": "再接続中"
+    },
+    {
+      "name": "voice_error",
+      "value": "音声エラー"
+    },
+    {
+      "name": "voice_connection_failed",
+      "value": "音声に接続できません"
+    },
+    {
+      "name": "voice_disconnected",
+      "value": "音声が切断されました"
+    },
+    {
+      "name": "voice_timeout",
+      "value": "音声接続がタイムアウトしました"
+    },
+    {
+      "name": "voice_audio_unavailable",
+      "value": "音声を利用できません"
+    },
+    {
+      "name": "voice_target_unavailable",
+      "value": "会話を利用できません"
+    },
+    {
+      "name": "voice_microphone_denied",
+      "value": "マイクの使用が拒否されています"
+    },
+    {
+      "name": "voice_microphone_unavailable",
+      "value": "マイクを利用できません"
+    },
+    {
+      "name": "voice_start",
+      "value": "通話を開始"
+    },
+    {
+      "name": "voice_mute",
+      "value": "ミュート"
+    },
+    {
+      "name": "voice_unmute",
+      "value": "ミュート解除"
+    },
+    {
+      "name": "voice_interrupt",
+      "value": "中断"
+    },
+    {
+      "name": "voice_end",
+      "value": "通話を終了"
+    },
+    {
+      "name": "voice_you",
+      "value": "あなた"
+    },
+    {
+      "name": "voice_assistant",
+      "value": "Persona"
+    },
+    {
+      "name": "voice_ask_released_elsewhere",
+      "value": "別のデバイスで回答済み"
+    },
+    {
+      "name": "voice_run_unsent_draft",
+      "value": "未送信の下書き"
+    },
+    {
+      "name": "voice_run_sending",
+      "value": "送信中"
+    },
+    {
+      "name": "voice_run_sent",
+      "value": "送信済み"
+    },
+    {
+      "name": "voice_run_working",
+      "value": "作業中"
+    },
+    {
+      "name": "voice_run_needs_you",
+      "value": "対応が必要"
+    },
+    {
+      "name": "voice_run_blocked",
+      "value": "待機中"
+    },
+    {
+      "name": "voice_run_held",
+      "value": "バックグラウンドで実行中"
+    },
+    {
+      "name": "voice_run_done",
+      "value": "完了"
+    },
+    {
+      "name": "voice_run_failed",
+      "value": "失敗"
+    },
+    {
+      "name": "voice_run_refused",
+      "value": "送信されていません"
+    },
+    {
+      "name": "voice_run_unknown",
+      "value": "結果を確認できません"
+    },
+    {
+      "name": "voice_run_folded",
+      "value": "統合済み"
+    },
+    {
+      "name": "photos",
+      "value": "写真"
+    },
+    {
+      "name": "preview_unavailable",
+      "value": "プレビューできません"
+    },
+    {
+      "name": "dismiss",
+      "value": "閉じる"
+    },
+    {
+      "name": "chat_attachment_target_unavailable",
+      "value": "会話を選択してください"
+    },
+    {
+      "name": "chat_attachment_storage_unavailable",
+      "value": "添付ファイルを保存できませんでした"
+    },
+    {
+      "name": "chat_attachment_limit_reached",
+      "value": "添付数の上限に達しました"
+    },
+    {
+      "name": "chat_attachment_image_unsupported",
+      "value": "未対応の画像です"
+    },
+    {
+      "name": "chat_attachment_image_too_large",
+      "value": "画像が大きすぎます"
+    },
+    {
+      "name": "chat_attachment_file_too_large",
+      "value": "ファイルが大きすぎます"
+    },
+    {
+      "name": "chat_attachment_file_read_failed",
+      "value": "ファイルを読み込めませんでした"
+    },
+    {
+      "name": "chat_attachment_upload_unknown",
+      "value": "アップロード結果が不明です"
+    },
+    {
+      "name": "chat_attachment_request_too_large",
+      "value": "メッセージと添付ファイルが大きすぎます"
+    },
+    {
+      "name": "chat_attachment_offline",
+      "value": "接続すると添付ファイルを送信できます"
+    },
+    {
+      "name": "chat_attachment_selection_changed",
+      "value": "添付が変更されました。確認して送信してください"
+    },
+    {
+      "name": "chat_attachment_pick_failed",
+      "value": "添付ファイルを選択できませんでした"
+    },
+    {
+      "name": "chat_attachment_send_failed",
+      "value": "添付ファイルを送信できませんでした"
+    },
+    {
+      "name": "chat_attachment_upload_failed",
+      "value": "アップロードに失敗しました"
+    },
+    {
+      "name": "chat_attachment_uploading",
+      "value": "アップロード中"
+    },
+    {
+      "name": "assistant_feed_answered",
+      "value": "回答済み"
+    },
+    {
+      "name": "assistant_feed_check_met",
+      "value": "達成"
+    },
+    {
+      "name": "assistant_feed_check_not_met",
+      "value": "未達成"
+    },
+    {
+      "name": "assistant_feed_confirm_send",
+      "value": "メッセージを送信しますか？"
+    },
+    {
+      "name": "assistant_feed_dismiss",
+      "value": "閉じる"
+    },
+    {
+      "name": "assistant_feed_draft",
+      "value": "返信"
+    },
+    {
+      "name": "assistant_feed_edit_plan",
+      "value": "プランを編集"
+    },
+    {
+      "name": "assistant_feed_filed_elsewhere",
+      "value": "別の場所で処理済み"
+    },
+    {
+      "name": "assistant_feed_folder",
+      "value": "作業ディレクトリ"
+    },
+    {
+      "name": "assistant_feed_interrupted",
+      "value": "中断"
+    },
+    {
+      "name": "assistant_feed_machine",
+      "value": "コンピュータ"
+    },
+    {
+      "name": "assistant_feed_message",
+      "value": "メッセージ"
+    },
+    {
+      "name": "assistant_feed_message_open",
+      "value": "返信待ち"
+    },
+    {
+      "name": "assistant_feed_message_pending",
+      "value": "送信中"
+    },
+    {
+      "name": "assistant_feed_message_sent",
+      "value": "送信済み"
+    },
+    {
+      "name": "assistant_feed_message_dismissed",
+      "value": "閉じました"
+    },
+    {
+      "name": "assistant_feed_message_filed",
+      "value": "処理済み"
+    },
+    {
+      "name": "assistant_feed_message_unknown",
+      "value": "結果不明"
+    },
+    {
+      "name": "assistant_feed_open_agent",
+      "value": "Agent を開く"
+    },
+    {
+      "name": "assistant_feed_open_inbox",
+      "value": "受信項目を開く"
+    },
+    {
+      "name": "assistant_feed_open_todo",
+      "value": "タスクを開く"
+    },
+    {
+      "name": "assistant_feed_permission_bypassPermissions",
+      "value": "フルアクセス"
+    },
+    {
+      "name": "assistant_feed_permission_default",
+      "value": "デフォルト"
+    },
+    {
+      "name": "assistant_feed_permission_plan",
+      "value": "読み取り専用"
+    },
+    {
+      "name": "assistant_feed_persona_message",
+      "value": "Persona から"
+    },
+    {
+      "name": "assistant_feed_plan",
+      "value": "プラン"
+    },
+    {
+      "name": "assistant_feed_plan_open",
+      "value": "開始可能"
+    },
+    {
+      "name": "assistant_feed_plan_started",
+      "value": "開始済み"
+    },
+    {
+      "name": "assistant_feed_plan_dismissed",
+      "value": "閉じました"
+    },
+    {
+      "name": "assistant_feed_plan_unknown",
+      "value": "不明"
+    },
+    {
+      "name": "assistant_feed_plan_unavailable",
+      "value": "プランを利用できません"
+    },
+    {
+      "name": "assistant_feed_progress",
+      "value": "進捗"
+    },
+    {
+      "name": "assistant_feed_prompt",
+      "value": "指示"
+    },
+    {
+      "name": "assistant_feed_receipt",
+      "value": "結果"
+    },
+    {
+      "name": "assistant_feed_remember",
+      "value": "このプロジェクトで記憶"
+    },
+    {
+      "name": "assistant_feed_report",
+      "value": "レポート"
+    },
+    {
+      "name": "assistant_feed_report_unavailable",
+      "value": "レポートを利用できません"
+    },
+    {
+      "name": "assistant_feed_review",
+      "value": "レビュー"
+    },
+    {
+      "name": "assistant_feed_review_accepted",
+      "value": "承認済み"
+    },
+    {
+      "name": "assistant_feed_review_rejected",
+      "value": "却下"
+    },
+    {
+      "name": "assistant_feed_review_pass",
+      "value": "合格"
+    },
+    {
+      "name": "assistant_feed_review_fail",
+      "value": "不合格"
+    },
+    {
+      "name": "assistant_feed_review_unknown",
+      "value": "未レビュー"
+    },
+    {
+      "name": "assistant_feed_send",
+      "value": "送信"
+    },
+    {
+      "name": "assistant_feed_start",
+      "value": "開始"
+    },
+    {
+      "name": "assistant_feed_task",
+      "value": "タスク"
+    },
+    {
+      "name": "assistant_feed_task_dock",
+      "value": "タスク"
+    },
+    {
+      "name": "assistant_feed_task_message",
+      "value": "タスクから"
+    },
+    {
+      "name": "assistant_feed_undo_dismiss",
+      "value": "閉じる操作を取り消す"
+    },
+    {
+      "name": "assistant_feed_unsupported_activity",
+      "value": "アクティビティを利用できません"
+    },
+    {
+      "name": "assistant_feed_view_unavailable",
+      "value": "ビューを利用できません"
+    },
+    {
+      "name": "assistant_feed_state_not_started",
+      "value": "未開始"
+    },
+    {
+      "name": "assistant_feed_state_working",
+      "value": "実行中"
+    },
+    {
+      "name": "assistant_feed_state_waiting",
+      "value": "待機中"
+    },
+    {
+      "name": "assistant_feed_state_needs_you",
+      "value": "対応が必要"
+    },
+    {
+      "name": "assistant_feed_state_interrupted",
+      "value": "中断"
+    },
+    {
+      "name": "assistant_feed_state_usage_limit",
+      "value": "使用上限"
+    },
+    {
+      "name": "assistant_feed_state_unread",
+      "value": "未読"
+    },
+    {
+      "name": "assistant_feed_state_followup",
+      "value": "フォローアップ"
+    },
+    {
+      "name": "assistant_feed_state_done",
+      "value": "完了"
+    },
+    {
+      "name": "assistant_feed_state_failed",
+      "value": "失敗"
+    },
+    {
+      "name": "assistant_feed_state_cancelled",
+      "value": "キャンセル済み"
+    },
+    {
+      "name": "assistant_feed_state_accepted",
+      "value": "承認済み"
+    },
+    {
+      "name": "assistant_feed_state_unknown",
+      "value": "不明"
+    },
+    {
+      "name": "notifications_denied",
+      "value": "システム設定で通知を許可してください"
+    },
+    {
+      "name": "notifications_unavailable",
+      "value": "通知を利用できません"
+    },
+    {
+      "name": "agent_history",
+      "value": "履歴"
+    },
+    {
+      "name": "agent_history_off",
+      "value": "現在のセッション"
+    },
+    {
+      "name": "agent_filter_machine",
+      "value": "コンピュータ"
+    },
+    {
+      "name": "agent_filter_all_machines",
+      "value": "すべてのコンピュータ"
+    },
+    {
+      "name": "agent_filter_repository",
+      "value": "リポジトリ"
+    },
+    {
+      "name": "agent_filter_worktree",
+      "value": "ワークツリー"
+    },
+    {
+      "name": "agent_pin",
+      "value": "ピン留め"
+    },
+    {
+      "name": "agent_unpin",
+      "value": "ピン留めを解除"
+    },
+    {
+      "name": "agent_mute",
+      "value": "ミュート"
+    },
+    {
+      "name": "agent_unmute",
+      "value": "ミュートを解除"
+    },
+    {
+      "name": "agent_rename",
+      "value": "名前を変更"
+    },
+    {
+      "name": "agent_title",
+      "value": "タイトル"
+    },
+    {
+      "name": "agent_tab_name",
+      "value": "タブ名"
+    },
+    {
+      "name": "agent_mark_seen",
+      "value": "既読にする"
+    },
+    {
+      "name": "agent_close",
+      "value": "Agent を閉じる"
+    },
+    {
+      "name": "agent_delete",
+      "value": "履歴を削除"
+    },
+    {
+      "name": "agent_close_confirm",
+      "value": "この Agent を閉じますか？"
+    },
+    {
+      "name": "agent_delete_confirm",
+      "value": "このセッション履歴を削除しますか？"
+    },
+    {
+      "name": "cleanup_incomplete",
+      "value": "一部のローカルデータを削除できませんでした。アプリを再起動して再試行してください。"
+    },
+    {
+      "name": "interaction_history",
+      "value": "承認と回答"
+    },
+    {
+      "name": "inbox_handoff_target_unavailable",
+      "value": "Persona に送信しました。更新して会話を開いてください。"
+    },
+    {
+      "name": "agent_pin_space",
+      "value": "ワークツリーをピン留め"
+    },
+    {
+      "name": "agent_unpin_space",
+      "value": "ワークツリーのピン留めを解除"
+    },
+    {
+      "name": "agent_mute_space",
+      "value": "ワークツリーをミュート"
+    },
+    {
+      "name": "agent_unmute_space",
+      "value": "ワークツリーのミュートを解除"
+    },
+    {
+      "name": "bcc",
+      "value": "Bcc"
+    },
+    {
+      "name": "cc",
+      "value": "Cc"
+    },
+    {
+      "name": "compose",
+      "value": "メールを作成"
+    },
+    {
+      "name": "subject",
+      "value": "件名"
+    },
+    {
+      "name": "to",
+      "value": "宛先"
+    },
+    {
+      "name": "you",
+      "value": "あなた"
+    },
+    {
+      "name": "inbox_open",
+      "value": "未処理"
+    },
+    {
+      "name": "inbox_source_lark",
+      "value": "Lark"
+    },
+    {
+      "name": "inbox_source_generic",
+      "value": "メッセージ"
+    },
+    {
+      "name": "inbox_card_unsupported",
+      "value": "このメッセージ形式は表示できません。"
+    },
+    {
+      "name": "inbox_edited",
+      "value": "編集済み"
+    },
+    {
+      "name": "inbox_handed_to",
+      "value": "引き継ぎ先"
+    },
+    {
+      "name": "inbox_handoff_instruction",
+      "value": "Persona に何を依頼しますか？"
+    },
+    {
+      "name": "inbox_handoff_preset_summary",
+      "value": "内容を要約し、必要な対応と返信案を教えてください。"
+    },
+    {
+      "name": "inbox_handoff_title",
+      "value": "Persona に依頼"
+    },
+    {
+      "name": "inbox_handoff_send",
+      "value": "引き継ぐ"
+    },
+    {
+      "name": "inbox_open_thread",
+      "value": "スレッドを開く"
+    },
+    {
+      "name": "inbox_processing",
+      "value": "処理中"
+    },
+    {
+      "name": "inbox_recalled",
+      "value": "取り消し済み"
+    },
+    {
+      "name": "inbox_reply_target_changed",
+      "value": "返信先が変更されました。宛先を再確認してください。"
+    },
+    {
+      "name": "inbox_reply_to",
+      "value": "返信先"
+    },
+    {
+      "name": "inbox_translation_clipped",
+      "value": "翻訳が省略されています"
+    },
+    {
+      "name": "inbox_urgent",
+      "value": "緊急"
+    },
+    {
+      "name": "inbox_show_translation",
+      "value": "翻訳"
+    },
+    {
+      "name": "inbox_show_original",
+      "value": "原文"
+    },
+    {
+      "name": "inbox_topics",
+      "value": "トピック"
+    },
+    {
+      "name": "inbox_conversation",
+      "value": "会話"
+    },
+    {
+      "name": "inbox_older",
+      "value": "過去のメッセージ"
+    },
+    {
+      "name": "inbox_thread_reply",
+      "value": "スレッドに返信"
+    },
+    {
+      "name": "inbox_message_reply",
+      "value": "返信"
+    },
+    {
+      "name": "inbox_send_attachment",
+      "value": "添付を送信"
+    },
+    {
+      "name": "inbox_handling_looking",
+      "value": "確認中"
+    },
+    {
+      "name": "inbox_handling_agent",
+      "value": "Agent が実行中"
+    },
+    {
+      "name": "inbox_handling_waiting",
+      "value": "対応待ち"
+    },
+    {
+      "name": "inbox_handling_done",
+      "value": "完了"
+    },
+    {
+      "name": "inbox_handling_failed",
+      "value": "失敗"
+    },
+    {
+      "name": "inbox_suggestion_reply",
+      "value": "返信案"
+    },
+    {
+      "name": "inbox_suggestion_agent",
+      "value": "Agent の提案"
+    },
+    {
+      "name": "inbox_suggestion_conclusion",
+      "value": "結論"
+    },
+    {
+      "name": "inbox_tier_action",
+      "value": "対応が必要"
+    },
+    {
+      "name": "inbox_tier_fyi",
+      "value": "参考情報"
+    },
+    {
+      "name": "inbox_tier_noise",
+      "value": "優先度低"
+    },
+    {
+      "name": "inbox_tier_untriaged",
+      "value": "未分類"
+    },
+    {
+      "name": "inbox_message_pending",
+      "value": "送信中"
+    },
+    {
+      "name": "inbox_message_failed",
+      "value": "送信失敗"
+    },
+    {
+      "name": "inbox_write_draft",
+      "value": "下書き"
+    },
+    {
+      "name": "inbox_write_sending",
+      "value": "送信中"
+    },
+    {
+      "name": "inbox_write_sent",
+      "value": "送信済み"
+    },
+    {
+      "name": "inbox_write_pending",
+      "value": "確認待ち"
+    },
+    {
+      "name": "inbox_write_unknown",
+      "value": "結果不明"
+    },
+    {
+      "name": "inbox_write_failed",
+      "value": "失敗"
+    },
+    {
+      "name": "inbox_write_saving",
+      "value": "保存中"
+    },
+    {
+      "name": "inbox_write_handed_off",
+      "value": "Persona に引き継ぎ済み"
+    },
+    {
+      "name": "inbox_write_target_changed",
+      "value": "宛先が変更されました"
+    },
+    {
+      "name": "account_changed",
+      "value": "アカウントが変更されました。確認して送信してください。"
+    },
+    {
+      "name": "attachment_limit",
+      "value": "添付ファイルが大きすぎます"
+    },
+    {
+      "name": "draft_save_failed",
+      "value": "下書きを保存できませんでした"
+    },
+    {
+      "name": "mail_reply_target_changed",
+      "value": "メールが変更されました。返信先を再確認してください。"
+    },
+    {
+      "name": "voice_transcript_empty",
+      "value": "文字起こしはまだありません"
+    },
+    {
+      "name": "grouping",
+      "value": "グループ"
+    },
+    {
+      "name": "agent_group_flat",
+      "value": "グループ化なし"
+    },
+    {
+      "name": "restore_draft",
+      "value": "下書きを復元"
+    },
+    {
+      "name": "replace_draft",
+      "value": "現在の下書きを置き換えますか？"
+    },
+    {
+      "name": "todo_agents",
+      "value": "Agent"
+    },
+    {
+      "name": "todo_choose_agent",
+      "value": "Agent を選択"
+    },
+    {
+      "name": "todo_choose_project",
+      "value": "プロジェクトを選択"
+    },
+    {
+      "name": "todo_complete",
+      "value": "完了にする"
+    },
+    {
+      "name": "todo_filter_status",
+      "value": "状態で絞り込む"
+    },
+    {
+      "name": "todo_group_by",
+      "value": "グループ化"
+    },
+    {
+      "name": "todo_group_project",
+      "value": "プロジェクト"
+    },
+    {
+      "name": "todo_group_status",
+      "value": "状態"
+    },
+    {
+      "name": "todo_group_thread",
+      "value": "会話"
+    },
+    {
+      "name": "todo_link_agent",
+      "value": "Agent を関連付け"
+    },
+    {
+      "name": "todo_link_project",
+      "value": "プロジェクトを関連付け"
+    },
+    {
+      "name": "todo_move_from",
+      "value": "移動元"
+    },
+    {
+      "name": "todo_notes",
+      "value": "メモ"
+    },
+    {
+      "name": "todo_previously_involved",
+      "value": "以前参加した Agent"
+    },
+    {
+      "name": "todo_projects",
+      "value": "プロジェクト"
+    },
+    {
+      "name": "todo_related",
+      "value": "関連"
+    },
+    {
+      "name": "todo_remove_project",
+      "value": "プロジェクトの関連付けを解除"
+    },
+    {
+      "name": "todo_search",
+      "value": "タスクを検索"
+    },
+    {
+      "name": "todo_source_conversation",
+      "value": "元の会話"
+    },
+    {
+      "name": "todo_unlink_agent",
+      "value": "Agent の関連付けを解除"
+    },
+    {
+      "name": "todo_unsorted",
+      "value": "未分類"
+    },
+    {
+      "name": "todo_no_thread",
+      "value": "会話なし"
+    },
+    {
+      "name": "todo_state_needs_you",
+      "value": "対応が必要"
+    },
+    {
+      "name": "todo_state_checking",
+      "value": "確認中"
+    },
+    {
+      "name": "todo_state_working",
+      "value": "作業中"
+    },
+    {
+      "name": "todo_state_followup",
+      "value": "フォローアップ"
+    },
+    {
+      "name": "todo_state_not_started",
+      "value": "未着手"
+    },
+    {
+      "name": "todo_state_done",
+      "value": "完了"
+    },
+    {
+      "name": "todo_gone",
+      "value": "タスクが見つかりません"
+    },
+    {
+      "name": "todo_write_pending",
+      "value": "前の変更を確認中です"
+    },
+    {
+      "name": "todo_write_unknown",
+      "value": "前の変更の結果を確認できません"
+    },
+    {
+      "name": "todo_title_required",
+      "value": "タイトルを入力してください"
+    },
+    {
+      "name": "todo_agent_unavailable",
+      "value": "この Agent を関連付けできません"
+    },
+    {
+      "name": "todo_project_unavailable",
+      "value": "このプロジェクトを関連付けできません"
+    },
+    {
+      "name": "draft_restore_failed",
+      "value": "下書きを復元できませんでした"
+    },
+    {
+      "name": "health_archive",
+      "value": "アーカイブ"
+    },
+    {
+      "name": "health_archive_title",
+      "value": "この会話をアーカイブしますか？"
+    },
+    {
+      "name": "health_ask_placeholder",
+      "value": "健康について質問"
+    },
+    {
+      "name": "health_chats",
+      "value": "健康に関する会話"
+    },
+    {
+      "name": "health_chats_unavailable",
+      "value": "健康に関する会話を利用できません"
+    },
+    {
+      "name": "health_checkup_reports",
+      "value": "健康診断レポート"
+    },
+    {
+      "name": "health_home_title",
+      "value": "健康"
+    },
+    {
+      "name": "health_memory",
+      "value": "健康メモリ"
+    },
+    {
+      "name": "health_memory_content",
+      "value": "健康メモリにメモを追加"
+    },
+    {
+      "name": "health_memory_delete_title",
+      "value": "このメモリを削除しますか？"
+    },
+    {
+      "name": "health_memory_edit",
+      "value": "編集"
+    },
+    {
+      "name": "health_memory_index",
+      "value": "健康メモリのインデックス"
+    },
+    {
+      "name": "health_new_chat",
+      "value": "新しい健康の会話"
+    },
+    {
+      "name": "health_no_chats",
+      "value": "健康に関する会話はありません"
+    },
+    {
+      "name": "health_no_memory",
+      "value": "健康メモリはありません"
+    },
+    {
+      "name": "health_no_reports",
+      "value": "レポートはありません"
+    },
+    {
+      "name": "health_privacy_note",
+      "value": "健康データは Hub に保存されます。"
+    },
+    {
+      "name": "health_question_sleep",
+      "value": "睡眠を改善するには？"
+    },
+    {
+      "name": "health_question_steps",
+      "value": "毎日の歩数から何がわかりますか？"
+    },
+    {
+      "name": "health_log_weight",
+      "value": "体重を記録"
+    },
+    {
+      "name": "health_log_water",
+      "value": "水分摂取量を記録"
+    },
+    {
+      "name": "health_report_delete_message",
+      "value": "このレポートは Hub から削除されます。"
+    },
+    {
+      "name": "health_report_delete_title",
+      "value": "このレポートを削除しますか？"
+    },
+    {
+      "name": "health_report_file_read_failed",
+      "value": "選択したレポートを読み込めませんでした"
+    },
+    {
+      "name": "health_report_file_too_large",
+      "value": "レポートが 32 MiB の上限を超えています"
+    },
+    {
+      "name": "health_report_file_unsupported",
+      "value": "このレポート形式には対応していません"
+    },
+    {
+      "name": "health_report_node_outdated",
+      "value": "健康レポートを使うには Hub の更新が必要です"
+    },
+    {
+      "name": "health_report_not_summarized",
+      "value": "要約はありません"
+    },
+    {
+      "name": "health_report_original",
+      "value": "元のレポート"
+    },
+    {
+      "name": "health_report_prompt",
+      "value": "健康レポートを確認し、主な所見を要約してください。"
+    },
+    {
+      "name": "health_report_summary",
+      "value": "要約"
+    },
+    {
+      "name": "health_report_summarized",
+      "value": "要約済み"
+    },
+    {
+      "name": "health_report_uploading",
+      "value": "レポートをアップロード中…"
+    },
+    {
+      "name": "health_request_failed",
+      "value": "健康データの取得に失敗しました"
+    },
+    {
+      "name": "health_storage_unavailable",
+      "value": "健康データを保存できませんでした"
+    },
+    {
+      "name": "health_try_asking",
+      "value": "質問してみましょう"
+    },
+    {
+      "name": "health_upload_pdf",
+      "value": "PDF をアップロード"
+    },
+    {
+      "name": "health_upload_photos",
+      "value": "写真をアップロード"
+    },
+    {
+      "name": "health_upload_report",
+      "value": "レポートをアップロード"
+    },
+    {
+      "name": "knowledge_agent_prompt",
+      "value": "Agent への依頼"
+    },
+    {
+      "name": "knowledge_agent_unavailable",
+      "value": "対応するコンピューターがありません"
+    },
+    {
+      "name": "knowledge_all_tags",
+      "value": "すべてのタグ"
+    },
+    {
+      "name": "knowledge_ask_persona",
+      "value": "Persona に質問"
+    },
+    {
+      "name": "knowledge_edit_metadata",
+      "value": "詳細を編集"
+    },
+    {
+      "name": "knowledge_empty",
+      "value": "この分類には項目がありません"
+    },
+    {
+      "name": "knowledge_forget_recording",
+      "value": "録音をナレッジから削除しますか？"
+    },
+    {
+      "name": "knowledge_forget_recording_note",
+      "value": "この録音は Hub から削除されます。"
+    },
+    {
+      "name": "knowledge_kind_projects",
+      "value": "プロジェクト"
+    },
+    {
+      "name": "knowledge_kind_chats",
+      "value": "チャット"
+    },
+    {
+      "name": "knowledge_kind_people",
+      "value": "連絡先"
+    },
+    {
+      "name": "knowledge_kind_docs",
+      "value": "ドキュメント"
+    },
+    {
+      "name": "knowledge_kind_meetings",
+      "value": "ミーティング"
+    },
+    {
+      "name": "knowledge_kind_events",
+      "value": "イベント"
+    },
+    {
+      "name": "knowledge_kind_recordings",
+      "value": "録音"
+    },
+    {
+      "name": "knowledge_minutes",
+      "value": "議事録"
+    },
+    {
+      "name": "knowledge_minutes_add_todos",
+      "value": "選択した項目をタスクに追加"
+    },
+    {
+      "name": "knowledge_minutes_make",
+      "value": "議事録を作成"
+    },
+    {
+      "name": "knowledge_no_results",
+      "value": "結果はありません"
+    },
+    {
+      "name": "knowledge_open_link",
+      "value": "リンクを開く"
+    },
+    {
+      "name": "knowledge_profile",
+      "value": "プロフィール"
+    },
+    {
+      "name": "knowledge_project_agents",
+      "value": "プロジェクトの Agent"
+    },
+    {
+      "name": "knowledge_project_long",
+      "value": "長期"
+    },
+    {
+      "name": "knowledge_project_short",
+      "value": "短期"
+    },
+    {
+      "name": "knowledge_recent",
+      "value": "最近のアクティビティ"
+    },
+    {
+      "name": "knowledge_recording_summary",
+      "value": "ミーティングの要約"
+    },
+    {
+      "name": "knowledge_related",
+      "value": "関連項目"
+    },
+    {
+      "name": "knowledge_related_moments",
+      "value": "関連する場面"
+    },
+    {
+      "name": "knowledge_relevance",
+      "value": "関連度"
+    },
+    {
+      "name": "knowledge_request_failed",
+      "value": "ナレッジの取得に失敗しました"
+    },
+    {
+      "name": "knowledge_search",
+      "value": "ナレッジを検索"
+    },
+    {
+      "name": "knowledge_search_matches",
+      "value": "一致する項目"
+    },
+    {
+      "name": "knowledge_start_agent",
+      "value": "Agent を開始"
+    },
+    {
+      "name": "knowledge_status_active",
+      "value": "進行中"
+    },
+    {
+      "name": "knowledge_status_done",
+      "value": "完了"
+    },
+    {
+      "name": "knowledge_status_ignored",
+      "value": "無視"
+    },
+    {
+      "name": "knowledge_status_paused",
+      "value": "一時停止"
+    },
+    {
+      "name": "knowledge_storage_unavailable",
+      "value": "ナレッジ設定を保存できませんでした"
+    },
+    {
+      "name": "knowledge_tags",
+      "value": "タグ"
+    },
+    {
+      "name": "knowledge_timeline",
+      "value": "タイムライン"
+    },
+    {
+      "name": "knowledge_transcript",
+      "value": "文字起こし"
+    },
+    {
+      "name": "session_tools_branch_from",
+      "value": "分岐元"
+    },
+    {
+      "name": "session_tools_commit",
+      "value": "コミット"
+    },
+    {
+      "name": "session_tools_commit_message",
+      "value": "コミットメッセージ"
+    },
+    {
+      "name": "session_tools_conflict_keep",
+      "value": "既存ファイルを保持"
+    },
+    {
+      "name": "session_tools_conflict_replace",
+      "value": "既存ファイルを置き換え"
+    },
+    {
+      "name": "session_tools_create_branch",
+      "value": "ブランチを作成"
+    },
+    {
+      "name": "session_tools_current_branch",
+      "value": "現在のブランチ"
+    },
+    {
+      "name": "session_tools_destination_folder",
+      "value": "移動先フォルダー"
+    },
+    {
+      "name": "session_tools_forward",
+      "value": "進む"
+    },
+    {
+      "name": "session_tools_git_confirm_title",
+      "value": "Git 操作を実行しますか？"
+    },
+    {
+      "name": "session_tools_git_stage",
+      "value": "ファイルをステージ"
+    },
+    {
+      "name": "session_tools_git_unstage",
+      "value": "ファイルのステージを解除"
+    },
+    {
+      "name": "session_tools_git_commit",
+      "value": "コミットを作成"
+    },
+    {
+      "name": "session_tools_git_push",
+      "value": "変更をプッシュ"
+    },
+    {
+      "name": "session_tools_git_publish",
+      "value": "ブランチを公開"
+    },
+    {
+      "name": "session_tools_git_switch",
+      "value": "ブランチを切り替え"
+    },
+    {
+      "name": "session_tools_git_create",
+      "value": "ブランチを作成"
+    },
+    {
+      "name": "session_tools_git_stash_push",
+      "value": "スタッシュを保存"
+    },
+    {
+      "name": "session_tools_git_stash_apply",
+      "value": "スタッシュを適用"
+    },
+    {
+      "name": "session_tools_git_stash_pop",
+      "value": "適用して削除"
+    },
+    {
+      "name": "session_tools_git_stash_drop",
+      "value": "スタッシュを削除"
+    },
+    {
+      "name": "session_tools_move",
+      "value": "移動"
+    },
+    {
+      "name": "session_tools_move_conflict",
+      "value": "同じ名前のファイルがあります"
+    },
+    {
+      "name": "session_tools_move_to_trash",
+      "value": "ゴミ箱に移動"
+    },
+    {
+      "name": "session_tools_new_branch",
+      "value": "新しいブランチ名"
+    },
+    {
+      "name": "session_tools_new_name",
+      "value": "新しい名前"
+    },
+    {
+      "name": "session_tools_no_branches",
+      "value": "ブランチがありません"
+    },
+    {
+      "name": "session_tools_preview_external_link",
+      "value": "ブラウザーで開く"
+    },
+    {
+      "name": "session_tools_preview_file",
+      "value": "ファイルをプレビュー"
+    },
+    {
+      "name": "session_tools_preview_input",
+      "value": "ページに送るテキスト"
+    },
+    {
+      "name": "session_tools_preview_listening",
+      "value": "待機中"
+    },
+    {
+      "name": "session_tools_preview_none",
+      "value": "プレビューサーバーがありません"
+    },
+    {
+      "name": "session_tools_preview_open",
+      "value": "プレビューを開く"
+    },
+    {
+      "name": "session_tools_preview_path",
+      "value": "パス"
+    },
+    {
+      "name": "session_tools_preview_path_invalid",
+      "value": "有効なパスを入力してください"
+    },
+    {
+      "name": "session_tools_preview_problem",
+      "value": "プレビューエラー"
+    },
+    {
+      "name": "session_tools_preview_start_confirm",
+      "value": "プレビューサーバーを起動しますか？"
+    },
+    {
+      "name": "session_tools_preview_stopped",
+      "value": "停止中"
+    },
+    {
+      "name": "session_tools_preview_unavailable",
+      "value": "プレビューを利用できません"
+    },
+    {
+      "name": "session_tools_publish_branch",
+      "value": "ブランチを公開"
+    },
+    {
+      "name": "session_tools_push",
+      "value": "プッシュ"
+    },
+    {
+      "name": "session_tools_remote_branch",
+      "value": "リモートブランチ"
+    },
+    {
+      "name": "session_tools_restore",
+      "value": "復元"
+    },
+    {
+      "name": "session_tools_restore_confirm",
+      "value": "削除したファイルを復元しますか？"
+    },
+    {
+      "name": "session_tools_stage",
+      "value": "ステージ"
+    },
+    {
+      "name": "session_tools_stash_apply",
+      "value": "適用"
+    },
+    {
+      "name": "session_tools_stash_drop",
+      "value": "削除"
+    },
+    {
+      "name": "session_tools_stash_message",
+      "value": "スタッシュメッセージ"
+    },
+    {
+      "name": "session_tools_stash_pop",
+      "value": "適用して削除"
+    },
+    {
+      "name": "session_tools_stash_save",
+      "value": "スタッシュを保存"
+    },
+    {
+      "name": "session_tools_stash_untracked",
+      "value": "未追跡ファイルを含める"
+    },
+    {
+      "name": "session_tools_stashes",
+      "value": "スタッシュ"
+    },
+    {
+      "name": "session_tools_switch_branch",
+      "value": "ブランチを切り替え"
+    },
+    {
+      "name": "session_tools_terminal_control_confirm",
+      "value": "このターミナルを操作しますか？"
+    },
+    {
+      "name": "session_tools_terminal_screen",
+      "value": "コンピューター画面"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_confirm",
+      "value": "コンピューター画面での入力を許可しますか？"
+    },
+    {
+      "name": "session_tools_terminal_screen_input",
+      "value": "コンピューターに入力"
+    },
+    {
+      "name": "session_tools_trash_title",
+      "value": "ファイルをゴミ箱に移動しますか？"
+    },
+    {
+      "name": "session_tools_trashed_count",
+      "value": "{count} 件をゴミ箱に移動しました"
+    },
+    {
+      "name": "session_tools_unstage",
+      "value": "ステージを解除"
+    },
+    {
+      "name": "session_tools_write_pending",
+      "value": "変更を確認中です"
+    },
+    {
+      "name": "session_tools_write_unknown",
+      "value": "変更の結果を確認できません"
+    },
+    {
+      "name": "screen_unavailable",
+      "value": "コンピューター画面を利用できません"
+    },
+    {
+      "name": "preview_start_slow",
+      "value": "プレビューサーバーの起動に時間がかかっています"
+    },
+    {
+      "name": "chat_attachment_text_too_large",
+      "value": "メッセージが長すぎます"
+    },
+    {
+      "name": "computer_screen_connect",
+      "value": "接続"
+    },
+    {
+      "name": "computer_screen_refresh",
+      "value": "更新"
+    },
+    {
+      "name": "computer_screen_control",
+      "value": "操作を開始"
+    },
+    {
+      "name": "computer_screen_release_control",
+      "value": "操作を終了"
+    },
+    {
+      "name": "computer_screen_control_confirm_title",
+      "value": "コンピューター画面の操作を許可しますか？"
+    },
+    {
+      "name": "computer_screen_control_confirm_message",
+      "value": "このスマートフォンから画面表示と操作を許可しますか？"
+    },
+    {
+      "name": "computer_screen_allow_control",
+      "value": "コンピューターで操作を許可"
+    },
+    {
+      "name": "computer_screen_read_only",
+      "value": "閲覧のみ"
+    },
+    {
+      "name": "computer_screen_enter_credentials",
+      "value": "アカウントとパスワードを入力"
+    },
+    {
+      "name": "computer_screen_account",
+      "value": "アカウント"
+    },
+    {
+      "name": "computer_screen_password",
+      "value": "パスワード"
+    },
+    {
+      "name": "computer_screen_sign_in",
+      "value": "ログイン"
+    },
+    {
+      "name": "computer_screen_cancel_sign_in",
+      "value": "ログインをキャンセル"
+    },
+    {
+      "name": "computer_screen_waiting",
+      "value": "コンピューターを待っています…"
+    },
+    {
+      "name": "computer_screen_sharing_off",
+      "value": "画面共有がオフです"
+    },
+    {
+      "name": "computer_screen_connection_lost",
+      "value": "コンピューターとの接続が切れました"
+    },
+    {
+      "name": "computer_screen_connection_failed",
+      "value": "コンピューター画面に接続できません"
+    },
+    {
+      "name": "computer_screen_auth_failed",
+      "value": "ログインに失敗しました"
+    },
+    {
+      "name": "computer_screen_unsupported",
+      "value": "コンピューター画面に対応していません"
+    },
+    {
+      "name": "computer_screen_screen_unavailable",
+      "value": "コンピューター画面を利用できません"
+    },
+    {
+      "name": "computer_screen_type_text",
+      "value": "文字を入力"
+    },
+    {
+      "name": "computer_screen_send_text",
+      "value": "文字を送信"
+    },
+    {
+      "name": "computer_screen_not_mac",
+      "value": "画面操作には Mac が必要です"
+    },
+    {
+      "name": "computer_screen_read_only_device",
+      "value": "このデバイスでは閲覧のみ可能です"
+    },
+    {
+      "name": "scan_qr",
+      "value": "QRコードをスキャン"
+    },
+    {
+      "name": "app_style_glass",
+      "value": "Glass"
+    },
+    {
+      "name": "app_style_brief",
+      "value": "Brief"
+    },
+    {
+      "name": "app_style_board",
+      "value": "Board"
+    },
+    {
+      "name": "inbox_reference_unavailable",
+      "value": "参照先の会話を開けません"
+    },
+    {
+      "name": "inbox_reference_changed",
+      "value": "参照先の会話が変更されました"
+    },
+    {
+      "name": "branch_chat",
+      "value": "会話を分岐"
+    },
+    {
+      "name": "use_as_context",
+      "value": "コンテキストに追加"
+    },
+    {
+      "name": "rewind_chat",
+      "value": "会話のみ巻き戻す"
+    },
+    {
+      "name": "rewind_code_chat",
+      "value": "コードと会話を巻き戻す"
+    },
+    {
+      "name": "rewind_chat_consequence",
+      "value": "このメッセージ以降の会話を削除します。メッセージは入力欄に戻せます。"
+    },
+    {
+      "name": "rewind_code_consequence",
+      "value": "コンピュータのファイルと会話をこのメッセージの前に戻します。その後のファイル変更は失われます。"
+    },
+    {
+      "name": "rewind_chat_done",
+      "value": "会話を巻き戻しました"
+    },
+    {
+      "name": "rewind_code_done",
+      "value": "コードと会話を巻き戻しました"
+    },
+    {
+      "name": "rewind_input_kept",
+      "value": "巻き戻しました。メッセージはコンピュータの入力欄に残っています"
+    },
+    {
+      "name": "session_revision_dialog_open",
+      "value": "先にコンピュータのダイアログを閉じてください"
+    },
+    {
+      "name": "session_revision_failed",
+      "value": "会話の操作に失敗しました"
+    },
+    {
+      "name": "session_revision_fork_turn_running",
+      "value": "この返信はまだ生成中です"
+    },
+    {
+      "name": "session_revision_full_access",
+      "value": "デバイスのフルアクセスが必要です"
+    },
+    {
+      "name": "session_revision_hub_outdated",
+      "value": "Hub またはコンピュータのノードを更新してください"
+    },
+    {
+      "name": "session_revision_input_draft",
+      "value": "コンピュータの入力欄に下書きがあります"
+    },
+    {
+      "name": "session_revision_mismatch",
+      "value": "会話履歴が変わりました。もう一度確認してください"
+    },
+    {
+      "name": "session_revision_needs_you",
+      "value": "先に保留中のリクエストに回答してください"
+    },
+    {
+      "name": "session_revision_no_text",
+      "value": "巻き戻すメッセージを特定できません"
+    },
+    {
+      "name": "session_revision_not_running",
+      "value": "セッションは実行されていません"
+    },
+    {
+      "name": "session_revision_nothing",
+      "value": "巻き戻せるメッセージがありません"
+    },
+    {
+      "name": "session_revision_open_request",
+      "value": "先に未処理のリクエストを解決してください"
+    },
+    {
+      "name": "session_revision_target_changed",
+      "value": "会話が変わりました。もう一度確認してください"
+    },
+    {
+      "name": "session_revision_target_invalid",
+      "value": "返された会話を確認できません"
+    },
+    {
+      "name": "session_revision_timeout",
+      "value": "コンピュータの操作がタイムアウトしました"
+    },
+    {
+      "name": "session_revision_unsupported",
+      "value": "このセッションではこの操作を利用できません"
+    },
+    {
+      "name": "session_revision_working",
+      "value": "現在の応答が完了するまでお待ちください"
+    },
+    {
+      "name": "platform",
+      "value": "システム"
+    },
+    {
+      "name": "directory_partly_unavailable",
+      "value": "一部のワークスペースを利用できません"
+    },
+    {
+      "name": "computer_screen_open",
+      "value": "画面を表示"
+    },
+    {
+      "name": "candidate_addresses",
+      "value": "代替アドレス"
+    },
+    {
+      "name": "language_change_failed",
+      "value": "アプリの言語を変更できませんでした"
+    },
+    {
+      "name": "language_after_restart",
+      "value": "次回起動時からシステム言語を使用します"
+    },
+    {
+      "name": "admin_about_me",
+      "value": "自分について"
+    },
+    {
+      "name": "admin_agent_tasks",
+      "value": "Agent のタスク"
+    },
+    {
+      "name": "admin_all_online_machines",
+      "value": "オンラインのコンピュータすべて"
+    },
+    {
+      "name": "admin_archive_days",
+      "value": "完了したタスクをアーカイブするまでの日数"
+    },
+    {
+      "name": "admin_auto_update",
+      "value": "Hub の自動更新"
+    },
+    {
+      "name": "admin_auto_update_nodes",
+      "value": "コンピュータを自動更新"
+    },
+    {
+      "name": "admin_builtin",
+      "value": "組み込み"
+    },
+    {
+      "name": "admin_check_failed",
+      "value": "チェックに失敗しました"
+    },
+    {
+      "name": "admin_check_ok",
+      "value": "チェックに成功しました"
+    },
+    {
+      "name": "admin_code_expires",
+      "value": "コードの有効期限"
+    },
+    {
+      "name": "admin_command_copied",
+      "value": "インストールコマンドをコピーしました"
+    },
+    {
+      "name": "admin_command_copy_failed",
+      "value": "インストールコマンドをコピーできませんでした"
+    },
+    {
+      "name": "admin_confirmation_target",
+      "value": "対象"
+    },
+    {
+      "name": "admin_create_manager",
+      "value": "マネージャーを作成"
+    },
+    {
+      "name": "admin_create_memory",
+      "value": "メモリーを作成"
+    },
+    {
+      "name": "admin_default",
+      "value": "デフォルト"
+    },
+    {
+      "name": "admin_default_machine",
+      "value": "デフォルトのコンピュータ"
+    },
+    {
+      "name": "admin_delete_launcher_note",
+      "value": "ランチャーの設定を削除します。"
+    },
+    {
+      "name": "admin_delete_manager_note",
+      "value": "このマネージャーを削除するとアクセス権が取り消され、接続が解除されます。コンピュータが割り当てられていない場合のみ削除できます。"
+    },
+    {
+      "name": "admin_delete_memory_note",
+      "value": "選択したメモリーファイルを削除します。"
+    },
+    {
+      "name": "admin_edit",
+      "value": "編集"
+    },
+    {
+      "name": "admin_engine_confirm_selection",
+      "value": "選択したエンジンホスト"
+    },
+    {
+      "name": "admin_engine_default",
+      "value": "デフォルト"
+    },
+    {
+      "name": "admin_engine_no_default",
+      "value": "デフォルトのエンジンはありません"
+    },
+    {
+      "name": "admin_engine_save",
+      "value": "エンジンの選択を保存"
+    },
+    {
+      "name": "admin_engine_save_note",
+      "value": "このコンピュータで Agent が利用できるエンジンを変更します。"
+    },
+    {
+      "name": "admin_engine_sets_unsupported",
+      "value": "このコンピュータではカスタムエンジンセットを利用できません"
+    },
+    {
+      "name": "admin_health_check",
+      "value": "ランチャーのヘルスチェックを実行"
+    },
+    {
+      "name": "admin_health_check_note",
+      "value": "選択したコンピュータに設定されたランチャーをチェックします。"
+    },
+    {
+      "name": "admin_history_empty",
+      "value": "更新履歴はありません"
+    },
+    {
+      "name": "admin_history_unsupported",
+      "value": "この Hub では更新履歴を利用できません"
+    },
+    {
+      "name": "admin_hub_auto_policy_note",
+      "value": "有効にすると、更新が利用可能になったときに Hub が自動で更新されます。"
+    },
+    {
+      "name": "admin_hub_busy",
+      "value": "実行中の Agent"
+    },
+    {
+      "name": "admin_hub_cannot_update",
+      "value": "現在 Hub を更新できません"
+    },
+    {
+      "name": "admin_hub_check",
+      "value": "Hub の更新を確認"
+    },
+    {
+      "name": "admin_hub_check_auto_note",
+      "value": "この確認により Hub の自動更新が始まる場合があります。"
+    },
+    {
+      "name": "admin_hub_check_note",
+      "value": "Hub の更新が利用可能か確認します。"
+    },
+    {
+      "name": "admin_hub_no_status",
+      "value": "Hub の更新状況を取得できません"
+    },
+    {
+      "name": "admin_hub_node_policy_note",
+      "value": "有効にすると、Hub の更新後にコンピュータも自動更新されます。"
+    },
+    {
+      "name": "admin_hub_setting",
+      "value": "更新設定を変更"
+    },
+    {
+      "name": "admin_hub_state",
+      "value": "更新状況"
+    },
+    {
+      "name": "admin_hub_update",
+      "value": "Hub を更新"
+    },
+    {
+      "name": "admin_hub_update_history",
+      "value": "更新履歴"
+    },
+    {
+      "name": "admin_hub_update_note",
+      "value": "Hub は実行中の Agent がアイドル状態になるまで待ってから更新します。"
+    },
+    {
+      "name": "admin_hub_update_now",
+      "value": "今すぐ更新"
+    },
+    {
+      "name": "admin_hub_update_now_note",
+      "value": "実行中の Agent がアイドル状態になるのを待たずに更新します。"
+    },
+    {
+      "name": "admin_hub_version",
+      "value": "Hub のバージョン"
+    },
+    {
+      "name": "admin_identity",
+      "value": "アシスタントの識別情報"
+    },
+    {
+      "name": "admin_idle_hours",
+      "value": "アイドル状態のセッションを閉じるまでの時間（時間）"
+    },
+    {
+      "name": "admin_import_providers",
+      "value": "プロバイダー"
+    },
+    {
+      "name": "admin_import_selected",
+      "value": "選択項目をインポート"
+    },
+    {
+      "name": "admin_inbox_signals",
+      "value": "受信トレイの通知"
+    },
+    {
+      "name": "admin_install_code",
+      "value": "インストールコード"
+    },
+    {
+      "name": "admin_interject_background",
+      "value": "バックグラウンドでの割り込みを許可"
+    },
+    {
+      "name": "admin_knowledge_topics",
+      "value": "ナレッジのトピック"
+    },
+    {
+      "name": "admin_last_check",
+      "value": "最終確認"
+    },
+    {
+      "name": "admin_latest_version",
+      "value": "最新バージョン"
+    },
+    {
+      "name": "admin_launcher_agent_note",
+      "value": "組み込みの Agent ランチャーは Hub が管理します。"
+    },
+    {
+      "name": "admin_launcher_base_url",
+      "value": "ベース URL"
+    },
+    {
+      "name": "admin_launcher_check",
+      "value": "ランチャーをテスト"
+    },
+    {
+      "name": "admin_launcher_check_note",
+      "value": "プロバイダーに実際のリクエストを送信します。"
+    },
+    {
+      "name": "admin_launcher_delete",
+      "value": "ランチャーを削除"
+    },
+    {
+      "name": "admin_launcher_display_name",
+      "value": "表示名"
+    },
+    {
+      "name": "admin_launcher_env_present",
+      "value": "環境変数を設定済み"
+    },
+    {
+      "name": "admin_launcher_headers_present",
+      "value": "カスタムヘッダーを設定済み"
+    },
+    {
+      "name": "admin_launcher_health",
+      "value": "ランチャーの状態"
+    },
+    {
+      "name": "admin_launcher_id",
+      "value": "ランチャー ID"
+    },
+    {
+      "name": "admin_launcher_import",
+      "value": "ランチャーをインポート"
+    },
+    {
+      "name": "admin_launcher_import_note",
+      "value": "選択したプロバイダー設定をこのコンピュータからインポートします。"
+    },
+    {
+      "name": "admin_launcher_key",
+      "value": "API キー"
+    },
+    {
+      "name": "admin_launcher_key_missing",
+      "value": "API キーは保存されていません"
+    },
+    {
+      "name": "admin_launcher_key_present",
+      "value": "API キーを保存済み"
+    },
+    {
+      "name": "admin_launcher_model",
+      "value": "モデル"
+    },
+    {
+      "name": "admin_launcher_models",
+      "value": "利用可能なモデル"
+    },
+    {
+      "name": "admin_launcher_name",
+      "value": "ランチャー名"
+    },
+    {
+      "name": "admin_launcher_presets",
+      "value": "ランチャーのプリセット"
+    },
+    {
+      "name": "admin_launcher_presets_empty",
+      "value": "利用できるランチャーのプリセットはありません"
+    },
+    {
+      "name": "admin_launcher_replace_key",
+      "value": "API キーを置き換え"
+    },
+    {
+      "name": "admin_launcher_select",
+      "value": "ランチャーを選択"
+    },
+    {
+      "name": "admin_launcher_stale",
+      "value": "古くなっています"
+    },
+    {
+      "name": "admin_launchers",
+      "value": "ランチャー"
+    },
+    {
+      "name": "admin_load_import",
+      "value": "ランチャーを読み込む"
+    },
+    {
+      "name": "admin_machine_engine",
+      "value": "コンピュータのエンジン"
+    },
+    {
+      "name": "admin_machine_id",
+      "value": "コンピュータ ID"
+    },
+    {
+      "name": "admin_machine_unavailable",
+      "value": "コンピュータを利用できません"
+    },
+    {
+      "name": "admin_machines",
+      "value": "コンピュータ"
+    },
+    {
+      "name": "admin_main_tasks_quiet",
+      "value": "メイン会話を静かに保つ"
+    },
+    {
+      "name": "admin_make_default",
+      "value": "デフォルトに設定"
+    },
+    {
+      "name": "admin_manager_code",
+      "value": "インストールコードを生成"
+    },
+    {
+      "name": "admin_manager_code_note",
+      "value": "このマネージャーに参加するための新しいインストールコードを作成します。"
+    },
+    {
+      "name": "admin_manager_create",
+      "value": "マネージャーを作成"
+    },
+    {
+      "name": "admin_manager_create_note",
+      "value": "この名前のマネージャーを作成します。"
+    },
+    {
+      "name": "admin_manager_default",
+      "value": "デフォルトのマネージャーに設定"
+    },
+    {
+      "name": "admin_manager_default_note",
+      "value": "新しいセッションではこのマネージャーがデフォルトで使われます。既存のコンピュータは移動しません。"
+    },
+    {
+      "name": "admin_manager_delete",
+      "value": "マネージャーを削除"
+    },
+    {
+      "name": "admin_manager_installing",
+      "value": "インストール中"
+    },
+    {
+      "name": "admin_manager_move",
+      "value": "コンピュータを移動"
+    },
+    {
+      "name": "admin_manager_move_note",
+      "value": "このコンピュータを選択したマネージャーに割り当てます。"
+    },
+    {
+      "name": "admin_manager_name",
+      "value": "マネージャー名"
+    },
+    {
+      "name": "admin_manager_offline",
+      "value": "オフライン"
+    },
+    {
+      "name": "admin_manager_online",
+      "value": "オンライン"
+    },
+    {
+      "name": "admin_manager_rename",
+      "value": "マネージャー名を変更"
+    },
+    {
+      "name": "admin_manager_rename_note",
+      "value": "このマネージャーの表示名を変更します。"
+    },
+    {
+      "name": "admin_managers",
+      "value": "マネージャー"
+    },
+    {
+      "name": "admin_managers_empty",
+      "value": "マネージャーがありません"
+    },
+    {
+      "name": "admin_memory",
+      "value": "メモリー"
+    },
+    {
+      "name": "admin_memory_content",
+      "value": "メモリーの内容"
+    },
+    {
+      "name": "admin_memory_created",
+      "value": "メモリーを作成しました"
+    },
+    {
+      "name": "admin_memory_delete",
+      "value": "メモリーを削除"
+    },
+    {
+      "name": "admin_memory_empty",
+      "value": "メモリーファイルはありません"
+    },
+    {
+      "name": "admin_memory_exists",
+      "value": "同じ名前のメモリーファイルがすでにあります"
+    },
+    {
+      "name": "admin_memory_filename",
+      "value": "ファイル名"
+    },
+    {
+      "name": "admin_memory_invalid_name",
+      "value": "有効なファイル名を入力してください"
+    },
+    {
+      "name": "admin_minutes_days",
+      "value": "議事録の保存日数"
+    },
+    {
+      "name": "admin_move",
+      "value": "移動"
+    },
+    {
+      "name": "admin_move_machine",
+      "value": "コンピュータを移動"
+    },
+    {
+      "name": "admin_new_install_code",
+      "value": "新しいインストールコード"
+    },
+    {
+      "name": "admin_new_launcher",
+      "value": "新しいランチャー"
+    },
+    {
+      "name": "admin_new_manager",
+      "value": "新しいマネージャー"
+    },
+    {
+      "name": "admin_new_memory",
+      "value": "新しいメモリー"
+    },
+    {
+      "name": "admin_no_machine_move",
+      "value": "移動できるコンピュータはありません"
+    },
+    {
+      "name": "admin_node_cannot_deploy",
+      "value": "このコンピュータは更新できません"
+    },
+    {
+      "name": "admin_node_deploying",
+      "value": "更新中"
+    },
+    {
+      "name": "admin_node_mismatch",
+      "value": "Node のバージョンが一致しません"
+    },
+    {
+      "name": "admin_node_update",
+      "value": "Node を更新"
+    },
+    {
+      "name": "admin_node_update_note",
+      "value": "このコンピュータへの Node のデプロイを開始します。結果はコンピュータの状態で確認してください。"
+    },
+    {
+      "name": "admin_node_version",
+      "value": "Node のバージョン"
+    },
+    {
+      "name": "admin_preferences",
+      "value": "設定"
+    },
+    {
+      "name": "admin_preset_add",
+      "value": "ランチャーのプリセットを追加"
+    },
+    {
+      "name": "admin_preset_add_note",
+      "value": "このランチャーのプリセットを追加します。"
+    },
+    {
+      "name": "admin_recording_days",
+      "value": "録音の保存日数"
+    },
+    {
+      "name": "admin_redeploy",
+      "value": "Node を更新"
+    },
+    {
+      "name": "admin_refresh_failed",
+      "value": "再読み込みに失敗しました"
+    },
+    {
+      "name": "admin_rename",
+      "value": "名前を変更"
+    },
+    {
+      "name": "admin_save",
+      "value": "保存"
+    },
+    {
+      "name": "admin_setting_disable",
+      "value": "オフにする"
+    },
+    {
+      "name": "admin_setting_enable",
+      "value": "オンにする"
+    },
+    {
+      "name": "admin_storage_failed",
+      "value": "端末に保存できませんでした"
+    },
+    {
+      "name": "admin_timezone",
+      "value": "タイムゾーン"
+    },
+    {
+      "name": "admin_unsupported",
+      "value": "この Hub では利用できません"
+    },
+    {
+      "name": "admin_update_available",
+      "value": "更新あり"
+    },
+    {
+      "name": "admin_update_held",
+      "value": "更新が保留されています"
+    },
+    {
+      "name": "admin_update_rolled_back",
+      "value": "更新がロールバックされました"
+    },
+    {
+      "name": "admin_updated_unknown",
+      "value": "更新日時は不明です"
+    },
+    {
+      "name": "admin_invalid_number",
+      "value": "整数を入力してください"
+    },
+    {
+      "name": "admin_state_saving",
+      "value": "保存中"
+    },
+    {
+      "name": "admin_state_done",
+      "value": "保存しました"
+    },
+    {
+      "name": "admin_state_pending",
+      "value": "確認待ち"
+    },
+    {
+      "name": "admin_state_result_unknown",
+      "value": "結果を確認中"
+    },
+    {
+      "name": "admin_state_failed",
+      "value": "保存できませんでした"
+    },
+    {
+      "name": "admin_state_running",
+      "value": "実行中"
+    },
+    {
+      "name": "admin_hub_state_idle",
+      "value": "アイドル"
+    },
+    {
+      "name": "admin_hub_state_checking",
+      "value": "確認中"
+    },
+    {
+      "name": "admin_hub_state_available",
+      "value": "更新あり"
+    },
+    {
+      "name": "admin_hub_state_downloading",
+      "value": "ダウンロード中"
+    },
+    {
+      "name": "admin_hub_state_waiting_idle",
+      "value": "Agent がアイドル状態になるのを待機中"
+    },
+    {
+      "name": "admin_hub_state_restarting",
+      "value": "再起動中"
+    },
+    {
+      "name": "admin_hub_state_confirming",
+      "value": "更新を確認中"
+    },
+    {
+      "name": "admin_hub_state_updated",
+      "value": "更新済み"
+    },
+    {
+      "name": "admin_hub_state_rolled_back",
+      "value": "ロールバック済み"
+    },
+    {
+      "name": "admin_hub_state_failed",
+      "value": "失敗"
+    },
+    {
+      "name": "admin_command_service",
+      "value": "サービスコマンド"
+    },
+    {
+      "name": "admin_command_join",
+      "value": "参加コマンド"
+    },
+    {
+      "name": "admin_command_docker",
+      "value": "Docker コマンド"
+    },
+    {
+      "name": "extension_ui_action_ambiguous",
+      "value": "操作の結果を確認できません"
+    },
+    {
+      "name": "extension_ui_action_completed",
+      "value": "操作が完了しました"
+    },
+    {
+      "name": "extension_ui_action_rejected",
+      "value": "操作が拒否されました"
+    },
+    {
+      "name": "extension_ui_action_stale",
+      "value": "この操作は古くなっています。更新してやり直してください。"
+    },
+    {
+      "name": "extension_ui_action_uncertain",
+      "value": "操作の結果を確認できません"
+    },
+    {
+      "name": "extension_ui_binary_diff",
+      "value": "バイナリファイルのため差分を表示できません"
+    },
+    {
+      "name": "extension_ui_comment_line",
+      "value": "行"
+    },
+    {
+      "name": "extension_ui_comment_placeholder",
+      "value": "コメントを書く"
+    },
+    {
+      "name": "extension_ui_confirm_action",
+      "value": "操作を確認"
+    },
+    {
+      "name": "extension_ui_confirmation_required",
+      "value": "この操作には確認が必要です"
+    },
+    {
+      "name": "extension_ui_epoch_limit",
+      "value": "ストリームのリセット回数が上限に達しました"
+    },
+    {
+      "name": "extension_ui_expand_diff",
+      "value": "前後の文脈を表示"
+    },
+    {
+      "name": "extension_ui_failed",
+      "value": "拡張機能の画面を読み込めません"
+    },
+    {
+      "name": "extension_ui_html_unsupported",
+      "value": "HTML コンテンツをテキストとして表示しています"
+    },
+    {
+      "name": "extension_ui_image_invalid",
+      "value": "画像が無効か大きすぎます"
+    },
+    {
+      "name": "extension_ui_image_unavailable",
+      "value": "画像を表示できません"
+    },
+    {
+      "name": "extension_ui_invalid_view",
+      "value": "拡張機能から無効な画面が返されました"
+    },
+    {
+      "name": "extension_ui_load_context",
+      "value": "前後の文脈を読み込む"
+    },
+    {
+      "name": "extension_ui_load_diff",
+      "value": "差分を読み込む"
+    },
+    {
+      "name": "extension_ui_load_more",
+      "value": "さらに読み込む"
+    },
+    {
+      "name": "extension_ui_mark_viewed",
+      "value": "ファイルを確認済みにする"
+    },
+    {
+      "name": "extension_ui_offline",
+      "value": "オフライン中は拡張機能を使えません"
+    },
+    {
+      "name": "extension_ui_open_lines",
+      "value": "この範囲を開く"
+    },
+    {
+      "name": "extension_ui_queue_limit",
+      "value": "保留中の操作が多すぎます"
+    },
+    {
+      "name": "extension_ui_receipt_invalid",
+      "value": "操作結果を確認できません"
+    },
+    {
+      "name": "extension_ui_receipt_timeout",
+      "value": "操作の確認がタイムアウトしました"
+    },
+    {
+      "name": "extension_ui_reopen_thread",
+      "value": "スレッドを再開"
+    },
+    {
+      "name": "extension_ui_resolve_thread",
+      "value": "スレッドを解決"
+    },
+    {
+      "name": "extension_ui_retry_action",
+      "value": "操作を再試行"
+    },
+    {
+      "name": "extension_ui_secret_stream",
+      "value": "ストリーミング中は秘密の入力欄を送信できません"
+    },
+    {
+      "name": "extension_ui_send_uncertain",
+      "value": "操作が届いたか確認できません。準備ができたら安全に再試行できます。"
+    },
+    {
+      "name": "extension_ui_stack_limit",
+      "value": "拡張機能のページが多すぎます"
+    },
+    {
+      "name": "extension_ui_unknown_node",
+      "value": "このコンポーネントは未対応です。内容を以下に表示します"
+    },
+    {
+      "name": "extension_ui_unsupported_component",
+      "value": "この拡展ビューには未対応のコンテンツがあります"
+    },
+    {
+      "name": "extension_ui_value_invalid",
+      "value": "操作の値が無効です"
+    },
+    {
+      "name": "apply",
+      "value": "適用"
+    },
+    {
+      "name": "comment",
+      "value": "コメント"
+    },
+    {
+      "name": "discard",
+      "value": "破棄"
+    },
+    {
+      "name": "unknown",
+      "value": "不明"
+    },
+    {
+      "name": "session_tools_write_unavailable",
+      "value": "現在ファイルを変更できません"
+    },
+    {
+      "name": "assistant_view_cache_full",
+      "value": "このカードは現在開けません。"
+    },
+    {
+      "name": "assistant_view_changed",
+      "value": "カードが更新されました。内容を確認し、返信前にもう一度確認してください。"
+    },
+    {
+      "name": "assistant_view_confirm_title",
+      "value": "操作を確認"
+    },
+    {
+      "name": "assistant_view_form_incomplete",
+      "value": "送信前にすべての項目を入力してください。"
+    },
+    {
+      "name": "assistant_view_form_invalid",
+      "value": "入力内容を確認して再試行してください。"
+    },
+    {
+      "name": "assistant_view_form_limit",
+      "value": "フォームの内容が多すぎて送信できません。"
+    },
+    {
+      "name": "assistant_view_invalid_target",
+      "value": "このリンクには対応していません。"
+    },
+    {
+      "name": "assistant_view_page_depth",
+      "value": "開いているページが多すぎます。"
+    },
+    {
+      "name": "assistant_view_page_unavailable",
+      "value": "このページは利用できません。"
+    },
+    {
+      "name": "assistant_view_result_unknown",
+      "value": "返信が送信されたか確認できません。同じ操作を再試行してください。"
+    },
+    {
+      "name": "assistant_view_retry_original",
+      "value": "同じ内容で再試行"
+    },
+    {
+      "name": "assistant_view_selected_pending",
+      "value": "返信を送信待ち"
+    },
+    {
+      "name": "assistant_view_selected_sent",
+      "value": "返信を送信しました"
+    },
+    {
+      "name": "assistant_view_selected_failed",
+      "value": "返信を送信できませんでした"
+    },
+    {
+      "name": "assistant_view_selected_unknown",
+      "value": "返信の状態を確認できません"
+    },
+    {
+      "name": "assistant_view_submit_failed",
+      "value": "返信を送信できませんでした。"
+    },
+    {
+      "name": "assistant_view_syncing",
+      "value": "返信の状態を確認中…"
+    },
+    {
+      "name": "assistant_view_unavailable",
+      "value": "このカードは利用できません。"
+    },
+    {
+      "name": "voice_main_only",
+      "value": "この音声拡張機能はメインチャットにのみ対応しています"
+    },
+    {
+      "name": "phone_before",
+      "value": "変更前"
+    },
+    {
+      "name": "phone_after",
+      "value": "変更後"
+    },
+    {
+      "name": "contacts_write",
+      "value": "連絡先を編集"
+    },
+    {
+      "name": "ssh_settings",
+      "value": "SSH トンネル"
+    },
+    {
+      "name": "ssh_host",
+      "value": "SSH ホスト"
+    },
+    {
+      "name": "ssh_port",
+      "value": "SSH ポート"
+    },
+    {
+      "name": "ssh_username",
+      "value": "SSH ユーザー名"
+    },
+    {
+      "name": "ssh_host_key",
+      "value": "SSH ホストの指紋"
+    },
+    {
+      "name": "ssh_private_key",
+      "value": "秘密鍵"
+    },
+    {
+      "name": "ssh_replace_key",
+      "value": "秘密鍵を変更（任意）"
+    },
+    {
+      "name": "ssh_passphrase",
+      "value": "鍵のパスフレーズ（任意）"
+    },
+    {
+      "name": "ssh_save_enable",
+      "value": "保存して有効にする"
+    },
+    {
+      "name": "ssh_disable",
+      "value": "SSH トンネルを無効にする"
+    },
+    {
+      "name": "ssh_verify_host",
+      "value": "SSH ホストを確認"
+    },
+    {
+      "name": "ssh_verify_message",
+      "value": "続行する前に、この指紋を SSH サーバーの信頼できる記録と照合してください。"
+    },
+    {
+      "name": "ssh_verified_enable",
+      "value": "確認して有効にする"
+    },
+    {
+      "name": "ssh_loading",
+      "value": "SSH 設定を読み込み中…"
+    },
+    {
+      "name": "ssh_saving",
+      "value": "SSH 設定を保存中…"
+    },
+    {
+      "name": "ssh_connecting",
+      "value": "SSH トンネルに接続中…"
+    },
+    {
+      "name": "ssh_connected",
+      "value": "SSH トンネルに接続済み"
+    },
+    {
+      "name": "ssh_enabled",
+      "value": "SSH トンネルは有効です"
+    },
+    {
+      "name": "ssh_disabled",
+      "value": "SSH トンネルは無効です"
+    },
+    {
+      "name": "ssh_invalid_config",
+      "value": "SSH ホスト、ポート、ユーザー名、SHA256 の指紋を確認してください。"
+    },
+    {
+      "name": "ssh_invalid_key",
+      "value": "秘密鍵を読み取れません。形式、サイズ、パスフレーズを確認してください。"
+    },
+    {
+      "name": "ssh_key_required",
+      "value": "続行するには秘密鍵を入力してください。"
+    },
+    {
+      "name": "ssh_storage_failed",
+      "value": "安全な鍵ストレージを利用できません。端末のロックを解除して再試行してください。"
+    },
+    {
+      "name": "ssh_cancelled",
+      "value": "SSH 接続をキャンセルしました。"
+    },
+    {
+      "name": "ssh_busy",
+      "value": "SSH の操作が進行中です。"
+    },
+    {
+      "name": "ssh_timeout",
+      "value": "SSH 接続がタイムアウトしました。"
+    },
+    {
+      "name": "ssh_connect_failed",
+      "value": "SSH サーバーに接続できません。"
+    },
+    {
+      "name": "ssh_host_key_mismatch",
+      "value": "SSH ホストの指紋が一致しません。"
+    },
+    {
+      "name": "ssh_auth_failed",
+      "value": "SSH の鍵認証に失敗しました。"
+    },
+    {
+      "name": "ssh_proxy_failed",
+      "value": "SSH 経由で Hub に接続できません。"
+    },
+    {
+      "name": "ssh_native_failed",
+      "value": "SSH トンネルを開始できませんでした。"
+    },
+    {
+      "name": "knowledge_recording_start",
+      "value": "録音を開始"
+    },
+    {
+      "name": "knowledge_recording_stop",
+      "value": "録音を停止"
+    },
+    {
+      "name": "knowledge_recording_requesting",
+      "value": "マイクの使用許可を確認中"
+    },
+    {
+      "name": "knowledge_recording_transcribe",
+      "value": "中国語の文字起こし"
+    },
+    {
+      "name": "knowledge_recording_retry_upload",
+      "value": "アップロードを再試行"
+    },
+    {
+      "name": "knowledge_recording_capture_ready",
+      "value": "録音できます"
+    },
+    {
+      "name": "knowledge_recording_active",
+      "value": "録音中"
+    },
+    {
+      "name": "knowledge_recording_stopped",
+      "value": "録音を停止しました"
+    },
+    {
+      "name": "knowledge_recording_transcribing",
+      "value": "文字起こし中"
+    },
+    {
+      "name": "knowledge_recording_transcribed",
+      "value": "文字起こし完了"
+    },
+    {
+      "name": "knowledge_recording_uploading",
+      "value": "文字起こしをアップロード中"
+    },
+    {
+      "name": "knowledge_recording_uploaded",
+      "value": "ナレッジに保存済み"
+    },
+    {
+      "name": "knowledge_recording_upload_unknown",
+      "value": "アップロード結果不明。安全に再試行できます"
+    },
+    {
+      "name": "knowledge_recording_upload_failed",
+      "value": "アップロード失敗。文字起こしは端末に保存されています"
+    },
+    {
+      "name": "knowledge_recording_stale",
+      "value": "ナレッジには新しい版があります"
+    },
+    {
+      "name": "knowledge_recording_expired",
+      "value": "この録音はナレッジの保存期間を過ぎています"
+    },
+    {
+      "name": "knowledge_recording_deleted",
+      "value": "この録音はナレッジから削除されました"
+    },
+    {
+      "name": "knowledge_recording_transcribe_failed",
+      "value": "文字起こし失敗。録音は端末に保存されています"
+    },
+    {
+      "name": "knowledge_recording_microphone_denied",
+      "value": "マイクの権限を利用できません"
+    },
+    {
+      "name": "knowledge_recording_chinese_only",
+      "value": "オフライン文字起こしは現在、中国語（標準語）のみ対応しています"
+    },
+    {
+      "name": "knowledge_recording_too_short",
+      "value": "録音が短すぎて文字起こしできません"
+    },
+    {
+      "name": "knowledge_recording_storage_full",
+      "value": "録音ストレージがいっぱいです。先に端末内の録音を削除してください"
+    },
+    {
+      "name": "knowledge_recording_limit",
+      "value": "1時間の録音上限です。続けるには新しい録音を開始してください"
+    },
+    {
+      "name": "knowledge_recording_write_failed",
+      "value": "録音を保存できませんでした。端末内のファイルが不完全な可能性があります"
+    },
+    {
+      "name": "knowledge_recording_retry_transcribe",
+      "value": "中国語の文字起こしを再試行"
+    },
+    {
+      "name": "knowledge_recording_delete_local",
+      "value": "端末内の録音を削除"
+    },
+    {
+      "name": "knowledge_recording_open",
+      "value": "録音"
+    },
+    {
+      "name": "schedule_template_meeting_prep",
+      "value": "会議の準備"
+    },
+    {
+      "name": "schedule_template_meeting_prep_prompt",
+      "value": "今日のLarkカレンダーとスマホのカレンダーにある会議を確認してください。準備が必要な会議ごとに、schedule_followupで会議の10分前に事前準備を入れてください：関連ドキュメント、前回の議事録、未決事項、私が話すべきポイント。準備が必要な会議がなければ、簡単にそう伝えてください。"
+    },
+    {
+      "name": "schedule_template_weekly_report",
+      "value": "週報"
+    },
+    {
+      "name": "schedule_template_weekly_report_prompt",
+      "value": "今週の週報の下書きを作成してください：Larkカレンダー、議事録、ドキュメント、メッセージから、今週やったこと、進捗と成果、課題、来週の予定をまとめてください。各コンピューターのエージェントが今週終えた主な変更も含めてください。まず下書きを見せて、修正するか聞いてください。そのまま送信はしないでください。"
+    },
+    {
+      "name": "schedule_template_end_of_day",
+      "value": "終業前の振り返り"
+    },
+    {
+      "name": "schedule_template_end_of_day_prompt",
+      "value": "終業前の棚卸し：今日まだ返信していないメッセージ、約束したのにまだやっていないこと、各コンピューターでまだ実行中か私を待っているエージェント、明日の午前に準備が必要な会議を挙げてください。緊急度順に並べ、最後にどれにリマインダーを設定するか聞いてください。"
+    },
+    {
+      "name": "ssh_dns_failed",
+      "value": "Hub のホスト名を解決できません。"
+    },
+    {
+      "name": "device_look_avatar_heading",
+      "value": "アバター"
+    },
+    {
+      "name": "device_look_accent_heading",
+      "value": "アクセントカラー"
+    },
+    {
+      "name": "device_look_accent_style",
+      "value": "インターフェイスに合わせる"
+    },
+    {
+      "name": "device_look_accent_avatar",
+      "value": "アバターに合わせる"
+    },
+    {
+      "name": "device_look_accent_blue",
+      "value": "ブルー"
+    },
+    {
+      "name": "device_look_accent_coral",
+      "value": "コーラル"
+    },
+    {
+      "name": "device_look_accent_lavender",
+      "value": "ラベンダー"
+    },
+    {
+      "name": "device_look_accent_teal",
+      "value": "ティール"
+    },
+    {
+      "name": "device_look_accent_lark",
+      "value": "Lark ブルー"
+    },
+    {
+      "name": "device_look_owner_unavailable",
+      "value": "この Hub ではアバターを利用できません。"
+    },
+    {
+      "name": "device_look_avatar_unavailable",
+      "value": "対応するアバターがありません。"
+    },
+    {
+      "name": "device_look_hub_unsupported",
+      "value": "この Hub はアバターパッケージに対応していません。"
+    },
+    {
+      "name": "device_look_list_failed",
+      "value": "アバターを読み込めませんでした。"
+    },
+    {
+      "name": "device_look_connect_to_hub",
+      "value": "このアバターの Hub に接続してください。"
+    },
+    {
+      "name": "device_look_download_failed",
+      "value": "このアバターをダウンロードできませんでした。"
+    },
+    {
+      "name": "device_look_storage_failed",
+      "value": "外観設定を保存できませんでした。"
+    },
+    {
+      "name": "device_look_cache_cleanup_failed",
+      "value": "一部のアバターキャッシュを削除できませんでした。"
+    },
+    {
+      "name": "device_look_avatar_invalid",
+      "value": "このアバター画像を開けません。"
+    },
+    {
+      "name": "device_look_cache_failed",
+      "value": "このアバター画像を保存できませんでした。"
+    },
+    {
+      "name": "open_source_licenses",
+      "value": "オープンソースライセンス"
+    },
+    {
+      "name": "retry_cleanup",
+      "value": "クリーンアップを再試行"
+    },
+    {
+      "name": "color_mode",
+      "value": "カラーモード"
+    },
+    {
+      "name": "applications",
+      "value": "アプリ"
+    },
+    {
+      "name": "application_unavailable",
+      "value": "このアプリは利用できません。"
+    },
+    {
+      "name": "no_applications",
+      "value": "アプリがありません"
+    },
+    {
+      "name": "file_transfer_send_to_computer",
+      "value": "コンピュータに送信"
+    },
+    {
+      "name": "file_transfer_unavailable",
+      "value": "このコンピュータでは現在ファイルを転送できません。"
+    },
+    {
+      "name": "file_transfer_journal_unavailable",
+      "value": "このデバイスに転送状態を保存できませんでした。ストレージが利用可能になってから再試行してください。"
+    },
+    {
+      "name": "file_transfer_check_unknown_first",
+      "value": "再送信する前に、結果不明の転送を確認してください。"
+    },
+    {
+      "name": "file_transfer_confirm_duplicate",
+      "value": "前回の転送がまだ完了する可能性があります。再送信するとコピーがもう一つ作成される場合があります。"
+    },
+    {
+      "name": "file_transfer_confirm_title",
+      "value": "このファイルを送信しますか？"
+    },
+    {
+      "name": "file_transfer_confirm_send",
+      "value": "送信"
+    },
+    {
+      "name": "file_transfer_source",
+      "value": "送信元"
+    },
+    {
+      "name": "file_transfer_target",
+      "value": "送信先"
+    },
+    {
+      "name": "file_transfer_inbox",
+      "value": "受信フォルダ"
+    },
+    {
+      "name": "file_transfer_status_creating",
+      "value": "転送を開始しています"
+    },
+    {
+      "name": "file_transfer_status_running",
+      "value": "転送中"
+    },
+    {
+      "name": "file_transfer_status_done",
+      "value": "転送が完了しました"
+    },
+    {
+      "name": "file_transfer_status_failed",
+      "value": "転送に失敗しました"
+    },
+    {
+      "name": "file_transfer_status_cancelled",
+      "value": "転送をキャンセルしました"
+    },
+    {
+      "name": "file_transfer_status_unknown",
+      "value": "転送結果を確認できません"
+    },
+    {
+      "name": "file_transfer_error",
+      "value": "転送エラー"
+    },
+    {
+      "name": "file_transfer_setting_loading",
+      "value": "設定を確認しています"
+    },
+    {
+      "name": "file_transfer_setting_saving",
+      "value": "設定を保存しています"
+    },
+    {
+      "name": "file_transfer_setting_unknown",
+      "value": "設定状態を確認できません"
+    },
+    {
+      "name": "file_transfer_inbox_enable_hint",
+      "value": "ファイル転送を有効にすると受信フォルダを確認できます。"
+    },
+    {
+      "name": "file_transfer_inbox_unknown",
+      "value": "受信フォルダを確認できませんでした。"
+    },
+    {
+      "name": "file_transfer_choose_target",
+      "value": "コンピュータを選択"
+    },
+    {
+      "name": "file_transfer_no_targets",
+      "value": "このワークスペースでオンラインの信頼済みコンピュータはありません。"
+    },
+    {
+      "name": "file_transfer_source_switch",
+      "value": "このコンピュータからの送信を許可"
+    },
+    {
+      "name": "file_transfer_shared_switch",
+      "value": "ファイル転送"
+    },
+    {
+      "name": "file_transfer_target_switch",
+      "value": "このコンピュータでの受信を許可"
+    },
+    {
+      "name": "file_transfer_check_status",
+      "value": "状態を確認"
+    },
+    {
+      "name": "file_transfer_i_checked",
+      "value": "確認しました"
+    },
+    {
+      "name": "file_transfer_possible_duplicate",
+      "value": "前回の転送がまだ完了する可能性があります。再送信するとコピーがもう一つ作成される場合があります。"
+    },
+    {
+      "name": "file_transfer_cancel_unknown",
+      "value": "キャンセル結果を確認できません。転送状態を確認しています。"
+    },
+    {
+      "name": "file_transfer_cancel_transfer",
+      "value": "転送をキャンセル"
+    },
+    {
+      "name": "file_transfer_title",
+      "value": "ファイル送信"
+    },
+    {
+      "name": "session_tools_parent_folder",
+      "value": "親フォルダー"
+    }
+  ]
+}

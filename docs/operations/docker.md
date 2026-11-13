@@ -305,8 +305,21 @@ With the two common ways of setting up a reverse proxy on a NAS, the source seen
   respond @admin_outside 403
   reverse_proxy persona-hub:18660 {
   	flush_interval -1
+	stream_close_delay 5m
   }
   ```
+
+- **Caddy reloads and long-lived connections**: Caddy normally closes WebSockets when their reverse-proxy handler unloads. `stream_close_delay` in the example above gives the old handler a bounded drain period; it does not extend Persona heartbeats or hide a broken connection. It also does not guarantee uninterrupted permanent node connections: all streams still using that old handler close when its delay expires. Five minutes is a deployment-window example, not a measured node lifetime. Choose a bounded period for your workload and account for retained old handlers, connections and routes across repeated reloads. Do not set `stream_timeout` to implement draining: that option limits the lifetime of a stream even without a reload. See the [Caddy streaming options](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming).
+  Edit the persistent configuration source used by your existing deployment, rather than only its adapted JSON or live admin API. Check source/runtime agreement and validate with the installed Caddy version. A single-file bind mount can keep the old inode after a host-side atomic replacement; verify the container sees the edited source. The **first activation still closes connections owned by the old handler**, whose delay is unchanged: include activation in the next already necessary proxy load, rather than adding a reload experiment during active sessions. A rollback cannot change the delay of an already retired handler.
+
+  Reproduce the lifecycle locally before deployment, with an operator-supplied Caddy binary and no Docker or live Hub access:
+
+  ```sh
+  uv run --script scripts/test/caddy_reload_replay.py \
+    --binary /path/to/caddy --output /tmp/caddy-reload-results.json
+  ```
+
+  The replay uses loopback-only ephemeral ports and a two-second scaled drain period. It checks default reload closure, ordered echo during draining, finite expiry, reconnect, repeated reload, upstream closure and client-heartbeat detection of a silent upstream. It terminates its Caddy process and removes its temporary configuration. The short synthetic heartbeat is a test client setting, not Persona's production heartbeat. Results describe this isolated test only; measure actual disconnect counts and recovery times in explicit before/after windows after the managed configuration is active. Keep unrelated network and model-service failures separate.
 
 - **Calling hub APIs on the NAS** works the same way: `curl http://127.0.0.1:18660/…` is treated as public internet; use the LAN address instead, or call from inside the container
   (`docker compose exec hub wget -qO- --header "Authorization: Bearer <token>" http://127.0.0.1:18660/api/v1/machines`).

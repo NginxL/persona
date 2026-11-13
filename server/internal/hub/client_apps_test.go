@@ -141,3 +141,20 @@ func TestClientAppVersionInAssistantContext(t *testing.T) {
 		t.Fatalf("the context does not name the iPhone app's version:\n%s", text)
 	}
 }
+
+// A HarmonyOS build reports the installed bundle, with the same durable device and simulator semantics.
+func TestHarmonyAppVersionSurvivesReconnect(t *testing.T) {
+	store := &settingsStore{vals: map[string][]byte{}}
+	h := newTestHub(t)
+	h.store = store
+	phone := &client{out: make(chan []byte, 16), role: roleFull, hub: h, device: "dev_harmony"}
+	h.onClientHello(phone, []byte(`{"platform":"harmony","version":"1.0.0","build":"1000000","os":{"name":"HarmonyOS","version":"7.0"}}`))
+	h.noteClientAppSimulator(phone, true)
+	h.onClientHello(phone, []byte(`{"platform":"harmony","version":"1.0.1","build":"1000001","os":{"name":"HarmonyOS","version":"7.0"}}`))
+	again := newTestHub(t)
+	again.store = store
+	list := again.clientAppList(context.Background())
+	if len(list) != 1 || list[0].Platform != "harmony" || list[0].Version != "1.0.1" || list[0].Build != "1000001" || list[0].OS != "HarmonyOS 7.0" || !list[0].Simulator {
+		t.Fatalf("HarmonyOS app metadata after reconnect: %+v", list)
+	}
+}

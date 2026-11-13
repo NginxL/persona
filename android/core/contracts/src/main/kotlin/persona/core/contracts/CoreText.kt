@@ -117,7 +117,6 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         DirectionPlanned("Not started"),
         DirectionSecretary("Secretary"),
         DirectionUntitled("Chat"),
-        DirectionCountWorking("%1\$d working"),
         DirectionCountNeedsYou("%1\$d need you"),
         InboxAction("Needs you"),
         InboxFyi("FYI"),

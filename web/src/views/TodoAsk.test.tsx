@@ -8,6 +8,7 @@ import { ApiError } from "../lib/api";
 import { getState } from "../lib/store";
 import { boardSectionOf } from "../lib/task-board";
 import { askTake, askTone, awaitsReview, openAsk, sortTodos, type Todo, type TodoAsk } from "../lib/todos";
+import { getFeedState, setRoute } from "../lib/feed";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -175,6 +176,21 @@ describe("a to-do's row", () => {
 });
 
 describe("a to-do's page", () => {
+  it("lists parked work outside Done and counts it under the badge's name", async () => {
+    await drawList([todo({
+      seen_at: new Date(Date.now() + 1000).toISOString(),
+      ask: { outcome: "done", verdict: "The previous turn ended.", asked_at: now },
+      supervision: {
+        supervisor: "conv1", state: "parked",
+        parked: { reason: "Waiting on another team", waiting_on: "someone_else", until: new Date(Date.now() + 86400_000).toISOString(), count: 1 },
+      },
+    })]);
+    expect(host.querySelector('[data-section="parked"]')?.textContent).toContain("上线新登录页");
+    expect(host.querySelector('[data-section="done"]')?.textContent ?? "").not.toContain("上线新登录页");
+    expect(host.querySelector("header")?.textContent).toContain("已搁置 1");
+    expect(host.querySelector("header")?.textContent).toContain("暂无进展 0");
+  });
+
   it("shows the ask in full with its button and the conversation to answer it in", async () => {
     await drawList([todo()], "t1");
     const panel = host.querySelector<HTMLElement>("[data-testid=todo-ask-panel]")!;
@@ -184,6 +200,8 @@ describe("a to-do's page", () => {
     expect(buttons).toEqual(["按推荐来", "去对话里回答"]);
     act(() => [...panel.querySelectorAll("button")][1].click());
     expect(navigate).toHaveBeenCalledWith({ name: "persona", sid: "conv1" });
+    expect(getFeedState().routes.conv1).toEqual({ todoId: "t1", askedAt: ASKED });
+    setRoute("conv1", null);
   });
 
   it("a decision with nothing recommended says where to answer it", async () => {

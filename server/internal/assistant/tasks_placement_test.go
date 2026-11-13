@@ -389,11 +389,11 @@ func TestStartTakesASavedWritablePlanWithoutPermission(t *testing.T) {
 		if err := s.savePlan(ctx, plan); err != nil {
 			t.Fatal(err)
 		}
-		want := len(f.starts) + 1
+		want := len(f.started()) + 1
 		if _, err := s.startPlan(ctx, plan.ID, []PlanTask{{Permission: ""}}, false); err != nil {
 			t.Fatalf("saved permission %q: %v", saved, err)
 		}
-		waitFor(t, "the start with permission "+saved, func() bool { return len(f.starts) == want })
+		waitFor(t, "the start with permission "+saved, func() bool { return len(f.started()) == want })
 	}
 }
 

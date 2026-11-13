@@ -93,19 +93,18 @@ struct ShellView: View {
     private var sidebar: some View {
         AssistantSidebar(current: model.assistantCurrent,
                          open: { key in
+                             // Under the open drawer: no slide; the page switches, then closes the drawer (AssistantView).
+                             shell.select(0, animated: false)
                              model.assistantCurrent = key
-                             model.selectedTab = .assistant
                              model.assistantReveal += 1
-                             shell.drawer.close()
+                             closeIfLeftOpen()
                          },
                          newConversation: { go(.newConversation) },
                          openProfile: { go(.profile) },
                          openRoutines: { go(.routines) },
                          openKnowledge: { go(.knowledge) },
-                         openSettings: {
-                             shell.drawer.close()
-                             model.shellSettings = true
-                         },
+                         // A task: over the open drawer, which is where Done comes back to (docs/design/sidebar-navigation.md).
+                         openSettings: { model.shellSettings = true },
                          drawer: shell.drawer,
                          openInbox: { go(.inbox) },
                          openTodos: { go(.todos) },
@@ -124,10 +123,18 @@ struct ShellView: View {
         #endif
     }
 
+    /// A place from the drawer (docs/design/sidebar-navigation.md): the strip snaps to Assistant under the open drawer, the page
+    /// switches there without animation and then closes the drawer (`AssistantView.show`). Before, the strip slid, the stack
+    /// pushed and the drawer closed in the same moment (#6599).
     private func go(_ page: ShellPage) {
-        model.selectedTab = .assistant
+        shell.select(0, animated: false)
         shell.show(page)
-        shell.drawer.close()
+        closeIfLeftOpen()
+    }
+
+    /// The Assistant page closes the drawer once it has switched; should nothing have taken the request, this still does.
+    private func closeIfLeftOpen() {
+        DispatchQueue.main.async { if shell.drawer.isOut { shell.drawer.close() } }
     }
 }
 

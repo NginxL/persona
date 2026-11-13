@@ -18,7 +18,7 @@
   "subagents_count_running": "サブエージェント {count} 件が実行中",
   "background_running": "バックグラウンドで作業中",
   "tray_empty_pending": "対応待ちはありません",
-  "tray_shelved_other": "保留 {count}",
+  "tray_shelved_other": "動きなし {count}",
   "tray_shelved_hint": "48 時間進展がなく、動いている Agent もありません。「進行中」には数えません。データは残っています。",
   "tray_empty_progress": "進行中のものはありません",
   "plan_waiting": "開始を待っています",

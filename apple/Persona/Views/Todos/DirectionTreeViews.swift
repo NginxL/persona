@@ -1,7 +1,8 @@
 import SwiftUI
 
 // What the sidebar, the To-dos page and the Agents page draw of the hub's direction tree (#4352, `DirectionTree`): one
-// state word per to-do in one tone, and a direction's two counts. The tree decides both; these only draw them.
+// state word per to-do in one tone, and what a direction has going (its activity mark, its "N need you"). The tree
+// decides both; these only draw them.
 
 extension DirectionTree.TaskState {
     /// The word's color: Needs You's for needs you, Working's for working, Caution's for stuck and to verify (the words
@@ -30,23 +31,26 @@ struct DirectionTaskStateWord: View {
 }
 
 nonisolated extension DirectionTree.Counts {
-    /// "N working · N need you", only the parts that are not zero (`DirectionCountsText`, the sidebar's lead rows'
-    /// words); nil while the direction holds neither.
-    var label: String? { DirectionCountsText.label(working: working, needsYou: needsYou) }
+    /// "N need you" (`DirectionCountsText`, the sidebar's lead rows' words); nil while nothing waits on you.
+    var label: String? { DirectionCountsText.label(needsYou: needsYou) }
 }
 
-/// A direction's counts in a To-dos or Agents section header: the sidebar's words (`DirectionTree.Counts.label`), and
-/// nothing while both are zero.
+/// What a direction has going in a To-dos or Agents section header, as its sidebar row shows it (#6626): the working
+/// spinner while anything under it runs (`Direction.running`), then the sidebar's words (`DirectionTree.Counts.label`);
+/// nothing while neither.
 struct DirectionCountsLine: View {
-    var counts: DirectionTree.Counts
+    var direction: DirectionTree.Direction
     var font: Font = Theme.Font.caption
 
     var body: some View {
-        if let label = counts.label {
-            Text(label)
-                .font(font.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        HStack(spacing: Theme.Space.xs) {
+            if direction.running { WorkingIndicator() }
+            if let label = direction.counts.label {
+                Text(label)
+                    .font(font.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
     }
 }

@@ -17,7 +17,7 @@ class DirectionTreeParseTest {
 
     @Test fun readsDirectionsTasksAgentsAndChildren() {
         val tree = directionTreeOf(json("""{"directions": [
-            {"id": "lead", "name": " Product ", "counts": {"working": 2, "needs_you": 1, "stuck": 0, "review": 3},
+            {"id": "lead", "name": " Product ", "counts": {"working": 2, "needs_you": 1, "stuck": 0, "review": 3}, "running": true,
              "tasks": [{"id": "t1", "title": "Ship", "state": "needs_you", "agents": [
                 {"machine_id": "m", "session_id": "s1", "title": "Claude", "agent": "claude", "state": "working",
                  "children": [{"machine_id": "m", "session_id": "s1@x", "title": "Search", "state": "working"}]}
@@ -49,6 +49,16 @@ class DirectionTreeParseTest {
         assertEquals(2, lead.counts.planned)
         assertEquals(DirectionTaskState.Planned, lead.tasks[1].state)
         assertEquals(persona.core.contracts.CoreText.Key.DirectionPlanned, lead.tasks[1].state.label)
+    }
+
+    @Test fun runningIsTheHubsAndAnOlderHubReadsTheWorkingCount() {
+        // #6626: as the hub sent it, whatever the counts; a hub without it spins on a working task, as the rows did before
+        fun running(direction: String) = directionTreeOf(json("""{"directions": [$direction]}"""))!!.directions.single().running
+        assertFalse(running("""{"id": "a", "counts": {"working": 3}, "running": false}"""))
+        assertTrue(running("""{"id": "a", "counts": {"needs_you": 1}, "running": true}"""))
+        assertTrue(running("""{"id": "a", "counts": {"working": 1}}"""))
+        assertFalse(running("""{"id": "a", "counts": {"needs_you": 1}}"""))
+        assertFalse(running("""{"id": "a"}"""))
     }
 
     @Test fun anOlderHubsEmptyAnswerIsNoTree() {

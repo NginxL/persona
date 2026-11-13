@@ -214,7 +214,7 @@ private struct MinutesItemRow<Below: View>: View {
 
     private var words: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-            Text(item.text).font(Theme.Font.body).textSelection(.enabled)
+            Text(item.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             if let byline = item.byline {
                 Text(byline).font(Theme.Font.caption).foregroundStyle(.secondary)
@@ -283,7 +283,7 @@ private struct MinutesContext: View {
 
     private func row(_ line: RecordingMinutesCards.Line) -> some View {
         let stamp = Text(RecordingFormat.clock(line.start)).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-        let words = Text(line.text)
+        let words = Text(line.text).readingContent()
             .font(line.said ? Theme.Font.secondaryStrong : Theme.Font.secondary)
             .foregroundStyle(line.said ? HierarchicalShapeStyle.primary : HierarchicalShapeStyle.secondary)
             .textSelection(.enabled)

@@ -503,7 +503,12 @@ func TestLinkedDeployWaitsOnlyForWhatTheRestartCuts(t *testing.T) {
 			m.info.Capabilities = []string{nodeproto.Sessions, nodeproto.NodeUpdate, nodeproto.NodeUpdateIdle}
 			n.sessions, n.updateBusy = []proto.Session{terminal, headless}, tc.updateBusy
 			record := nodeDeployRecord{Target: "new-build", State: "queued"}
-			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			// The refusals wait for this deadline to expire; the update returns when it is done, so it gets a long one.
+			wait := 200 * time.Millisecond
+			if tc.update {
+				wait = 30 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), wait)
 			defer cancel()
 			err := m.performRPCDeployment(ctx, bin, &record)
 			n.mu.Lock()

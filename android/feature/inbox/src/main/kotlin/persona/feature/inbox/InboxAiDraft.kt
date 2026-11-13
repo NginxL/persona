@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
-import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -98,7 +97,10 @@ internal fun InboxDraftSheet(
                 Text(stringResource(R.string.inbox_reply_ai_basis, agent.basis), style = PersonaTheme.type.callout, color = palette.ink2)
             }
             if (agent?.machineId != null && agent.sessionId != null) {
-                JButton(stringResource(R.string.inbox_reply_view_process), { onDismiss(); navigator?.navigate(ChatRoute(agent.machineId, agent.sessionId)) },
+                JButton(stringResource(R.string.inbox_reply_view_process), {
+                    onDismiss()
+                    navigator?.navigate(inboxConversationRoute(agent.machineId, agent.sessionId, record.item.id))
+                },
                     kind = JButtonKind.Secondary, size = JButtonSize.Small, icon = PhIcons.ListChecks)
             }
             ReplyComposerField(state, composer::update, onSend = {

@@ -659,7 +659,7 @@ struct KnowledgeDetailView: View {
                 // Empty once the header's parts are taken out (a summary that is just the one line): no blank card.
                 if let sum = d.summary, case let profile = Self.profile(sum, oneLine: shown.oneLine), !profile.isEmpty {
                     Section("Profile") {
-                        Markdown(Links.markdown(MathMarkdown.rewrite(profile))).markdownTheme(.persona).textSelection(.enabled)
+                        Markdown(Links.markdown(MathMarkdown.rewrite(profile))).markdownTheme(.persona).readingContent().textSelection(.enabled)
                             .padding(.vertical, Theme.Space.sm)
                     }
                 }
@@ -1083,7 +1083,7 @@ struct KBMomentView: View {
                 }
                 if let chunks {
                     ForEach(Array(chunks.enumerated()), id: \.offset) { _, c in
-                        Markdown(c).markdownTheme(.persona)
+                        Markdown(c).markdownTheme(.persona).readingContent()
                     }
                 } else if let error {
                     Label(error, systemImage: Theme.Icon.error).foregroundStyle(Theme.danger).font(Theme.Font.caption)

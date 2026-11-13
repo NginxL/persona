@@ -170,6 +170,24 @@ describe("a Persona chat's pill on a hub that keeps picks", () => {
     expect(await act(() => panel.props!.onApplyCurrent!({ fast: true }))).toBe(true);
     expect(calls.filter((c) => c.url.endsWith("/modes")).map((c) => c.body)).toEqual([{ service_tier: "priority" }]);
   });
+
+  it("re-reads the effective Main chat model when a hub push bumps the conversation revision (#6542)", async () => {
+    const s = chat();
+    await show(s);
+    const assistantReads = () => calls.filter((c) => c.url.includes("/launchers?purpose=assistant")).length;
+    const afterMount = assistantReads();
+    expect(afterMount).toBeGreaterThan(0);
+    // a re-render with no new push reads nothing again (the page-life cache stands)
+    act(() => root.render(<AssistantModelPill session={s} />));
+    await flush();
+    expect(assistantReads()).toBe(afterMount);
+    // a hub push that changes the session (a new rev) forces a fresh read so the pill matches the effective model
+    const pushed = { ...s, rev: 7 };
+    upsertSession(pushed);
+    act(() => root.render(<AssistantModelPill session={pushed} />));
+    await flush();
+    expect(assistantReads()).toBe(afterMount + 1);
+  });
 });
 
 describe("an older hub and the new-conversation page", () => {

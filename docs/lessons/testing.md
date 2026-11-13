@@ -376,6 +376,20 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
 - A database copied with `CREATE DATABASE ... TEMPLATE` keeps none of its template's `ALTER DATABASE ... SET` settings: set `synchronous_commit` on every copy (`dbtest.create`). Nothing may be connected to the template; Postgres waits up to 5 s on its own for backends that are closing, so no sleep after `Close` is needed. Use `STRATEGY wal_log`: `file_copy` checkpoints the whole server twice.
 - Since Postgres 15, every `DROP DATABASE` forces a checkpoint of the whole server, which writes whatever other tests left dirty. On a loaded machine, one drop took 0.07-3.8 s. Count that before giving more tests a database of their own.
 
+## An edit a watcher must see once is written whole (2026-11-13, #2174)
+
+- `TestFsWatchGitStatusChanges` failed its final quiet check under the deploy's test load: one more Git `fs.changed`.
+  The watcher was right. `os.WriteFile` truncates and then writes, and a look in between sees an empty file, a real
+  change of its own; the finished write is a second one. A trace of every Git look (the status text, each listed
+  file's size and time) showed `a.txt` at size 0 in every failing run. The window is well under a millisecond, so
+  about 400 runs at the test's own intervals never hit it, with CPU burners or fsync writers alongside too. With the
+  watcher looking continuously, plain writes failed 8 of 200 runs and whole writes none.
+- Write such an edit beside the watched place and rename it in (`writeWhole` in
+  `server/internal/node/fswatch_test.go`), staged outside a watched Git repository: a staged file inside it is an
+  untracked change. Keep the quiet check; don't lengthen waits or debounce the watcher to hide a state that is real.
+- To catch a narrow window, shorten the watcher's interval in a scratch copy and print the trace only on failure,
+  rather than loading the machine and waiting.
+
 ## "TempDir RemoveAll cleanup: directory not empty" after an assistant test (2026-11-12, #5510)
 
 - A test passed and then failed its own cleanup: something wrote into its `t.TempDir()` after the test returned. In

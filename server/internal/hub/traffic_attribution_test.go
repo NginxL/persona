@@ -19,6 +19,7 @@ func TestTrafficAttribution(t *testing.T) {
 		{"okhttp", "okhttp/5.0", "other", "", "", "android", "app", "user-agent", "native-default"},
 		{"browser android", "Mozilla/5.0 (Linux; Android 16) Chrome/140", "phone", "", "", "web", "app", "user-agent", "browser"},
 		{"browser ios", "Mozilla/5.0 (iPhone) Version/26 Safari/605", "phone", "", "", "web", "app", "user-agent", "browser"},
+		{"harmony", "", "phone", "harmony/1.0.0", "app", "harmony", "app", "client-header", "source-header"},
 		{"explicit app", "Mozilla/5.0 (iPhone)", "phone", "ios/1", "app", "ios", "app", "client-header", "source-header"},
 		{"explicit widget", "CFNetwork/1 Darwin/1", "phone", "ios-widget/1", "", "ios", "widget", "client-header", "client-header"},
 		{"explicit activity", "CFNetwork/1 Darwin/1", "phone", "ios/1", "liveactivity", "ios", "liveactivity", "client-header", "source-header"},

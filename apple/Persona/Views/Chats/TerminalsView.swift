@@ -182,9 +182,14 @@ struct TerminalsView: View {
                         }
                     }
                 } label: {
-                    ThemedIcon(Theme.Icon.more)
+                    // A finger's square, the glyph at its trailing edge where it was. A menu is hit only in its label's
+                    // frame, and the header's cell holds no more than it lays out: the square takes `Space.s` above and
+                    // below as room, so the header grows 10 pt rather than 26, and all of the square is inside it (#6577).
+                    ThemedIcon(Theme.Icon.more).tapTargetFrame(alignment: .trailing)
                 }
+                .padding(.vertical, -Theme.Space.s)
                 .accessibilityLabel(String(localized: "Terminal actions for \(m.name)"))
+                .accessibilityIdentifier("terminals.more")
             }
         }
         .font(Theme.Font.secondaryStrong)

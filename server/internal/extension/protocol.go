@@ -141,6 +141,10 @@ type HubInfo struct {
 // Hub capabilities (HubInfo.Capabilities).
 const (
 	HubInboxGroup = "inbox_group"
+	// HubInboxGroupState: the hub also takes a grouped conversation's read and replied state for its events (a thing
+	// with an empty batch and the event's id), and a fallback plan's messages for events already handled
+	// (docs/assistant/inbox.md "Following up"). Listed in HubCapabilities once the manager does both.
+	HubInboxGroupState = "inbox_group_state"
 )
 
 // HubCapabilities are this hub's.

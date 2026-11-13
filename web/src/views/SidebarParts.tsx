@@ -23,9 +23,10 @@ import { connPhase } from "../lib/connection";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
 import type { Session } from "../lib/types";
 import type { MenuItem } from "../ui/atoms";
-import { AGENTS_FOLD, onFoldAll, setAgentsFolded } from "../lib/sidebar-api";
+import { agentsFoldAction, setAgentsFolded } from "../lib/sidebar-api";
 import { SESSION_LIST_STYLE } from "../ui/list-metrics";
-import { Icon, type IconName } from "../ui/icons";
+import { FoldAllButton } from "../ui/FoldAllButton";
+import type { IconName } from "../ui/icons";
 import type { MenuNode } from "../lib/node-actions";
 import type { MenuAt } from "../ui/menu-model";
 
@@ -138,24 +139,37 @@ export function morePagesMenu(more: NavPage[], activeKey: string, onNavigate?: (
 
 export { GroupCount, Section, SidebarGroup } from "./SidebarSection";
 
-/** One action reflects the visible groups, including manual folds and keyboard/menu actions. */
-export function GroupFoldButton({ groups, onAction }: { groups: React.RefObject<HTMLElement | null>; onAction: () => void }) {
-  const [collapse, setCollapse] = useState(true);
+const FOLD_LABEL = { "open-block": "sidebar.open_all", "fold-groups": "sidebar.fold_all", "open-groups": "sidebar.open_all" } as const;
+
+/** The Agents title row's one fold control (#3222): it acts on the list under the controls, never on the grouping
+ *  tabs, quick filters, search or Filter. Its action follows the group headings on screen, folded by hand, by the
+ *  keyboard shortcut or by it, and the block's own fold under the Agents title (`block`, absent where the list cannot
+ *  fold), so a click always changes something; a list without groups shows no button (#6447, lib/sidebar-api.ts
+ *  `agentsFoldAction`). The row around it is its tooltip's box. */
+export function GroupFoldButton({ groups, onAction, block, flat }: { groups: React.RefObject<HTMLElement | null>; onAction: () => void; block?: { folded: boolean; toggle: () => void }; flat?: boolean }) {
+  const [seen, setSeen] = useState({ groups: 0, open: false });
   useEffect(() => {
     const root = groups.current;
     if (!root) return;
-    const read = () => setCollapse([...root.querySelectorAll<HTMLButtonElement>("[data-sidebar-group-heading] button[aria-expanded]")]
-      .some((button) => !button.closest("[data-sidebar-agents-controls], [inert]") && button.getAttribute("aria-expanded") === "true"));
+    const read = () => {
+      const shown = [...root.querySelectorAll<HTMLButtonElement>("[data-sidebar-group-heading] button[aria-expanded]")]
+        .filter((button) => !button.closest("[data-sidebar-agents-controls], [inert]"));
+      const open = shown.some((button) => button.getAttribute("aria-expanded") === "true");
+      setSeen((s) => (s.groups === shown.length && s.open === open ? s : { groups: shown.length, open }));
+    };
     read();
     const observer = new MutationObserver(read);
     observer.observe(root, { attributes: true, attributeFilter: ["aria-expanded", "inert"], childList: true, subtree: true });
-    const off = onFoldAll((folded) => setCollapse(!folded), AGENTS_FOLD);
-    return () => { observer.disconnect(); off(); };
+    return () => observer.disconnect();
   }, [groups]);
-  const label = t(collapse ? "sidebar.fold_all" : "sidebar.open_all");
-  return <button type="button" title={label} aria-label={label} onClick={() => { setAgentsFolded(collapse); onAction(); }} className={SESSION_LIST_STYLE.foldButton}>
-    <Icon name="foldToggle" size={12} stroke={2}  />
-  </button>;
+  const action = agentsFoldAction({ blockFolded: Boolean(block?.folded), flat, groups: seen.groups, open: seen.open });
+  if (!action) return null;
+  const run = () => {
+    if (action === "open-block") block?.toggle();
+    setAgentsFolded(action === "fold-groups");
+    onAction();
+  };
+  return <FoldAllButton label={t(FOLD_LABEL[action])} expand={action !== "fold-groups"} onClick={run} className={SESSION_LIST_STYLE.foldButton} testId="agents-fold-all" />;
 }
 
 

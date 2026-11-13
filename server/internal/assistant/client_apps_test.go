@@ -40,3 +40,19 @@ func TestSnapshotApps(t *testing.T) {
 	}
 	golden(t, "assistant_snapshot.apps", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", Apps: got}))
 }
+
+func TestHarmonyAppVersionInSnapshot(t *testing.T) {
+	now := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	apps := snapshotApps([]ClientApp{
+		{Platform: "harmony", Version: "1.0.2", Build: "1000002", OS: "HarmonyOS 7.0", Simulator: true, SeenAt: now},
+		{Platform: "harmony", Version: "1.0.0", Build: "1000000", OS: "HarmonyOS 7.0", SeenAt: now.Add(-2 * time.Hour)},
+		{Platform: "harmony", Version: "1.0.1", Build: "1000001", OS: "HarmonyOS 7.0", SeenAt: now.Add(-time.Hour)},
+	})
+	if len(apps) != 1 || apps[0].Platform != "harmony" || apps[0].Version != "1.0.1" || apps[0].Simulator {
+		t.Fatalf("want the newest real HarmonyOS app: %+v", apps)
+	}
+	text := prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", Apps: apps})
+	if !strings.Contains(text, "HarmonyOS App 1.0.1 (build 1000001)（HarmonyOS 7.0）") {
+		t.Fatalf("HarmonyOS app missing from assistant context:\n%s", text)
+	}
+}

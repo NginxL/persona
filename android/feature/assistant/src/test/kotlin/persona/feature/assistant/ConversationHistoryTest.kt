@@ -318,9 +318,9 @@ class ConversationHistoryShotsTest {
         Session(machineId = "hub", sessionId = "gift", title = "1023 | 探索 | 给妈妈的生日礼物", archived = true, updatedAt = minutesAgo(60 * 24 * 20)),
     )
 
-    private fun drawer(dark: () -> Boolean, archivedCount: Int) {
+    private fun drawer(dark: () -> Boolean, archivedCount: Int, style: () -> AppStyle = { AppStyle.Glass }) {
         rule.setContent {
-            PersonaTheme(darkTheme = dark(), reduceMotion = true, style = AppStyle.Glass) {
+            PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
                 CompositionLocalProvider(LocalHomeDrawer provides true) {
                     Box(Modifier.testTag("shot").width(320.dp).height(760.dp).background(PersonaTheme.palette.background)) {
                         AssistantDrawer("", {}, ConversationGroups(main, emptyList(), listOf(inbox, trip), recent = listOf(inbox, trip)),
@@ -342,6 +342,19 @@ class ConversationHistoryShotsTest {
             dark = d
             rule.waitForIdle()
             historyShot(rule.onNode(isDialog()).captureToImage().asAndroidBitmap(), "menu-glass-${if (d) "dark" else "light"}")
+        }
+    }
+
+    @Test fun aWorkingConversationSpinsInEveryStyle() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        drawer({ dark }, archivedCount = 0, style = { style })
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.waitForIdle()
+            rule.onNodeWithContentDescription("加载中").assertExists()
+            historyShot(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap(),
+                "drawer-own-working-spin-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
     }
 

@@ -152,7 +152,20 @@ JSON
         esac
         ;;
       *:+chat-list) cat "$base/chats.json" ;;
-      *:+chat-messages-list|*:+threads-messages-list) cat "$base/messages.json" ;;
+      *:chats)
+        # A chat's own record (`im chats get`): a direct chat's has no name; a chat the user has left is refused.
+        case " $* " in
+          *" oc_example_dm "*) cat "$base/chat_get_p2p.json" ;;
+          *" oc_example_left "*) cat "$base/error_permission.json"; exit 1 ;;
+          *) cat "$base/chat_get.json" ;;
+        esac
+        ;;
+      *:+chat-messages-list|*:+threads-messages-list)
+        case " $* " in
+          *" oc_example_dm "*) cat "$base/messages_dm.json" ;;
+          *) cat "$base/messages.json" ;;
+        esac
+        ;;
       *:+messages-search|*:+chat-search) cat "$base/search.json" ;;
       *) cat "$base/search.json" ;;
     esac

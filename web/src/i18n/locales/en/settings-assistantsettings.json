@@ -131,7 +131,7 @@
   "archive_closed_hint": "A closed session with no open task leaves the lists after this many idle days and stays under Archived. 0 turns it off",
   "archive_closed_unit": "days",
   "background_folded": "Fold background rounds",
-  "background_folded_footer": "Rounds that another conversation, a scheduled task or a follow-up started in the main chat show as one line you can open. Rounds that ask or tell you something stay shown.",
+  "background_folded_footer": "Rounds that another conversation, a scheduled task or a follow-up started in the main chat or a leader conversation show as one line you can open. Rounds that ask or tell you something stay shown.",
   "next_suggestions": "Suggest the next message",
   "next_suggestions_footer": "After a reply in a chat you have open, a small model suggests what you might send next, above the empty message box. Claude Code in a terminal keeps its own suggestions. Uses one extra model call per reply; the model is set under Model configuration › Next-message suggestions.",
   "idle_close": "Stop idle Agents after",

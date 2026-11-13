@@ -56,6 +56,46 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     expect(at(todo("t", { ask: { outcome: "decide", verdict: "v", asked_at: hoursAgo(1) } })).section).toBe("waiting");
   });
 
+  it.each([false, true])("keeps a stopped parked task unfinished (seen: %s)", (seen) => {
+    const td = todo("parked", {
+      agents: [agent("unseen")],
+      seen_at: seen ? hoursAgo(0) : undefined,
+      supervision: {
+        supervisor: "conv",
+        state: "parked",
+        parked: { reason: "Waiting for another team", waiting_on: "someone_else", until: hoursAgo(-12), count: 1 },
+      },
+    });
+    expect(at(td)).toMatchObject({ section: "parked", rule: "parked" });
+    expect(todoBucket(td, lookup, NOW)).toBe("open");
+    const result = triageTodos([td], lookup, NOW);
+    expect(result.todoCounts.parked).toBe(1);
+    expect(result.open).toBe(1);
+    expect(result.shelved).toBe(0);
+    expect(result.finished).toBe(0);
+    expect(result.sections.done).toEqual([]);
+  });
+
+  it("an expired park stays open for review rather than filing a seen turn as done", () => {
+    const td = todo("expired", {
+      agents: [agent("unseen")], seen_at: hoursAgo(0),
+      supervision: { supervisor: "conv", state: "parked", parked: { reason: "Check again", waiting_on: "date", until: hoursAgo(1), count: 1 } },
+    });
+    expect(at(td)).toMatchObject({ section: "other", rule: "parked" });
+    expect(todoBucket(td, lookup, NOW)).toBe("open");
+  });
+
+  it("real activity or an explicit close takes precedence over a parked review", () => {
+    const supervision: Supervision = {
+      supervisor: "conv", state: "parked",
+      parked: { reason: "Waiting for another team", waiting_on: "someone_else", until: hoursAgo(-12), count: 1 },
+    };
+    expect(at(todo("running", { supervision, agents: [agent("run")] })).section).toBe("working");
+    expect(at(todo("asking", { supervision, agents: [agent("ask")] })).section).toBe("waiting");
+    expect(at(todo("closed", { supervision, done_at: hoursAgo(30) })).section).toBe("done");
+    expect(at(todo("old", { supervision, updated_at: hoursAgo(100), seen_at: hoursAgo(0) })).section).toBe("parked");
+  });
+
   it("a deployed to-do's Please verify, or a done conclusion, is Just finished: the supervisor accepts it, not the owner", () => {
     const idle = { agents: [agent("idle")] };
     expect(at(todo("t", { ...idle, ask: { verdict: "done, deployed: verify below", asked_at: hoursAgo(1) } }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
@@ -185,7 +225,7 @@ describe("triageTodos", () => {
   });
 
   it("lists the unfinished sections open above Just finished, Shelved and Done folded with Done last (#5707)", () => {
-    expect(TRIAGE_SECTIONS).toEqual(["waiting", "working", "pr", "other", "just_done", "shelved", "done"]);
+    expect(TRIAGE_SECTIONS).toEqual(["waiting", "working", "pr", "parked", "other", "just_done", "shelved", "done"]);
     expect([...FOLDED_SECTIONS]).toEqual(["shelved", "done"]);
   });
 

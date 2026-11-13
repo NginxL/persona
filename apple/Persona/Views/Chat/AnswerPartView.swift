@@ -122,6 +122,7 @@ private struct AnswerPartWords: View {
     var body: some View {
         LinkedMarkdown(plain: text.markdown, paths: text.paths, key: key)
             .markdownTheme(.persona)
+            .readingContent()
             .environment(\.replyKey, message) // its quotes' folds, the lifted copy's too (as `AssistantText`)
             .frame(maxWidth: .infinity, alignment: .leading)
     }

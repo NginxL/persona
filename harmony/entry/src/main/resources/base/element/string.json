@@ -1,0 +1,4440 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Persona phone client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Your Persona workspace"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Persona"
+    },
+    {
+      "name": "persona",
+      "value": "Persona"
+    },
+    {
+      "name": "agents",
+      "value": "Agents"
+    },
+    {
+      "name": "inbox",
+      "value": "Inbox"
+    },
+    {
+      "name": "settings",
+      "value": "Settings"
+    },
+    {
+      "name": "welcome",
+      "value": "Connect your Hub"
+    },
+    {
+      "name": "connect",
+      "value": "Connect"
+    },
+    {
+      "name": "pair",
+      "value": "Pair"
+    },
+    {
+      "name": "pair_code",
+      "value": "Pairing code"
+    },
+    {
+      "name": "hub_address",
+      "value": "Hub address"
+    },
+    {
+      "name": "verify",
+      "value": "Verify identity"
+    },
+    {
+      "name": "trust",
+      "value": "Trust and connect"
+    },
+    {
+      "name": "hub",
+      "value": "Workspace"
+    },
+    {
+      "name": "manager",
+      "value": "Manager"
+    },
+    {
+      "name": "experience",
+      "value": "Try locally"
+    },
+    {
+      "name": "main_chat",
+      "value": "Main conversation"
+    },
+    {
+      "name": "new_chat",
+      "value": "New conversation"
+    },
+    {
+      "name": "recent",
+      "value": "Recent"
+    },
+    {
+      "name": "automatic",
+      "value": "Automatic"
+    },
+    {
+      "name": "todos",
+      "value": "Todos"
+    },
+    {
+      "name": "knowledge",
+      "value": "Knowledge"
+    },
+    {
+      "name": "search",
+      "value": "Search"
+    },
+    {
+      "name": "search_sessions",
+      "value": "Search sessions"
+    },
+    {
+      "name": "all",
+      "value": "All"
+    },
+    {
+      "name": "needs_you",
+      "value": "Needs you"
+    },
+    {
+      "name": "working",
+      "value": "Working"
+    },
+    {
+      "name": "done",
+      "value": "Done"
+    },
+    {
+      "name": "unread",
+      "value": "Unread"
+    },
+    {
+      "name": "empty",
+      "value": "Nothing here yet"
+    },
+    {
+      "name": "no_results",
+      "value": "No matching items"
+    },
+    {
+      "name": "loading",
+      "value": "Loading"
+    },
+    {
+      "name": "retry",
+      "value": "Retry"
+    },
+    {
+      "name": "refresh",
+      "value": "Refresh"
+    },
+    {
+      "name": "offline",
+      "value": "Offline"
+    },
+    {
+      "name": "online",
+      "value": "Connected"
+    },
+    {
+      "name": "read_only",
+      "value": "Read only"
+    },
+    {
+      "name": "send",
+      "value": "Send"
+    },
+    {
+      "name": "sending",
+      "value": "Sending"
+    },
+    {
+      "name": "message",
+      "value": "Message"
+    },
+    {
+      "name": "stop",
+      "value": "Stop"
+    },
+    {
+      "name": "cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "confirm",
+      "value": "Confirm"
+    },
+    {
+      "name": "save",
+      "value": "Save"
+    },
+    {
+      "name": "add",
+      "value": "Add"
+    },
+    {
+      "name": "create",
+      "value": "Create"
+    },
+    {
+      "name": "edit",
+      "value": "Edit"
+    },
+    {
+      "name": "delete",
+      "value": "Delete"
+    },
+    {
+      "name": "close",
+      "value": "Close"
+    },
+    {
+      "name": "back",
+      "value": "Back"
+    },
+    {
+      "name": "more",
+      "value": "More"
+    },
+    {
+      "name": "title",
+      "value": "Title"
+    },
+    {
+      "name": "content",
+      "value": "Content"
+    },
+    {
+      "name": "name",
+      "value": "Name"
+    },
+    {
+      "name": "new_agent",
+      "value": "New Agent"
+    },
+    {
+      "name": "task",
+      "value": "Task"
+    },
+    {
+      "name": "machine",
+      "value": "Computer"
+    },
+    {
+      "name": "directory",
+      "value": "Directory"
+    },
+    {
+      "name": "launcher",
+      "value": "Launcher"
+    },
+    {
+      "name": "model",
+      "value": "Model"
+    },
+    {
+      "name": "permissions",
+      "value": "Permissions"
+    },
+    {
+      "name": "effort",
+      "value": "Reasoning effort"
+    },
+    {
+      "name": "manual",
+      "value": "Ask before changes"
+    },
+    {
+      "name": "low",
+      "value": "Low"
+    },
+    {
+      "name": "medium",
+      "value": "Medium"
+    },
+    {
+      "name": "high",
+      "value": "High"
+    },
+    {
+      "name": "chat",
+      "value": "Conversation"
+    },
+    {
+      "name": "files",
+      "value": "Files"
+    },
+    {
+      "name": "git",
+      "value": "Git"
+    },
+    {
+      "name": "terminal",
+      "value": "Terminal"
+    },
+    {
+      "name": "reply",
+      "value": "Reply"
+    },
+    {
+      "name": "confirm_send",
+      "value": "Send this reply?"
+    },
+    {
+      "name": "process",
+      "value": "Mark as handled"
+    },
+    {
+      "name": "reopen",
+      "value": "Reopen"
+    },
+    {
+      "name": "handoff",
+      "value": "Ask Persona"
+    },
+    {
+      "name": "source",
+      "value": "Source"
+    },
+    {
+      "name": "remove",
+      "value": "Remove"
+    },
+    {
+      "name": "attachment",
+      "value": "Attachment"
+    },
+    {
+      "name": "attach",
+      "value": "Attach"
+    },
+    {
+      "name": "photo",
+      "value": "Photo"
+    },
+    {
+      "name": "file",
+      "value": "File"
+    },
+    {
+      "name": "upload",
+      "value": "Upload"
+    },
+    {
+      "name": "download",
+      "value": "Save file"
+    },
+    {
+      "name": "preview",
+      "value": "Preview"
+    },
+    {
+      "name": "open",
+      "value": "Open"
+    },
+    {
+      "name": "approve",
+      "value": "Approve"
+    },
+    {
+      "name": "deny",
+      "value": "Reject"
+    },
+    {
+      "name": "answer",
+      "value": "Answer"
+    },
+    {
+      "name": "question",
+      "value": "Question"
+    },
+    {
+      "name": "plan",
+      "value": "Plan"
+    },
+    {
+      "name": "start",
+      "value": "Start"
+    },
+    {
+      "name": "request_updated",
+      "value": "This request has changed"
+    },
+    {
+      "name": "already_handled",
+      "value": "Already handled"
+    },
+    {
+      "name": "result_unknown",
+      "value": "Result pending verification"
+    },
+    {
+      "name": "failed",
+      "value": "Could not complete the operation"
+    },
+    {
+      "name": "saved",
+      "value": "Saved"
+    },
+    {
+      "name": "sent",
+      "value": "Sent"
+    },
+    {
+      "name": "pending",
+      "value": "Pending"
+    },
+    {
+      "name": "completed",
+      "value": "Completed"
+    },
+    {
+      "name": "work_summary",
+      "value": "Work details"
+    },
+    {
+      "name": "tool",
+      "value": "Tool"
+    },
+    {
+      "name": "collapse",
+      "value": "Collapse navigation"
+    },
+    {
+      "name": "expand",
+      "value": "Expand navigation"
+    },
+    {
+      "name": "appearance",
+      "value": "Appearance"
+    },
+    {
+      "name": "system",
+      "value": "System"
+    },
+    {
+      "name": "light",
+      "value": "Light"
+    },
+    {
+      "name": "dark",
+      "value": "Dark"
+    },
+    {
+      "name": "style",
+      "value": "Style"
+    },
+    {
+      "name": "notifications",
+      "value": "Notifications"
+    },
+    {
+      "name": "message_alerts",
+      "value": "Message alerts"
+    },
+    {
+      "name": "system_permission",
+      "value": "System permission"
+    },
+    {
+      "name": "not_requested",
+      "value": "Not requested"
+    },
+    {
+      "name": "allow_notifications",
+      "value": "Allow notifications"
+    },
+    {
+      "name": "machines",
+      "value": "Computers"
+    },
+    {
+      "name": "add_computer",
+      "value": "Add computer"
+    },
+    {
+      "name": "generate_code",
+      "value": "Generate first pairing code"
+    },
+    {
+      "name": "expires",
+      "value": "Expires"
+    },
+    {
+      "name": "pending_trust",
+      "value": "Waiting for confirmation"
+    },
+    {
+      "name": "confirm_computer",
+      "value": "This is my computer"
+    },
+    {
+      "name": "reject",
+      "value": "Reject"
+    },
+    {
+      "name": "install",
+      "value": "Install"
+    },
+    {
+      "name": "install_instructions",
+      "value": "Installation instructions"
+    },
+    {
+      "name": "models",
+      "value": "Models"
+    },
+    {
+      "name": "schedules",
+      "value": "Scheduled tasks"
+    },
+    {
+      "name": "extensions",
+      "value": "Extensions"
+    },
+    {
+      "name": "connectors",
+      "value": "Connectors"
+    },
+    {
+      "name": "channels",
+      "value": "Channels"
+    },
+    {
+      "name": "translation",
+      "value": "Translation"
+    },
+    {
+      "name": "triage",
+      "value": "Conversation triage"
+    },
+    {
+      "name": "ledger",
+      "value": "Sent on your behalf"
+    },
+    {
+      "name": "phone",
+      "value": "This phone"
+    },
+    {
+      "name": "privacy",
+      "value": "Privacy"
+    },
+    {
+      "name": "storage",
+      "value": "Storage"
+    },
+    {
+      "name": "language",
+      "value": "Language"
+    },
+    {
+      "name": "clear_cache",
+      "value": "Clear cached messages"
+    },
+    {
+      "name": "disconnect",
+      "value": "Disconnect"
+    },
+    {
+      "name": "forget_hub",
+      "value": "Remove this workspace"
+    },
+    {
+      "name": "diagnostics",
+      "value": "Connection diagnostics"
+    },
+    {
+      "name": "copy",
+      "value": "Copy"
+    },
+    {
+      "name": "branch",
+      "value": "Branch"
+    },
+    {
+      "name": "stage",
+      "value": "Stage"
+    },
+    {
+      "name": "unstage",
+      "value": "Unstage"
+    },
+    {
+      "name": "commit",
+      "value": "Commit"
+    },
+    {
+      "name": "push",
+      "value": "Push"
+    },
+    {
+      "name": "pull",
+      "value": "Pull"
+    },
+    {
+      "name": "fetch",
+      "value": "Fetch"
+    },
+    {
+      "name": "switch_branch",
+      "value": "Switch branch"
+    },
+    {
+      "name": "stash",
+      "value": "Stash"
+    },
+    {
+      "name": "stash_pop",
+      "value": "Apply stash"
+    },
+    {
+      "name": "rename",
+      "value": "Rename"
+    },
+    {
+      "name": "control",
+      "value": "Take control"
+    },
+    {
+      "name": "release",
+      "value": "Release control"
+    },
+    {
+      "name": "control_confirm",
+      "value": "Take control of this terminal?"
+    },
+    {
+      "name": "voice",
+      "value": "Voice conversation"
+    },
+    {
+      "name": "listening",
+      "value": "Listening"
+    },
+    {
+      "name": "muted",
+      "value": "Microphone muted"
+    },
+    {
+      "name": "mute",
+      "value": "Mute"
+    },
+    {
+      "name": "unmute",
+      "value": "Unmute"
+    },
+    {
+      "name": "hang_up",
+      "value": "End call"
+    },
+    {
+      "name": "ended",
+      "value": "Conversation ended"
+    },
+    {
+      "name": "restart",
+      "value": "Start again"
+    },
+    {
+      "name": "health",
+      "value": "Health"
+    },
+    {
+      "name": "timeline",
+      "value": "Timeline"
+    },
+    {
+      "name": "tags",
+      "value": "Tags"
+    },
+    {
+      "name": "status",
+      "value": "Status"
+    },
+    {
+      "name": "purpose",
+      "value": "Purpose"
+    },
+    {
+      "name": "enabled",
+      "value": "Enabled"
+    },
+    {
+      "name": "disabled",
+      "value": "Disabled"
+    },
+    {
+      "name": "unsupported",
+      "value": "Not available on this Hub"
+    },
+    {
+      "name": "permission_denied",
+      "value": "Denied"
+    },
+    {
+      "name": "identity_changed",
+      "value": "Hub identity changed. Pair again."
+    },
+    {
+      "name": "invalid_endpoint",
+      "value": "Use a valid HTTPS Hub address"
+    },
+    {
+      "name": "connection_failed",
+      "value": "Could not connect. Your input is preserved."
+    },
+    {
+      "name": "unsafe_endpoint",
+      "value": "This connection cannot be authenticated securely"
+    },
+    {
+      "name": "pin_unavailable",
+      "value": "This certificate pin cannot be verified"
+    },
+    {
+      "name": "required",
+      "value": "Required"
+    },
+    {
+      "name": "secret",
+      "value": "Secret"
+    },
+    {
+      "name": "unknown_field",
+      "value": "This field cannot be approved on this phone"
+    },
+    {
+      "name": "pending_action",
+      "value": "Check the previous result before trying again"
+    },
+    {
+      "name": "no_computer",
+      "value": "Connect a computer"
+    },
+    {
+      "name": "no_model",
+      "value": "Configure an assistant model"
+    },
+    {
+      "name": "local_demo",
+      "value": "Local experience"
+    },
+    {
+      "name": "leave_demo",
+      "value": "Connect a real Hub"
+    },
+    {
+      "name": "about",
+      "value": "About"
+    },
+    {
+      "name": "version",
+      "value": "Version"
+    },
+    {
+      "name": "mail",
+      "value": "Mail"
+    },
+    {
+      "name": "projects",
+      "value": "Projects"
+    },
+    {
+      "name": "chats",
+      "value": "Chats"
+    },
+    {
+      "name": "people",
+      "value": "People"
+    },
+    {
+      "name": "docs",
+      "value": "Documents"
+    },
+    {
+      "name": "meetings",
+      "value": "Meetings"
+    },
+    {
+      "name": "events",
+      "value": "Events"
+    },
+    {
+      "name": "recordings",
+      "value": "Recordings"
+    },
+    {
+      "name": "current_value",
+      "value": "Current value"
+    },
+    {
+      "name": "select_purpose",
+      "value": "Select a purpose"
+    },
+    {
+      "name": "model_provider",
+      "value": "Provider"
+    },
+    {
+      "name": "model_id",
+      "value": "Model ID"
+    },
+    {
+      "name": "permission_mode",
+      "value": "Permission mode"
+    },
+    {
+      "name": "reasoning_effort",
+      "value": "Reasoning effort"
+    },
+    {
+      "name": "no_capability",
+      "value": "This session does not support this setting"
+    },
+    {
+      "name": "no_configuration",
+      "value": "No supported configuration is available"
+    },
+    {
+      "name": "machine_details",
+      "value": "Computer details"
+    },
+    {
+      "name": "new_pairing_code",
+      "value": "Create a new pairing code"
+    },
+    {
+      "name": "expires_at",
+      "value": "Expires at"
+    },
+    {
+      "name": "confirm_trust",
+      "value": "Trust this computer?"
+    },
+    {
+      "name": "connector_status",
+      "value": "Connector status"
+    },
+    {
+      "name": "extension_status",
+      "value": "Extension status"
+    },
+    {
+      "name": "features",
+      "value": "Features"
+    },
+    {
+      "name": "load_more",
+      "value": "Load earlier"
+    },
+    {
+      "name": "auto_continue",
+      "value": "Continue after errors"
+    },
+    {
+      "name": "wake",
+      "value": "Wake on schedule"
+    },
+    {
+      "name": "decide",
+      "value": "Decision cards"
+    },
+    {
+      "name": "reply_reminder",
+      "value": "Remind when seen but unanswered"
+    },
+    {
+      "name": "default",
+      "value": "Use default"
+    },
+    {
+      "name": "acceptEdits",
+      "value": "Accept edits"
+    },
+    {
+      "name": "auto",
+      "value": "Automatic"
+    },
+    {
+      "name": "bypassPermissions",
+      "value": "Skip permission checks"
+    },
+    {
+      "name": "xhigh",
+      "value": "Extra high"
+    },
+    {
+      "name": "max",
+      "value": "Maximum"
+    },
+    {
+      "name": "checked_no_effect",
+      "value": "I checked the target and confirmed that the action did not take effect. Allow a new action?"
+    },
+    {
+      "name": "checked",
+      "value": "Checked manually"
+    },
+    {
+      "name": "account",
+      "value": "Account"
+    },
+    {
+      "name": "archive",
+      "value": "Archive"
+    },
+    {
+      "name": "cached",
+      "value": "Cached"
+    },
+    {
+      "name": "clear",
+      "value": "Clear"
+    },
+    {
+      "name": "dependencies_unresolved",
+      "value": "Dependencies unresolved"
+    },
+    {
+      "name": "details",
+      "value": "Details"
+    },
+    {
+      "name": "every_minutes",
+      "value": "Every minutes"
+    },
+    {
+      "name": "extension_market",
+      "value": "Extension market"
+    },
+    {
+      "name": "operation",
+      "value": "Operation"
+    },
+    {
+      "name": "review",
+      "value": "Review"
+    },
+    {
+      "name": "run_at",
+      "value": "Run at"
+    },
+    {
+      "name": "run_now",
+      "value": "Run now"
+    },
+    {
+      "name": "run_started",
+      "value": "Run started"
+    },
+    {
+      "name": "sign_in",
+      "value": "Sign in"
+    },
+    {
+      "name": "sign_out",
+      "value": "Sign out"
+    },
+    {
+      "name": "test",
+      "value": "Test"
+    },
+    {
+      "name": "time",
+      "value": "Time"
+    },
+    {
+      "name": "unbind",
+      "value": "Unbind"
+    },
+    {
+      "name": "via",
+      "value": "Via"
+    },
+    {
+      "name": "waiting",
+      "value": "Waiting"
+    },
+    {
+      "name": "weekdays",
+      "value": "Weekdays"
+    },
+    {
+      "name": "once",
+      "value": "Once"
+    },
+    {
+      "name": "daily",
+      "value": "Daily"
+    },
+    {
+      "name": "interval",
+      "value": "Interval"
+    },
+    {
+      "name": "upgrade",
+      "value": "Upgrade"
+    },
+    {
+      "name": "continue",
+      "value": "Continue"
+    },
+    {
+      "name": "check_status",
+      "value": "Check status"
+    },
+    {
+      "name": "agent",
+      "value": "Agent"
+    },
+    {
+      "name": "conversation",
+      "value": "Conversation"
+    },
+    {
+      "name": "running",
+      "value": "Running"
+    },
+    {
+      "name": "needs_consent",
+      "value": "Needs consent"
+    },
+    {
+      "name": "succeeded",
+      "value": "Succeeded"
+    },
+    {
+      "name": "canceled",
+      "value": "Canceled"
+    },
+    {
+      "name": "image",
+      "value": "Image"
+    },
+    {
+      "name": "attach_live",
+      "value": "Join live"
+    },
+    {
+      "name": "feedback",
+      "value": "Feedback"
+    },
+    {
+      "name": "other",
+      "value": "Other answer"
+    },
+    {
+      "name": "workspace",
+      "value": "Workspace"
+    },
+    {
+      "name": "latest",
+      "value": "Latest"
+    },
+    {
+      "name": "ignored",
+      "value": "Ignored"
+    },
+    {
+      "name": "parent_folder",
+      "value": "Parent folder"
+    },
+    {
+      "name": "path",
+      "value": "Path"
+    },
+    {
+      "name": "symlink",
+      "value": "Symbolic link"
+    },
+    {
+      "name": "takeover",
+      "value": "Take over"
+    },
+    {
+      "name": "session_tools_binary_file",
+      "value": "Preview unavailable for this file type"
+    },
+    {
+      "name": "session_tools_changes",
+      "value": "Changes"
+    },
+    {
+      "name": "session_tools_clean",
+      "value": "No changes"
+    },
+    {
+      "name": "session_tools_control_active",
+      "value": "Controlling"
+    },
+    {
+      "name": "session_tools_control_busy",
+      "value": "Controlled elsewhere"
+    },
+    {
+      "name": "session_tools_control_off",
+      "value": "Control off"
+    },
+    {
+      "name": "session_tools_control_starting",
+      "value": "Requesting control"
+    },
+    {
+      "name": "session_tools_file_read_failed",
+      "value": "Could not read the selected file"
+    },
+    {
+      "name": "session_tools_first_entries",
+      "value": "First entries"
+    },
+    {
+      "name": "session_tools_no_diff",
+      "value": "No diff"
+    },
+    {
+      "name": "session_tools_no_upstream",
+      "value": "No upstream branch"
+    },
+    {
+      "name": "session_tools_not_repository",
+      "value": "Not a Git repository"
+    },
+    {
+      "name": "session_tools_staged",
+      "value": "Staged"
+    },
+    {
+      "name": "session_tools_synced",
+      "value": "Up to date"
+    },
+    {
+      "name": "session_tools_terminal_input",
+      "value": "Terminal input"
+    },
+    {
+      "name": "session_tools_terminal_waiting",
+      "value": "Waiting for terminal"
+    },
+    {
+      "name": "session_tools_transfer_limit",
+      "value": "The transfer exceeds 32 MiB"
+    },
+    {
+      "name": "session_tools_truncated",
+      "value": "Load more"
+    },
+    {
+      "name": "session_tools_unstaged",
+      "value": "Unstaged"
+    },
+    {
+      "name": "session_tools_view_only",
+      "value": "View only"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "Record audio during voice conversations and Knowledge recordings."
+    },
+    {
+      "name": "contacts_reason",
+      "value": "Allow Persona to search contacts and, after your approval, create or update them."
+    },
+    {
+      "name": "calendar_read_reason",
+      "value": "Read events when you use calendar tools."
+    },
+    {
+      "name": "calendar_write_reason",
+      "value": "Save calendar events after you confirm each request."
+    },
+    {
+      "name": "location_reason",
+      "value": "Get an approximate location when you use location tools."
+    },
+    {
+      "name": "clipboard_reason",
+      "value": "Read clipboard text when you use clipboard tools."
+    },
+    {
+      "name": "phone_tools_connected",
+      "value": "Connected"
+    },
+    {
+      "name": "phone_tools_offline",
+      "value": "Disconnected"
+    },
+    {
+      "name": "phone_tools_registered",
+      "value": "tools"
+    },
+    {
+      "name": "contacts",
+      "value": "Contacts"
+    },
+    {
+      "name": "calendar",
+      "value": "Calendar"
+    },
+    {
+      "name": "location",
+      "value": "Location"
+    },
+    {
+      "name": "clipboard",
+      "value": "Clipboard"
+    },
+    {
+      "name": "permission_granted",
+      "value": "Allowed"
+    },
+    {
+      "name": "permission_not_determined",
+      "value": "Not allowed yet"
+    },
+    {
+      "name": "permission_invalid",
+      "value": "Unavailable"
+    },
+    {
+      "name": "permission_unavailable",
+      "value": "Permission unavailable"
+    },
+    {
+      "name": "allow",
+      "value": "Allow"
+    },
+    {
+      "name": "open_settings",
+      "value": "Open Settings"
+    },
+    {
+      "name": "cache_unavailable",
+      "value": "Cached data unavailable"
+    },
+    {
+      "name": "voice_unavailable",
+      "value": "Voice unavailable"
+    },
+    {
+      "name": "voice_ready",
+      "value": "Ready"
+    },
+    {
+      "name": "voice_idle",
+      "value": "Ready"
+    },
+    {
+      "name": "voice_protocol_unsupported",
+      "value": "Voice version unsupported"
+    },
+    {
+      "name": "voice_needs_setup",
+      "value": "Voice needs setup"
+    },
+    {
+      "name": "voice_connecting",
+      "value": "Connecting"
+    },
+    {
+      "name": "voice_starting_audio",
+      "value": "Starting audio"
+    },
+    {
+      "name": "voice_listening",
+      "value": "Listening"
+    },
+    {
+      "name": "voice_paused",
+      "value": "Paused"
+    },
+    {
+      "name": "voice_waking",
+      "value": "Resuming"
+    },
+    {
+      "name": "voice_reconnecting",
+      "value": "Reconnecting"
+    },
+    {
+      "name": "voice_error",
+      "value": "Voice error"
+    },
+    {
+      "name": "voice_connection_failed",
+      "value": "Voice connection failed"
+    },
+    {
+      "name": "voice_disconnected",
+      "value": "Voice disconnected"
+    },
+    {
+      "name": "voice_timeout",
+      "value": "Voice connection timed out"
+    },
+    {
+      "name": "voice_audio_unavailable",
+      "value": "Audio unavailable"
+    },
+    {
+      "name": "voice_target_unavailable",
+      "value": "Conversation unavailable"
+    },
+    {
+      "name": "voice_microphone_denied",
+      "value": "Microphone access denied"
+    },
+    {
+      "name": "voice_microphone_unavailable",
+      "value": "Microphone unavailable"
+    },
+    {
+      "name": "voice_start",
+      "value": "Start call"
+    },
+    {
+      "name": "voice_mute",
+      "value": "Mute"
+    },
+    {
+      "name": "voice_unmute",
+      "value": "Unmute"
+    },
+    {
+      "name": "voice_interrupt",
+      "value": "Interrupt"
+    },
+    {
+      "name": "voice_end",
+      "value": "End call"
+    },
+    {
+      "name": "voice_you",
+      "value": "You"
+    },
+    {
+      "name": "voice_assistant",
+      "value": "Persona"
+    },
+    {
+      "name": "voice_ask_released_elsewhere",
+      "value": "Answered on another device"
+    },
+    {
+      "name": "voice_run_unsent_draft",
+      "value": "Unsent draft"
+    },
+    {
+      "name": "voice_run_sending",
+      "value": "Sending"
+    },
+    {
+      "name": "voice_run_sent",
+      "value": "Sent"
+    },
+    {
+      "name": "voice_run_working",
+      "value": "Working"
+    },
+    {
+      "name": "voice_run_needs_you",
+      "value": "Needs you"
+    },
+    {
+      "name": "voice_run_blocked",
+      "value": "Waiting"
+    },
+    {
+      "name": "voice_run_held",
+      "value": "Running in background"
+    },
+    {
+      "name": "voice_run_done",
+      "value": "Done"
+    },
+    {
+      "name": "voice_run_failed",
+      "value": "Failed"
+    },
+    {
+      "name": "voice_run_refused",
+      "value": "Not sent"
+    },
+    {
+      "name": "voice_run_unknown",
+      "value": "Result unknown"
+    },
+    {
+      "name": "voice_run_folded",
+      "value": "Combined"
+    },
+    {
+      "name": "photos",
+      "value": "Photos"
+    },
+    {
+      "name": "preview_unavailable",
+      "value": "Preview unavailable"
+    },
+    {
+      "name": "dismiss",
+      "value": "Dismiss"
+    },
+    {
+      "name": "chat_attachment_target_unavailable",
+      "value": "Select a conversation first"
+    },
+    {
+      "name": "chat_attachment_storage_unavailable",
+      "value": "Couldn’t save attachments"
+    },
+    {
+      "name": "chat_attachment_limit_reached",
+      "value": "Attachment limit reached"
+    },
+    {
+      "name": "chat_attachment_image_unsupported",
+      "value": "Unsupported image"
+    },
+    {
+      "name": "chat_attachment_image_too_large",
+      "value": "Image too large"
+    },
+    {
+      "name": "chat_attachment_file_too_large",
+      "value": "File too large"
+    },
+    {
+      "name": "chat_attachment_file_read_failed",
+      "value": "Couldn’t read file"
+    },
+    {
+      "name": "chat_attachment_upload_unknown",
+      "value": "Upload result unknown"
+    },
+    {
+      "name": "chat_attachment_request_too_large",
+      "value": "Message and attachments too large"
+    },
+    {
+      "name": "chat_attachment_offline",
+      "value": "Reconnect to send attachments"
+    },
+    {
+      "name": "chat_attachment_selection_changed",
+      "value": "Attachments changed; check before sending"
+    },
+    {
+      "name": "chat_attachment_pick_failed",
+      "value": "Couldn’t select attachment"
+    },
+    {
+      "name": "chat_attachment_send_failed",
+      "value": "Couldn’t send attachments"
+    },
+    {
+      "name": "chat_attachment_upload_failed",
+      "value": "Upload failed"
+    },
+    {
+      "name": "chat_attachment_uploading",
+      "value": "Uploading"
+    },
+    {
+      "name": "assistant_feed_answered",
+      "value": "Answered"
+    },
+    {
+      "name": "assistant_feed_check_met",
+      "value": "Met"
+    },
+    {
+      "name": "assistant_feed_check_not_met",
+      "value": "Not met"
+    },
+    {
+      "name": "assistant_feed_confirm_send",
+      "value": "Send message?"
+    },
+    {
+      "name": "assistant_feed_dismiss",
+      "value": "Dismiss"
+    },
+    {
+      "name": "assistant_feed_draft",
+      "value": "Reply"
+    },
+    {
+      "name": "assistant_feed_edit_plan",
+      "value": "Edit plan"
+    },
+    {
+      "name": "assistant_feed_filed_elsewhere",
+      "value": "Handled elsewhere"
+    },
+    {
+      "name": "assistant_feed_folder",
+      "value": "Working directory"
+    },
+    {
+      "name": "assistant_feed_interrupted",
+      "value": "Interrupted"
+    },
+    {
+      "name": "assistant_feed_machine",
+      "value": "Computer"
+    },
+    {
+      "name": "assistant_feed_message",
+      "value": "Message"
+    },
+    {
+      "name": "assistant_feed_message_open",
+      "value": "Awaiting reply"
+    },
+    {
+      "name": "assistant_feed_message_pending",
+      "value": "Sending"
+    },
+    {
+      "name": "assistant_feed_message_sent",
+      "value": "Sent"
+    },
+    {
+      "name": "assistant_feed_message_dismissed",
+      "value": "Dismissed"
+    },
+    {
+      "name": "assistant_feed_message_filed",
+      "value": "Handled"
+    },
+    {
+      "name": "assistant_feed_message_unknown",
+      "value": "Result unknown"
+    },
+    {
+      "name": "assistant_feed_open_agent",
+      "value": "Open Agent"
+    },
+    {
+      "name": "assistant_feed_open_inbox",
+      "value": "Open Inbox item"
+    },
+    {
+      "name": "assistant_feed_open_todo",
+      "value": "Open task"
+    },
+    {
+      "name": "assistant_feed_permission_bypassPermissions",
+      "value": "Full access"
+    },
+    {
+      "name": "assistant_feed_permission_default",
+      "value": "Default"
+    },
+    {
+      "name": "assistant_feed_permission_plan",
+      "value": "Read only"
+    },
+    {
+      "name": "assistant_feed_persona_message",
+      "value": "From Persona"
+    },
+    {
+      "name": "assistant_feed_plan",
+      "value": "Plan"
+    },
+    {
+      "name": "assistant_feed_plan_open",
+      "value": "Ready"
+    },
+    {
+      "name": "assistant_feed_plan_started",
+      "value": "Started"
+    },
+    {
+      "name": "assistant_feed_plan_dismissed",
+      "value": "Dismissed"
+    },
+    {
+      "name": "assistant_feed_plan_unknown",
+      "value": "Unknown"
+    },
+    {
+      "name": "assistant_feed_plan_unavailable",
+      "value": "Plan unavailable"
+    },
+    {
+      "name": "assistant_feed_progress",
+      "value": "Progress"
+    },
+    {
+      "name": "assistant_feed_prompt",
+      "value": "Instructions"
+    },
+    {
+      "name": "assistant_feed_receipt",
+      "value": "Result"
+    },
+    {
+      "name": "assistant_feed_remember",
+      "value": "Remember for this project"
+    },
+    {
+      "name": "assistant_feed_report",
+      "value": "Report"
+    },
+    {
+      "name": "assistant_feed_report_unavailable",
+      "value": "Report unavailable"
+    },
+    {
+      "name": "assistant_feed_review",
+      "value": "Review"
+    },
+    {
+      "name": "assistant_feed_review_accepted",
+      "value": "Accepted"
+    },
+    {
+      "name": "assistant_feed_review_rejected",
+      "value": "Rejected"
+    },
+    {
+      "name": "assistant_feed_review_pass",
+      "value": "Passed"
+    },
+    {
+      "name": "assistant_feed_review_fail",
+      "value": "Failed"
+    },
+    {
+      "name": "assistant_feed_review_unknown",
+      "value": "Unreviewed"
+    },
+    {
+      "name": "assistant_feed_send",
+      "value": "Send"
+    },
+    {
+      "name": "assistant_feed_start",
+      "value": "Start"
+    },
+    {
+      "name": "assistant_feed_task",
+      "value": "Task"
+    },
+    {
+      "name": "assistant_feed_task_dock",
+      "value": "Tasks"
+    },
+    {
+      "name": "assistant_feed_task_message",
+      "value": "From task"
+    },
+    {
+      "name": "assistant_feed_undo_dismiss",
+      "value": "Undo dismissal"
+    },
+    {
+      "name": "assistant_feed_unsupported_activity",
+      "value": "Activity unavailable"
+    },
+    {
+      "name": "assistant_feed_view_unavailable",
+      "value": "View unavailable"
+    },
+    {
+      "name": "assistant_feed_state_not_started",
+      "value": "Not started"
+    },
+    {
+      "name": "assistant_feed_state_working",
+      "value": "Working"
+    },
+    {
+      "name": "assistant_feed_state_waiting",
+      "value": "Waiting"
+    },
+    {
+      "name": "assistant_feed_state_needs_you",
+      "value": "Needs you"
+    },
+    {
+      "name": "assistant_feed_state_interrupted",
+      "value": "Interrupted"
+    },
+    {
+      "name": "assistant_feed_state_usage_limit",
+      "value": "Usage limit"
+    },
+    {
+      "name": "assistant_feed_state_unread",
+      "value": "Unread"
+    },
+    {
+      "name": "assistant_feed_state_followup",
+      "value": "Follow-up"
+    },
+    {
+      "name": "assistant_feed_state_done",
+      "value": "Done"
+    },
+    {
+      "name": "assistant_feed_state_failed",
+      "value": "Failed"
+    },
+    {
+      "name": "assistant_feed_state_cancelled",
+      "value": "Cancelled"
+    },
+    {
+      "name": "assistant_feed_state_accepted",
+      "value": "Accepted"
+    },
+    {
+      "name": "assistant_feed_state_unknown",
+      "value": "Unknown"
+    },
+    {
+      "name": "notifications_denied",
+      "value": "Allow notifications in system settings"
+    },
+    {
+      "name": "notifications_unavailable",
+      "value": "Notifications unavailable"
+    },
+    {
+      "name": "agent_history",
+      "value": "History"
+    },
+    {
+      "name": "agent_history_off",
+      "value": "Live sessions"
+    },
+    {
+      "name": "agent_filter_machine",
+      "value": "Computer"
+    },
+    {
+      "name": "agent_filter_all_machines",
+      "value": "All computers"
+    },
+    {
+      "name": "agent_filter_repository",
+      "value": "Repository"
+    },
+    {
+      "name": "agent_filter_worktree",
+      "value": "Worktree"
+    },
+    {
+      "name": "agent_pin",
+      "value": "Pin"
+    },
+    {
+      "name": "agent_unpin",
+      "value": "Unpin"
+    },
+    {
+      "name": "agent_mute",
+      "value": "Mute"
+    },
+    {
+      "name": "agent_unmute",
+      "value": "Unmute"
+    },
+    {
+      "name": "agent_rename",
+      "value": "Rename"
+    },
+    {
+      "name": "agent_title",
+      "value": "Title"
+    },
+    {
+      "name": "agent_tab_name",
+      "value": "Tab name"
+    },
+    {
+      "name": "agent_mark_seen",
+      "value": "Mark as read"
+    },
+    {
+      "name": "agent_close",
+      "value": "Close Agent"
+    },
+    {
+      "name": "agent_delete",
+      "value": "Delete history"
+    },
+    {
+      "name": "agent_close_confirm",
+      "value": "Close this Agent?"
+    },
+    {
+      "name": "agent_delete_confirm",
+      "value": "Delete this session history?"
+    },
+    {
+      "name": "cleanup_incomplete",
+      "value": "Some local data could not be removed. Try again after restarting the app."
+    },
+    {
+      "name": "interaction_history",
+      "value": "Approvals and answers"
+    },
+    {
+      "name": "inbox_handoff_target_unavailable",
+      "value": "Sent to Persona. Refresh to open the conversation."
+    },
+    {
+      "name": "agent_pin_space",
+      "value": "Pin worktree"
+    },
+    {
+      "name": "agent_unpin_space",
+      "value": "Unpin worktree"
+    },
+    {
+      "name": "agent_mute_space",
+      "value": "Mute worktree"
+    },
+    {
+      "name": "agent_unmute_space",
+      "value": "Unmute worktree"
+    },
+    {
+      "name": "bcc",
+      "value": "Bcc"
+    },
+    {
+      "name": "cc",
+      "value": "Cc"
+    },
+    {
+      "name": "compose",
+      "value": "Compose"
+    },
+    {
+      "name": "subject",
+      "value": "Subject"
+    },
+    {
+      "name": "to",
+      "value": "To"
+    },
+    {
+      "name": "you",
+      "value": "You"
+    },
+    {
+      "name": "inbox_open",
+      "value": "Unhandled"
+    },
+    {
+      "name": "inbox_source_lark",
+      "value": "Lark"
+    },
+    {
+      "name": "inbox_source_generic",
+      "value": "Messages"
+    },
+    {
+      "name": "inbox_card_unsupported",
+      "value": "This message format is unavailable."
+    },
+    {
+      "name": "inbox_edited",
+      "value": "Edited"
+    },
+    {
+      "name": "inbox_handed_to",
+      "value": "Handed to"
+    },
+    {
+      "name": "inbox_handoff_instruction",
+      "value": "What should Persona do?"
+    },
+    {
+      "name": "inbox_handoff_preset_summary",
+      "value": "Summarize this, tell me what I need to do, and suggest a reply."
+    },
+    {
+      "name": "inbox_handoff_title",
+      "value": "Hand to Persona"
+    },
+    {
+      "name": "inbox_handoff_send",
+      "value": "Hand over"
+    },
+    {
+      "name": "inbox_open_thread",
+      "value": "Open thread"
+    },
+    {
+      "name": "inbox_processing",
+      "value": "Processing"
+    },
+    {
+      "name": "inbox_recalled",
+      "value": "Recalled"
+    },
+    {
+      "name": "inbox_reply_target_changed",
+      "value": "Reply target changed. Confirm the recipient again."
+    },
+    {
+      "name": "inbox_reply_to",
+      "value": "Reply to"
+    },
+    {
+      "name": "inbox_translation_clipped",
+      "value": "Translation truncated"
+    },
+    {
+      "name": "inbox_urgent",
+      "value": "Urgent"
+    },
+    {
+      "name": "inbox_show_translation",
+      "value": "Translation"
+    },
+    {
+      "name": "inbox_show_original",
+      "value": "Original"
+    },
+    {
+      "name": "inbox_topics",
+      "value": "Topics"
+    },
+    {
+      "name": "inbox_conversation",
+      "value": "Conversation"
+    },
+    {
+      "name": "inbox_older",
+      "value": "Earlier messages"
+    },
+    {
+      "name": "inbox_thread_reply",
+      "value": "Reply in thread"
+    },
+    {
+      "name": "inbox_message_reply",
+      "value": "Reply"
+    },
+    {
+      "name": "inbox_send_attachment",
+      "value": "Send attachment"
+    },
+    {
+      "name": "inbox_handling_looking",
+      "value": "Reviewing"
+    },
+    {
+      "name": "inbox_handling_agent",
+      "value": "Agent working"
+    },
+    {
+      "name": "inbox_handling_waiting",
+      "value": "Waiting for you"
+    },
+    {
+      "name": "inbox_handling_done",
+      "value": "Done"
+    },
+    {
+      "name": "inbox_handling_failed",
+      "value": "Failed"
+    },
+    {
+      "name": "inbox_suggestion_reply",
+      "value": "Reply suggestion"
+    },
+    {
+      "name": "inbox_suggestion_agent",
+      "value": "Agent suggestion"
+    },
+    {
+      "name": "inbox_suggestion_conclusion",
+      "value": "Conclusion"
+    },
+    {
+      "name": "inbox_tier_action",
+      "value": "Needs action"
+    },
+    {
+      "name": "inbox_tier_fyi",
+      "value": "For your information"
+    },
+    {
+      "name": "inbox_tier_noise",
+      "value": "Low priority"
+    },
+    {
+      "name": "inbox_tier_untriaged",
+      "value": "Unsorted"
+    },
+    {
+      "name": "inbox_message_pending",
+      "value": "Sending"
+    },
+    {
+      "name": "inbox_message_failed",
+      "value": "Failed to send"
+    },
+    {
+      "name": "inbox_write_draft",
+      "value": "Draft"
+    },
+    {
+      "name": "inbox_write_sending",
+      "value": "Sending"
+    },
+    {
+      "name": "inbox_write_sent",
+      "value": "Sent"
+    },
+    {
+      "name": "inbox_write_pending",
+      "value": "Awaiting confirmation"
+    },
+    {
+      "name": "inbox_write_unknown",
+      "value": "Result unknown"
+    },
+    {
+      "name": "inbox_write_failed",
+      "value": "Failed"
+    },
+    {
+      "name": "inbox_write_saving",
+      "value": "Saving"
+    },
+    {
+      "name": "inbox_write_handed_off",
+      "value": "Handed to Persona"
+    },
+    {
+      "name": "inbox_write_target_changed",
+      "value": "Recipient changed"
+    },
+    {
+      "name": "account_changed",
+      "value": "Account changed. Check before sending."
+    },
+    {
+      "name": "attachment_limit",
+      "value": "Attachment too large"
+    },
+    {
+      "name": "draft_save_failed",
+      "value": "Couldn’t save the draft"
+    },
+    {
+      "name": "mail_reply_target_changed",
+      "value": "Mail changed. Confirm the reply target again."
+    },
+    {
+      "name": "voice_transcript_empty",
+      "value": "No transcript yet"
+    },
+    {
+      "name": "grouping",
+      "value": "Group by"
+    },
+    {
+      "name": "agent_group_flat",
+      "value": "No grouping"
+    },
+    {
+      "name": "restore_draft",
+      "value": "Restore draft"
+    },
+    {
+      "name": "replace_draft",
+      "value": "Replace the current draft?"
+    },
+    {
+      "name": "todo_agents",
+      "value": "Agents"
+    },
+    {
+      "name": "todo_choose_agent",
+      "value": "Choose an agent"
+    },
+    {
+      "name": "todo_choose_project",
+      "value": "Choose a project"
+    },
+    {
+      "name": "todo_complete",
+      "value": "Mark done"
+    },
+    {
+      "name": "todo_filter_status",
+      "value": "Filter by status"
+    },
+    {
+      "name": "todo_group_by",
+      "value": "Group by"
+    },
+    {
+      "name": "todo_group_project",
+      "value": "Project"
+    },
+    {
+      "name": "todo_group_status",
+      "value": "Status"
+    },
+    {
+      "name": "todo_group_thread",
+      "value": "Conversation"
+    },
+    {
+      "name": "todo_link_agent",
+      "value": "Link agent"
+    },
+    {
+      "name": "todo_link_project",
+      "value": "Link project"
+    },
+    {
+      "name": "todo_move_from",
+      "value": "Move from"
+    },
+    {
+      "name": "todo_notes",
+      "value": "Notes"
+    },
+    {
+      "name": "todo_previously_involved",
+      "value": "Previously involved"
+    },
+    {
+      "name": "todo_projects",
+      "value": "Projects"
+    },
+    {
+      "name": "todo_related",
+      "value": "related"
+    },
+    {
+      "name": "todo_remove_project",
+      "value": "Remove project link"
+    },
+    {
+      "name": "todo_search",
+      "value": "Search todos"
+    },
+    {
+      "name": "todo_source_conversation",
+      "value": "Source conversation"
+    },
+    {
+      "name": "todo_unlink_agent",
+      "value": "Unlink agent"
+    },
+    {
+      "name": "todo_unsorted",
+      "value": "Unsorted"
+    },
+    {
+      "name": "todo_no_thread",
+      "value": "No conversation"
+    },
+    {
+      "name": "todo_state_needs_you",
+      "value": "Needs you"
+    },
+    {
+      "name": "todo_state_checking",
+      "value": "Checking"
+    },
+    {
+      "name": "todo_state_working",
+      "value": "Working"
+    },
+    {
+      "name": "todo_state_followup",
+      "value": "Follow up"
+    },
+    {
+      "name": "todo_state_not_started",
+      "value": "Not started"
+    },
+    {
+      "name": "todo_state_done",
+      "value": "Done"
+    },
+    {
+      "name": "todo_gone",
+      "value": "This todo no longer exists"
+    },
+    {
+      "name": "todo_write_pending",
+      "value": "A previous change is still being checked"
+    },
+    {
+      "name": "todo_write_unknown",
+      "value": "The result of the previous change is unknown"
+    },
+    {
+      "name": "todo_title_required",
+      "value": "Enter a title"
+    },
+    {
+      "name": "todo_agent_unavailable",
+      "value": "This agent cannot be linked"
+    },
+    {
+      "name": "todo_project_unavailable",
+      "value": "This project cannot be linked"
+    },
+    {
+      "name": "draft_restore_failed",
+      "value": "Could not restore the draft"
+    },
+    {
+      "name": "health_archive",
+      "value": "Archive"
+    },
+    {
+      "name": "health_archive_title",
+      "value": "Archive this conversation?"
+    },
+    {
+      "name": "health_ask_placeholder",
+      "value": "Ask about your health"
+    },
+    {
+      "name": "health_chats",
+      "value": "Health conversations"
+    },
+    {
+      "name": "health_chats_unavailable",
+      "value": "Health conversations are unavailable"
+    },
+    {
+      "name": "health_checkup_reports",
+      "value": "Checkup reports"
+    },
+    {
+      "name": "health_home_title",
+      "value": "Your health"
+    },
+    {
+      "name": "health_memory",
+      "value": "Health memory"
+    },
+    {
+      "name": "health_memory_content",
+      "value": "Add a note to health memory"
+    },
+    {
+      "name": "health_memory_delete_title",
+      "value": "Delete this memory?"
+    },
+    {
+      "name": "health_memory_edit",
+      "value": "Edit"
+    },
+    {
+      "name": "health_memory_index",
+      "value": "Health memory index"
+    },
+    {
+      "name": "health_new_chat",
+      "value": "New health conversation"
+    },
+    {
+      "name": "health_no_chats",
+      "value": "No health conversations"
+    },
+    {
+      "name": "health_no_memory",
+      "value": "No health memories"
+    },
+    {
+      "name": "health_no_reports",
+      "value": "No reports yet"
+    },
+    {
+      "name": "health_privacy_note",
+      "value": "Your health data stays in your Hub."
+    },
+    {
+      "name": "health_question_sleep",
+      "value": "How can I improve my sleep?"
+    },
+    {
+      "name": "health_question_steps",
+      "value": "What can my daily steps tell me?"
+    },
+    {
+      "name": "health_log_weight",
+      "value": "Log my weight"
+    },
+    {
+      "name": "health_log_water",
+      "value": "Log my water intake"
+    },
+    {
+      "name": "health_report_delete_message",
+      "value": "This report will be removed from your Hub."
+    },
+    {
+      "name": "health_report_delete_title",
+      "value": "Delete this report?"
+    },
+    {
+      "name": "health_report_file_read_failed",
+      "value": "Could not read the selected report"
+    },
+    {
+      "name": "health_report_file_too_large",
+      "value": "The report exceeds the 32 MiB limit"
+    },
+    {
+      "name": "health_report_file_unsupported",
+      "value": "This report file type is not supported"
+    },
+    {
+      "name": "health_report_node_outdated",
+      "value": "Update your Hub to use health reports"
+    },
+    {
+      "name": "health_report_not_summarized",
+      "value": "Summary not available"
+    },
+    {
+      "name": "health_report_original",
+      "value": "Original report"
+    },
+    {
+      "name": "health_report_prompt",
+      "value": "Review this health report and summarize its key findings."
+    },
+    {
+      "name": "health_report_summary",
+      "value": "Summary"
+    },
+    {
+      "name": "health_report_summarized",
+      "value": "Summary ready"
+    },
+    {
+      "name": "health_report_uploading",
+      "value": "Uploading reports…"
+    },
+    {
+      "name": "health_request_failed",
+      "value": "Health request failed"
+    },
+    {
+      "name": "health_storage_unavailable",
+      "value": "Health data could not be saved"
+    },
+    {
+      "name": "health_try_asking",
+      "value": "Try asking"
+    },
+    {
+      "name": "health_upload_pdf",
+      "value": "Upload PDF"
+    },
+    {
+      "name": "health_upload_photos",
+      "value": "Upload photos"
+    },
+    {
+      "name": "health_upload_report",
+      "value": "Upload a report"
+    },
+    {
+      "name": "knowledge_agent_prompt",
+      "value": "Task for the agent"
+    },
+    {
+      "name": "knowledge_agent_unavailable",
+      "value": "No compatible computer is available"
+    },
+    {
+      "name": "knowledge_all_tags",
+      "value": "All tags"
+    },
+    {
+      "name": "knowledge_ask_persona",
+      "value": "Ask Persona"
+    },
+    {
+      "name": "knowledge_edit_metadata",
+      "value": "Edit details"
+    },
+    {
+      "name": "knowledge_empty",
+      "value": "Nothing in this section"
+    },
+    {
+      "name": "knowledge_forget_recording",
+      "value": "Delete recording from knowledge?"
+    },
+    {
+      "name": "knowledge_forget_recording_note",
+      "value": "This recording will be deleted from your Hub."
+    },
+    {
+      "name": "knowledge_kind_projects",
+      "value": "Projects"
+    },
+    {
+      "name": "knowledge_kind_chats",
+      "value": "Chats"
+    },
+    {
+      "name": "knowledge_kind_people",
+      "value": "People"
+    },
+    {
+      "name": "knowledge_kind_docs",
+      "value": "Documents"
+    },
+    {
+      "name": "knowledge_kind_meetings",
+      "value": "Meetings"
+    },
+    {
+      "name": "knowledge_kind_events",
+      "value": "Events"
+    },
+    {
+      "name": "knowledge_kind_recordings",
+      "value": "Recordings"
+    },
+    {
+      "name": "knowledge_minutes",
+      "value": "Meeting notes"
+    },
+    {
+      "name": "knowledge_minutes_add_todos",
+      "value": "Add selected actions as todos"
+    },
+    {
+      "name": "knowledge_minutes_make",
+      "value": "Create meeting notes"
+    },
+    {
+      "name": "knowledge_no_results",
+      "value": "No results"
+    },
+    {
+      "name": "knowledge_open_link",
+      "value": "Open link"
+    },
+    {
+      "name": "knowledge_profile",
+      "value": "Profile"
+    },
+    {
+      "name": "knowledge_project_agents",
+      "value": "Project agents"
+    },
+    {
+      "name": "knowledge_project_long",
+      "value": "Long-term"
+    },
+    {
+      "name": "knowledge_project_short",
+      "value": "Short-term"
+    },
+    {
+      "name": "knowledge_recent",
+      "value": "Recent activity"
+    },
+    {
+      "name": "knowledge_recording_summary",
+      "value": "Meeting summary"
+    },
+    {
+      "name": "knowledge_related",
+      "value": "Related items"
+    },
+    {
+      "name": "knowledge_related_moments",
+      "value": "Related moments"
+    },
+    {
+      "name": "knowledge_relevance",
+      "value": "Relevance"
+    },
+    {
+      "name": "knowledge_request_failed",
+      "value": "Knowledge request failed"
+    },
+    {
+      "name": "knowledge_search",
+      "value": "Search knowledge"
+    },
+    {
+      "name": "knowledge_search_matches",
+      "value": "Matches"
+    },
+    {
+      "name": "knowledge_start_agent",
+      "value": "Start an agent"
+    },
+    {
+      "name": "knowledge_status_active",
+      "value": "Active"
+    },
+    {
+      "name": "knowledge_status_done",
+      "value": "Done"
+    },
+    {
+      "name": "knowledge_status_ignored",
+      "value": "Ignored"
+    },
+    {
+      "name": "knowledge_status_paused",
+      "value": "Paused"
+    },
+    {
+      "name": "knowledge_storage_unavailable",
+      "value": "Knowledge settings could not be saved"
+    },
+    {
+      "name": "knowledge_tags",
+      "value": "Tags"
+    },
+    {
+      "name": "knowledge_timeline",
+      "value": "Timeline"
+    },
+    {
+      "name": "knowledge_transcript",
+      "value": "Transcript"
+    },
+    {
+      "name": "session_tools_branch_from",
+      "value": "Branch from"
+    },
+    {
+      "name": "session_tools_commit",
+      "value": "Commit"
+    },
+    {
+      "name": "session_tools_commit_message",
+      "value": "Commit message"
+    },
+    {
+      "name": "session_tools_conflict_keep",
+      "value": "Keep existing"
+    },
+    {
+      "name": "session_tools_conflict_replace",
+      "value": "Replace existing"
+    },
+    {
+      "name": "session_tools_create_branch",
+      "value": "Create branch"
+    },
+    {
+      "name": "session_tools_current_branch",
+      "value": "Current branch"
+    },
+    {
+      "name": "session_tools_destination_folder",
+      "value": "Destination folder"
+    },
+    {
+      "name": "session_tools_forward",
+      "value": "Forward"
+    },
+    {
+      "name": "session_tools_git_confirm_title",
+      "value": "Confirm Git operation?"
+    },
+    {
+      "name": "session_tools_git_stage",
+      "value": "Stage file"
+    },
+    {
+      "name": "session_tools_git_unstage",
+      "value": "Unstage file"
+    },
+    {
+      "name": "session_tools_git_commit",
+      "value": "Create commit"
+    },
+    {
+      "name": "session_tools_git_push",
+      "value": "Push changes"
+    },
+    {
+      "name": "session_tools_git_publish",
+      "value": "Publish branch"
+    },
+    {
+      "name": "session_tools_git_switch",
+      "value": "Switch branch"
+    },
+    {
+      "name": "session_tools_git_create",
+      "value": "Create branch"
+    },
+    {
+      "name": "session_tools_git_stash_push",
+      "value": "Save stash"
+    },
+    {
+      "name": "session_tools_git_stash_apply",
+      "value": "Apply stash"
+    },
+    {
+      "name": "session_tools_git_stash_pop",
+      "value": "Apply and remove stash"
+    },
+    {
+      "name": "session_tools_git_stash_drop",
+      "value": "Drop stash"
+    },
+    {
+      "name": "session_tools_move",
+      "value": "Move"
+    },
+    {
+      "name": "session_tools_move_conflict",
+      "value": "A file with this name already exists"
+    },
+    {
+      "name": "session_tools_move_to_trash",
+      "value": "Move to trash"
+    },
+    {
+      "name": "session_tools_new_branch",
+      "value": "New branch name"
+    },
+    {
+      "name": "session_tools_new_name",
+      "value": "New name"
+    },
+    {
+      "name": "session_tools_no_branches",
+      "value": "No branches available"
+    },
+    {
+      "name": "session_tools_preview_external_link",
+      "value": "Open in browser"
+    },
+    {
+      "name": "session_tools_preview_file",
+      "value": "Preview file"
+    },
+    {
+      "name": "session_tools_preview_input",
+      "value": "Send text to page"
+    },
+    {
+      "name": "session_tools_preview_listening",
+      "value": "Listening"
+    },
+    {
+      "name": "session_tools_preview_none",
+      "value": "No preview servers found"
+    },
+    {
+      "name": "session_tools_preview_open",
+      "value": "Open preview"
+    },
+    {
+      "name": "session_tools_preview_path",
+      "value": "Path"
+    },
+    {
+      "name": "session_tools_preview_path_invalid",
+      "value": "Enter a valid path"
+    },
+    {
+      "name": "session_tools_preview_problem",
+      "value": "Preview error"
+    },
+    {
+      "name": "session_tools_preview_start_confirm",
+      "value": "Start preview server?"
+    },
+    {
+      "name": "session_tools_preview_stopped",
+      "value": "Stopped"
+    },
+    {
+      "name": "session_tools_preview_unavailable",
+      "value": "Preview is unavailable"
+    },
+    {
+      "name": "session_tools_publish_branch",
+      "value": "Publish branch"
+    },
+    {
+      "name": "session_tools_push",
+      "value": "Push"
+    },
+    {
+      "name": "session_tools_remote_branch",
+      "value": "Remote branch"
+    },
+    {
+      "name": "session_tools_restore",
+      "value": "Restore"
+    },
+    {
+      "name": "session_tools_restore_confirm",
+      "value": "Restore deleted files?"
+    },
+    {
+      "name": "session_tools_stage",
+      "value": "Stage"
+    },
+    {
+      "name": "session_tools_stash_apply",
+      "value": "Apply"
+    },
+    {
+      "name": "session_tools_stash_drop",
+      "value": "Drop"
+    },
+    {
+      "name": "session_tools_stash_message",
+      "value": "Stash message"
+    },
+    {
+      "name": "session_tools_stash_pop",
+      "value": "Apply and remove"
+    },
+    {
+      "name": "session_tools_stash_save",
+      "value": "Save stash"
+    },
+    {
+      "name": "session_tools_stash_untracked",
+      "value": "Include untracked files"
+    },
+    {
+      "name": "session_tools_stashes",
+      "value": "Stashes"
+    },
+    {
+      "name": "session_tools_switch_branch",
+      "value": "Switch branch"
+    },
+    {
+      "name": "session_tools_terminal_control_confirm",
+      "value": "Take control of this terminal?"
+    },
+    {
+      "name": "session_tools_terminal_screen",
+      "value": "Computer screen"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_confirm",
+      "value": "Allow input on the computer screen?"
+    },
+    {
+      "name": "session_tools_terminal_screen_input",
+      "value": "Type to computer"
+    },
+    {
+      "name": "session_tools_trash_title",
+      "value": "Move files to trash?"
+    },
+    {
+      "name": "session_tools_trashed_count",
+      "value": "Moved {count} items to trash"
+    },
+    {
+      "name": "session_tools_unstage",
+      "value": "Unstage"
+    },
+    {
+      "name": "session_tools_write_pending",
+      "value": "This change is still being checked"
+    },
+    {
+      "name": "session_tools_write_unknown",
+      "value": "The result of this change is unknown"
+    },
+    {
+      "name": "screen_unavailable",
+      "value": "Computer screen is unavailable"
+    },
+    {
+      "name": "preview_start_slow",
+      "value": "The preview server is taking longer than expected"
+    },
+    {
+      "name": "chat_attachment_text_too_large",
+      "value": "The message is too large"
+    },
+    {
+      "name": "computer_screen_connect",
+      "value": "Connect"
+    },
+    {
+      "name": "computer_screen_refresh",
+      "value": "Refresh"
+    },
+    {
+      "name": "computer_screen_control",
+      "value": "Take control"
+    },
+    {
+      "name": "computer_screen_release_control",
+      "value": "Release control"
+    },
+    {
+      "name": "computer_screen_control_confirm_title",
+      "value": "Allow control of the computer screen?"
+    },
+    {
+      "name": "computer_screen_control_confirm_message",
+      "value": "Allow this phone to view and control your computer screen?"
+    },
+    {
+      "name": "computer_screen_allow_control",
+      "value": "Allow control on your computer"
+    },
+    {
+      "name": "computer_screen_read_only",
+      "value": "Read only"
+    },
+    {
+      "name": "computer_screen_enter_credentials",
+      "value": "Enter account and password"
+    },
+    {
+      "name": "computer_screen_account",
+      "value": "Account"
+    },
+    {
+      "name": "computer_screen_password",
+      "value": "Password"
+    },
+    {
+      "name": "computer_screen_sign_in",
+      "value": "Sign in"
+    },
+    {
+      "name": "computer_screen_cancel_sign_in",
+      "value": "Cancel sign-in"
+    },
+    {
+      "name": "computer_screen_waiting",
+      "value": "Waiting for the computer…"
+    },
+    {
+      "name": "computer_screen_sharing_off",
+      "value": "Screen sharing is off"
+    },
+    {
+      "name": "computer_screen_connection_lost",
+      "value": "Connection to the computer was lost"
+    },
+    {
+      "name": "computer_screen_connection_failed",
+      "value": "Could not connect to the computer screen"
+    },
+    {
+      "name": "computer_screen_auth_failed",
+      "value": "Sign-in failed"
+    },
+    {
+      "name": "computer_screen_unsupported",
+      "value": "Computer screen is not supported"
+    },
+    {
+      "name": "computer_screen_screen_unavailable",
+      "value": "Computer screen is unavailable"
+    },
+    {
+      "name": "computer_screen_type_text",
+      "value": "Type text"
+    },
+    {
+      "name": "computer_screen_send_text",
+      "value": "Send text"
+    },
+    {
+      "name": "computer_screen_not_mac",
+      "value": "Computer screen is supported on Mac only"
+    },
+    {
+      "name": "computer_screen_read_only_device",
+      "value": "This device supports viewing only"
+    },
+    {
+      "name": "scan_qr",
+      "value": "Scan QR code"
+    },
+    {
+      "name": "app_style_glass",
+      "value": "Glass"
+    },
+    {
+      "name": "app_style_brief",
+      "value": "Brief"
+    },
+    {
+      "name": "app_style_board",
+      "value": "Board"
+    },
+    {
+      "name": "inbox_reference_unavailable",
+      "value": "Conversation reference unavailable"
+    },
+    {
+      "name": "inbox_reference_changed",
+      "value": "Conversation reference changed"
+    },
+    {
+      "name": "branch_chat",
+      "value": "Branch chat"
+    },
+    {
+      "name": "use_as_context",
+      "value": "Use as context"
+    },
+    {
+      "name": "rewind_chat",
+      "value": "Rewind chat only"
+    },
+    {
+      "name": "rewind_code_chat",
+      "value": "Rewind code and chat"
+    },
+    {
+      "name": "rewind_chat_consequence",
+      "value": "Remove the conversation after this message. The message can return to the composer."
+    },
+    {
+      "name": "rewind_code_consequence",
+      "value": "Restore the computer’s files and conversation to before this message. Later file changes are lost."
+    },
+    {
+      "name": "rewind_chat_done",
+      "value": "Chat rewound"
+    },
+    {
+      "name": "rewind_code_done",
+      "value": "Code and chat rewound"
+    },
+    {
+      "name": "rewind_input_kept",
+      "value": "Rewound; the message remains in the computer’s input box"
+    },
+    {
+      "name": "session_revision_dialog_open",
+      "value": "Dismiss the computer’s dialog first"
+    },
+    {
+      "name": "session_revision_failed",
+      "value": "The conversation action failed"
+    },
+    {
+      "name": "session_revision_fork_turn_running",
+      "value": "This reply is still being written"
+    },
+    {
+      "name": "session_revision_full_access",
+      "value": "Full device access is required"
+    },
+    {
+      "name": "session_revision_hub_outdated",
+      "value": "Update the Hub or computer node"
+    },
+    {
+      "name": "session_revision_input_draft",
+      "value": "The computer’s input box has a draft"
+    },
+    {
+      "name": "session_revision_mismatch",
+      "value": "The transcript changed; review it again"
+    },
+    {
+      "name": "session_revision_needs_you",
+      "value": "Answer the pending request first"
+    },
+    {
+      "name": "session_revision_no_text",
+      "value": "This message cannot be identified for rewind"
+    },
+    {
+      "name": "session_revision_not_running",
+      "value": "The session is not running"
+    },
+    {
+      "name": "session_revision_nothing",
+      "value": "No message is available to rewind"
+    },
+    {
+      "name": "session_revision_open_request",
+      "value": "Resolve the open request first"
+    },
+    {
+      "name": "session_revision_target_changed",
+      "value": "The conversation changed; review it again"
+    },
+    {
+      "name": "session_revision_target_invalid",
+      "value": "The returned conversation could not be verified"
+    },
+    {
+      "name": "session_revision_timeout",
+      "value": "The computer did not finish in time"
+    },
+    {
+      "name": "session_revision_unsupported",
+      "value": "This session does not support this action"
+    },
+    {
+      "name": "session_revision_working",
+      "value": "Wait for the running turn to finish"
+    },
+    {
+      "name": "platform",
+      "value": "System"
+    },
+    {
+      "name": "directory_partly_unavailable",
+      "value": "Some workspaces are unavailable"
+    },
+    {
+      "name": "computer_screen_open",
+      "value": "View screen"
+    },
+    {
+      "name": "candidate_addresses",
+      "value": "Alternate addresses"
+    },
+    {
+      "name": "language_change_failed",
+      "value": "Could not change the app language"
+    },
+    {
+      "name": "language_after_restart",
+      "value": "Follow the system language after the next launch"
+    },
+    {
+      "name": "admin_about_me",
+      "value": "About me"
+    },
+    {
+      "name": "admin_agent_tasks",
+      "value": "Agent tasks"
+    },
+    {
+      "name": "admin_all_online_machines",
+      "value": "All online computers"
+    },
+    {
+      "name": "admin_archive_days",
+      "value": "Archive closed tasks after (days)"
+    },
+    {
+      "name": "admin_auto_update",
+      "value": "Automatic Hub updates"
+    },
+    {
+      "name": "admin_auto_update_nodes",
+      "value": "Update computers automatically"
+    },
+    {
+      "name": "admin_builtin",
+      "value": "Built-in"
+    },
+    {
+      "name": "admin_check_failed",
+      "value": "Check failed"
+    },
+    {
+      "name": "admin_check_ok",
+      "value": "Check succeeded"
+    },
+    {
+      "name": "admin_code_expires",
+      "value": "Code expires"
+    },
+    {
+      "name": "admin_command_copied",
+      "value": "Install command copied"
+    },
+    {
+      "name": "admin_command_copy_failed",
+      "value": "Could not copy install command"
+    },
+    {
+      "name": "admin_confirmation_target",
+      "value": "Target"
+    },
+    {
+      "name": "admin_create_manager",
+      "value": "Create manager"
+    },
+    {
+      "name": "admin_create_memory",
+      "value": "Create memory"
+    },
+    {
+      "name": "admin_default",
+      "value": "Default"
+    },
+    {
+      "name": "admin_default_machine",
+      "value": "Default computer"
+    },
+    {
+      "name": "admin_delete_launcher_note",
+      "value": "This removes the launcher configuration."
+    },
+    {
+      "name": "admin_delete_manager_note",
+      "value": "Deleting this manager revokes its access and disconnects it. It can be deleted only when no computers are assigned."
+    },
+    {
+      "name": "admin_delete_memory_note",
+      "value": "This deletes the selected memory file."
+    },
+    {
+      "name": "admin_edit",
+      "value": "Edit"
+    },
+    {
+      "name": "admin_engine_confirm_selection",
+      "value": "Selected engine hosts"
+    },
+    {
+      "name": "admin_engine_default",
+      "value": "Default"
+    },
+    {
+      "name": "admin_engine_no_default",
+      "value": "No default engine"
+    },
+    {
+      "name": "admin_engine_save",
+      "value": "Save engine selection"
+    },
+    {
+      "name": "admin_engine_save_note",
+      "value": "This changes which engines are available to agents on this computer."
+    },
+    {
+      "name": "admin_engine_sets_unsupported",
+      "value": "Custom engine sets aren't supported by this computer"
+    },
+    {
+      "name": "admin_health_check",
+      "value": "Run launcher health check"
+    },
+    {
+      "name": "admin_health_check_note",
+      "value": "Runs checks for the selected computer's configured launchers."
+    },
+    {
+      "name": "admin_history_empty",
+      "value": "No update history"
+    },
+    {
+      "name": "admin_history_unsupported",
+      "value": "Update history isn't available on this Hub"
+    },
+    {
+      "name": "admin_hub_auto_policy_note",
+      "value": "When enabled, Hub updates install automatically when available."
+    },
+    {
+      "name": "admin_hub_busy",
+      "value": "Active agents"
+    },
+    {
+      "name": "admin_hub_cannot_update",
+      "value": "Hub can't be updated right now"
+    },
+    {
+      "name": "admin_hub_check",
+      "value": "Check for Hub updates"
+    },
+    {
+      "name": "admin_hub_check_auto_note",
+      "value": "This check may start an automatic Hub update."
+    },
+    {
+      "name": "admin_hub_check_note",
+      "value": "Checks whether a Hub update is available."
+    },
+    {
+      "name": "admin_hub_no_status",
+      "value": "Hub update status unavailable"
+    },
+    {
+      "name": "admin_hub_node_policy_note",
+      "value": "When enabled, computers update automatically after the Hub."
+    },
+    {
+      "name": "admin_hub_setting",
+      "value": "Change update setting"
+    },
+    {
+      "name": "admin_hub_state",
+      "value": "Update status"
+    },
+    {
+      "name": "admin_hub_update",
+      "value": "Update Hub"
+    },
+    {
+      "name": "admin_hub_update_history",
+      "value": "Update history"
+    },
+    {
+      "name": "admin_hub_update_note",
+      "value": "The Hub waits for active agents to become idle before updating."
+    },
+    {
+      "name": "admin_hub_update_now",
+      "value": "Update now"
+    },
+    {
+      "name": "admin_hub_update_now_note",
+      "value": "Updates immediately without waiting for active agents to become idle."
+    },
+    {
+      "name": "admin_hub_version",
+      "value": "Hub version"
+    },
+    {
+      "name": "admin_identity",
+      "value": "Assistant identity"
+    },
+    {
+      "name": "admin_idle_hours",
+      "value": "Close idle sessions after (hours)"
+    },
+    {
+      "name": "admin_import_providers",
+      "value": "Providers"
+    },
+    {
+      "name": "admin_import_selected",
+      "value": "Import selected"
+    },
+    {
+      "name": "admin_inbox_signals",
+      "value": "Inbox signals"
+    },
+    {
+      "name": "admin_install_code",
+      "value": "Install code"
+    },
+    {
+      "name": "admin_interject_background",
+      "value": "Allow background interjections"
+    },
+    {
+      "name": "admin_knowledge_topics",
+      "value": "Knowledge topics"
+    },
+    {
+      "name": "admin_last_check",
+      "value": "Last checked"
+    },
+    {
+      "name": "admin_latest_version",
+      "value": "Latest version"
+    },
+    {
+      "name": "admin_launcher_agent_note",
+      "value": "The built-in Agent launcher is managed by the Hub."
+    },
+    {
+      "name": "admin_launcher_base_url",
+      "value": "Base URL"
+    },
+    {
+      "name": "admin_launcher_check",
+      "value": "Test launcher"
+    },
+    {
+      "name": "admin_launcher_check_note",
+      "value": "Sends an actual request to the provider."
+    },
+    {
+      "name": "admin_launcher_delete",
+      "value": "Delete launcher"
+    },
+    {
+      "name": "admin_launcher_display_name",
+      "value": "Display name"
+    },
+    {
+      "name": "admin_launcher_env_present",
+      "value": "Environment variables configured"
+    },
+    {
+      "name": "admin_launcher_headers_present",
+      "value": "Custom headers configured"
+    },
+    {
+      "name": "admin_launcher_health",
+      "value": "Launcher health"
+    },
+    {
+      "name": "admin_launcher_id",
+      "value": "Launcher ID"
+    },
+    {
+      "name": "admin_launcher_import",
+      "value": "Import launchers"
+    },
+    {
+      "name": "admin_launcher_import_note",
+      "value": "Imports the selected provider settings from this computer."
+    },
+    {
+      "name": "admin_launcher_key",
+      "value": "API key"
+    },
+    {
+      "name": "admin_launcher_key_missing",
+      "value": "No API key saved"
+    },
+    {
+      "name": "admin_launcher_key_present",
+      "value": "API key saved"
+    },
+    {
+      "name": "admin_launcher_model",
+      "value": "Model"
+    },
+    {
+      "name": "admin_launcher_models",
+      "value": "Available models"
+    },
+    {
+      "name": "admin_launcher_name",
+      "value": "Launcher name"
+    },
+    {
+      "name": "admin_launcher_presets",
+      "value": "Launcher presets"
+    },
+    {
+      "name": "admin_launcher_presets_empty",
+      "value": "No launcher presets available"
+    },
+    {
+      "name": "admin_launcher_replace_key",
+      "value": "Replace API key"
+    },
+    {
+      "name": "admin_launcher_select",
+      "value": "Select a launcher"
+    },
+    {
+      "name": "admin_launcher_stale",
+      "value": "Out of date"
+    },
+    {
+      "name": "admin_launchers",
+      "value": "Launchers"
+    },
+    {
+      "name": "admin_load_import",
+      "value": "Load launchers"
+    },
+    {
+      "name": "admin_machine_engine",
+      "value": "Computer engine"
+    },
+    {
+      "name": "admin_machine_id",
+      "value": "Computer ID"
+    },
+    {
+      "name": "admin_machine_unavailable",
+      "value": "Computer unavailable"
+    },
+    {
+      "name": "admin_machines",
+      "value": "Computers"
+    },
+    {
+      "name": "admin_main_tasks_quiet",
+      "value": "Keep the main conversation quiet"
+    },
+    {
+      "name": "admin_make_default",
+      "value": "Make default"
+    },
+    {
+      "name": "admin_manager_code",
+      "value": "Generate install code"
+    },
+    {
+      "name": "admin_manager_code_note",
+      "value": "Creates a new install code for joining this manager."
+    },
+    {
+      "name": "admin_manager_create",
+      "value": "Create manager"
+    },
+    {
+      "name": "admin_manager_create_note",
+      "value": "Creates a manager with this name."
+    },
+    {
+      "name": "admin_manager_default",
+      "value": "Make default manager"
+    },
+    {
+      "name": "admin_manager_default_note",
+      "value": "New sessions will use this manager by default. Existing computers will not move."
+    },
+    {
+      "name": "admin_manager_delete",
+      "value": "Delete manager"
+    },
+    {
+      "name": "admin_manager_installing",
+      "value": "Installing"
+    },
+    {
+      "name": "admin_manager_move",
+      "value": "Move computer"
+    },
+    {
+      "name": "admin_manager_move_note",
+      "value": "Assigns this computer to the selected manager."
+    },
+    {
+      "name": "admin_manager_name",
+      "value": "Manager name"
+    },
+    {
+      "name": "admin_manager_offline",
+      "value": "Offline"
+    },
+    {
+      "name": "admin_manager_online",
+      "value": "Online"
+    },
+    {
+      "name": "admin_manager_rename",
+      "value": "Rename manager"
+    },
+    {
+      "name": "admin_manager_rename_note",
+      "value": "Changes the name shown for this manager."
+    },
+    {
+      "name": "admin_managers",
+      "value": "Managers"
+    },
+    {
+      "name": "admin_managers_empty",
+      "value": "No managers found"
+    },
+    {
+      "name": "admin_memory",
+      "value": "Memory"
+    },
+    {
+      "name": "admin_memory_content",
+      "value": "Memory content"
+    },
+    {
+      "name": "admin_memory_created",
+      "value": "Memory created"
+    },
+    {
+      "name": "admin_memory_delete",
+      "value": "Delete memory"
+    },
+    {
+      "name": "admin_memory_empty",
+      "value": "No memory files"
+    },
+    {
+      "name": "admin_memory_exists",
+      "value": "A memory file with this name already exists"
+    },
+    {
+      "name": "admin_memory_filename",
+      "value": "File name"
+    },
+    {
+      "name": "admin_memory_invalid_name",
+      "value": "Enter a valid file name"
+    },
+    {
+      "name": "admin_minutes_days",
+      "value": "Keep meeting minutes for (days)"
+    },
+    {
+      "name": "admin_move",
+      "value": "Move"
+    },
+    {
+      "name": "admin_move_machine",
+      "value": "Move computer"
+    },
+    {
+      "name": "admin_new_install_code",
+      "value": "New install code"
+    },
+    {
+      "name": "admin_new_launcher",
+      "value": "New launcher"
+    },
+    {
+      "name": "admin_new_manager",
+      "value": "New manager"
+    },
+    {
+      "name": "admin_new_memory",
+      "value": "New memory"
+    },
+    {
+      "name": "admin_no_machine_move",
+      "value": "No computers available to move"
+    },
+    {
+      "name": "admin_node_cannot_deploy",
+      "value": "This computer can't be updated"
+    },
+    {
+      "name": "admin_node_deploying",
+      "value": "Updating"
+    },
+    {
+      "name": "admin_node_mismatch",
+      "value": "Node version mismatch"
+    },
+    {
+      "name": "admin_node_update",
+      "value": "Update Node"
+    },
+    {
+      "name": "admin_node_update_note",
+      "value": "Starts a Node deployment on this computer. Check the computer status to confirm the result."
+    },
+    {
+      "name": "admin_node_version",
+      "value": "Node version"
+    },
+    {
+      "name": "admin_preferences",
+      "value": "Preferences"
+    },
+    {
+      "name": "admin_preset_add",
+      "value": "Add launcher preset"
+    },
+    {
+      "name": "admin_preset_add_note",
+      "value": "Adds this launcher preset."
+    },
+    {
+      "name": "admin_recording_days",
+      "value": "Keep recordings for (days)"
+    },
+    {
+      "name": "admin_redeploy",
+      "value": "Update Node"
+    },
+    {
+      "name": "admin_refresh_failed",
+      "value": "Refresh failed"
+    },
+    {
+      "name": "admin_rename",
+      "value": "Rename"
+    },
+    {
+      "name": "admin_save",
+      "value": "Save"
+    },
+    {
+      "name": "admin_setting_disable",
+      "value": "Turn off"
+    },
+    {
+      "name": "admin_setting_enable",
+      "value": "Turn on"
+    },
+    {
+      "name": "admin_storage_failed",
+      "value": "Could not save locally"
+    },
+    {
+      "name": "admin_timezone",
+      "value": "Time zone"
+    },
+    {
+      "name": "admin_unsupported",
+      "value": "Not supported by this Hub"
+    },
+    {
+      "name": "admin_update_available",
+      "value": "Update available"
+    },
+    {
+      "name": "admin_update_held",
+      "value": "Update paused"
+    },
+    {
+      "name": "admin_update_rolled_back",
+      "value": "Update was rolled back"
+    },
+    {
+      "name": "admin_updated_unknown",
+      "value": "Updated time unavailable"
+    },
+    {
+      "name": "admin_invalid_number",
+      "value": "Enter a whole number"
+    },
+    {
+      "name": "admin_state_saving",
+      "value": "Saving"
+    },
+    {
+      "name": "admin_state_done",
+      "value": "Saved"
+    },
+    {
+      "name": "admin_state_pending",
+      "value": "Pending"
+    },
+    {
+      "name": "admin_state_result_unknown",
+      "value": "Result unknown"
+    },
+    {
+      "name": "admin_state_failed",
+      "value": "Could not save"
+    },
+    {
+      "name": "admin_state_running",
+      "value": "Running"
+    },
+    {
+      "name": "admin_hub_state_idle",
+      "value": "Idle"
+    },
+    {
+      "name": "admin_hub_state_checking",
+      "value": "Checking"
+    },
+    {
+      "name": "admin_hub_state_available",
+      "value": "Update available"
+    },
+    {
+      "name": "admin_hub_state_downloading",
+      "value": "Downloading"
+    },
+    {
+      "name": "admin_hub_state_waiting_idle",
+      "value": "Waiting for agents to become idle"
+    },
+    {
+      "name": "admin_hub_state_restarting",
+      "value": "Restarting"
+    },
+    {
+      "name": "admin_hub_state_confirming",
+      "value": "Verifying update"
+    },
+    {
+      "name": "admin_hub_state_updated",
+      "value": "Updated"
+    },
+    {
+      "name": "admin_hub_state_rolled_back",
+      "value": "Rolled back"
+    },
+    {
+      "name": "admin_hub_state_failed",
+      "value": "Failed"
+    },
+    {
+      "name": "admin_command_service",
+      "value": "Service command"
+    },
+    {
+      "name": "admin_command_join",
+      "value": "Join command"
+    },
+    {
+      "name": "admin_command_docker",
+      "value": "Docker command"
+    },
+    {
+      "name": "extension_ui_action_ambiguous",
+      "value": "Action status is uncertain"
+    },
+    {
+      "name": "extension_ui_action_completed",
+      "value": "Action completed"
+    },
+    {
+      "name": "extension_ui_action_rejected",
+      "value": "Action was rejected"
+    },
+    {
+      "name": "extension_ui_action_stale",
+      "value": "This action is out of date. Refresh and try again."
+    },
+    {
+      "name": "extension_ui_action_uncertain",
+      "value": "Action status is uncertain"
+    },
+    {
+      "name": "extension_ui_binary_diff",
+      "value": "Binary file; diff unavailable"
+    },
+    {
+      "name": "extension_ui_comment_line",
+      "value": "Line"
+    },
+    {
+      "name": "extension_ui_comment_placeholder",
+      "value": "Write a comment"
+    },
+    {
+      "name": "extension_ui_confirm_action",
+      "value": "Confirm action"
+    },
+    {
+      "name": "extension_ui_confirmation_required",
+      "value": "Confirmation is required for this action"
+    },
+    {
+      "name": "extension_ui_epoch_limit",
+      "value": "Too many stream resets"
+    },
+    {
+      "name": "extension_ui_expand_diff",
+      "value": "Show more context"
+    },
+    {
+      "name": "extension_ui_failed",
+      "value": "Could not load the extension view"
+    },
+    {
+      "name": "extension_ui_html_unsupported",
+      "value": "HTML content is shown as text"
+    },
+    {
+      "name": "extension_ui_image_invalid",
+      "value": "Image is invalid or too large"
+    },
+    {
+      "name": "extension_ui_image_unavailable",
+      "value": "Image unavailable"
+    },
+    {
+      "name": "extension_ui_invalid_view",
+      "value": "Extension returned an invalid view"
+    },
+    {
+      "name": "extension_ui_load_context",
+      "value": "Load context"
+    },
+    {
+      "name": "extension_ui_load_diff",
+      "value": "Load diff"
+    },
+    {
+      "name": "extension_ui_load_more",
+      "value": "Load more"
+    },
+    {
+      "name": "extension_ui_mark_viewed",
+      "value": "Mark file as viewed"
+    },
+    {
+      "name": "extension_ui_offline",
+      "value": "Extension is unavailable while offline"
+    },
+    {
+      "name": "extension_ui_open_lines",
+      "value": "Open lines"
+    },
+    {
+      "name": "extension_ui_queue_limit",
+      "value": "Too many pending actions"
+    },
+    {
+      "name": "extension_ui_receipt_invalid",
+      "value": "Could not verify the action result"
+    },
+    {
+      "name": "extension_ui_receipt_timeout",
+      "value": "Action confirmation timed out"
+    },
+    {
+      "name": "extension_ui_reopen_thread",
+      "value": "Reopen thread"
+    },
+    {
+      "name": "extension_ui_resolve_thread",
+      "value": "Resolve thread"
+    },
+    {
+      "name": "extension_ui_retry_action",
+      "value": "Retry action"
+    },
+    {
+      "name": "extension_ui_secret_stream",
+      "value": "Secret fields cannot be sent in streaming mode"
+    },
+    {
+      "name": "extension_ui_send_uncertain",
+      "value": "Action delivery is uncertain. Retry safely when ready."
+    },
+    {
+      "name": "extension_ui_stack_limit",
+      "value": "Too many extension pages"
+    },
+    {
+      "name": "extension_ui_unknown_node",
+      "value": "This component is not supported; its text is shown below"
+    },
+    {
+      "name": "extension_ui_unsupported_component",
+      "value": "This extension view contains unsupported content"
+    },
+    {
+      "name": "extension_ui_value_invalid",
+      "value": "Action values are invalid"
+    },
+    {
+      "name": "apply",
+      "value": "Apply"
+    },
+    {
+      "name": "comment",
+      "value": "Comment"
+    },
+    {
+      "name": "discard",
+      "value": "Discard"
+    },
+    {
+      "name": "unknown",
+      "value": "Unknown"
+    },
+    {
+      "name": "session_tools_write_unavailable",
+      "value": "File changes aren't available right now"
+    },
+    {
+      "name": "assistant_view_cache_full",
+      "value": "This card can't be opened right now."
+    },
+    {
+      "name": "assistant_view_changed",
+      "value": "This card changed. Review it and confirm again before replying."
+    },
+    {
+      "name": "assistant_view_confirm_title",
+      "value": "Confirm assistant action"
+    },
+    {
+      "name": "assistant_view_form_incomplete",
+      "value": "Fill in every field before submitting."
+    },
+    {
+      "name": "assistant_view_form_invalid",
+      "value": "Check the form values and try again."
+    },
+    {
+      "name": "assistant_view_form_limit",
+      "value": "This form is too large to submit."
+    },
+    {
+      "name": "assistant_view_invalid_target",
+      "value": "This link isn't supported."
+    },
+    {
+      "name": "assistant_view_page_depth",
+      "value": "Too many open pages."
+    },
+    {
+      "name": "assistant_view_page_unavailable",
+      "value": "This page isn't available."
+    },
+    {
+      "name": "assistant_view_result_unknown",
+      "value": "We couldn't confirm whether the reply was sent. Retry the same action."
+    },
+    {
+      "name": "assistant_view_retry_original",
+      "value": "Retry same action"
+    },
+    {
+      "name": "assistant_view_selected_pending",
+      "value": "Reply queued"
+    },
+    {
+      "name": "assistant_view_selected_sent",
+      "value": "Reply sent"
+    },
+    {
+      "name": "assistant_view_selected_failed",
+      "value": "Reply failed"
+    },
+    {
+      "name": "assistant_view_selected_unknown",
+      "value": "Reply status unknown"
+    },
+    {
+      "name": "assistant_view_submit_failed",
+      "value": "Couldn't submit this response."
+    },
+    {
+      "name": "assistant_view_syncing",
+      "value": "Checking reply status…"
+    },
+    {
+      "name": "assistant_view_unavailable",
+      "value": "This card is unavailable."
+    },
+    {
+      "name": "voice_main_only",
+      "value": "This voice extension supports the main chat only"
+    },
+    {
+      "name": "phone_before",
+      "value": "Before"
+    },
+    {
+      "name": "phone_after",
+      "value": "After"
+    },
+    {
+      "name": "contacts_write",
+      "value": "Edit contacts"
+    },
+    {
+      "name": "ssh_settings",
+      "value": "SSH tunnel"
+    },
+    {
+      "name": "ssh_host",
+      "value": "SSH host"
+    },
+    {
+      "name": "ssh_port",
+      "value": "SSH port"
+    },
+    {
+      "name": "ssh_username",
+      "value": "SSH username"
+    },
+    {
+      "name": "ssh_host_key",
+      "value": "SSH host fingerprint"
+    },
+    {
+      "name": "ssh_private_key",
+      "value": "Private key"
+    },
+    {
+      "name": "ssh_replace_key",
+      "value": "Replace private key (optional)"
+    },
+    {
+      "name": "ssh_passphrase",
+      "value": "Key passphrase (optional)"
+    },
+    {
+      "name": "ssh_save_enable",
+      "value": "Save and enable"
+    },
+    {
+      "name": "ssh_disable",
+      "value": "Disable SSH tunnel"
+    },
+    {
+      "name": "ssh_verify_host",
+      "value": "Verify SSH host"
+    },
+    {
+      "name": "ssh_verify_message",
+      "value": "Compare this fingerprint with a trusted record from your SSH server before continuing."
+    },
+    {
+      "name": "ssh_verified_enable",
+      "value": "Verified, enable"
+    },
+    {
+      "name": "ssh_loading",
+      "value": "Loading SSH settings…"
+    },
+    {
+      "name": "ssh_saving",
+      "value": "Saving SSH settings…"
+    },
+    {
+      "name": "ssh_connecting",
+      "value": "Connecting SSH tunnel…"
+    },
+    {
+      "name": "ssh_connected",
+      "value": "SSH tunnel connected"
+    },
+    {
+      "name": "ssh_enabled",
+      "value": "SSH tunnel enabled"
+    },
+    {
+      "name": "ssh_disabled",
+      "value": "SSH tunnel disabled"
+    },
+    {
+      "name": "ssh_invalid_config",
+      "value": "Check the SSH host, port, username and SHA256 fingerprint."
+    },
+    {
+      "name": "ssh_invalid_key",
+      "value": "Cannot read this private key. Check its format, size and passphrase."
+    },
+    {
+      "name": "ssh_key_required",
+      "value": "Enter a private key to continue."
+    },
+    {
+      "name": "ssh_storage_failed",
+      "value": "Secure key storage is unavailable. Unlock the device and try again."
+    },
+    {
+      "name": "ssh_cancelled",
+      "value": "SSH connection cancelled."
+    },
+    {
+      "name": "ssh_busy",
+      "value": "An SSH operation is already in progress."
+    },
+    {
+      "name": "ssh_timeout",
+      "value": "The SSH connection timed out."
+    },
+    {
+      "name": "ssh_connect_failed",
+      "value": "Cannot connect to the SSH server."
+    },
+    {
+      "name": "ssh_host_key_mismatch",
+      "value": "The SSH host fingerprint does not match."
+    },
+    {
+      "name": "ssh_auth_failed",
+      "value": "SSH key authentication failed."
+    },
+    {
+      "name": "ssh_proxy_failed",
+      "value": "Cannot forward the Hub connection through SSH."
+    },
+    {
+      "name": "ssh_native_failed",
+      "value": "The SSH tunnel could not start."
+    },
+    {
+      "name": "knowledge_recording_start",
+      "value": "Start recording"
+    },
+    {
+      "name": "knowledge_recording_stop",
+      "value": "Stop recording"
+    },
+    {
+      "name": "knowledge_recording_requesting",
+      "value": "Requesting microphone access"
+    },
+    {
+      "name": "knowledge_recording_transcribe",
+      "value": "Transcribe Mandarin"
+    },
+    {
+      "name": "knowledge_recording_retry_upload",
+      "value": "Retry upload"
+    },
+    {
+      "name": "knowledge_recording_capture_ready",
+      "value": "Ready to record"
+    },
+    {
+      "name": "knowledge_recording_active",
+      "value": "Recording"
+    },
+    {
+      "name": "knowledge_recording_stopped",
+      "value": "Recording stopped"
+    },
+    {
+      "name": "knowledge_recording_transcribing",
+      "value": "Transcribing"
+    },
+    {
+      "name": "knowledge_recording_transcribed",
+      "value": "Transcription ready"
+    },
+    {
+      "name": "knowledge_recording_uploading",
+      "value": "Uploading transcript"
+    },
+    {
+      "name": "knowledge_recording_uploaded",
+      "value": "Saved to Knowledge"
+    },
+    {
+      "name": "knowledge_recording_upload_unknown",
+      "value": "Upload result unknown; retry safely"
+    },
+    {
+      "name": "knowledge_recording_upload_failed",
+      "value": "Upload failed; transcript kept locally"
+    },
+    {
+      "name": "knowledge_recording_stale",
+      "value": "A newer recording revision is already in Knowledge"
+    },
+    {
+      "name": "knowledge_recording_expired",
+      "value": "This recording is outside the Knowledge retention window"
+    },
+    {
+      "name": "knowledge_recording_deleted",
+      "value": "This recording was deleted from Knowledge"
+    },
+    {
+      "name": "knowledge_recording_transcribe_failed",
+      "value": "Transcription failed; recording kept locally"
+    },
+    {
+      "name": "knowledge_recording_microphone_denied",
+      "value": "Microphone permission is unavailable"
+    },
+    {
+      "name": "knowledge_recording_chinese_only",
+      "value": "Offline transcription currently supports Mandarin Chinese"
+    },
+    {
+      "name": "knowledge_recording_too_short",
+      "value": "Recording is too short to transcribe"
+    },
+    {
+      "name": "knowledge_recording_storage_full",
+      "value": "Recording storage is full; remove a local recording first"
+    },
+    {
+      "name": "knowledge_recording_limit",
+      "value": "Recording reached its one-hour limit; start a new recording to continue"
+    },
+    {
+      "name": "knowledge_recording_write_failed",
+      "value": "Could not save the recording; the local file may be incomplete"
+    },
+    {
+      "name": "knowledge_recording_retry_transcribe",
+      "value": "Retry Mandarin transcription"
+    },
+    {
+      "name": "knowledge_recording_delete_local",
+      "value": "Delete local recording"
+    },
+    {
+      "name": "knowledge_recording_open",
+      "value": "Record"
+    },
+    {
+      "name": "schedule_template_meeting_prep",
+      "value": "Meeting prep"
+    },
+    {
+      "name": "schedule_template_meeting_prep_prompt",
+      "value": "Check today's meetings in my Lark calendar and phone calendar. For each meeting that needs preparing, use schedule_followup to set up a prep 10 minutes before it: related docs, notes from the last meeting, open questions, and the points I should make. If no meeting needs preparing today, just say so briefly."
+    },
+    {
+      "name": "schedule_template_weekly_report",
+      "value": "Weekly report"
+    },
+    {
+      "name": "schedule_template_weekly_report_prompt",
+      "value": "Draft this week's report for me: from my Lark calendar, meeting notes, docs and messages, sum up what got done this week, progress and results, problems, and next week's plan. Include the main changes the agents on my computers finished this week. Give me a draft first and ask whether to change anything. Don't send it."
+    },
+    {
+      "name": "schedule_template_end_of_day",
+      "value": "End-of-day review"
+    },
+    {
+      "name": "schedule_template_end_of_day_prompt",
+      "value": "End-of-day review: which messages I haven't answered today, what I promised others and haven't done, which agents on my computers are still running or waiting on me, and which meetings tomorrow morning need preparing. List them by urgency, then ask me which ones need a reminder."
+    },
+    {
+      "name": "ssh_dns_failed",
+      "value": "Cannot resolve the Hub hostname."
+    },
+    {
+      "name": "device_look_avatar_heading",
+      "value": "Avatar"
+    },
+    {
+      "name": "device_look_accent_heading",
+      "value": "Accent"
+    },
+    {
+      "name": "device_look_accent_style",
+      "value": "Follow interface style"
+    },
+    {
+      "name": "device_look_accent_avatar",
+      "value": "Match Avatar"
+    },
+    {
+      "name": "device_look_accent_blue",
+      "value": "Blue"
+    },
+    {
+      "name": "device_look_accent_coral",
+      "value": "Coral"
+    },
+    {
+      "name": "device_look_accent_lavender",
+      "value": "Lavender"
+    },
+    {
+      "name": "device_look_accent_teal",
+      "value": "Teal"
+    },
+    {
+      "name": "device_look_accent_lark",
+      "value": "Lark Blue"
+    },
+    {
+      "name": "device_look_owner_unavailable",
+      "value": "This Hub cannot provide avatars."
+    },
+    {
+      "name": "device_look_avatar_unavailable",
+      "value": "No compatible avatar is available."
+    },
+    {
+      "name": "device_look_hub_unsupported",
+      "value": "This Hub does not support avatar packages."
+    },
+    {
+      "name": "device_look_list_failed",
+      "value": "Couldn't load avatars."
+    },
+    {
+      "name": "device_look_connect_to_hub",
+      "value": "Connect to this avatar’s Hub."
+    },
+    {
+      "name": "device_look_download_failed",
+      "value": "Couldn't download this avatar."
+    },
+    {
+      "name": "device_look_storage_failed",
+      "value": "Couldn't save this appearance."
+    },
+    {
+      "name": "device_look_cache_cleanup_failed",
+      "value": "Some avatar cache files could not be removed."
+    },
+    {
+      "name": "device_look_avatar_invalid",
+      "value": "This avatar image cannot be opened."
+    },
+    {
+      "name": "device_look_cache_failed",
+      "value": "Couldn't store this avatar image."
+    },
+    {
+      "name": "open_source_licenses",
+      "value": "Open source licenses"
+    },
+    {
+      "name": "retry_cleanup",
+      "value": "Retry cleanup"
+    },
+    {
+      "name": "color_mode",
+      "value": "Color mode"
+    },
+    {
+      "name": "applications",
+      "value": "Apps"
+    },
+    {
+      "name": "application_unavailable",
+      "value": "This app is unavailable."
+    },
+    {
+      "name": "no_applications",
+      "value": "No apps"
+    },
+    {
+      "name": "file_transfer_send_to_computer",
+      "value": "Send to computer"
+    },
+    {
+      "name": "file_transfer_unavailable",
+      "value": "File transfer is unavailable for this computer right now."
+    },
+    {
+      "name": "file_transfer_journal_unavailable",
+      "value": "The transfer status could not be saved on this device. Try again after storage is available."
+    },
+    {
+      "name": "file_transfer_check_unknown_first",
+      "value": "Check the unknown result before sending again."
+    },
+    {
+      "name": "file_transfer_confirm_duplicate",
+      "value": "A previous attempt may still finish. Sending again could create a second copy."
+    },
+    {
+      "name": "file_transfer_confirm_title",
+      "value": "Send this file?"
+    },
+    {
+      "name": "file_transfer_confirm_send",
+      "value": "Send"
+    },
+    {
+      "name": "file_transfer_source",
+      "value": "From"
+    },
+    {
+      "name": "file_transfer_target",
+      "value": "To"
+    },
+    {
+      "name": "file_transfer_inbox",
+      "value": "Receive folder"
+    },
+    {
+      "name": "file_transfer_status_creating",
+      "value": "Starting transfer"
+    },
+    {
+      "name": "file_transfer_status_running",
+      "value": "Transferring"
+    },
+    {
+      "name": "file_transfer_status_done",
+      "value": "Transfer complete"
+    },
+    {
+      "name": "file_transfer_status_failed",
+      "value": "Transfer failed"
+    },
+    {
+      "name": "file_transfer_status_cancelled",
+      "value": "Transfer cancelled"
+    },
+    {
+      "name": "file_transfer_status_unknown",
+      "value": "Transfer result unknown"
+    },
+    {
+      "name": "file_transfer_error",
+      "value": "Transfer error"
+    },
+    {
+      "name": "file_transfer_setting_loading",
+      "value": "Checking setting"
+    },
+    {
+      "name": "file_transfer_setting_saving",
+      "value": "Saving setting"
+    },
+    {
+      "name": "file_transfer_setting_unknown",
+      "value": "Setting status unknown"
+    },
+    {
+      "name": "file_transfer_inbox_enable_hint",
+      "value": "Turn on file transfer to see the receive folder."
+    },
+    {
+      "name": "file_transfer_inbox_unknown",
+      "value": "The receive folder could not be confirmed."
+    },
+    {
+      "name": "file_transfer_choose_target",
+      "value": "Choose a computer"
+    },
+    {
+      "name": "file_transfer_no_targets",
+      "value": "No trusted computers are online in this workspace."
+    },
+    {
+      "name": "file_transfer_source_switch",
+      "value": "Allow sending from this computer"
+    },
+    {
+      "name": "file_transfer_shared_switch",
+      "value": "File transfer"
+    },
+    {
+      "name": "file_transfer_target_switch",
+      "value": "Allow receiving on this computer"
+    },
+    {
+      "name": "file_transfer_check_status",
+      "value": "Check status"
+    },
+    {
+      "name": "file_transfer_i_checked",
+      "value": "I checked"
+    },
+    {
+      "name": "file_transfer_possible_duplicate",
+      "value": "A previous attempt may still finish. Sending again could create a second copy."
+    },
+    {
+      "name": "file_transfer_cancel_unknown",
+      "value": "The cancel result is not confirmed. Checking the transfer status."
+    },
+    {
+      "name": "file_transfer_cancel_transfer",
+      "value": "Cancel transfer"
+    },
+    {
+      "name": "file_transfer_title",
+      "value": "Send file"
+    },
+    {
+      "name": "session_tools_parent_folder",
+      "value": "Parent folder"
+    }
+  ]
+}

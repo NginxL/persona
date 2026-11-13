@@ -420,6 +420,11 @@ func (s *Service) setupRead(ctx context.Context, now time.Time) (setupEvidence, 
 	for _, row := range rows {
 		ev.plans = append(ev.plans, planFromRow(row))
 	}
+	withdrawn, err := st.WorkEventsBetween(ctx, back, now, []string{taskPlanWithdrawnEvent})
+	if err != nil {
+		return ev, err
+	}
+	ev.plans = withoutWithdrawn(ev.plans, withdrawn) // its own conversation's withdrawal is no answer of the owner's (#6739)
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return ev, err
 	}

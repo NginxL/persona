@@ -149,7 +149,9 @@ nonisolated final class LiftScrolled {
         skip = 1
         #if os(macOS)
         let t = Tick(self)
-        let l = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in MainActor.assumeIsolated { t.fire(timer) } }
+        // The timer is not handed into the main-actor closure (Swift 6 reads that as a race): the tick keeps it weakly.
+        let l = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { t.fire() } }
+        t.timer = l
         RunLoop.main.add(l, forMode: .common)
         #else
         let l = CADisplayLink(target: Tick(self), selector: #selector(Tick.tick))
@@ -180,8 +182,11 @@ nonisolated final class LiftScrolled {
         init(_ frames: LiftFrames) { self.frames = frames }
 
         #if os(macOS)
-        func fire(_ timer: Timer) {
-            guard let frames else { return timer.invalidate() }
+        /// The timer firing it, which the run loop keeps.
+        weak var timer: Timer?
+
+        func fire() {
+            guard let frames else { timer?.invalidate(); return }
             MainActor.assumeIsolated { frames.tick() }
         }
         #else
@@ -660,6 +665,8 @@ extension EnvironmentValues {
     var chat: [String: String] = [:]
     var lift = ""
     var select = ""
+    /// What is selected in the text view (`LiftUITextView.publishPicked`): its lines and its handles, in the window.
+    var picked = ""
     /// The text view's right edge, in the window.
     var edge: CGFloat = 0
 
@@ -793,7 +800,7 @@ private struct LiftedMessage: View {
             if LiftLines.on {
                 let l = LiftLines.shared
                 Color.clear.allowsHitTesting(false).accessibilityElement().accessibilityIdentifier("lift-lines")
-                    .accessibilityValue("chat=\(l.chat[lift.bar.id] ?? "")|lift=\(l.lift)|edge=\(String(format: "%.1f", l.edge))|select=\(selecting ? l.select : "")")
+                    .accessibilityValue("chat=\(l.chat[lift.bar.id] ?? "")|lift=\(l.lift)|edge=\(String(format: "%.1f", l.edge))|select=\(selecting ? l.select : "")|picked=\(selecting ? l.picked : "")")
             }
             #endif
             backdrop

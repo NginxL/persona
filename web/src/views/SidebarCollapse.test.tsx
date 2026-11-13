@@ -27,6 +27,16 @@ const flush = async () => {
 };
 const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === name || b.textContent?.trim() === name);
 const sectionBody = (title: string) => button(title)!.closest(".mt-1, .mt-3")!.querySelector("[inert], .flex.flex-col") as HTMLElement;
+/** A hub with one computer and one working agent, so the Agents list has a group (the fold-all button needs one, #6447). */
+const withAgent = async () => {
+  const agent: Session = { machine_id: "mac", session_id: "s1", title: "改发布脚本", cwd: "/code/a", status: "working", state: "working" };
+  vi.stubGlobal("fetch", vi.fn((url: string) => {
+    const path = new URL(url, "http://x").pathname;
+    const body = path === "/api/v1/sessions" ? { sessions: [agent] } : path === "/api/v1/machines" ? { machines: [{ id: "mac", name: "工作电脑", online: true }] } : {};
+    return Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
+  }));
+  await refresh();
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -257,32 +267,48 @@ describe("ordering the Agents list (G099)", () => {
     expect(button("Agent 列表选项：最近更新")).toBeDefined();
   });
 
-  it("is not offered under 按状态, whose sections are the states", async () => {
+  it("is not offered under 按状态, whose sections are the states, and a menu with nothing left is not there (#6447)", async () => {
     localStorage.setItem("persona.agentGrouping", "state");
     localStorage.setItem("persona.agentSort", "updated");
+    await withAgent();
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();
     expect(host.querySelector('[role="radio"][aria-label="按状态"]')!.getAttribute("aria-checked")).toBe("true");
-    act(() => button("Agent 列表选项")!.click());
-    expect(item("全部折叠")).toBeDefined();
-    expect(item("最近更新")).toBeUndefined();
+    expect(host.querySelector('[aria-label^="Agent 列表选项"]')).toBeNull();
+    expect(host.querySelector("[data-sidebar-agents-controls] [data-testid=agents-fold-all]")).not.toBeNull();
   });
 });
 
-describe("the Agents list menu (#3027)", () => {
-  it("has 全部折叠 and 全部展开, which open the spaces folded by hand and leave the other blocks", async () => {
-    localStorage.setItem("fold:space:mac/a", "1");
+describe("the Agents fold-all button (#3027, #6447)", () => {
+  it("is the only 全部折叠 / 全部展开: the list menu does not repeat them", async () => {
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();
     const menu = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === "Agent 列表选项")!;
     act(() => menu.click());
     await flush();
     const item = (label: string) => [...document.querySelectorAll<HTMLElement>("[role=menuitem], [role=menuitemradio], [role=menuitemcheckbox]")].find((el) => el.textContent?.includes(label));
-    expect(item("全部折叠")).toBeDefined();
-    act(() => item("全部展开")!.click());
+    expect(item("状态优先")).toBeDefined();
+    expect(item("全部折叠")).toBeUndefined();
+    expect(item("全部展开")).toBeUndefined();
+  });
+
+  it("opens with 全部展开 the spaces folded by hand, and leaves the other blocks", async () => {
+    localStorage.setItem("fold:space:mac/a", "1");
+    localStorage.setItem("persona.agentGrouping", "machine");
+    await withAgent();
+    act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
+    await flush();
+    const fold = () => host.querySelector<HTMLButtonElement>("[data-sidebar-agents-controls] [data-testid=agents-fold-all]")!;
+    if (fold().getAttribute("aria-label") === "全部折叠") {
+      act(() => fold().click());
+      await flush();
+    }
+    expect(fold().getAttribute("aria-label")).toBe("全部展开");
+    act(() => fold().click());
     await flush();
     expect(localStorage.getItem("fold:space:mac/a")).toBe("0");
     expect(localStorage.getItem("fold:persona")).toBeNull();
+    expect(button("Agents")!.getAttribute("aria-expanded")).toBe("true");
   });
 });
 
@@ -343,7 +369,7 @@ describe("the main conversation: the column's first row, Persona with the app's 
     // the brand row reads as a conversation, not a heading: a small "主对话" under the name (#6293)
     const mark = mainRow().querySelector("[data-row-line]:not([data-draft])");
     expect(mark?.textContent).toBe("主对话");
-    expect(mainRow().querySelector('img[src$="/app-icon.png"]')).not.toBeNull();
+    expect(mainRow().querySelector("svg.rounded-full")).not.toBeNull();
     expect(mainRow().textContent).toContain("2"); // its pending count
     // the line parts it from the pages, which come after it
     const line = host.querySelector("[data-persona-divider]")!;

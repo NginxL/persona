@@ -324,6 +324,79 @@ describe("a message that did not go, in an agent's chat (#1122)", () => {
   });
 });
 
+describe("a send whose answer came back in doubt (the hub stopped waiting, the message went in)", () => {
+  const failed = () => host.querySelector('[data-user-bubble][data-send-state="failed"]');
+  let bodies: { client_msg_id: string; text: string }[];
+  let answer!: (r: Response) => void;
+  beforeEach(() => {
+    bodies = [];
+    transcript.items = [];
+    resetOutboxClaimsForTests();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith("/messages")) return Promise.resolve(json({}));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Promise<Response>((resolve) => (answer = resolve));
+    }));
+  });
+  afterEach(() => {
+    transcript.items = [];
+  });
+  const inDoubt = () => json({ error: "The message may have been sent: the computer did not answer in time.", delivered: "unknown" }, 502);
+
+  it("shows as sent once its line reaches the transcript, without the hub tying it, so nothing asks to send it again", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "前端页面上也有多次显示发送失败", images: [] }); });
+    await flush();
+    answer(inDoubt());
+    await act(async () => void (await sending));
+    await flush();
+    expect(failed()?.textContent).toContain("前端页面上也有多次显示发送失败"); // in doubt, until the transcript says
+
+    transcript.items = [{ id: "line-1", seq: 1, role: "user", kind: "text", text: bodies[0].text, ts: new Date().toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(failed()).toBeNull();
+    const bubbles = host.querySelectorAll("[data-user-bubble]");
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0].getAttribute("data-send-state")).not.toBe("failed");
+    expect(bodies).toHaveLength(1);
+  });
+
+  it("shows as sent when its line arrived before the answer did", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "可以，前端页面上也有", images: [] }); });
+    await flush();
+    transcript.items = [{ id: "line-2", seq: 1, role: "user", kind: "text", text: bodies[0].text, ts: new Date().toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+
+    answer(inDoubt());
+    await act(async () => void (await sending));
+    await flush();
+    expect(failed()).toBeNull();
+    expect(host.querySelectorAll("[data-user-bubble]")).toHaveLength(1);
+  });
+
+  it("a refusal stays failed even with the same words in the chat", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "继续", images: [] }); });
+    await flush();
+    answer(json({ error: "会话已结束", delivered: "none" }, 400));
+    await act(async () => void (await sending));
+    await flush();
+    transcript.items = [{ id: "line-3", seq: 1, role: "user", kind: "text", text: "继续", ts: new Date().toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(failed()?.textContent).toContain("继续");
+  });
+});
+
 describe("a message the node held back for an ultracode change (#3428)", () => {
   const HELD = { code: "ultracode_pending", error: "ultracode 等这一轮结束后生效，请稍后再发送消息" };
   let bodies: { client_msg_id: string; text: string }[];

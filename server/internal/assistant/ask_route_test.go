@@ -641,7 +641,9 @@ func TestQuietTaskAskIsNotPushedOnTimeout(t *testing.T) {
 func TestEscalateLeavesADelegatedCard(t *testing.T) {
 	e := newRouteEnv(t, nil, true)
 	on := true
+	e.f.mu.Lock()
 	e.f.hello.Agents.Delegate.Enabled = &on
+	e.f.mu.Unlock()
 	release := make(chan struct{})
 	e.s.delegateHook = func(context.Context, DelegateParams) (DelegateResult, error) {
 		<-release

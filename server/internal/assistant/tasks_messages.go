@@ -244,16 +244,15 @@ func (s *Service) feedItem(ctx context.Context, id string) (*FeedItem, error) {
 // activeTasks are the tasks going on, as the inbox's judge and AI twin see them.
 func (s *Service) activeTasks(ctx context.Context) []prompts.InboxTask {
 	var out []prompts.InboxTask
-	for _, t := range s.snapshotTasks(ctx, "") {
-		if t.State == taskStateLabel("done") || t.State == taskStateLabel("auto_done") || t.State == taskStateLabel("failed") ||
-			t.State == taskStateLabel("cancelled") {
+	for _, t := range s.todosOf(ctx, "*") {
+		if t.Origin == "" || t.DoneAt != nil || t.Cancelled() {
 			continue
 		}
-		task := prompts.InboxTask{ID: t.ID, Title: t.Title, State: t.State, Last: t.Last}
-		if full, ok := s.todoNow(t.ID); ok {
-			task.Notes = clip(full.Notes, 1200)
-		}
-		out = append(out, task)
+		agents := s.taskAgents(ctx, t)
+		task := snapshotTask(t, taskState(t, agents), agents, time.Now())
+		out = append(out, prompts.InboxTask{ID: t.ID, Title: t.Title, State: task.State, Last: task.Last, Notes: clip(t.Notes, 1200)})
 	}
+	// The assistant's brief is capped and age-filtered; the task judge must see every open candidate.
+	slices.SortFunc(out, func(a, b prompts.InboxTask) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }

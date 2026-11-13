@@ -32,13 +32,15 @@ internal fun conversationInboxView(
             messagePreview = row.messagePreview.takeIf { records.size == row.records.size })
     }
     val nativeIds = native.flatMap { it.records }.map { it.item.id }.toSet()
-    val groups = listOf("action", "fyi", "read-pending", "noise", "done").mapNotNull { id ->
+    val groups = listOf("action", InboxItem.WORKING, "fyi", "read-pending", "noise", "done").mapNotNull { id ->
         val base = original.groups.firstOrNull { it.id == id }
         val added = native.filter { it.section != InboxConversationSection.Read && it.section.groupId == id }
             .map { InboxRow(InboxRowType.Item, it.itemId) }
         val rows = added + base?.rows.orEmpty().filterNot { it.type == InboxRowType.Item && it.id in nativeIds }
+        // In progress keeps buildInboxList's position and is always expanded.
+        val folded = id != InboxItem.WORKING && id !in settings.expanded
         if (rows.isEmpty()) null else InboxGroup(id, base?.title ?: fallbackTitle, rows,
-            if (id in settings.expanded) rows else emptyList(), id !in settings.expanded)
+            if (folded) emptyList() else rows, folded)
     }
     return InboxConversationView(original.copy(groups = groups), native)
 }

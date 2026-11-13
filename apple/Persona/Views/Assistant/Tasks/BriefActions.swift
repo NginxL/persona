@@ -54,10 +54,15 @@ import SwiftUI
     }
 
     /// A round of a to-do: the same round listed by two briefings is one button.
-    private static func key(accepting row: BriefBody.Row, group: String) -> String { "\(group)|accept|\(row.id)|\(row.askedAt ?? "")" }
+    private static func key(accepting row: BriefBody.Row, group: String) -> String { key(accepting: row.id, askedAt: row.askedAt, group: group) }
+    private static func key(accepting id: String, askedAt: String?, group: String) -> String { "\(group)|accept|\(id)|\(askedAt ?? "")" }
     private static func key(marking row: BriefBody.Row, group: String) -> String { "\(group)|later|\(row.id)" }
 
     func outcome(accepting row: BriefBody.Row, group: String = "") -> Outcome? { outcomes[Self.key(accepting: row, group: group)] }
+    /// The same, by the to-do and its round: a row that only reads it (`DecisionRow`) need not build a `BriefBody.Row`.
+    func outcome(accepting id: String, askedAt: String?, group: String = "") -> Outcome? {
+        outcomes[Self.key(accepting: id, askedAt: askedAt, group: group)]
+    }
     func outcome(marking row: BriefBody.Row, group: String = "") -> Outcome? { outcomes[Self.key(marking: row, group: group)] }
 
     /// Accept, Got It or Take Recommendation (`POST /api/v1/todos/{id}/accept` with the row's round).

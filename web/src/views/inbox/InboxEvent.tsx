@@ -11,13 +11,15 @@ import {
 import { conversationRoute, docChangeLine, isDone, itemKey, itemRoute, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
 import { otherManager } from "../../lib/manager-choice";
 import { openLink } from "../../lib/links";
-import { navigate, type Route } from "../../lib/router";
+import { type Route } from "../../lib/router";
 import { openFromInbox } from "../../lib/inbox-nav";
+import { nowText } from "../../lib/inbox-now";
 import { useStore } from "../../lib/store";
 import { t } from "../../i18n";
 import { Button, cx, Shimmer, Spinner } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { useFoldScroll } from "../chat/fold-scroll";
+import { useInboxView } from "../../lib/inbox-view-memory";
 import { InboxLine } from "./InboxLine";
 import { Glyph, Spark } from "./InboxParts";
 
@@ -35,13 +37,14 @@ function useConversation(): (mid: string, sid: string) => Route {
 
 /** Under a row: what the AI is doing ("In progress"), "AI is preparing a suggestion" (urgent), a failed handling, or the suggestion's kind + first line. */
 export function EventMark({ it }: { it: InboxItem }) {
+  const now = nowText(it);
   if (isDone(it)) {
-    // filed by the manager after it looked (done_by manager): say who
-    if (it.done_by !== "manager") return null;
+    // A known state key says how it was filed; an older hub keeps the manager-done line alone.
+    if (!now && it.done_by !== "manager") return null;
     return (
-      <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap text-ink-3" data-event-mark="manager-done">
+      <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap text-ink-3" data-event-mark={now ? "now" : "manager-done"}>
         <Icon name="check" size={12} stroke={2.4} className="shrink-0" />
-        <span className="truncate">{t("inbox-inboxevent.manager_done")}</span>
+        <span className="truncate">{now ?? t("inbox-inboxevent.manager_done")}</span>
       </p>
     );
   }
@@ -58,7 +61,7 @@ export function EventMark({ it }: { it: InboxItem }) {
     return (
       <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap" data-event-mark="preparing">
         <Spinner size={11} />
-        <Shimmer className="truncate">{t("inbox-inboxevent.preparing")}</Shimmer>
+        <Shimmer className="truncate">{now ?? t("inbox-inboxevent.preparing")}</Shimmer>
       </p>
     );
   }
@@ -66,13 +69,14 @@ export function EventMark({ it }: { it: InboxItem }) {
     return (
       <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap text-red" data-event-mark="failed">
         <Icon name="warning" size={12} className="shrink-0" />
-        <span className="truncate">{t("inbox-inboxevent.failed_short")}</span>
+        <span className="truncate">{now ?? t("inbox-inboxevent.failed_short")}</span>
       </p>
     );
   }
-  const word = handlingWord(it);
+  const oldWord = handlingWord(it);
+  const word = now ?? oldWord;
   if (!word) return null;
-  const waiting = it.handling?.state === "waiting";
+  const waiting = it.handling?.state === "waiting" || !oldWord;
   return (
     <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap text-ink-2" data-event-mark="working">
       {waiting ? <Icon name="clock" size={12} className="shrink-0 text-ink-3" /> : <Spinner size={11} />}
@@ -137,7 +141,7 @@ function HandlingLine({ item }: { item: InboxItem }) {
   const word = handlingWord(item);
   const to = h.machine_id && h.session_id ? conversation(h.machine_id, h.session_id) : undefined;
   const open = to && (
-    <button type="button" onClick={() => navigate(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
+    <button type="button" onClick={() => openFromInbox(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
       {t("inbox-inboxevent.open_conversation")}
       <Icon name="chevronRight" size={11} stroke={2.4} />
     </button>
@@ -283,7 +287,16 @@ function ChainIcon({ kind }: { kind: string }) {
 
 /** The handling chain: folded to the newest entry, "Show all (N)" shows them all, oldest first. */
 export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: SourceAt) => void }) {
-  const [open, setOpen] = useState(false);
+  const view = useInboxView();
+  const key = itemKey(item);
+  const revision = view.revision;
+  const [open, setOpen] = useState(() => view.chainOpen(key));
+  const [seen, setSeen] = useState({ key, revision });
+  if (seen.key !== key || seen.revision !== revision) {
+    setSeen({ key, revision });
+    setOpen(view.chainOpen(key));
+  }
+  useEffect(() => view.setChainOpen(key, open), [view, key, open]);
   const conversation = useConversation();
   const all = item.chain ?? [];
   if (!all.length) return null;

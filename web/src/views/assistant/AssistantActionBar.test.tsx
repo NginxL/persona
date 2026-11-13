@@ -214,7 +214,7 @@ describe("Assistant Needs you / In progress trays", () => {
     }
   });
 
-  it("keeps a stale parked task visible in In progress but out of its number, the To-dos page's rule (#3331)", async () => {
+  it("counts an unexpired parked task in In progress even after days without activity, as the To-dos page does", async () => {
     const stale = "2026-11-05T08:00:00Z";
     moreSessions = [{ machine_id: "demo", session_id: "parked-worker", title: "Parked agent", cwd: "/demo", state: "idle", status: "idle", updated_at: stale } as Session];
     moreTodos = [{
@@ -223,12 +223,12 @@ describe("Assistant Needs you / In progress trays", () => {
       supervision: { supervisor: conversation, state: "parked", updated_at: stale, reviews: [], parked: { reason: "Waiting on another team", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else", count: 1 } },
     }];
     await act(async () => { await refresh(); await refreshTodos(); });
-    // the working fixture task is still the only one counted; the parked one adds no number
-    expect(entry("running").textContent).toBe(`${label.running}1`);
+    // Both tasks remain unfinished; explicit parking is not the inactivity fold.
+    expect(entry("running").textContent).toBe(`${label.running}2`);
     act(() => entry("running").click());
     const slots = host.querySelectorAll("[data-task-slot]");
     expect(slots).toHaveLength(2);
-    // its parked line stays visible in the tray even though the badge does not count it
+    // Its parked line and the shared open count survive the inactivity window.
     expect(host.textContent).toContain("Waiting on another team");
   });
 
@@ -264,7 +264,8 @@ describe("Assistant Needs you / In progress trays", () => {
     await act(async () => putTodo(todo));
     await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
     await openRows();
-    expect(host.querySelectorAll('[data-brief-row="accept"]')).toHaveLength(1);
+    // A lazy card can commit after its module import resolves.
+    await expect.poll(() => host.querySelectorAll('[data-brief-row="accept"]')).toHaveLength(1);
     expect(host.textContent).not.toContain(t("assistant-tasks.review_needs_user"));
     const first = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === t("assistant-brief.take"))!;
     const nextRound = "2026-11-10T08:20:00Z";
@@ -274,6 +275,10 @@ describe("Assistant Needs you / In progress trays", () => {
       putTodo(todo);
     });
     await openRows(); // the next round asks folded again
+    await expect.poll(() => {
+      const button = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === t("assistant-brief.take"));
+      return button !== undefined && button !== first;
+    }).toBe(true);
     const second = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === t("assistant-brief.take"))!;
     expect(second).not.toBe(first);
     await act(async () => second.click());
@@ -322,7 +327,7 @@ describe("Assistant Needs you / In progress trays", () => {
     });
     expect(host.querySelector('[data-testid="message-card"]')).toBeNull(); // folded until opened
     await openRows();
-    expect(host.querySelector('[data-testid="message-card"]')).not.toBeNull();
+    await expect.poll(() => host.querySelector('[data-testid="message-card"]')).not.toBeNull();
     expect(host.textContent).toContain(t("assistant-tasks.review_needs_user"));
     const draftCard = host.querySelector('[data-testid="message-card"]')!;
     const actions = [...draftCard.querySelectorAll("button")];

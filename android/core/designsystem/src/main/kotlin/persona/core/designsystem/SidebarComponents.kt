@@ -19,6 +19,9 @@ fun JSidebarNewChat(text: String, onClick: () -> Unit, modifier: Modifier = Modi
     }
 }
 
+internal fun sidebarHistoryRowSpins(status: Status, working: Boolean): Boolean =
+    status == Status.Working || (working && status != Status.NeedsYou && status != Status.Unread)
+
 /** Compact iPhone history is one title and a state mark, not a second conversation preview. */
 @Composable
 fun JSidebarHistoryRow(
@@ -35,13 +38,13 @@ fun JSidebarHistoryRow(
     titleAccessory: (@Composable () -> Unit)? = null,
     /** Drawn before the ⋯ (a 常驻 lead's caret that folds its to-dos open, #4352); null: nothing. */
     trailingAccessory: (@Composable () -> Unit)? = null,
-    /** A lead whose Agents work while its own conversation is idle spins the working mark anyway (#6230). */
+    /** A lead with anything at work under it while its own conversation is idle spins the working mark anyway (#6230, #6626). */
     working: Boolean = false,
 ) {
     JRow(title, onClick = onClick, onLongClick = onMenu, selected = selected, chevron = false, subtitle = hint,
         titleAccessory = titleAccessory, titleLead = titleLead, trailing = {
             // A Needs You dot is still, as iOS's `RowStateMark` in a dense list; a lead with work under it spins (#6230), as there.
-            if (status == Status.NeedsYou || status == Status.Working || status == Status.Unread || working) JStatusDot(status, spinning = working && status != Status.NeedsYou && status != Status.Unread, breathes = false)
+            if (status == Status.NeedsYou || status == Status.Working || status == Status.Unread || working) JStatusDot(status, spinning = sidebarHistoryRowSpins(status, working), breathes = false)
             trailingAccessory?.invoke()
             JIconButton(PhIcons.DotsThree, menuLabel, onMenu)
         })

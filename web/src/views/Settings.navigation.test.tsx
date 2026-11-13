@@ -41,7 +41,7 @@ vi.mock("./settings/FeishuBot", () => ({ FeishuBot: () => null }));
 vi.mock("./settings/HubConnector", () => ({ ConnectorList: () => <div data-page="connector-list" />, ConnectorDetail: () => <div data-page="connector-detail" /> }));
 vi.mock("./settings/SentSettings", () => ({ SentSettings: () => <div data-page="sent" /> }));
 
-import { t } from "../i18n";
+import { initI18n, t } from "../i18n";
 import { Settings } from "./Settings";
 import { FROM_LIST, openedFromSub } from "./settings/nav";
 
@@ -78,6 +78,35 @@ const popped = (go: () => void) => act(async () => {
 const category = (label: string) => [...nav().querySelectorAll("button")].find((button) => button.textContent?.startsWith(label))!;
 
 describe("Settings category navigation", () => {
+  it("shows a neutral source link at the foot of General in every language and viewport, without touching old prompt data", async () => {
+    const legacy = JSON.stringify({ launches: 20, welcomed: false, done: false });
+    localStorage.setItem("persona.starPrompt", legacy);
+    try {
+      for (const phone of [false, true]) {
+        viewport.phone = phone;
+        for (const lang of ["en", "zh-Hans", "ja"]) {
+          await initI18n(lang);
+          await mount("/settings?tab=general");
+          const about = host.querySelector('[data-settings-group="about-persona"]')!;
+          expect(about.querySelector("h2")?.textContent).toBe(t("settings.about_persona"));
+          expect(about.textContent).toContain(t("settings.source_code"));
+          const link = about.querySelector("a")!;
+          expect(link.textContent?.trim()).toBe("github.com/nwverse/persona");
+          expect(link.href).toBe("https://github.com/nwverse/persona");
+          expect(link.target).toBe("_blank");
+          expect(link.rel).toBe("noopener noreferrer");
+          expect(about.nextElementSibling).toBeNull();
+          link.focus();
+          expect(document.activeElement).toBe(link);
+          link.addEventListener("click", (e) => e.preventDefault(), { once: true });
+          act(() => link.click());
+          expect(localStorage.getItem("persona.starPrompt")).toBe(legacy);
+        }
+      }
+    } finally {
+      await initI18n("zh-Hans");
+    }
+  });
   it("opens knowledge selection as the current assistant's, with no manager in the address", async () => {
     await mount("/settings?tab=models&manager=remote");
     await act(async () => category(t("settings-nav.tab_knowledge")).click());

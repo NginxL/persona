@@ -1,0 +1,10 @@
+{
+  "menu": "映像",
+  "picture_video": "ビデオ（滑らか・軽量）",
+  "picture_vnc": "VNC（互換）",
+  "quality": "画質",
+  "quality_auto": "自動",
+  "quality_sharper": "高精細優先",
+  "quality_smoother": "滑らかさ優先",
+  "picture_current": "映像：{current}"
+}

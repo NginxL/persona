@@ -112,7 +112,6 @@
     <string name="assistant_make_leader_text">这个对话会移到常驻区，不再出现在「最近」。</string>
     <string name="assistant_end_leader_title">取消常驻？</string>
     <string name="assistant_end_leader_text">「%1$s」会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。</string>
-    <string name="assistant_leader_working">在做 %1$d</string>
     <string name="assistant_leader_needs_you">等你 %1$d</string>
     <string name="assistant_direction_todos_of">%1$s 的待办</string>
     <string name="assistant_direction_agents_of">%1$s 的 Agent</string>

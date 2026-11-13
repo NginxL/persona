@@ -48,6 +48,7 @@ struct ComposerRow<MenuItems: View>: View {
                         .padding(.top, Theme.Space.s)
                 }
                 TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                    .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .lineLimit(1...6)
                     #if os(macOS)
                     .textFieldStyle(.plain) // the surface below is the field's box; the Mac's own bezel drew a second one inside

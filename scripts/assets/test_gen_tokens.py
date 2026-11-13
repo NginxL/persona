@@ -449,7 +449,8 @@ class RepositoryTests(unittest.TestCase):
 
     def test_ios_motion_matches(self):
         # The shared motions (phase 1 R3) as Theme.Motion writes them; the rest of Theme.Motion belongs to single components
-        # (the composer, attaching, blinks). SwiftUI's snappy has a bounce of 0.15, smooth none.
+        # (the composer's quote bar and growth, holding the mic, attaching, blinks). SwiftUI's snappy has a bounce of 0.15,
+        # smooth none.
         motion = self.swift_enum("Motion")
 
         def seconds(pattern):
@@ -474,6 +475,27 @@ class RepositoryTests(unittest.TestCase):
         expected["keyboard"] = {"stiffness": stiffness, "damping": damping}
         breath = {part: seconds(rf'static let needsYou{part}(?:: \w+)? = ([0-9.]+)\n')[0] for part in ("BreathDuration", "BreathScale", "RingOpacity")}
         expected["needsYouBreath"] = {"duration": round(breath["BreathDuration"] * 1000), "scale": breath["BreathScale"], "ringOpacity": breath["RingOpacity"]}
+        # The composer's send swap and press (#4210 T3). Theme.Motion writes each as a line of its own; the JSON groups them by
+        # what moves. composerRelease is on composerSwap's curve, which the JSON holds once.
+        bezier = r'Animation\.timingCurve\(([0-9.]+), ([0-9.]+), ([0-9.]+), ([0-9.]+), duration: ([0-9.]+)\)'
+        swap = seconds(rf'static let composerSwap = {bezier}')
+        release = seconds(rf'static let composerRelease = {bezier}')
+        self.assertEqual(release[:4], swap[:4], "composerRelease and composerSwap share one curve")
+        fade = re.search(r'static let composerSwapFade = Animation\.(\w+)\(duration: ([0-9.]+)\)', motion)
+        press = re.search(r'static let composerPress = Animation\.(\w+)\(duration: ([0-9.]+)\)', motion)
+        self.assertIsNotNone(fade)
+        self.assertIsNotNone(press)
+        expected["composerSwap"] = {
+            "duration": round(swap[4] * 1000), "curveX1": swap[0], "curveY1": swap[1], "curveX2": swap[2], "curveY2": swap[3],
+            "fadeDuration": round(float(fade[2]) * 1000), "fadeCurve": fade[1],
+            "blur": seconds(r'static let composerSwapBlur: CGFloat = ([0-9.]+)\n')[0],
+            "from": seconds(r'static let composerSwapFrom: CGFloat = ([0-9.]+)\n')[0],
+            "scale": seconds(r'static let composerSwapScale: CGFloat = ([0-9.]+)\n')[0],
+        }
+        expected["composerPress"] = {
+            "scale": seconds(r'static let composerPressScale: CGFloat = ([0-9.]+)\n')[0],
+            "duration": round(float(press[2]) * 1000), "curve": press[1], "releaseDuration": round(release[4] * 1000),
+        }
         tokens = {}
         for key, value in self.catalog.values.items():
             parts = key.split(".")

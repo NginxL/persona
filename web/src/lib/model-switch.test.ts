@@ -45,6 +45,18 @@ describe("which sessions can switch model", () => {
   it("asks the launcher the session runs with, plain claude without one", () => {
     expect(sessionLauncher({ launcher: "gateway" })).toBe("gateway");
     expect(sessionLauncher({})).toBe("claude");
+    expect(sessionLauncher({ agent: "claude" })).toBe("claude");
+  });
+
+  it("asks a Codex session without a launcher its engine's, never Claude Code's (#6501)", () => {
+    // a Codex App chat (the node names its space codex_app): the App's own launcher, whose list is empty and locked
+    expect(sessionLauncher({ agent: "codex", source_kind: "codex_history", space_kind: "codex_app", agent_surface: "desktop" })).toBe("codex-app");
+    // another Codex session: plain codex, whether the node names the agent or only its source
+    expect(sessionLauncher({ agent: "codex" })).toBe("codex");
+    expect(sessionLauncher({ source_kind: "codex_app_server" })).toBe("codex");
+    expect(sessionLauncher({ source_kind: "codex_history", space_kind: "herdr" })).toBe("codex");
+    // a launcher it names still wins
+    expect(sessionLauncher({ agent: "codex", space_kind: "codex_app", launcher: "codex-gw" })).toBe("codex-gw");
   });
 });
 

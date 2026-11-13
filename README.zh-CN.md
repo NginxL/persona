@@ -77,11 +77,12 @@ github:nwverse/persona-extensions
 
 - **先看看**：装上 [TestFlight 公开测试版](https://testflight.apple.com/join/vsjfy3hE)，在配对页点「没有 hub？先体验一下」，不用服务器也不用账号。
 - **自己部署**：用[官网](https://personaside.com/#start)上的一行命令装好 hub，再扫个码。看 [开始使用](docs/operations/getting-started.md)。
+- **HarmonyOS 7 直板与折叠手机**：[从源码构建原生 ArkUI 客户端](harmony/README.md)（API 26）。
 - **从源码构建**：[配置](docs/operations/config.md) · [部署](docs/server/server.md) · [参与开发](CLAUDE.md)
 
 ## 文档
 
-[开始使用](docs/operations/getting-started.md) · [架构](docs/server/architecture.md) · [协议](docs/protocol/protocol.md) · [Docker](docs/operations/docker.md) · [iPhone / iPad / Watch](docs/apple/ios.md) · [网页](docs/web/web.md) · [Android](docs/android/android.md) · [Vision Pro](docs/apple/vision.md) · [Mac](docs/apple/mac.md) · [CarPlay 语音](docs/apple/carplay.md) · [引擎](docs/integrations/engines.md) · [Agent 运行时](docs/integrations/runtimes.md) · [全部文档](CLAUDE.md#docs-index)
+[开始使用](docs/operations/getting-started.md) · [架构](docs/server/architecture.md) · [协议](docs/protocol/protocol.md) · [Docker](docs/operations/docker.md) · [iPhone / iPad / Watch](docs/apple/ios.md) · [网页](docs/web/web.md) · [Android](docs/android/android.md) · [HarmonyOS](docs/harmony/harmony.md) · [Vision Pro](docs/apple/vision.md) · [Mac](docs/apple/mac.md) · [CarPlay 语音](docs/apple/carplay.md) · [引擎](docs/integrations/engines.md) · [Agent 运行时](docs/integrations/runtimes.md) · [全部文档](CLAUDE.md#docs-index)
 
 ## Star History
 

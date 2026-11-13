@@ -13,5 +13,7 @@
   "mute": "Mute",
   "more": "More",
   "view_source": "Original",
-  "view_event": "Handling"
+  "view_event": "Handling",
+  "linked_task": "Linked task",
+  "linked_agent": "Linked Agent"
 }

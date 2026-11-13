@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "name": "libc++_shared.so",
+      "version": "26.0.0.105",
+      "license": "Apache License 2.0 with LLVM Exceptions; libc++ dual licensed under University of Illinois/NCSA OR MIT",
+      "authors": [
+        "LLVM Team",
+        "University of Illinois at Urbana-Champaign",
+        "contributors listed in CREDITS.TXT"
+      ],
+      "repository": "https://llvm.org",
+      "source_sdk_path": "native/NOTICE.txt#lines-10369-10680",
+      "source_sdk_version": "26.0.0.105",
+      "source_content_sha256": "3f3d1da78246d5c2ffc879f8239d6e856b19ba813b8349cbe48f85bd018ee3af",
+      "source_files": [
+        {
+          "sdk_path": "native/NOTICE.txt",
+          "source_content_sha256": "a3f1d551a503822c970b44eff85aeaee81c38dd9fa16c37591ebee473e2f6cd5"
+        },
+        {
+          "sdk_path": "native/llvm/NOTICE",
+          "source_content_sha256": "22208a1d78a9271ec1d6eaf7d21db5dda6049ed14af09d7d0f8d7787b6bffb77"
+        },
+        {
+          "sdk_path": "native/oh-uni-package.json",
+          "source_content_sha256": "3dbc4a06ffd3b1be6b45c3c346a7900ca42f8a81a5b0454dc7f5cc1e5a9509a8"
+        }
+      ],
+      "provenance": "Complete libc++ LLVM notice block copied verbatim from native/NOTICE.txt lines 10369-10680 and independently byte-matched to native/llvm/NOTICE lines 593-904. It includes Apache License 2.0 with LLVM Exceptions and the full libc++ University of Illinois/NCSA and MIT dual-license text. SDK version is pinned from native/oh-uni-package.json.",
+      "notices": [
+        {
+          "path": "licenses/sdk-runtime/libcxx-license.txt",
+          "sha256": "3f3d1da78246d5c2ffc879f8239d6e856b19ba813b8349cbe48f85bd018ee3af"
+        }
+      ]
+    }
+  ]
+}

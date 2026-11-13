@@ -18,7 +18,7 @@
   "subagents_count_running": "子 Agent {count} 个在跑",
   "background_running": "后台工作在跑",
   "tray_empty_pending": "没有等你处理的事",
-  "tray_shelved_other": "搁置 {count}",
+  "tray_shelved_other": "暂无进展 {count}",
   "tray_shelved_hint": "超过 48 小时没有进展、也没有 Agent 在跑。不计入「进行中」，数据都还在。",
   "tray_empty_progress": "没有进行中的事",
   "plan_waiting": "等你点开始",

@@ -3,15 +3,18 @@
 // agent under No to-do and moving it, and a hub without todos hides To-dos and shows By machine while keeping the choice.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // jsdom has no matchMedia (the sidebar's modules read it when they load) and no ResizeObserver (its highlight)
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
+import { t } from "../i18n";
 import { connect, refresh, reset } from "../lib/store";
 import type { Todo } from "../lib/todos";
 import type { Machine, Session } from "../lib/types";
+import { Icon, type IconName } from "../ui/icons";
 import { Sidebar } from "./Sidebar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -160,7 +163,7 @@ describe("group controls in every Agents view", () => {
     const action = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
     const disclosures = () => [...agentsBlock().querySelectorAll<HTMLButtonElement>("[data-sidebar-group-heading] button[aria-expanded]")].filter((b) => !b.closest("[data-sidebar-agents-controls]"));
     expect(disclosures().length).toBeGreaterThan(0);
-    expect(host.querySelectorAll("[data-sidebar-agents-controls] button[title=\"全部折叠\"], [data-sidebar-agents-controls] button[title=\"全部展开\"]")).toHaveLength(1);
+    expect(host.querySelectorAll("[data-sidebar-agents-controls] [data-testid=agents-fold-all]")).toHaveLength(1);
     await act(async () => { action("全部折叠").click(); await Promise.resolve(); });
     expect(disclosures().every((b) => b.getAttribute("aria-expanded") === "false")).toBe(true);
     expect(grouping().closest("[inert]")).toBeNull();
@@ -177,6 +180,114 @@ describe("group controls in every Agents view", () => {
     expect(action("全部折叠")).not.toBeNull();
     await act(async () => { action("全部折叠").click(); await Promise.resolve(); });
     expect(first.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+// Collapse all / Expand all act on the list under the controls only (#6447): the grouping tabs, the quick filters, the
+// search and Filter stay on screen while every group folds to its heading; the chat-list view has no groups to fold to,
+// so it has no button (a first fix folded the whole block there, the controls with it).
+describe("the fold-all button keeps the Agents controls", () => {
+  /** On screen: not inside an inert box or a closed Collapse (0fr), the two ways the sidebar folds. */
+  const onScreen = (el: Element | null | undefined) => {
+    for (let e: Element | null = el ?? null; e; e = e.parentElement) {
+      if (e.hasAttribute("inert") || (e as HTMLElement).style?.gridTemplateRows === "0fr") return false;
+    }
+    return Boolean(el);
+  };
+  const controls = () => ({
+    tabs: onScreen(grouping()),
+    filters: onScreen(agentsBlock().querySelector(`[role="radiogroup"][aria-label="${t("sidebar.quick_filters")}"]`)),
+    search: onScreen(agentsBlock().querySelector("[data-testid=agent-dimension-filter-bar] input")),
+    filter: onScreen(agentsBlock().querySelector("[data-testid=agent-filter-button]")),
+  });
+  const everyControl = { tabs: true, filters: true, search: true, filter: true };
+  /** The agent's title, wherever the grouping draws it. */
+  const agentShown = () => {
+    const walk = document.createTreeWalker(agentsBlock(), NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.textContent?.includes(agent.title!) && onScreen(n.parentElement)) return true;
+    return false;
+  };
+  const headings = () => [...agentsBlock().querySelectorAll<HTMLButtonElement>("[data-sidebar-group-heading] button[aria-expanded]")]
+    .filter((b) => !b.closest("[data-sidebar-agents-controls]") && onScreen(b));
+  const foldAll = () => host.querySelector<HTMLButtonElement>("[data-sidebar-agents-controls] [data-testid=agents-fold-all]");
+  /** The glyph an icon draws, and the one the button shows: corners in (Collapse all) or out (Expand all). */
+  const glyph = (name: IconName) => renderToStaticMarkup(<Icon name={name} />).match(/ d="([^"]+)"/)?.[1];
+  const shows = () => foldAll()?.querySelector("path")?.getAttribute("d");
+  const press = async () => {
+    await act(async () => { foldAll()!.click(); await Promise.resolve(); });
+    await flush();
+  };
+
+  it.each(["todo", "machine", "repo", "space", "state"])("folds %s to its group headings and opens it again, the controls staying", async (mode) => {
+    localStorage.setItem("persona.agentGrouping", mode);
+    vi.stubGlobal("fetch", hub(() => json({ todos: [todo] })));
+    await refresh();
+    await render();
+    expect(controls()).toEqual(everyControl);
+    expect(agentShown()).toBe(true);
+    expect(foldAll()!.getAttribute("aria-label")).toBe("全部折叠");
+    expect(shows()).toBe(glyph("foldToggle"));
+
+    await press();
+    expect(controls()).toEqual(everyControl);
+    expect(headings().length).toBeGreaterThan(0);
+    expect(headings().every((b) => b.getAttribute("aria-expanded") === "false")).toBe(true);
+    expect(agentShown()).toBe(false);
+    // by to-do, each to-do is one row, its agents folded under it (no project or repository level above it, #6458)
+    if (mode === "todo") expect(agentsBlock().querySelector('[data-tree-branch="todo:td1"] [data-tree-branch-row]')?.textContent).toContain(todo.title);
+    if (mode === "todo") expect(onScreen(agentsBlock().querySelector('[data-tree-branch="todo:td1"] [data-tree-branch-row]'))).toBe(true);
+    expect(foldAll()!.getAttribute("aria-label")).toBe("全部展开");
+    expect(shows()).toBe(glyph("unfoldToggle"));
+
+    await press();
+    expect(controls()).toEqual(everyControl);
+    expect(headings().every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
+    expect(agentShown()).toBe(true);
+    expect(shows()).toBe(glyph("foldToggle"));
+  });
+
+  it("has no button in the chat-list view, whose rows stay under the controls", async () => {
+    localStorage.setItem("persona.agentGrouping", "machine");
+    localStorage.setItem("persona.agentChatList", "1");
+    vi.stubGlobal("fetch", hub(() => json({ todos: [todo] })));
+    await refresh();
+    await render();
+    expect(host.querySelector("[data-testid=agent-chatlist-section]")).not.toBeNull();
+    expect(foldAll()).toBeNull();
+    expect(controls()).toEqual(everyControl);
+    expect(agentShown()).toBe(true);
+  });
+});
+
+describe("按待办's 最近（未运行）", () => {
+  it("has no ⓘ, its name saying what it holds, and is listed only with something in it (#6447)", async () => {
+    localStorage.setItem("persona.agentGrouping", "todo");
+    const gone: Session = { ...agent, session_id: "s2", title: "旧的发布检查", status: "offline", state: "offline" };
+    let sessions = [agent, gone];
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.endsWith("/api/v1/todos")) return json({ todos: [todo] });
+      if (url.endsWith("/api/v1/sessions")) return json({ sessions });
+      if (url.endsWith("/api/v1/machines")) return json({ machines: [mac] });
+      return json({});
+    }));
+    await refresh();
+    await render();
+    const about = (branch: string) => agentsBlock().querySelector(`[data-tree-branch="${branch}"] [data-tree-branch-row] [aria-label^="${t("ui-atoms.about", { name: "" }).slice(0, 2)}"]`);
+    const recent = () => agentsBlock().querySelector('[data-tree-branch="recent"] [data-tree-branch-row]');
+    expect(recent()?.textContent).toContain(t("sidebar.recent"));
+    expect(about("recent")).toBeNull();
+    // the groups whose names do not say it keep theirs
+    expect(about("todo:none")).not.toBeNull();
+
+    // the same hub with nothing stopped: no 最近（未运行） row at all
+    act(() => root.unmount());
+    reset();
+    root = createRoot(host);
+    sessions = [agent];
+    await refresh();
+    await render();
+    expect(recent()).toBeNull();
+    expect(agentsBlock().querySelector('[data-tree-branch="todo:none"]')).not.toBeNull();
   });
 });
 

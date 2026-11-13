@@ -106,6 +106,27 @@ nonisolated enum RecordingTimeline {
         return wait / Theme.Recording.gapStep * Theme.Recording.gapStep
     }
 
+    /// Where the transcript opens at a highlight's minute (#3862 phase 2b): the row to scroll to and the rows to light.
+    nonisolated struct Focus: Equatable, Sendable {
+        var scroll: Item.ID
+        var lit: Set<Item.ID>
+    }
+
+    /// The transcript at a highlight's minute, `at` to `end` (pure, for the tests): every sentence of `items` that starts
+    /// in it, lit, the first of them scrolled to; with none there (the hub's lines aren't the phone's, phase 5), the one
+    /// `RecordingMinutes.sentenceIndex` picks for `at`. Nil without a sentence. Compared in milliseconds, as the rows' ids
+    /// are, so a time that went through the hub and back still finds its line.
+    static func focus(at: Double, end: Double, in items: [Item]) -> Focus? {
+        guard at.isFinite else { return nil }
+        let sentences = items.filter { if case .sentence = $0.kind { true } else { false } }
+        let from = millis(at), to = millis(end.isFinite ? max(at, end) : at)
+        let inside = sentences.filter { (from...to).contains(millis($0.at)) }
+        if let first = inside.first { return Focus(scroll: first.id, lit: Set(inside.map(\.id))) }
+        let starts = sentences.map { RecordingSentence(start: $0.at, end: $0.at, text: "") }
+        guard let index = RecordingMinutes.sentenceIndex(at: at, in: starts) else { return nil }
+        return Focus(scroll: sentences[index].id, lit: [sentences[index].id])
+    }
+
     static func millis(_ seconds: Double) -> Int {
         guard seconds.isFinite else { return 0 }
         return Int((seconds * 1000).rounded())

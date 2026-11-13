@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Persona HarmonyOS · Interaction design</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;color:#18212d;background:#eef0f3;font-synthesis:none;text-rendering:optimizeLegibility}
+*{box-sizing:border-box}body{margin:0;min-width:320px}button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}
+.review-app{min-height:100vh;display:grid;grid-template-rows:auto 1fr}.review-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;padding:14px 22px;background:#f8f9faeF;border-bottom:1px solid #dfe3e8;backdrop-filter:blur(18px)}.review-brand{min-width:0;flex:1}.review-eyebrow{font-size:calc(11px * var(--font-scale,1));letter-spacing:.1em;text-transform:uppercase;color:#6b7480;font-weight:700}.review-header h1{font-size:calc(18px * var(--font-scale,1));margin:2px 0 0;font-weight:650}.review-badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.review-badge{border:1px solid #d8dde4;border-radius:99px;padding:6px 10px;font-size:calc(11px * var(--font-scale,1));color:#4a5664;background:#fff;white-space:nowrap}.review-body{display:grid;grid-template-columns:296px minmax(0,1fr);min-height:0}.inspector{background:#f7f8fa;border-right:1px solid #dfe3e8;padding:18px 16px 28px;overflow:auto}.inspector-title{margin:0 0 3px;font-size:calc(13px * var(--font-scale,1));font-weight:700}.inspector-intro{margin:0 0 18px;color:#687381;font-size:calc(11px * var(--font-scale,1));line-height:1.45}.control-group{padding:13px 0;border-top:1px solid #e1e5e9}.control-group:first-of-type{border-top:0;padding-top:0}.control-heading{font-size:calc(11px * var(--font-scale,1));font-weight:700;color:#67717e;margin:0 0 8px}.choice-grid{display:grid;gap:6px}.choice-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.choice-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.seg-button{border:1px solid #d8dde4;background:#fff;color:#283341;border-radius:9px;min-height:38px;padding:6px 7px;font-size:calc(11px * var(--font-scale,1));line-height:1.25;text-align:center}.seg-button[aria-pressed=true]{border-color:#0a59f7;background:#edf3ff;color:#064bd5;box-shadow:inset 0 0 0 1px #0a59f7}.inspector label{display:block;font-size:calc(11px * var(--font-scale,1));font-weight:600;color:#596472;margin:9px 0 4px}.inspector select{width:100%;height:38px;border:1px solid #d8dde4;border-radius:9px;background:#fff;color:#27313e;padding:0 10px;font-size:calc(12px * var(--font-scale,1))}.review-action{min-height:38px;border:1px solid #d8dde4;border-radius:9px;background:#fff;color:#27313e;padding:7px 10px;font-size:calc(11px * var(--font-scale,1));font-weight:650}.review-action.primary{border-color:#0a59f7;background:#0a59f7;color:#fff}.review-action:active,.seg-button:active{transform:translateY(1px)}.scope-note{font-size:calc(10px * var(--font-scale,1));color:#77818d;line-height:1.5;margin:12px 0 0}.event-row{display:grid;grid-template-columns:1fr;gap:7px}.status-line{min-height:30px;padding:7px 8px;border-radius:8px;background:#eef1f5;color:#586270;font-size:calc(10px * var(--font-scale,1));line-height:1.4}.stage{min-width:0;min-height:0;padding:22px 24px 32px;display:flex;flex-direction:column;align-items:center;overflow:auto;background:radial-gradient(ellipse at 50% 20%,#ffffff 0,#f1f3f5 56%,#eceff2 100%)}.stage-head{width:min(100%,940px);display:flex;justify-content:space-between;align-items:center;gap:14px;margin:0 auto 12px}.stage-head p{margin:0;color:#5f6a77;font-size:calc(11px * var(--font-scale,1))}.stage-head strong{font-weight:700;color:#374352}.preview-caption{width:max-content;max-width:100%;margin:0 auto 9px;padding:0 4px;display:flex;align-items:center;gap:10px;color:#687381;font-size:calc(10px * var(--font-scale,1))}.preview-caption .caption-dim{color:#89929c}.preview-shell{width:max-content;max-width:100%;margin:auto}.device{--bg:#f1f3f5;--surface:#fff;--panel:#fff;--soft:#e9edf2;--ink:#18212d;--muted:#687381;--line:#e0e5eb;--action:#0a59f7;--action-ink:#fff;--warn:#9b4e00;--green:#147052;--bad:#bd2335;--own:#e0edff;--radius:24px;position:relative;isolation:isolate;display:flex;flex-direction:column;flex-shrink:0;width:390px;height:844px;max-width:none;overflow:hidden;border:6px solid #3c4149;border-radius:38px;background:var(--bg);color:var(--ink);box-shadow:0 26px 65px #27374c24,0 4px 12px #15233726;font-size:calc(16px * var(--font-scale,1));line-height:1.5}.device[data-size=fold]{width:712px;height:799px;border-radius:31px}.device[data-size=wide]{width:940px;height:665px;border-radius:28px}.device[data-tone=dark]{--bg:#101113;--surface:#1d1f23;--panel:#24262b;--soft:#2a2d33;--ink:#f0f2f6;--muted:#a7afbb;--line:#373c44;--action:#9abfff;--action-ink:#101113;--warn:#ffc06c;--green:#83d5b6;--bad:#ff9fad;--own:#263e61;border-color:#282b30}.device[data-tone=light]{--bg:#fff;--soft:#f1f3f5;--line:#e6e6e6}.device[data-font-scale="1"]{--font-scale:1}.device[data-font-scale="2"]{--font-scale:2}.device[data-font-scale="3.2"]{--font-scale:3.2}.device[data-font-scale="2"] .native-title{min-height:88px}.device[data-font-scale="3.2"] .native-title{min-height:108px}.device[data-font-scale="2"] .composer{min-height:82px}.device[data-font-scale="3.2"] .composer{min-height:100px}.device[data-font-scale="2"] .composer textarea{min-height:56px}.device[data-font-scale="3.2"] .composer textarea{min-height:70px}.device[data-font-scale="2"] .dock{height:78px;flex-basis:78px}.device[data-font-scale="3.2"] .dock{height:88px;flex-basis:88px}.device[data-style=brief]{--own:#f1eadb;--radius:16px}.device[data-style=board]{--own:#dce8f4;--radius:20px}.device[data-style=brief] .decision-badge{background:#fff1b2;color:#715700}.device[data-style=board] .message-own{border:1px solid color-mix(in srgb,var(--action) 12%,transparent)}
+.statusbar{height:28px;flex:0 0 28px;padding:5px 18px 1px;display:flex;justify-content:space-between;align-items:center;font-size:calc(11px * var(--font-scale,1));font-weight:600}.status-icons{font-size:calc(10px * var(--font-scale,1));letter-spacing:.06em}.app-shell{display:flex;min-height:0;flex:1}.master-pane{display:none;min-width:0;flex-direction:column;flex:0 0 320px;width:320px;background:color-mix(in srgb,var(--bg) 96%,var(--soft));border-right:1px solid var(--line)}.device[data-size=wide] .master-pane{display:flex}.device[data-collapsed=true] .master-pane{flex:0 0 64px;width:64px}.master-head{height:66px;flex:0 0 66px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}.master-head h2{margin:0;min-width:0;flex:1;font-size:calc(16px * var(--font-scale,1));font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.master-head .scope-short{display:block;color:var(--muted);font-size:calc(10px * var(--font-scale,1));font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.master-head button{width:40px;height:40px;min-width:40px;border:0;border-radius:12px;background:transparent;color:var(--muted)}.master-scroll{min-height:0;flex:1;overflow:auto;padding:8px}.device[data-collapsed=true] .master-head{justify-content:center;padding:0 8px}.device[data-collapsed=true] .master-head h2,.device[data-collapsed=true] .master-head .scope-short,.device[data-collapsed=true] .master-scroll .row-label,.device[data-collapsed=true] .master-scroll .row-meta,.device[data-collapsed=true] .master-scroll .row-badge,.device[data-collapsed=true] .master-scroll .app-name{display:none}.device[data-collapsed=true] .master-scroll{padding:7px}.device[data-collapsed=true] .master-row{justify-content:center;padding:5px}.device[data-collapsed=true] .master-row .row-icon{margin:0}.device[data-collapsed=true] .master-row .row-chevron{display:none}.master-row{width:100%;min-height:48px;border:0;border-radius:13px;background:transparent;color:var(--ink);display:flex;align-items:center;gap:10px;text-align:left;padding:7px 10px}.master-row.active{background:var(--surface);color:var(--action);box-shadow:0 1px 4px #1a27320d}.master-row:active{background:var(--soft)}.row-icon{width:30px;height:30px;flex:0 0 30px;border-radius:10px;display:grid;place-items:center;background:var(--soft);color:var(--muted)}.master-row.active .row-icon{background:color-mix(in srgb,var(--action) 11%,var(--surface));color:var(--action)}.row-icon svg{width:17px;height:17px}.row-copy{min-width:0;flex:1}.row-label{display:block;font-size:calc(13px * var(--font-scale,1));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-meta{display:block;margin-top:1px;color:var(--muted);font-size:calc(10px * var(--font-scale,1));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-badge{font-size:calc(9px * var(--font-scale,1));color:var(--green);background:color-mix(in srgb,var(--green) 11%,var(--surface));padding:2px 6px;border-radius:20px}.row-chevron{color:var(--muted);font-size:calc(15px * var(--font-scale,1))}
+.detail-pane{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;background:var(--bg)}.native-title{min-height:68px;flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:8px 16px;background:color-mix(in srgb,var(--bg) 92%,transparent);border-bottom:1px solid color-mix(in srgb,var(--line) 65%,transparent);backdrop-filter:blur(16px);z-index:2}.title-copy{min-width:0;flex:1}.native-title h1{margin:0;font-size:calc(20px * var(--font-scale,1));line-height:1.2;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.scope-button{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px;border:0;padding:0;background:transparent;color:var(--muted);font-size:calc(10px * var(--font-scale,1));text-align:left}.title-actions{display:flex;align-items:center;gap:3px}.icon-button,.menu-button,.apps-button,.owner-option{min-width:44px;min-height:44px;border:0;border-radius:14px;background:transparent;color:var(--ink);display:inline-flex;align-items:center;justify-content:center}.icon-button svg,.apps-button svg{width:20px;height:20px}.icon-button:active,.apps-button:active,.menu-button:active{background:var(--soft)}.apps-button{gap:5px;padding:0 9px;background:color-mix(in srgb,var(--soft) 75%,transparent);font-size:calc(12px * var(--font-scale,1));white-space:nowrap}.apps-button svg{width:18px;height:18px}.back-button{font-size:calc(22px * var(--font-scale,1));color:var(--action);padding:0 5px}.content-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px 16px 22px}.device[data-size=fold] .content-scroll{padding-left:22px;padding-right:22px}.device[data-size=wide] .content-scroll{padding:18px 22px 22px}.page-stack{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:14px}.device[data-size=wide] .page-stack{max-width:760px}.section-heading{margin:2px 0 -4px;font-size:calc(12px * var(--font-scale,1));font-weight:650;color:var(--muted)}.surface-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:15px;box-shadow:0 2px 7px #101b2805}.surface-card h2,.surface-card h3{margin:0;font-size:calc(15px * var(--font-scale,1));line-height:1.35;font-weight:650}.surface-card p{margin:7px 0 0;font-size:calc(13px * var(--font-scale,1));color:var(--muted);line-height:1.45}.surface-card .large-value{margin-top:7px;font-size:calc(30px * var(--font-scale,1));line-height:1.1;font-weight:620;letter-spacing:-.03em}.surface-card .value-line{display:flex;align-items:center;justify-content:space-between;gap:10px}.surface-card .up{font-size:calc(13px * var(--font-scale,1));color:var(--green);font-weight:650}.surface-card .down{font-size:calc(13px * var(--font-scale,1));color:var(--bad);font-weight:650}.list-card{overflow:hidden;padding:0}.list-row{width:100%;min-height:62px;display:flex;align-items:center;gap:12px;padding:9px 13px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);text-align:left}.list-row:last-child{border-bottom:0}.list-row:active{background:var(--soft)}.list-row .row-copy strong{display:block;font-size:calc(13px * var(--font-scale,1));font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.list-row .row-copy small{display:block;margin-top:2px;color:var(--muted);font-size:calc(10px * var(--font-scale,1))}.list-row .row-chevron{margin-left:auto}.list-row .list-action{margin-left:auto;min-width:44px;min-height:44px;border:0;border-radius:12px;background:transparent;color:var(--muted);font-size:calc(19px * var(--font-scale,1))}
+.app-list{display:flex;flex-direction:column;gap:8px}.app-entry{min-height:68px;width:100%;display:flex;align-items:center;gap:13px;padding:9px 12px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--ink);text-align:left}.app-entry:active{background:var(--soft)}.app-glyph{width:42px;height:42px;flex:0 0 42px;border-radius:14px;background:var(--soft);color:var(--action);display:grid;place-items:center}.app-glyph svg{width:20px;height:20px}.app-name{min-width:0;flex:1;font-size:calc(14px * var(--font-scale,1));font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.app-entry .row-badge{flex:0 0 auto}.app-entry.compact{min-height:52px;padding:6px 8px;border-radius:13px;gap:8px}.app-entry.compact .app-glyph{width:30px;height:30px;flex-basis:30px;border-radius:9px}.app-entry.compact .app-glyph svg{width:16px;height:16px}.app-entry.compact .app-name{font-size:calc(12px * var(--font-scale,1))}.empty-state{min-height:190px;padding:28px 20px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:20px}.empty-mark{width:46px;height:46px;display:grid;place-items:center;border-radius:16px;background:var(--soft);color:var(--muted);margin-bottom:12px}.empty-mark svg{width:22px;height:22px}.empty-state h2{font-size:calc(15px * var(--font-scale,1));margin:0;font-weight:650}.empty-state p{font-size:calc(12px * var(--font-scale,1));color:var(--muted);margin:5px 0 13px}.empty-state button{min-height:40px;border:0;border-radius:13px;padding:0 15px;background:var(--action);color:var(--action-ink);font-size:calc(12px * var(--font-scale,1));font-weight:600}
+.dock{height:70px;flex:0 0 70px;display:flex;align-items:stretch;justify-content:space-around;gap:2px;padding:4px 8px 7px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--surface) 90%,transparent);backdrop-filter:blur(24px);z-index:2}.device[data-style=brief] .dock{backdrop-filter:none}.tab-button{min-width:50px;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:0;border-radius:14px;background:transparent;color:var(--muted)}.tab-button svg{width:21px;height:21px}.tab-button span{font-size:calc(10px * var(--font-scale,1));line-height:1.2}.tab-button.active{color:var(--action)}.tab-button.active svg{filter:drop-shadow(0 1px 1px color-mix(in srgb,var(--action) 20%,transparent))}.home-indicator{position:absolute;bottom:5px;left:50%;transform:translateX(-50%);z-index:5;width:94px;height:4px;border-radius:99px;background:var(--ink);opacity:.52;pointer-events:none}.device[data-size=wide] .home-indicator{display:none}
+.device[data-size=wide] #masterTabs .dock{height:74px;min-height:74px;flex-basis:74px;padding:4px 7px 8px;border-top:1px solid var(--line);border-bottom:0}.device[data-size=wide][data-font-scale="2"] #masterTabs .dock{height:84px;min-height:84px;flex-basis:84px}.device[data-size=wide][data-font-scale="3.2"] #masterTabs .dock{height:96px;min-height:96px;flex-basis:96px}.device[data-size=wide] #dockHost{display:none}.device[data-size=wide][data-collapsed=true] #masterTabs{display:none}.master-actions{display:flex;align-items:center;gap:2px;flex:0 0 auto}.master-owner-button{max-width:100px;min-height:44px;border:0;border-radius:11px;padding:3px 4px;background:transparent;color:var(--muted);font-size:10px;line-height:1.2;text-align:left;white-space:normal;overflow:hidden}.device[data-size=wide] .owner-popover{left:12px;right:auto}.alert-overlay{position:absolute;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;padding:20px;background:#10151c60}.alert-dialog{width:min(320px,calc(100% - 26px));padding:20px;border:1px solid var(--line);border-radius:22px;background:var(--surface);color:var(--ink);box-shadow:0 18px 55px #07152240}.alert-dialog h2{margin:0;font-size:calc(17px * var(--font-scale,1))}.alert-dialog p{margin:9px 0 19px;color:var(--muted);font-size:calc(12px * var(--font-scale,1))}.alert-actions{display:flex;justify-content:flex-end;gap:8px}.alert-actions button{min-height:42px;border:0;border-radius:12px;padding:0 13px;background:var(--soft);color:var(--ink);font-size:calc(12px * var(--font-scale,1))}.alert-actions button.primary{background:var(--action);color:var(--action-ink)}
+
+.conversation{display:flex;flex-direction:column;gap:12px}.message{max-width:90%;padding:11px 14px;border-radius:19px;font-size:calc(13px * var(--font-scale,1));line-height:1.55}.message-assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--line)}.message-own{align-self:flex-end;background:var(--own);border-radius:19px 19px 5px 19px}.message-meta{font-size:calc(10px * var(--font-scale,1));color:var(--muted);margin-bottom:4px}.question-card{background:var(--surface);border:1px solid var(--line);border-radius:19px;padding:14px 14px 12px;box-shadow:0 2px 8px #0e1b2b07}.question-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.decision-badge{padding:3px 8px;background:#fff3da;color:#815208;border-radius:99px;font-size:calc(10px * var(--font-scale,1));font-weight:650}.decision-badge.nonblocking{background:color-mix(in srgb,var(--action) 10%,var(--surface));color:var(--action)}.question-card h3{margin:0;font-size:calc(14px * var(--font-scale,1));font-weight:650}.question-card .question-copy{margin:5px 0 10px;font-size:calc(12px * var(--font-scale,1));line-height:1.45;color:var(--muted)}.question-options{display:flex;flex-wrap:wrap;gap:7px;margin:7px 0 10px}.choice-pill{position:relative;min-height:38px;display:flex;align-items:center;gap:7px;padding:4px 11px;border:1px solid var(--line);border-radius:99px;background:var(--bg);font-size:calc(12px * var(--font-scale,1));color:var(--ink)}.choice-pill:has(input:checked){border-color:var(--action);background:color-mix(in srgb,var(--action) 8%,var(--surface));color:var(--action)}.choice-pill input{accent-color:var(--action);margin:0}.question-actions{display:flex;justify-content:flex-end;gap:7px}.text-button{min-height:38px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--muted);font-size:calc(12px * var(--font-scale,1));font-weight:600}.text-button.primary{background:var(--action);color:var(--action-ink)}.text-button.danger{color:var(--bad)}.blocker-card{border-color:color-mix(in srgb,var(--warn) 35%,var(--line));}.blocker-card .question-top .decision-badge{background:color-mix(in srgb,var(--warn) 14%,var(--surface));color:var(--warn)}.composer{min-height:71px;flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:9px 13px;background:color-mix(in srgb,var(--surface) 96%,transparent);border-top:1px solid var(--line);z-index:1}.composer textarea{flex:1;min-width:0;min-height:43px;max-height:90px;resize:none;border:1px solid var(--line);border-radius:16px;padding:10px 12px;background:var(--bg);color:var(--ink);font-size:calc(13px * var(--font-scale,1));line-height:1.4;outline:none}.composer textarea:focus{border-color:var(--action);box-shadow:0 0 0 2px color-mix(in srgb,var(--action) 14%,transparent)}.composer textarea::placeholder{color:var(--muted)}.send-button{width:44px;height:44px;min-width:44px;border:0;border-radius:15px;background:var(--action);color:var(--action-ink);display:grid;place-items:center}.send-button svg{width:19px;height:19px}
+.switch-row{display:flex;align-items:center;gap:12px;min-height:73px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--surface)}.switch-row:first-child{border-radius:18px 18px 0 0}.switch-row:last-child{border-bottom:0;border-radius:0 0 18px 18px}.switch-row .row-copy{flex:1;min-width:0}.switch-row strong{display:block;font-size:calc(13px * var(--font-scale,1));font-weight:600}.switch-row small{display:block;margin-top:2px;color:var(--muted);font-size:calc(10px * var(--font-scale,1))}.switch-control{width:48px;height:28px;position:relative;flex:0 0 auto}.switch-control input{position:absolute;opacity:0;width:100%;height:100%;margin:0;z-index:2;cursor:pointer}.switch-track{position:absolute;inset:2px;border-radius:99px;background:#aab2bd;transition:background .18s ease}.switch-track:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:white;box-shadow:0 1px 3px #0003;transition:transform .18s ease}.switch-control input:checked+.switch-track{background:#0a9d78}.switch-control input:checked+.switch-track:after{transform:translateX(20px)}.switch-control input:focus-visible+.switch-track{outline:3px solid color-mix(in srgb,var(--action) 50%,transparent);outline-offset:2px}.workspace-view{display:flex;flex-direction:column;width:100%;height:100%;min-height:0;overflow:hidden}.workspace-tabs{display:flex;align-items:stretch;gap:2px;width:100%;min-height:48px;height:auto;flex:0 0 auto;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:thin}.workspace-tab{flex:0 0 auto;min-height:48px;padding:0 13px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-size:calc(13px * var(--font-scale,1));white-space:nowrap}.workspace-tab[aria-selected=true]{border-bottom-color:var(--action);color:var(--action)}.workspace-tab-content{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}.workspace-file-toolbar{display:flex;align-items:center;gap:6px;width:100%;padding:0 0 10px}.workspace-icon-button{display:grid;place-items:center;width:44px;height:44px;min-width:44px;flex:0 0 44px;border:0;border-radius:12px;background:var(--soft);color:var(--ink)}.workspace-icon-button svg{width:20px;height:20px}.workspace-icon-button:active{background:color-mix(in srgb,var(--action) 14%,var(--soft))}.workspace-path-input{display:block;width:auto;min-width:0;height:44px;flex:1;border:1px solid var(--line);border-radius:12px;padding:0 10px;background:var(--surface);color:var(--ink);font-size:calc(12px * var(--font-scale,1));outline:none}.workspace-file-list{flex:1;min-height:0;overflow:auto;border-top:1px solid var(--line)}.workspace-file-row{display:block;width:100%;min-height:64px;height:auto;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);text-align:left;white-space:normal}.workspace-file-row:active{background:var(--soft)}.workspace-file-row strong{display:block;font-size:calc(13px * var(--font-scale,1));font-weight:600;line-height:1.25;overflow-wrap:anywhere}.workspace-file-row small{display:block;margin-top:3px;color:var(--muted);font-size:calc(10px * var(--font-scale,1));line-height:1.25;overflow-wrap:anywhere}.workspace-panel{flex:1;min-height:0;overflow:auto;padding:14px 0;color:var(--ink)}.workspace-panel h2{margin:0;font-size:calc(15px * var(--font-scale,1));line-height:1.35;font-weight:650}.workspace-panel p{margin:8px 0 0;color:var(--muted);font-size:calc(12px * var(--font-scale,1));overflow-wrap:anywhere}.file-transfer-settings{display:flex;flex-direction:column;width:100%;gap:2px;margin:4px 0 10px}.file-transfer-setting{display:flex;align-items:center;gap:10px;min-height:48px;padding:8px 2px;border-bottom:1px solid var(--line)}.file-transfer-setting:last-child{border-bottom:0}.file-transfer-setting label{min-width:0;flex:1;font-size:calc(12px * var(--font-scale,1));font-weight:600;line-height:1.3;overflow-wrap:anywhere}.file-transfer-setting .setting-unknown{color:var(--bad);font-size:calc(10px * var(--font-scale,1))}.file-transfer-setting .setting-query{min-height:38px;padding:0 8px;border:0;border-radius:10px;background:var(--soft);color:var(--ink);font-size:calc(10px * var(--font-scale,1))}.target-list{max-height:180px;overflow:auto;overscroll-behavior:contain;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.target-row{min-height:48px;height:auto;border:0;border-bottom:1px solid var(--line);border-radius:0;margin:0;padding:8px 2px;background:transparent}.target-row:last-child{border-bottom:0}.target-row input{width:20px;height:20px;flex:0 0 auto}.target-row span{min-width:0}.target-row strong{font-size:calc(12px * var(--font-scale,1));font-weight:500;overflow-wrap:anywhere}.target-row.selected{box-shadow:none;background:color-mix(in srgb,var(--action) 7%,transparent)}.native-menu.workspace-native-menu{top:112px;bottom:auto;right:12px}
+.owner-popover,.native-menu{position:absolute;z-index:10;top:64px;right:12px;width:min(286px,calc(100% - 24px));padding:7px;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:20px;box-shadow:0 16px 42px #07152235;backdrop-filter:blur(28px)}.owner-popover .popover-heading{padding:8px 10px;color:var(--muted);font-size:calc(10px * var(--font-scale,1));font-weight:700}.owner-option{width:100%;min-height:52px;justify-content:flex-start;padding:7px 11px;text-align:left;border-radius:13px;gap:10px}.owner-option.selected{background:color-mix(in srgb,var(--action) 9%,var(--surface));color:var(--action)}.owner-option .owner-check{margin-left:auto}.owner-option small{display:block;color:var(--muted);font-size:calc(10px * var(--font-scale,1))}.native-menu{top:auto;right:12px;bottom:74px;width:218px}.native-menu button{width:100%;height:48px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--ink);text-align:left;display:flex;align-items:center;gap:11px;font-size:calc(13px * var(--font-scale,1))}.native-menu button:active{background:var(--soft)}.menu-symbol{width:24px;height:24px;display:grid;place-items:center;color:var(--muted)}.menu-symbol svg{width:18px;height:18px}
+.overlay{position:absolute;inset:0;z-index:20;background:#10151c60;display:flex;align-items:flex-end;justify-content:center;padding-top:28px}.sheet{width:100%;max-height:92%;min-height:300px;display:flex;flex-direction:column;overflow:hidden;border-radius:25px 25px 0 0;background:var(--surface);color:var(--ink);box-shadow:0 -10px 44px #0715222e}.sheet-grabber{align-self:center;width:38px;height:4px;border-radius:99px;background:var(--muted);opacity:.38;margin:9px 0 4px}.sheet-head{min-height:56px;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line)}.sheet-head h2{margin:0;flex:1;font-size:calc(16px * var(--font-scale,1));font-weight:650}.sheet-close{width:40px;height:40px;border:0;border-radius:13px;background:var(--soft);color:var(--ink);font-size:calc(20px * var(--font-scale,1))}.sheet-scroll{padding:14px 16px 6px;overflow:auto;flex:1;min-height:0}.sheet-section-title{margin:0 0 8px;color:var(--muted);font-size:calc(11px * var(--font-scale,1));font-weight:650}.transfer-source{padding:11px 12px;border:1px solid var(--line);border-radius:15px;display:flex;align-items:center;gap:10px;margin-bottom:14px}.file-glyph{width:34px;height:34px;border-radius:11px;background:var(--soft);color:var(--action);display:grid;place-items:center}.transfer-source strong{display:block;font-size:calc(12px * var(--font-scale,1));font-weight:600}.transfer-source small{display:block;color:var(--muted);font-size:calc(10px * var(--font-scale,1));margin-top:1px}.target-row{display:flex;align-items:center;gap:11px;padding:10px 11px;min-height:62px;border:1px solid var(--line);border-radius:15px;margin:6px 0;background:var(--bg);cursor:pointer}.target-row.selected{border-color:var(--action);box-shadow:inset 0 0 0 1px var(--action);background:color-mix(in srgb,var(--action) 5%,var(--surface))}.target-row input{accent-color:var(--action)}.target-glyph{width:34px;height:34px;border-radius:11px;background:var(--soft);display:grid;place-items:center;color:var(--muted)}.target-row strong{display:block;font-size:calc(12px * var(--font-scale,1));font-weight:600}.target-row small{display:block;color:var(--muted);font-size:calc(10px * var(--font-scale,1));margin-top:1px}.target-path{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:11px 0 7px;padding:10px 12px;border-radius:13px;background:var(--soft);font-size:calc(11px * var(--font-scale,1))}.target-path span:first-child{color:var(--muted)}.target-path strong{font-size:calc(11px * var(--font-scale,1));font-weight:600;text-align:right}.duplicate-risk{font-size:calc(11px * var(--font-scale,1));line-height:1.45;color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,var(--surface));padding:10px 12px;border-radius:13px;margin:9px 0}.sheet-actions{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 16px calc(16px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--surface)}.sheet-actions button{min-height:46px;border:0;border-radius:14px;padding:0 15px;font-size:calc(13px * var(--font-scale,1));font-weight:650}.sheet-actions .cancel{background:var(--soft);color:var(--ink)}.sheet-actions .confirm{flex:1;background:var(--action);color:var(--action-ink)}.sheet-actions .confirm:disabled{opacity:.42}.transfer-status{padding:17px 15px 14px;border:1px solid var(--line);border-radius:18px;background:var(--bg)}.transfer-state-line{display:flex;align-items:center;gap:9px}.state-dot{width:10px;height:10px;flex:0 0 10px;border-radius:50%;background:var(--action)}.state-dot.done{background:var(--green)}.state-dot.error{background:var(--bad)}.state-dot.unknown{background:var(--warn)}.state-dot.cancel{background:var(--muted)}.transfer-status h3{font-size:calc(14px * var(--font-scale,1));margin:0;font-weight:650}.transfer-status p{font-size:calc(11px * var(--font-scale,1));line-height:1.45;color:var(--muted);margin:7px 0 0;overflow-wrap:anywhere}.progress-track{height:6px;border-radius:99px;background:var(--soft);overflow:hidden;margin:15px 0 10px}.progress-value{height:100%;border-radius:inherit;background:var(--action);transition:width .25s ease}.transfer-meta{display:grid;gap:6px;margin-top:12px}.transfer-meta div{display:flex;justify-content:space-between;gap:10px;font-size:calc(10px * var(--font-scale,1))}.transfer-meta span:first-child{color:var(--muted)}.transfer-meta span:last-child{text-align:right;overflow-wrap:anywhere}.transfer-toolbar{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.transfer-toolbar button{min-height:39px;border:1px solid var(--line);border-radius:12px;padding:0 11px;background:var(--surface);color:var(--ink);font-size:calc(11px * var(--font-scale,1));font-weight:600}.transfer-toolbar button.primary{border-color:var(--action);background:var(--action);color:var(--action-ink)}.transfer-summary{padding:12px 13px;border-radius:16px;background:var(--soft);display:flex;align-items:center;gap:10px}.transfer-summary .row-copy strong{font-size:calc(12px * var(--font-scale,1))}.transfer-summary .row-copy small{font-size:calc(10px * var(--font-scale,1));color:var(--muted)}.transfer-summary button{min-height:38px;border:0;border-radius:12px;padding:0 12px;background:var(--surface);color:var(--action);font-size:calc(11px * var(--font-scale,1));font-weight:650}
+.toast{position:absolute;z-index:30;bottom:82px;left:50%;transform:translateX(-50%);max-width:calc(100% - 35px);padding:8px 13px;border-radius:99px;background:#25292f;color:#fff;font-size:calc(11px * var(--font-scale,1));white-space:nowrap;box-shadow:0 5px 20px #0004;animation:toast-in .18s ease-out}@keyframes toast-in{from{opacity:0;transform:translate(-50%,5px)}to{opacity:1;transform:translate(-50%,0)}}
+@media(max-width:760px){.review-header{padding:12px 14px;align-items:flex-start}.review-header h1{font-size:calc(16px * var(--font-scale,1))}.review-badges{gap:5px}.review-badge{font-size:calc(9px * var(--font-scale,1));padding:5px 7px}.review-body{display:flex;flex-direction:column}.inspector{order:2;border-right:0;border-top:1px solid #dfe3e8;padding:16px}.stage{order:1;min-height:650px;padding:18px 12px 26px}.stage-head{padding:0 4px}.inspector-title{font-size:calc(14px * var(--font-scale,1))}.control-group{display:inline-block;vertical-align:top;width:min(100%,360px);padding-right:15px}.control-group:first-of-type{padding-top:13px;border-top:1px solid #e1e5e9}}
+@media(max-width:420px){.review-header{gap:8px}.review-header h1{font-size:calc(14px * var(--font-scale,1))}.review-badges{max-width:115px}.review-badge{white-space:normal}.device{border-radius:33px}.native-title{padding-left:12px;padding-right:12px}.apps-button{padding:0 7px}.apps-button span{font-size:calc(11px * var(--font-scale,1))}.content-scroll{padding:13px 12px 19px}.dock{padding-left:3px;padding-right:3px}.tab-button span{font-size:calc(9px * var(--font-scale,1))}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+.master-head .master-actions .master-owner-button{width:auto;min-width:0;height:auto;min-height:44px;max-width:100px}.master-head .master-actions .apps-button{width:auto;min-width:44px;height:44px}
+
+.chat-action-overlay{position:absolute;inset:0;z-index:24;display:flex;align-items:center;justify-content:center;padding:12px;background:transparent}.chat-action-sheet{width:min(272px,calc(100% - 24px));max-height:88%;display:flex;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--ink);box-shadow:0 14px 38px #07152230}.chat-action-options{min-height:0;width:100%;overflow:auto;overscroll-behavior:contain}.chat-action-option{display:flex;align-items:center;width:100%;min-height:48px;padding:9px 16px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);text-align:left;font-size:calc(14px * var(--font-scale,1));line-height:1.3;overflow-wrap:anywhere}.chat-action-option:last-child{border-bottom:0}.chat-action-option:active{background:var(--soft)}.conversation-more-button{width:auto;padding:0 12px;font-size:calc(14px * var(--font-scale,1));font-weight:600;white-space:nowrap}.device[data-size=wide] .chat-action-overlay{align-items:flex-start;justify-content:flex-end;padding:88px 18px 12px}
+
+.target-list{max-height:180px;overflow:auto;overscroll-behavior:contain;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.target-row{display:flex;align-items:center;gap:11px;min-height:48px;height:auto;border:0;border-bottom:1px solid var(--line);border-radius:0;margin:0;padding:8px 2px;background:transparent}.target-row:last-child{border-bottom:0}.target-row input{width:20px;height:20px;flex:0 0 auto}.target-row strong{font-size:calc(12px * var(--font-scale,1));font-weight:500;overflow-wrap:anywhere}.target-row.selected{border-color:transparent;box-shadow:none;background:color-mix(in srgb,var(--action) 7%,transparent)}
+.transfer-source>span{min-width:0;flex:1;overflow-wrap:anywhere}.transfer-source strong,.transfer-source small,.target-row strong,.target-path strong,.transfer-status h3,.transfer-meta span:last-child{overflow-wrap:anywhere;word-break:normal}.target-path{align-items:flex-start}.target-path strong{min-width:0;flex:1}.transfer-meta span:last-child{min-width:0}.sheet-actions{flex-wrap:wrap}.sheet-actions button{flex:1 1 max-content;min-width:0;white-space:normal;overflow-wrap:normal;word-break:normal}.sheet-actions .cancel,.sheet-actions .confirm{flex:1 1 max-content}.transfer-toolbar{flex-wrap:wrap}.transfer-toolbar button{flex:1 1 max-content;min-width:0;white-space:normal;overflow-wrap:anywhere}.wide-agent-title-actions{justify-content:flex-end}
+.review-guide{display:inline-block;margin-top:5px;color:#3157a4;font-size:12px;font-weight:650;text-decoration:none}.review-guide:hover{text-decoration:underline}.review-guide:focus-visible{outline:2px solid #3157a4;outline-offset:3px;border-radius:3px}.projection-disclaimer{margin:0;padding:9px 11px;border:1px solid #dfe3e8;border-radius:10px;background:#f8f9fa;color:#536071;font-size:11px;line-height:1.45}
+
+.composer .send-button{width:auto;min-width:64px;min-height:48px;height:auto;padding:10px 16px;border-radius:99px;font-family:inherit;font-size:calc(16px * var(--font-scale,1));line-height:1.2;font-weight:600;white-space:nowrap}
+.device[data-font-scale="2"] .composer,.device[data-font-scale="3.2"] .composer{display:grid;grid-template-columns:minmax(0,1fr);max-height:38%;overflow:auto;align-items:stretch}.device[data-font-scale="2"] .composer textarea,.device[data-font-scale="3.2"] .composer textarea{width:100%;min-width:0}.device[data-font-scale="2"] .composer .send-button,.device[data-font-scale="3.2"] .composer .send-button{width:100%;min-height:48px;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="review-app">
+  <header class="review-header">
+    <div class="review-brand"><div class="review-eyebrow">HarmonyOS · interaction projection</div><h1>Persona · Interaction design</h1><a class="review-guide" href="harmony.md">HarmonyOS client guide</a></div>
+    <div class="review-badges"><span class="review-badge">Interactive design projection</span><span class="review-badge">Synthetic data</span></div>
+  </header>
+  <div class="review-body">
+    <aside class="inspector" aria-label="Prototype controls">
+      <h2 class="inspector-title">Preview controls</h2>
+      <p class="inspector-intro">Interactions are simulated locally on this page; The UI structure is a discussion aid for the native implementation. </p>
+      <section class="control-group" aria-label="Device viewport">
+        <h3 class="control-heading">Device viewport</h3>
+        <div class="choice-grid three" id="sizeControls"></div>
+      </section>
+      <section class="control-group" aria-label="Appearance">
+        <h3 class="control-heading">Appearance</h3>
+        <div class="choice-grid three" id="styleControls"></div>
+        <div class="choice-grid two" id="toneControls" style="margin-top:6px"></div>
+      </section>
+      <section class="control-group" aria-label="Text size">
+        <h3 class="control-heading">Text size</h3>
+        <div class="choice-grid three" id="fontControls"></div>
+      </section>
+      <section class="control-group" aria-label="Workspace status">
+        <h3 class="control-heading">Workspace status</h3>
+        <label for="ownerSelect">Workspace / manager</label>
+        <select id="ownerSelect" data-testid="review-owner-select"></select>
+        <label for="directorySelect">App directory</label>
+        <select id="directorySelect" data-testid="review-directory-state">
+          <option value="ready">Normal</option><option value="empty">Empty directory</option><option value="error">Request failed</option><option value="offline">Offline</option><option value="unavailable">App unavailable</option><option value="legacy">Legacy Hub</option>
+        </select>
+      </section>
+      <section class="control-group" aria-label="Assistant status">
+        <h3 class="control-heading">Persona Status</h3>
+        <div class="choice-grid three" id="assistantControls"></div>
+        <p class="scope-note">You can send another message while a question is open; Permission and plan states remain blocking independently. </p>
+      </section>
+      <section class="control-group" aria-label="Transfer response simulation">
+        <h3 class="control-heading">Transfer response simulation</h3>
+        <label for="settingPutSelect">Computer switch saved</label>
+        <select id="settingPutSelect" data-testid="review-setting-put"><option value="accepted">Confirm save</option><option value="rejected">Explicitly rejected</option><option value="lost">Response lost</option></select>
+        <label for="settingGetSelect">GET Check result</label>
+        <select id="settingGetSelect" data-testid="review-setting-get"><option value="enabled">On</option><option value="disabled">Off</option><option value="failed">Check failed</option></select>
+        <label for="receiptSelect">Creation response</label>
+        <select id="receiptSelect" data-testid="review-transfer-receipt"><option value="accepted">202 · received ID</option><option value="unknown">Not received ID</option></select>
+        <label for="eventSelect">Known ID server status</label>
+        <select id="eventSelect" data-testid="review-transfer-event"><option value="running">In progress</option><option value="done">Completed</option><option value="error">Failed</option><option value="cancelled">Cancellation confirmed</option><option value="notfound">404 · cannot be checked</option></select>
+        <div class="event-row" style="margin-top:8px"><button class="review-action" data-action="inject-transfer-event" data-testid="review-apply-transfer-event">Simulate server status</button><div class="status-line" id="transferReviewStatus" aria-live="polite">No transfer has been created yet. </div></div>
+        <p class="scope-note">Without a transfer ID, status checks and cancellation are unavailable. "I checked" saves a local note only. Resending always requires explicit confirmation.</p>
+      </section>
+      <p class="projection-disclaimer">This is an interactive design projection only; native HAP and device proof will be attached separately to the PR, and no image on this page is a native screenshot.</p>
+    </aside>
+    <main class="stage" aria-label="Interactive preview">
+      <div class="stage-head"><p><strong id="stageSize">390 × 844</strong> · native ArkUI Structure projection</p><p id="stageState">Hub A · Default manager</p></div>
+      <div class="preview-shell">
+        <div class="preview-caption"><span id="previewTitle">Persona Main chat</span><span class="caption-dim">Synthetic data · HTML</span></div>
+        <div id="device" class="device" data-size="phone" data-style="glass" data-tone="light" data-collapsed="false" data-testid="projection-device"></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+'use strict';
+const icons={
+  persona:'<path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/>',
+  agents:'<path d="m8 5-6 7 6 7m8-14 6 7-6 7m-3-15-2 16"/>',
+  inbox:'<path d="M4 4h16l2 12v4H2v-4L4 4Zm-2 11h6l2 3h4l2-3h6"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.5 1.2-1.5 2.6-1.8-.6a8 8 0 0 1-1.8 1l-.3 1.9h-3l-.4-1.9a8 8 0 0 1-1.8-1l-1.8.6-1.5-2.6 1.5-1.2a7 7 0 0 1 0-2l-1.5-1.2 1.5-2.6 1.8.6a8 8 0 0 1 1.8-1l.4-1.9h3l.3 1.9a8 8 0 0 1 1.8 1l1.8-.6 1.5 2.6-1.5 1.2a7 7 0 0 1 0 2Z" transform="translate(-1 -1)"/>',
+  apps:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+  home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z"/>',
+  market:'<path d="M4 19V5m0 14h17M7 15l4-4 3 2 6-7"/>',
+  calendar:'<rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  notes:'<path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 5h8m-8 4h8m-8 4h5"/>',
+  chart:'<path d="M4 20V4m0 16h17M8 16v-5m4 5V7m4 9v-3m4 3V5"/>',
+  search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+  book:'<path d="M4 4a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1-2-2V4Zm0 14c0-1 1-2 2-2h14M8 6h8m-8 4h7"/>',
+  sparkles:'<path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Zm7 11 .8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z"/>',
+  weather:'<path d="M6 16a4 4 0 1 1 1-7.9A6 6 0 0 1 19 10a3.5 3.5 0 0 1 0 7H6Z"/>',
+  file:'<path d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 1v5h5M8 13h8m-8 4h8"/>',
+  computer:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>',
+  back:'<path d="m15 18-6-6 6-6"/>',
+  more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  send:'<path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13"/>',
+  retry:'<path d="M20 7v5h-5M4 17v-5h5m-4.5-2A8 8 0 0 1 18 6l2 2M4 16l2 2a8 8 0 0 0 13.5-4"/>',
+  check:'<path d="m5 12 4 4L19 6"/>',
+  close:'<path d="m6 6 12 12M18 6 6 18"/>',
+  folder:'<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/>',
+  signal:'<path d="M3 18a13 13 0 0 1 18 0M6 15a9 9 0 0 1 12 0m-9-3a5 5 0 0 1 6 0"/><circle cx="12" cy="19" r="1"/>',
+  battery:'<rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4M5 10h10v4H5z"/>',
+  chevron:'<path d="m9 18 6-6-6-6"/>',
+  up:'<path d="m5 12 7-7 7 7M12 5v14"/>',
+  open:'<path d="M5 12h14m-7-7 7 7-7 7"/>',
+  more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  alert:'<path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5m0 3h.01"/>',
+  shield:'<path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/>'
+};
+function icon(name,cls=''){return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.apps}</svg>`}
+function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const owners=[
+  {id:'default',hub:'Hub A',manager:'Default manager',short:'Hub A · Default'},
+  {id:'research',hub:'Hub A',manager:'Research manager',short:'Hub A · Research'},
+  {id:'studio',hub:'Hub B',manager:'Design manager',short:'Hub B · Design'}
+];
+const appItems=[
+  {id:'home-assistant',name:'Home Assistant',icon:'home'},
+  {id:'markets',name:'Markets',icon:'market'},
+  {id:'calendar',name:'Calendar',icon:'calendar'},
+  {id:'notes',name:'Notes',icon:'notes'},
+  {id:'metrics',name:'Metrics',icon:'chart'},
+  {id:'search',name:'Search',icon:'search'},
+  {id:'journal',name:'Journal',icon:'book'},
+  {id:'insights',name:'Insights',icon:'sparkles'},
+  {id:'weather',name:'Weather',icon:'weather'},
+  {id:'library',name:'Library',icon:'folder'}
+];
+const fileItems=[
+  {id:'readme',name:'README.md',path:'Workspace / weather-widget',meta:'File · 1.2 KB'},
+  {id:'forecast',name:'forecast.ts',path:'src / forecast.ts',meta:'File · 3.6 KB'},
+  {id:'widget',name:'WidgetCard.ets',path:'entry / src / WidgetCard.ets',meta:'File · 6.8 KB'},
+  {id:'release-notes',name:'weather-widget-accessibility-and-responsive-layout-notes.md',path:'docs / accessibility',meta:'File · 18.0 KB'}
+];
+const workspaceTabs=[['files','Files'],['git','Git'],['terminal','Terminal'],['screen','Terminal screen'],['preview','Preview']];
+const machines={
+  default:[
+    {id:'default-source',name:'Workspace Runner',manager:'default',trusted:true,online:true,full:true,isSource:true},
+    {id:'mac-mini',name:'Mac mini',manager:'default',trusted:true,online:true,full:true},
+    {id:'studio-imac',name:'Studio iMac',manager:'default',trusted:true,online:true,full:true},
+    {id:'shared-node',name:'Shared workstation',manager:'research',trusted:true,online:true,full:true},
+    {id:'test-phone',name:'Test Phone',manager:'default',trusted:false,online:true,full:false}
+  ],
+  research:[
+    {id:'research-source',name:'Research Runner',manager:'research',trusted:true,online:true,full:true,isSource:true},
+    {id:'research-mac',name:'Research Mac',manager:'research',trusted:true,online:true,full:true},
+    {id:'lab-mini',name:'Lab mini',manager:'research',trusted:true,online:true,full:true},
+    {id:'default-node',name:'Main workstation',manager:'default',trusted:true,online:true,full:true}
+  ],
+  studio:[
+    {id:'studio-source',name:'Design Runner',manager:'studio',trusted:true,online:true,full:true,isSource:true},
+    {id:'design-mac',name:'Design Mac',manager:'studio',trusted:true,online:true,full:true},
+    {id:'render-node',name:'Render Node',manager:'studio',trusted:true,online:true,full:true},
+    {id:'remote-node',name:'Remote Node',manager:'default',trusted:true,online:true,full:true}
+  ]
+};
+const questions=[
+  {id:'question-home',title:'What should the home page show by default??',copy:'The default card layout for the Weather Widget.',wait:true,options:['Overview','Hourly forecast']},
+  {id:'question-alerts',title:'Should I show rain alerts??',copy:'Show an alert when the chance of rain exceeds 60%.',wait:true,options:['Yes','Not now']},
+  {id:'question-air',title:'Show air quality too?',copy:'',wait:false,options:['Show','Later']}
+];
+const S={size:'phone',style:'glass',tone:'light',fontScale:'1',collapsed:false,owner:'default',tab:'persona',route:'persona',history:[],conversation:'main',appId:null,fileId:null,fileMenu:null,todoMenu:false,newAgentDialog:false,newAgentDraft:null,todoAssigned:false,ownerMenu:false,sheet:false,chatActionSheet:false,sessionSetting:null,canInterrupt:false,transferStage:'select',selectedTarget:null,transferDraft:null,workspaceTab:'files',workspacePath:'/workspace/weather-widget',workspacePathDraft:'/workspace/weather-widget',workspaceMenu:false,directoryState:'ready',assistantMode:'questions',receipt:'accepted',serverEvent:'running',settingPut:'accepted',settingGet:'enabled',toast:'',scrollTop:0};
+const perOwner={};
+for(const owner of owners){
+  perOwner[owner.id]={
+    settings:Object.fromEntries((machines[owner.id]||[]).map(m=>[m.id,'off'])),
+    conversations:{
+      main:{messages:[{role:'assistant',text:'The Weather Widget is ready for more changes.'}],questions:questions.map(q=>({...q,options:[...q.options]})),answers:{},draft:''},
+      recent:{messages:[{role:'assistant',text:'The release summary is ready.'},{role:'user',text:'Review the risk list again. '}],questions:[{id:'question-secondary',title:'How long should the summary be kept??',copy:'How long should the release summary be kept?',wait:true,options:['30 days','90 days']}],answers:{},draft:''},
+      auto:{messages:[{role:'assistant',text:'Automatic checks are complete.'}],questions:[],answers:{},draft:''}
+    },
+    transfer:{status:'none',id:null,file:null,source:null,target:null,targetMachine:null,targetName:null,targetInbox:null,progress:0,checked:false,resultPath:null,sequence:0}
+  };
+}
+function owner(){return owners.find(o=>o.id===S.owner)||owners[0]}
+function ownerState(){return perOwner[S.owner]}
+function conversation(){return ownerState().conversations[S.conversation]||ownerState().conversations.main}
+function activeTransfer(){return ownerState().transfer}
+function transferInboxPath(machine){return machine?.inbox||'User files / Inbox'}
+function transferTargetName(t){return t.targetName||t.target?.name||t.targetMachine||t.target?.id||''}
+function transferTargetInbox(t){return t.targetInbox||transferInboxPath(t.target)}
+function routeTitle(){
+  const names={persona:'Persona',agents:'Agents',inbox:'Inbox',settings:'Settings',applications:'Apps',appDetail:appItems.find(a=>a.id===S.appId)?.name||'Apps',agentDetail:'Weather assistant',files:'Files',devices:'Computer',todos:'To-dos',conversation:S.conversation==='main'?'Main chat':S.conversation==='recent'?'Release summary':'Automatic checks',history:'Approvals and answers',tools:'Workspace',computerScreen:'View screen'};
+  if(S.route==='sessionSettings')return ({model:'Model',permissions:'Permission mode',effort:'Reasoning effort',voice:'Voice chat'})[S.sessionSetting]||'Settings';
+  return names[S.route]||'Persona';
+}
+function isRoot(){return ['persona','agents','inbox','settings'].includes(S.route)}
+function routeTo(route,{push=true}={}){if(push&&S.route!==route)S.history.push({route:S.route,conversation:S.conversation,appId:S.appId});S.route=route;if(route==='applications')S.appId=null;if(route==='persona')S.conversation='main';render()}
+function goBack(){if(S.newAgentDialog){S.newAgentDialog=false;S.todoMenu=false;render();return}if(S.ownerMenu){S.ownerMenu=false;render();return}if(S.fileMenu||S.todoMenu||S.workspaceMenu){S.fileMenu=null;S.todoMenu=false;S.workspaceMenu=false;render();return}if(S.sheet){closeSheet();return}if(S.chatActionSheet){closeChatActionSheet();return}const prev=S.history.pop();if(prev){S.route=prev.route;S.conversation=prev.conversation||'main';S.appId=prev.appId||null}else{S.route=S.tab;S.conversation='main';S.appId=null}render()}
+function enterWideAgentDestination(){if(S.size==='wide'&&S.tab==='agents'&&S.route==='agents'){S.route='agentDetail';S.history=[]}}
+function switchTab(tab){S.tab=tab;S.route=tab;S.conversation='main';S.history=[];S.appId=null;S.fileMenu=null;S.workspaceMenu=false;S.todoMenu=false;S.newAgentDialog=false;S.sheet=false;S.chatActionSheet=false;enterWideAgentDestination();render()}
+function currentOwnerLabel(){return `${owner().hub} · ${owner().manager}`}
+function currentTargets(){return eligibleMachines()}
+function eligibleMachines(){return (machines[S.owner]||[]).filter(m=>m.manager===S.owner&&m.full&&m.trusted&&m.online)}
+function sourceMachine(){return (machines[S.owner]||[]).find(m=>m.isSource&&m.manager===S.owner)||null}
+function isBlockingMode(){return ['permission','plan','mixed-permission','mixed-plan'].includes(S.assistantMode)}
+function showsQuestions(){return ['questions','mixed-permission','mixed-plan'].includes(S.assistantMode)}
+function directoryButtonAvailable(){return !['empty','legacy'].includes(S.directoryState)}
+function titleMarkup(){
+  const root=isRoot(),wide=S.size==='wide',title=routeTitle();
+  if(wide&&root)return '';
+  if(wide&&S.route==='agentDetail'&&!S.collapsed)return `<header class="native-title wide-agent-title-actions"><div class="title-actions"><button class="icon-button" data-action="open-chat-actions" data-testid="wide-agent-more" aria-label="More">${icon('more')}</button></div></header>`;
+  const back=root?'':`<button class="icon-button back-button" data-action="back" data-testid="navigation-back" aria-label="Back">${icon('back')}</button>`;
+  const phoneRootActions=!wide&&root?rootMenusMarkup():'';
+  const conversationMore=S.route==='conversation'?`<button class="icon-button conversation-more-button" data-action="open-chat-actions" data-testid="conversation-more" aria-label="More">${icon('more')}</button>`:'';
+  return `<header class="native-title">${back}<div class="title-copy"><h1>${esc(title)}</h1></div><div class="title-actions">${phoneRootActions}${conversationMore}</div></header>`;
+}
+function rootMenusMarkup(){return `<button class="master-owner-button" data-action="owner-menu" data-testid="owner-switch" aria-label="Switch workspace">${esc(currentOwnerLabel())}⌄</button>${directoryButtonAvailable()?`<button class="apps-button" data-action="open-apps" data-testid="root-app-menu" aria-label="Open app">${icon('apps')}<span>Apps</span></button>`:''}`}
+function ownerPopover(){return S.ownerMenu?`<div class="owner-popover" role="menu" aria-label="Switch workspace"><div class="popover-heading">Workspace / manager</div>${owners.map(o=>`<button class="owner-option ${o.id===S.owner?'selected':''}" role="menuitemradio" aria-checked="${o.id===S.owner}" data-action="select-owner" data-owner="${o.id}" data-testid="owner-option-${o.id}"><span>${icon('computer')}</span><span><strong>${esc(o.hub)}</strong><small>${esc(o.manager)}</small></span><span class="owner-check">${o.id===S.owner?icon('check'):''}</span></button>`).join('')}</div>`:''}
+function emptyState(title,copy,action,label,tid){return `<section class="empty-state" data-testid="${tid}"><div class="empty-mark">${icon(tid.includes('error')?'alert':tid.includes('offline')?'signal':'apps')}</div><h2>${esc(title)}</h2>${copy?`<p>${esc(copy)}</p>`:''}${action?`<button data-action="${action}" data-testid="${tid}-action">${esc(label)}</button>`:''}</section>`}
+function appListMarkup({compact=false}={}){
+  if(S.directoryState==='error')return emptyState('Could not load apps','', 'retry-directory','Retry','app-state-error');
+  if(S.directoryState==='offline')return emptyState('Connection unavailable','', 'retry-directory','Retry','app-state-offline');
+  if(S.directoryState==='empty')return emptyState('No apps are available','',null,'','app-state-empty');
+  if(S.directoryState==='unavailable')return emptyState('App temporarily unavailable','',null,'','app-state-unavailable');
+  if(S.directoryState==='legacy')return emptyState('Current Hub App directory is not supported','',null,'','app-state-legacy');
+  return `<div class="app-list" data-testid="apps-list">${appItems.map(app=>`<button class="app-entry ${compact?'compact':''}" data-action="open-app" data-app="${app.id}" data-testid="app-row-${app.id}" aria-label="Open ${esc(app.name)}"><span class="app-glyph">${icon(app.icon)}</span><span class="app-name">${esc(app.name)}</span><span class="row-badge">Available</span></button>`).join('')}</div>`;
+}
+function appDetailContent(){
+  if(S.directoryState!=='ready')return emptyState(S.directoryState==='error'?'Could not load apps':S.directoryState==='offline'?'Connection unavailable':'App temporarily unavailable','',S.directoryState==='error'||S.directoryState==='offline'?'retry-directory':null,S.directoryState==='error'||S.directoryState==='offline'?'Retry':'','app-detail-unavailable');
+  const id=S.appId;
+  if(id==='home-assistant')return `<div class="page-stack" data-testid="home-assistant-page"><section class="surface-card"><div class="value-line"><div><div class="message-meta">Living room</div><h2>Weather</h2></div><span class="app-glyph">${icon('weather')}</span></div><div class="large-value">22°</div><p>Cloudy · Feels like 21°</p></section><section class="surface-card"><h3>Today</h3><p>Maximum 24° <span style="margin:0 8px">·</span> Minimum 18°</p></section><section class="surface-card"><h3>Automation</h3><p>2  enabled</p></section></div>`;
+  if(id==='markets')return `<div class="page-stack" data-testid="markets-page"><section class="surface-card"><div class="message-meta">Hang Seng Index</div><div class="value-line"><div class="large-value">18,120.34</div><span class="up">+1.28%</span></div></section><section class="surface-card"><div class="value-line"><div><div class="message-meta">CSI 300 300</div><h2>3,942.51</h2></div><span class="up">+0.46%</span></div></section><section class="surface-card"><div class="value-line"><div><div class="message-meta">Nikkei 225</div><h2>39,420.18</h2></div><span class="down">−0.22%</span></div></section></div>`;
+  return `<div class="page-stack" data-testid="extension-page-${esc(id)}"><section class="surface-card"><span class="row-badge">Available</span></section></div>`;
+}
+function questionMarkup(q){
+  const c=conversation(),chosen=c.answers[q.id]||q.options[0],labels={pending:'Pending',unknown:'Status unknown',readonly:'Read only'},status=labels[q.status]||'';
+  const statusMarkup=status?`<span class="decision-badge" data-testid="question-status-${q.id}">${esc(status)}</span>`:'';
+  return `<section class="question-card" data-testid="ask-card-${q.id}" aria-label="${esc(q.title)}"><div class="question-top">${statusMarkup}<button class="text-button danger" data-action="cancel-question" data-question="${q.id}" data-testid="question-cancel-${q.id}">Cancel</button></div><h3>${esc(q.title)}</h3>${q.copy?`<p class="question-copy">${esc(q.copy)}</p>`:''}<div class="question-options">${q.options.map((option,i)=>`<label class="choice-pill"><input type="radio" name="answer-${q.id}" value="${esc(option)}" ${chosen===option?'checked':''} data-action="choose-answer" data-question="${q.id}" data-testid="question-choice-${q.id}-${i}"><span>${esc(option)}</span></label>`).join('')}</div><div class="question-actions"><button class="text-button primary" data-action="answer-question" data-question="${q.id}" data-testid="question-answer-${q.id}">Submit answer</button></div></section>`;
+}
+function blockerMarkup(){
+  if(['permission','mixed-permission'].includes(S.assistantMode))return `<section class="question-card blocker-card" data-testid="blocking-state-permission"><div class="question-top"><span class="decision-badge">Permission approval pending</span>${icon('shield')}</div><h3>File editing permission</h3><p class="question-copy">Allow the Weather Widget Agent to edit these files?</p><div class="question-options"><span class="choice-pill">src/forecast.ts</span><span class="choice-pill">WidgetCard.ets</span></div><div class="question-actions"><button class="text-button" data-action="deny-blocker" data-testid="permission-deny">Reject</button><button class="text-button primary" data-action="resolve-blocker" data-testid="permission-allow">Allow</button></div></section>`;
+  if(['plan','mixed-plan'].includes(S.assistantMode))return `<section class="question-card blocker-card" data-testid="blocking-state-plan"><div class="question-top"><span class="decision-badge">Plan approval pending</span>${icon('clock')}</div><h3>Weather Widget update plan</h3><div class="question-options"><span class="choice-pill">Organize data sources</span><span class="choice-pill">Update the widget layout</span><span class="choice-pill">Run validation</span></div><div class="question-actions"><button class="text-button" data-action="deny-blocker" data-testid="plan-reject">Change plan</button><button class="text-button primary" data-action="resolve-blocker" data-testid="plan-approve">Approve plan</button></div></section>`;
+  return '';
+}
+function conversationContent(){
+  const c=conversation();
+  const bubbles=c.messages.map(m=>`<div class="message ${m.role==='user'?'message-own':'message-assistant'}" data-testid="message-${m.role}">${m.role==='assistant'?`<div class="message-meta">Persona</div>`:''}${esc(m.text)}</div>`).join('');
+  const cards=[showsQuestions()?c.questions.map(questionMarkup).join(''):'',isBlockingMode()?blockerMarkup():''].join('');
+  return `<div class="page-stack"><div class="conversation" data-testid="conversation-transcript">${bubbles}${cards}</div></div>`;
+}
+function composerMarkup(){
+  const c=conversation();
+  return `<form class="composer" data-testid="assistant-composer"><textarea id="composerInput" rows="1" data-action="draft" data-testid="composer-input" aria-label="Message Persona" placeholder="Message Persona">${esc(c.draft)}</textarea><button class="send-button" type="submit" data-action="send-message" data-testid="composer-send" aria-label="Send">Send</button></form>`;
+}
+function chatActionItems(){
+  const items=[],machine=sourceMachine();
+  if(machine)items.push({id:'history',label:'Approvals and answers',action:'chat-history'});
+  if(machine)items.push({id:'screen',label:'View screen',action:'chat-screen'});
+  if(machine)items.push({id:'workspace',label:'Workspace',action:'chat-workspace'});
+  [['model','Model'],['permissions','Permission mode'],['effort','Reasoning effort'],['voice','Voice chat']].forEach(([setting,label])=>items.push({id:setting,label,action:'chat-setting',setting}));
+  if(S.canInterrupt)items.push({id:'stop',label:'Stop',action:'chat-stop'});
+  return items;
+}
+function chatActionSheetMarkup(){
+  const items=chatActionItems();
+  return `<div class="chat-action-overlay" data-testid="chat-action-overlay"><div class="chat-action-sheet" role="menu" aria-label="More" data-testid="chat-action-sheet"><div class="chat-action-options">${items.map(item=>`<button class="chat-action-option" role="menuitem" data-action="${item.action}" data-setting="${item.setting||''}" data-testid="chat-action-${item.id}">${esc(item.label)}</button>`).join('')}</div></div></div>`;
+}
+function openChatActionSheet(){
+  if(!['conversation','agentDetail'].includes(S.route))return;
+  S.modalReturnNode=S.lastActionElement||document.activeElement;S.modalReturnTestId=S.route==='agentDetail'?'wide-agent-more':'conversation-more';S.chatActionSheet=true;S.fileMenu=null;S.ownerMenu=false;render();
+}
+function closeChatActionSheet(){if(!S.chatActionSheet)return;S.chatActionSheet=false;render()}
+function interactionHistoryContent(){
+  const c=conversation();
+  return `<div class="page-stack" data-testid="interaction-history"><section class="surface-card"><h2>Approvals and answers</h2><div class="history-list">${c.messages.map((message,index)=>`<div class="history-entry" data-testid="history-entry-${index}"><span class="message-meta">${message.role==='assistant'?'Persona':'You'}</span><p>${esc(message.text)}</p></div>`).join('')}</div></section></div>`;
+}
+function sessionWorkspaceContent(){
+  const activeTab=S.workspaceTab||'files';
+  const tabs=workspaceTabs.map(([id,label])=>`<button class="workspace-tab" role="tab" data-action="workspace-tab" data-tab="${id}" data-testid="workspace-tab-${id}" aria-selected="${activeTab===id}">${label}</button>`).join('');
+  const fileRows=fileItems.map(file=>`<button class="workspace-file-row" data-action="workspace-open-entry" data-file="${file.id}" data-workspace-file="${file.id}" data-testid="workspace-file-row-${file.id}"><strong>${esc(file.name)}</strong><small>${esc(file.meta||'')}</small></button>`).join('');
+  const fileContent=`<div class="workspace-file-toolbar" data-testid="workspace-file-toolbar"><button class="workspace-icon-button" data-action="workspace-parent" data-testid="workspace-parent" aria-label="Parent folder" title="Parent folder">${icon('up')}</button><input class="workspace-path-input" type="text" data-action="workspace-path" data-testid="workspace-path-input" aria-label="Path" value="${esc(S.workspacePathDraft)}"><button class="workspace-icon-button" data-action="workspace-open-path" data-testid="workspace-open" aria-label="Open" title="Open">${icon('open')}</button><button class="workspace-icon-button" data-action="workspace-menu" data-testid="workspace-more" aria-label="More" title="More">${icon('more')}</button></div><div class="workspace-file-list" data-testid="workspace-file-list">${fileRows}</div>`;
+  const otherContent=activeTab==='git'?`<section class="workspace-panel" data-testid="workspace-git-panel"><h2>main</h2><p>Workspace changes</p></section>`:activeTab==='terminal'?`<section class="workspace-panel" data-testid="workspace-terminal-panel"><h2>Terminal</h2></section>`:activeTab==='screen'?`<section class="workspace-panel" data-testid="workspace-screen-panel"><h2>Terminal screen</h2></section>`:`<section class="workspace-panel" data-testid="workspace-preview-panel"><h2>Preview</h2></section>`;
+  return `<div class="workspace-view" data-testid="session-workspace"><nav class="workspace-tabs" role="tablist" aria-label="Workspace" data-testid="workspace-tabs">${tabs}</nav><div class="workspace-tab-content" role="tabpanel" data-testid="workspace-tab-content">${activeTab==='files'?fileContent:otherContent}</div></div>`;
+}
+function computerScreenContent(){
+  const machine=sourceMachine();
+  return `<div class="page-stack" data-testid="computer-screen"><section class="surface-card"><div class="message-meta">View screen</div><h2>${esc(machine?.name||'Computer')}</h2><div class="screen-preview" aria-label="Computer screen preview"><span>Desktop preview</span></div></section></div>`;
+}
+function sessionSettingsContent(){
+  const labels={model:'Model',permissions:'Permission mode',effort:'Reasoning effort',voice:'Voice chat'};
+  return `<div class="page-stack" data-testid="session-settings"><section class="surface-card"><div class="message-meta">Current chat</div><h2>${labels[S.sessionSetting]||'Settings'}</h2><p>This setting applies to the current chat.</p></section></div>`;
+}
+function transferSummary(){
+  const t=activeTransfer();if(t.status==='none')return '';
+  const text=transferStatusLabel(t.status);
+  return `<div class="transfer-summary" data-testid="transfer-summary"><span class="row-icon">${icon('file')}</span><span class="row-copy"><strong>${esc(text)}</strong><small>${esc(t.file?.name||'README.md')} · ${esc(transferTargetName(t))}</small></span><button data-action="show-transfer" data-testid="transfer-summary-open">View</button></div>`;
+}
+function transferStatusLabel(status){return ({creating:'Creating',running:'Transferring',done:'Completed',error:'Transfer failed',cancelPending:'Cancelling',cancelled:'Cancelled',unknownNoId:'Result unknown',unknownWithId:'Result unknown'})[status]||'Waiting for confirmation'}
+function fileListContent(){
+  return `<div class="page-stack" data-testid="file-list"><div class="section-heading">weather-widget</div>${transferSummary()}<section class="surface-card list-card">${fileItems.map(file=>`<div class="list-row" data-testid="file-row-${file.id}"><span class="row-icon">${icon('file')}</span><span class="row-copy"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><button class="list-action" data-action="file-menu" data-file="${file.id}" data-testid="file-menu-${file.id}" aria-label="Actions for ${esc(file.name)}">⋯</button></div>`).join('')}</section></div>`;
+}
+function workspaceMenuMarkup(){
+  if(!S.workspaceMenu)return '';
+  return `<div class="native-menu workspace-native-menu" role="menu" aria-label="File menu" data-testid="workspace-menu"><button role="menuitem" data-action="refresh-workspace" data-testid="workspace-menu-refresh"><span class="menu-symbol">${icon('clock')}</span>Refresh</button><button role="menuitem" data-action="upload-workspace" data-testid="workspace-menu-upload"><span class="menu-symbol">${icon('file')}</span>Upload</button><button role="menuitem" data-action="workspace-parent" data-testid="workspace-menu-parent"><span class="menu-symbol">${icon('up')}</span>Parent folder</button></div>`;
+}
+function fileMenuMarkup(){
+  if(!S.fileMenu)return '';
+  const file=fileItems.find(f=>f.id===S.fileMenu)||fileItems[0];
+  return `<div class="native-menu" role="menu" aria-label="${esc(file.name)} Menu"><button role="menuitem" data-action="open-file" data-file="${file.id}" data-testid="file-open-${file.id}"><span class="menu-symbol">${icon('file')}</span>Open</button><button role="menuitem" data-action="send-to-computer" data-file="${file.id}" data-testid="send-to-computer-${file.id}"><span class="menu-symbol">${icon('computer')}</span>Send to computer</button></div>`;
+}
+function deviceSettingsContent(){
+  const list=eligibleMachines();
+  return `<div class="page-stack" data-testid="computer-settings"><section class="surface-card" style="padding:0;overflow:hidden">${list.map(m=>{const state=ownerState().settings[m.id];return `<div class="switch-row" data-testid="computer-row-${m.id}"><span class="row-icon">${icon('computer')}</span><span class="row-copy"><strong>${esc(m.name)}</strong><small>${m.online?'Online':'Offline'} · ${m.trusted?'Trusted':'Trust required'} · ${state==='unknown'?'Status unknown':state==='on'?'Transfers on':'Transfers off'}</small></span><span class="switch-control"><input type="checkbox" data-action="toggle-transfer-setting" data-machine="${m.id}" data-testid="computer-transfer-switch-${m.id}" aria-label="${esc(m.name)} file transfer" ${state==='on'?'checked':''} ${state==='unknown'?'disabled':''}><span class="switch-track" aria-hidden="true"></span></span>${state==='unknown'?`<button class="text-button primary" data-action="query-transfer-setting" data-machine="${m.id}" data-testid="computer-setting-query-${m.id}">Check again</button>`:''}</div>`}).join('')}</section>${(machines[S.owner]||[]).filter(m=>!eligibleMachines().includes(m)).map(m=>`<section class="surface-card"><div class="value-line"><div><h3>${esc(m.name)}</h3><p>${m.manager===S.owner?'Needs trust or is not supported':'Other manager'}</p></div><span class="row-badge" style="color:var(--muted)">Unavailable</span></div></section>`).join('')}</div>`;
+}
+function settingsContent(){return `<div class="page-stack"><section class="surface-card list-card"><button class="list-row" data-action="open-devices" data-testid="settings-computers"><span class="row-icon">${icon('computer')}</span><span class="row-copy"><strong>Computer</strong><small>${esc(owner().manager)}</small></span><span class="row-chevron">›</span></button></section></div>`}
+function agentsContent(){return `<div class="page-stack"><section class="surface-card list-card"><button class="list-row" data-action="open-agent" data-testid="agent-row-weather"><span class="row-icon">${icon('weather')}</span><span class="row-copy"><strong>Weather assistant</strong><small>Running · Weather Widget</small></span><span class="row-chevron">›</span></button></section></div>`}
+function personaListContent(){return `<div class="page-stack" data-testid="persona-conversation-list"><section class="surface-card list-card">${[['main','Main chat'],['recent','Release summary'],['auto','Automatic checks']].map(([id,title])=>`<button class="list-row" data-action="select-conversation" data-id="${id}" data-testid="persona-list-${id}"><span class="row-icon">${icon(id==='main'?'persona':id==='recent'?'notes':'clock')}</span><span class="row-copy"><strong>${title}</strong></span><span class="row-chevron">›</span></button>`).join('')}</section></div>`}
+function agentDetailContent(){return `<div class="page-stack"><section class="surface-card list-card"><button class="list-row" data-action="open-files" data-testid="agent-files"><span class="row-icon">${icon('folder')}</span><span class="row-copy"><strong>Files</strong><small>weather-widget</small></span><span class="row-chevron">›</span></button></section></div>`}
+function inboxContent(){return `<div class="page-stack"><section class="surface-card list-card"><button class="list-row" data-action="open-todos" data-testid="inbox-todos"><span class="row-icon">${icon('inbox')}</span><span class="row-copy"><strong>Weather Widget update</strong><small>To-dos · In progress</small></span><span class="row-chevron">›</span></button></section></div>`}
+function todoContent(){return `<div class="page-stack" data-testid="todo-workspace"><section class="surface-card"><div class="value-line"><div><div class="message-meta">Weather Widget</div><h2>Add rain alerts</h2></div><button class="icon-button" data-action="todo-menu" data-testid="todo-more-menu" aria-label="More">${icon('more')}</button></div><p>${S.todoAssigned?'assigned to Persona':'Pending'}</p><div class="question-actions" style="margin-top:12px"><button class="text-button primary" data-action="assign-to-persona" data-testid="todo-assistant">${S.todoAssigned?'assigned to Persona':'Assign to Persona'}</button></div></section></div>`}
+function todoMenuMarkup(){return S.todoMenu?`<div class="native-menu" role="menu" aria-label="Todo menu"><button role="menuitem" data-action="open-new-agent" data-testid="todo-new-agent-menu"><span class="menu-symbol">${icon('agents')}</span>New Agent</button></div>`:''}
+function newAgentDialogMarkup(){return S.newAgentDialog?`<div class="alert-overlay" data-testid="todo-new-agent-dialog"><section class="alert-dialog" role="dialog" aria-modal="true" aria-label="New Agent"><h2>New Agent</h2><p>${esc(S.newAgentDraft?.hub||owner().hub)} · ${esc(S.newAgentDraft?.manager||owner().manager)}</p><div class="alert-actions"><button data-action="cancel-new-agent" data-testid="todo-new-agent-cancel">Cancel</button><button class="primary" data-action="confirm-new-agent" data-testid="todo-new-agent-confirm">Confirm creation</button></div></section></div>`:''}
+function contentMarkup(){
+  if(S.route==='persona')return S.size==='wide'?emptyState('Select a chat','','','','wide-persona-placeholder'):personaListContent();
+  if(S.route==='agents')return S.size==='wide'?emptyState('Select one Agent','','','','wide-agents-placeholder'):agentsContent();
+  if(S.route==='inbox')return S.size==='wide'?emptyState('Select a to-do','','','','wide-inbox-placeholder'):inboxContent();
+  if(S.route==='settings')return S.size==='wide'?emptyState('Select a setting','','','','wide-settings-placeholder'):settingsContent();
+  if(S.route==='applications')return `<div class="page-stack" data-testid="applications-page">${appListMarkup()}</div>`;
+  if(S.route==='appDetail')return appDetailContent();
+  if(S.route==='history')return interactionHistoryContent();
+  if(S.route==='tools')return sessionWorkspaceContent();
+  if(S.route==='computerScreen')return computerScreenContent();
+  if(S.route==='sessionSettings')return sessionSettingsContent();
+  if(S.route==='agentDetail')return agentDetailContent();
+  if(S.route==='files')return fileListContent();
+  if(S.route==='devices')return deviceSettingsContent();
+  if(S.route==='todos')return todoContent();
+  if(S.route==='conversation')return conversationContent();
+  return conversationContent();
+}
+function masterTitle(){return ({persona:'Persona',agents:'Agents',inbox:'Inbox',settings:'Settings'})[S.tab]||'Persona'}
+function masterRow({iconName,label,meta='',action='',route='',id='',active=false,testid='',badge=''}){
+  const a=action||'master-route',attrs=action?`data-action="${a}"`:`data-action="master-route" data-route="${route}"`;
+  return `<button class="master-row ${active?'active':''}" ${attrs} ${id?`data-id="${id}"`:''} ${testid?`data-testid="${testid}"`:''} aria-label="${esc(label)}"><span class="row-icon">${icon(iconName)}</span><span class="row-copy"><span class="row-label">${esc(label)}</span>${meta?`<span class="row-meta">${esc(meta)}</span>`:''}</span>${badge?`<span class="row-badge">${esc(badge)}</span>`:''}<span class="row-chevron">›</span></button>`;
+}
+function masterContent(){
+  if(S.tab==='persona'){
+    return `<div class="master-list">${masterRow({iconName:'persona',label:'Main chat',action:'select-conversation',id:'main',active:S.conversation==='main',testid:'conversation-main'})}${masterRow({iconName:'notes',label:'Release summary',action:'select-conversation',id:'recent',active:S.conversation==='recent',testid:'conversation-recent'})}${masterRow({iconName:'clock',label:'Automatic checks',action:'select-conversation',id:'auto',active:S.conversation==='auto',testid:'conversation-auto'})}</div>`;
+  }
+  if(S.tab==='agents')return `<div class="master-list">${masterRow({iconName:'weather',label:'Weather assistant',meta:'Running',action:'open-agent',active:true,testid:'agent-row-weather'})}</div>`;
+  if(S.tab==='inbox')return `<div class="master-list">${masterRow({iconName:'inbox',label:'Weather Widget update',meta:'To-dos · In progress',action:'open-todos',active:S.route==='todos',testid:'master-inbox-weather'})}</div>`;
+  return `<div class="master-list">${masterRow({iconName:'computer',label:'Computer',meta:owner().manager,action:'open-devices',active:S.route==='devices',testid:'master-computers'})}</div>`;
+}
+function tabMarkup(){
+  const tabs=[['persona','persona','Persona'],['agents','agents','Agents'],['inbox','inbox','Inbox'],['settings','settings','Settings']];
+  return `<nav class="dock" aria-label="Main navigation">${tabs.map(([id,ic,label])=>`<button class="tab-button ${S.tab===id?'active':''}" data-action="tab" data-tab="${id}" data-testid="base-tab-${id}" aria-current="${S.tab===id?'page':'false'}">${icon(ic)}<span>${label}</span></button>`).join('')}</nav>`;
+}
+function appMarkup(){
+  return `<div class="statusbar"><span>10:08</span><span class="status-icons">◒ ▰ 88%</span></div><div class="app-shell" id="appShell" data-native="Navigation"><aside class="master-pane" id="masterPane" aria-label="Navigation master"><div class="master-head"><div style="min-width:0;flex:1"><h2 id="masterTitle"></h2></div><div class="master-actions" id="masterScope"></div><button data-action="toggle-collapse" data-testid="master-collapse" aria-label="Expand or collapse navigation">${icon('back')}</button></div><div class="master-scroll" id="masterContent"></div><div id="masterTabs"></div></aside><section class="detail-pane"><div id="titleHost"></div><main class="content-scroll" id="content" aria-label="${esc(routeTitle())}" data-testid="route-${esc(S.route)}"></main><div id="composerHost"></div></section></div><div id="dockHost"></div><div class="home-indicator" id="homeIndicator" aria-hidden="true"></div><div id="ownerPopoverHost"></div><div id="fileMenuHost"></div><div id="workspaceMenuHost"></div><div id="todoMenuHost"></div><div id="dialogHost"></div><div id="sheetHost"></div><div id="toastHost"></div>`;
+}
+function targetRows(){
+  const list=currentTargets();
+  if(!list.length)return emptyState('No computers are available','', 'open-devices','Computer settings','transfer-no-target');
+  return `<div class="target-list" data-testid="transfer-target-list">${list.map(m=>`<label class="target-row ${S.selectedTarget===m.id?'selected':''}" data-action="select-target" data-machine="${m.id}" data-testid="transfer-target-${m.id}"><input type="radio" name="transfer-target" value="${m.id}" ${S.selectedTarget===m.id?'checked':''}><strong>${esc(m.name)}</strong></label>`).join('')}</div>`;
+}
+function sheetFooter(primary,disabled=false,secondary='Cancel'){
+  return `<footer class="sheet-actions"><button class="cancel" data-action="close-sheet" data-testid="transfer-close">${secondary}</button><button class="confirm" data-action="${primary.action}" data-testid="${primary.testid}" ${disabled?'disabled':''}>${esc(primary.label)}</button></footer>`;
+}
+function sheetMarkup(){
+  const t=activeTransfer();
+  if(S.transferStage==='cancel-confirm')return `<div class="overlay" data-testid="cancel-confirm-sheet"><section class="sheet" role="dialog" aria-modal="true" aria-label="Cancel transfer"><div class="sheet-grabber"></div><header class="sheet-head"><h2>Cancel transfer</h2><button class="sheet-close" data-action="close-sheet" aria-label="Close">×</button></header><div class="sheet-scroll"><div class="transfer-status"><div class="transfer-state-line"><span class="state-dot"></span><h3>${esc(t.file?.name||'README.md')}</h3></div><p>Destination · ${esc(t.target?.name||'')}</p><p>ID · ${esc(t.id||'')}</p></div></div>${sheetFooter({action:'confirm-cancel',label:'Confirm cancellation',testid:'transfer-confirm-cancel'})}</section></div>`;
+  if(S.transferStage==='again-confirm')return transferConfirmSheet(true);
+  if(['running','done','error','cancelPending','cancelled','unknownNoId','unknownWithId'].includes(t.status))return transferStatusSheet(t);
+  return transferConfirmSheet(false);
+}
+function transferSettingMarkup(machine,kind){
+  if(!machine)return '';
+  const state=ownerState().settings[machine.id]||'off',label=`File transfer · ${machine.name}`,inputId=`transfer-setting-${kind}-${machine.id}`;
+  return `<div class="file-transfer-setting" data-testid="transfer-setting-${kind}"><label for="${inputId}">${esc(label)}</label>${state==='unknown'?`<span class="setting-unknown" data-testid="transfer-setting-unknown-${kind}">Status unknown</span>`:''}<span class="switch-control"><input id="${inputId}" type="checkbox" data-action="toggle-transfer-setting" data-machine="${machine.id}" data-testid="transfer-setting-toggle-${kind}" aria-label="${esc(label)}" ${state==='on'?'checked':''} ${state==='unknown'?'disabled':''}><span class="switch-track" aria-hidden="true"></span></span>${state==='unknown'?`<button class="setting-query" data-action="query-transfer-setting" data-machine="${machine.id}" data-testid="transfer-setting-query-${kind}">Check again</button>`:''}</div>`;
+}
+function transferConfirmSheet(reissue){
+  const t=activeTransfer(),draft=S.transferDraft,file=draft?.file||fileItems.find(f=>f.id===S.fileId)||t.file||fileItems[0],source=draft?.source||t.source||sourceMachine(),target=currentTargets().find(m=>m.id===S.selectedTarget),sourceSetting=source?ownerState().settings[source.id]:'off',targetSetting=target?ownerState().settings[target.id]:'off';
+  const sourceReady=!!source&&source.manager===S.owner&&source.trusted&&source.online&&source.full&&sourceSetting==='on';
+  const targetReady=!!target&&target.manager===S.owner&&target.trusted&&target.online&&target.full&&targetSetting==='on';
+  const sourceIdentity=`<div class="transfer-source" data-testid="transfer-source"><span><strong data-testid="transfer-source-name">${esc(file.name)}</strong><small data-testid="transfer-source-path">${esc(file.path)}</small></span></div>`;
+  const settingRows=`<div class="file-transfer-settings">${transferSettingMarkup(source,'source')}${target&&target.id!==source?.id?transferSettingMarkup(target,'target'):''}</div>`;
+  const warning=reissue?(t.status==='error'?`<div class="duplicate-risk" data-testid="transfer-duplicate-warning">The previous transfer failed. Confirm to create a new request.</div>`:`<div class="duplicate-risk" data-testid="transfer-duplicate-warning">The previous result is unknown. Resending may create a duplicate if the file arrived.</div>`):'';
+  const body=`${sourceIdentity}${settingRows}<h3 class="sheet-section-title">Choose a destination computer</h3>${targetRows()}${target?`<div class="target-path" data-testid="transfer-destination"><span>Inbox folder</span><strong data-testid="transfer-destination-path">${esc(transferInboxPath(target))}</strong></div>`:''}${warning}`;
+  const action={action:reissue?'confirm-new-transfer':'confirm-transfer',label:reissue?'Confirm resend':'Send to computer',testid:reissue?'transfer-new-confirm':'transfer-confirm'};
+  return `<div class="overlay" data-testid="transfer-sheet"><section class="sheet" role="dialog" aria-modal="true" aria-label="${reissue?'Resend':'Send file'}"><div class="sheet-grabber"></div><header class="sheet-head"><h2>${reissue?'Resend':'Send file'}</h2><button class="sheet-close" data-action="close-sheet" aria-label="Close">×</button></header><div class="sheet-scroll">${body}</div>${sheetFooter(action,!target||!sourceReady||!targetReady)}</section></div>`;
+}
+function transferStatusSheet(t){
+  const status=t.status,unknown=status==='unknownNoId'||status==='unknownWithId',running=status==='running'||status==='cancelPending';
+  const dot=unknown?'unknown':status==='done'?'done':status==='error'?'error':status==='cancelled'?'cancel':'',headline=transferStatusLabel(status);
+  const idLine=t.id?`<div><span>Transfer ID</span><span>${esc(t.id)}</span></div>`:`<div><span>Transfer ID</span><span>Not received</span></div>`;
+  const resultPathLine=t.resultPath?`<div><span>Result path</span><span data-testid="transfer-result-path">${esc(t.resultPath)}</span></div>`:'';
+  const progress=running?`<div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${t.progress}"><div class="progress-value" style="width:${t.progress}%"></div></div>`:'';
+  const noIdCopy=status==='creating'?'Creating the transfer. The destination computer and inbox are locked.':status==='unknownNoId'?'The request returned no transfer ID.':status==='unknownWithId'?'The status service could not find this transfer ID.':status==='cancelPending'?'Cancellation requested. Waiting for confirmation.':status==='done'?'The destination inbox received the file.':status==='cancelled'?'Cancellation confirmed. ':status==='error'?'The server reported a transfer failure.':'The destination computer is receiving the file.';
+  let actions='';
+  if(status==='running')actions=`<button data-action="refresh-transfer" data-testid="transfer-refresh">Refresh status</button><button class="primary" data-action="request-cancel" data-testid="transfer-cancel">Cancel transfer</button>`;
+  else if(status==='cancelPending')actions=`<button data-action="refresh-transfer" data-testid="transfer-refresh">Refresh status</button>`;
+  else if(status==='unknownNoId'||status==='unknownWithId')actions=`<button data-action="mark-checked" data-testid="unknown-checked">${t.checked?'Checked locally':'Checked'}</button><button class="primary" data-action="start-retransfer" data-testid="transfer-new-request">Resend</button>`;
+  else if(status==='error')actions=`<button data-action="start-retransfer" class="primary" data-testid="transfer-new-request">Resend</button>`;
+  else if(status==='done'||status==='cancelled')actions=`<button data-action="close-sheet" data-testid="transfer-done-close">Done</button>`;
+  return `<div class="overlay" data-testid="transfer-status-sheet"><section class="sheet" role="dialog" aria-modal="true" aria-label="Transfer status"><div class="sheet-grabber"></div><header class="sheet-head"><h2>Send file</h2><button class="sheet-close" data-action="close-sheet" aria-label="Close">×</button></header><div class="sheet-scroll"><div class="transfer-status"><div class="transfer-state-line"><span class="state-dot ${dot}"></span><h3>${esc(headline)}</h3></div><p>${esc(noIdCopy)}</p>${progress}<div class="transfer-meta"><div><span>Files</span><span data-testid="transfer-status-file-name">${esc(t.file?.name||'README.md')}</span></div><div><span>Source file path</span><span data-testid="transfer-status-source-path">${esc(t.file?.path||'')}</span></div><div><span>Source computer</span><span data-testid="transfer-status-source-machine">${esc(t.source?.name||'')}</span></div><div><span>Destination computer</span><span data-testid="transfer-status-target-machine">${esc(transferTargetName(t))}</span></div><div><span>Inbox folder</span><span data-testid="transfer-inbox-path">${esc(transferTargetInbox(t))}</span></div>${resultPathLine}${idLine}</div></div>${unknown?`<p class="scope-note" data-testid="unknown-no-query">${t.checked?'Local check saved. ':''}${t.id?'':'No transfer ID was returned. Status checks and cancellation are unavailable.'}</p>`:''}<div class="transfer-toolbar">${actions}</div></div></section></div>`;
+}
+function renderInspector(){
+  const sizeDefs=[['phone','Phone','390 × 844'],['fold','Fold','712 × 799'],['wide','Wide','940 × 665']];
+  document.getElementById('sizeControls').innerHTML=sizeDefs.map(([id,label,dim])=>`<button class="seg-button" data-action="size" data-value="${id}" data-testid="size-${id}" aria-pressed="${S.size===id}">${label}<br><small>${dim}</small></button>`).join('');
+  document.getElementById('styleControls').innerHTML=[['glass','Glass'],['brief','Brief'],['board','Board']].map(([id,label])=>`<button class="seg-button" data-action="style" data-value="${id}" data-testid="style-${id}" aria-pressed="${S.style===id}">${label}</button>`).join('');
+  document.getElementById('toneControls').innerHTML=[['light','Light'],['dark','Dark']].map(([id,label])=>`<button class="seg-button" data-action="tone" data-value="${id}" data-testid="tone-${id}" aria-pressed="${S.tone===id}">${label}</button>`).join('');
+  document.getElementById('fontControls').innerHTML=[['1','1×'],['2','2×'],['3.2','3.2×']].map(([id,label])=>`<button class="seg-button" data-action="font-scale" data-value="${id}" data-testid="font-scale-${id}" aria-pressed="${S.fontScale===id}">${label}</button>`).join('');
+  const modes=[['questions','Questions'],['permission','Permission'],['plan','Plan'],['mixed-permission','Question+Permission'],['mixed-plan','Question+Plan'],['secondary','Secondary chat question']];
+  document.getElementById('assistantControls').innerHTML=modes.map(([id,label])=>`<button class="seg-button" data-action="assistant-mode" data-value="${id}" data-testid="assistant-mode-${id}" aria-pressed="${id==='secondary'?S.route==='conversation'&&S.conversation==='recent':S.assistantMode===id}">${label}</button>`).join('');
+  const ownerSelect=document.getElementById('ownerSelect');ownerSelect.innerHTML=owners.map(o=>`<option value="${o.id}" ${o.id===S.owner?'selected':''}>${esc(o.hub)} · ${esc(o.manager)}</option>`).join('');ownerSelect.value=S.owner;
+  document.getElementById('directorySelect').value=S.directoryState;
+  document.getElementById('receiptSelect').value=S.receipt;
+  document.getElementById('eventSelect').value=S.serverEvent;
+  document.getElementById('settingPutSelect').value=S.settingPut;
+  document.getElementById('settingGetSelect').value=S.settingGet;
+  const t=activeTransfer();document.getElementById('transferReviewStatus').textContent=t.status==='none'?'No transfer has been created yet. ':`${transferStatusLabel(t.status)}${t.id?` · ${t.id}`:' · Not received ID'}`;
+}
+function updateComposer(){
+  const host=document.getElementById('composerHost'),key=S.route==='conversation'?`${S.owner}:${S.conversation}`:'';
+  if(host.dataset.key!==key){host.innerHTML=key?composerMarkup():'';host.dataset.key=key}
+  const blocked=!!key&&isBlockingMode();host.hidden=blocked;
+  if(!key)return;
+  const input=host.querySelector('[data-testid="composer-input"]'),c=conversation();
+  if(input){input.disabled=blocked;if(input.value!==c.draft)input.value=c.draft}
+}
+function updateModalState(previousKey,preservedFocusTestId=''){
+  const modalOpen=S.sheet||S.chatActionSheet||S.newAgentDialog;
+  ['appShell','dockHost','ownerPopoverHost','fileMenuHost','workspaceMenuHost','todoMenuHost'].forEach(id=>{const el=document.getElementById(id);if(!el)return;el.inert=modalOpen;if(modalOpen)el.setAttribute('aria-hidden','true');else el.removeAttribute('aria-hidden')});
+  const key=S.sheet?`sheet:${S.transferStage}:${activeTransfer().status}`:S.chatActionSheet?'chat-actions':S.newAgentDialog?'todo-agent':'';
+  const modalSelector=S.sheet?'#sheetHost .sheet':S.chatActionSheet?'#sheetHost .chat-action-sheet':'#dialogHost .alert-dialog';
+  if(key&&key!==previousKey){const modal=document.querySelector(modalSelector);const first=modal?.querySelector('button:not([disabled]),input:not([disabled])');first?.focus({preventScroll:true})}
+  else if(key&&preservedFocusTestId){const modal=document.querySelector(modalSelector),match=modal?.querySelector(`[data-testid="${preservedFocusTestId}"]`),focusTarget=match?.matches('button,input,textarea,select,[tabindex]')?match:match?.querySelector('button:not([disabled]),input:not([disabled]),textarea:not([disabled])');focusTarget?.focus({preventScroll:true})}
+  if(!key&&previousKey){let target=S.modalReturnNode?.isConnected?S.modalReturnNode:null;if(!target&&S.modalReturnTestId)target=document.querySelector(`[data-testid="${S.modalReturnTestId}"]`);target?.focus({preventScroll:true});S.modalReturnNode=null;S.modalReturnTestId=null}
+  if(S.focusRestoreTestId){document.querySelector(`[data-testid="${S.focusRestoreTestId}"]`)?.focus({preventScroll:true});S.focusRestoreTestId=null}
+  S.renderedModalKey=key;
+}
+function render(){
+  const active=document.activeElement,activeModal=active?.closest?.('.sheet,.chat-action-sheet,.alert-dialog'),focusNode=activeModal?active.closest('[data-testid]'):null,preservedFocusTestId=focusNode?.dataset.testid||'',d=document.getElementById('device'),previousModalKey=S.renderedModalKey||'';
+  Object.assign(d.dataset,{size:S.size,style:S.style,tone:S.tone,collapsed:String(S.collapsed),fontScale:S.fontScale});
+  if(!d.dataset.initialized){d.innerHTML=appMarkup();d.dataset.initialized='true'}
+  const wide=S.size==='wide',master=document.getElementById('masterPane');
+  master.dataset.collapsed=String(wide&&S.collapsed);
+  document.getElementById('masterTitle').textContent=masterTitle();
+  document.getElementById('masterScope').innerHTML=wide&&!S.collapsed?rootMenusMarkup():'';
+  const collapse=document.querySelector('[data-testid="master-collapse"]');if(collapse){collapse.setAttribute('aria-label',S.collapsed?'Expand main navigation':'Collapse main navigation');collapse.title=S.collapsed?'Expand main navigation':'Collapse main navigation';collapse.innerHTML=icon(S.collapsed?'chevron':'back')}
+  document.getElementById('masterContent').innerHTML=masterContent();
+  document.getElementById('titleHost').innerHTML=titleMarkup();
+  const content=document.getElementById('content');content.setAttribute('aria-label',routeTitle());content.dataset.testid=`route-${S.route}`;content.innerHTML=contentMarkup();
+  document.getElementById('masterTabs').innerHTML=wide&&!S.collapsed?tabMarkup():'';
+  document.getElementById('dockHost').innerHTML=!wide&&isRoot()?tabMarkup():'';
+  updateComposer();
+  document.getElementById('ownerPopoverHost').innerHTML=ownerPopover();
+  document.getElementById('fileMenuHost').innerHTML=fileMenuMarkup();
+  document.getElementById('workspaceMenuHost').innerHTML=workspaceMenuMarkup();
+  document.getElementById('todoMenuHost').innerHTML=todoMenuMarkup();
+  document.getElementById('dialogHost').innerHTML=newAgentDialogMarkup();
+  document.getElementById('sheetHost').innerHTML=S.chatActionSheet?chatActionSheetMarkup():S.sheet?sheetMarkup():'';
+  document.getElementById('toastHost').innerHTML=S.toast?`<div class="toast" role="status" data-testid="toast">${esc(S.toast)}</div>`:'';
+  renderInspector();
+  updateModalState(previousModalKey,preservedFocusTestId);
+  const captions={persona:'Persona',conversation:routeTitle(),agents:'Agents',inbox:'Inbox',settings:'Settings',applications:'Apps',appDetail:routeTitle(),agentDetail:'Weather assistant',files:'Files',devices:'Computer',todos:'To-dos'};
+  document.getElementById('previewTitle').textContent=captions[S.route]||'Persona';
+  const dimensions={phone:'390 × 844',fold:'712 × 799',wide:'940 × 665'};document.getElementById('stageSize').textContent=dimensions[S.size];
+  document.getElementById('stageState').textContent=currentOwnerLabel();
+  if(S.toast){const text=S.toast;window.clearTimeout(render.toastTimer);render.toastTimer=window.setTimeout(()=>{if(S.toast===text){S.toast='';render()}},1900)}
+}
+function showToast(message){S.toast=message;render()}
+function openApps(){if(!directoryButtonAvailable())return;S.fileMenu=null;routeTo('applications')}
+function openFileMenu(id){S.fileId=id;S.fileMenu=id;render()}
+function beginTransfer(fileId,isRetry=false){
+  S.fileId=fileId||S.fileId||fileItems[0].id;S.fileMenu=null;
+  const f=fileItems.find(x=>x.id===S.fileId)||fileItems[0];
+  const t=activeTransfer();
+  S.modalReturnNode=S.lastActionElement||document.activeElement;S.modalReturnTestId=`file-menu-${S.fileId}`;
+  if(isRetry){S.transferStage='again-confirm';S.selectedTarget=t.target?.id&&currentTargets().some(m=>m.id===t.target.id)?t.target.id:null;S.transferDraft={owner:S.owner,file:{...(t.file||f)},source:{...(t.source||sourceMachine())},target:t.target?{...t.target}:null}}
+  else if(t.status!=='none'){S.transferStage='status';S.selectedTarget=null;S.transferDraft={owner:S.owner,file:{...(t.file||f)},source:{...(t.source||sourceMachine())},target:t.target?{...t.target}:null}}
+  else{S.transferStage='select';S.selectedTarget=null;const source=sourceMachine();S.transferDraft={owner:S.owner,file:{...f},source:source?{...source}:null,target:null}}
+  if(isRetry&&t.file)S.fileId=t.file.id;
+  S.sheet=true;render()
+}
+function createTransfer(isRetry=false){
+  const target=currentTargets().find(m=>m.id===S.selectedTarget),draft=S.transferDraft,source=draft?.source,sourceSetting=source?ownerState().settings[source.id]:'off';
+  if(!target||!draft||draft.owner!==S.owner||!source||source.manager!==target.manager||source.manager!==S.owner||!source.full||!source.online||!source.trusted||sourceSetting!=='on'||ownerState().settings[target.id]!=='on'){showToast('The source or destination computer is unavailable.');return}
+  const t=activeTransfer(),file=draft.file||fileItems.find(f=>f.id===S.fileId)||t.file||fileItems[0];
+  t.sequence+=1;t.resultPath=null;t.targetMachine=target.id;t.targetName=target.name;t.targetInbox=transferInboxPath(target);t.file={...file};t.source={...source};t.target={...target};t.checked=false;
+  if(S.receipt==='unknown'){t.status='unknownNoId';t.id=null;t.progress=0;S.transferStage='status';S.sheet=true;render();return}
+  t.id=`transfer-${S.owner}-${String(t.sequence).padStart(3,'0')}`;t.status='running';t.progress=34;S.transferStage='status';S.sheet=true;render()
+}
+function applyTransferEvent(){
+  const t=activeTransfer();if(!t.id){showToast('Transfer ID not received ID');return}
+  if(t.status==='unknownWithId'){showToast('This transfer ID cannot be checked.');return}
+  if(S.serverEvent==='notfound'){t.status='unknownWithId';t.progress=0;S.transferStage='status';S.sheet=true;render();return}
+  if(S.serverEvent==='done'){t.status='done';t.progress=100;t.resultPath=`${transferTargetInbox(t)} / ${t.file?.name||'README.md'}`}
+  else if(S.serverEvent==='error'){t.status='error';t.progress=0}
+  else if(S.serverEvent==='cancelled'){
+    if(t.status!=='cancelPending'){showToast('Cancellation was not requested');return}
+    t.status='cancelled';t.progress=0
+  }else if(S.serverEvent==='running'){
+    if(t.status==='cancelPending')t.status='running';
+    else if(t.status==='running')t.progress=Math.min(85,t.progress+18);
+  }
+  S.transferStage='status';S.sheet=true;render()
+}
+function refreshTransfer(){if(!activeTransfer().id){showToast('Transfer ID not received ID');return}applyTransferEvent()}
+function sendMessage(){
+  const c=conversation(),text=c.draft.trim();if(!text||isBlockingMode())return;
+  c.messages.push({role:'user',text});c.draft='';
+  c.questions=c.questions.filter(q=>!q.wait);
+  S.toast='Message sent';render()
+}
+function closeSheet(){
+  if(S.transferStage==='cancel-confirm'){S.transferStage='status';S.sheet=true;S.focusRestoreTestId='transfer-cancel';render();return}
+  if(S.transferStage==='again-confirm'){S.transferStage='status';S.sheet=true;S.focusRestoreTestId='transfer-new-request';render();return}
+  S.sheet=false;S.transferStage='select';render()
+}
+function handleAction(el,event){
+  const a=el.dataset.action;
+  if(a==='size'){const previousSize=S.size;S.size=el.dataset.value;S.collapsed=false;if(S.size==='wide')enterWideAgentDestination();else if(previousSize==='wide'&&S.route==='agentDetail'&&S.tab==='agents'&&S.history.length===0)S.route='agents';render()}
+  else if(a==='style'){S.style=el.dataset.value;render()}
+  else if(a==='tone'){S.tone=el.dataset.value;render()}
+  else if(a==='font-scale'){S.fontScale=el.dataset.value;render()}
+  else if(a==='assistant-mode'){
+    if(el.dataset.value==='secondary'){S.tab='persona';S.history=[{route:'persona',conversation:'main'}];S.route='conversation';S.conversation='recent';S.assistantMode='questions'}
+    else S.assistantMode=el.dataset.value;
+    render()
+  }
+  else if(a==='open-apps')openApps();
+  else if(a==='owner-menu'){S.ownerMenu=!S.ownerMenu;S.fileMenu=null;render()}
+  else if(a==='select-owner'){S.owner=el.dataset.owner;S.ownerMenu=false;S.history=[];S.tab='persona';S.route='persona';S.conversation='main';S.appId=null;S.fileId=null;S.sheet=false;S.fileMenu=null;S.todoMenu=false;S.newAgentDialog=false;S.transferDraft=null;render()}
+  else if(a==='toggle-collapse'){S.collapsed=!S.collapsed;render()}
+  else if(a==='back')goBack();
+  else if(a==='open-chat-actions')openChatActionSheet();
+  else if(a==='close-chat-actions')closeChatActionSheet();
+  else if(a==='chat-history'){S.chatActionSheet=false;routeTo('history')}
+  else if(a==='chat-screen'){S.chatActionSheet=false;routeTo('computerScreen')}
+  else if(a==='chat-workspace'){S.chatActionSheet=false;routeTo('tools')}
+  else if(a==='chat-setting'){S.chatActionSheet=false;S.sessionSetting=el.dataset.setting||'model';routeTo('sessionSettings')}
+  else if(a==='chat-stop'){S.chatActionSheet=false;S.canInterrupt=false;showToast('Stopped')}
+  else if(a==='tab')switchTab(el.dataset.tab);
+  else if(a==='open-app'){S.appId=el.dataset.app;routeTo('appDetail')}
+  else if(a==='retry-directory'){S.directoryState='ready';if(S.route==='appDetail')S.route='applications';render()}
+  else if(a==='select-conversation'){if(S.route!=='conversation')S.history.push({route:S.route,conversation:S.conversation,appId:S.appId});S.conversation=el.dataset.id||'main';S.route='conversation';render()}
+  else if(a==='open-agent')routeTo('agentDetail');
+  else if(a==='open-files'){S.fileId=fileItems[0].id;routeTo('files')}
+  else if(a==='master-route'){const route=el.dataset.route;if(route)routeTo(route)}
+  else if(a==='select-file'){S.fileId=el.dataset.id;S.route='files';render()}
+  else if(a==='open-devices'){if(S.sheet){S.sheet=false;S.transferStage='select'}routeTo('devices')}
+  else if(a==='open-todos')routeTo('todos');
+  else if(a==='todo-menu'){S.todoMenu=!S.todoMenu;S.fileMenu=null;render()}
+  else if(a==='open-new-agent'){S.modalReturnNode=S.lastActionElement||document.activeElement;S.modalReturnTestId='todo-more-menu';S.newAgentDraft={owner:S.owner,hub:owner().hub,manager:owner().manager};S.todoMenu=false;S.newAgentDialog=true;render()}
+  else if(a==='cancel-new-agent'){S.newAgentDialog=false;S.todoMenu=false;render()}
+  else if(a==='confirm-new-agent'){if(S.newAgentDraft?.owner===S.owner){S.newAgentDialog=false;showToast('Agent Created')}else{S.newAgentDialog=false;showToast('The workspace changed. Please confirm again.')}}
+  else if(a==='assign-to-persona'){S.todoAssigned=true;showToast('To-do assigned to Persona')}
+  else if(a==='query-transfer-setting'){
+    const machine=el.dataset.machine,reported=S.settingGet;
+    if(reported==='failed'){ownerState().settings[machine]='unknown';showToast('Status remains unknown')}
+    else{ownerState().settings[machine]=reported==='enabled'?'on':'off';showToast('Computer status checked again')}
+  }
+  else if(a==='workspace-tab'){S.workspaceTab=el.dataset.tab||'files';render()}
+  else if(a==='workspace-parent'){S.workspaceMenu=false;const parts=(S.workspacePathDraft||'/').split('/').filter(Boolean);parts.pop();S.workspacePathDraft='/'+parts.join('/');if(!S.workspacePathDraft||S.workspacePathDraft==='/')S.workspacePathDraft='/';render()}
+  else if(a==='workspace-open-path'){S.workspaceMenu=false;S.workspacePath=S.workspacePathDraft.trim()||S.workspacePath;S.workspacePathDraft=S.workspacePath;render()}
+  else if(a==='workspace-menu'){S.workspaceMenu=!S.workspaceMenu;S.fileMenu=null;render()}
+  else if(a==='refresh-workspace'){S.workspaceMenu=false;render()}
+  else if(a==='upload-workspace'){S.workspaceMenu=false;showToast('Upload file')}
+  else if(a==='workspace-open-entry'){S.fileId=el.dataset.file;showToast('Opened '+(fileItems.find(file=>file.id===S.fileId)?.name||''))}
+  else if(a==='file-menu'){openFileMenu(el.dataset.file)}
+  else if(a==='open-file'){S.fileMenu=null;S.fileId=el.dataset.file;render()}
+  else if(a==='send-to-computer'){beginTransfer(el.dataset.file)}
+  else if(a==='select-target'){S.selectedTarget=el.dataset.machine;render()}
+  else if(a==='confirm-transfer')createTransfer(false);
+  else if(a==='confirm-new-transfer')createTransfer(true);
+  else if(a==='start-retransfer')beginTransfer(activeTransfer().file?.id,true);
+  else if(a==='close-sheet')closeSheet();
+  else if(a==='show-transfer'){S.modalReturnNode=S.lastActionElement||document.activeElement;S.modalReturnTestId='transfer-summary-open';S.fileId=activeTransfer().file?.id||fileItems[0].id;S.sheet=true;S.transferStage='status';render()}
+  else if(a==='mark-checked'){activeTransfer().checked=true;render();S.toast='Local check saved';render()}
+  else if(a==='request-cancel'){S.modalReturnTestId='transfer-cancel';S.transferStage='cancel-confirm';render()}
+  else if(a==='confirm-cancel'){activeTransfer().status='cancelPending';S.transferStage='status';S.sheet=true;S.focusRestoreTestId='transfer-refresh';render()}
+  else if(a==='refresh-transfer')refreshTransfer();
+  else if(a==='inject-transfer-event')applyTransferEvent();
+  else if(a==='resolve-blocker'||a==='deny-blocker'){S.assistantMode='questions';showToast(a==='resolve-blocker'?'Request handled':'Request rejected')}
+  else if(a==='cancel-question'){
+    const c=conversation();c.questions=c.questions.filter(q=>q.id!==el.dataset.question);showToast('Question cancelled')
+  }
+  else if(a==='answer-question'){
+    const c=conversation(),id=el.dataset.question,q=c.questions.find(x=>x.id===id);if(!q)return;
+    const answer=c.answers[id]||q.options[0];c.questions=c.questions.filter(x=>x.id!==id);c.messages.push({role:'user',text:`${q.title} ${answer}`});showToast('Answer submitted')
+  }
+  else if(a==='open-inbox')switchTab('inbox');
+}
+document.addEventListener('contextmenu',event=>{
+  const row=event.target.closest('[data-workspace-file]');
+  if(!row)return;
+  event.preventDefault();S.fileId=row.dataset.workspaceFile;openFileMenu(S.fileId)
+});
+document.addEventListener('click',event=>{
+  const action=event.target.closest('[data-action]');
+  if(!action){if(S.chatActionSheet&&event.target.classList.contains('chat-action-overlay')){closeChatActionSheet();return}if(S.ownerMenu&&!event.target.closest('.owner-popover')){S.ownerMenu=false;render()}if(S.fileMenu&&!event.target.closest('#fileMenuHost')){S.fileMenu=null;render()}if(S.workspaceMenu&&!event.target.closest('#workspaceMenuHost')){S.workspaceMenu=false;render()}if(S.todoMenu&&!event.target.closest('#todoMenuHost')){S.todoMenu=false;render()}return}
+  if(action.disabled)return;
+  if(action.dataset.action==='send-message')return;
+  S.lastActionElement=action;
+  handleAction(action,event)
+  S.lastActionElement=null;
+});
+document.addEventListener('change',event=>{
+  const t=event.target;
+  if(t.id==='ownerSelect'){S.owner=t.value;S.history=[];S.tab='persona';S.route='persona';S.conversation='main';S.appId=null;S.fileId=null;S.sheet=false;render()}
+  else if(t.id==='directorySelect'){S.directoryState=t.value;render()}
+  else if(t.id==='receiptSelect'){S.receipt=t.value}
+  else if(t.id==='eventSelect'){S.serverEvent=t.value}
+  else if(t.id==='settingPutSelect'){S.settingPut=t.value}
+  else if(t.id==='settingGetSelect'){S.settingGet=t.value}
+  else if(t.matches('[data-action="choose-answer"]')){conversation().answers[t.dataset.question]=t.value}
+  else if(t.matches('[data-action="toggle-transfer-setting"]')){
+    const id=t.dataset.machine,previous=ownerState().settings[id],desired=t.checked?'on':'off';
+    if(S.settingPut==='lost'){ownerState().settings[id]='unknown';showToast('Setting status unknown, Check again')}
+    else if(S.settingPut==='rejected'){ownerState().settings[id]=previous;showToast('The computer did not accept this setting.')}
+    else{ownerState().settings[id]=desired;render()}
+  }
+});
+document.addEventListener('input',event=>{
+  const t=event.target;
+  if(t.matches('[data-testid="composer-input"]'))conversation().draft=t.value;
+  if(t.matches('[data-testid="workspace-path-input"]'))S.workspacePathDraft=t.value;
+});
+document.addEventListener('submit',event=>{
+  if(event.target.matches('[data-testid="assistant-composer"]')){event.preventDefault();sendMessage()}
+});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){if(S.sheet||S.chatActionSheet||S.ownerMenu||S.fileMenu)goBack()}
+  if(event.key==='Escape'&&S.newAgentDialog){event.preventDefault();goBack();return}
+  if(event.key==='Tab'&&(S.sheet||S.chatActionSheet||S.newAgentDialog)){
+    const modal=document.querySelector(S.sheet?'#sheetHost .sheet':S.chatActionSheet?'#sheetHost .chat-action-sheet':'#dialogHost .alert-dialog');
+    const items=[...(modal?.querySelectorAll('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])')||[])].filter(el=>!el.hidden);
+    if(items.length){const first=items[0],last=items[items.length-1];if(event.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){event.preventDefault();last.focus()}else if(!event.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){event.preventDefault();first.focus()}}
+  }
+  if(event.key==='Enter'&&!event.isComposing&&event.keyCode!==229&&event.target.matches('[data-testid="composer-input"]')&&!event.shiftKey){event.preventDefault();sendMessage()}
+});
+document.addEventListener('change',event=>{
+  if(event.target.id==='directorySelect'&&S.route==='applications')document.querySelector('#content')?.scrollTo(0,0)
+});
+render();
+</script>
+</body>
+</html>

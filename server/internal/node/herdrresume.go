@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/nwverse/persona/server/internal/host"
 )
@@ -36,6 +37,10 @@ type agentLaunch struct {
 	Display                          string // the live replies plugin's directory, "" for none (liveRepliesPlugin)
 	Plugins                          bool   // claude loads plugins: Persona's plugin directory and office rule
 	ID                               string
+	// Server is the herdr server instance (herdr.Client.ServerID) that last took the resume command; "" before. A
+	// pane whose server changed since (a restart, a live handoff, an upgrade from a herdr older than 0.9.2, which
+	// ignored resume_argv) is reported again by backfillResume.
+	Server string
 }
 
 type claudeLaunch = agentLaunch
@@ -83,10 +88,20 @@ func dquote(s string) string {
 func (n *Node) claudeResumeArgv(spec claudeLaunch, id string) (argv []string, ok bool) {
 	cmd := withHerdrAgent(resumeHerdrAgent("claude"), n.claudeCommandLine(spec, "--resume "+id, dquote))
 	cmd = n.agentCommand(cmd, dquote, herdrPaneShell())
-	if strings.Contains(cmd, "'") || !validID(id) {
+	if !resumeSayable(cmd) || !validID(id) {
 		return nil, false
 	}
 	return []string{"eval", cmd}, true
+}
+
+// maxResumeArgv is herdr's limit on a resume_argv's total length (agent_resume.rs, v0.9.5).
+const maxResumeArgv = 8192
+
+// resumeSayable reports whether herdr takes cmd as eval's argument: no apostrophe, no control character (both make
+// herdr answer invalid_resume_argv) and within herdr's length limit, counting "eval".
+func resumeSayable(cmd string) bool {
+	return !strings.Contains(cmd, "'") && len("eval")+len(cmd) <= maxResumeArgv &&
+		strings.IndexFunc(cmd, unicode.IsControl) < 0
 }
 
 // agentResumeArgv is the resume_argv for an agent Persona started (Claude, Codex, a compatible CLI, pi); a Codex gets
@@ -98,7 +113,7 @@ func (n *Node) agentResumeArgv(spec agentLaunch, id string) (argv []string, ok b
 	}
 	cmd := withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, dquote)+" resume "+id)
 	cmd = n.agentCommand(cmd, dquote, herdrPaneShell())
-	if strings.Contains(cmd, "'") || !validID(id) {
+	if !resumeSayable(cmd) || !validID(id) {
 		return nil, false
 	}
 	return []string{"eval", cmd}, true
@@ -147,7 +162,7 @@ func (n *Node) reportResume(ctx context.Context, h *herdrHost, pane string, spec
 	n.mu.Unlock()
 	argv, ok := n.agentResumeArgv(spec, spec.ID)
 	if !ok {
-		n.logf("herdr resume: %s (%s) not given a resume command (it cannot be said without an apostrophe)", pane, spec.ID)
+		n.logf("herdr resume: %s (%s) not given a resume command (herdr would refuse it: an apostrophe, a control character or too long)", pane, spec.ID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -156,9 +171,17 @@ func (n *Node) reportResume(ctx context.Context, h *herdrHost, pane string, spec
 	if agentName == "" {
 		agentName = "claude"
 	}
+	server := h.serverID(ctx, host.ParsePane(pane)) // before the report: a server that replaces this one meanwhile is newer
 	if err := h.PaneReportResume(ctx, host.ParsePane(pane), resumeSource, agentName, spec.ID, argv); err != nil {
 		n.logf("herdr resume: %s (%s): %v", pane, spec.ID, err)
+		return
 	}
+	n.mu.Lock()
+	if cur, ok := n.launches[pane]; ok && cur.ID == spec.ID {
+		cur.Server = server
+		n.launches[pane] = cur
+	}
+	n.mu.Unlock()
 }
 
 // resumeOnSessionStart follows a Persona-started Claude to its new session (/clear, /resume in it): herdr would
@@ -187,7 +210,10 @@ func (n *Node) resumeOnSessionStart(pane, id string) {
 
 // backfillResume gives herdr the resume command of Persona-started agents found running in herdr that have none from
 // this node yet: ones started by an older node, or before this node restarted (n.launches is memory only). Once
-// per pane and session; the work (settings paths, the reports) runs in the background, off the refresh.
+// per pane and session, and once more each time the pane's herdr server is a new one (herdr.Client.ServerID): on a
+// user's machine herdr 0.9.0 ignored every resume_argv, an upgrade to 0.9.5 by live handoff carried nothing over,
+// and the node, sure it had reported, let the next restart resume the Agents bare. The work (settings paths, the reports)
+// runs in the background, off the refresh.
 func (n *Node) backfillResume(agents []host.Agent) {
 	h, ok := n.hosts.Get(host.Herdr).(*herdrHost)
 	if !ok || h.c == nil {
@@ -199,7 +225,9 @@ func (n *Node) backfillResume(agents []host.Agent) {
 		st   sessionState
 		kind string
 	}
+	type held struct{ pane, server string }
 	var work []todo
+	var recheck []held
 	n.mu.Lock()
 	for _, a := range agents {
 		if a.PaneID == "" || host.ParsePane(a.PaneID).Kind != host.Herdr {
@@ -213,6 +241,9 @@ func (n *Node) backfillResume(agents []host.Agent) {
 			continue
 		}
 		if spec, ok := n.launches[a.PaneID]; ok && spec.ID == id {
+			if spec.Server != "" {
+				recheck = append(recheck, held{a.PaneID, spec.Server})
+			}
 			continue
 		}
 		st, ok := n.state.get(id)
@@ -233,12 +264,39 @@ func (n *Node) backfillResume(agents []host.Agent) {
 		work = append(work, todo{a.PaneID, id, st, kind})
 	}
 	n.mu.Unlock()
-	if len(work) == 0 {
+	var moved []string
+	if len(recheck) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		for _, r := range recheck {
+			if s := h.serverID(ctx, host.ParsePane(r.pane)); s != "" && s != r.server {
+				moved = append(moved, r.pane)
+			}
+		}
+		cancel()
+		n.mu.Lock()
+		for _, pane := range moved { // claimed: a refresh while the report is out does not send another
+			if cur, ok := n.launches[pane]; ok {
+				cur.Server = ""
+				n.launches[pane] = cur
+			}
+		}
+		n.mu.Unlock()
+	}
+	if len(work) == 0 && len(moved) == 0 {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		for _, pane := range moved {
+			n.mu.Lock()
+			spec, ok := n.launches[pane]
+			n.mu.Unlock()
+			if ok {
+				n.logf("herdr resume: %s (%s) is on a new herdr server: its resume command again", pane, spec.ID)
+				n.reportResume(ctx, h, pane, spec)
+			}
+		}
 		for _, w := range work {
 			var spec agentLaunch
 			if w.kind == "claude" || w.kind == "" {

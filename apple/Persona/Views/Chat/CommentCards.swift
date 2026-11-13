@@ -131,7 +131,7 @@ struct CommentCard: View {
             Button(action: remove) {
                 ThemedIcon(Theme.Icon.close).font(Theme.Font.captionStrong).foregroundStyle(.secondary)
                     .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
-                    .contentShape(.rect)
+                    .tapTargetOutset(.all) // drawn in 28 pt, hit over the card's padding (#6577)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Remove Comment"))

@@ -114,11 +114,11 @@ class AssistantTest {
         val leadB = Session(machineId = "demo", sessionId = "lead-b", title = "1110 | 探索 | 支付", origin = "user")
         val snapshot = AssistantSnapshot(main.key, listOf(main, mine, leadB, leadA),
             leaders = listOf("lead-a", "gone", "lead-b"), directionNames = mapOf("lead-a" to "Growth"),
-            directionTree = DirectionTree(listOf(Direction("lead-a", counts = DirectionCounts(working = 1, needsYou = 2, stuck = 4)))))
+            directionTree = DirectionTree(listOf(Direction("lead-a", counts = DirectionCounts(working = 1, needsYou = 2, stuck = 4), running = true))))
         val result = conversationGroups(snapshot, "", words)
         assertEquals(listOf(leadA, leadB), result.directions)
         assertEquals("Growth", result.names["lead-a"])
-        assertEquals(LeaderCounts(working = 1, needsYou = 2), result.counts["lead-a"])
+        assertEquals(LeaderCounts(running = true, needsYou = 2), result.counts["lead-a"])
         assertEquals(listOf(mine), result.others)
         // a search finds a direction by its name
         assertEquals(listOf(leadA), conversationGroups(snapshot, "growth", words).directions)
@@ -127,7 +127,8 @@ class AssistantTest {
     }
 
     // #5084: the background supervisor is built in. It waits under "All chats" with the chats Persona opened itself,
-    // never among 常驻 or Recent, and is found by the name the app gives it.
+    // never among 常驻 or Recent, and is found by the name the app gives it. Since #6350 (#6228) a scheduled task's
+    // own chat leaves Recent as well: it keeps its All chats row and the Scheduled Tasks entry, nothing is deleted.
     @Test fun theBackgroundSupervisorIsListedUnderAllChatsOnly() {
         val main = Session(machineId = "demo", sessionId = "main", title = "主对话")
         val mine = Session(machineId = "demo", sessionId = "mine", title = "周报", origin = "user", updatedAt = "2026-11-12T08:00:00Z")
@@ -140,7 +141,7 @@ class AssistantTest {
         val result = conversationGroups(snapshot, "", named)
         assertEquals("bg", result.background)
         assertEquals(listOf(background, scheduled, mine), result.others)
-        assertEquals(listOf(scheduled, mine), result.recent)
+        assertEquals("a scheduled task's chat no longer takes a Recent row (#6350)", listOf(mine), result.recent)
         assertTrue(result.directions.isEmpty())
         // whatever the leaders or its origin say, it is no direction and no recent chat of the user's
         val odd = snapshot.copy(leaders = listOf("bg"), conversations = listOf(main, mine, background.copy(origin = null)))
@@ -165,11 +166,11 @@ class AssistantTest {
         assertEquals(listOf(kept), result.others)
     }
 
-    // #4331: a leader's row says what it has open, only the parts that are not zero.
-    @Test fun leaderCountsSayWhatIsOpen() {
-        assertEquals("在做 1 · 等你 2", leaderCountsLabel(LeaderCounts(working = 1, needsYou = 2), resources))
-        assertEquals("在做 3", leaderCountsLabel(LeaderCounts(working = 3), resources))
+    // #4331, #6626: a leader's row says in words only what waits on you; what runs under it is its spinner alone.
+    @Test fun leaderCountsSayWhatWaitsOnYou() {
+        assertEquals("等你 2", leaderCountsLabel(LeaderCounts(running = true, needsYou = 2), resources))
         assertEquals("等你 1", leaderCountsLabel(LeaderCounts(needsYou = 1), resources))
+        assertNull("only running: the spinner says it, no words", leaderCountsLabel(LeaderCounts(running = true), resources))
         assertNull("nothing open: no line", leaderCountsLabel(LeaderCounts(), resources))
         assertNull(leaderCountsLabel(null, resources))
     }

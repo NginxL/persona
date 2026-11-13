@@ -123,6 +123,10 @@ type PlanTask struct {
 	planIndex int
 	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
 	preservePermission bool
+	// admissionRelease, once the admission gate passed, releases this start's held machine/direction slot. It is kept
+	// across the whole start (not the session.start RPC alone) and run when the agent is linked or the start failed for
+	// good, so the slot stays counted through the metrics/ledger gap. Never serialized (admission.go).
+	admissionRelease func()
 }
 
 // Readonly starts conservatively in plan. The launcher fit changes Claude to bypassPermissions while preserving Codex's sandbox.
@@ -205,6 +209,11 @@ type tasksState struct {
 	// limitLooks: when a task agent's usage-limit wait is looked at again (taskTurnEndedAfter), one look per agent
 	// however many turns the wait's wakes end.
 	limitLooks map[SessionRef]time.Time
+	// sentBy: by agent (machine, session), the conversation that last sent it text for a task and when (noteAgentSend:
+	// agent_send, the owner's message on a task's card). A task its supervisor accepted opens again on its agent's new
+	// turn only after its own conversation sent it more (closedTurnReopens, #6726). In memory only: after a restart
+	// such a task stays closed until its conversation sends again or the owner reopens it.
+	sentBy map[[2]string]agentSent
 	// retrying: the tasks whose agent is starting again after a failed start (one start at a time, #1396).
 	retrying map[string]bool
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
@@ -233,7 +242,7 @@ type tasksState struct {
 func newTasksState() tasksState {
 	return tasksState{recoverBefore: time.Now(), plans: map[string]*TaskPlan{}, feed: map[string][]FeedItem{},
 		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]bool{},
-		outcomes: map[string]time.Time{}, reusing: map[string]bool{}}
+		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, sentBy: map[[2]string]agentSent{}}
 }
 
 // ---- plans and the feed: storage ----
@@ -694,8 +703,9 @@ func (s *Service) taskRoutes() {
 			return
 		}
 		var in struct {
-			TodoID string `json:"todo_id"`
-			Text   string `json:"text"`
+			TodoID  string `json:"todo_id"`
+			Text    string `json:"text"`
+			AskedAt string `json:"asked_at"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
@@ -705,7 +715,13 @@ func (s *Service) taskRoutes() {
 			apierr.Write(w, http.StatusBadRequest, errors.New("todo_id and text are required"))
 			return
 		}
-		it, err := s.routeToTask(r.Context(), r.PathValue("id"), in.TodoID, in.Text)
+		var it FeedItem
+		var err error
+		if in.AskedAt != "" {
+			it, err = s.routeDecisionAnswer(r.Context(), r.PathValue("id"), in.TodoID, in.AskedAt, in.Text)
+		} else {
+			it, err = s.routeToTask(r.Context(), r.PathValue("id"), in.TodoID, in.Text)
+		}
 		if err != nil {
 			apierr.Write(w, http.StatusConflict, err)
 			return

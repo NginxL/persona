@@ -44,7 +44,7 @@ fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp, w
     val tone = PersonaTheme.palette.status(status, waiting)
     if (spinning) {
         // the dense row's mark slot is small; the arc keeps the dot's footprint rather than the 20dp default spinner
-        JSpinner(modifier.size(size + 4.dp), color = tone.dot, stroke = 1.8.dp)
+        JSpinner(modifier.size(size + Tokens.Space.Standard.xs), color = tone.dot, stroke = SpinnerTokens.compactStroke)
         return
     }
     when (PersonaTheme.style) {

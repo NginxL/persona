@@ -498,7 +498,7 @@ const (
 	CodeSwitchBusy = "switch_busy"
 )
 
-// TodoRef is a session's link to an active todo (docs/assistant/todos.md).
+// TodoRef names a session's associated todo; Session.Todo is active, CompletedTodo() is display-only history.
 type TodoRef struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`

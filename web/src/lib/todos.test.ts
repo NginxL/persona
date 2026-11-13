@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Machine, Session } from "./types";
 import {
+  DECISIONS_FIRST,
+  shownDecisions,
   heldDelivery,
   isAutoDone,
   isRemovable,
@@ -367,7 +369,7 @@ describe("Agents 侧边栏「按待办」分组 (buildTodoAgentGroups)", () => {
     expect(groups[2].sessions.map((s) => s.session_id)).toEqual(["solo-task"]);
   });
 
-  it("没挂待办、在 herdr 里手动开的单独一段「手动开的」，在「未归属」前面，展开 (#2608)", () => {
+  it("没挂待办的 Agent 一段「没挂待办的」，在终端里手动开的也在里面 (#6591; 原先单独一段, #2608)", () => {
     const sOnTodo = mockSession("mac-1", "on-todo", "working", { space_kind: "herdr", started_by_persona: false, todo: { id: "todo-a", title: "A" } });
     const sManual = mockSession("mac-1", "manual-herdr", "idle", { space_kind: "herdr", started_by_persona: false });
     const sByPersona = mockSession("mac-1", "persona-herdr", "idle", { space_kind: "herdr", started_by_persona: true });
@@ -377,18 +379,18 @@ describe("Agents 侧边栏「按待办」分组 (buildTodoAgentGroups)", () => {
     ];
 
     const groups = buildTodoAgentGroups([sOnTodo, sManual, sByPersona, sBotmux], machines, todos, mutes);
-    expect(groups.map((g) => g.key)).toEqual(["todo:todo-a", "todo:manual", "todo:none"]);
-    expect(groups[1].name).toBe("在终端里开的");
-    // the name alone does not say why these are here: the group says it (#3057)
-    expect(groups[1].hint).toContain("没挂在待办上");
-    expect(groups[1].folded).toBeFalsy();
-    expect(groups[1].sessions.map((s) => s.session_id)).toEqual(["manual-herdr"]);
-    expect(groups[2].sessions.map((s) => s.session_id).sort()).toEqual(["botmux-chat", "persona-herdr"]);
+    expect(groups.map((g) => g.key)).toEqual(["todo:todo-a", "todo:none"]);
+    expect(groups[1].name).toBe("没挂待办的");
+    // the name alone does not say why these are here: the group says it (#3057), the terminal ones included
+    expect(groups[1].hint).toContain("没挂在任何待办上");
+    expect(groups[1].hint).toContain("终端");
+    expect(groups[1].sessions.map((s) => s.session_id).sort()).toEqual(["botmux-chat", "manual-herdr", "persona-herdr"]);
+    expect(groups[1].folded).toBe(true);
 
-    // no todo above: "Opened by hand" alone does not fold "Unassigned"
+    // no todo above: it is the whole list, so open
     const noTodo = buildTodoAgentGroups([sManual, sBotmux], machines, [], mutes);
-    expect(noTodo.map((g) => g.key)).toEqual(["todo:manual", "todo:none"]);
-    expect(noTodo[1].folded).toBe(false);
+    expect(noTodo.map((g) => g.key)).toEqual(["todo:none"]);
+    expect(noTodo[0].folded).toBe(false);
   });
 
   it("Agent 换到另一个待办后马上归新待办，即使旧待办的列表还没刷新 (#4802)", () => {
@@ -871,5 +873,25 @@ describe("任务卡片的进度 (taskNow, #1583)", () => {
     expect(taskNow(s, true)).toEqual({ kind: "step", text: "在搜 Shutdown", since: undefined });
     expect(runningSubagents(s)).toEqual(["Hub children lifecycle survey", "Explore"]);
     expect(runningSubagents(base)).toEqual([]);
+  });
+});
+
+describe("a to-do's decisions shown (#6447)", () => {
+  const list = Array.from({ length: 12 }, (_, i) => `d${i + 1}`);
+
+  it("shows the first five by default, in the list's order", () => {
+    expect(DECISIONS_FIRST).toBe(5);
+    expect(shownDecisions(list, "first")).toEqual(["d1", "d2", "d3", "d4", "d5"]);
+  });
+
+  it("shows every one, or none once folded", () => {
+    expect(shownDecisions(list, "all")).toEqual(list);
+    expect(shownDecisions(list, "folded")).toEqual([]);
+  });
+
+  it("shows a short list whole by default, and never changes the list it is given", () => {
+    expect(shownDecisions(["a", "b"], "first")).toEqual(["a", "b"]);
+    expect(shownDecisions([], "first")).toEqual([]);
+    expect(list).toHaveLength(12);
   });
 });

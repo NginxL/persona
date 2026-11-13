@@ -52,6 +52,10 @@ describe("edit helpers", () => {
 let host: HTMLDivElement, root: Root, sent: Record<string, unknown>[], answers: ((body: Record<string, unknown>) => Response)[], done: boolean[];
 const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
 const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+const appears = (check: () => unknown) => vi.waitFor(async () => {
+  await act(async () => {});
+  expect(check()).toBeTruthy();
+}, { timeout: 3000 });
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); await flush(); }
 async function type(text: string) {
   const area = document.querySelector<HTMLTextAreaElement>('[data-testid="code-editor"]')!;
@@ -97,11 +101,14 @@ describe("FileEdit", () => {
     answers.push(() => Response.json({ error: "changed", code: "file_changed", revision: "r5" }, { status: 409 }));
     await type("x\n");
     await click(t("files-editor.save"));
+    await appears(() => document.body.textContent?.includes(t("files-editor.changed_title", { name: "a.txt" })));
     expect(document.body.textContent).toContain(t("files-editor.changed_title", { name: "a.txt" }));
     expect(done).toEqual([]);
     await click(t("files-editor.overwrite_anyway"));
+    await appears(() => document.body.textContent?.includes(t("files-editor.overwrite_title")));
     expect(document.body.textContent).toContain(t("files-editor.overwrite_title"));
     await click(t("files-editor.overwrite"));
+    await appears(() => done.length === 1);
     expect(sent.at(-1)).toMatchObject({ text: "x\r\n", force: true });
     expect(done).toEqual([true]);
   });
@@ -111,7 +118,9 @@ describe("FileEdit", () => {
     answers.push(() => Response.json({ error: "taken", code: "exists", name: "a 2.txt" }, { status: 409 }));
     await type("y\n");
     await click(t("files-editor.save"));
+    await appears(() => document.body.textContent?.includes(t("files-editor.changed_title", { name: "a.txt" })));
     await click(t("files-editor.save_copy"));
+    await appears(() => done.length === 1);
     expect(sent.slice(1).map((b) => [b.path, b.create])).toEqual([["/w/a 2.txt", true], ["/w/a 3.txt", true]]);
     expect(done).toEqual([true]);
   });

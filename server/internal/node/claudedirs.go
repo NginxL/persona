@@ -139,6 +139,7 @@ func (n *Node) projectDirs() []string {
 
 // globProjects globs pattern (relative to a projects directory) in every projects directory.
 func (n *Node) globProjects(pattern ...string) []string {
+	n.projectGlobs.Add(1)
 	var out []string
 	for _, p := range n.projectDirs() {
 		if n.sessionScope != nil && !sessionScopeWithin(n.sessionScope.claude, p) {

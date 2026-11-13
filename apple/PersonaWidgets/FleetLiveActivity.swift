@@ -414,6 +414,10 @@ struct FleetLockScreen: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        // The system can refresh the capsule tint and content separately when the wallpaper changes.
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        .activityBackgroundTint(.black)
     }
 
     /// Apple Watch Smart Stack: one glance.

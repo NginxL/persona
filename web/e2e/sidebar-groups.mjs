@@ -101,7 +101,7 @@ try {
         const top = Number.parseFloat(getComputedStyle(header).top);
         const rect = header.getBoundingClientRect();
         const element = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        return { pinned: Math.abs(rect.top - scroller.getBoundingClientRect().top - top) < 2, unobscured: header.contains(element), onlyOneAction: root.querySelectorAll("[data-sidebar-agents-controls] button[title='Collapse all'], [data-sidebar-agents-controls] button[title='Expand all']").length === 1 };
+        return { pinned: Math.abs(rect.top - scroller.getBoundingClientRect().top - top) < 2, unobscured: header.contains(element), onlyOneAction: root.querySelectorAll("[data-sidebar-agents-controls] [data-testid=agents-fold-all]").length === 1 };
       });
       assert(toolbar.pinned && toolbar.unobscured && toolbar.onlyOneAction, `Toolbar stays pinned, clear and has one action: ${JSON.stringify(toolbar)}`);
       await page.screenshot({ path: join(output, `${width}-${theme}-${textSize}-${mode.toLowerCase()}.png`) });

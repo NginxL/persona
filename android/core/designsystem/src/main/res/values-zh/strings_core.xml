@@ -125,7 +125,6 @@
     <string name="designsystem_core_direction_planned">未开始</string>
     <string name="designsystem_core_direction_secretary">书记官</string>
     <string name="designsystem_core_direction_untitled">对话</string>
-    <string name="designsystem_core_direction_count_working">在做 %1$d</string>
     <string name="designsystem_core_direction_count_needs_you">等你 %1$d</string>
     <string name="designsystem_core_inbox_action">需要你</string>
     <string name="designsystem_core_inbox_fyi">知悉即可</string>

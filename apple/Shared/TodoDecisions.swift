@@ -48,10 +48,29 @@ nonisolated struct TodoDecision: Decodable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// How the Decisions list is shown (#6447): the first few, each time a to-do opens; every one; or none, folded under
+/// its title.
+nonisolated enum TodoDecisionsDisplay: Sendable, Equatable {
+    case first, all, folded
+}
+
 /// The decision log's rules, shared with the web's todo page (`web/src/lib/todos.ts`).
 nonisolated enum TodoDecisionsLogic {
+    /// How many decisions show before Show All (the web's `DECISIONS_FIRST`).
+    static let firstCount = 5
+
     static func current(_ all: [TodoDecision]) -> [TodoDecision] {
         all.filter(\.isCurrent)
+    }
+
+    /// What `display` shows of `list` (the current decisions, or the full history), in its order (the web's
+    /// `shownDecisions`).
+    static func shown<T>(_ list: [T], _ display: TodoDecisionsDisplay) -> [T] {
+        switch display {
+        case .first: Array(list.prefix(firstCount))
+        case .all: list
+        case .folded: []
+        }
     }
 
     /// The decisions `d` may be marked as revising: earlier ones (in the hub's order, oldest first) that are current,

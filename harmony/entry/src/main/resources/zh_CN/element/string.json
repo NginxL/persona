@@ -1,0 +1,4440 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Persona 手机客户端"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "你的 Persona 工作空间"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Persona"
+    },
+    {
+      "name": "persona",
+      "value": "Persona"
+    },
+    {
+      "name": "agents",
+      "value": "Agents"
+    },
+    {
+      "name": "inbox",
+      "value": "收件箱"
+    },
+    {
+      "name": "settings",
+      "value": "设置"
+    },
+    {
+      "name": "welcome",
+      "value": "连接你的 Hub"
+    },
+    {
+      "name": "connect",
+      "value": "连接"
+    },
+    {
+      "name": "pair",
+      "value": "配对"
+    },
+    {
+      "name": "pair_code",
+      "value": "临时配对码"
+    },
+    {
+      "name": "hub_address",
+      "value": "Hub 地址"
+    },
+    {
+      "name": "verify",
+      "value": "验证身份"
+    },
+    {
+      "name": "trust",
+      "value": "信任并连接"
+    },
+    {
+      "name": "hub",
+      "value": "工作空间"
+    },
+    {
+      "name": "manager",
+      "value": "管理器"
+    },
+    {
+      "name": "experience",
+      "value": "先体验"
+    },
+    {
+      "name": "main_chat",
+      "value": "主对话"
+    },
+    {
+      "name": "new_chat",
+      "value": "新建对话"
+    },
+    {
+      "name": "recent",
+      "value": "最近对话"
+    },
+    {
+      "name": "automatic",
+      "value": "自动对话"
+    },
+    {
+      "name": "todos",
+      "value": "待办"
+    },
+    {
+      "name": "knowledge",
+      "value": "知识库"
+    },
+    {
+      "name": "search",
+      "value": "搜索"
+    },
+    {
+      "name": "search_sessions",
+      "value": "搜索会话"
+    },
+    {
+      "name": "all",
+      "value": "全部"
+    },
+    {
+      "name": "needs_you",
+      "value": "需要你"
+    },
+    {
+      "name": "working",
+      "value": "工作中"
+    },
+    {
+      "name": "done",
+      "value": "已完成"
+    },
+    {
+      "name": "unread",
+      "value": "未读"
+    },
+    {
+      "name": "empty",
+      "value": "暂无内容"
+    },
+    {
+      "name": "no_results",
+      "value": "没有匹配项"
+    },
+    {
+      "name": "loading",
+      "value": "加载中"
+    },
+    {
+      "name": "retry",
+      "value": "重试"
+    },
+    {
+      "name": "refresh",
+      "value": "刷新"
+    },
+    {
+      "name": "offline",
+      "value": "离线"
+    },
+    {
+      "name": "online",
+      "value": "已连接"
+    },
+    {
+      "name": "read_only",
+      "value": "只读"
+    },
+    {
+      "name": "send",
+      "value": "发送"
+    },
+    {
+      "name": "sending",
+      "value": "发送中"
+    },
+    {
+      "name": "message",
+      "value": "消息"
+    },
+    {
+      "name": "stop",
+      "value": "停止"
+    },
+    {
+      "name": "cancel",
+      "value": "取消"
+    },
+    {
+      "name": "confirm",
+      "value": "确认"
+    },
+    {
+      "name": "save",
+      "value": "保存"
+    },
+    {
+      "name": "add",
+      "value": "添加"
+    },
+    {
+      "name": "create",
+      "value": "创建"
+    },
+    {
+      "name": "edit",
+      "value": "编辑"
+    },
+    {
+      "name": "delete",
+      "value": "删除"
+    },
+    {
+      "name": "close",
+      "value": "关闭"
+    },
+    {
+      "name": "back",
+      "value": "返回"
+    },
+    {
+      "name": "more",
+      "value": "更多"
+    },
+    {
+      "name": "title",
+      "value": "标题"
+    },
+    {
+      "name": "content",
+      "value": "内容"
+    },
+    {
+      "name": "name",
+      "value": "名称"
+    },
+    {
+      "name": "new_agent",
+      "value": "新建 Agent"
+    },
+    {
+      "name": "task",
+      "value": "任务"
+    },
+    {
+      "name": "machine",
+      "value": "电脑"
+    },
+    {
+      "name": "directory",
+      "value": "目录"
+    },
+    {
+      "name": "launcher",
+      "value": "启动器"
+    },
+    {
+      "name": "model",
+      "value": "模型"
+    },
+    {
+      "name": "permissions",
+      "value": "权限模式"
+    },
+    {
+      "name": "effort",
+      "value": "思考程度"
+    },
+    {
+      "name": "manual",
+      "value": "手动确认"
+    },
+    {
+      "name": "low",
+      "value": "低"
+    },
+    {
+      "name": "medium",
+      "value": "中"
+    },
+    {
+      "name": "high",
+      "value": "高"
+    },
+    {
+      "name": "chat",
+      "value": "对话"
+    },
+    {
+      "name": "files",
+      "value": "文件"
+    },
+    {
+      "name": "git",
+      "value": "Git"
+    },
+    {
+      "name": "terminal",
+      "value": "终端"
+    },
+    {
+      "name": "reply",
+      "value": "回复"
+    },
+    {
+      "name": "confirm_send",
+      "value": "发送这条回复？"
+    },
+    {
+      "name": "process",
+      "value": "标为已处理"
+    },
+    {
+      "name": "reopen",
+      "value": "重新打开"
+    },
+    {
+      "name": "handoff",
+      "value": "交给 Persona"
+    },
+    {
+      "name": "source",
+      "value": "来源"
+    },
+    {
+      "name": "remove",
+      "value": "移除"
+    },
+    {
+      "name": "attachment",
+      "value": "附件"
+    },
+    {
+      "name": "attach",
+      "value": "附件"
+    },
+    {
+      "name": "photo",
+      "value": "照片"
+    },
+    {
+      "name": "file",
+      "value": "文件"
+    },
+    {
+      "name": "upload",
+      "value": "上传"
+    },
+    {
+      "name": "download",
+      "value": "保存文件"
+    },
+    {
+      "name": "preview",
+      "value": "预览"
+    },
+    {
+      "name": "open",
+      "value": "打开"
+    },
+    {
+      "name": "approve",
+      "value": "批准"
+    },
+    {
+      "name": "deny",
+      "value": "拒绝"
+    },
+    {
+      "name": "answer",
+      "value": "回答"
+    },
+    {
+      "name": "question",
+      "value": "问题"
+    },
+    {
+      "name": "plan",
+      "value": "计划"
+    },
+    {
+      "name": "start",
+      "value": "启动"
+    },
+    {
+      "name": "request_updated",
+      "value": "请求已更新"
+    },
+    {
+      "name": "already_handled",
+      "value": "已由其他设备处理"
+    },
+    {
+      "name": "result_unknown",
+      "value": "结果待确认"
+    },
+    {
+      "name": "failed",
+      "value": "操作未完成"
+    },
+    {
+      "name": "saved",
+      "value": "已保存"
+    },
+    {
+      "name": "sent",
+      "value": "已发送"
+    },
+    {
+      "name": "pending",
+      "value": "等待中"
+    },
+    {
+      "name": "completed",
+      "value": "已完成"
+    },
+    {
+      "name": "work_summary",
+      "value": "工作过程"
+    },
+    {
+      "name": "tool",
+      "value": "工具"
+    },
+    {
+      "name": "collapse",
+      "value": "收起侧栏"
+    },
+    {
+      "name": "expand",
+      "value": "展开侧栏"
+    },
+    {
+      "name": "appearance",
+      "value": "界面外观"
+    },
+    {
+      "name": "system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "light",
+      "value": "浅色"
+    },
+    {
+      "name": "dark",
+      "value": "深色"
+    },
+    {
+      "name": "style",
+      "value": "风格"
+    },
+    {
+      "name": "notifications",
+      "value": "通知"
+    },
+    {
+      "name": "message_alerts",
+      "value": "消息提醒"
+    },
+    {
+      "name": "system_permission",
+      "value": "系统授权"
+    },
+    {
+      "name": "not_requested",
+      "value": "未请求"
+    },
+    {
+      "name": "allow_notifications",
+      "value": "允许通知"
+    },
+    {
+      "name": "machines",
+      "value": "电脑与设备"
+    },
+    {
+      "name": "add_computer",
+      "value": "添加电脑"
+    },
+    {
+      "name": "generate_code",
+      "value": "生成首次配对码"
+    },
+    {
+      "name": "expires",
+      "value": "到期"
+    },
+    {
+      "name": "pending_trust",
+      "value": "等待信任确认"
+    },
+    {
+      "name": "confirm_computer",
+      "value": "是我的电脑"
+    },
+    {
+      "name": "reject",
+      "value": "拒绝"
+    },
+    {
+      "name": "install",
+      "value": "安装"
+    },
+    {
+      "name": "install_instructions",
+      "value": "安装说明"
+    },
+    {
+      "name": "models",
+      "value": "模型配置"
+    },
+    {
+      "name": "schedules",
+      "value": "计划任务"
+    },
+    {
+      "name": "extensions",
+      "value": "扩展"
+    },
+    {
+      "name": "connectors",
+      "value": "连接器"
+    },
+    {
+      "name": "channels",
+      "value": "渠道"
+    },
+    {
+      "name": "translation",
+      "value": "自动翻译"
+    },
+    {
+      "name": "triage",
+      "value": "会话分诊"
+    },
+    {
+      "name": "ledger",
+      "value": "以你的身份发送"
+    },
+    {
+      "name": "phone",
+      "value": "这台手机"
+    },
+    {
+      "name": "privacy",
+      "value": "隐私"
+    },
+    {
+      "name": "storage",
+      "value": "存储"
+    },
+    {
+      "name": "language",
+      "value": "语言"
+    },
+    {
+      "name": "clear_cache",
+      "value": "清理消息缓存"
+    },
+    {
+      "name": "disconnect",
+      "value": "断开连接"
+    },
+    {
+      "name": "forget_hub",
+      "value": "移除此工作空间"
+    },
+    {
+      "name": "diagnostics",
+      "value": "连接诊断"
+    },
+    {
+      "name": "copy",
+      "value": "复制"
+    },
+    {
+      "name": "branch",
+      "value": "分支"
+    },
+    {
+      "name": "stage",
+      "value": "暂存"
+    },
+    {
+      "name": "unstage",
+      "value": "取消暂存"
+    },
+    {
+      "name": "commit",
+      "value": "提交"
+    },
+    {
+      "name": "push",
+      "value": "推送"
+    },
+    {
+      "name": "pull",
+      "value": "拉取"
+    },
+    {
+      "name": "fetch",
+      "value": "获取"
+    },
+    {
+      "name": "switch_branch",
+      "value": "切换分支"
+    },
+    {
+      "name": "stash",
+      "value": "储藏"
+    },
+    {
+      "name": "stash_pop",
+      "value": "恢复储藏"
+    },
+    {
+      "name": "rename",
+      "value": "重命名"
+    },
+    {
+      "name": "control",
+      "value": "接管终端"
+    },
+    {
+      "name": "release",
+      "value": "退出控制"
+    },
+    {
+      "name": "control_confirm",
+      "value": "接管这个终端？"
+    },
+    {
+      "name": "voice",
+      "value": "语音对话"
+    },
+    {
+      "name": "listening",
+      "value": "正在聆听"
+    },
+    {
+      "name": "muted",
+      "value": "麦克风已静音"
+    },
+    {
+      "name": "mute",
+      "value": "静音"
+    },
+    {
+      "name": "unmute",
+      "value": "取消静音"
+    },
+    {
+      "name": "hang_up",
+      "value": "挂断"
+    },
+    {
+      "name": "ended",
+      "value": "对话已结束"
+    },
+    {
+      "name": "restart",
+      "value": "重新开始"
+    },
+    {
+      "name": "health",
+      "value": "健康空间"
+    },
+    {
+      "name": "timeline",
+      "value": "时间线"
+    },
+    {
+      "name": "tags",
+      "value": "标签"
+    },
+    {
+      "name": "status",
+      "value": "状态"
+    },
+    {
+      "name": "purpose",
+      "value": "用途"
+    },
+    {
+      "name": "enabled",
+      "value": "已开启"
+    },
+    {
+      "name": "disabled",
+      "value": "已关闭"
+    },
+    {
+      "name": "unsupported",
+      "value": "当前 Hub 不支持"
+    },
+    {
+      "name": "permission_denied",
+      "value": "已拒绝"
+    },
+    {
+      "name": "identity_changed",
+      "value": "Hub 身份已变化，请重新配对。"
+    },
+    {
+      "name": "invalid_endpoint",
+      "value": "请输入有效的 HTTPS Hub 地址"
+    },
+    {
+      "name": "connection_failed",
+      "value": "无法连接，输入已保留。"
+    },
+    {
+      "name": "unsafe_endpoint",
+      "value": "此连接无法安全验证身份"
+    },
+    {
+      "name": "pin_unavailable",
+      "value": "无法验证此证书指纹"
+    },
+    {
+      "name": "required",
+      "value": "必填"
+    },
+    {
+      "name": "secret",
+      "value": "秘密字段"
+    },
+    {
+      "name": "unknown_field",
+      "value": "此手机无法确认该字段"
+    },
+    {
+      "name": "pending_action",
+      "value": "请先确认上次执行结果"
+    },
+    {
+      "name": "no_computer",
+      "value": "连接一台电脑"
+    },
+    {
+      "name": "no_model",
+      "value": "配置助手模型"
+    },
+    {
+      "name": "local_demo",
+      "value": "本地体验"
+    },
+    {
+      "name": "leave_demo",
+      "value": "连接真实 Hub"
+    },
+    {
+      "name": "about",
+      "value": "关于"
+    },
+    {
+      "name": "version",
+      "value": "版本"
+    },
+    {
+      "name": "mail",
+      "value": "邮件"
+    },
+    {
+      "name": "projects",
+      "value": "项目"
+    },
+    {
+      "name": "chats",
+      "value": "聊天"
+    },
+    {
+      "name": "people",
+      "value": "人物"
+    },
+    {
+      "name": "docs",
+      "value": "文档"
+    },
+    {
+      "name": "meetings",
+      "value": "会议"
+    },
+    {
+      "name": "events",
+      "value": "事件"
+    },
+    {
+      "name": "recordings",
+      "value": "录音"
+    },
+    {
+      "name": "current_value",
+      "value": "当前值"
+    },
+    {
+      "name": "select_purpose",
+      "value": "选择用途"
+    },
+    {
+      "name": "model_provider",
+      "value": "提供方"
+    },
+    {
+      "name": "model_id",
+      "value": "模型 ID"
+    },
+    {
+      "name": "permission_mode",
+      "value": "权限模式"
+    },
+    {
+      "name": "reasoning_effort",
+      "value": "推理强度"
+    },
+    {
+      "name": "no_capability",
+      "value": "此会话不支持此设置"
+    },
+    {
+      "name": "no_configuration",
+      "value": "没有可用的受支持配置"
+    },
+    {
+      "name": "machine_details",
+      "value": "电脑详情"
+    },
+    {
+      "name": "new_pairing_code",
+      "value": "创建新的配对码"
+    },
+    {
+      "name": "expires_at",
+      "value": "到期时间"
+    },
+    {
+      "name": "confirm_trust",
+      "value": "信任这台电脑？"
+    },
+    {
+      "name": "connector_status",
+      "value": "连接器状态"
+    },
+    {
+      "name": "extension_status",
+      "value": "扩展状态"
+    },
+    {
+      "name": "features",
+      "value": "功能"
+    },
+    {
+      "name": "load_more",
+      "value": "加载更早内容"
+    },
+    {
+      "name": "auto_continue",
+      "value": "出错自动继续"
+    },
+    {
+      "name": "wake",
+      "value": "到点叫醒"
+    },
+    {
+      "name": "decide",
+      "value": "决策卡片"
+    },
+    {
+      "name": "reply_reminder",
+      "value": "看过没回时提醒"
+    },
+    {
+      "name": "default",
+      "value": "使用默认值"
+    },
+    {
+      "name": "acceptEdits",
+      "value": "接受编辑"
+    },
+    {
+      "name": "auto",
+      "value": "自动"
+    },
+    {
+      "name": "bypassPermissions",
+      "value": "跳过权限确认"
+    },
+    {
+      "name": "xhigh",
+      "value": "极高"
+    },
+    {
+      "name": "max",
+      "value": "最高"
+    },
+    {
+      "name": "checked_no_effect",
+      "value": "我已检查目标，确认该操作未生效。是否允许重新操作？"
+    },
+    {
+      "name": "checked",
+      "value": "已人工核对"
+    },
+    {
+      "name": "account",
+      "value": "账号"
+    },
+    {
+      "name": "archive",
+      "value": "归档"
+    },
+    {
+      "name": "cached",
+      "value": "缓存"
+    },
+    {
+      "name": "clear",
+      "value": "清除"
+    },
+    {
+      "name": "dependencies_unresolved",
+      "value": "依赖未就绪"
+    },
+    {
+      "name": "details",
+      "value": "详情"
+    },
+    {
+      "name": "every_minutes",
+      "value": "间隔分钟"
+    },
+    {
+      "name": "extension_market",
+      "value": "扩展市场"
+    },
+    {
+      "name": "operation",
+      "value": "操作"
+    },
+    {
+      "name": "review",
+      "value": "检查"
+    },
+    {
+      "name": "run_at",
+      "value": "运行时间"
+    },
+    {
+      "name": "run_now",
+      "value": "立即运行"
+    },
+    {
+      "name": "run_started",
+      "value": "已开始"
+    },
+    {
+      "name": "sign_in",
+      "value": "登录"
+    },
+    {
+      "name": "sign_out",
+      "value": "退出登录"
+    },
+    {
+      "name": "test",
+      "value": "测试"
+    },
+    {
+      "name": "time",
+      "value": "时间"
+    },
+    {
+      "name": "unbind",
+      "value": "解除绑定"
+    },
+    {
+      "name": "via",
+      "value": "来源"
+    },
+    {
+      "name": "waiting",
+      "value": "等待中"
+    },
+    {
+      "name": "weekdays",
+      "value": "星期"
+    },
+    {
+      "name": "once",
+      "value": "一次"
+    },
+    {
+      "name": "daily",
+      "value": "每天"
+    },
+    {
+      "name": "interval",
+      "value": "间隔"
+    },
+    {
+      "name": "upgrade",
+      "value": "升级"
+    },
+    {
+      "name": "continue",
+      "value": "继续"
+    },
+    {
+      "name": "check_status",
+      "value": "检查状态"
+    },
+    {
+      "name": "agent",
+      "value": "Agent"
+    },
+    {
+      "name": "conversation",
+      "value": "对话"
+    },
+    {
+      "name": "running",
+      "value": "运行中"
+    },
+    {
+      "name": "needs_consent",
+      "value": "待授权"
+    },
+    {
+      "name": "succeeded",
+      "value": "已完成"
+    },
+    {
+      "name": "canceled",
+      "value": "已取消"
+    },
+    {
+      "name": "image",
+      "value": "图片"
+    },
+    {
+      "name": "attach_live",
+      "value": "加入实时会话"
+    },
+    {
+      "name": "feedback",
+      "value": "反馈"
+    },
+    {
+      "name": "other",
+      "value": "其他答案"
+    },
+    {
+      "name": "workspace",
+      "value": "工作区"
+    },
+    {
+      "name": "latest",
+      "value": "最新消息"
+    },
+    {
+      "name": "ignored",
+      "value": "已忽略"
+    },
+    {
+      "name": "parent_folder",
+      "value": "上级文件夹"
+    },
+    {
+      "name": "path",
+      "value": "路径"
+    },
+    {
+      "name": "symlink",
+      "value": "符号链接"
+    },
+    {
+      "name": "takeover",
+      "value": "接管"
+    },
+    {
+      "name": "session_tools_binary_file",
+      "value": "此文件类型暂不支持预览"
+    },
+    {
+      "name": "session_tools_changes",
+      "value": "更改"
+    },
+    {
+      "name": "session_tools_clean",
+      "value": "没有更改"
+    },
+    {
+      "name": "session_tools_control_active",
+      "value": "正在控制"
+    },
+    {
+      "name": "session_tools_control_busy",
+      "value": "其他设备正在控制"
+    },
+    {
+      "name": "session_tools_control_off",
+      "value": "未接管"
+    },
+    {
+      "name": "session_tools_control_starting",
+      "value": "正在请求接管"
+    },
+    {
+      "name": "session_tools_file_read_failed",
+      "value": "无法读取所选文件"
+    },
+    {
+      "name": "session_tools_first_entries",
+      "value": "起始条目"
+    },
+    {
+      "name": "session_tools_no_diff",
+      "value": "没有差异"
+    },
+    {
+      "name": "session_tools_no_upstream",
+      "value": "没有上游分支"
+    },
+    {
+      "name": "session_tools_not_repository",
+      "value": "当前目录不是 Git 仓库"
+    },
+    {
+      "name": "session_tools_staged",
+      "value": "已暂存"
+    },
+    {
+      "name": "session_tools_synced",
+      "value": "已同步"
+    },
+    {
+      "name": "session_tools_terminal_input",
+      "value": "终端输入"
+    },
+    {
+      "name": "session_tools_terminal_waiting",
+      "value": "正在等待终端"
+    },
+    {
+      "name": "session_tools_transfer_limit",
+      "value": "传输文件超过 32 MiB"
+    },
+    {
+      "name": "session_tools_truncated",
+      "value": "加载更多"
+    },
+    {
+      "name": "session_tools_unstaged",
+      "value": "未暂存"
+    },
+    {
+      "name": "session_tools_view_only",
+      "value": "仅查看"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "用于语音对话和知识录音。"
+    },
+    {
+      "name": "contacts_reason",
+      "value": "允许 Persona 搜索联系人，并在你确认后创建或修改联系人。"
+    },
+    {
+      "name": "calendar_read_reason",
+      "value": "用于日历工具查询日程。"
+    },
+    {
+      "name": "calendar_write_reason",
+      "value": "用于确认请求后保存日程。"
+    },
+    {
+      "name": "location_reason",
+      "value": "用于位置工具获取大致位置。"
+    },
+    {
+      "name": "clipboard_reason",
+      "value": "用于剪贴板工具读取文本。"
+    },
+    {
+      "name": "phone_tools_connected",
+      "value": "已连接"
+    },
+    {
+      "name": "phone_tools_offline",
+      "value": "未连接"
+    },
+    {
+      "name": "phone_tools_registered",
+      "value": "项工具"
+    },
+    {
+      "name": "contacts",
+      "value": "联系人"
+    },
+    {
+      "name": "calendar",
+      "value": "日历"
+    },
+    {
+      "name": "location",
+      "value": "位置"
+    },
+    {
+      "name": "clipboard",
+      "value": "剪贴板"
+    },
+    {
+      "name": "permission_granted",
+      "value": "已允许"
+    },
+    {
+      "name": "permission_not_determined",
+      "value": "尚未允许"
+    },
+    {
+      "name": "permission_invalid",
+      "value": "不可用"
+    },
+    {
+      "name": "permission_unavailable",
+      "value": "权限不可用"
+    },
+    {
+      "name": "allow",
+      "value": "允许"
+    },
+    {
+      "name": "open_settings",
+      "value": "打开设置"
+    },
+    {
+      "name": "cache_unavailable",
+      "value": "缓存数据不可用"
+    },
+    {
+      "name": "voice_unavailable",
+      "value": "语音不可用"
+    },
+    {
+      "name": "voice_ready",
+      "value": "就绪"
+    },
+    {
+      "name": "voice_idle",
+      "value": "就绪"
+    },
+    {
+      "name": "voice_protocol_unsupported",
+      "value": "语音版本不受支持"
+    },
+    {
+      "name": "voice_needs_setup",
+      "value": "语音待配置"
+    },
+    {
+      "name": "voice_connecting",
+      "value": "连接中"
+    },
+    {
+      "name": "voice_starting_audio",
+      "value": "正在启动音频"
+    },
+    {
+      "name": "voice_listening",
+      "value": "聆听中"
+    },
+    {
+      "name": "voice_paused",
+      "value": "已暂停"
+    },
+    {
+      "name": "voice_waking",
+      "value": "恢复中"
+    },
+    {
+      "name": "voice_reconnecting",
+      "value": "重新连接中"
+    },
+    {
+      "name": "voice_error",
+      "value": "语音出错"
+    },
+    {
+      "name": "voice_connection_failed",
+      "value": "语音连接失败"
+    },
+    {
+      "name": "voice_disconnected",
+      "value": "语音已断开"
+    },
+    {
+      "name": "voice_timeout",
+      "value": "语音连接超时"
+    },
+    {
+      "name": "voice_audio_unavailable",
+      "value": "音频不可用"
+    },
+    {
+      "name": "voice_target_unavailable",
+      "value": "当前对话不可用"
+    },
+    {
+      "name": "voice_microphone_denied",
+      "value": "麦克风权限被拒绝"
+    },
+    {
+      "name": "voice_microphone_unavailable",
+      "value": "麦克风不可用"
+    },
+    {
+      "name": "voice_start",
+      "value": "开始通话"
+    },
+    {
+      "name": "voice_mute",
+      "value": "静音"
+    },
+    {
+      "name": "voice_unmute",
+      "value": "取消静音"
+    },
+    {
+      "name": "voice_interrupt",
+      "value": "打断"
+    },
+    {
+      "name": "voice_end",
+      "value": "结束通话"
+    },
+    {
+      "name": "voice_you",
+      "value": "你"
+    },
+    {
+      "name": "voice_assistant",
+      "value": "Persona"
+    },
+    {
+      "name": "voice_ask_released_elsewhere",
+      "value": "已在其他设备处理"
+    },
+    {
+      "name": "voice_run_unsent_draft",
+      "value": "未发送草稿"
+    },
+    {
+      "name": "voice_run_sending",
+      "value": "发送中"
+    },
+    {
+      "name": "voice_run_sent",
+      "value": "已发送"
+    },
+    {
+      "name": "voice_run_working",
+      "value": "工作中"
+    },
+    {
+      "name": "voice_run_needs_you",
+      "value": "需要你"
+    },
+    {
+      "name": "voice_run_blocked",
+      "value": "等待中"
+    },
+    {
+      "name": "voice_run_held",
+      "value": "后台运行中"
+    },
+    {
+      "name": "voice_run_done",
+      "value": "已完成"
+    },
+    {
+      "name": "voice_run_failed",
+      "value": "失败"
+    },
+    {
+      "name": "voice_run_refused",
+      "value": "未发送"
+    },
+    {
+      "name": "voice_run_unknown",
+      "value": "结果未知"
+    },
+    {
+      "name": "voice_run_folded",
+      "value": "已合并"
+    },
+    {
+      "name": "photos",
+      "value": "照片"
+    },
+    {
+      "name": "preview_unavailable",
+      "value": "无法预览"
+    },
+    {
+      "name": "dismiss",
+      "value": "忽略"
+    },
+    {
+      "name": "chat_attachment_target_unavailable",
+      "value": "请先选择会话"
+    },
+    {
+      "name": "chat_attachment_storage_unavailable",
+      "value": "无法保存附件"
+    },
+    {
+      "name": "chat_attachment_limit_reached",
+      "value": "附件数量已达上限"
+    },
+    {
+      "name": "chat_attachment_image_unsupported",
+      "value": "不支持的图片"
+    },
+    {
+      "name": "chat_attachment_image_too_large",
+      "value": "图片过大"
+    },
+    {
+      "name": "chat_attachment_file_too_large",
+      "value": "文件过大"
+    },
+    {
+      "name": "chat_attachment_file_read_failed",
+      "value": "无法读取文件"
+    },
+    {
+      "name": "chat_attachment_upload_unknown",
+      "value": "上传结果未知"
+    },
+    {
+      "name": "chat_attachment_request_too_large",
+      "value": "消息和附件过大"
+    },
+    {
+      "name": "chat_attachment_offline",
+      "value": "连接后可发送附件"
+    },
+    {
+      "name": "chat_attachment_selection_changed",
+      "value": "附件已变化，请检查后发送"
+    },
+    {
+      "name": "chat_attachment_pick_failed",
+      "value": "无法选择附件"
+    },
+    {
+      "name": "chat_attachment_send_failed",
+      "value": "无法发送附件"
+    },
+    {
+      "name": "chat_attachment_upload_failed",
+      "value": "上传失败"
+    },
+    {
+      "name": "chat_attachment_uploading",
+      "value": "正在上传"
+    },
+    {
+      "name": "assistant_feed_answered",
+      "value": "已回答"
+    },
+    {
+      "name": "assistant_feed_check_met",
+      "value": "已满足"
+    },
+    {
+      "name": "assistant_feed_check_not_met",
+      "value": "未满足"
+    },
+    {
+      "name": "assistant_feed_confirm_send",
+      "value": "发送消息？"
+    },
+    {
+      "name": "assistant_feed_dismiss",
+      "value": "忽略"
+    },
+    {
+      "name": "assistant_feed_draft",
+      "value": "回复"
+    },
+    {
+      "name": "assistant_feed_edit_plan",
+      "value": "编辑计划"
+    },
+    {
+      "name": "assistant_feed_filed_elsewhere",
+      "value": "已在其他位置处理"
+    },
+    {
+      "name": "assistant_feed_folder",
+      "value": "工作目录"
+    },
+    {
+      "name": "assistant_feed_interrupted",
+      "value": "已中断"
+    },
+    {
+      "name": "assistant_feed_machine",
+      "value": "电脑"
+    },
+    {
+      "name": "assistant_feed_message",
+      "value": "消息"
+    },
+    {
+      "name": "assistant_feed_message_open",
+      "value": "待回复"
+    },
+    {
+      "name": "assistant_feed_message_pending",
+      "value": "正在发送"
+    },
+    {
+      "name": "assistant_feed_message_sent",
+      "value": "已发送"
+    },
+    {
+      "name": "assistant_feed_message_dismissed",
+      "value": "已忽略"
+    },
+    {
+      "name": "assistant_feed_message_filed",
+      "value": "已处理"
+    },
+    {
+      "name": "assistant_feed_message_unknown",
+      "value": "结果未知"
+    },
+    {
+      "name": "assistant_feed_open_agent",
+      "value": "打开 Agent"
+    },
+    {
+      "name": "assistant_feed_open_inbox",
+      "value": "打开收件箱条目"
+    },
+    {
+      "name": "assistant_feed_open_todo",
+      "value": "打开任务"
+    },
+    {
+      "name": "assistant_feed_permission_bypassPermissions",
+      "value": "完全访问"
+    },
+    {
+      "name": "assistant_feed_permission_default",
+      "value": "默认"
+    },
+    {
+      "name": "assistant_feed_permission_plan",
+      "value": "只读"
+    },
+    {
+      "name": "assistant_feed_persona_message",
+      "value": "来自 Persona"
+    },
+    {
+      "name": "assistant_feed_plan",
+      "value": "计划"
+    },
+    {
+      "name": "assistant_feed_plan_open",
+      "value": "待启动"
+    },
+    {
+      "name": "assistant_feed_plan_started",
+      "value": "已启动"
+    },
+    {
+      "name": "assistant_feed_plan_dismissed",
+      "value": "已忽略"
+    },
+    {
+      "name": "assistant_feed_plan_unknown",
+      "value": "未知"
+    },
+    {
+      "name": "assistant_feed_plan_unavailable",
+      "value": "计划不可用"
+    },
+    {
+      "name": "assistant_feed_progress",
+      "value": "进度"
+    },
+    {
+      "name": "assistant_feed_prompt",
+      "value": "指令"
+    },
+    {
+      "name": "assistant_feed_receipt",
+      "value": "结果"
+    },
+    {
+      "name": "assistant_feed_remember",
+      "value": "记住此项目的选择"
+    },
+    {
+      "name": "assistant_feed_report",
+      "value": "报告"
+    },
+    {
+      "name": "assistant_feed_report_unavailable",
+      "value": "报告不可用"
+    },
+    {
+      "name": "assistant_feed_review",
+      "value": "评审"
+    },
+    {
+      "name": "assistant_feed_review_accepted",
+      "value": "已接受"
+    },
+    {
+      "name": "assistant_feed_review_rejected",
+      "value": "未接受"
+    },
+    {
+      "name": "assistant_feed_review_pass",
+      "value": "已通过"
+    },
+    {
+      "name": "assistant_feed_review_fail",
+      "value": "未通过"
+    },
+    {
+      "name": "assistant_feed_review_unknown",
+      "value": "未评审"
+    },
+    {
+      "name": "assistant_feed_send",
+      "value": "发送"
+    },
+    {
+      "name": "assistant_feed_start",
+      "value": "启动"
+    },
+    {
+      "name": "assistant_feed_task",
+      "value": "任务"
+    },
+    {
+      "name": "assistant_feed_task_dock",
+      "value": "任务"
+    },
+    {
+      "name": "assistant_feed_task_message",
+      "value": "来自任务"
+    },
+    {
+      "name": "assistant_feed_undo_dismiss",
+      "value": "撤销忽略"
+    },
+    {
+      "name": "assistant_feed_unsupported_activity",
+      "value": "活动不可用"
+    },
+    {
+      "name": "assistant_feed_view_unavailable",
+      "value": "视图不可用"
+    },
+    {
+      "name": "assistant_feed_state_not_started",
+      "value": "未开始"
+    },
+    {
+      "name": "assistant_feed_state_working",
+      "value": "执行中"
+    },
+    {
+      "name": "assistant_feed_state_waiting",
+      "value": "等待中"
+    },
+    {
+      "name": "assistant_feed_state_needs_you",
+      "value": "需要你处理"
+    },
+    {
+      "name": "assistant_feed_state_interrupted",
+      "value": "已中断"
+    },
+    {
+      "name": "assistant_feed_state_usage_limit",
+      "value": "已达用量限制"
+    },
+    {
+      "name": "assistant_feed_state_unread",
+      "value": "未读"
+    },
+    {
+      "name": "assistant_feed_state_followup",
+      "value": "待跟进"
+    },
+    {
+      "name": "assistant_feed_state_done",
+      "value": "已完成"
+    },
+    {
+      "name": "assistant_feed_state_failed",
+      "value": "失败"
+    },
+    {
+      "name": "assistant_feed_state_cancelled",
+      "value": "已取消"
+    },
+    {
+      "name": "assistant_feed_state_accepted",
+      "value": "已接受"
+    },
+    {
+      "name": "assistant_feed_state_unknown",
+      "value": "未知"
+    },
+    {
+      "name": "notifications_denied",
+      "value": "请在系统设置中允许通知"
+    },
+    {
+      "name": "notifications_unavailable",
+      "value": "通知不可用"
+    },
+    {
+      "name": "agent_history",
+      "value": "历史会话"
+    },
+    {
+      "name": "agent_history_off",
+      "value": "当前会话"
+    },
+    {
+      "name": "agent_filter_machine",
+      "value": "电脑"
+    },
+    {
+      "name": "agent_filter_all_machines",
+      "value": "所有电脑"
+    },
+    {
+      "name": "agent_filter_repository",
+      "value": "仓库"
+    },
+    {
+      "name": "agent_filter_worktree",
+      "value": "工作树"
+    },
+    {
+      "name": "agent_pin",
+      "value": "置顶"
+    },
+    {
+      "name": "agent_unpin",
+      "value": "取消置顶"
+    },
+    {
+      "name": "agent_mute",
+      "value": "静音"
+    },
+    {
+      "name": "agent_unmute",
+      "value": "取消静音"
+    },
+    {
+      "name": "agent_rename",
+      "value": "重命名"
+    },
+    {
+      "name": "agent_title",
+      "value": "标题"
+    },
+    {
+      "name": "agent_tab_name",
+      "value": "标签名称"
+    },
+    {
+      "name": "agent_mark_seen",
+      "value": "标为已读"
+    },
+    {
+      "name": "agent_close",
+      "value": "关闭 Agent"
+    },
+    {
+      "name": "agent_delete",
+      "value": "删除历史"
+    },
+    {
+      "name": "agent_close_confirm",
+      "value": "关闭此 Agent？"
+    },
+    {
+      "name": "agent_delete_confirm",
+      "value": "删除此会话历史？"
+    },
+    {
+      "name": "cleanup_incomplete",
+      "value": "部分本地数据未能移除，请重启应用后重试。"
+    },
+    {
+      "name": "interaction_history",
+      "value": "审批与回答"
+    },
+    {
+      "name": "inbox_handoff_target_unavailable",
+      "value": "已交给 Persona，请刷新后打开会话。"
+    },
+    {
+      "name": "agent_pin_space",
+      "value": "置顶工作树"
+    },
+    {
+      "name": "agent_unpin_space",
+      "value": "取消置顶工作树"
+    },
+    {
+      "name": "agent_mute_space",
+      "value": "静音工作树"
+    },
+    {
+      "name": "agent_unmute_space",
+      "value": "取消静音工作树"
+    },
+    {
+      "name": "bcc",
+      "value": "密送"
+    },
+    {
+      "name": "cc",
+      "value": "抄送"
+    },
+    {
+      "name": "compose",
+      "value": "写邮件"
+    },
+    {
+      "name": "subject",
+      "value": "主题"
+    },
+    {
+      "name": "to",
+      "value": "收件人"
+    },
+    {
+      "name": "you",
+      "value": "你"
+    },
+    {
+      "name": "inbox_open",
+      "value": "未处理"
+    },
+    {
+      "name": "inbox_source_lark",
+      "value": "飞书"
+    },
+    {
+      "name": "inbox_source_generic",
+      "value": "消息"
+    },
+    {
+      "name": "inbox_card_unsupported",
+      "value": "暂不支持此消息格式。"
+    },
+    {
+      "name": "inbox_edited",
+      "value": "已编辑"
+    },
+    {
+      "name": "inbox_handed_to",
+      "value": "已交给"
+    },
+    {
+      "name": "inbox_handoff_instruction",
+      "value": "让 Persona 做什么？"
+    },
+    {
+      "name": "inbox_handoff_preset_summary",
+      "value": "请总结这条内容，告诉我需要做什么，并建议一条回复。"
+    },
+    {
+      "name": "inbox_handoff_title",
+      "value": "交给 Persona"
+    },
+    {
+      "name": "inbox_handoff_send",
+      "value": "交给 Persona"
+    },
+    {
+      "name": "inbox_open_thread",
+      "value": "打开话题"
+    },
+    {
+      "name": "inbox_processing",
+      "value": "处理中"
+    },
+    {
+      "name": "inbox_recalled",
+      "value": "已撤回"
+    },
+    {
+      "name": "inbox_reply_target_changed",
+      "value": "回复目标已变化，请重新确认收件人。"
+    },
+    {
+      "name": "inbox_reply_to",
+      "value": "回复给"
+    },
+    {
+      "name": "inbox_translation_clipped",
+      "value": "翻译已截断"
+    },
+    {
+      "name": "inbox_urgent",
+      "value": "紧急"
+    },
+    {
+      "name": "inbox_show_translation",
+      "value": "译文"
+    },
+    {
+      "name": "inbox_show_original",
+      "value": "原文"
+    },
+    {
+      "name": "inbox_topics",
+      "value": "话题"
+    },
+    {
+      "name": "inbox_conversation",
+      "value": "会话"
+    },
+    {
+      "name": "inbox_older",
+      "value": "更早的消息"
+    },
+    {
+      "name": "inbox_thread_reply",
+      "value": "在话题中回复"
+    },
+    {
+      "name": "inbox_message_reply",
+      "value": "回复"
+    },
+    {
+      "name": "inbox_send_attachment",
+      "value": "发送附件"
+    },
+    {
+      "name": "inbox_handling_looking",
+      "value": "查看中"
+    },
+    {
+      "name": "inbox_handling_agent",
+      "value": "Agent 执行中"
+    },
+    {
+      "name": "inbox_handling_waiting",
+      "value": "等待你处理"
+    },
+    {
+      "name": "inbox_handling_done",
+      "value": "已完成"
+    },
+    {
+      "name": "inbox_handling_failed",
+      "value": "失败"
+    },
+    {
+      "name": "inbox_suggestion_reply",
+      "value": "建议回复"
+    },
+    {
+      "name": "inbox_suggestion_agent",
+      "value": "Agent 建议"
+    },
+    {
+      "name": "inbox_suggestion_conclusion",
+      "value": "结论"
+    },
+    {
+      "name": "inbox_tier_action",
+      "value": "待处理"
+    },
+    {
+      "name": "inbox_tier_fyi",
+      "value": "知会"
+    },
+    {
+      "name": "inbox_tier_noise",
+      "value": "低优先级"
+    },
+    {
+      "name": "inbox_tier_untriaged",
+      "value": "未分类"
+    },
+    {
+      "name": "inbox_message_pending",
+      "value": "正在发送"
+    },
+    {
+      "name": "inbox_message_failed",
+      "value": "发送失败"
+    },
+    {
+      "name": "inbox_write_draft",
+      "value": "草稿"
+    },
+    {
+      "name": "inbox_write_sending",
+      "value": "正在发送"
+    },
+    {
+      "name": "inbox_write_sent",
+      "value": "已发送"
+    },
+    {
+      "name": "inbox_write_pending",
+      "value": "等待确认"
+    },
+    {
+      "name": "inbox_write_unknown",
+      "value": "结果未知"
+    },
+    {
+      "name": "inbox_write_failed",
+      "value": "失败"
+    },
+    {
+      "name": "inbox_write_saving",
+      "value": "保存中"
+    },
+    {
+      "name": "inbox_write_handed_off",
+      "value": "已交给 Persona"
+    },
+    {
+      "name": "inbox_write_target_changed",
+      "value": "收件人已变化"
+    },
+    {
+      "name": "account_changed",
+      "value": "账号已变化，请检查后发送。"
+    },
+    {
+      "name": "attachment_limit",
+      "value": "附件过大"
+    },
+    {
+      "name": "draft_save_failed",
+      "value": "无法保存草稿"
+    },
+    {
+      "name": "mail_reply_target_changed",
+      "value": "邮件已变化，请重新确认回复目标。"
+    },
+    {
+      "name": "voice_transcript_empty",
+      "value": "暂无转写"
+    },
+    {
+      "name": "grouping",
+      "value": "分组"
+    },
+    {
+      "name": "agent_group_flat",
+      "value": "不分组"
+    },
+    {
+      "name": "restore_draft",
+      "value": "恢复草稿"
+    },
+    {
+      "name": "replace_draft",
+      "value": "替换当前草稿？"
+    },
+    {
+      "name": "todo_agents",
+      "value": "Agent"
+    },
+    {
+      "name": "todo_choose_agent",
+      "value": "选择 Agent"
+    },
+    {
+      "name": "todo_choose_project",
+      "value": "选择项目"
+    },
+    {
+      "name": "todo_complete",
+      "value": "标记为已完成"
+    },
+    {
+      "name": "todo_filter_status",
+      "value": "按状态筛选"
+    },
+    {
+      "name": "todo_group_by",
+      "value": "分组方式"
+    },
+    {
+      "name": "todo_group_project",
+      "value": "项目"
+    },
+    {
+      "name": "todo_group_status",
+      "value": "状态"
+    },
+    {
+      "name": "todo_group_thread",
+      "value": "会话"
+    },
+    {
+      "name": "todo_link_agent",
+      "value": "关联 Agent"
+    },
+    {
+      "name": "todo_link_project",
+      "value": "关联项目"
+    },
+    {
+      "name": "todo_move_from",
+      "value": "移出项目"
+    },
+    {
+      "name": "todo_notes",
+      "value": "备注"
+    },
+    {
+      "name": "todo_previously_involved",
+      "value": "曾参与的 Agent"
+    },
+    {
+      "name": "todo_projects",
+      "value": "项目"
+    },
+    {
+      "name": "todo_related",
+      "value": "相关项"
+    },
+    {
+      "name": "todo_remove_project",
+      "value": "移除项目关联"
+    },
+    {
+      "name": "todo_search",
+      "value": "搜索待办"
+    },
+    {
+      "name": "todo_source_conversation",
+      "value": "来源会话"
+    },
+    {
+      "name": "todo_unlink_agent",
+      "value": "解除 Agent 关联"
+    },
+    {
+      "name": "todo_unsorted",
+      "value": "未分组"
+    },
+    {
+      "name": "todo_no_thread",
+      "value": "无会话"
+    },
+    {
+      "name": "todo_state_needs_you",
+      "value": "需要你处理"
+    },
+    {
+      "name": "todo_state_checking",
+      "value": "检查中"
+    },
+    {
+      "name": "todo_state_working",
+      "value": "进行中"
+    },
+    {
+      "name": "todo_state_followup",
+      "value": "待跟进"
+    },
+    {
+      "name": "todo_state_not_started",
+      "value": "未开始"
+    },
+    {
+      "name": "todo_state_done",
+      "value": "已完成"
+    },
+    {
+      "name": "todo_gone",
+      "value": "待办事项已不存在"
+    },
+    {
+      "name": "todo_write_pending",
+      "value": "正在确认上一项更改"
+    },
+    {
+      "name": "todo_write_unknown",
+      "value": "无法确认上一项更改的结果"
+    },
+    {
+      "name": "todo_title_required",
+      "value": "请输入标题"
+    },
+    {
+      "name": "todo_agent_unavailable",
+      "value": "无法关联此 Agent"
+    },
+    {
+      "name": "todo_project_unavailable",
+      "value": "无法关联此项目"
+    },
+    {
+      "name": "draft_restore_failed",
+      "value": "无法恢复草稿"
+    },
+    {
+      "name": "health_archive",
+      "value": "归档"
+    },
+    {
+      "name": "health_archive_title",
+      "value": "归档此会话？"
+    },
+    {
+      "name": "health_ask_placeholder",
+      "value": "询问健康相关问题"
+    },
+    {
+      "name": "health_chats",
+      "value": "健康会话"
+    },
+    {
+      "name": "health_chats_unavailable",
+      "value": "健康会话暂不可用"
+    },
+    {
+      "name": "health_checkup_reports",
+      "value": "体检报告"
+    },
+    {
+      "name": "health_home_title",
+      "value": "健康空间"
+    },
+    {
+      "name": "health_memory",
+      "value": "健康记忆"
+    },
+    {
+      "name": "health_memory_content",
+      "value": "添加健康记忆"
+    },
+    {
+      "name": "health_memory_delete_title",
+      "value": "删除此记忆？"
+    },
+    {
+      "name": "health_memory_edit",
+      "value": "编辑"
+    },
+    {
+      "name": "health_memory_index",
+      "value": "健康记忆索引"
+    },
+    {
+      "name": "health_new_chat",
+      "value": "新建健康会话"
+    },
+    {
+      "name": "health_no_chats",
+      "value": "暂无健康会话"
+    },
+    {
+      "name": "health_no_memory",
+      "value": "暂无健康记忆"
+    },
+    {
+      "name": "health_no_reports",
+      "value": "暂无报告"
+    },
+    {
+      "name": "health_privacy_note",
+      "value": "健康数据保存在你的 Hub 中。"
+    },
+    {
+      "name": "health_question_sleep",
+      "value": "怎样改善睡眠？"
+    },
+    {
+      "name": "health_question_steps",
+      "value": "日常步数能说明什么？"
+    },
+    {
+      "name": "health_log_weight",
+      "value": "记录体重"
+    },
+    {
+      "name": "health_log_water",
+      "value": "记录饮水"
+    },
+    {
+      "name": "health_report_delete_message",
+      "value": "此报告将从 Hub 中删除。"
+    },
+    {
+      "name": "health_report_delete_title",
+      "value": "删除此报告？"
+    },
+    {
+      "name": "health_report_file_read_failed",
+      "value": "无法读取所选报告"
+    },
+    {
+      "name": "health_report_file_too_large",
+      "value": "报告超过 32 MiB 限制"
+    },
+    {
+      "name": "health_report_file_unsupported",
+      "value": "不支持此报告文件类型"
+    },
+    {
+      "name": "health_report_node_outdated",
+      "value": "请更新 Hub 以使用健康报告"
+    },
+    {
+      "name": "health_report_not_summarized",
+      "value": "尚无摘要"
+    },
+    {
+      "name": "health_report_original",
+      "value": "原始报告"
+    },
+    {
+      "name": "health_report_prompt",
+      "value": "查看此健康报告并总结主要发现。"
+    },
+    {
+      "name": "health_report_summary",
+      "value": "摘要"
+    },
+    {
+      "name": "health_report_summarized",
+      "value": "摘要已就绪"
+    },
+    {
+      "name": "health_report_uploading",
+      "value": "正在上传报告…"
+    },
+    {
+      "name": "health_request_failed",
+      "value": "健康请求失败"
+    },
+    {
+      "name": "health_storage_unavailable",
+      "value": "无法保存健康数据"
+    },
+    {
+      "name": "health_try_asking",
+      "value": "试着问问"
+    },
+    {
+      "name": "health_upload_pdf",
+      "value": "上传 PDF"
+    },
+    {
+      "name": "health_upload_photos",
+      "value": "上传照片"
+    },
+    {
+      "name": "health_upload_report",
+      "value": "上传报告"
+    },
+    {
+      "name": "knowledge_agent_prompt",
+      "value": "给 Agent 的任务"
+    },
+    {
+      "name": "knowledge_agent_unavailable",
+      "value": "没有可用的兼容电脑"
+    },
+    {
+      "name": "knowledge_all_tags",
+      "value": "所有标签"
+    },
+    {
+      "name": "knowledge_ask_persona",
+      "value": "询问 Persona"
+    },
+    {
+      "name": "knowledge_edit_metadata",
+      "value": "编辑详情"
+    },
+    {
+      "name": "knowledge_empty",
+      "value": "此分类暂无内容"
+    },
+    {
+      "name": "knowledge_forget_recording",
+      "value": "从知识库中删除录音？"
+    },
+    {
+      "name": "knowledge_forget_recording_note",
+      "value": "此录音将从 Hub 中删除。"
+    },
+    {
+      "name": "knowledge_kind_projects",
+      "value": "项目"
+    },
+    {
+      "name": "knowledge_kind_chats",
+      "value": "会话"
+    },
+    {
+      "name": "knowledge_kind_people",
+      "value": "联系人"
+    },
+    {
+      "name": "knowledge_kind_docs",
+      "value": "文档"
+    },
+    {
+      "name": "knowledge_kind_meetings",
+      "value": "会议"
+    },
+    {
+      "name": "knowledge_kind_events",
+      "value": "活动"
+    },
+    {
+      "name": "knowledge_kind_recordings",
+      "value": "录音"
+    },
+    {
+      "name": "knowledge_minutes",
+      "value": "会议纪要"
+    },
+    {
+      "name": "knowledge_minutes_add_todos",
+      "value": "将所选事项添加为待办"
+    },
+    {
+      "name": "knowledge_minutes_make",
+      "value": "生成会议纪要"
+    },
+    {
+      "name": "knowledge_no_results",
+      "value": "没有结果"
+    },
+    {
+      "name": "knowledge_open_link",
+      "value": "打开链接"
+    },
+    {
+      "name": "knowledge_profile",
+      "value": "资料"
+    },
+    {
+      "name": "knowledge_project_agents",
+      "value": "项目 Agent"
+    },
+    {
+      "name": "knowledge_project_long",
+      "value": "长期"
+    },
+    {
+      "name": "knowledge_project_short",
+      "value": "短期"
+    },
+    {
+      "name": "knowledge_recent",
+      "value": "最近动态"
+    },
+    {
+      "name": "knowledge_recording_summary",
+      "value": "会议摘要"
+    },
+    {
+      "name": "knowledge_related",
+      "value": "相关条目"
+    },
+    {
+      "name": "knowledge_related_moments",
+      "value": "相关片段"
+    },
+    {
+      "name": "knowledge_relevance",
+      "value": "相关度"
+    },
+    {
+      "name": "knowledge_request_failed",
+      "value": "知识请求失败"
+    },
+    {
+      "name": "knowledge_search",
+      "value": "搜索知识库"
+    },
+    {
+      "name": "knowledge_search_matches",
+      "value": "匹配结果"
+    },
+    {
+      "name": "knowledge_start_agent",
+      "value": "启动 Agent"
+    },
+    {
+      "name": "knowledge_status_active",
+      "value": "进行中"
+    },
+    {
+      "name": "knowledge_status_done",
+      "value": "已完成"
+    },
+    {
+      "name": "knowledge_status_ignored",
+      "value": "已忽略"
+    },
+    {
+      "name": "knowledge_status_paused",
+      "value": "已暂停"
+    },
+    {
+      "name": "knowledge_storage_unavailable",
+      "value": "无法保存知识库设置"
+    },
+    {
+      "name": "knowledge_tags",
+      "value": "标签"
+    },
+    {
+      "name": "knowledge_timeline",
+      "value": "时间线"
+    },
+    {
+      "name": "knowledge_transcript",
+      "value": "转写文本"
+    },
+    {
+      "name": "session_tools_branch_from",
+      "value": "基于此分支"
+    },
+    {
+      "name": "session_tools_commit",
+      "value": "提交"
+    },
+    {
+      "name": "session_tools_commit_message",
+      "value": "提交说明"
+    },
+    {
+      "name": "session_tools_conflict_keep",
+      "value": "保留现有文件"
+    },
+    {
+      "name": "session_tools_conflict_replace",
+      "value": "替换现有文件"
+    },
+    {
+      "name": "session_tools_create_branch",
+      "value": "创建分支"
+    },
+    {
+      "name": "session_tools_current_branch",
+      "value": "当前分支"
+    },
+    {
+      "name": "session_tools_destination_folder",
+      "value": "目标文件夹"
+    },
+    {
+      "name": "session_tools_forward",
+      "value": "前进"
+    },
+    {
+      "name": "session_tools_git_confirm_title",
+      "value": "确认 Git 操作？"
+    },
+    {
+      "name": "session_tools_git_stage",
+      "value": "暂存文件"
+    },
+    {
+      "name": "session_tools_git_unstage",
+      "value": "取消暂存文件"
+    },
+    {
+      "name": "session_tools_git_commit",
+      "value": "创建提交"
+    },
+    {
+      "name": "session_tools_git_push",
+      "value": "推送更改"
+    },
+    {
+      "name": "session_tools_git_publish",
+      "value": "发布分支"
+    },
+    {
+      "name": "session_tools_git_switch",
+      "value": "切换分支"
+    },
+    {
+      "name": "session_tools_git_create",
+      "value": "创建分支"
+    },
+    {
+      "name": "session_tools_git_stash_push",
+      "value": "保存暂存"
+    },
+    {
+      "name": "session_tools_git_stash_apply",
+      "value": "应用暂存"
+    },
+    {
+      "name": "session_tools_git_stash_pop",
+      "value": "应用并移除暂存"
+    },
+    {
+      "name": "session_tools_git_stash_drop",
+      "value": "删除暂存"
+    },
+    {
+      "name": "session_tools_move",
+      "value": "移动"
+    },
+    {
+      "name": "session_tools_move_conflict",
+      "value": "已存在同名文件"
+    },
+    {
+      "name": "session_tools_move_to_trash",
+      "value": "移到废纸篓"
+    },
+    {
+      "name": "session_tools_new_branch",
+      "value": "新分支名称"
+    },
+    {
+      "name": "session_tools_new_name",
+      "value": "新名称"
+    },
+    {
+      "name": "session_tools_no_branches",
+      "value": "没有可用分支"
+    },
+    {
+      "name": "session_tools_preview_external_link",
+      "value": "在浏览器中打开"
+    },
+    {
+      "name": "session_tools_preview_file",
+      "value": "预览文件"
+    },
+    {
+      "name": "session_tools_preview_input",
+      "value": "输入要发送给网页的文字"
+    },
+    {
+      "name": "session_tools_preview_listening",
+      "value": "监听中"
+    },
+    {
+      "name": "session_tools_preview_none",
+      "value": "没有预览服务器"
+    },
+    {
+      "name": "session_tools_preview_open",
+      "value": "打开预览"
+    },
+    {
+      "name": "session_tools_preview_path",
+      "value": "路径"
+    },
+    {
+      "name": "session_tools_preview_path_invalid",
+      "value": "请输入有效路径"
+    },
+    {
+      "name": "session_tools_preview_problem",
+      "value": "预览错误"
+    },
+    {
+      "name": "session_tools_preview_start_confirm",
+      "value": "启动预览服务器？"
+    },
+    {
+      "name": "session_tools_preview_stopped",
+      "value": "已停止"
+    },
+    {
+      "name": "session_tools_preview_unavailable",
+      "value": "预览不可用"
+    },
+    {
+      "name": "session_tools_publish_branch",
+      "value": "发布分支"
+    },
+    {
+      "name": "session_tools_push",
+      "value": "推送"
+    },
+    {
+      "name": "session_tools_remote_branch",
+      "value": "远程分支"
+    },
+    {
+      "name": "session_tools_restore",
+      "value": "恢复"
+    },
+    {
+      "name": "session_tools_restore_confirm",
+      "value": "恢复已删除的文件？"
+    },
+    {
+      "name": "session_tools_stage",
+      "value": "暂存"
+    },
+    {
+      "name": "session_tools_stash_apply",
+      "value": "应用"
+    },
+    {
+      "name": "session_tools_stash_drop",
+      "value": "删除"
+    },
+    {
+      "name": "session_tools_stash_message",
+      "value": "暂存说明"
+    },
+    {
+      "name": "session_tools_stash_pop",
+      "value": "应用并移除"
+    },
+    {
+      "name": "session_tools_stash_save",
+      "value": "保存暂存"
+    },
+    {
+      "name": "session_tools_stash_untracked",
+      "value": "包含未跟踪文件"
+    },
+    {
+      "name": "session_tools_stashes",
+      "value": "暂存列表"
+    },
+    {
+      "name": "session_tools_switch_branch",
+      "value": "切换分支"
+    },
+    {
+      "name": "session_tools_terminal_control_confirm",
+      "value": "接管此终端？"
+    },
+    {
+      "name": "session_tools_terminal_screen",
+      "value": "电脑屏幕"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_confirm",
+      "value": "允许在电脑屏幕上操作？"
+    },
+    {
+      "name": "session_tools_terminal_screen_input",
+      "value": "在电脑上输入"
+    },
+    {
+      "name": "session_tools_trash_title",
+      "value": "将文件移到废纸篓？"
+    },
+    {
+      "name": "session_tools_trashed_count",
+      "value": "已将 {count} 个项目移到废纸篓"
+    },
+    {
+      "name": "session_tools_unstage",
+      "value": "取消暂存"
+    },
+    {
+      "name": "session_tools_write_pending",
+      "value": "正在确认此更改"
+    },
+    {
+      "name": "session_tools_write_unknown",
+      "value": "无法确认此更改的结果"
+    },
+    {
+      "name": "screen_unavailable",
+      "value": "电脑屏幕不可用"
+    },
+    {
+      "name": "preview_start_slow",
+      "value": "预览服务器启动时间较长"
+    },
+    {
+      "name": "chat_attachment_text_too_large",
+      "value": "消息过长"
+    },
+    {
+      "name": "computer_screen_connect",
+      "value": "连接"
+    },
+    {
+      "name": "computer_screen_refresh",
+      "value": "刷新"
+    },
+    {
+      "name": "computer_screen_control",
+      "value": "控制屏幕"
+    },
+    {
+      "name": "computer_screen_release_control",
+      "value": "释放控制权限"
+    },
+    {
+      "name": "computer_screen_control_confirm_title",
+      "value": "允许控制电脑屏幕？"
+    },
+    {
+      "name": "computer_screen_control_confirm_message",
+      "value": "允许这部手机查看并控制电脑屏幕？"
+    },
+    {
+      "name": "computer_screen_allow_control",
+      "value": "允许控制电脑"
+    },
+    {
+      "name": "computer_screen_read_only",
+      "value": "只读"
+    },
+    {
+      "name": "computer_screen_enter_credentials",
+      "value": "输入账号和密码"
+    },
+    {
+      "name": "computer_screen_account",
+      "value": "账号"
+    },
+    {
+      "name": "computer_screen_password",
+      "value": "密码"
+    },
+    {
+      "name": "computer_screen_sign_in",
+      "value": "登录"
+    },
+    {
+      "name": "computer_screen_cancel_sign_in",
+      "value": "取消登录"
+    },
+    {
+      "name": "computer_screen_waiting",
+      "value": "正在等待电脑…"
+    },
+    {
+      "name": "computer_screen_sharing_off",
+      "value": "电脑未开启屏幕共享"
+    },
+    {
+      "name": "computer_screen_connection_lost",
+      "value": "与电脑的连接已断开"
+    },
+    {
+      "name": "computer_screen_connection_failed",
+      "value": "无法连接电脑屏幕"
+    },
+    {
+      "name": "computer_screen_auth_failed",
+      "value": "登录失败"
+    },
+    {
+      "name": "computer_screen_unsupported",
+      "value": "电脑屏幕暂不受支持"
+    },
+    {
+      "name": "computer_screen_screen_unavailable",
+      "value": "电脑屏幕不可用"
+    },
+    {
+      "name": "computer_screen_type_text",
+      "value": "输入文字"
+    },
+    {
+      "name": "computer_screen_send_text",
+      "value": "发送文字"
+    },
+    {
+      "name": "computer_screen_not_mac",
+      "value": "仅 Mac 支持电脑屏幕"
+    },
+    {
+      "name": "computer_screen_read_only_device",
+      "value": "此设备仅支持查看"
+    },
+    {
+      "name": "scan_qr",
+      "value": "扫描二维码"
+    },
+    {
+      "name": "app_style_glass",
+      "value": "Glass"
+    },
+    {
+      "name": "app_style_brief",
+      "value": "Brief"
+    },
+    {
+      "name": "app_style_board",
+      "value": "Board"
+    },
+    {
+      "name": "inbox_reference_unavailable",
+      "value": "无法打开来源会话"
+    },
+    {
+      "name": "inbox_reference_changed",
+      "value": "来源会话已更改"
+    },
+    {
+      "name": "branch_chat",
+      "value": "创建分支对话"
+    },
+    {
+      "name": "use_as_context",
+      "value": "用作上下文"
+    },
+    {
+      "name": "rewind_chat",
+      "value": "仅回退对话"
+    },
+    {
+      "name": "rewind_code_chat",
+      "value": "回退代码与对话"
+    },
+    {
+      "name": "rewind_chat_consequence",
+      "value": "移除此消息之后的对话，此消息可恢复到输入框。"
+    },
+    {
+      "name": "rewind_code_consequence",
+      "value": "将电脑文件与对话恢复到此消息之前，之后的文件修改会丢失。"
+    },
+    {
+      "name": "rewind_chat_done",
+      "value": "对话已回退"
+    },
+    {
+      "name": "rewind_code_done",
+      "value": "代码与对话已回退"
+    },
+    {
+      "name": "rewind_input_kept",
+      "value": "已回退，消息仍在电脑的输入框中"
+    },
+    {
+      "name": "session_revision_dialog_open",
+      "value": "请先关闭电脑上的对话框"
+    },
+    {
+      "name": "session_revision_failed",
+      "value": "对话操作失败"
+    },
+    {
+      "name": "session_revision_fork_turn_running",
+      "value": "这条回复仍在生成中"
+    },
+    {
+      "name": "session_revision_full_access",
+      "value": "需要设备的完整访问权限"
+    },
+    {
+      "name": "session_revision_hub_outdated",
+      "value": "请更新 Hub 或电脑节点"
+    },
+    {
+      "name": "session_revision_input_draft",
+      "value": "电脑输入框中有草稿"
+    },
+    {
+      "name": "session_revision_mismatch",
+      "value": "对话记录已变化，请重新查看"
+    },
+    {
+      "name": "session_revision_needs_you",
+      "value": "请先处理待回答的请求"
+    },
+    {
+      "name": "session_revision_no_text",
+      "value": "无法确定要回退的消息"
+    },
+    {
+      "name": "session_revision_not_running",
+      "value": "会话尚未运行"
+    },
+    {
+      "name": "session_revision_nothing",
+      "value": "没有可回退的消息"
+    },
+    {
+      "name": "session_revision_open_request",
+      "value": "请先处理当前请求"
+    },
+    {
+      "name": "session_revision_target_changed",
+      "value": "对话已变化，请重新查看"
+    },
+    {
+      "name": "session_revision_target_invalid",
+      "value": "无法验证返回的对话"
+    },
+    {
+      "name": "session_revision_timeout",
+      "value": "电脑未能及时完成操作"
+    },
+    {
+      "name": "session_revision_unsupported",
+      "value": "此会话不支持该操作"
+    },
+    {
+      "name": "session_revision_working",
+      "value": "请等待当前回复完成"
+    },
+    {
+      "name": "platform",
+      "value": "系统"
+    },
+    {
+      "name": "directory_partly_unavailable",
+      "value": "部分工作空间不可用"
+    },
+    {
+      "name": "computer_screen_open",
+      "value": "查看屏幕"
+    },
+    {
+      "name": "candidate_addresses",
+      "value": "候选地址"
+    },
+    {
+      "name": "language_change_failed",
+      "value": "无法更改应用语言"
+    },
+    {
+      "name": "language_after_restart",
+      "value": "下次启动后跟随系统语言"
+    },
+    {
+      "name": "admin_about_me",
+      "value": "关于我"
+    },
+    {
+      "name": "admin_agent_tasks",
+      "value": "Agent 任务"
+    },
+    {
+      "name": "admin_all_online_machines",
+      "value": "所有在线电脑"
+    },
+    {
+      "name": "admin_archive_days",
+      "value": "已关闭任务的归档天数"
+    },
+    {
+      "name": "admin_auto_update",
+      "value": "自动更新 Hub"
+    },
+    {
+      "name": "admin_auto_update_nodes",
+      "value": "自动更新电脑"
+    },
+    {
+      "name": "admin_builtin",
+      "value": "内置"
+    },
+    {
+      "name": "admin_check_failed",
+      "value": "检查失败"
+    },
+    {
+      "name": "admin_check_ok",
+      "value": "检查成功"
+    },
+    {
+      "name": "admin_code_expires",
+      "value": "代码到期时间"
+    },
+    {
+      "name": "admin_command_copied",
+      "value": "安装命令已复制"
+    },
+    {
+      "name": "admin_command_copy_failed",
+      "value": "无法复制安装命令"
+    },
+    {
+      "name": "admin_confirmation_target",
+      "value": "目标"
+    },
+    {
+      "name": "admin_create_manager",
+      "value": "创建管理器"
+    },
+    {
+      "name": "admin_create_memory",
+      "value": "创建记忆"
+    },
+    {
+      "name": "admin_default",
+      "value": "默认"
+    },
+    {
+      "name": "admin_default_machine",
+      "value": "默认电脑"
+    },
+    {
+      "name": "admin_delete_launcher_note",
+      "value": "这会删除此启动器配置。"
+    },
+    {
+      "name": "admin_delete_manager_note",
+      "value": "删除此管理器会撤销其访问权限并断开连接。仅当没有分配电脑时才能删除。"
+    },
+    {
+      "name": "admin_delete_memory_note",
+      "value": "这会删除所选记忆文件。"
+    },
+    {
+      "name": "admin_edit",
+      "value": "编辑"
+    },
+    {
+      "name": "admin_engine_confirm_selection",
+      "value": "选定的执行引擎"
+    },
+    {
+      "name": "admin_engine_default",
+      "value": "默认"
+    },
+    {
+      "name": "admin_engine_no_default",
+      "value": "未设置默认引擎"
+    },
+    {
+      "name": "admin_engine_save",
+      "value": "保存引擎选择"
+    },
+    {
+      "name": "admin_engine_save_note",
+      "value": "这会更改此电脑上 Agent 可用的引擎。"
+    },
+    {
+      "name": "admin_engine_sets_unsupported",
+      "value": "此电脑不支持自定义引擎集合"
+    },
+    {
+      "name": "admin_health_check",
+      "value": "检查启动器健康状态"
+    },
+    {
+      "name": "admin_health_check_note",
+      "value": "检查所选电脑上已配置的启动器。"
+    },
+    {
+      "name": "admin_history_empty",
+      "value": "没有更新记录"
+    },
+    {
+      "name": "admin_history_unsupported",
+      "value": "此 Hub 不支持更新记录"
+    },
+    {
+      "name": "admin_hub_auto_policy_note",
+      "value": "启用后，有可用更新时会自动安装。"
+    },
+    {
+      "name": "admin_hub_busy",
+      "value": "正在运行的 Agent"
+    },
+    {
+      "name": "admin_hub_cannot_update",
+      "value": "当前无法更新 Hub"
+    },
+    {
+      "name": "admin_hub_check",
+      "value": "检查 Hub 更新"
+    },
+    {
+      "name": "admin_hub_check_auto_note",
+      "value": "此次检查可能会启动 Hub 自动更新。"
+    },
+    {
+      "name": "admin_hub_check_note",
+      "value": "检查是否有可用的 Hub 更新。"
+    },
+    {
+      "name": "admin_hub_no_status",
+      "value": "无法获取 Hub 更新状态"
+    },
+    {
+      "name": "admin_hub_node_policy_note",
+      "value": "启用后，Hub 更新后会自动更新电脑。"
+    },
+    {
+      "name": "admin_hub_setting",
+      "value": "更改更新设置"
+    },
+    {
+      "name": "admin_hub_state",
+      "value": "更新状态"
+    },
+    {
+      "name": "admin_hub_update",
+      "value": "更新 Hub"
+    },
+    {
+      "name": "admin_hub_update_history",
+      "value": "更新记录"
+    },
+    {
+      "name": "admin_hub_update_note",
+      "value": "Hub 会等待正在运行的 Agent 空闲后再更新。"
+    },
+    {
+      "name": "admin_hub_update_now",
+      "value": "立即更新"
+    },
+    {
+      "name": "admin_hub_update_now_note",
+      "value": "不等待正在运行的 Agent 空闲，立即更新。"
+    },
+    {
+      "name": "admin_hub_version",
+      "value": "Hub 版本"
+    },
+    {
+      "name": "admin_identity",
+      "value": "助手身份"
+    },
+    {
+      "name": "admin_idle_hours",
+      "value": "空闲会话关闭时间（小时）"
+    },
+    {
+      "name": "admin_import_providers",
+      "value": "服务提供方"
+    },
+    {
+      "name": "admin_import_selected",
+      "value": "导入所选项"
+    },
+    {
+      "name": "admin_inbox_signals",
+      "value": "收件箱动态"
+    },
+    {
+      "name": "admin_install_code",
+      "value": "安装码"
+    },
+    {
+      "name": "admin_interject_background",
+      "value": "允许在后台主动介入"
+    },
+    {
+      "name": "admin_knowledge_topics",
+      "value": "知识主题"
+    },
+    {
+      "name": "admin_last_check",
+      "value": "上次检查"
+    },
+    {
+      "name": "admin_latest_version",
+      "value": "最新版本"
+    },
+    {
+      "name": "admin_launcher_agent_note",
+      "value": "内置 Agent 启动器由 Hub 管理。"
+    },
+    {
+      "name": "admin_launcher_base_url",
+      "value": "基础 URL"
+    },
+    {
+      "name": "admin_launcher_check",
+      "value": "测试启动器"
+    },
+    {
+      "name": "admin_launcher_check_note",
+      "value": "会向服务提供方发送实际请求。"
+    },
+    {
+      "name": "admin_launcher_delete",
+      "value": "删除启动器"
+    },
+    {
+      "name": "admin_launcher_display_name",
+      "value": "显示名称"
+    },
+    {
+      "name": "admin_launcher_env_present",
+      "value": "已配置环境变量"
+    },
+    {
+      "name": "admin_launcher_headers_present",
+      "value": "已配置自定义标头"
+    },
+    {
+      "name": "admin_launcher_health",
+      "value": "启动器健康状态"
+    },
+    {
+      "name": "admin_launcher_id",
+      "value": "启动器 ID"
+    },
+    {
+      "name": "admin_launcher_import",
+      "value": "导入启动器"
+    },
+    {
+      "name": "admin_launcher_import_note",
+      "value": "从此电脑导入所选服务提供方的设置。"
+    },
+    {
+      "name": "admin_launcher_key",
+      "value": "API 密钥"
+    },
+    {
+      "name": "admin_launcher_key_missing",
+      "value": "未保存 API 密钥"
+    },
+    {
+      "name": "admin_launcher_key_present",
+      "value": "已保存 API 密钥"
+    },
+    {
+      "name": "admin_launcher_model",
+      "value": "模型"
+    },
+    {
+      "name": "admin_launcher_models",
+      "value": "可用模型"
+    },
+    {
+      "name": "admin_launcher_name",
+      "value": "启动器名称"
+    },
+    {
+      "name": "admin_launcher_presets",
+      "value": "启动器预设"
+    },
+    {
+      "name": "admin_launcher_presets_empty",
+      "value": "没有可用的启动器预设"
+    },
+    {
+      "name": "admin_launcher_replace_key",
+      "value": "替换 API 密钥"
+    },
+    {
+      "name": "admin_launcher_select",
+      "value": "选择启动器"
+    },
+    {
+      "name": "admin_launcher_stale",
+      "value": "已过期"
+    },
+    {
+      "name": "admin_launchers",
+      "value": "启动器"
+    },
+    {
+      "name": "admin_load_import",
+      "value": "加载启动器"
+    },
+    {
+      "name": "admin_machine_engine",
+      "value": "电脑引擎"
+    },
+    {
+      "name": "admin_machine_id",
+      "value": "电脑 ID"
+    },
+    {
+      "name": "admin_machine_unavailable",
+      "value": "电脑不可用"
+    },
+    {
+      "name": "admin_machines",
+      "value": "电脑"
+    },
+    {
+      "name": "admin_main_tasks_quiet",
+      "value": "保持主对话安静"
+    },
+    {
+      "name": "admin_make_default",
+      "value": "设为默认"
+    },
+    {
+      "name": "admin_manager_code",
+      "value": "生成安装码"
+    },
+    {
+      "name": "admin_manager_code_note",
+      "value": "为加入此管理器生成新的安装码。"
+    },
+    {
+      "name": "admin_manager_create",
+      "value": "创建管理器"
+    },
+    {
+      "name": "admin_manager_create_note",
+      "value": "创建一个使用此名称的管理器。"
+    },
+    {
+      "name": "admin_manager_default",
+      "value": "设为默认管理器"
+    },
+    {
+      "name": "admin_manager_default_note",
+      "value": "新会话将默认使用此管理器。现有电脑不会因此迁移。"
+    },
+    {
+      "name": "admin_manager_delete",
+      "value": "删除管理器"
+    },
+    {
+      "name": "admin_manager_installing",
+      "value": "正在安装"
+    },
+    {
+      "name": "admin_manager_move",
+      "value": "迁移电脑"
+    },
+    {
+      "name": "admin_manager_move_note",
+      "value": "将此电脑分配给所选管理器。"
+    },
+    {
+      "name": "admin_manager_name",
+      "value": "管理器名称"
+    },
+    {
+      "name": "admin_manager_offline",
+      "value": "离线"
+    },
+    {
+      "name": "admin_manager_online",
+      "value": "在线"
+    },
+    {
+      "name": "admin_manager_rename",
+      "value": "重命名管理器"
+    },
+    {
+      "name": "admin_manager_rename_note",
+      "value": "更改此管理器的显示名称。"
+    },
+    {
+      "name": "admin_managers",
+      "value": "管理器"
+    },
+    {
+      "name": "admin_managers_empty",
+      "value": "没有管理器"
+    },
+    {
+      "name": "admin_memory",
+      "value": "记忆"
+    },
+    {
+      "name": "admin_memory_content",
+      "value": "记忆内容"
+    },
+    {
+      "name": "admin_memory_created",
+      "value": "已创建记忆"
+    },
+    {
+      "name": "admin_memory_delete",
+      "value": "删除记忆"
+    },
+    {
+      "name": "admin_memory_empty",
+      "value": "没有记忆文件"
+    },
+    {
+      "name": "admin_memory_exists",
+      "value": "已存在同名记忆文件"
+    },
+    {
+      "name": "admin_memory_filename",
+      "value": "文件名"
+    },
+    {
+      "name": "admin_memory_invalid_name",
+      "value": "请输入有效的文件名"
+    },
+    {
+      "name": "admin_minutes_days",
+      "value": "会议纪要保留天数"
+    },
+    {
+      "name": "admin_move",
+      "value": "迁移"
+    },
+    {
+      "name": "admin_move_machine",
+      "value": "迁移电脑"
+    },
+    {
+      "name": "admin_new_install_code",
+      "value": "生成新安装码"
+    },
+    {
+      "name": "admin_new_launcher",
+      "value": "新建启动器"
+    },
+    {
+      "name": "admin_new_manager",
+      "value": "新建管理器"
+    },
+    {
+      "name": "admin_new_memory",
+      "value": "新建记忆"
+    },
+    {
+      "name": "admin_no_machine_move",
+      "value": "没有可迁移的电脑"
+    },
+    {
+      "name": "admin_node_cannot_deploy",
+      "value": "无法更新此电脑"
+    },
+    {
+      "name": "admin_node_deploying",
+      "value": "正在更新"
+    },
+    {
+      "name": "admin_node_mismatch",
+      "value": "Node 版本不匹配"
+    },
+    {
+      "name": "admin_node_update",
+      "value": "更新 Node"
+    },
+    {
+      "name": "admin_node_update_note",
+      "value": "开始在此电脑上部署 Node。请查看电脑状态以确认结果。"
+    },
+    {
+      "name": "admin_node_version",
+      "value": "Node 版本"
+    },
+    {
+      "name": "admin_preferences",
+      "value": "偏好设置"
+    },
+    {
+      "name": "admin_preset_add",
+      "value": "添加启动器预设"
+    },
+    {
+      "name": "admin_preset_add_note",
+      "value": "添加此启动器预设。"
+    },
+    {
+      "name": "admin_recording_days",
+      "value": "录音保留天数"
+    },
+    {
+      "name": "admin_redeploy",
+      "value": "更新 Node"
+    },
+    {
+      "name": "admin_refresh_failed",
+      "value": "刷新失败"
+    },
+    {
+      "name": "admin_rename",
+      "value": "重命名"
+    },
+    {
+      "name": "admin_save",
+      "value": "保存"
+    },
+    {
+      "name": "admin_setting_disable",
+      "value": "关闭"
+    },
+    {
+      "name": "admin_setting_enable",
+      "value": "开启"
+    },
+    {
+      "name": "admin_storage_failed",
+      "value": "无法在本机保存"
+    },
+    {
+      "name": "admin_timezone",
+      "value": "时区"
+    },
+    {
+      "name": "admin_unsupported",
+      "value": "此 Hub 不支持"
+    },
+    {
+      "name": "admin_update_available",
+      "value": "有可用更新"
+    },
+    {
+      "name": "admin_update_held",
+      "value": "更新已暂停"
+    },
+    {
+      "name": "admin_update_rolled_back",
+      "value": "更新已回滚"
+    },
+    {
+      "name": "admin_updated_unknown",
+      "value": "更新时间未知"
+    },
+    {
+      "name": "admin_invalid_number",
+      "value": "请输入整数"
+    },
+    {
+      "name": "admin_state_saving",
+      "value": "保存中"
+    },
+    {
+      "name": "admin_state_done",
+      "value": "已保存"
+    },
+    {
+      "name": "admin_state_pending",
+      "value": "待确认"
+    },
+    {
+      "name": "admin_state_result_unknown",
+      "value": "结果待确认"
+    },
+    {
+      "name": "admin_state_failed",
+      "value": "保存失败"
+    },
+    {
+      "name": "admin_state_running",
+      "value": "正在运行"
+    },
+    {
+      "name": "admin_hub_state_idle",
+      "value": "空闲"
+    },
+    {
+      "name": "admin_hub_state_checking",
+      "value": "正在检查"
+    },
+    {
+      "name": "admin_hub_state_available",
+      "value": "有可用更新"
+    },
+    {
+      "name": "admin_hub_state_downloading",
+      "value": "正在下载"
+    },
+    {
+      "name": "admin_hub_state_waiting_idle",
+      "value": "等待 Agent 空闲"
+    },
+    {
+      "name": "admin_hub_state_restarting",
+      "value": "正在重启"
+    },
+    {
+      "name": "admin_hub_state_confirming",
+      "value": "正在验证更新"
+    },
+    {
+      "name": "admin_hub_state_updated",
+      "value": "已更新"
+    },
+    {
+      "name": "admin_hub_state_rolled_back",
+      "value": "已回滚"
+    },
+    {
+      "name": "admin_hub_state_failed",
+      "value": "失败"
+    },
+    {
+      "name": "admin_command_service",
+      "value": "服务命令"
+    },
+    {
+      "name": "admin_command_join",
+      "value": "加入命令"
+    },
+    {
+      "name": "admin_command_docker",
+      "value": "Docker 命令"
+    },
+    {
+      "name": "extension_ui_action_ambiguous",
+      "value": "操作结果不确定"
+    },
+    {
+      "name": "extension_ui_action_completed",
+      "value": "操作已完成"
+    },
+    {
+      "name": "extension_ui_action_rejected",
+      "value": "操作被拒绝"
+    },
+    {
+      "name": "extension_ui_action_stale",
+      "value": "此操作已过期，请刷新后重试。"
+    },
+    {
+      "name": "extension_ui_action_uncertain",
+      "value": "操作结果不确定"
+    },
+    {
+      "name": "extension_ui_binary_diff",
+      "value": "二进制文件，无法显示差异"
+    },
+    {
+      "name": "extension_ui_comment_line",
+      "value": "行号"
+    },
+    {
+      "name": "extension_ui_comment_placeholder",
+      "value": "写下评论"
+    },
+    {
+      "name": "extension_ui_confirm_action",
+      "value": "确认操作"
+    },
+    {
+      "name": "extension_ui_confirmation_required",
+      "value": "此操作需要确认"
+    },
+    {
+      "name": "extension_ui_epoch_limit",
+      "value": "流会话重置次数过多"
+    },
+    {
+      "name": "extension_ui_expand_diff",
+      "value": "显示更多上下文"
+    },
+    {
+      "name": "extension_ui_failed",
+      "value": "无法加载扩展视图"
+    },
+    {
+      "name": "extension_ui_html_unsupported",
+      "value": "HTML 内容以文本显示"
+    },
+    {
+      "name": "extension_ui_image_invalid",
+      "value": "图片无效或过大"
+    },
+    {
+      "name": "extension_ui_image_unavailable",
+      "value": "图片不可用"
+    },
+    {
+      "name": "extension_ui_invalid_view",
+      "value": "扩展返回了无效视图"
+    },
+    {
+      "name": "extension_ui_load_context",
+      "value": "加载上下文"
+    },
+    {
+      "name": "extension_ui_load_diff",
+      "value": "加载差异"
+    },
+    {
+      "name": "extension_ui_load_more",
+      "value": "加载更多"
+    },
+    {
+      "name": "extension_ui_mark_viewed",
+      "value": "标记文件已查看"
+    },
+    {
+      "name": "extension_ui_offline",
+      "value": "离线时无法使用扩展"
+    },
+    {
+      "name": "extension_ui_open_lines",
+      "value": "打开这些行"
+    },
+    {
+      "name": "extension_ui_queue_limit",
+      "value": "待处理操作过多"
+    },
+    {
+      "name": "extension_ui_receipt_invalid",
+      "value": "无法验证操作结果"
+    },
+    {
+      "name": "extension_ui_receipt_timeout",
+      "value": "操作确认超时"
+    },
+    {
+      "name": "extension_ui_reopen_thread",
+      "value": "重新打开讨论"
+    },
+    {
+      "name": "extension_ui_resolve_thread",
+      "value": "解决讨论"
+    },
+    {
+      "name": "extension_ui_retry_action",
+      "value": "重试操作"
+    },
+    {
+      "name": "extension_ui_secret_stream",
+      "value": "流式模式不能发送机密字段"
+    },
+    {
+      "name": "extension_ui_send_uncertain",
+      "value": "操作是否送达不确定，确认后可安全重试。"
+    },
+    {
+      "name": "extension_ui_stack_limit",
+      "value": "扩展页面层级过多"
+    },
+    {
+      "name": "extension_ui_unknown_node",
+      "value": "暂不支持此组件，相关文本如下"
+    },
+    {
+      "name": "extension_ui_unsupported_component",
+      "value": "此扩展视图包含不支持的内容"
+    },
+    {
+      "name": "extension_ui_value_invalid",
+      "value": "操作参数无效"
+    },
+    {
+      "name": "apply",
+      "value": "应用"
+    },
+    {
+      "name": "comment",
+      "value": "评论"
+    },
+    {
+      "name": "discard",
+      "value": "放弃"
+    },
+    {
+      "name": "unknown",
+      "value": "未知"
+    },
+    {
+      "name": "session_tools_write_unavailable",
+      "value": "当前无法修改文件"
+    },
+    {
+      "name": "assistant_view_cache_full",
+      "value": "当前无法打开此卡片。"
+    },
+    {
+      "name": "assistant_view_changed",
+      "value": "卡片内容已更改。请重新检查并确认后再回复。"
+    },
+    {
+      "name": "assistant_view_confirm_title",
+      "value": "确认此操作"
+    },
+    {
+      "name": "assistant_view_form_incomplete",
+      "value": "提交前请填写所有字段。"
+    },
+    {
+      "name": "assistant_view_form_invalid",
+      "value": "请检查表单内容后重试。"
+    },
+    {
+      "name": "assistant_view_form_limit",
+      "value": "表单内容过多，无法提交。"
+    },
+    {
+      "name": "assistant_view_invalid_target",
+      "value": "不支持此链接。"
+    },
+    {
+      "name": "assistant_view_page_depth",
+      "value": "打开的页面过多。"
+    },
+    {
+      "name": "assistant_view_page_unavailable",
+      "value": "此页面不可用。"
+    },
+    {
+      "name": "assistant_view_result_unknown",
+      "value": "无法确认回复是否已发送。请重试同一操作。"
+    },
+    {
+      "name": "assistant_view_retry_original",
+      "value": "按原内容重试"
+    },
+    {
+      "name": "assistant_view_selected_pending",
+      "value": "回复已排队"
+    },
+    {
+      "name": "assistant_view_selected_sent",
+      "value": "回复已发送"
+    },
+    {
+      "name": "assistant_view_selected_failed",
+      "value": "回复失败"
+    },
+    {
+      "name": "assistant_view_selected_unknown",
+      "value": "回复状态未知"
+    },
+    {
+      "name": "assistant_view_submit_failed",
+      "value": "无法提交此回复。"
+    },
+    {
+      "name": "assistant_view_syncing",
+      "value": "正在确认回复状态…"
+    },
+    {
+      "name": "assistant_view_unavailable",
+      "value": "此卡片不可用。"
+    },
+    {
+      "name": "voice_main_only",
+      "value": "此语音扩展仅支持主对话"
+    },
+    {
+      "name": "phone_before",
+      "value": "修改前"
+    },
+    {
+      "name": "phone_after",
+      "value": "修改后"
+    },
+    {
+      "name": "contacts_write",
+      "value": "编辑联系人"
+    },
+    {
+      "name": "ssh_settings",
+      "value": "SSH 隧道"
+    },
+    {
+      "name": "ssh_host",
+      "value": "SSH 主机"
+    },
+    {
+      "name": "ssh_port",
+      "value": "SSH 端口"
+    },
+    {
+      "name": "ssh_username",
+      "value": "SSH 用户名"
+    },
+    {
+      "name": "ssh_host_key",
+      "value": "SSH 主机指纹"
+    },
+    {
+      "name": "ssh_private_key",
+      "value": "私钥"
+    },
+    {
+      "name": "ssh_replace_key",
+      "value": "替换私钥（可选）"
+    },
+    {
+      "name": "ssh_passphrase",
+      "value": "私钥口令（可选）"
+    },
+    {
+      "name": "ssh_save_enable",
+      "value": "保存并启用"
+    },
+    {
+      "name": "ssh_disable",
+      "value": "停用 SSH 隧道"
+    },
+    {
+      "name": "ssh_verify_host",
+      "value": "验证 SSH 主机"
+    },
+    {
+      "name": "ssh_verify_message",
+      "value": "请将此指纹与 SSH 服务器的可信记录核对后继续。"
+    },
+    {
+      "name": "ssh_verified_enable",
+      "value": "已核对，启用"
+    },
+    {
+      "name": "ssh_loading",
+      "value": "正在加载 SSH 设置…"
+    },
+    {
+      "name": "ssh_saving",
+      "value": "正在保存 SSH 设置…"
+    },
+    {
+      "name": "ssh_connecting",
+      "value": "正在连接 SSH 隧道…"
+    },
+    {
+      "name": "ssh_connected",
+      "value": "SSH 隧道已连接"
+    },
+    {
+      "name": "ssh_enabled",
+      "value": "SSH 隧道已启用"
+    },
+    {
+      "name": "ssh_disabled",
+      "value": "SSH 隧道未启用"
+    },
+    {
+      "name": "ssh_invalid_config",
+      "value": "请检查 SSH 主机、端口、用户名和 SHA256 指纹。"
+    },
+    {
+      "name": "ssh_invalid_key",
+      "value": "无法读取此私钥，请检查格式、大小和口令。"
+    },
+    {
+      "name": "ssh_key_required",
+      "value": "请输入私钥以继续。"
+    },
+    {
+      "name": "ssh_storage_failed",
+      "value": "安全密钥存储暂不可用，请解锁设备后重试。"
+    },
+    {
+      "name": "ssh_cancelled",
+      "value": "SSH 连接已取消。"
+    },
+    {
+      "name": "ssh_busy",
+      "value": "SSH 操作正在进行中。"
+    },
+    {
+      "name": "ssh_timeout",
+      "value": "SSH 连接超时。"
+    },
+    {
+      "name": "ssh_connect_failed",
+      "value": "无法连接 SSH 服务器。"
+    },
+    {
+      "name": "ssh_host_key_mismatch",
+      "value": "SSH 主机指纹不匹配。"
+    },
+    {
+      "name": "ssh_auth_failed",
+      "value": "SSH 密钥认证失败。"
+    },
+    {
+      "name": "ssh_proxy_failed",
+      "value": "无法通过 SSH 转发 Hub 连接。"
+    },
+    {
+      "name": "ssh_native_failed",
+      "value": "SSH 隧道无法启动。"
+    },
+    {
+      "name": "knowledge_recording_start",
+      "value": "开始录音"
+    },
+    {
+      "name": "knowledge_recording_stop",
+      "value": "停止录音"
+    },
+    {
+      "name": "knowledge_recording_requesting",
+      "value": "正在请求麦克风权限"
+    },
+    {
+      "name": "knowledge_recording_transcribe",
+      "value": "转写普通话"
+    },
+    {
+      "name": "knowledge_recording_retry_upload",
+      "value": "重试上传"
+    },
+    {
+      "name": "knowledge_recording_capture_ready",
+      "value": "可开始录音"
+    },
+    {
+      "name": "knowledge_recording_active",
+      "value": "正在录音"
+    },
+    {
+      "name": "knowledge_recording_stopped",
+      "value": "录音已停止"
+    },
+    {
+      "name": "knowledge_recording_transcribing",
+      "value": "正在转写"
+    },
+    {
+      "name": "knowledge_recording_transcribed",
+      "value": "转写完成"
+    },
+    {
+      "name": "knowledge_recording_uploading",
+      "value": "正在上传转写文本"
+    },
+    {
+      "name": "knowledge_recording_uploaded",
+      "value": "已保存到知识库"
+    },
+    {
+      "name": "knowledge_recording_upload_unknown",
+      "value": "上传结果未知，可安全重试"
+    },
+    {
+      "name": "knowledge_recording_upload_failed",
+      "value": "上传失败，转写文本已保存在本机"
+    },
+    {
+      "name": "knowledge_recording_stale",
+      "value": "知识库中已有更新版本"
+    },
+    {
+      "name": "knowledge_recording_expired",
+      "value": "这条录音已超出知识库保留期限"
+    },
+    {
+      "name": "knowledge_recording_deleted",
+      "value": "这条录音已从知识库删除"
+    },
+    {
+      "name": "knowledge_recording_transcribe_failed",
+      "value": "转写失败，录音已保存在本机"
+    },
+    {
+      "name": "knowledge_recording_microphone_denied",
+      "value": "无法使用麦克风权限"
+    },
+    {
+      "name": "knowledge_recording_chinese_only",
+      "value": "当前离线转写仅支持普通话"
+    },
+    {
+      "name": "knowledge_recording_too_short",
+      "value": "录音太短，无法转写"
+    },
+    {
+      "name": "knowledge_recording_storage_full",
+      "value": "录音存储空间已满，请先删除本地录音"
+    },
+    {
+      "name": "knowledge_recording_limit",
+      "value": "已达到一小时录音上限；请开始另一条录音"
+    },
+    {
+      "name": "knowledge_recording_write_failed",
+      "value": "无法保存录音；本地文件可能不完整"
+    },
+    {
+      "name": "knowledge_recording_retry_transcribe",
+      "value": "重试普通话转写"
+    },
+    {
+      "name": "knowledge_recording_delete_local",
+      "value": "删除本地录音"
+    },
+    {
+      "name": "knowledge_recording_open",
+      "value": "录音"
+    },
+    {
+      "name": "schedule_template_meeting_prep",
+      "value": "会前准备"
+    },
+    {
+      "name": "schedule_template_meeting_prep_prompt",
+      "value": "看看今天飞书日历和手机日历里的会。对每个需要准备的会，用 schedule_followup 在会前 10 分钟安排一次会前准备：相关文档、上次的会议纪要、还没定的事、我该说的要点。今天没有要准备的会就简单说一声。"
+    },
+    {
+      "name": "schedule_template_weekly_report",
+      "value": "周报"
+    },
+    {
+      "name": "schedule_template_weekly_report_prompt",
+      "value": "帮我起草这周的周报：从飞书日历、会议纪要、文档和消息里整理这周做了什么、进展和结果、遇到的问题、下周计划；各台电脑上的 Agent 这周完成的主要改动也算进去。先给我草稿，问我要不要改，不要直接发出去。"
+    },
+    {
+      "name": "schedule_template_end_of_day",
+      "value": "下班前盘点"
+    },
+    {
+      "name": "schedule_template_end_of_day_prompt",
+      "value": "下班前盘点：今天还有哪些消息没回、答应别人的事还没做、各台电脑上还在跑或在等我的 Agent，明天上午有哪些会要准备。按紧急程度列出来，最后问我哪些要设提醒。"
+    },
+    {
+      "name": "ssh_dns_failed",
+      "value": "无法解析 Hub 主机名。"
+    },
+    {
+      "name": "device_look_avatar_heading",
+      "value": "头像"
+    },
+    {
+      "name": "device_look_accent_heading",
+      "value": "强调色"
+    },
+    {
+      "name": "device_look_accent_style",
+      "value": "跟随界面风格"
+    },
+    {
+      "name": "device_look_accent_avatar",
+      "value": "跟随头像"
+    },
+    {
+      "name": "device_look_accent_blue",
+      "value": "蓝色"
+    },
+    {
+      "name": "device_look_accent_coral",
+      "value": "珊瑚色"
+    },
+    {
+      "name": "device_look_accent_lavender",
+      "value": "薰衣草色"
+    },
+    {
+      "name": "device_look_accent_teal",
+      "value": "青绿色"
+    },
+    {
+      "name": "device_look_accent_lark",
+      "value": "Lark 蓝"
+    },
+    {
+      "name": "device_look_owner_unavailable",
+      "value": "此 Hub 无法提供头像。"
+    },
+    {
+      "name": "device_look_avatar_unavailable",
+      "value": "暂无可用的兼容头像。"
+    },
+    {
+      "name": "device_look_hub_unsupported",
+      "value": "此 Hub 不支持头像包。"
+    },
+    {
+      "name": "device_look_list_failed",
+      "value": "无法加载头像。"
+    },
+    {
+      "name": "device_look_connect_to_hub",
+      "value": "请连接此头像所属的 Hub。"
+    },
+    {
+      "name": "device_look_download_failed",
+      "value": "无法下载此头像。"
+    },
+    {
+      "name": "device_look_storage_failed",
+      "value": "无法保存此外观设置。"
+    },
+    {
+      "name": "device_look_cache_cleanup_failed",
+      "value": "部分头像缓存未能移除。"
+    },
+    {
+      "name": "device_look_avatar_invalid",
+      "value": "无法打开此头像图片。"
+    },
+    {
+      "name": "device_look_cache_failed",
+      "value": "无法保存此头像图片。"
+    },
+    {
+      "name": "open_source_licenses",
+      "value": "开源许可"
+    },
+    {
+      "name": "retry_cleanup",
+      "value": "重试清理"
+    },
+    {
+      "name": "color_mode",
+      "value": "外观模式"
+    },
+    {
+      "name": "applications",
+      "value": "应用"
+    },
+    {
+      "name": "application_unavailable",
+      "value": "此应用暂不可用。"
+    },
+    {
+      "name": "no_applications",
+      "value": "暂无应用"
+    },
+    {
+      "name": "file_transfer_send_to_computer",
+      "value": "发送到电脑"
+    },
+    {
+      "name": "file_transfer_unavailable",
+      "value": "这台电脑目前无法传输文件。"
+    },
+    {
+      "name": "file_transfer_journal_unavailable",
+      "value": "无法在此设备保存传输状态。存储恢复后请重试。"
+    },
+    {
+      "name": "file_transfer_check_unknown_first",
+      "value": "请先核对结果未知的传输，再重新发送。"
+    },
+    {
+      "name": "file_transfer_confirm_duplicate",
+      "value": "之前的传输可能仍会完成。再次发送可能会产生第二份副本。"
+    },
+    {
+      "name": "file_transfer_confirm_title",
+      "value": "发送此文件？"
+    },
+    {
+      "name": "file_transfer_confirm_send",
+      "value": "发送"
+    },
+    {
+      "name": "file_transfer_source",
+      "value": "来源"
+    },
+    {
+      "name": "file_transfer_target",
+      "value": "目标"
+    },
+    {
+      "name": "file_transfer_inbox",
+      "value": "接收文件夹"
+    },
+    {
+      "name": "file_transfer_status_creating",
+      "value": "正在开始传输"
+    },
+    {
+      "name": "file_transfer_status_running",
+      "value": "正在传输"
+    },
+    {
+      "name": "file_transfer_status_done",
+      "value": "传输完成"
+    },
+    {
+      "name": "file_transfer_status_failed",
+      "value": "传输失败"
+    },
+    {
+      "name": "file_transfer_status_cancelled",
+      "value": "传输已取消"
+    },
+    {
+      "name": "file_transfer_status_unknown",
+      "value": "传输结果未知"
+    },
+    {
+      "name": "file_transfer_error",
+      "value": "传输错误"
+    },
+    {
+      "name": "file_transfer_setting_loading",
+      "value": "正在检查设置"
+    },
+    {
+      "name": "file_transfer_setting_saving",
+      "value": "正在保存设置"
+    },
+    {
+      "name": "file_transfer_setting_unknown",
+      "value": "设置状态未知"
+    },
+    {
+      "name": "file_transfer_inbox_enable_hint",
+      "value": "开启文件传输后可查看接收文件夹。"
+    },
+    {
+      "name": "file_transfer_inbox_unknown",
+      "value": "无法确认接收文件夹。"
+    },
+    {
+      "name": "file_transfer_choose_target",
+      "value": "选择一台电脑"
+    },
+    {
+      "name": "file_transfer_no_targets",
+      "value": "此工作区中没有可信且在线的电脑。"
+    },
+    {
+      "name": "file_transfer_source_switch",
+      "value": "允许从这台电脑发送"
+    },
+    {
+      "name": "file_transfer_shared_switch",
+      "value": "文件传输"
+    },
+    {
+      "name": "file_transfer_target_switch",
+      "value": "允许这台电脑接收文件"
+    },
+    {
+      "name": "file_transfer_check_status",
+      "value": "检查状态"
+    },
+    {
+      "name": "file_transfer_i_checked",
+      "value": "我已核对"
+    },
+    {
+      "name": "file_transfer_possible_duplicate",
+      "value": "之前的传输可能仍会完成。再次发送可能会产生第二份副本。"
+    },
+    {
+      "name": "file_transfer_cancel_unknown",
+      "value": "尚未确认取消结果，正在检查传输状态。"
+    },
+    {
+      "name": "file_transfer_cancel_transfer",
+      "value": "取消传输"
+    },
+    {
+      "name": "file_transfer_title",
+      "value": "发送文件"
+    },
+    {
+      "name": "session_tools_parent_folder",
+      "value": "上一级文件夹"
+    }
+  ]
+}

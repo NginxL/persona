@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// "By to-do" (#6458): the to-dos and the groups of agents on no to-do are one kind of row at the top level, each a sticky
-// group heading with its chevron, mark, title, count and state; a group's explanation is behind its ⓘ and is what it
-// says when open and empty; the rows that fold groups select no text.
+// "By to-do" (#6458): the to-dos and the group of agents on no to-do are one kind of row at the top level, each a sticky
+// group heading with its chevron, mark, title, count and state; the group's explanation is behind its ⓘ and is what it
+// says when open and empty; the rows that fold groups select no text. Agents opened by hand in a terminal are in the
+// same group, their rows ending with the Terminal source mark (#6591).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +32,11 @@ const sessions = [
   s("c", "idle", "/code/weather", { work: { phase: "blocked", on: "external", line: "CI" } }),
   // on no to-do, started elsewhere and waiting on the user
   s("loose", "needs_you", "/code/report", { pane_id: "botmux:x" }),
+  // on no to-do, opened by hand in a terminal
+  s("hand", "working", "/code/sandbox", { space_kind: "herdr", pane_id: "w1:p1", started_by_persona: false }),
 ];
+/** Only the agents on to-dos: the group is empty. */
+const onTodos = sessions.filter((x) => x.session_id !== "loose" && x.session_id !== "hand");
 const stable = { reg: () => () => {}, hover: () => {}, go: () => () => {}, onRowMenu: () => {} };
 
 let host: HTMLDivElement;
@@ -60,7 +65,7 @@ describe("By to-do's rows (#6458)", () => {
     const tree = buildTodoTree(sessions, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
     show(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />);
     const keys = [...host.querySelectorAll("[data-tree-branch]")].map((el) => el.getAttribute("data-tree-branch"));
-    expect(keys).toEqual(["todo:ship", "todo:ci", "todo:manual", "todo:none"]);
+    expect(keys).toEqual(["todo:ship", "todo:ci", "todo:none"]);
     for (const key of keys) {
       // a sticky group heading of the list's top level, never inside another branch
       expect(row(key!).closest("[data-sidebar-group-heading]")).not.toBeNull();
@@ -74,15 +79,28 @@ describe("By to-do's rows (#6458)", () => {
     // count, then state: the to-do's in the To-dos page's word, a group's the most urgent of its agents'
     expect(row("todo:ship").textContent).toMatch(/2 个 Agent工作中$/);
     expect(row("todo:ci").textContent).toMatch(/1 个 Agent等待中$/);
-    expect(row("todo:none").textContent).toMatch(/^没挂待办的.*1 个 Agent需要你$/);
-    // an empty group says 0 and no state
-    expect(row("todo:manual").textContent).toMatch(/^在终端里开的.*0 个 Agent$/);
+    expect(row("todo:none").textContent).toMatch(/^没挂待办的.*2 个 Agent需要你$/);
   });
 
-  it("folds the groups by default, except one holding an agent that needs you", () => {
+  it("an empty group says 0 and no state", () => {
+    show(<TodoTreeView tree={buildTodoTree(onTodos, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true })} machines={machines} activeKey="" {...stable} />);
+    expect(row("todo:none").textContent).toMatch(/^没挂待办的.*0 个 Agent$/);
+  });
+
+  it("puts the agents opened in a terminal in the same group, each row ending with the Terminal source mark (#6591)", () => {
+    show(<TodoTreeView tree={buildTodoTree(sessions, machines, todos, { spaces: [], sessions: [] }, Date.now())} machines={machines} activeKey="" {...stable} />);
+    const marks = [...branch("todo:none").querySelectorAll("[data-tree-branch-list] [data-source]")].map((el) => [el.getAttribute("data-source"), el.getAttribute("aria-label")]);
+    expect(marks).toEqual([["feishu", "飞书群"], ["terminal", "终端"]]);
+  });
+
+  it("folds the group by default, except when it holds an agent that needs you", () => {
+    show(<TodoTreeView tree={buildTodoTree(sessions.filter((x) => x.session_id !== "loose"), machines, todos, { spaces: [], sessions: [] }, Date.now())} machines={machines} activeKey="" {...stable} />);
+    expect(chevron("todo:none").getAttribute("aria-expanded")).toBe("false");
+    act(() => root.unmount());
+    root = createRoot(host);
+    localStorage.clear();
     const tree = buildTodoTree(sessions, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
     show(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />);
-    expect(chevron("todo:manual").getAttribute("aria-expanded")).toBe("false");
     expect(chevron("todo:none").getAttribute("aria-expanded")).toBe("true");
     // the shared fold hook keeps the choice in this browser
     act(() => chevron("todo:none").click());
@@ -91,13 +109,13 @@ describe("By to-do's rows (#6458)", () => {
   });
 
   it("keeps the explanation behind the ⓘ, and says it when an empty group is opened", async () => {
-    const tree = buildTodoTree(sessions, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
+    const tree = buildTodoTree(onTodos, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
     const hint = tree.loose[0]!.hint;
     show(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />);
-    const list = branch("todo:manual").querySelector("[data-tree-branch-list]")!;
+    const list = branch("todo:none").querySelector("[data-tree-branch-list]")!;
     // folded: inert, nothing for a reader to land on
     expect(list.closest("[inert]") ?? list.getAttribute("inert")).not.toBeNull();
-    const info = row("todo:manual").querySelector<HTMLButtonElement>('button[aria-label="关于「在终端里开的」"]')!;
+    const info = row("todo:none").querySelector<HTMLButtonElement>('button[aria-label="关于「没挂待办的」"]')!;
     expect(info.hasAttribute("aria-expanded")).toBe(false);
     // the tip's words load the first time an ⓘ is asked (InfoTipPanel)
     await act(async () => info.click());
@@ -107,7 +125,7 @@ describe("By to-do's rows (#6458)", () => {
     expect(info.getAttribute("aria-describedby")).toBe(tip.id);
     act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
-    act(() => chevron("todo:manual").click());
+    act(() => chevron("todo:none").click());
     expect(list.textContent).toBe(hint);
   });
 

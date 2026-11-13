@@ -1,7 +1,8 @@
 #!/bin/bash
 # Persona Link: the menu bar app around persona-link on a Mac (apple/PersonaLink/, docs/operations/link.md, docs/operations/persona-link-install.md).
 # The bundle keeps its old name "Persona Link.app" and executable PersonaLink (docs/operations/rename.md).
-#   ./scripts/app/mac-link.sh build            apple/PersonaLink/build/Persona Link.app, persona-link and persona-node inside, signed to run locally
+#   ./scripts/app/mac-link.sh build            apple/PersonaLink/build/Persona Link.app, persona-link, persona-node and
+#                                              Persona Screen.app inside, signed to run locally
 #   ./scripts/app/mac-link.sh install          build, put it in /Applications and open it
 #   ./scripts/app/mac-link.sh snapshot <dir>   draw the menu and the pairing window, light and dark, as PNGs
 # The bundle id is mac.link_bundle_id in ~/.config/persona/config.json (or PERSONA_LINK_BUNDLE_ID),
@@ -21,6 +22,9 @@ build() {
   if [ "${UNIVERSAL:-}" = 1 ]; then archs=(arm64 x86_64); else archs=("$(uname -m)"); fi
   # xcodebuild builds the Swift package (swift build's default backend can't find the developer directory here).
   (cd "$PKG" && xcodebuild -quiet -scheme PersonaLink -configuration Release -derivedDataPath build/dd \
+    -destination 'generic/platform=macOS' ARCHS="${archs[*]}" ONLY_ACTIVE_ARCH=NO build)
+  # Persona Screen, the live screen's video helper (#3954): a scheme of its own in the same package.
+  (cd "$PKG" && xcodebuild -quiet -scheme PersonaScreen -configuration Release -derivedDataPath build/dd \
     -destination 'generic/platform=macOS' ARCHS="${archs[*]}" ONLY_ACTIVE_ARCH=NO build)
   local bin="$OUT/dd/Build/Products/Release/PersonaLink"
   mkdir -p "$OUT"
@@ -55,9 +59,18 @@ build() {
   lipo -create "${helpers[@]}" -output "$APP/Contents/Helpers/persona-link"
   lipo -create "${nodes[@]}" -output "$APP/Contents/Helpers/persona-node"
   sed -e "s/__BUNDLE_ID__/$ID/" -e "s/__BUILD__/$(date +%Y%m%d%H%M)/" "$PKG/Info.plist" > "$APP/Contents/Info.plist"
+  # Persona Screen.app (docs/extensions/computer-use.md "Live screen video (#3954)"): an app bundle of its own, so macOS
+  # holds its Screen Recording grant to it, not to the node. Built the same way every time (no timestamp anywhere), it
+  # gets the same ad-hoc signature while its code is unchanged, so the grant outlives Persona Link updates; a node with
+  # a signing certificate (docs/operations/mac-node-signing.md) runs its own signed copy instead.
+  local screen="$APP/Contents/Helpers/Persona Screen.app"
+  mkdir -p "$screen/Contents/MacOS"
+  cp "$OUT/dd/Build/Products/Release/PersonaScreen" "$screen/Contents/MacOS/PersonaScreen"
+  sed -e "s/__SCREEN_BUNDLE_ID__/$ID.screen/" "$PKG/PersonaScreen-Info.plist" > "$screen/Contents/Info.plist"
   # Sign to run locally (ad-hoc): the helpers first, then the bundle that seals them.
   codesign --force --sign - --identifier "$ID.helper" "$APP/Contents/Helpers/persona-link"
   codesign --force --sign - --identifier "$ID.persona-node" "$APP/Contents/Helpers/persona-node"
+  codesign --force --sign - --identifier "$ID.screen" "$screen"
   codesign --force --sign - "$APP"
   codesign --verify --strict "$APP"
   echo "built $APP ($ID, persona-link $version)"

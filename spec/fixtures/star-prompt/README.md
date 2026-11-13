@@ -1,9 +1,9 @@
 # GitHub star prompt fixtures
 
-The web and Android clients (iOS with #5910) ask for a GitHub star in three quiet places (#5761, `docs/design/DESIGN_SYSTEM.md`,
+Android (with an iOS proposal in #5910) asks for a GitHub star in three places (#5761, `docs/design/DESIGN_SYSTEM.md`,
 "GitHub star prompts"): a pill on the empty Agents page, a card in the Agents list's notice slot once this device has
-started enough Agents, and a toast when first setup finishes. These cases pin when each one shows, so every client
-follows one rule (`docs/design/PRINCIPLES.md`, "Consistency first").
+started enough Agents, and a toast when first setup finishes. These cases pin that client's rules. The web removed
+all three prompts in #6570 and instead shows the project source in Settings; it no longer consumes these fixtures.
 
 | Rule | Cases |
 | --- | --- |
@@ -20,5 +20,5 @@ follows one rule (`docs/design/PRINCIPLES.md`, "Consistency first").
   `expected.toast` whether the event showed the onboarding toast.
 - Not in these cases, because they belong to the screen: the card also waits while a session needs the user or a search
   is on, and the pill shows only on the empty Agents surface.
-- Run: `web/src/lib/star-prompt.test.ts` and `cd android && ./gradlew :core:domain:test --tests '*StarPromptFixtureTest*'`;
-  iOS replays them with #5910.
+- Run: `cd android && ./gradlew :core:domain:test --tests '*StarPromptFixtureTest*'`;
+  the proposed iOS implementation replays them with #5910.

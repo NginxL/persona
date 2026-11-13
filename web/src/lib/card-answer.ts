@@ -34,6 +34,18 @@ export interface AnswerFrom {
   handoffCard?: boolean;
 }
 
+/** A manager work-card answer that sends nothing to the Agent. The server marks built-in and legacy defer choices with
+ *  `action: "defer"`; a bare dismiss is the card's hand-back action. Continue, retry and free text still need approve. */
+export function workCardLocalResolution(ix: Interaction, body: Resolution): boolean {
+  if (ix.kind !== "question" || ix.tool_name !== "persona_triage") return false;
+  if (body.dismiss === true) return Object.keys(body).length === 1;
+  const entries = Object.entries(body.answers ?? {}).filter(([, answer]) => answer.trim());
+  return Object.keys(body).length === 1 && entries.length > 0 && entries.every(([question, answer]) => {
+    const q = ix.questions?.find((candidate) => candidate.question === question);
+    return q && !q.multi_select && q.options?.some((o) => o.label === answer.trim() && o.action === "defer");
+  });
+}
+
 /** A property name that holds a credential whatever the form says about it (the hub's secretName, answered.go). */
 const secretName = /pass|secret|token|credential|api[_-]?key|private|otp|pin\b/i;
 
@@ -80,7 +92,9 @@ function sameAnswer(a: unknown, b: unknown): boolean {
  * the hub already. Once it ends (delivered, refused, or out of time) the card can be answered again.
  */
 export function answerCard(ix: Interaction, body: Resolution, from: AnswerFrom = {}): Promise<CardAnswer> {
-  if (!interactionCanAnswer(ix, getSession(ix.machine_id, ix.session_id))) return Promise.resolve({ ok: false, error: t("chat-interactions.approve_not_allowed") });
+  if (!interactionCanAnswer(ix, getSession(ix.machine_id, ix.session_id)) && !workCardLocalResolution(ix, body)) {
+    return Promise.resolve({ ok: false, error: t("chat-interactions.approve_not_allowed") });
+  }
   if (isSecretRun(ix) && !isSecretRunAnswer(body)) return Promise.resolve({ ok: false, error: t("chat-interactions.secret_run_card_only") });
   // a hand-off is approved on its card alone; a no goes from anywhere
   const handoff = isSecretHandoff(ix) && body.allow === true;

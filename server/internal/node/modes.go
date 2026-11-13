@@ -586,13 +586,20 @@ func (n *Node) syncAssistantModes(ctx context.Context, p *assistantProc) error {
 		effort = p.model.Effort
 	}
 	p.mu.Unlock()
-	return n.applyAssistantModes(ctx, p, mode, effort)
+	return n.setAssistantModes(ctx, p, mode, effort)
 }
 
-// applyAssistantModes commits each field only after Claude acknowledges it. A refused startup setting also
-// restores the previously recorded choice, so the next message does not silently retry it. settingsMu is held.
+// applyAssistantModes is setAssistantModes for a change made in the app: the list goes out with it at once.
 func (n *Node) applyAssistantModes(ctx context.Context, p *assistantProc, mode, effort string) error {
 	defer func() { p.ownerOr(n).notifySessions() }()
+	return n.setAssistantModes(ctx, p, mode, effort)
+}
+
+// setAssistantModes commits each field only after Claude acknowledges it. A refused startup setting also
+// restores the previously recorded choice, so the next message does not silently retry it. settingsMu is held.
+// It pushes no list: the message it runs for (syncAssistantModes) has one pushed once its line is written, and
+// building one here held every send up for as long as a list takes on a busy computer.
+func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, effort string) error {
 	for _, field := range []string{"mode", "effort"} {
 		p.mu.Lock()
 		want, previous := mode, p.mode

@@ -109,6 +109,12 @@ class PerfTestCase: XCTestCase {
                           name, kept.count, fps.isEmpty ? .nan : fps[fps.count / 2], median("hitch_ms_per_s"), median("hitches"),
                           median("p95_ms"), median("max_ms"), median("busy_p95_ms"), median("busy_over_16ms"))
         print(line)
+        if median("text_changes") > 0 { // a streamed reply was on screen (#6651)
+            print(String(format: "perf-stream: %@ runs=%d fps=%.1f hitches=%.0f max_ms=%.1f text_changes=%.0f text_gap_p50_ms=%.0f text_gap_p95_ms=%.0f text_gap_max_ms=%.0f text_added_p50=%.0f text_added_p95=%.0f text_added_max=%.0f main_cpu_ms_per_s=%.0f busy_ms_per_s=%.0f",
+                         name, kept.count, fps.isEmpty ? .nan : fps[fps.count / 2], median("hitches"), median("max_ms"), median("text_changes"),
+                         median("text_gap_p50_ms"), median("text_gap_p95_ms"), median("text_gap_max_ms"), median("text_added_p50"),
+                         median("text_added_p95"), median("text_added_max"), median("main_cpu_ms_per_s"), median("busy_ms_per_s")))
+        }
         XCTAssertFalse(runs.isEmpty, "the app sent no frames (is -showFrameProbe in this build?)")
         if assertMainThreadBudget {
             for run in runs {

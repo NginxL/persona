@@ -169,9 +169,15 @@ func (d *DB) CommitSubscriptionRun(ctx context.Context, id string, merge func(da
 			return err
 		}
 	}
-	for _, it := range items {
-		if _, err := tx.Exec(ctx, `INSERT INTO subscription_items (subscription_id, uid, data, created_at) VALUES ($1, $2, $3, $4)`,
-			id, it.UID, it.Data, now); err != nil {
+	if len(items) > 0 {
+		// One statement for the run's items: ORDER BY the array position keeps seq in the run's order.
+		uids, datas := make([]string, len(items)), make([]string, len(items))
+		for i, it := range items {
+			uids[i], datas[i] = it.UID, string(it.Data)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO subscription_items (subscription_id, uid, data, created_at)
+			SELECT $1, u, d::json, $4 FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS t(u, d, n) ORDER BY n`,
+			id, uids, datas, now); err != nil {
 			return err
 		}
 	}

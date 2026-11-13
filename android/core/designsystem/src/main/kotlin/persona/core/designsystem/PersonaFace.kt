@@ -140,6 +140,8 @@ fun PersonaFace(
     val dark = PersonaTheme.darkTheme
     Box(modifier.size(size).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
+            // BlurMaskFilter rejects the zero blur radius produced by an empty pane-sized canvas.
+            if (this.size.minDimension <= 0f) return@Canvas
             val t = if (moving) time else 0f
             when (design) {
                 PersonaDesign.Mochi -> mochi(state, dark, t, moving, blink.value, size < Mochi.COMPACT_BELOW, paint)

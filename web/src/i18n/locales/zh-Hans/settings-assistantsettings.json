@@ -129,7 +129,7 @@
   "archive_closed_hint": "已关闭、身上没有未完成任务的会话，闲置这么多天后移出列表，仍能在已归档里找到；0 表示不自动归档",
   "archive_closed_unit": "天",
   "background_folded": "后台轮次默认折叠",
-  "background_folded_footer": "主对话里由别的对话、定时任务或跟进发起的轮次折成一行，点开能看全部；问过你或通知过你的轮次照常显示。",
+  "background_folded_footer": "主对话和主管对话里，由别的对话、定时任务或跟进发起的轮次折成一行，点开能看全部；问过你或通知过你的轮次照常显示。",
   "next_suggestions": "建议下一句",
   "next_suggestions_footer": "在你打开的对话里，每次回复后由小模型在空输入框上方建议你可能要发的下一句。终端里的 Claude Code 仍用它自己的建议。每次回复多一次模型调用；所用模型在「模型配置 › 下一句建议」里设置。",
   "idle_close": "Agent 闲置多久后停止",

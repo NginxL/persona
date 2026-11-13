@@ -7,7 +7,7 @@ import (
 )
 
 // snapshotAppOrder is the order of the snapshot's app line (docs/assistant/assistant.md "Live snapshots and prefix caching").
-var snapshotAppOrder = []string{"ios", "ipados", "watchos", "macos", "visionos", "android"}
+var snapshotAppOrder = []string{"ios", "ipados", "watchos", "macos", "visionos", "android", "harmony"}
 
 // snapshotApps is the snapshot's app line: one app per kind of device, the one most recently heard from, a real
 // device before a simulator (a developer's simulator must not stand in for the phone). An iPad reports platform ios

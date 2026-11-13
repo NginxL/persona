@@ -3,9 +3,13 @@ package persona.core.designsystem
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,7 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -31,9 +37,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -476,6 +484,11 @@ fun ComposerFrame(
     val palette = PersonaTheme.palette
     val blankTap by rememberUpdatedState(onBlankTap)
     val keepsKeyboard = Modifier.keepsKeyboardOnTap { blankTap?.invoke() }
+    // Glass moves the trailing content from the field's row to the second row as the composer grows. Movable, it keeps its
+    // state across the move: a swap of send and stop under way ([ComposerActionSlot]) goes on in the other row, instead of
+    // being cut off or ending there at once (#4210 T3). Brief and Board draw it in one place and invoke it directly.
+    val trailingNow by rememberUpdatedState(trailing)
+    val movableTrailing = remember { movableContentWithReceiverOf<RowScope> { trailingNow?.invoke(this) } }
     if (PersonaTheme.style == AppStyle.Glass && LocalHomeChrome.current != null) {
         val shape = RoundedCornerShape(HomeTokens.composerRadius)
         val fill = if (PersonaTheme.darkTheme) HomeTokens.composerDark else HomeTokens.composerLight
@@ -491,12 +504,12 @@ fun ComposerFrame(
                 if (!expanded) leading?.invoke(this)
                 Box(Modifier.weight(1f).heightIn(min = Tokens.MinTouch.android).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.m),
                     contentAlignment = Alignment.CenterStart, content = field)
-                if (!expanded) trailing?.invoke(this)
+                if (!expanded && trailing != null) movableTrailing(this)
             }
             if (expanded) Row(verticalAlignment = Alignment.CenterVertically) {
                 leading?.invoke(this)
                 Spacer(Modifier.weight(1f))
-                trailing?.invoke(this)
+                if (trailing != null) movableTrailing(this)
             }
         }
         return
@@ -509,12 +522,12 @@ fun ComposerFrame(
                 if (!expanded) leading?.invoke(this)
                 Box(Modifier.weight(1f).heightIn(min = Tokens.MinTouch.ios).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.m),
                     contentAlignment = Alignment.CenterStart, content = field)
-                if (!expanded) trailing?.invoke(this)
+                if (!expanded && trailing != null) movableTrailing(this)
             }
             if (expanded) Row(verticalAlignment = Alignment.CenterVertically) {
                 leading?.invoke(this)
                 Spacer(Modifier.weight(1f))
-                trailing?.invoke(this)
+                if (trailing != null) movableTrailing(this)
             }
         }
         AppStyle.Brief -> Column(modifier.fillMaxWidth().background(palette.background).then(keepsKeyboard).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)) {
@@ -582,7 +595,6 @@ fun ComposerTextField(
 
 enum class SendKind { Send, Stop }
 
-/** The send (or stop) button of a composer: a filled circle, or a square on the board. */
 /**
  * The send button while nothing can be sent yet ("Connect a model first", "Add a computer first": docs/assistant/onboarding.md 4.4): a one-line pill in the
  * send button's place, centred on the same 48 dp row, that opens the missing step.
@@ -594,8 +606,23 @@ fun BlockedSendButton(label: String, onClick: () -> Unit, modifier: Modifier = M
     }
 }
 
+/**
+ * The send (or stop) button of a composer: a filled circle, or a square on the board. With [pressScales] it shrinks under the
+ * finger, slowly, and comes back quicker when let go, on Glass and not with the system's animations off, as iOS's `pressScales`
+ * does for the shell composer's send (`ComposerRoundButton`, `Theme.Motion.composerPress`); the other composers' send keeps the
+ * plain press, as on iOS. A composer that swaps send and stop draws them through [ComposerActionSlot].
+ */
 @Composable
-fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, kind: SendKind = SendKind.Send, loading: Boolean = false) {
+fun SendButton(
+    onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, kind: SendKind = SendKind.Send, loading: Boolean = false,
+    pressScales: Boolean = false,
+) = SendButtonBody(onClick, modifier, enabled, kind, loading, pressScales, inert = false)
+
+/** [SendButton], and [inert] for one on its way out of the slot: it looks as it did but takes no touch and is not read out. */
+@Composable
+internal fun SendButtonBody(
+    onClick: () -> Unit, modifier: Modifier, enabled: Boolean, kind: SendKind, loading: Boolean, pressScales: Boolean, inert: Boolean,
+) {
     val palette = PersonaTheme.palette
     val board = PersonaTheme.style == AppStyle.Board
     val shape = if (board) RoundedCornerShape(8.dp.corner) else CircleShape
@@ -604,12 +631,23 @@ fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bool
     val spoken = stringResource(if (kind == SendKind.Stop) R.string.designsystem_send_stop else R.string.designsystem_send)
     // Send and Stop are felt, as on iOS (DESIGN_SYSTEM.md 4.3).
     val haptics = rememberHaptics()
+    // Shrinks while pressed, on Glass (the style aligned with iOS, decision 8 of #4194; Brief and Board keep the plain press),
+    // and not when the system's animations are off. Only the circle shrinks; the 48 dp that takes the touch stays put.
+    val shrinks = pressScales && PersonaTheme.style == AppStyle.Glass && !PersonaTheme.reduceMotion
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val pressScale = animateFloatAsState(
+        if (pressed) Tokens.Motion.ComposerPress.scale else 1f,
+        if (pressed) ComposerMotion.pressIn() else ComposerMotion.pressOut(), label = "send-press",
+    )
     Box(
-        modifier.size(48.dp).clickable(enabled = enabled && !loading, role = Role.Button, onClick = haptics.tapped(onClick))
-            .semantics { contentDescription = spoken },
+        modifier.size(48.dp).clickable(press, LocalIndication.current, enabled = enabled && !loading && !inert, role = Role.Button, onClick = haptics.tapped(onClick))
+            .semantics { contentDescription = spoken; if (inert) hideFromAccessibility() },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(if (board) 40.dp else 38.dp).clip(shape).background(fill), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(if (board) 40.dp else 38.dp)
+            .then(if (shrinks) Modifier.graphicsLayer { scaleX = pressScale.value; scaleY = pressScale.value } else Modifier)
+            .clip(shape).background(fill), contentAlignment = Alignment.Center) {
             when {
                 loading -> JSpinner(Modifier.size(16.dp), color = ink, stroke = 2.dp)
                 kind == SendKind.Stop -> JIcon(PhIcons.Stop, null, size = 16.dp, tint = ink, selected = true)

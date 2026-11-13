@@ -25,9 +25,9 @@ func startHolder(t *testing.T) holderProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	done, exited := make(chan error, 1), make(chan struct{})
+	go func() { done <- cmd.Wait(); close(exited) }() // the only Wait: os/exec allows one
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
 	return holderProc{PID: cmd.Process.Pid, Done: done}
 }
 

@@ -18,7 +18,7 @@ vi.mock("./store", () => {
 vi.mock("./router", () => ({ navigate: vi.fn() }));
 vi.mock("../ui/atoms", async (actual) => ({ ...(await actual<typeof import("../ui/atoms")>()), toast: vi.fn() }));
 
-import { acceptOutgoing, arrived, forgetOutgoing, askPersona, discardOutbox, inSendOrder, keepFailed, keepOutgoing, noteSent, noteWritten, outboxMessage, placeFailed, queueToSession, resetOutboxClaimsForTests, resetRestoredForTests, restoreOutbox, retryOutbox, sendToSession, settle, settleOutbox, SENT_GRACE_MS, type OutboxEntry } from "./outbox";
+import { acceptOutgoing, arrived, forgetOutgoing, askPersona, discardOutbox, inSendOrder, keepFailed, keepOutgoing, noteSent, noteWritten, outboxMessage, placeFailed, queueToSession, resetOutboxClaimsForTests, resetRestoredForTests, restoreOutbox, retryOutbox, retryOutboxEntry, sendToSession, settle, settleOutbox, SENT_GRACE_MS, type OutboxEntry } from "./outbox";
 import { messageFeedback, resetMessageFeedback } from "./message-send";
 import type { ChatLine } from "./turns";
 import { ApiError } from "./api";
@@ -65,6 +65,19 @@ describe("which bubbles stay", () => {
     const list = [entry({ id: "a", state: "failed" }), entry({ id: "b", state: "failed" }), entry({ id: "w", state: "failed", wordsOnly: true })];
     expect(settle(list, [{ id: "u1", client_msg_id: "a", text: "改过的字", images: [] }], 1000).map((e) => e.id)).toEqual(["b", "w"]);
     expect(settle(list, [{ id: "u1", text: "你好", images: [] }], 1000).map((e) => e.id)).toEqual(["a", "b", "w"]); // words alone: not it
+  });
+
+  it("a send that ended in doubt goes once its words reach the transcript; a refusal does not", () => {
+    const doubt = entry({ id: "d", state: "failed", inDoubt: true, at: 1_000_000 });
+    const refused = entry({ id: "r", state: "failed", at: 1_000_000 });
+    const copy = { id: "u1", text: "你好", images: [], ts: new Date(1_030_000).toISOString() };
+    expect(settle([doubt], [copy], 1_040_000).map((e) => e.id)).toEqual([]);
+    expect(settle([refused], [copy], 1_040_000).map((e) => e.id)).toEqual(["r"]);
+    // an older message with the same words is not its copy, also within the clocks' usual slack
+    const older = { id: "u0", text: "你好", images: [], ts: new Date(1_000_000 - 600_000).toISOString() };
+    expect(settle([doubt], [older], 1_040_000).map((e) => e.id)).toEqual(["d"]);
+    const justBefore = { id: "u2", text: "你好", images: [], ts: new Date(1_000_000 - 60_000).toISOString() };
+    expect(settle([doubt], [justBefore], 1_040_000).map((e) => e.id)).toEqual(["d"]);
   });
 
   it("takes one bubble per copy, never an older message's copy, and a copy only once", () => {
@@ -173,6 +186,23 @@ describe("sending from another page", () => {
     const id = outbox()["m/s"][0].id;
     await retryOutbox("m", "s", id);
     expect(JSON.parse(fetcher.mock.calls[1][1].body).client_msg_id).not.toBe(id);
+  });
+
+  it("a retried send that was in doubt is not taken for sent by the first try's copy", () => {
+    // The first try ended in doubt and the owner sent it again before its copy showed. That copy, written before the
+    // retry, is not the new message's: only one written after the retry is (within the 5 s the clocks are allowed).
+    let resolve!: (v: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(new Promise((r) => (resolve = r))));
+    keepFailed("m", "s", { id: "a8", text: "再发一次", images: [], at: Date.now() - 100_000 }, new ApiError(502, "x", { delivered: "unknown" }));
+    const { id } = retryOutboxEntry("m", "s", "a8");
+    try {
+      settleOutbox("m", "s", [{ id: "line-1", text: "再发一次", images: [], ts: new Date(Date.now() - 99_000).toISOString() }]);
+      expect(outbox()["m/s"]).toMatchObject([{ id, state: "sending" }]);
+      settleOutbox("m", "s", [{ id: "line-2", text: "再发一次", images: [], ts: new Date(Date.now() + 1_000).toISOString() }]);
+      expect(outbox()["m/s"]).toBeUndefined();
+    } finally {
+      resolve(response({ ok: true })); // the retry's send ends either way, so the conversation's queue is free for the next case
+    }
   });
 
   it("notes a prompt that started a conversation as sent", () => {
@@ -407,6 +437,15 @@ describe("messages kept across a reload", () => {
     reload();
     restoreOutbox("m", "s");
     expect(outbox()["m/s"]).toMatchObject([{ id: "a6", error: reason, newId: true }]);
+  });
+
+  it("a message whose send timed out but went in shows as sent, not as failed to send again", () => {
+    // The hub answered 502 delivered "unknown" after its 90 s (the node wrote the message after it stopped waiting).
+    keepFailed("m", "s", { id: "a7", text: "前端页面上也有多次显示发送失败", images: [], at: Date.now() }, new ApiError(502, "x", { delivered: "unknown" }));
+    expect(outbox()["m/s"]).toMatchObject([{ id: "a7", state: "failed", inDoubt: true }]);
+    // Its line reaches the transcript a little later, with no tie from the hub.
+    settleOutbox("m", "s", [{ id: "line-9", text: "前端页面上也有多次显示发送失败", images: [], ts: new Date(Date.now() + 30_000).toISOString() }]);
+    expect(outbox()["m/s"]).toBeUndefined();
   });
 
   it("a message still sending when the page closed comes back too", () => {

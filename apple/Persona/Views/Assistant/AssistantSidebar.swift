@@ -121,6 +121,9 @@ import UIKit
         #if DEBUG && os(iOS)
         DrawerProbe.note("settle", ["from": Double(progress), "to": Double(target), "share": share])
         #endif
+        #if DEBUG
+        ShellTrace.shared.note("drawer \(target == 0 ? "close" : "open")")
+        #endif
         // The same spring for the tab bar and the sidebar (UIKit) as for the page (SwiftUI).
         settling = true
         UIView.animate(motion) {
@@ -795,9 +798,11 @@ struct AssistantSidebar: View {
     /// The chat whose Pin / Unpin confirmation is open (#6214): the menu asks before the hub call.
     @State private var leaderConfirm: Session?
     @State private var showArchived = false
+    /// The conversation picked in Archived, Auto conversations or Search: opened when its sheet has gone.
+    @State private var picked: SessionKey?
     @State private var autoList: AutoConversationsRoute?
     /// Whether Recent is folded, kept on this device (#6228): default open, the choice survives relaunches.
-    @AppStorage("assistant.sidebar.recent.folded") private var recentFolded = false
+    @StoredValue("assistant.sidebar.recent.folded") private var recentFolded = false
     @State private var feed = SidebarFeed()
     private let taskChats = AssistantTaskChatsStore.shared
     @FocusState private var searching: Bool
@@ -901,24 +906,33 @@ struct AssistantSidebar: View {
                 Text(String(localized: "Pin Confirmation Message [Leader Actions 6214]"))
             }
         }
-        .sheet(item: $autoList) { route in
+        // Tasks over the drawer: a conversation picked in one opens once its sheet is gone, so the sheet's dismissal and
+        // the drawer's closing never run together (docs/design/sidebar-navigation.md).
+        .sheet(item: $autoList, onDismiss: openPicked) { route in
             AutoConversationsView(source: route.source) { key in
+                picked = key
                 autoList = nil
-                open(key)
             }
         }
-        .sheet(isPresented: $showArchived) {
+        .sheet(isPresented: $showArchived, onDismiss: openPicked) {
             ArchivedConversationsView { key in
+                picked = key
                 showArchived = false
-                open(key)
             }
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $fullSearch) {
+        .fullScreenCover(isPresented: $fullSearch, onDismiss: openPicked) {
             AssistantFullSearch { key in
+                picked = key
                 fullSearch = false
-                open(key)
             }
+        }
+        #endif
+        #if DEBUG && os(iOS)
+        .task { // `-openFullSearch YES`: Search over the window on any phone; only an open iPhone Duo has it otherwise (#6577)
+            guard UserDefaults.standard.bool(forKey: "openFullSearch") else { return }
+            try? await Task.sleep(for: .seconds(2))
+            fullSearch = true
         }
         #endif
         .background {
@@ -1012,6 +1026,15 @@ struct AssistantSidebar: View {
 
     /// Settings on the page `AppModel.settingsPath` names (the switcher's Manage Assistants…): the way this sidebar has
     /// to Settings, else the app's own.
+    private func openPicked() {
+        guard let key = picked else { return }
+        picked = nil
+        #if DEBUG
+        ShellTrace.shared.note("task dismissed, open")
+        #endif
+        open(key)
+    }
+
     private func showSettings() {
         if let openSettings { openSettings() } else { model.showSettings() }
     }
@@ -1210,7 +1233,7 @@ struct AssistantSidebar: View {
         }
         .buttonStyle(.plain)
         .macListRow(selected: selected, in: Rectangle(), drawsShade: false) // the row draws its own (`selectedFill`)
-        .accessibilityLabel([mainDisplayName, String(localized: "Main Chat"), main.flatMap(stateWord)].compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
+        .accessibilityLabel([mainDisplayName, String(localized: "Main Chat"), main.flatMap { stateWord($0) }].compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("sidebar-main")
         .disabled(key == nil && model.assistantConfig == nil)
@@ -1466,12 +1489,12 @@ struct AssistantSidebar: View {
         let kept = isMain || builtIn
         let title = isMain ? mainDisplayName : named ?? (s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title)
         let preview = s.lastText.map { Fmt.plain($0).replacingOccurrences(of: "\n", with: " ") } ?? ""
-        let counts: String? = model.assistantLeaders.contains(s.sessionID)
-            ? model.directionCounts[s.sessionID].flatMap { DirectionCountsText.label(working: $0.working, needsYou: $0.needsYou) }
-            : nil
-        // One activity mark for the whole row (#6230): it spins whether this conversation runs its own turn or only the
-        // Agents under it work; the row's own needs-you / unread dot still takes precedence.
-        let leadWorking = model.assistantLeaders.contains(s.sessionID) && ((model.directionCounts[s.sessionID]?.working ?? 0) > 0)
+        let direction = model.assistantLeaders.contains(s.sessionID) ? model.directionTree?.leader(s.sessionID) : nil
+        let counts = direction?.counts.label
+        // One activity mark for the whole row (#6230): it spins whether this conversation runs its own turn or anything
+        // under it runs (the tree's `running`, an Agent at work, #6626); the row's own needs-you / unread dot still takes
+        // precedence. It is the only way the row says so: no "N working" beside it.
+        let leadWorking = direction?.running ?? false
         // What opened it when Persona did (#5195): the rule All Chats' filters use, so its mark and its filter agree.
         let source = isMain ? nil : AutoConversations.source(of: s, tasks: taskChats.known(on: model.api))
         return Button { open(s.key) } label: {
@@ -1488,7 +1511,7 @@ struct AssistantSidebar: View {
                 titleText(title, named: !isMain)
                 ConversationSourceMark(source: source, channels: s.channels) // what opened it, or its latest message's channel
                 Spacer(minLength: Theme.Space.xs)
-                // A direction's work at this moment ("N working · N need you"), never a zero part (#4331).
+                // What waits on you under a direction ("N need you", #4331); what runs is the mark after it (#6626).
                 if let counts {
                     Text(counts).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -1508,7 +1531,8 @@ struct AssistantSidebar: View {
         .buttonStyle(.plain)
         .tag(s.key)
         .macListRow(selected: selected, in: Rectangle(), drawsShade: false) // the row draws its own (`selectedFill`)
-        .accessibilityLabel([title, counts, isMain && s.title != title ? s.title : nil, source?.markLabel, stateWord(s), preview.isEmpty ? nil : preview]
+        .accessibilityLabel([title, counts, isMain && s.title != title ? s.title : nil, source?.markLabel, stateWord(s, under: leadWorking),
+                             preview.isEmpty ? nil : preview]
             .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(isMain ? "sidebar-main" : "sidebar-conversation")
@@ -1565,10 +1589,12 @@ struct AssistantSidebar: View {
         }
     }
 
-    private func stateWord(_ s: Session) -> String? {
+    /// The row's state as VoiceOver says it: its mark's (`RowStateMark`), so a lead that spins for what runs under it
+    /// (`under`) says Working too.
+    private func stateWord(_ s: Session, under: Bool = false) -> String? {
         switch s.state {
         case .working, .needsYou, .unread: s.state.label
-        default: s.updatedAt.map { Fmt.relative($0) }
+        default: under ? AgentState.working.label : s.updatedAt.map { Fmt.relative($0) }
         }
     }
 

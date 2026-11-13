@@ -209,7 +209,7 @@ class InboxEventShotsTest {
 
         // The chain: the newest entry, its link opens the processing conversation.
         rule.onNodeWithText("管理者处理").performClick()
-        assertEquals(ChatRoute("m1", "s-demo1"), opened.last())
+        assertEquals(ChatRoute("m1", "s-demo1", source = persona.core.navigation.RouteSource.InboxItem("lark:oc_demo1:100")), opened.last())
         rule.onNodeWithText("看原文").performClick()
         assertEquals(LarkRoute("oc_demo1", "lark:oc_demo1:100", 100), opened.last())
     }

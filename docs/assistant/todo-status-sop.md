@@ -28,9 +28,10 @@ then the folded ones, Done last. The same order decides which member leads a mer
 | Waiting on you | open | Something only the owner can move: an answer, an approval, a decision, a retry |
 | Working | open | An agent is running on it now |
 | PR to merge | open | Its work stopped at a pull request that is still open and nothing runs: however old, it stays here, with the PR link and how long since it moved |
+| Parked (web) | open | An explicitly parked task whose wait has not expired; it is unfinished, even if its last agent turn was seen |
 | Other open | open | Open, recently active, none of the above (an agent stopped and seen, a reminder of the user's own) |
 | Just finished | open | Worth a look: closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet (those stay until seen or reviewed); the owner has not seen it since (see "Seen") |
-| Shelved | folded | No activity for 48 hours and nothing running (see "Shelving") |
+| Inactive (web; Shelved on native clients) | folded | No activity for 48 hours and nothing running (see "Shelving"); not an explicit parked verdict |
 | Done | folded | Closed, accepted or deployed more than 24 hours ago or seen since; a finished turn the owner has seen since it last moved |
 
 ## Decision table
@@ -45,6 +46,7 @@ The first rule that holds wins.
 | 3 | `owner_decides` | Open, and the review says `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
 | 4 | `agent_running` | An agent is working or starting | Working |
 | 5 | `closed` | `done_at` is set | Just finished for 24 hours or until seen, then Done |
+| 5a | `parked` (web) | Open and the current review is parked | Parked until its `until`; after that, Other open while awaiting review, never Done just because its agent stopped |
 | 6 | `accepted` | The latest review accepted it and no review came since, even when the hub reopened it (see "Accepted tasks") | Just finished for 24 hours after the review or until seen, then Done |
 | 7 | `deployed` | `delivery.state` is `live` | Just finished for 24 hours or until seen, then Done |
 | 8 | `finished_unseen` | An agent finished a turn nobody has seen, the review is pending, or its ask says done / please verify; not seen since it last moved | Just finished |
@@ -52,6 +54,11 @@ The first rule that holds wins.
 | 9a | `seen` | Rule 8's signals, seen by the owner since it last moved (see "Seen"); not an open concern | Done |
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
+
+On the web, the header's Parked count is the number of to-dos in the Parked section (included in open).
+Inactive counts only automatic 48-hour shelving. The Parked section and review badge use the same localized name.
+Apple (`apple/Shared/TodoTriage.swift`) and Android (`TodoTriage.kt` in `android/core/domain`) still need this
+parked rule and naming alignment; #5929 records the parity gap. This web fix does not claim native-client delivery.
 
 **A failed start whose work got done another way is not the owner's**: the hub closes a to-do whose agent never started
 (`done_at` with its `start_error`), and rule 1 keeps it in Waiting on you so the owner can retry or remove it. When the
@@ -197,7 +204,10 @@ Relations chain (A shares a PR with B, B an issue with C: one row). A closed to-
 ## Accepted tasks
 
 When `task_review` accepts a task, the hub closes it. If its agent is then sent more work, the hub reopens it
-(`taskWorking` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says `accepted`. Earlier the
+(`taskWorking` → `closedTurnReopens` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says
+`accepted`. For a task with no plan (an adopted agent, often kept on for other work), only the task's conversation
+sending more (`agent_send`, or the owner's message on its card) reopens it; that agent's other turns leave it closed
+(#6726). Earlier the
 page treated every reopened task as not reviewed: it showed "Follow up", its badge "Supervising", and criteria added
 with the extra work (`agent_supervise` / `agent_send` replace `done_when`, so the list grew from 5 to 8) as open
 with a clock and counted them ("5/8").

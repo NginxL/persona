@@ -51,7 +51,8 @@ export function useFoldScroll(ref: RefObject<HTMLElement | null>, folded: boolea
   useLayoutEffect(() => void (folded && measure()), [measure, folded, ...deps]);
   useEffect(() => {
     const el = ref.current;
-    if (!el || !folded) return;
+    // no ResizeObserver (jsdom): measured on each change of `deps` only, as CommandScreenCard's fold does
+    if (!el || !folded || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();

@@ -67,7 +67,19 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityHTTPBodyStream: the manager takes MethodHTTPStreamed, a forwarded request whose body comes on a relay
+	// stream of its own instead of inside the bus message (#6574). The hub sends a large body that way only to a
+	// manager that names it; any other gets MethodHTTP as before.
+	CapabilityHTTPBodyStream = "http_body_stream"
 )
+
+// BodyStream is where MethodHTTPStreamed's body comes from: the relay the hub holds with ID (devicewire.RelayPath
+// ?id=, only the manager the request is for may take it), which carries exactly Size bytes as a body stream
+// (bus.WriteBody) and then closes normally.
+type BodyStream struct {
+	ID   string `json:"id"`
+	Size int64  `json:"size"`
+}
 
 // The methods and events, by direction. The assistant's handshake is manager.hello {id, host, os, arch, deploy,
 // version, capabilities}; its answer is Hello (with the hub's name, role and managers besides).
@@ -81,11 +93,16 @@ const (
 	EventBroadcast = "ws.broadcast" // one way
 
 	// The hub calls the assistant (Handler).
-	MethodHTTP    = "http.request" // HTTPRequest → HTTPResponse
-	MethodTools   = "assistant.tools"
-	MethodTool    = "assistant.tool"
-	MethodContext = "assistant.context"
-	MethodAction  = "manager.action"
+	MethodHTTP = "http.request" // HTTPRequest → HTTPResponse
+	// MethodHTTPStreamed is MethodHTTP for a large body: HTTPRequest without Body, with BodyStream saying where the
+	// body comes from. The manager reads it whole before the route runs, so the bus carries no message of its size
+	// and other calls are not held up behind it (#6574). A body that does not arrive whole is refused with
+	// CodeBodyIncomplete before anything runs.
+	MethodHTTPStreamed = "http.request_streamed"
+	MethodTools        = "assistant.tools"
+	MethodTool         = "assistant.tool"
+	MethodContext      = "assistant.context"
+	MethodAction       = "manager.action"
 
 	// The hub tells the assistant (one way).
 	EventUserSpoke           = "session.user_spoke"
@@ -126,6 +143,9 @@ const (
 	// conversation (Data: conversation_agent, launcher, launcher_agent, delivered "none"): the hub answers 409, nothing
 	// was sent, and the conversation keeps its agent (docs/assistant/assistant.md, #4662).
 	CodeLauncherOtherKind = "launcher_other_kind"
+	// CodeBodyIncomplete: MethodHTTPStreamed's body did not arrive whole (the relay was not there, broke or carried
+	// another size). Nothing ran: the hub sends the request again as MethodHTTP.
+	CodeBodyIncomplete = "body_incomplete"
 )
 
 // HTTPRequest is http.request's params: an app's request on one of Routes, with an escaped URL path (header without
@@ -144,7 +164,10 @@ type HTTPRequest struct {
 	Path   string              `json:"path"`
 	Query  string              `json:"query,omitempty"`
 	Header map[string][]string `json:"header,omitempty"`
-	Body   []byte              `json:"body,omitempty"`
+	// BodyStream is set on MethodHTTPStreamed only, in place of Body: where the body comes from.
+	BodyStream *BodyStream `json:"body_stream,omitempty"`
+	// Body stays the last field: hub/bus_forward.go httpParams appends it to the rest as written.
+	Body []byte `json:"body,omitempty"`
 }
 
 // HTTPResponse is http.request's answer, written back to the app unchanged.

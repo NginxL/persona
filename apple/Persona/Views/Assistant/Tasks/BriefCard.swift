@@ -463,7 +463,7 @@ struct BriefAcceptRow: View {
 
 /// A decision that can wait (#4930, #5803): nothing was pushed for it, it comes with the next briefing. Only a to-do's
 /// own row carries it (`TodoAsk.row`); a briefing's rows never do.
-private struct BriefHeldMark: View {
+struct BriefHeldMark: View {
     var id: String
 
     var body: some View {
@@ -540,8 +540,11 @@ private extension View {
     @ViewBuilder func tapTargetHeightIf(_ tall: Bool) -> some View {
         if tall { buttonLabelHeight() } else { self }
     }
+}
 
-    /// A label tall enough that the glass button around it (about 14 pt of its own padding) is a finger's height.
+extension View {
+    /// A label tall enough that the glass button around it (about 14 pt of its own padding) is a finger's height
+    /// (also the decision row's Later and Don't handle, DecisionRow.swift).
     func buttonLabelHeight() -> some View {
         scaledFrame(minHeight: Theme.Size.tapTarget - 14).frame(minHeight: Theme.Size.tapTarget - 14)
     }

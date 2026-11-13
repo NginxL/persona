@@ -101,4 +101,25 @@ class MessageContextsTest {
         assertEquals("上下文 · 5 项", (contextSummary(contexts)).zhAny())
         assertEquals("看下构建为什么挂了", (cleanText(text, "[图片]")).zhAny())
     }
+
+    @Test fun theInterjectNoteIsNeverAnOwnerBubbleQuote() {
+        val interject =
+            """<persona-context kind="context" title="插话" url="">
+            用户在你这一轮还没做完时发来下面这条消息。
+            </persona-context>
+            先停一下，帮我查个东西""".trimIndent()
+        val (contexts, rest) = parseContexts(interject)
+        // the block parses like any context, but the render predicate marks it as the hub's interject note
+        assertEquals(1, contexts.size)
+        assertTrue(contexts.single().isInterjectContext())
+        assertEquals("先停一下，帮我查个东西", rest.zhAny())
+        // a normal picked context beside it still renders
+        val mixed = interject + "\n<persona-context kind=\"context\" title=\"需求文档\" url=\"https://x\">摘要</persona-context>"
+        val renderable = parseContexts(mixed).first.filterNot(MessageContext::isInterjectContext)
+        assertEquals(listOf("需求文档"), renderable.map { it.title }.zhAny())
+        // only the exact title is dropped; a similarly named context stays a quote
+        val similar = parseContexts("<persona-context kind=\"context\" title=\"插话记录\" url=\"\">x</persona-context>问").first
+        assertEquals(1, similar.size)
+        assertTrue(similar.none { it.isInterjectContext() })
+    }
 }

@@ -635,6 +635,11 @@ private val TagPadding = PaddingValues(horizontal = 6.dp.dense, vertical = 2.dp.
 
 // ------------------------------------------------------------------ progress
 
+/** Fixed stroke widths for [JSpinner], independent of the page's spacing density. */
+object SpinnerTokens {
+    val compactStroke = Tokens.Android.Size.spinnerStroke
+}
+
 /**
  * The style's spinner: an ink arc in brief, an accent arc elsewhere. Static when motion is reduced. It reads its angle only while
  * drawing, so a turn draws the arc again and recomposes nothing (iOS's spinners turn off the main thread).

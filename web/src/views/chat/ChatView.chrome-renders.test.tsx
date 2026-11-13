@@ -105,6 +105,28 @@ async function open(view: React.ReactElement, session = row()) {
 }
 const posted = (path: string) => fetcher.mock.calls.filter(([url, init]) => String(url).endsWith(path) && (init as RequestInit | undefined)?.method === "POST");
 
+it("a completed task remains a labelled, clickable owner, not a prompt to link it again", async () => {
+  const router = await import("../../lib/router");
+  const navigate = vi.spyOn(router, "navigate").mockImplementation(() => {});
+  try {
+    await open(<ChatView mid="mac" sid="s1" inPage />, row({
+      status: "idle", state: "idle", completed_todo: { id: "done-task", title: "Completed example task" },
+    }));
+    act(() => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-chatview.more_actions")}"]`)!.click());
+    await settle();
+    const menu = document.querySelector('[role="menu"]')!;
+    const label = t("chat-chatview.todo_completed_label", { title: "Completed example task" });
+    expect(menu.textContent).toContain(label);
+    expect(menu.textContent).not.toContain(t("chat-chatview.link_todo"));
+    expect(menu.textContent).not.toContain(t("chat-chatview.relink_todo"));
+    const item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.includes(label))!;
+    act(() => item.click());
+    expect(navigate).toHaveBeenCalledWith("/todos?id=done-task");
+  } finally {
+    navigate.mockRestore();
+  }
+});
+
 it("an agent's page: pushed items leave its header and composer alone, a session change still reaches them", async () => {
   await open(<ChatView mid="mac" sid="s1" inPage />);
   for (let seq = 1; seq <= 10; seq++) await push(seq);

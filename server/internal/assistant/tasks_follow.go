@@ -137,6 +137,10 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string) {
 		if !found {
 			return
 		}
+		if !s.closedTurnReopens(closed, mid, sid) {
+			s.logf("task %s: accepted; its agent works again, but nothing was sent for the task: left closed", closed.ID)
+			return
+		}
 		if err := s.reopenTodo(ctx, closed.ID); err != nil {
 			s.logf("task %s: reopen: %v", closed.ID, err)
 			return
@@ -156,6 +160,52 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string) {
 	if t.Supervision != nil {
 		s.supervisedWorking(ctx, t)
 	}
+}
+
+// agentSent is one send to an agent for a conversation: which one and when (tasksState.sentBy).
+type agentSent struct {
+	conversation string
+	at           time.Time
+}
+
+// noteAgentSend records that conversation self is sending agent mid/sid text now (agent_send, or the owner's message on
+// a task's card, routeToTask), before the send goes: its turn may start before the call returns. undo takes the record
+// back when the send failed, unless a later send replaced it.
+func (s *Service) noteAgentSend(self, mid, sid string) (undo func()) {
+	key, sent := [2]string{mid, sid}, agentSent{conversation: self, at: time.Now()}
+	s.tasks.mu.Lock()
+	s.tasks.sentBy[key] = sent
+	s.tasks.mu.Unlock()
+	return func() {
+		s.tasks.mu.Lock()
+		if s.tasks.sentBy[key] == sent {
+			delete(s.tasks.sentBy, key)
+		}
+		s.tasks.mu.Unlock()
+	}
+}
+
+// closedTurnReopens: a new turn of agent mid/sid opens closed task t again (taskWorking). One the hub's judge closed,
+// yes: the judge may have been early, and more for it comes as a turn of its agent. So does one its supervisor
+// accepted whose agent its plan started (task_plan): that session exists for the task, and more for it (the owner's
+// follow-up, a start that failed and came up late) is the task's work. A task with no plan has an agent that was often
+// running before it became the task's (agent_supervise, agent_send with a task, an agent that became a task by itself,
+// a link by hand; agent_start's tasks have no plan either) and is kept on for other work: turns for its own timers,
+// other conversations, messages from other sessions and the owner's words in its own session reopened the finished
+// task each time and woke its supervision again (#6726). Such an accepted task reopens only when the task's
+// conversation (or its supervisor) sent the agent more after the acceptance: agent_send, or the owner's message on the
+// task's card. The owner can still reopen one by hand.
+func (s *Service) closedTurnReopens(t Todo, mid, sid string) bool {
+	if t.DoneBy != db.DoneByReview || t.PlanID != "" {
+		return true
+	}
+	s.tasks.mu.Lock()
+	sent, ok := s.tasks.sentBy[[2]string{mid, sid}]
+	s.tasks.mu.Unlock()
+	if !ok || t.DoneAt == nil || !sent.at.After(*t.DoneAt) {
+		return false
+	}
+	return sent.conversation == t.Origin || t.Supervision != nil && sent.conversation == t.Supervision.Supervisor
 }
 
 type receiptBody struct {
@@ -457,6 +507,12 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 	}
 	live, last := liveTaskAgents(agents)
 	if len(live) == 0 { // every agent has stopped (read-only, #4754): the user's message starts a new one (tasks_successor.go)
+		if guard != nil {
+			cur, ok := s.todoNow(todoID)
+			if !ok || !guard(cur) {
+				return FeedItem{}, db.ErrTodoCompleted
+			}
+		}
 		if relay != "" {
 			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_stopped")
 		}
@@ -488,7 +544,11 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 			return FeedItem{}, db.ErrTodoCompleted
 		}
 	}
+	unsent := s.noteAgentSend(conversation, c.MachineID, c.SessionID) // the owner's words to the task reopen it (#6726)
 	if err := s.call(sctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil); err != nil {
+		if !startResultUnknown(err) {
+			unsent()
+		}
 		return FeedItem{}, err
 	}
 	body := map[string]string{"text": text}

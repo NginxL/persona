@@ -1,0 +1,22 @@
+{
+  "android": {
+    "size": {
+      "assistantSplitMin": {
+        "$type": "dimension",
+        "$value": {
+          "value": 840,
+          "unit": "px"
+        },
+        "$description": "Android assistant split: the least width for its existing 300dp conversation list beside a chat"
+      },
+      "spinnerStroke": {
+        "$type": "dimension",
+        "$value": {
+          "value": 1.8,
+          "unit": "px"
+        },
+        "$description": "Android compact spinner stroke: a small activity arc beside an 8dp dot or in a 20dp inline mark"
+      }
+    }
+  }
+}

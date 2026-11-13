@@ -94,7 +94,10 @@ enum RecordingSamples {
     /// `room-whiteboard`: `room-taking-part` started with photos, which adds a made-up whiteboard photo as the camera
     /// would (#3862 phase 3); `room-talk-held`: `room-taking-part` with Talk held for 10 s once the meeting call is up
     /// (#3862 phase 4; every room sample feeds canned audio into the recorder's tap for Talk); `minutes` / `pending`: a
-    /// finished meeting whose page opens (its minutes from the hub, or still being written). Both recordings are made up.
+    /// finished meeting whose page opens (its minutes from the hub, or still being written); `room-highlights`:
+    /// `room-taking-part` started with the highlights too (phase 2b), 24:20 in, with a line in each of fourteen minutes
+    /// (`highlightsLines`), so the hub's highlights and the transcript at their minutes have real lines. Both
+    /// recordings are made up.
     static func showMeetingIfAsked() {
         #if os(iOS)
         guard let mode = UserDefaults.standard.string(forKey: "showMeetingSample") else {
@@ -126,7 +129,9 @@ enum RecordingSamples {
         if mode == "flow" { startFlow(meeting); return }
 
         RecordingLibrary.shared.restore(liveMeeting)
-        var live = RecordingEntry(id: liveMeeting, createdAt: .now.addingTimeInterval(-754), source: .phone, title: "产品周会", active: true)
+        let highlighted = mode == "room-highlights"
+        let elapsed: Double = highlighted ? highlightsElapsed : 754
+        var live = RecordingEntry(id: liveMeeting, createdAt: .now.addingTimeInterval(-elapsed), source: .phone, title: "产品周会", active: true)
         live.meeting = meeting
         live.segments = [RecordingSegment(index: 0, start: 0, duration: 30, sentences: [
             RecordingSentence(start: 1, end: 9, text: "好，我们开始，今天先看录音入口的进展。"),
@@ -136,14 +141,16 @@ enum RecordingSamples {
         // answers given. The main chat attends, picked for it (no session named, `mainPicked`: never the default, #3862);
         // the made-up meeting's upload tells the hub, as a real one would, and its lines go to the hub's live log, the last
         // one just before the tap (12:34). `room-listening` / `room-taking-part`: the meeting's own room conversation
-        // attends instead (#3862), not private; `room-whiteboard` takes part and takes photos.
-        let room = ["room-listening", "room-taking-part", "room-whiteboard", "room-talk-held"].contains(mode)
+        // attends instead (#3862), not private; `room-whiteboard` takes part and takes photos; `room-highlights` takes part
+        // with the highlights (phase 2b) and its own fourteen lines.
+        let room = ["room-listening", "room-taking-part", "room-whiteboard", "room-talk-held", "room-highlights"].contains(mode)
         let photos = mode == "room-whiteboard"
         if ["listening", "taking-part", "answered"].contains(mode) || room {
             if room {
-                // Started with the live view (#3862 phase 2): the page shows the room's topics once the hub has any.
+                // Started with the live view (#3862 phase 2): the page shows the room's topics once the hub has any (and
+                // with the highlights, phase 2b, its highlights).
                 live.attendance = RecordingAttendance.room(mode == "room-listening" ? .listener : .participant, private: false,
-                                                           photos: photos, liveView: true)
+                                                           photos: photos, liveView: true, highlights: highlighted)
             } else {
                 live.attendance = RecordingAttendance(role: mode == "listening" ? .listener : .participant, session: nil,
                                                       sessionTitle: "Persona", mainPicked: true)
@@ -151,13 +158,14 @@ enum RecordingSamples {
             live.segments.append(RecordingSegment(index: 1, start: 720, duration: 30, sentences: [
                 RecordingSentence(start: 741, end: 748, text: "上周定的长录音测试谁负责？"),
             ]))
+            if highlighted { live.segments = highlightsSegments }
         }
         if photos {
             // An earlier run's photos not sent yet stay behind: this run's whiteboard is the only one.
             try? FileManager.default.removeItem(at: RecordingLibrary.shared.folder(liveMeeting).appending(path: MeetingPhotos.listFile))
         }
         try? RecordingLibrary.shared.save(live)
-        RecordingCapture.shared.showSample(liveMeeting, elapsed: 754, paused: mode == "paused", interrupted: mode == "interrupted")
+        RecordingCapture.shared.showSample(liveMeeting, elapsed: elapsed, paused: mode == "paused", interrupted: mode == "interrupted")
         if photos { Task { await addWhiteboard() } }
         // The room meetings' microphone for Talk (#3862 phase 4): canned audio into the recorder's tap. `room-talk-held`:
         // `room-taking-part` with Talk held for a while once the meeting call is up (the held page's screenshot), its
@@ -178,6 +186,35 @@ enum RecordingSamples {
             MeetingSpeaker.shared.showSample(second.id)
         }
         #endif
+    }
+
+    /// `room-highlights`: how far into its recording the meeting is (24:20).
+    static let highlightsElapsed: Double = 1460
+
+    /// `room-highlights`: a product meeting's lines, each in a minute of its own (starts at least 61 s apart, so a
+    /// highlight set at a line's second has that line alone in its minute), from 0:05 to 23:40.
+    static let highlightsLines: [RecordingSentence] = [
+        RecordingSentence(start: 5, end: 12, text: "好，我们开始，今天先过导出功能、供应商和下季度定价。"),
+        RecordingSentence(start: 80, end: 88, text: "导出上限现在是 4 MB，几家客户反馈大文件导不出来。"),
+        RecordingSentence(start: 150, end: 159, text: "我建议这个版本先保留上限，下个版本再放开。"),
+        RecordingSentence(start: 225, end: 233, text: "同意，这个版本保留 4 MB 的导出上限，发版说明里写清楚。"),
+        RecordingSentence(start: 370, end: 379, text: "接下来是供应商，他们的合同下个月到期。"),
+        RecordingSentence(start: 460, end: 469, text: "他们最近两次交付都晚了一周左右。"),
+        RecordingSentence(start: 545, end: 553, text: "但现在换供应商成本太高，三季度前也来不及迁移。"),
+        RecordingSentence(start: 620, end: 629, text: "那就先续约到三季度，下周再核一次成本。"),
+        RecordingSentence(start: 830, end: 838, text: "定价方面，销售希望企业版按席位收费。"),
+        RecordingSentence(start: 915, end: 923, text: "按用量收费对小团队更友好，两种方案都算一下。"),
+        RecordingSentence(start: 1050, end: 1058, text: "张三周五前出一版两种定价方案的测算。"),
+        RecordingSentence(start: 1185, end: 1193, text: "还有招聘计划，目前没有人负责。"),
+        RecordingSentence(start: 1270, end: 1278, text: "招聘计划谁来负责，下次会上再定。"),
+        RecordingSentence(start: 1420, end: 1428, text: "今天先到这里，下周同一时间再对一次进展。"),
+    ]
+
+    /// `highlightsLines`, a segment of its own each, as 30-second segments land.
+    private static var highlightsSegments: [RecordingSegment] {
+        highlightsLines.enumerated().map { n, line in
+            RecordingSegment(index: n, start: max(0, line.start - 2), duration: 30, sentences: [line])
+        }
     }
 
     #if os(iOS)
@@ -202,9 +239,12 @@ enum RecordingSamples {
                 buffer.frameLength = AVAudioFrameCount(frames)
                 let voiced = tick % 50 < 30
                 for i in 0..<frames {
-                    let t = Double(tick * frames + i) / 16000
+                    let t: Double = Double(tick * frames + i) / 16000
                     // A low hum with a slower swell: loud enough to count as speech (`MeetingTalkWindow.speechLevel`).
-                    channel[i] = voiced ? Float(0.12 * sin(2 * .pi * 180 * t) * (0.6 + 0.4 * sin(2 * .pi * 3 * t))) : 0
+                    // In steps with their types written out: as one expression Xcode 26.0 gives up type-checking it.
+                    let hum: Double = sin(2 * Double.pi * 180 * t)
+                    let swell: Double = 0.6 + 0.4 * sin(2 * Double.pi * 3 * t)
+                    channel[i] = voiced ? Float(0.12 * hum * swell) : 0
                 }
                 RecordingCapture.shared.feedSample(buffer)
                 tick += 1

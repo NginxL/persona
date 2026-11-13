@@ -251,7 +251,6 @@
     <string name="chat_links_context_default">See the content above.</string>
     <string name="chat_menu_copied">Copied</string>
     <string name="chat_menu_no_share">No app can share this</string>
-    <string name="chat_menu_select_title">Select text</string>
     <string name="chat_menu_copy">Copy</string>
     <string name="chat_menu_select">Select</string>
     <string name="chat_menu_quote">Quote</string>

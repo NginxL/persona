@@ -404,6 +404,32 @@ struct ChatView: View {
         }
     }
 
+    /// The closeout the header's card shows (#3612, `CloseoutCard`): a stopped agent's own account of its work, on its
+    /// own chat (not a subagent's, not an assistant conversation). The Mac app is frozen and draws no card, so it
+    /// keeps the reply as it was written.
+    private var shownCloseout: Closeout? {
+        #if os(macOS)
+        return nil
+        #else
+        guard style == .dev, pane == .chat, viewing == nil, let session, !session.assistant else { return nil }
+        return session.shownCloseout
+        #endif
+    }
+
+    /// The card, at most a share of the page tall (as the workflow section): the conversation stays under it.
+    @ViewBuilder private var closeoutCard: some View {
+        if let closeout = shownCloseout {
+            // Under an open workflow section it starts folded: the two would take most of the page.
+            CloseoutCard(closeout: closeout, artifacts: session?.work?.artifacts ?? [],
+                         maxHeight: pageHeight > 0 ? pageHeight * Theme.Size.workflowShare : nil, startsOpen: !hasWorkflows)
+                // A list row carries only where the closeout stands; what changed and what was verified come with
+                // the session's own read. One that arrived without them (a list push after the chat opened) is read again.
+                .task(id: CloseoutRead(key: key, closeout: closeout)) {
+                    if closeout.did == nil, closeout.verified == nil { await model.refreshSessionDetail(key) }
+                }
+        }
+    }
+
     /// A workflow runs in the background (#2935), or one just ended: its section shows (only in the chat pane).
     private var hasWorkflows: Bool { pane == .chat && !(session?.shownWorkflows().isEmpty ?? true) }
 
@@ -969,7 +995,8 @@ struct ChatView: View {
                                        streaming: drawsLive && (frozen.map { !$0.text.isEmpty } ?? liveShown),
                                        quietAgents: quietSubagents, workflowCalls: workflowCalls,
                                        day: style == .assistant ? Calendar.current.startOfDay(for: .now) : nil,
-                                       supervision: openSupervision, active: shownRoundActive, background: foldsBackground)
+                                       supervision: openSupervision, active: shownRoundActive, background: foldsBackground,
+                                       closeout: shownCloseout != nil)
         if scratch.linesKey == key { return scratch.lines }
         var blocks = store.blocks
         if frozen != nil {
@@ -989,6 +1016,8 @@ struct ChatView: View {
             lines = ChatLines.daySections(ChatLines.quickResults(ChatLines.mergeFeed(lines, feed)))
         }
         lines = ChatLines.sourceRuns(lines)
+        // The card in the header says the closeout (#3612): the reply that carried the raw block shows without it.
+        if key.closeout { lines = ChatLines.hidingCloseout(lines) }
         scratch.lines = lines
         scratch.linesKey = key
         ChatTrace.shared.note(shownKey, ChatTrace.screen(lines, live: store.liveText.count, streaming: key.streaming, running: key.live != nil,
@@ -996,10 +1025,12 @@ struct ChatView: View {
         return lines
     }
 
-    /// The main conversation folds its background rounds while the hub's switch is on (docs/apple/ios.md "Background rounds").
+    /// The main conversation and the leader conversations fold their background rounds while the hub's switch is on
+    /// (docs/apple/ios.md "Background rounds", #6595).
     private var foldsBackground: Bool {
         ChatLines.foldsBackground(assistant: style == .assistant, conversation: shownKey.sessionID,
-                                  main: model.assistantMain?.sessionID, on: model.mainBackgroundFolded)
+                                  main: model.assistantMain?.sessionID, on: model.mainBackgroundFolded,
+                                  leaders: Set(model.assistantLeaders))
     }
 
     /// A later turn must not make a frozen historical question look like a live one.
@@ -3647,6 +3678,12 @@ struct ChatView: View {
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.bottom, Theme.Space.s)
                 }
+                // What the agent said of its own work as it stopped (#3612): above the transcript, never inside it.
+                if shownCloseout != nil {
+                    closeoutCard
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.bottom, Theme.Space.s)
+                }
                 // The ports it listens on (its dev servers, docs/operations/ports.md): a tap opens the page.
                 if let ports = session?.ports, !ports.isEmpty {
                     SessionPortChips(machine: key.machineRef, ports: ports)
@@ -3791,6 +3828,7 @@ struct ChatView: View {
         if tabs || hasActivity || mode != nil { contextRow(tabs: tabs, activity: hasActivity, mode: mode) }
         if let goal = session?.goal { GoalBar(goal: goal) }
         workflowBar
+        closeoutCard
         if let ports = session?.ports, !ports.isEmpty { SessionPortChips(machine: key.machineRef, ports: ports) }
         if pane == .chat {
             if host == nil {
@@ -5029,6 +5067,9 @@ struct Composer: View, Equatable {
     @State private var voiceNote: VoiceUnavailableNote?
     /// The model menu's "Other Model…" (#1644): a model ID typed by hand, through POST …/modes.
     @State private var typingModel = false
+    /// The main Persona chat's own model sheet (#6542): the conversation-scoped pick (#5033), opened from its model row.
+    @State private var showAssistantModel = false
+    @State private var assistantPanel: AssistantModelPanelModel?
 
     /// The voice call bound to this conversation, live or ended (docs/assistant/voice.md 6.2): the bar takes the box's place while
     /// it is on, and 「语音已结束 · 继续」 sits over the box after it ended by itself.
@@ -5106,6 +5147,18 @@ struct Composer: View, Equatable {
         guard let s = model.session(key) else { return false }
         if s.capabilities?.model != nil { return SessionModes.offersModels(s, list: runningModels) }
         return s.canSend && s.canTerminal && s.paneID != nil && !s.isCodex && !s.isTraex && !s.assistant
+    }
+
+    /// The main Persona conversation: its model row opens the conversation model sheet (#6542), never the terminal
+    /// session's `/model` menu (the headless assistant has no terminal to type into).
+    private var isAssistantChat: Bool { model.session(key)?.assistant == true }
+    /// The hub keeps a conversation's own model pick (#5033); an older hub keeps nothing and the row stays read-only.
+    private var assistantModelPickAvailable: Bool { isAssistantChat && model.keepsConversationModelPick(key.group) }
+    /// What the main chat's next message runs on: its own pick, then the Main chat default, then the running process's
+    /// last model while the picker has not answered (the 11-13 Haiku/Opus divergence fix).
+    private var assistantEffective: AssistantModelChoice.Effective? {
+        guard isAssistantChat else { return nil }
+        return AssistantModelChoice.effective(session: model.session(key), response: model.cachedAssistantLaunchers(key.machineRef))
     }
 
     @ViewBuilder private var extensionPrompts: some View {
@@ -5211,9 +5264,14 @@ struct Composer: View, Equatable {
     /// Only the effort can change: a Codex thread on its app-server (`Session.setsEffortOnly`).
     private var setsEffortOnly: Bool { model.session(key)?.setsEffortOnly == true }
 
-    /// The model button's title; with nothing to show or pick, no button.
+    /// The model button's title; with nothing to show or pick, no button. The main conversation names its *effective*
+    /// model (pick > Main chat default > running), so a hub-side change shows after the picker refreshes (#6542).
     private var modesTitle: SessionModes.ComposerTitle? {
         let effort = setsModes || setsEffortOnly
+        if isAssistantChat, let effective = assistantEffective {
+            let name = AssistantModelChoice.displayName(effective, response: model.cachedAssistantLaunchers(key.machineRef))
+            return SessionModes.composerTitle(model: name, effort: effort ? SessionModes.effortLabel(model.session(key)?.effort) : nil)
+        }
         return SessionModesMenu.title(model.session(key), setsModes: effort) ?? (effort || canPickModel ? .init(model: String(localized: "Model [Assistant View c98e11]")) : nil)
     }
 
@@ -5394,7 +5452,8 @@ struct Composer: View, Equatable {
                     #endif
                 } modes: {
                     SessionModesMenu(key: key, session: model.session(key), picksModel: canPickModel, setsModes: setsModes,
-                                     setsEffortOnly: setsEffortOnly, otherModel: canPickModel ? { typingModel = true } : nil, pick: pickMode)
+                                     setsEffortOnly: setsEffortOnly, otherModel: canPickModel ? { typingModel = true } : nil,
+                                     assistantPick: assistantModelPickAvailable ? { showAssistantModel = true } : nil, pick: pickMode)
                 }
             } else if AppStyle.current.usesBeautifulUI {
                 // The BeautifulUI style's prompt bar; every other style keeps the original input line.
@@ -5625,6 +5684,22 @@ struct Composer: View, Equatable {
         #endif
         .modifier(ComposerCaptureSheets(camera: $showCamera, glasses: $showGlasses, scan: $showScan, pages: { addScan($0) }) { add($0) })
         .sheet(isPresented: $typingModel) { SessionTypedModelSheet(key: key, session: model.session(key)) }
+        .onChange(of: showAssistantModel) { _, on in
+            if on, assistantPanel == nil {
+                assistantPanel = AssistantModelPanelModel(key: key, machine: key.machineRef)
+            }
+        }
+        .sheet(isPresented: $showAssistantModel, onDismiss: { assistantPanel = nil }) {
+            if let assistantPanel {
+                AssistantModelSheet(session: model.session(key), panel: assistantPanel)
+            }
+        }
+        // Keep the effective Main chat model fresh so the composer title matches what the next message runs (#6542):
+        // re-read when the conversation is replaced (/clear) or Model Settings change.
+        .task(id: "\(key.sessionID)-\(model.launchersRevision)") {
+            guard assistantModelPickAvailable else { return }
+            _ = try? await model.assistantLaunchers(key.machineRef)
+        }
         .onChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             Task { await load(items) }
@@ -6278,7 +6353,7 @@ struct QueueStrip: View {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         ThemedIcon(Theme.Icon.expand)
-                            .font(Theme.Font.caption.weight(.semibold))
+                            .font(Theme.Font.captionStrong)
                             .foregroundStyle(.secondary)
                             .rotationEffect(.degrees(relayedExpanded ? 180 : 0))
                     }
@@ -6777,6 +6852,14 @@ struct ChatLine: Identifiable {
         id = content.id
         self.content = content
     }
+
+    private init(id: String, content: Content) {
+        self.id = id
+        self.content = content
+    }
+
+    /// `line` drawn as `row` under its own id: the list keeps its place (`ChatLines.hidingCloseout`).
+    static func replacing(_ line: ChatLine, with row: ChatRow) -> Self { Self(id: line.id, content: .row(row)) }
 
     static func supervision(id: String, lines: [ChatLine], live: Bool, source: MessageSource? = nil) -> Self {
         Self(.supervision(id: id, lines: lines, live: live, source: source))
@@ -7374,6 +7457,12 @@ struct WorkLine: View, Equatable {
 }
 
 
+/// What the closeout card's detail read follows: the chat and the closeout as the list has it.
+private struct CloseoutRead: Equatable {
+    var key: SessionKey
+    var closeout: Closeout
+}
+
 /// Where a work line's or tool run's header is, told to the chat's pin (`workHeadMoved`). Not from Full Page's copies of
 /// the lines (#1609): they are off screen, and their positions moved the list the next time a header was tapped.
 private struct WorkHeadReport: ViewModifier {
@@ -7450,16 +7539,18 @@ private struct ChatLiveText: View {
         #endif
         // Held: the store is not read, so the deltas do not draw this again.
         let text = held ?? (Self.shows(store) ? store.liveText : "")
+        // Held, or the stream over: the words whole, not revealed further (#6651).
+        let done = held != nil || store.liveDone
         if !text.isEmpty {
             if layout.on {
-                StreamingText(text: text)
+                StreamingText(text: text, done: done)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .chatBoxed(Theme.ChatBox.persona)
                     .chatMark("chat.live")
                     .id("live")
                     .flippedBack()
             } else {
-                StreamingText(text: text).chatMark("chat.live").id("live").flippedBack()
+                StreamingText(text: text, done: done).chatMark("chat.live").id("live").flippedBack()
             }
         }
     }
@@ -7589,6 +7680,8 @@ final class ChatScratch {
         var active = false
         /// Background rounds fold (`ChatLines.foldBackground`): the main conversation with the hub's switch on.
         var background = false
+        /// The header shows the session's closeout card: its raw block is left out of the last reply.
+        var closeout = false
     }
     /// What was sent from this chat lately: its transcript copy arriving brings you to the newest, others do not.
     var sentHere: [(id: UUID, text: String)] = []

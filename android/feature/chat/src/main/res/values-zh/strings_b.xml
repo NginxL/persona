@@ -244,7 +244,6 @@
     <string name="chat_links_context_default">参考上面的内容。</string>
     <string name="chat_menu_copied">已拷贝</string>
     <string name="chat_menu_no_share">没有能分享的应用</string>
-    <string name="chat_menu_select_title">选择文本</string>
     <string name="chat_menu_copy">复制</string>
     <string name="chat_menu_select">选择</string>
     <string name="chat_menu_quote">引用</string>

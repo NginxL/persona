@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "operation": "inbox_showcase",
+  "description": "One scenario every client draws for the side-by-side screenshots: the list, then sc-1's detail with its timeline folded and expanded. Items are as the hub lists them (wire JSON), made up, in Chinese because the screenshots are read in zh-Hans; the chain's text is what a zh-Hans hub writes. Clock: 2026-01-01T12:00:00Z; zh-Hans first, en once for the state words; light and dark.",
+  "now_clock": "2026-01-01T12:00:00Z",
+  "detail": "sc-1",
+  "items": [
+    {
+      "id": "sc-1",
+      "source": "chat",
+      "kind": "group",
+      "account": "chat",
+      "account_name": "团队聊天",
+      "title": "春季订单的报价",
+      "summary": "张三发现税率错了，正在等他确认更正后的报价",
+      "where": "订单群",
+      "sender": "张三",
+      "preview": "好的，我看一下新的",
+      "count": 3,
+      "started_at": "2026-01-01T11:02:00Z",
+      "updated_at": "2026-01-01T11:21:00Z",
+      "tier": "action",
+      "status": "working",
+      "now": "waiting",
+      "handling": {
+        "owner": "manager",
+        "state": "waiting",
+        "machine_id": "m1",
+        "session_id": "s-handling",
+        "since": "2026-01-01T11:20:30Z"
+      },
+      "follow": {
+        "who": "张三确认新报价",
+        "next": "问更正后的报价行不行",
+        "check_at": "2026-01-02T09:00:00Z"
+      },
+      "recap": "张三要报价单。Agent 对着价目表核了一遍，发现第 3 行用的是去年的税率；更正后的报价已经用邮件发出。",
+      "chain": [
+        {
+          "id": "c1",
+          "at": "2026-01-01T11:02:00Z",
+          "kind": "received",
+          "text": "收到 2 条消息 · 张三",
+          "via": "chat",
+          "count": 2,
+          "sender": "张三",
+          "link": {
+            "type": "source"
+          }
+        },
+        {
+          "id": "c2",
+          "at": "2026-01-01T11:03:00Z",
+          "kind": "handling",
+          "text": "助手处理",
+          "via": "assistant",
+          "link": {
+            "type": "session",
+            "machine_id": "m1",
+            "session_id": "s-handling"
+          }
+        },
+        {
+          "id": "c3",
+          "at": "2026-01-01T11:04:00Z",
+          "kind": "agent",
+          "text": "开了 Agent：核对报价单",
+          "via": "agent",
+          "link": {
+            "type": "session",
+            "machine_id": "m1",
+            "session_id": "s-agent"
+          }
+        },
+        {
+          "id": "c4",
+          "at": "2026-01-01T11:19:00Z",
+          "kind": "agent_stopped",
+          "text": "Agent 停了：报价单第 3 行税率错了",
+          "via": "agent",
+          "link": {
+            "type": "session",
+            "machine_id": "m1",
+            "session_id": "s-agent"
+          }
+        },
+        {
+          "id": "c5",
+          "at": "2026-01-01T11:20:00Z",
+          "kind": "reported",
+          "text": "发了邮件：报价单更正",
+          "via": "agent"
+        },
+        {
+          "id": "c6",
+          "at": "2026-01-01T11:20:30Z",
+          "kind": "waiting",
+          "text": "等张三确认新报价 · 明天 09:00 再看",
+          "via": "assistant"
+        },
+        {
+          "id": "c7",
+          "at": "2026-01-01T11:21:00Z",
+          "kind": "received",
+          "text": "收到 1 条消息 · 张三",
+          "via": "chat",
+          "count": 1,
+          "sender": "张三",
+          "link": {
+            "type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sc-2",
+      "source": "chat",
+      "kind": "dm",
+      "account": "chat",
+      "account_name": "团队聊天",
+      "title": "周五午饭",
+      "summary": "李四问周五的午饭还约不约",
+      "where": "李四",
+      "sender": "李四",
+      "preview": "周五还约吗？",
+      "count": 1,
+      "started_at": "2026-01-01T10:40:00Z",
+      "updated_at": "2026-01-01T10:40:00Z",
+      "tier": "action",
+      "status": "action",
+      "now": "confirm_reply",
+      "handling": {
+        "owner": "manager",
+        "state": "done",
+        "machine_id": "m1",
+        "session_id": "s-2",
+        "since": "2026-01-01T10:41:00Z"
+      },
+      "suggestion": {
+        "version": 1,
+        "kind": "reply",
+        "text": "约，中午见。",
+        "handback": false,
+        "at": "2026-01-01T10:41:00Z"
+      }
+    },
+    {
+      "id": "sc-3",
+      "source": "chat",
+      "kind": "group",
+      "account": "chat",
+      "account_name": "团队聊天",
+      "title": "下周一办公室关闭",
+      "summary": "下周一办公室检修，关闭一天",
+      "where": "全员群",
+      "sender": "行政",
+      "preview": "提醒：周一关闭",
+      "count": 1,
+      "started_at": "2026-01-01T09:00:00Z",
+      "updated_at": "2026-01-01T09:00:00Z",
+      "tier": "fyi",
+      "status": "fyi",
+      "now": "fyi"
+    },
+    {
+      "id": "sc-4",
+      "source": "chat",
+      "kind": "group",
+      "account": "chat",
+      "account_name": "团队聊天",
+      "title": "发布检查清单",
+      "summary": "看过 3 次，还没有回复",
+      "where": "发布群",
+      "sender": "王五",
+      "preview": "我晚点回你",
+      "count": 2,
+      "started_at": "2025-12-29T09:00:00Z",
+      "updated_at": "2025-12-31T09:00:00Z",
+      "tier": "action",
+      "status": "action",
+      "now": "follow_up_ask",
+      "handling": {
+        "owner": "manager",
+        "state": "done",
+        "machine_id": "m1",
+        "session_id": "s-4",
+        "since": "2026-01-01T09:00:00Z"
+      },
+      "follow": {
+        "who": "王五发检查清单",
+        "next": "再问一次王五",
+        "checks": 3
+      }
+    },
+    {
+      "id": "sc-5",
+      "source": "chat",
+      "kind": "dm",
+      "account": "chat",
+      "account_name": "团队聊天",
+      "title": "工牌照片",
+      "summary": "照片已发",
+      "where": "赵六",
+      "sender": "赵六",
+      "preview": "收到，谢谢",
+      "count": 2,
+      "started_at": "2026-01-01T07:00:00Z",
+      "updated_at": "2026-01-01T07:30:00Z",
+      "tier": "fyi",
+      "done_at": "2026-01-01T07:31:00Z",
+      "done_by": "replied",
+      "now": "done_replied"
+    }
+  ]
+}

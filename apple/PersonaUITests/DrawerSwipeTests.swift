@@ -116,11 +116,14 @@ final class DrawerSwipeTests: XCTestCase {
         XCTAssertTrue(isOpen(app), "a drag to the right on code at its left edge did not open the sidebar")
     }
 
-    /// Settings from the drawer closes it; dismissing Settings restores the chat and both page switches.
-    @MainActor func testDrawerSettingsClosesBeforeSwitchingPages() throws {
+    /// Settings from the drawer opens over it (a task, docs/design/sidebar-navigation.md, #6599); closing Settings comes back to
+    /// the open drawer, and once that closes the chat and both page switches are as before.
+    @MainActor func testDrawerSettingsReturnsToTheDrawerThenPagesSwitch() throws {
         let app = launch(main)
         let agents = app.buttons["shell-agents"].firstMatch
-        XCTAssertTrue(agents.waitForExistence(timeout: 5) && agents.isHittable, "no Agents switch")
+        // XCUITest calls the switch not hittable under the shell's status window (it takes no touches): the switch is
+        // tapped by its coordinates, as a finger does (`ShellFinger`), and checked through the probe.
+        XCTAssertTrue(agents.waitForExistence(timeout: 5), "no Agents switch")
         drag(app, from: point(app, 0.3, 0.5), dx: 220, dy: 20)
         XCTAssertTrue(isOpen(app))
         XCTAssertFalse(agents.isHittable, "the page switch is reachable under the drawer")
@@ -128,15 +131,16 @@ final class DrawerSwipeTests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5) && settings.isHittable, "the drawer's Settings is covered:\n\(app.debugDescription)")
         settings.tapCenter()
         XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 5), "Settings did not open")
-        let close = app.buttons["settings-close"].firstMatch
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "Settings has no close button")
-        close.tapCenter()
-        XCTAssertTrue(agents.waitForExistence(timeout: 5) && agents.isHittable, "the page switch did not return")
+        let closeSettings = app.buttons["settings-close"].firstMatch
+        XCTAssertTrue(closeSettings.waitForExistence(timeout: 5), "Settings has no close button")
+        closeSettings.tapCenter()
+        XCTAssertTrue(closeSettings.waitForNonExistence(timeout: 5), "Settings did not close")
+        XCTAssertTrue(isOpen(app), "closing Settings did not come back to the drawer")
+        close(app)
         ShellFinger(app).switchTo(agents: true, "Agents after closing Settings")
         ShellFinger(app).switchTo(agents: false, "Assistant after closing Settings")
         XCTAssertTrue(app.buttons["shell-assistant"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(sidebar(app).exists, "the drawer is still open after returning to Assistant")
-        XCTAssertTrue(agents.isHittable)
     }
 
     /// Not a check: drags whose frames `DrawerProbe` measures (docs/operations/testing.md「Sidebar dragging」) — a slow drag open, a drag

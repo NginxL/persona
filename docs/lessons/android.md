@@ -1,5 +1,33 @@
 # Lessons: Android
 
+## Selecting a message's words in place: what `SelectionContainer` leaves to you (#4210 T5)
+
+`rememberSelectionState()` and `SelectionContainer(state, …)` are public in Compose Foundation 1.12: `selectAll()`, `clear()`
+and the read-only `selectedTexts` / `getSelectableTexts()` are all a select-in-place needs. Nothing starts from the word under a
+point (`select` takes a range of the container's text, and the Markdown renderer exposes no text layouts to find an offset by), so
+Select takes the whole message and a long press on a word picks that word. The words register as the container is laid out, so wait
+until `getSelectableTexts()` lists them (a frame or two) before `selectAll()`; a message with no words never lists any, and must not be
+left selecting.
+
+- A `SelectionContainer` inside another takes its text out of the outer one: a code block that opens its own was missing from a
+  select-all. A block joins by checking `LocalSelectionAbove` (`SelectableOnItsOwn`); buttons, title bars and cards are wrapped in
+  `DisableSelection`, or "Copy" and the language name are copied with the code.
+- A selection over rendered Markdown copies one selectable a line: a list item's marker is a text of its own ("•", newline, the item),
+  a table cell a line, and the thin spaces that pad inline code come out in a terminal as a character the shell takes for a word. Copy goes
+  through `LocalClipboard`, so a wrapper clipboard cleans what the container copies (`pickedWords`); Quote reads `selectedTexts` and cleans the same way.
+- Wrapping content in a container only while something is selected rebuilds it and loses what it remembers (an opened quote, an unfolded
+  code block). Keep it as one `movableContentOf` that moves between the two places, with a test that opens something first.
+- Don't end the selection the moment `selectedTexts` is empty: a long press on another word lets go of the old words before it picks
+  the new ones. Wait a few frames, counted with `withFrameNanos`; a `delay` inside a `LaunchedEffect` is not driven by `waitForIdle`
+  or `mainClock.advanceTimeBy` in these tests.
+- Robolectric: a long press that lands on a glyph starts the platform Magnifier, which throws (`Magnifier.dismiss`, no Surface); long press blank
+  space, or assert the long-click semantics instead. The handles are roots of their own (`onRoot()` finds three), so send keys to
+  `onAllNodes(isRoot()).onFirst()`. The floating menu is not drawn, but `LocalTextContextMenuToolbarProvider` takes `data()` of what it would show,
+  and a `TextContextMenuItem.onClick` can be run.
+- A tap outside the selected message ends the selection without taking the tap from what it hit: watch it from the page in
+  `PointerEventPass.Initial` with `awaitFirstDown(requireUnconsumed = false)` and consume nothing; a move past the touch slop is a scroll,
+  not a tap, so the chat can be scrolled while words are selected.
+
 ## Explicit home selection is not detail-stack restoration (#5638)
 
 Keeping visited tabs composed prevents loading flashes, but keeping their entire back stacks can make the Agents
@@ -8,6 +36,12 @@ entry: remove only destinations above the existing Agents root, and preserve Ass
 Do not route task entries or notification/session links through that reset. Exercise the production home control after
 those entry paths and after a restored stack; a navigator test that expects the old detail to survive a tab selection
 can accidentally pin the bug rather than prevent it.
+
+## A drag on the chat list hides the keyboard; Robolectric hands the focus back (#4210)
+
+`ChatListEffects` clears the focus and hides the keyboard on the list's `DragInteraction.Start`, which only a finger past the touch slop starts. Do not use `isScrollInProgress` for this: it is also true while the page's own `scrollToItem` or `animateScrollToItem` runs (following the newest message while someone types, a jump to a message, a search hit), and those must leave the keyboard up. A bare touch is not enough either, since it may still be a tap on a field inside the list (iOS tells the two apart as `.tracking` and `.interacting`).
+
+Test it by what the page asks of the focus manager and the keyboard controller, wrapped around the real ones (`KeyboardProbe`), and by the field losing focus once, not by the field staying unfocused: Robolectric is not in touch mode, where Android gives the focus straight back to the first field after `clearFocus()`, and in one test every second drag did. Aim the swipe at a message in the middle of the page: a swipe injected on the last message of the semantics tree never reached an Agent chat's list, because the top bar is drawn over it. Check that a test of this kind fails without the change; the tests that guard a tap, a long press and a scroll the page starts pass either way, by design.
 
 ## Keep a worktree fixed while Gradle verifies it (#5233)
 
@@ -27,6 +61,12 @@ labels, and test owner-switch closure and parent Back navigation after adding a 
 ## A design-system signature change compiles every caller (#4145)
 
 #4124 added a `Boolean` after `JSectionHeader`'s composable slot. A caller passing the slot as a trailing lambda then bound it to the `Boolean`, and `main` stopped compiling for every Android build. No hosted CI runs on PRs, so the module's own build passing was not enough. Before merging a change to a `core/designsystem` component's parameters, compile `:app:compileDebugKotlin` (every feature's main code) and the test code of the modules that call it. Keep a composable slot last; `scripts/app/android_slot_order.py` checks that (#4146).
+
+## A swipe's actions for a screen reader go on the row's own node (#4210)
+
+TalkBack focuses a Compose node that merges its descendants (a clickable row) or a leaf, not an ancestor that only carries custom actions, and a merging parent leaves a clickable child separate. So `JSwipeActions` cannot put the actions on its own container: it provides them through a composition local, and the row applies `swipeActionSemantics()` on the node that carries its click. Apply it in every branch that draws the row's click: `MessageItem` draws a Glass Needs You item through `JCard` and the others through its own `click` modifier, and a first version that covered only the second left the most important rows without the action. Test it on the merged node (`config[SemanticsActions.CustomActions]` of the node found by its text and `hasClickAction()`), in each state the swipe can be absent: busy, picking, done.
+
+In a test, a row with no swipe takes a held sideways drag as a press that moves: after the long-press time (400 ms) it opens what its long press opens (a selection, a sheet), so keep a drag that must show nothing well under it, and do not read `onClick` counts after a fast swipe on such a row: a sideways drag that nobody consumes and ends on the row counts as a tap. The color of a revealed action can be read from the captured image at the row's end edge, outside the icon's padding (Robolectric native graphics, a flat fill).
 
 ## Adaptive evidence must survive serialization, re-chunking and cleanup
 
@@ -640,3 +680,12 @@ Skipping onboarding does not skip password sign-in. Tests of manual or scan pair
 ## First-message handoff must cross decorators and filtered lists (#4999)
 
 The composer decorator posts messages itself, so handling a successful response only in its underlying transport misses the production send and manual-refusal retry paths. Share the successful-response handler with the decorator and test that path. Keep a start/send receipt's session metadata separately from a paged list's membership: a newly started idle pane, or its working thread, may be excluded by the current filter. Bind a send reply to its exact previous waiting session; scanning old receipts by pane can select an earlier run after the pane is reused. For a terminal first message, match the same computer and pane only in current rows. If the current list excludes the thread, keep the waiting page without fetching extra pages. Never infer the new thread from its directory.
+
+## A swap inside a slot the frame moves between rows must be movable content (#4210 T3)
+
+`ComposerFrame` draws its trailing content in the field's row while the composer is closed and in a second row once it opens (`expanded = focused || hasContent`), so the content is disposed in one place and composed in the other. An `AnimatedContent` inside it then starts again in its last state: a draft written while the box was not focused (as `ChatComposerSwapTest` writes it) opens the composer and gives the slot its new button in the same frame, and the swap was drawn in its final frame, which only a test with the clock paused showed (`send is 48.0 dp in its first frame`). On Glass the frame now invokes `trailing` through `movableContentWithReceiverOf` (the latest lambda through `rememberUpdatedState`), which moves the composition state, running transitions included, with it; a test flips `expanded` and the content in one frame, and again in the middle of the swap, and fails without it (`ComposerActionSlotTest`, `ChatComposerSwapTest`). More learned on the way:
+- Put everything a button draws in the `AnimatedContent` state (a data class without lambdas, keyed by `contentKey` on its kind) and read the taps through `rememberUpdatedState`. Compose 1.12 recomposes the content that is leaving with the latest values its lambda captures (probed: a text read from a state and from a plain parameter both changed on the leaving content), so a send that was loading would turn into a fresh, enabled one while it shrinks; what is in the state it left with stays. A change of look with the same kind happens in place, and a state that held a lambda would either start a swap on every recomposition or keep calling a stale callback.
+- The leaving button is composed for the whole exit: make it inert (`clickable(enabled = false)`) and `hideFromAccessibility()`, or a tap on the stop that is leaving would still interrupt the Agent. Test finders still find a hidden node, so the test asserts `assertIsNotEnabled()` and the `HideFromAccessibility` property, and taps its centre.
+- Drive scale, fade and blur from `transition.animateFloat` inside the content, with `EnterTransition.None` and `ExitTransition.None` on the `ContentTransform`: the content stays until those animations finish, and the order is yours. `Modifier.blur` outside the scaling `graphicsLayer` keeps its radius while the button is small, as SwiftUI's `scaleEffect(…).blur(…)` does; inside it the blur shrinks with the scale. `SizeTransform(clip = false)` keeps the slot's width glide from clipping the blur. A node's `boundsInRoot` follows the layer's scale, so a motion test can read the size from semantics; an entering animation starts one frame after the change and a leaving one up to two.
+- Pass a lambda, not a reference to a local function: `::send` compared equal to the reference from the last composition whatever each captured (a probe: `make(1) == make(2)` is true for `::f` of a local `fun f` in `make(x)`), so `ComposerActionSlot` and `SendButton` were skipped and the button kept calling the `send` from before a quote joined New chat's draft, which then went without it. Six assistant tests that tap Send failed on it (`NewChatMentionsTest`, `AssistantDraftScopeTest`, `AssistantSwitchingShotsTest`) while the design-system and chat tests passed; run the callers' suites after moving a button's call site, not only the module's own.
+- Robolectric's native graphics do draw `Modifier.blur`, a render effect (the edge of the disc ramps over about 12 px at 80 ms), so its frames show it; Haze's glass is the blur the lesson above says it does not draw. Press feedback scales the circle inside the 48 dp button and leaves the button alone, so the touch target does not move under the finger.

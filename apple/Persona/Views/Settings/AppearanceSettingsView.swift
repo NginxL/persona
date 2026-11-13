@@ -169,7 +169,10 @@ struct StyleSettingsPage: View {
                 }
                 .accessibilityIdentifier("text-size")
             } footer: {
-                Text("One step smaller or larger than the system's Text Size.")
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text("One step smaller or larger than the system's Text Size.")
+                    Text("Buttons and bars stop growing at the system's Extra Extra Extra Large size; messages and other reading text keep growing.")
+                }
             }
         }
         .themedGroupedPage()

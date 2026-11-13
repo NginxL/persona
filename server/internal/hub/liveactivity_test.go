@@ -404,14 +404,14 @@ func TestFleetStartPersistenceFailsClosedWithoutLimitingAlertsOrUrgentUpdates(t 
 	for _, unavailable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("no_store=%v", unavailable), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				h, sink, stop := localFleetLoop(t)
+				h, sink, stop := localFleetLoopWith(t, func(h *Hub) {
+					h.store.(*fleetStartStore).fail = true
+					if unavailable {
+						h.store = nil
+					}
+				})
 				defer stop()
 				h.live.update("phone", func(v *db.LiveActivity) { v.PushToken = "" })
-				store := h.store.(*fleetStartStore)
-				store.fail = true
-				if unavailable {
-					h.store = nil
-				}
 				reportLive(t, h, FleetState{Phase: "working", Working: 1}, FleetStats{})
 				time.Sleep(fleetCoalesce + fleetMinGap)
 				synctest.Wait()
@@ -638,6 +638,13 @@ func (s *fleetPushSink) count(device, kind, event string) int {
 
 func localFleetLoop(t *testing.T) (*Hub, *fleetPushSink, func()) {
 	t.Helper()
+	return localFleetLoopWith(t, nil)
+}
+
+// localFleetLoopWith is localFleetLoop with prepare run on the hub after its devices are set up and before the loop
+// starts: a test changes what the loop reads (h.store) here, not while it runs.
+func localFleetLoopWith(t *testing.T, prepare func(h *Hub)) (*Hub, *fleetPushSink, func()) {
+	t.Helper()
 	h := newTestHub(t)
 	h.store = newFleetStartStore()
 	sink := &fleetPushSink{}
@@ -655,6 +662,9 @@ func localFleetLoop(t *testing.T) (*Hub, *fleetPushSink, func()) {
 		h.live.update(id, func(v *db.LiveActivity) {
 			v.ActivityID, v.PushToken, v.PushToStartToken, v.StartedAt = id+"-activity", id+"-update", id+"-start", time.Now()
 		})
+	}
+	if prepare != nil {
+		prepare(h)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

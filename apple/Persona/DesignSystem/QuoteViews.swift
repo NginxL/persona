@@ -501,12 +501,15 @@ struct UserBubbleBody: View {
     var body: some View {
         // The box or the style's bubble, and everything in it in its colors (#5204).
         let ink = Theme.UserBubbleInk.of(.current, boxed: layout.on)
-        if quotes.isEmpty, comments.isEmpty, lead == nil {
-            words(ink).padding(.horizontal, Theme.Space.l).padding(.vertical, Theme.Space.m)
-                .background(ink.fill, in: .rect(cornerRadius: Theme.Radius.bubble, style: .continuous))
-        } else {
-            quoted(ink)
+        Group {
+            if quotes.isEmpty, comments.isEmpty, lead == nil {
+                words(ink).padding(.horizontal, Theme.Space.l).padding(.vertical, Theme.Space.m)
+                    .background(ink.fill, in: .rect(cornerRadius: Theme.Radius.bubble, style: .continuous))
+            } else {
+                quoted(ink)
+            }
         }
+        .readingContent()
     }
 
     private func words(_ ink: Theme.UserBubbleInk) -> some View {

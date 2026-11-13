@@ -1,28 +1,33 @@
 import SwiftUI
 
 /// By App (#3756): the agents as someone working in the desktop apps knows them, by the app they run in. A section per
-/// agent's desktop app (Claude's, the Codex App, then any other by name), then Other for every agent outside one (a
-/// terminal pane, the command line, a Lark group's topic, a runtime, or a node that does not say). Running and offline
-/// agents alike, the latest first, as the apps' sidebars list them (`AgentListOrder.recent`); an app with no agent has no
-/// section. Which app is the node's `agent_surface`, as the agent's mark draws it (`AgentKind`).
+/// agent's desktop app (Claude's, the Codex App, then any other by name), then one per terminal engine an agent runs in
+/// (herdr, Herdr App, Orca, Tern: the agents Persona and its assistant start there, #6567), then Other for every agent
+/// outside both (the command line in another terminal, a Lark group's topic, a runtime, or a node that does not say).
+/// Running and offline agents alike, the latest first, as the apps' sidebars list them (`AgentListOrder.recent`); an app
+/// with no agent has no section. Which app is the node's `agent_surface`, as the agent's mark draws it (`AgentKind`);
+/// which engine, the host the node placed it in (`space_kind`).
 nonisolated struct AppGroup: Identifiable, Sendable {
-    /// "app/desktop/<agent>" or "app/other": the section's id and its fold key (`dev.folded`).
+    /// "app/desktop/<agent>", "app/engine/<engine>" or "app/other": the section's id and its fold key (`dev.folded`).
     var id: String
-    /// The app: the agent's mark on its desktop app; nil for Other.
+    /// The app: the agent's mark on its desktop app; nil for an engine's section and Other.
     var kind: AgentKind?
+    /// The terminal engine of an engine's section; nil for a desktop app's and Other.
+    var engine: MachineEngine? = nil
     var sessions: [Session]
     /// Its agents by project, as the desktop apps' sidebars list them: the latest project first (the Codex App's in its
     /// own order first), Other last.
     var projects: [AppProject] = []
 
-    /// Its projects have headings: a desktop app's section, unless every agent of it is in Other (then they are listed as
-    /// before). Other's section is not by project: its agents are terminals' and the like, not an app's sidebar.
+    /// Its projects have headings: a desktop app's or an engine's section, unless every agent of it is in Other (then they
+    /// are listed as before). Other's section is not by project: its agents are other terminals' and the like.
     var showsProjects: Bool { !projects.isEmpty && !(projects.count == 1 && projects[0].isOther) }
 
     /// The app as the rest of the list names it: "Claude desktop app" (a session's source), "Codex App" (the node's
     /// `agent_name`), else "<agent> desktop app"; "Other".
     var title: String {
-        switch kind?.name {
+        if let engine { return engine.name }
+        return switch kind?.name {
         case nil: String(localized: "Other")
         case "Claude Code": String(localized: "Claude desktop app")
         case "Codex": String(localized: "Codex App")
@@ -35,14 +40,30 @@ nonisolated enum AppGroups {
     static let otherID = "app/other"
     /// The desktop apps first, in this order; any other after them by name.
     private static let known = ["Claude Code", "Codex"]
+    /// The terminal engines with a section of their own, in this order, after the desktop apps (`space_kind` as the node
+    /// sends it: the host it placed the agent in).
+    static let engines: [MachineEngine] = [.herdr, .herdrApp, .orca, .tern]
+
+    /// The terminal engine an agent runs in, from the host the node placed it in; nil for none (a terminal or tmux pane
+    /// outside the engines, a runtime, an agent the node did not place).
+    static func engine(of s: Session) -> MachineEngine? {
+        guard let kind = s.spaceKind else { return nil }
+        return engines.first { $0.rawValue == kind }
+    }
 
     static func build(_ sessions: [Session]) -> [AppGroup] {
         var desktop: [String: AppGroup] = [:]
+        var byEngine: [String: AppGroup] = [:]
         var other: [Session] = []
         for s in sessions {
             let kind = AgentKind(s)
             guard kind.surface == .desktop else {
-                other.append(s)
+                if let engine = engine(of: s) {
+                    let id = "app/engine/" + engine.rawValue
+                    byEngine[id, default: AppGroup(id: id, kind: nil, engine: engine, sessions: [])].sessions.append(s)
+                } else {
+                    other.append(s)
+                }
                 continue
             }
             let id = "app/desktop/" + kind.name.lowercased()
@@ -52,18 +73,19 @@ nonisolated enum AppGroups {
         var groups = desktop.values.sorted { a, b in
             rank(a) != rank(b) ? rank(a) < rank(b) : a.id < b.id
         }
+        groups += engines.compactMap { byEngine["app/engine/" + $0.rawValue] }
         if !other.isEmpty {
             groups.append(AppGroup(id: otherID, kind: nil, sessions: other))
         }
         return groups.map { group in
             var group = group
             group.sessions = AgentListOrder.recent(group.sessions)
-            group.projects = group.kind == nil ? [] : projects(of: group)
+            group.projects = group.id == otherID ? [] : projects(of: group)
             return group
         }
     }
 
-    /// A desktop app section's agents by project: the repository a session runs in (`RepoPlace`: the node's, else its
+    /// A desktop app's or an engine's section's agents by project: the repository a session runs in (`RepoPlace`: the node's, else its
     /// folder, a working tree's main checkout), named as its folder; a Codex App chat's project. An agent without one
     /// (a home directory, a Codex App chat in no project) is in Other. Projects go by their latest agent, the Codex App's in its
     /// own order first (`inAppOrder`), Other last.
@@ -175,8 +197,8 @@ nonisolated struct AppProject: Identifiable, Sendable {
     var title: String { isOther ? String(localized: "Other") : name }
 }
 
-/// A By App section's title, laid out as a machine's (`MachineSectionHeader`): the app's mark (the agents symbol for
-/// Other) and name, its state counts, and how many agents it holds: offline ones too, which the state counts leave out.
+/// A By App section's title, laid out as a machine's (`MachineSectionHeader`): the app's mark (a terminal for an engine's,
+/// the agents symbol for Other) and name, its state counts, and how many agents it holds: offline ones too, which the state counts leave out.
 struct AppSectionHeader: View {
     var app: AppGroup
     var counts: SpaceGroup
@@ -186,8 +208,8 @@ struct AppSectionHeader: View {
         CountsHeading {
             if let kind = app.kind {
                 AgentMark(kind: kind).accessibilityHidden(true) // the title names it
-            } else {
-                ThemedIcon(Theme.Icon.agents).foregroundStyle(.secondary)
+            } else { // a terminal for an engine's section, the agents symbol for Other
+                ThemedIcon(app.engine != nil ? Theme.Icon.terminal : Theme.Icon.agents).foregroundStyle(.secondary)
                     .scaledFrame(width: Theme.Size.markS, height: Theme.Size.markS) // lined up with the marks above
             }
             if compact {

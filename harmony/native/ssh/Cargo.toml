@@ -1,0 +1,32 @@
+[package]
+name = "persona-ssh"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[lib]
+name = "persona_ssh_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+russh = { version = "=0.64.1", default-features = false, features = ["aws-lc-rs", "rsa"] }
+tokio = { version = "=1.53.2", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tokio-util = { version = "=0.7.19", features = ["rt"] }
+zeroize = "=1.9.0"
+getrandom = "=0.4.2"
+base64 = "=0.23.1"
+serde_json = "=1.0.151"
+# Pin the native crypto closure independently of updates to the registry index.
+aws-lc-rs = "=1.18.0"
+aws-lc-sys = "=0.44.0"
+
+[target.aarch64-unknown-linux-ohos.dependencies]
+# OHOS has no bundled pre-generated AWS-LC bindings. Use the library feature, not a bindgen-cli install.
+aws-lc-sys = { version = "=0.44.0", features = ["bindgen"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"

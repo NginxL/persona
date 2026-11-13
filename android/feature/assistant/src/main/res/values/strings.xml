@@ -114,7 +114,6 @@
     <string name="assistant_make_leader_text">The chat moves to Pinned and no longer appears in Recent.</string>
     <string name="assistant_end_leader_title">Unpin this chat?</string>
     <string name="assistant_end_leader_text">“%1$s” returns to Recent. Its open tasks go back to the main chat\'s supervision; nothing is closed or deleted.</string>
-    <string name="assistant_leader_working">%1$d working</string>
     <string name="assistant_leader_needs_you">%1$d need you</string>
     <string name="assistant_direction_todos_of">To-dos of %1$s</string>
     <string name="assistant_direction_agents_of">Agents of %1$s</string>

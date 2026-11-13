@@ -123,12 +123,12 @@ describe("the entries' open-to-do count follows the To-dos page's rule", () => {
   const openTaskItems = (got: ReturnType<typeof assistantEntries>) =>
     [...got.needsYou, ...got.running].filter((item) => item.kind === "task") as { key: string; countsOpen: boolean }[];
 
-  it("keeps a stale parked task visible in In progress but does not count it, as the page shelves it", () => {
+  it("keeps an unexpired parked task open even after days without activity, as the page does", () => {
     const t = base("parked-stale", stale, { supervision: { supervisor: "main", state: "parked", parked, reviews: [], updated_at: stale } });
     const got = run([t]);
     expect(got.running.map((i) => i.key)).toEqual(["task:parked-stale"]);
-    expect(openTaskItems(got)[0]!.countsOpen).toBe(false);
-    // a fresh parked task is open on both sides
+    expect(openTaskItems(got)[0]!.countsOpen).toBe(true);
+    // Explicit parking survives inactivity; fresh and stale parked tasks use the same count.
     const freshTodo = base("parked-fresh", fresh, { supervision: { supervisor: "main", state: "parked", parked: { ...parked, until: "2026-11-14T09:00:00Z" }, reviews: [], updated_at: fresh } });
     expect(openTaskItems(run([freshTodo]))[0]!.countsOpen).toBe(true);
   });
@@ -161,7 +161,7 @@ describe("the entries' open-to-do count follows the To-dos page's rule", () => {
     const pageOpen = triageTodos(todos, makeSessionLookup([workingSession, loneAgent]), now).open;
     const chipOpen = openTaskItems(got).filter((i) => i.countsOpen).length;
     expect(chipOpen).toBe(pageOpen);
-    expect(chipOpen).toBe(1); // only "working" is open; stale shelves, done/parked/seen-review close
+    expect(chipOpen).toBe(2); // Working and unexpired parked; inactivity alone does not end an explicit wait.
     expect(got.needsYou.some((i) => i.kind === "plan")).toBe(true);
     expect(got.running.some((i) => i.kind === "agent")).toBe(true);
   });

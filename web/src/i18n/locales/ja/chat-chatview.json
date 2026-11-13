@@ -112,6 +112,8 @@
   "codex_first_placeholder": "Codex への最初のメッセージ",
   "handoff_from": "{title} から移動しました · クリックして戻る",
   "handoff_dismiss": "戻るヒントを閉じる",
+  "inbox_back_title": "「{title}」に戻る",
+  "inbox_back_generic": "受信トレイのこの項目に戻る",
   "team": "コラボ",
   "team_needs_you": "コラボ：対応を待っている Worker があります",
   "more_actions": "その他の操作",
@@ -133,5 +135,6 @@
   "message_further_up": "このメッセージはさらに上にあります。",
   "search_origin_changed": "元の記録が変わりました。現在の記録をご覧ください",
   "search_return": "検索前の位置に戻る",
-  "search_menu": "会話内を検索"
+  "search_menu": "会話内を検索",
+  "todo_completed_label": "To-do（完了）：{title}"
 }

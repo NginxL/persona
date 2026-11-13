@@ -39,6 +39,24 @@ const session = (x: Partial<Session> = {}): Session =>
 const on: PanelOptions = { switching: true };
 const provider = (s: Session, id: string, o: PanelOptions = on) => sessionPanel(s, launchers, listOf, o).providers.find((p) => p.id === id)!;
 
+describe("a Codex session that names no launcher (#6501)", () => {
+  // the computer runs the Codex App: the node offers its launcher, whose list is empty and locked (the App picks the model)
+  const appList: LauncherModels = { agent: "codex", models: [], locked: "the App picks" };
+  const withApp: Launcher[] = [...launchers, { name: "codex-app", agent: "codex", source: "codex_app" }];
+  const readApp = (name: string): ModelList => (name === "codex-app" ? { list: appList } : listOf(name));
+  const chat = session({ agent: "codex", source_kind: "codex_history", space_kind: "codex_app", agent_surface: "desktop", launcher: undefined,
+    capabilities: { send: true }, model: "gpt-6-astra", effort: "ultra", efforts: ["low", "ultra"] });
+
+  it("is the Codex App's for one of its chats: its own provider, never Claude Code's models", () => {
+    const panel = sessionPanel(chat, withApp, readApp, on);
+    const own = panel.providers.find((p) => p.engine === "codex" && p.id === "codex-app")!;
+    expect(own).toBeDefined();
+    expect(own.models?.some((m) => m.id === "opus" || m.id === "default")).toBeFalsy();
+    // Claude Code's launcher is another engine's, not this chat's own
+    expect(panel.providers.find((p) => p.id === "claude")!.unavailable).toBe(t("chat-modelpanel.other_engine", { from: "Codex", to: "Claude Code" }));
+  });
+});
+
 describe("another launcher of the engine", () => {
   it("is picked like the session's own on a hub that switches, and stays off on an older one", () => {
     const work = provider(session(), "work");

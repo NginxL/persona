@@ -263,6 +263,38 @@ nonisolated struct DetectedEngine: Codable, Hashable, Identifiable, Sendable {
     var note: String?
 }
 
+/// What a Mac can do for the live-screen hardware video channel (#3954, docs/extensions/computer-use.md "Live screen
+/// video"): the capture-and-encode helper Persona Screen is present (`version` > 0), which codecs it can encode, and
+/// whether Screen Recording is granted for it. Absent from a Mac without the helper or from an older node, so the app
+/// simply keeps showing RFB. `advertised` is the test the Picture / Quality switcher uses: the node offers the channel
+/// at all, so there is a control worth showing.
+nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
+    /// The wire protocol version the helper speaks; 0 or absent means no video.
+    var version = 0
+    /// The codecs the helper can encode, in preference order ("hevc", "h264").
+    var codecs: [String] = []
+    /// Screen Recording for Persona Screen: granted | missing | unknown. Missing keeps the phone on RFB.
+    var permission: String? = nil
+
+    enum CodingKeys: String, CodingKey { case version, codecs, permission }
+
+    init(version: Int = 0, codecs: [String] = [], permission: String? = nil) {
+        self.version = version
+        self.codecs = codecs
+        self.permission = permission
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 0
+        codecs = (try? c.decodeIfPresent([String].self, forKey: .codecs)) ?? []
+        permission = try c.decodeIfPresent(String.self, forKey: .permission)
+    }
+
+    /// The node offers the video channel at all: the Picture / Quality switcher appears only then (#3954).
+    var advertised: Bool { version > 0 }
+}
+
 /// A Mac the assistant may operate through Cua Driver (the hub's plugin cua, docs/extensions/computer-use.md). `enabled`: the user
 /// turned it on for this machine; the rest is what its node found when last asked, and only for an enabled one.
 nonisolated struct MachineComputer: Codable, Hashable, Sendable {
@@ -290,10 +322,12 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     var chatgpt = false
     /// The Mac's displays as arranged in its System Settings, read with `screenSharing` (empty from an older node).
     var displays: [MachineDisplay] = []
+    /// The live-screen hardware video channel this Mac can carry (#3954); nil from a Mac without the helper or an older node.
+    var screenVideo: MachineScreenVideo? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, daemon, accessibility, desktop, ready, note, job, backend, chatgpt, displays
-        case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock"
+        case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock", screenVideo = "screen_video"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, daemon: Bool = false, accessibility: String? = nil,
@@ -331,6 +365,8 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
         chatgpt = try c.decodeIfPresent(Bool.self, forKey: .chatgpt) ?? false
         // An unreadable list only costs the display choice, not the machine.
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
+        // An unreadable channel only costs the video switcher, not the machine (the page stays on RFB).
+        screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
     }
 
     /// The node has said how it is (a never-asked one has neither a verdict nor a note).
@@ -359,10 +395,12 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
     var job: ComputerJob? = nil
     /// As `MachineComputer.displays`.
     var displays: [MachineDisplay] = []
+    /// As `MachineComputer.screenVideo` (#3954): a Mac the plugin ego is on for shares the same live screen and helper.
+    var screenVideo: MachineScreenVideo? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, imported, analytics, ready, note, job, displays
-        case setUp = "set_up", screenSharing = "screen_sharing"
+        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, setUp: Bool = false, imported: Bool = false,
@@ -392,6 +430,7 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
         screenSharing = try c.decodeIfPresent(Bool.self, forKey: .screenSharing) ?? false
         job = try? c.decodeIfPresent(ComputerJob.self, forKey: .job)
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
+        screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
     }
 
     /// The node has said how it is.
@@ -541,6 +580,37 @@ extension Launcher {
     /// refuses them with a reason too.
     var runsAssistant: Bool {
         assistant == true || (baseURL != "(traex)" && (agent == nil || agent == "" || agent == "claude" || agent == "codex"))
+    }
+}
+
+/// The launcher / model / effort picked for one of the assistant's conversations, which its next messages run on
+/// (#5033, `model_pick` on the session; docs/assistant/model-config.md "A conversation's own model"). Absent: the
+/// conversation follows Model configuration › Main chat (the main one) or keeps what it started with.
+nonisolated struct ModelPick: Codable, Hashable, Sendable {
+    var launcher: String
+    var model: String?
+    var effort: String?
+}
+
+/// A launcher or provider the main chat can't run on a machine, and why in the hub's words
+/// (`unavailable` of `GET …/machines/{id}/launchers?purpose=assistant`, #5033).
+nonisolated struct UnavailableLauncher: Codable, Identifiable, Hashable, Sendable {
+    var name: String
+    var displayName: String?
+    /// launcher | api
+    var kind: String?
+    var agent: String?
+    /// A direct API provider's protocol: messages | responses | chat.
+    var api: String?
+    /// The hub's machine-readable refusal code (`launcher_out_of_scope`, `api_protocol`…).
+    var code: String?
+    /// The refusal, in the request's language.
+    var reason: String
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, kind, agent, code, reason
+        case displayName = "display_name", api
     }
 }
 
@@ -767,6 +837,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// The levels `effort` may be set to when they are not Claude Code's (`SessionModes.effortOptions`): a Codex thread
     /// the hub drives through its app-server, where only the effort changes (node/codex_effort.go). Nil elsewhere.
     var efforts: [String]? = nil
+    /// The launcher / model / effort picked for this assistant conversation (#5033, `model_pick`); nil: it follows the
+    /// Main chat default or keeps what it runs. Only the manager names it, on assistant conversations.
+    var modelPick: ModelPick? = nil
     /// What the model saw in the agent's latest reply, and the model's window (#3289, node: `context_tokens` /
     /// `context_window`, #2430); nil while the node cannot tell (no reply yet, a window it does not know, an older node).
     var contextTokens: Int? = nil
@@ -1109,6 +1182,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
+        case modelPick = "model_pick"
         case canFork = "can_fork"
         case sourceKind = "source_kind", sourceThreadID = "source_thread_id", sourceInstanceID = "source_instance_id",
              parentThreadID = "parent_thread_id", readOnlyReason = "read_only_reason"
@@ -1267,11 +1341,37 @@ nonisolated struct WorkState: Codable, Hashable, Sendable {
     var max: Int? = nil
     /// The agent it waits for.
     var agent: WorkAgent? = nil
+    /// What the work produced: pull requests, commits, documents, builds (`WorkArtifact`). Nil from a hub without them.
+    var artifacts: [WorkArtifact]? = nil
+    /// What the agent said of its own work as the turn ended (`Closeout`, #3612). A turn the hub could not call finished
+    /// carries it with an empty `phase` and a line. Nil when it wrote none, and from a hub before closeouts.
+    var closeout: Closeout? = nil
 
     enum CodingKeys: String, CodingKey {
-        case phase, on, line, wait, then, attempts, max, agent
+        case phase, on, line, wait, then, attempts, max, agent, artifacts, closeout
         case wakeAt = "wake_at", resetsAt = "resets_at"
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phase = try c.decode(String.self, forKey: .phase)
+        on = try c.decodeIfPresent(String.self, forKey: .on)
+        line = try c.decodeIfPresent(String.self, forKey: .line)
+        wait = try c.decodeIfPresent(String.self, forKey: .wait)
+        then = try c.decodeIfPresent(String.self, forKey: .then)
+        wakeAt = try c.decodeIfPresent(Date.self, forKey: .wakeAt)
+        resetsAt = try c.decodeIfPresent(Date.self, forKey: .resetsAt)
+        attempts = try c.decodeIfPresent(Int.self, forKey: .attempts)
+        max = try c.decodeIfPresent(Int.self, forKey: .max)
+        agent = try c.decodeIfPresent(WorkAgent.self, forKey: .agent)
+        // New (#3612): one that does not decode is as if there were none, never the whole work state failing.
+        artifacts = try? c.decodeIfPresent([WorkArtifact].self, forKey: .artifacts)
+        closeout = try? c.decodeIfPresent(Closeout.self, forKey: .closeout)
+    }
+
+    /// A turn nobody can call finished (docs/assistant/agent-work.md "Closeout"): the hub publishes it with an empty
+    /// phase, the closeout and a line saying why. It stays Unread and never counts as waiting.
+    var notFinished: Bool { phase.isEmpty && closeout != nil && !(line ?? "").isEmpty }
 
     /// The hub waits it out: it wakes it (`wake_at`), or it wakes itself (its background tasks, a /loop). Waiting in the
     /// lists (the web's `hubWaits`, lib/work.ts).
@@ -1301,21 +1401,30 @@ nonisolated struct TriageSwitches: Codable, Hashable, Sendable {
     static let defaultReplyReminderMinutes = 30
     /// After how many minutes since the user looked the hub reminds (what Settings › Session Triage says).
     var replyReminderAfter: Int { replyReminderMinutes.flatMap { $0 > 0 ? $0 : nil } ?? Self.defaultReplyReminderMinutes }
+    /// Ask for a Closeout (#3612): hold a stop once when a turn that did work ends without one. Nil from a hub that
+    /// does not know it: Settings shows no switch then, and a PUT leaves it out, so the hub keeps its value.
+    var closeout: Bool? = nil
+    /// The switch as Settings flips it (off while the hub names none).
+    var asksCloseout: Bool {
+        get { closeout ?? false }
+        set { closeout = newValue }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, decide, wake
+        case enabled, decide, wake, closeout
         case autoContinue = "auto_continue"
         case replyReminder = "reply_reminder", replyReminderMinutes = "reply_reminder_minutes"
     }
 
     init(enabled: Bool = false, decide: Bool = false, autoContinue: Bool = false, wake: Bool = false,
-         replyReminder: Bool = true, replyReminderMinutes: Int? = nil) {
+         replyReminder: Bool = true, replyReminderMinutes: Int? = nil, closeout: Bool? = nil) {
         self.enabled = enabled
         self.decide = decide
         self.autoContinue = autoContinue
         self.wake = wake
         self.replyReminder = replyReminder
         self.replyReminderMinutes = replyReminderMinutes
+        self.closeout = closeout
     }
 
     init(from decoder: Decoder) throws {
@@ -1326,6 +1435,7 @@ nonisolated struct TriageSwitches: Codable, Hashable, Sendable {
         wake = try c.decodeIfPresent(Bool.self, forKey: .wake) ?? false
         replyReminder = (try? c.decodeIfPresent(Bool.self, forKey: .replyReminder)).flatMap { $0 } ?? true
         replyReminderMinutes = (try? c.decodeIfPresent(Int.self, forKey: .replyReminderMinutes)).flatMap { $0 }
+        closeout = (try? c.decodeIfPresent(Bool.self, forKey: .closeout)).flatMap { $0 }
     }
 }
 
@@ -1605,8 +1715,29 @@ extension Session {
         if state == .needsYou, let r = attentionReason, !r.isEmpty { return r } // a stale reason (offline, seen) stays out
         if state != .working, let r = failureReason, !r.isEmpty { return Session.failureText(r) }
         if let r = replyLine(muted: muted) { return r }
+        // The native Mac app is frozen (docs/apple/mac.md): its rows keep the line they had.
+        #if !os(macOS)
+        if let c = closeoutPreview() { return c }
+        #endif
         if let w = workLine() { return w }
         return lastText.flatMap { $0.isEmpty ? nil : Fmt.plain($0) }
+    }
+    /// The closeout to show (the web's `shownCloseout`): one with a status this build knows, while the session is not
+    /// working (a new turn has no closeout yet, and the previous turn's no longer says where the work stands).
+    var shownCloseout: Closeout? {
+        guard let w = work, let c = w.closeout, c.known != nil, state != .working, w.phase != "working" else { return nil }
+        return c
+    }
+    /// A stopped session's line when its agent ended the turn with a closeout (the web's `closeoutPreview`): the hub's
+    /// line as before (the closeout's own words when the hub gave none: the last words would be the raw block), then
+    /// "merged · not deployed" where the agent said or the hub found it, a claim the hub found untrue marked. One
+    /// string: the row truncates it like any other line.
+    func closeoutPreview(now: Date = Date()) -> String? {
+        guard let c = shownCloseout else { return nil }
+        let line = workLine(now: now) ?? c.line ?? ""
+        let suffix = c.suffix
+        if line.isEmpty { return suffix.isEmpty ? nil : suffix }
+        return suffix.isEmpty ? line : String(localized: "\(line) · \(suffix)")
     }
     /// The question an Awaiting Reply row shows: what the triage says it waits on the user for (blocked · user), else what
     /// its last reply asks; nil when it is not Awaiting Reply or names nothing.
@@ -1711,6 +1842,9 @@ nonisolated struct SessionKey: Hashable, Sendable, Codable {
         set { hubGroup = newValue.isEmpty ? nil : newValue }
     }
     var machineRef: MachineRef { MachineRef(group: group, id: machineID) }
+    /// A terminal addressed by its pane (`pane:<id>`, docs/integrations/terminal.md section 19): a plain terminal of the
+    /// Terminals page or Open Terminal Here, with no session row of its own.
+    var isPane: Bool { sessionID.hasPrefix("pane:") }
 
     /// "machine/session", or "group|machine/session" for another group: what launch arguments, remembered chats and
     /// deep links write.

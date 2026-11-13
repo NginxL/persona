@@ -155,6 +155,8 @@ type Meta struct {
 	// Queue holds input typed while Claude works and not yet taken (queue-operation lines:
 	// enqueue / dequeue / remove / popAll — popAll is "up arrow pulls them back into the input").
 	Queue []string
+	// queued is the whole queue in order, Claude Code's own system notices included; Queue is what the user typed of it.
+	queued []queuedInput
 	// Background holds background shells / agents that have not reported back (see trackBackground).
 	Background []proto.BackgroundTask
 	bgPending  map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id

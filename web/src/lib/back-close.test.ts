@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isOverlayEntry, openOverlay, overlayState, settleOverlayEntry, takeOverlayEntry } from "./back-close";
+import { isOverlayEntry, onOverlayEntry, openOverlay, overlayDepth, overlayState, settleOverlayEntry, takeOverlayEntry } from "./back-close";
 import { navigate } from "./router";
 
 describe("overlay history entries", () => {
@@ -92,6 +92,35 @@ describe("openOverlay", () => {
     await vi.runAllTimersAsync();
     expect(second).toHaveBeenCalledOnce();
     expect(b.history.length).toBe(1);
+  });
+
+  it("counts stacked entries, while reopening the same entry keeps its depth", async () => {
+    const b = fakeBrowser();
+    const closeFirst = openOverlay(vi.fn());
+    expect(overlayDepth()).toBe(1);
+    closeFirst();
+    openOverlay(vi.fn()); // StrictMode's cleanup, then the same overlay's effect again: reuse, not another entry
+    await vi.runAllTimersAsync();
+    expect(overlayDepth()).toBe(1);
+    expect(b.history.length).toBe(2);
+
+    openOverlay(vi.fn());
+    expect(overlayDepth()).toBe(2);
+    expect(b.history.length).toBe(3);
+    b.pressBack();
+    await vi.runAllTimersAsync();
+    expect(overlayDepth()).toBe(1);
+    expect(onOverlayEntry()).toBe(true);
+    b.pressBack();
+    await vi.runAllTimersAsync();
+    expect(overlayDepth()).toBe(0);
+    expect(onOverlayEntry()).toBe(false);
+  });
+
+  it("an overlay entry written before the depth field still counts as one", () => {
+    fakeBrowser();
+    expect(overlayDepth(null)).toBe(0);
+    expect(overlayDepth(overlayState(null, "old"))).toBe(1);
   });
 
   it("a navigation from inside the overlay takes its entry: one Back leaves the new page", async () => {

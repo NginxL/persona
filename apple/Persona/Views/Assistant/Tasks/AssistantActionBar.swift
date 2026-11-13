@@ -652,11 +652,12 @@ struct AssistantActionBar: View {
                 let state = status.taskState
                 let activity = AssistantTrayActivity(sessions: store.sessions(todo))
                 if let ask = todo.openAsk, todo.doneAt == nil {
-                    // an owner decision or a to-do to verify: folded to a line, opened it is its Accept row
+                    // an owner decision or a to-do to verify: folded to a line, opened it is its Accept row, or the answerable
+                    // decision row when the hub sent its options (`TodoAskRow`)
                     let brief = ask.row(for: todo)
                     opening(row.id, title: todo.title, detail: brief.isDecision ? String(localized: "Decision") : String(localized: "To Verify"),
                             subtitle: ask.verdict, mark: { TaskMark(state: .needsYou) }) {
-                        BriefAcceptRow(row: brief, group: AppModel.shared.hub?.group ?? "", decision: todo, showsTitle: false)
+                        TodoAskRow(todo: todo, ask: ask, group: AppModel.shared.hub?.group ?? "", deferrable: true, showsTitle: false)
                             .padding(.horizontal, Theme.Space.m)
                     }
                 } else {

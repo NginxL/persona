@@ -63,6 +63,8 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
     val assistantManagement = remember(wiring?.assistantManagement, managerId) {
         wiring?.assistantManagement?.forManager(managerId)
     }
+    // The hub's leader conversations drive the chat's background-round fold (#6595), scoped to this manager.
+    val assistantSnapshot by session.assistant.assistant.collectAsStateWithLifecycle()
     val waiting = rememberWaitingRequests(session, sessions)
     val assistant = route.kind == ConversationKind.Assistant || metadata?.assistant == true
     val editor = rememberChatDraftEditor(wiring, key)
@@ -107,6 +109,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     actions = actions, connection = wiring?.connection ?: session.connection, requestId = requestId, covered = pane != null || terminalOpen,
                     worktrees = wiring?.worktrees,
                     assistantManagement = assistantManagement,
+                    leaderConversations = assistantSnapshot.leaders.toSet(),
                     onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
                     onFollowSession = { onGroupGone(route, route.copy(machineId = it.machineId, sessionId = it.sessionId)) },
                     waiting = waiting,

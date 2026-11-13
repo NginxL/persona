@@ -101,10 +101,10 @@ class MergePrTests(unittest.TestCase):
         return dict({"headRefOid": head, "headRefName": "fix/7-notes", "isCrossRepository": False,
                      "baseRefName": "main", "title": "fix: add notes", "body": "Adds notes.\n\nFixes #6"}, **fields)
 
-    def merge_pr(self, pr, at_merge=None, arg="7"):
+    def merge_pr(self, pr, at_merge=None, arg="7", extra_args=()):
         self.state.write_text(json.dumps({"pr": pr, "at_merge": at_merge}))
-        result = subprocess.run(["bash", str(self.repo / "scripts/hooks/merge-pr.sh"), arg], cwd=self.repo,
-                                env=self.env, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["bash", str(self.repo / "scripts/hooks/merge-pr.sh")] + list(extra_args) + [arg],
+                                cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=60)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, calls
 
@@ -166,6 +166,20 @@ class MergePrTests(unittest.TestCase):
         result, calls = self.merge_pr(self.view(self.open_pr()))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.merges(calls)), 1)
+
+    def test_expected_head_and_base_are_required(self):
+        head = self.open_pr()
+        base = self.git("rev-parse", "main")
+        expected = ["--expect-head", head, "--expect-base", base]
+        result, calls = self.merge_pr(self.view(head), extra_args=expected)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.merges(calls)), 1)
+        for args in (["--expect-head", "f" * 40, "--expect-base", base],
+                     ["--expect-head", head, "--expect-base", "f" * 40]):
+            self.log.unlink(missing_ok=True)
+            result, calls = self.merge_pr(self.view(head), extra_args=args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.merges(calls), [])
 
     def test_a_non_number_is_refused_before_gh_runs(self):
         result, calls = self.merge_pr(self.view("0" * 40), arg="7a")

@@ -342,6 +342,9 @@ func superviseRun(t *testing.T, patch string) (run map[string]any, models []map[
 			}
 		}
 		models = append(models, m)
+		if id, _ := a["once_id"].(string); strings.HasPrefix(id, "relay-") {
+			a["once_id"] = "<relay id>" // made from the message, its time too: each run's own (relay_once.go)
+		}
 		raw, err := json.Marshal(a)
 		if err != nil {
 			t.Fatal(err)

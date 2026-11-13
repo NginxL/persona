@@ -25,7 +25,7 @@ const (
 )
 
 // clientAppPlatforms are the apps whose version is their own; the web is left out (the hub serves it).
-var clientAppPlatforms = map[string]bool{"ios": true, "macos": true, "watchos": true, "visionos": true, "android": true}
+var clientAppPlatforms = map[string]bool{"ios": true, "macos": true, "watchos": true, "visionos": true, "android": true, "harmony": true}
 
 type clientApps struct {
 	mu     sync.Mutex

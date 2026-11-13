@@ -19,7 +19,8 @@ nonisolated struct DirectionTree: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case directions }
 
-    /// How many of a direction's listed to-dos are in each state. A direction's row shows `working` and `needsYou`.
+    /// How many of a direction's listed to-dos are in each state. A direction's row shows `needsYou` (what runs under it
+    /// is `Direction.running`, its activity mark, #6626).
     nonisolated struct Counts: Codable, Hashable, Sendable {
         var working: Int
         var needsYou: Int
@@ -154,13 +155,19 @@ nonisolated struct DirectionTree: Codable, Hashable, Sendable {
         var name: String
         var secretary: Bool
         var counts: Counts
+        /// Something under it is at work right now: an Agent of one of its to-dos, or one under it, whose session is
+        /// working, whatever the to-do's state (the hub's one rule, #6626). Every direction row's activity mark spins on
+        /// it; the working count is not shown. From a hub without it: whether it counts a working to-do, as before.
+        var running: Bool
         var tasks: [TaskNode]
 
-        init(id: String, name: String = "", secretary: Bool = false, counts: Counts = Counts(), tasks: [TaskNode] = []) {
+        init(id: String, name: String = "", secretary: Bool = false, counts: Counts = Counts(), running: Bool = false,
+             tasks: [TaskNode] = []) {
             self.id = id
             self.name = name
             self.secretary = secretary
             self.counts = counts
+            self.running = running
             self.tasks = tasks
         }
 
@@ -170,10 +177,11 @@ nonisolated struct DirectionTree: Codable, Hashable, Sendable {
             name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
             secretary = try c.decodeIfPresent(Bool.self, forKey: .secretary) ?? false
             counts = try c.decodeIfPresent(Counts.self, forKey: .counts) ?? Counts()
+            running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? (counts.working > 0)
             tasks = try c.decodeIfPresent([TaskNode].self, forKey: .tasks) ?? []
         }
 
-        private enum CodingKeys: String, CodingKey { case id, name, secretary, counts, tasks }
+        private enum CodingKeys: String, CodingKey { case id, name, secretary, counts, running, tasks }
 
         /// What a header calls it: its name, Secretary for the secretary group (`fallback` for a leader the hub gave no
         /// name).
@@ -201,13 +209,6 @@ nonisolated extension DirectionTree {
             let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if !name.isEmpty { out[d.id] = name }
         }
-        return out
-    }
-
-    /// The directions' counts by leader conversation id (`AppModel.directionCounts`, the sidebar's lead rows).
-    var leaderCounts: [String: Counts] {
-        var out: [String: Counts] = [:]
-        for d in leaders { out[d.id] = d.counts }
         return out
     }
 

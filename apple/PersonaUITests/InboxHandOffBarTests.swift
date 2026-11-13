@@ -79,8 +79,8 @@ final class InboxHandOffBarTests: XCTestCase {
         target.tap()
         app.buttons["新对话"].firstMatch.tap()
         app.buttons["handoff-chip-summarize"].tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "已标完成")).firstMatch
-            .waitForExistence(timeout: 15), "the hand-off did not go, or did not say it marked the item done:\n\(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "已交给新对话")).firstMatch
+            .waitForExistence(timeout: 15), "the hand-off did not go:\n\(app.debugDescription)")
         // The sent toast (with Undo) fades into the handed one: let it finish, or the shot catches both.
         let undoGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["toast-secondary"])
         _ = XCTWaiter.wait(for: [undoGone], timeout: 5)

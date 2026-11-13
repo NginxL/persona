@@ -1,6 +1,7 @@
 // The Agents list "By to-do" on made-up data (docs/web/web.md "By to-do"): to-dos at the top level with no repository
-// rows, then "Opened in the terminal", "Not on a to-do" and "Recent (not running)" as rows of the same kind, each with an
-// ⓘ that tells what it holds and its count and most urgent state; a to-do says the To-dos page's state word.
+// rows, then "Not on a to-do" and "Recent (not running)" as rows of the same kind, each with its count and most urgent
+// state; "Not on a to-do" also holds the Agents opened by hand in a terminal, each row ending with the Terminal mark
+// (#6591), and has an ⓘ that tells what it holds; a to-do says the To-dos page's state word.
 //
 // Every session and to-do comes from the fixture below (the mock hub's own are replaced, over REST and the socket), so
 // the screenshots hold no real data. Needs the web page against the fake hub, and Chrome:
@@ -69,7 +70,7 @@ const manual = [
   session("server", "整理下载文件夹", "/Users/me/Downloads", "idle", 30, { started_by_persona: false, last_text: "按类型分好了。" }),
 ];
 // started from elsewhere (a phone, a group chat), on no to-do
-const unassigned = [session("studio", "周报里要的数据", "/Users/me/code/report", "needs_you", 3, { space_kind: "botmux", last_text: "这周的数据要按部门拆开吗？" })];
+const unassigned = [session("studio", "周报里要的数据", "/Users/me/code/report", "needs_you", 3, { space_kind: "botmux", pane_id: "botmux:report", last_text: "这周的数据要按部门拆开吗？" })];
 const offline = [
   session("server", "给博客换字体", "/Users/me/code/blog", "offline", 300),
   session("studio", "清理旧的构建缓存", "/Users/me/code/photo-sync", "offline", 600),
@@ -83,8 +84,8 @@ const todos = [todo("t_weather", "天气 App 发 1.3 版", weather, 2), todo("t_
 const FIXTURES = {
   // every group holds agents
   full: [...weather, ...release, ...photos, ...orders, ...manual, ...unassigned, ...offline],
-  // "Opened in the terminal" has none: its open row says what would be there
-  empty: [...weather, ...release, ...photos, ...orders, ...unassigned, ...offline],
+  // "Not on a to-do" has none: its open row says what would be there
+  empty: [...weather, ...release, ...photos, ...orders, ...offline],
 };
 
 async function open(browser, theme, fixture, path = "/overview") {
@@ -143,7 +144,7 @@ try {
         const text = await agents.innerText();
         for (const repo of ["weather", "photo-sync", "shop-api", "sandbox", "Downloads"]) assert.ok(!new RegExp(`^${repo}$`, "m").test(text), `no "${repo}" repository row in By to-do`);
         ok(`${theme}: no repository rows`);
-        // the to-dos and the three groups are rows of one kind, at one level, each with its count and state
+        // the to-dos and the two groups are rows of one kind, at one level, each with its count and state
         const rows = await agents.locator("[data-tree-branch]").evaluateAll((els) => els.map((el) => ({
           name: el.getAttribute("data-tree-branch"),
           level: el.closest("[data-tree-branch-list]") ? "nested" : "top",
@@ -151,37 +152,41 @@ try {
           expanded: el.querySelector("[data-tree-branch-row] button[aria-expanded]")?.getAttribute("aria-expanded"),
         })));
         const names = rows.map((r) => r.name);
-        assert.deepEqual(names.slice(-3), ["todo:manual", "todo:none", "recent"], `the three groups come last: ${names.join(", ")}`);
+        assert.deepEqual(names.slice(-2), ["todo:none", "recent"], `the two groups come last: ${names.join(", ")}`);
+        assert.ok(!names.includes("todo:manual"), "no group of its own for the Agents opened in a terminal (#6591)");
         assert.ok(rows.every((r) => r.level === "top"), "every to-do and group is top level");
         const group = (key) => rows.find((r) => r.name === key);
         // the count's spoken words sit between the number and the state in the text: "2" + "2 个 Agent" + "工作中"
-        assert.match(group("todo:manual").text, /^在终端里开的.*2 个 Agent工作中$/, "Opened in the terminal: 2, Working");
-        assert.match(group("todo:none").text, /^没挂待办的.*1 个 Agent需要你$/, "Not on a to-do: 1, Needs you");
+        assert.match(group("todo:none").text, /^没挂待办的.*3 个 Agent需要你$/, "Not on a to-do: 3 (2 opened in a terminal), Needs you");
         assert.match(group("recent").text, /^最近（未运行）.*3 个 Agent已完成$/, "Recent: 3, Done");
         // folded by default, unless it holds an agent that needs you (DESIGN_SYSTEM 3.4)
-        assert.equal(group("todo:manual").expanded, "false");
         assert.equal(group("recent").expanded, "false");
         assert.equal(group("todo:none").expanded, "true");
-        ok(`${theme}: three groups after the to-dos, top level, with count and most urgent state`);
+        ok(`${theme}: two groups after the to-dos, top level, with count and most urgent state`);
+        // where each came from stays on its row: the two opened in a terminal end with the Terminal mark, the Lark one with Lark's
+        const marks = await agents.locator('[data-tree-branch="todo:none"] [data-tree-branch-list] [data-source]').evaluateAll((els) => els.map((el) => el.getAttribute("data-source")).sort());
+        assert.deepEqual(marks, ["feishu", "terminal", "terminal"]);
+        ok(`${theme}: the rows opened in a terminal keep the Terminal mark`);
         // a to-do says the To-dos page's word: Waiting, Follow up
         assert.match(rows.find((r) => r.name === "todo:t_release").text, /3 个 Agent等待中$/);
         assert.match(rows.find((r) => r.name === "todo:t_orders").text, /1 个 Agent待跟进$/);
         ok(`${theme}: to-do rows say 等待中 / 待跟进 as the To-dos page`);
         // the explanation is behind the ⓘ, not under the title
         assert.equal(await agents.getByText("右键一行").count(), 0, "no explanation shown by default");
-        const info = agents.getByRole("button", { name: /关于「在终端里开的」/ });
+        const info = agents.getByRole("button", { name: /关于「没挂待办的」/ });
         await info.hover();
         const tip = page.getByRole("tooltip");
         await tip.waitFor();
-        assert.match(await tip.innerText(), /终端/);
+        assert.match(await tip.innerText(), /终端[\s\S]*飞书/);
         assert.doesNotMatch(await tip.innerText(), /herdr/i, "no engine name (DESIGN_SYSTEM 5.6)");
         ok(`${theme}: ⓘ shows the explanation on hover`);
-        // the sidebar and the tip beside it, which is drawn over the page
+        // the sidebar and the tip beside it, which is drawn over the page; the page itself is left out
         if (shots) {
           const at = await info.boundingBox();
           const side = await page.locator("aside").first().boundingBox();
+          const tipAt = await tip.boundingBox();
           const top = Math.max(0, at.y - 520);
-          await page.screenshot({ path: join(shots, `${prefix}agents-todo-info-${theme}.png`), clip: { x: 0, y: top, width: side.width + 260, height: Math.min(700, 1500 - top) }, animations: "disabled" });
+          await page.screenshot({ path: join(shots, `${prefix}agents-todo-info-${theme}.png`), clip: { x: 0, y: top, width: Math.max(side.width, tipAt.x + tipAt.width) + 12, height: Math.min(700, 1500 - top) }, animations: "disabled" });
           console.log(`shot ${prefix}agents-todo-info-${theme}.png`);
         }
         await page.mouse.move(900, 700);
@@ -193,7 +198,7 @@ try {
         ok(`${theme}: ⓘ opens on click and closes with Escape`);
         // a press-and-drag over the group rows selects nothing (the grey blocks of the report)
         const from = await agents.getByText("最近（未运行）", { exact: true }).boundingBox();
-        const to = await agents.getByText("在终端里开的", { exact: true }).boundingBox();
+        const to = await agents.getByText("没挂待办的", { exact: true }).boundingBox();
         await page.mouse.move(from.x + from.width - 2, from.y + from.height / 2);
         await page.mouse.down();
         await page.mouse.move(to.x + 1, to.y + to.height / 2, { steps: 10 });
@@ -219,18 +224,18 @@ try {
     // an empty group, opened: its explanation is the empty state
     {
       const { ctx, page, agents, errors } = await open(browser, theme, "empty");
-      const row = agents.locator('[data-tree-branch="todo:manual"]');
+      const row = agents.locator('[data-tree-branch="todo:none"]');
       if (checks) {
         await row.locator("[data-tree-branch-row] button[aria-expanded]").first().click();
         await row.getByText(/你自己在终端里开的/).waitFor();
-        assert.match(await row.locator("[data-tree-branch-row]").innerText(), /^在终端里开的[\s\S]*0 个 Agent$/);
+        assert.match(await row.locator("[data-tree-branch-row]").innerText(), /^没挂待办的[\s\S]*0 个 Agent$/);
         ok(`${theme}: an empty group says 0 and, opened, what would be there`);
         assert.deepEqual(errors, []);
       } else {
-        // before: the group is not listed when empty; open the others to show their insides
-        for (const name of ["没挂待办的", "最近（未运行）"]) {
-          const button = agents.getByRole("button", { name: new RegExp(name) }).first();
-          if ((await button.getAttribute("aria-expanded")) === "false") await button.click();
+        // before: open the groups of agents on no to-do there are, to show what they say
+        for (const key of ["todo:manual", "todo:none"]) {
+          const button = agents.locator(`[data-tree-branch="${key}"] [data-tree-branch-row] button[aria-expanded]`).first();
+          if ((await button.count()) && (await button.getAttribute("aria-expanded")) === "false") await button.click();
         }
       }
       await page.waitForTimeout(500);

@@ -40,6 +40,9 @@ internal fun ChatContextCard(context: ChatLinkContext, compact: Boolean = false,
     val session = context.url.startsWith(SESSION_CONTEXT_URL)
     // A quoted message ("Quote") and a session picked with @ say whom they quote (iOS `quoteHeading`); no title line under it.
     val label = when {
+        // Words picked in a message ("Select", then Quote) say so, as iOS's `quoteHeading` does.
+        quote && context.part == ChatLinkContext.PART_SELECTION -> stringResource(R.string.chat_quote_selection,
+            if (context.title == ChatLinkContext.QUOTE_ME) stringResource(R.string.chat_exchange_me) else context.title)
         quote && context.title == ChatLinkContext.QUOTE_ME -> stringResource(R.string.chat_quote_yours)
         quote -> stringResource(R.string.chat_quote_from, context.title)
         session -> stringResource(R.string.chat_quote_session, context.title)

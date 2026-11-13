@@ -40,6 +40,17 @@ data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: Str
 
         /** The id of the line that stands for the round [roundId] (its first input's id). */
         fun lineId(roundId: String): String = "bg-$roundId"
+
+        /**
+         * Whether conversation [sessionId] folds its background rounds (#4314, #6595): the main conversation or one of
+         * the hub's leader (direction) conversations, while the switch is on. A hub that omits the switch means on;
+         * an ordinary side conversation never folds.
+         */
+        fun foldsConversation(sessionId: String, main: String?, on: Boolean, leaders: Set<String>): Boolean {
+            if (!on || sessionId.isBlank()) return false
+            if (!main.isNullOrBlank() && sessionId == main) return true
+            return sessionId in leaders
+        }
     }
 }
 

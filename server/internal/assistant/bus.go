@@ -134,7 +134,7 @@ func NewBusHub(o BusOptions) *BusHub {
 					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch,
+					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHTTPBodyStream,
 					devicewire.SharingCapability}}
 		},
 		OnHello: b.onHello,
@@ -500,6 +500,18 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		defer memtrim.AfterLarge(len(p.Body)) // a large upload's buffers go back to the system after it
+		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
+	case assistantwire.MethodHTTPStreamed: // http.request with its body on a relay of its own (bus_body.go)
+		var p assistantwire.HTTPRequest
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		body, err := b.streamedBody(ctx, p.BodyStream)
+		if err != nil {
+			return nil, &rpc.Error{Code: assistantwire.CodeBodyIncomplete, Message: method + ": " + err.Error()}
+		}
+		p.Body, p.BodyStream = body, nil
+		defer memtrim.AfterLarge(len(p.Body))
 		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
 	case assistantwire.MethodTools:
 		return map[string]any{"tools": s.Tools(ctx)}, nil

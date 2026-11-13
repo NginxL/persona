@@ -355,7 +355,7 @@ func (s *Service) linkTaskFor(ctx context.Context, it *InboxItem, tasks []prompt
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if it.Agent != nil && id != "" {
+	if it.Agent != nil && id != "" && inboxTaskLinkEligible(it) {
 		held := w != nil && b.holds(w)
 		it.Agent.TodoID = id
 		if held {
@@ -372,6 +372,10 @@ func (s *Service) linkTaskFor(ctx context.Context, it *InboxItem, tasks []prompt
 func (s *Service) judgeInboxTask(ctx context.Context, it *InboxItem, tasks []prompts.InboxTask) (string, error) {
 	b := &s.inbox
 	b.mu.Lock()
+	if !inboxTaskLinkEligible(it) {
+		b.mu.Unlock()
+		return "", nil
+	}
 	sc := inboxScopeOf(it)
 	b.mu.Unlock()
 	if tasks = s.scopeInboxTasks(sc, tasks); len(tasks) == 0 {

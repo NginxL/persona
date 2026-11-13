@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { needsYouBySupervisor, type NeedsYouItem } from "./assistant-entries";
+import { foldsBackgroundRounds } from "./background-fold";
 import { chatLines, type ChatLine } from "./turns";
 import type { Todo } from "./todos";
 import type { Item } from "./types";
@@ -97,6 +98,18 @@ describe("background rounds in the main conversation", () => {
     const supervise: Item = { id: "s1#0", seq: 1, role: "user", kind: "text", text: "x", injected: { kind: "system", state: "supervise", level: "triage", line: "Check tasks" } };
     const [fold] = chatLines([supervise, answer(2)], on);
     expect(fold.kind === "supervision" && fold.source).toBeUndefined();
+  });
+
+  it("a leader conversation folds the same rounds the main chat does (#6595)", () => {
+    // the gate the chat view uses: a leader id with the switch on enables the same background option
+    const info = { machine_id: "m1", main: "main", leaders: ["lead-1"], main_background_folded: true };
+    expect(foldsBackgroundRounds("lead-1", info)).toBe(true);
+    expect(foldsBackgroundRounds("side-2", info)).toBe(false);
+    // with that option the leader's patrol / relayed rounds fold, the owner's exchange stays open
+    const items = [relayed(1), answer(2), scheduled(3), answer(4), mine(5), answer(6)];
+    expect(kinds(chatLines(items, { background: foldsBackgroundRounds("lead-1", info) }))).toEqual(["supervision", "supervision", "segment"]);
+    // a non-leader side chat keeps every round
+    expect(kinds(chatLines(items, { background: foldsBackgroundRounds("side-2", info) }))).toEqual(["segment", "segment", "segment"]);
   });
 });
 

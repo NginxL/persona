@@ -4,7 +4,7 @@
     <string name="inbox_title">Inbox</string>
     <string name="inbox_retry">Retry</string>
     <string name="inbox_done">Done</string>
-    <string name="inbox_move_back">Move to Inbox</string>
+    <string name="inbox_move_back">Move Back</string>
     <string name="inbox_hand_to_ai">Hand to AI</string>
     <string name="inbox_ai_draft">AI draft</string>
     <string name="inbox_ai_summary">AI summary</string>

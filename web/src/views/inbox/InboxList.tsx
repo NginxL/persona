@@ -7,12 +7,14 @@ import {
   BULK_CONFIRM_AT, bulkScope, bulkScopeName, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, mailShort, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS,
   useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup,
 } from "../../lib/inbox";
+import { rowMeta } from "../../lib/inbox-now";
 import { dayGroupCounts, doneGroups, groupBySource, groupByTime, openAtFirst, sortTimeKeys, timeRange, timeTitle, type Grouping, type InboxGroup } from "../../lib/inbox-groups";
 import { useMailAccounts } from "../../lib/mail";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
 import { machineWithHub } from "../../lib/mesh";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { openedItemState } from "../../lib/inbox-nav";
+import { useInboxListScroll, useInboxView } from "../../lib/inbox-view-memory";
 import { useInboxSources } from "../../lib/inbox-sources";
 import { subscriptionsHref, useInboxSourcesShown, useSubscriptionsShown } from "../../lib/subscriptions";
 import { type Manager } from "../../lib/managers";
@@ -74,6 +76,7 @@ type Picked = Set<string> | null;
 
 /** `selected`: the item opened (its id and manager). `picked` / `onPicked`: selecting, from the page's "Select". */
 export function InboxList({ selected, picked = null, onPicked }: { selected?: { id: string; manager?: string }; picked?: Picked; onPicked?: Dispatch<SetStateAction<Picked>> }) {
+  const view = useInboxView();
   // with several assistants the list is the current one's (docs/assistant/managers.md "Clients"); one: every item
   const mine = useScope();
   const items = useScoped(useInbox((s) => s.items));
@@ -99,7 +102,11 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const groupLoading = useInbox((st) => st.groupLoading);
   const groupComplete = useInbox((st) => st.groupComplete);
   const [storedFolder, setFolder] = useStored("inbox.folder");
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState(() => view.listQuery());
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    view.setListQuery(value);
+  };
   const foldersShown = useFoldersShown(items);
   // folders hidden (turned off, nothing filed): a folder picked before does not filter what can't be seen
   const folder = foldersShown ? storedFolder : "";
@@ -109,7 +116,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const agents = useScoped(useStore((st) => waitingAgents(st.interactions, st.sessions, st.mutes, { source, kind, query, folder })));
   // the sections opened or closed by hand, by "<manager group>:<section>" (each manager's group keeps its own; one
   // manager: the group ""), the others as they are at first
-  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const [toggled, setToggled] = useState<Set<string>>(() => view.listToggled());
   const isOpen = (group: string, k: string) => OPEN_AT_FIRST.has(k) !== toggled.has(`${group}:${k}`);
   const [editing, setEditing] = useState<InboxItem | null>(null);
   const accounts = useMailAccounts();
@@ -122,14 +129,15 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   // Clean up all over many items asks first; the items are the ones shown when it was asked.
   const [confirm, setConfirm] = useState<{ items: InboxItem[]; scope: string } | null>(null);
 
-  // The opened item stays in sight in the list (a link straight to it, a click in the detail).
+  // The opened item stays in sight in the list (a link straight to it, a click in the detail), except while a returned
+  // history entry's own scroll position is being put back.
   const selectedKey = selected ? itemKey(selected) : "";
-  useEffect(() => {
+  const listBox = useRef<HTMLDivElement>(null);
+  useInboxListScroll(listBox, view, selectedKey, loaded, storeLoaded, () => {
     if (!selected) return;
     const rows = [...document.querySelectorAll<HTMLElement>(`[data-item="${CSS.escape(selected.id)}"]`)];
     (rows.find((el) => sameItem({ id: selected.id, manager: el.dataset.manager }, selected)) ?? rows[0])?.scrollIntoView({ block: "nearest" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, loaded, storeLoaded]);
+  });
 
   const s = useMemo(() => sections(items, { source, kind, query, folder }), [items, source, kind, query, folder]);
   // what the folder bar counts: the items the other filters leave
@@ -271,13 +279,14 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     if (openInView.length >= BULK_CONFIRM_AT) setConfirm({ items: openInView, scope: bulkScopeName(filterNames, query) });
     else void setAllDone(openInView, "dismiss");
   };
-  const toggle = (group: string, k: string) => setToggled((o) => {
-    const n = new Set(o);
+  const toggle = (group: string, k: string) => {
+    const n = new Set(toggled);
     const at = `${group}:${k}`;
     if (n.has(at)) n.delete(at);
     else n.add(at);
-    return n;
-  });
+    setToggled(n);
+    view.setListToggled(n);
+  };
   // Agents have no source: picking one leaves the Agent filter, and the Agent filter leaves the source.
   const pickSource = (v: string) => {
     setSource(source === v ? "" : v);
@@ -293,7 +302,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     {/* `overflow-y-auto` alone makes this a scroll container on both axes, so a row or a long chip (a connector's name)
         wider than the 380px column let the whole list scroll sideways and cut off every card (#3262); `overflow-x-clip`
         clips that overflow instead, and is not a scroll container, so `scrollIntoView` above cannot shift it either. */}
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined}>
+    <div ref={listBox} className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined} data-inbox-list-scroll>
       <div className="mx-auto max-w-[760px] px-3 pt-3 pb-16 sm:px-4">
         <label className="flex h-8 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
           <Icon name="search" size={13} stroke={2} className="shrink-0 text-ink-3" />
@@ -631,7 +640,8 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   const rows = !done ? it.doc?.rows ?? [] : [];
   const first = rows[0];
   const translated = hubTranslation(it, useTranslatePrefs());
-  const from = fromLine(it, translated?.preview);
+  // Translated mail keeps the old optional-preview path exactly; mail has no `where`.
+  const from = translated ? fromLine(it, translated.preview) : rowMeta(it);
   // a right click: "Done" / "Move back", then what it can be muted by (iOS: the row's long press)
   // (the menu key / Shift+F10 open it next to the row, see ui/context-menu.ts)
   const [menu, setMenu] = useState<MenuAt | null>(null);

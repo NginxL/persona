@@ -56,3 +56,20 @@ func BenchmarkRenderDiff(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDiff is Diff alone, both trees already decoded: the part of a render
+// that finds and replays the delta.
+func BenchmarkDiff(b *testing.B) {
+	for _, size := range []struct{ sections, items int }{{4, 8}, {10, 25}} {
+		b.Run(fmt.Sprintf("%dx%d", size.sections, size.items), func(b *testing.B) {
+			from := snapshot(b, benchView(size.sections, size.items, ""), 1)
+			to := snapshot(b, benchView(size.sections, size.items, "s1-i3"), 2)
+			b.ReportAllocs()
+			for b.Loop() {
+				if d, _, err := Diff(from, to); err != nil || d == nil || len(d.ops) != 1 {
+					b.Fatalf("diff: %v %v", d, err)
+				}
+			}
+		})
+	}
+}

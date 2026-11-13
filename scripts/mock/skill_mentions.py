@@ -11,6 +11,9 @@ os.environ["MOCK_MANAGERS"] = "0"
 import mock_hub as hub
 
 STATE = "ready"
+SENDS = []
+CLAUDE_CHAT = "c1111111-0000-4000-8000-000000000001"
+CODEX_CHAT = "d2222222-0000-4000-8000-000000000002"
 SKILLS = [
     {"id": "fixture-project", "name": "review", "description": "Inspect security boundaries and regressions", "source": "project · ."},
     {"id": "fixture-user", "name": "review", "description": "Review a document for clarity", "source": "user · ~/example/skills"},
@@ -26,7 +29,10 @@ class Handler(hub.H):
             STATE = parse_qs(parsed.query).get("state", ["ready"])[0]
             self.send_json({"state": STATE})
             return
-        if parsed.path == "/api/v1/assistant/skills":
+        if parsed.path == "/mock/skill-sends":
+            self.send_json({"sends": SENDS})
+            return
+        if parsed.path == "/api/v1/assistant/skills" or parsed.path.endswith("/skills") and parsed.path.startswith("/api/v1/sessions/"):
             state = STATE
             if state == "loading":
                 time.sleep(2)
@@ -37,9 +43,26 @@ class Handler(hub.H):
             return
         super().do_GET()
 
+    def do_POST(self):
+        if urlparse(self.path).path.endswith("/messages"):
+            import json
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            SENDS.append({"path": self.path, "body": body})
+            if STATE == "refuse":
+                self.send_json({"error": "Selected skill is unavailable; remove it and select it again", "code": "skill_unavailable", "delivered": "none", "retryable": False}, 409)
+            else:
+                self.send_json({"ok": True})
+            return
+        super().do_POST()
+
 
 def main():
-    hub.SESSIONS[:] = []
+    hub.SESSIONS[:] = [
+        hub.sess("macbook", CLAUDE_CHAT, "Example Claude chat", "/example/project", "idle", "unread", "Example", 1, "Claude", 1, 1, "", launcher="claude"),
+        hub.sess("macbook", CODEX_CHAT, "Example Codex chat", "/example/project", "idle", "unread", "Example", 1, "Codex", 2, 1, "", agent="codex", launcher="codex"),
+    ]
+    for session in hub.SESSIONS:
+        hub.ITEMS[session["session_id"]] = []
     hub.ASSISTANT[:] = [hub.assistant_sess(hub.ASK1, "Example conversation", 1, "Synthetic skill selection example")]
     hub.ITEMS[hub.ASK1] = []
     hub.TODOS[:] = []

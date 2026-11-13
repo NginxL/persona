@@ -14,6 +14,7 @@ settleRosterDefault();
 const place: UIPlace = { extension: "example-chat", extension_name: "Example Chat", id: "event", title: "事件", placement: "inbox_item", size: "full", connector: "examplechat" };
 vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: (source?: string) => (source === "examplechat" ? place : undefined) }));
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined }));
+vi.mock("./LarkThread", () => ({ LarkThread: () => <div data-chat-body>chat body</div>, chatOfItem: () => ({}) }));
 
 const item = (over: Partial<InboxItem>): InboxItem => ({
   id: "examplechat:1", source: "examplechat", kind: "dm", account: "examplechat", account_name: "Example Chat", title: "周会", preview: "周四下午可以吗",
@@ -30,6 +31,13 @@ describe("收件箱：扩展画的详情（inbox_item）", () => {
     expect(html).not.toContain("周四下午可以吗"); // the own body is not drawn under it
     // a chat's Pin works on the chat the own body draws: not there under the extension's page
     expect(renderToStaticMarkup(<InboxDetail item={item({ lark: { feed_id: "f1", is_group: false } })} loaded />)).not.toContain("Pin 消息");
+  });
+  it("embeds a chat under its event even when the extension offers a page, with chat pins available", () => {
+    const html = renderToStaticMarkup(<InboxDetail item={item({ lark: { feed_id: "f1", is_group: false }, chain: [{ id: "c1", kind: "received", text: "New message" }] })} loaded />);
+    expect(html).toContain('data-event-body="embedded"');
+    expect(html).toContain("data-chat-body");
+    expect(html).toContain("Pin 消息");
+    expect(html).not.toContain("data-extension-inbox");
   });
   it("keeps the own detail for a source without one", () => {
     const html = renderToStaticMarkup(<InboxDetail item={item({ id: "x:1", source: "telegramx" })} loaded />);

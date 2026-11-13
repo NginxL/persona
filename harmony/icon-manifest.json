@@ -1,0 +1,50 @@
+{
+  "sdk": "HarmonyOS 7 / API 26",
+  "purpose": "Package icon layers and startup artwork; no store upload",
+  "sources": [
+    "apple/Persona/Resources/Assets.xcassets/AppIcon.appiconset/icon.png",
+    "apple/Persona/Resources/Assets.xcassets/AppIcon-Vision.solidimagestack/Front.solidimagestacklayer/Content.imageset/front.png"
+  ],
+  "exports": [
+    {
+      "path": "harmony/AppScope/resources/base/media/foreground.png",
+      "width": 1024,
+      "height": 1024,
+      "depth": 8,
+      "alpha": true,
+      "sha256": "aa6fb4cfac45db47bce9593b3ef87d8069e75d81a8b661e7c8dc70d15b6d5736"
+    },
+    {
+      "path": "harmony/AppScope/resources/base/media/background.png",
+      "width": 1024,
+      "height": 1024,
+      "depth": 8,
+      "alpha": false,
+      "sha256": "34444c266cdad095db44da3b8a2c903cf0a7575a791f6a68d8f720ede776fb88"
+    },
+    {
+      "path": "harmony/entry/src/main/resources/base/media/foreground.png",
+      "width": 1024,
+      "height": 1024,
+      "depth": 8,
+      "alpha": true,
+      "sha256": "aa6fb4cfac45db47bce9593b3ef87d8069e75d81a8b661e7c8dc70d15b6d5736"
+    },
+    {
+      "path": "harmony/entry/src/main/resources/base/media/background.png",
+      "width": 1024,
+      "height": 1024,
+      "depth": 8,
+      "alpha": false,
+      "sha256": "34444c266cdad095db44da3b8a2c903cf0a7575a791f6a68d8f720ede776fb88"
+    },
+    {
+      "path": "harmony/entry/src/main/resources/base/media/startIcon.png",
+      "width": 1024,
+      "height": 1024,
+      "depth": 8,
+      "alpha": false,
+      "sha256": "75e0d3f981f537db57000b7f6f1fa203f5dc0cf0305f6a7f1f1ec1b092fd031a"
+    }
+  ]
+}

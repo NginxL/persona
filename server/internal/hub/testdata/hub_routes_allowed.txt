@@ -66,6 +66,7 @@ GET /api/v1/machines/{mid}/ports/{port}
 GET /api/v1/machines/{mid}/ports/{port}/connect
 GET /api/v1/machines/{mid}/preview/connect
 GET /api/v1/machines/{mid}/preview/servers
+GET /api/v1/machines/{mid}/screen/video/connect
 GET /api/v1/machines/{mid}/stat
 GET /api/v1/managers
 GET /api/v1/mutes

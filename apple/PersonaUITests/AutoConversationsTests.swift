@@ -92,6 +92,7 @@ final class AutoConversationsTests: XCTestCase {
             XCTAssertTrue(app.buttons["auto-filter-" + id].exists, "no \(id) filter")
         }
         XCTAssertTrue(app.buttons["auto-filter-all"].isSelected, "全部 is not the filter All Chats opens on")
+        let rows = app.buttons.matching(identifier: "auto-conversation")
         // The scheduled tasks' chats left Recent, not the app: the task filter still lists them (#6228).
         app.buttons["auto-filter-task"].firstMatch.tap()
         XCTAssertTrue(rows.matching(NSPredicate(format: "label BEGINSWITH %@", "1105 | 定时 | 晨间简报")).firstMatch.waitForExistence(timeout: 5), "定时任务 filter lacks the task's chat")
@@ -100,7 +101,6 @@ final class AutoConversationsTests: XCTestCase {
         shot("list-opens-on-all")
         inbox.tap()
         XCTAssertTrue(inbox.isSelected, "收件箱 is not the chosen filter")
-        let rows = app.buttons.matching(identifier: "auto-conversation")
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "收件箱's list is empty")
         XCTAssertEqual(rows.count, 6, "收件箱's list")
         sleep(1)

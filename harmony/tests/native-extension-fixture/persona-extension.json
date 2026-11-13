@@ -1,0 +1,41 @@
+{
+  "manifest_version": 1,
+  "id": "harmony-native-check",
+  "name": "Native UI Check",
+  "version": "0.1.4",
+  "description": "Synthetic native UI update, focus, confirmation and stream checks for a disposable test Hub.",
+  "engines": {
+    "extension_protocol": 1,
+    "plugin_protocol": 1
+  },
+  "runtime": {
+    "command": {
+      "linux-amd64": "bin/harmony-native-check-linux-amd64",
+      "linux-arm64": "bin/harmony-native-check-linux-arm64",
+      "darwin-amd64": "bin/harmony-native-check-darwin-amd64",
+      "darwin-arm64": "bin/harmony-native-check-darwin-arm64"
+    }
+  },
+  "contributes": {
+    "ui": [
+      {
+        "id": "harmony-native-check",
+        "title": "Native UI Check",
+        "placement": "nav_page",
+        "icon": "list"
+      },
+      {
+        "id": "harmony-native-check-today",
+        "title": "Native UI Check \u4eca\u5929",
+        "placement": "overview_card",
+        "opens": "harmony-native-check"
+      },
+      {
+        "id": "harmony-native-stream",
+        "title": "Native Stream Check",
+        "placement": "nav_page",
+        "icon": "list"
+      }
+    ]
+  }
+}

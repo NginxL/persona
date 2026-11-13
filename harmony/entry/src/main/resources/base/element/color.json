@@ -1,0 +1,36 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "persona_canvas",
+      "value": "#F1F3F5"
+    },
+    {
+      "name": "persona_surface",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "persona_brand",
+      "value": "#0055FF"
+    },
+    {
+      "name": "persona_danger",
+      "value": "#BA1A1A"
+    },
+    {
+      "name": "persona_own_glass",
+      "value": "#E0EDFF"
+    },
+    {
+      "name": "persona_own_brief",
+      "value": "#F1EADB"
+    },
+    {
+      "name": "persona_own_board",
+      "value": "#DCE8F4"
+    }
+  ]
+}

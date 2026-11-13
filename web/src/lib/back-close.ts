@@ -4,6 +4,7 @@
 import { useEffect, useRef } from "react";
 
 const KEY = "personaOverlay";
+const DEPTH = "personaOverlayDepth";
 /** The address the overlay opened on: the entry under its own has it (see settleOverlayEntry). */
 const AT = "personaOverlayAt";
 let next = 0;
@@ -36,6 +37,13 @@ export function onOverlayEntry(state: unknown = typeof history !== "undefined" ?
   return Boolean(state && typeof state === "object" && typeof (state as Record<string, unknown>)[KEY] === "string");
 }
 
+/** How many overlay entries are stacked at `state`; entries written before the depth field count as one. */
+export function overlayDepth(state: unknown = typeof history !== "undefined" ? history.state : null): number {
+  if (!onOverlayEntry(state)) return 0;
+  const n = (state as Record<string, unknown>)[DEPTH];
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : 1;
+}
+
 /** Whether `state` is the entry the overlay `id` pushed. */
 export function isOverlayEntry(state: unknown, id: string): boolean {
   return Boolean(state && typeof state === "object" && (state as Record<string, unknown>)[KEY] === id);
@@ -49,7 +57,8 @@ export function openOverlay(onClose: () => void): () => void {
     pending = null;
     history.replaceState(overlayState(history.state, id), "", location.href);
   } else {
-    history.pushState({ ...overlayState(history.state, id), [AT]: location.href }, "", location.href);
+    const depth = overlayDepth(history.state) + 1;
+    history.pushState({ ...overlayState(history.state, id), [AT]: location.href, [DEPTH]: depth }, "", location.href);
   }
   // where it opened: a replace that moves the page under it (an old link turned into its new one, a delete going
   // home) keeps the marker, so Back still closes it; closing it from the page then must not go back from the new page
@@ -72,6 +81,7 @@ export function openOverlay(onClose: () => void): () => void {
       const rest = { ...(history.state as Record<string, unknown>) };
       delete rest[KEY];
       delete rest[AT];
+      delete rest[DEPTH];
       history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
       return;
     }
@@ -113,6 +123,7 @@ export async function settleOverlayEntry(ms = 500): Promise<void> {
   const rest = { ...st };
   delete rest[KEY];
   delete rest[AT];
+  delete rest[DEPTH];
   history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
 }
 

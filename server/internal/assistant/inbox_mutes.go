@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,7 +67,7 @@ func mutesOf(it *InboxItem) []MuteOption {
 			}
 		}
 	case it.Lark != nil && it.Doc == nil && it.Moment == nil:
-		add(connector.TagChat, it.Lark.FeedID, it.Title)
+		add(connector.TagChat, it.Lark.FeedID, cmp.Or(it.Where, it.Title))
 		if it.Lark.IsGroup {
 			add(connector.TagSender, it.Lark.SenderID, it.Sender)
 		}
@@ -112,7 +113,7 @@ func (b *inboxBook) applyMutes(now time.Time) []*inboxWrite {
 // fileMuted keeps done_by=read for compatibility, but records the mute as the cause. Under b.mu.
 func (b *inboxBook) fileMuted(it *InboxItem, at time.Time, name string) {
 	it.done(at, "read")
-	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted")})
+	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted"), By: DoneByMuted})
 	it.Reason = b.mutedReason(name)
 }
 

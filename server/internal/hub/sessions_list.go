@@ -363,6 +363,9 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 	if s.Todo != nil {
 		out.Todo = &proto.TodoRef{ID: s.Todo.ID, Title: rowText(s.Todo.Title, 256)}
 	}
+	if done := s.CompletedTodo(); done != nil {
+		out.SetCompletedTodo(&proto.TodoRef{ID: done.ID, Title: rowText(done.Title, 256)})
+	}
 	if s.Plan != nil {
 		cp := *s.Plan
 		cp.Current = rowText(cp.Current, 180)

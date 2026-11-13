@@ -22,6 +22,14 @@ You also need a **model**, Persona's brain: if you already use Claude Code, use 
                               model (Claude Code or API key)
 ```
 
+### Who runs what
+
+No central backend holds your data. Everything above is yours: you run the hub, on your own always-on Linux machine, Mac or NAS, and your computers do the work. Your messages, settings and memory stay on the hub ([the table below](#first-check-what-you-have) says which machine suits you).
+
+One shared service may be involved on Apple devices. Apple only lets the Apple Team that owns the App send it a push, and a self-hosted hub doesn't have that team's key. So when the hub has no APNs key of its own (`~/.persona/apns.json`), its notifications go through the **push relay**, which the App's publisher runs. Ordinary notifications reach the relay as ciphertext that only your phone can read; a Live Activity's content is the exception and is visible to the relay. With a key of your own the hub talks to Apple directly and the publisher's relay is not involved. [Push relay](push-relay.md) has the exact boundary and "Running your own relay" (it means signing and installing the App under your own Apple Team).
+
+The hub and the relay are both in the public repository (`server/internal/hub`, `server/internal/relay`); what a deployment holds, such as its APNs key and signing keys, is the operator's own configuration and is not in it.
+
 ## First, check what you have
 
 | What you have | Where the hub goes | How far you can get now |

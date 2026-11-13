@@ -299,9 +299,6 @@ final class AppModel {
     /// good answer count as stale.
     @ObservationIgnored private var directionTreeAsk = 0
     @ObservationIgnored private var directionTreeLanded = 0
-    /// How much work each direction holds, by leader conversation id: the tree's `counts` (the secretary group left
-    /// out), for the sidebar's "N working · N need you" under each name. Empty from a hub without the tree.
-    var directionCounts: [String: DirectionTree.Counts] { directionTree?.leaderCounts ?? [:] }
     @ObservationIgnored private var assistantRetryInFlight: Task<Void, Never>?
     /// The assistant conversation shown in the Chat tab (persisted across launches).
     ///
@@ -366,6 +363,9 @@ final class AppModel {
     @ObservationIgnored private(set) var launcherCache: [MachineRef: [Launcher]] = [:]
     /// What each machine's launcher pickers run with none picked (`LauncherDefault`), loaded with `launcherCache`.
     @ObservationIgnored private(set) var launcherDefaults: [MachineRef: LauncherDefault] = [:]
+    /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
+    /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
+    @ObservationIgnored private(set) var assistantLauncherCache: [MachineRef: APIClient.LaunchersResponse] = [:]
 
     /// The hub-level group's client: for pages about the hub (Persona, Inbox, its settings). A session's, a machine's
     /// or an interaction's requests go to its own group (`api(_:)`). The assistant's routes go to the manager the Persona
@@ -964,6 +964,13 @@ final class AppModel {
         if let b = m.browser, b.enabled, b.screenSharing { return b.displays }
         return []
     }
+    /// Whether this Mac's node advertises the live-screen hardware video channel (#3954), from whichever extension shows
+    /// its screen. The Picture / Quality switcher appears only then, so no Mac shows a control it cannot use.
+    func screenVideoAdvertised(_ ref: MachineRef) -> Bool { machine(ref).map(Self.advertisesVideo) ?? false }
+    nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
+        (m.computer.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
+            || (m.browser.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
+    }
     nonisolated static func showsScreen(_ m: Machine) -> Bool {
         (m.computer.map { $0.enabled && $0.screenSharing } ?? false) || (m.browser.map { $0.enabled && $0.screenSharing } ?? false)
     }
@@ -1559,23 +1566,35 @@ final class AppModel {
     }
 
 
+    /// The terminal of key can be streamed and typed into: what its session's row says (a read-only Agent's has none),
+    /// or a pane addressed directly (`pane:<id>`, a plain terminal), which has no row. Refusing those left Open Terminal
+    /// Here on Taking over… for good: nothing was sent, and the terminal waited for an answer (#6327).
+    func canUseTerminal(_ key: SessionKey) -> Bool { Self.terminalUsable(session(key), key) }
+
+    nonisolated static func terminalUsable(_ session: Session?, _ key: SessionKey) -> Bool {
+        session.map(\.canTerminal) ?? key.isPane
+    }
+
     /// Starts (or continues, with the last epoch and seq the view holds) a session's terminal stream. grid: drive it at
-    /// that size (the phone's); takeover: even if another program on the computer holds it.
+    /// that size (the phone's); takeover: even if another program on the computer holds it. False: nothing went out (no
+    /// terminal there, or no socket): the view asks again later.
+    @discardableResult
     func terminalSubscribe(_ key: SessionKey, epoch: String?, after: Int, grid: TerminalGridSize? = nil, takeover: Bool = false,
-                           handler: @escaping (TerminalEvent) -> Void) {
-        guard session(key)?.canTerminal == true else { return }
+                           handler: @escaping (TerminalEvent) -> Void) -> Bool {
+        guard canUseTerminal(key), let socket = socket(key.group) else { return false }
         terminalHandlers[key] = handler
         var msg: [String: Any] = ["type": "terminal_subscribe", "machine_id": key.machineID, "session_id": key.sessionID]
         if let epoch { msg["epoch"] = epoch; msg["after_seq"] = after }
         if let grid { msg["control"] = ["cols": grid.cols, "rows": grid.rows] }
         if takeover { msg["takeover"] = true }
-        socket(key.group)?.send(msg)
+        socket.send(msg)
+        return true
     }
 
     /// Typed into a terminal the phone drives: the bytes go straight to it (in order, over the WebSocket). grid: the
     /// terminal's new size (the keyboard came up, the font changed).
     func terminalInput(_ key: SessionKey, _ text: String, grid: TerminalGridSize? = nil) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         var msg: [String: Any] = ["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID]
         if !text.isEmpty { msg["text"] = text }
         if let grid { msg["control"] = ["cols": grid.cols, "rows": grid.rows] }
@@ -1586,7 +1605,7 @@ final class AppModel {
     /// gives it to a program that takes the mouse (Claude Code, Codex scroll their conversation) and scrolls its own
     /// scrollback for one that does not — what a herdr client does with the wheel, as in Moshi.
     func terminalScroll(_ key: SessionKey, lines: Int, at: (col: Int, row: Int)?) {
-        guard session(key)?.canTerminal == true, lines != 0 else { return }
+        guard canUseTerminal(key), lines != 0 else { return }
         var msg: [String: Any] = ["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID, "scroll": lines]
         if let at { msg["at"] = [at.col, at.row] }
         socket(key.group)?.send(msg)
@@ -1594,14 +1613,14 @@ final class AppModel {
 
     /// A tap on a terminal the app drives: a left click at that cell of its screen (0-based).
     func terminalClick(_ key: SessionKey, column: Int, row: Int) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         socket(key.group)?.send(["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID, "click": [column, row]])
     }
 
     /// The pointer on a terminal the app drives (docs/integrations/terminal.md section 25): action down / up / drag, button left /
     /// middle / right, at a cell of its screen (0-based), mods herdr's bits (shift 1, ctrl 2, alt 4).
     func terminalMouse(_ key: SessionKey, action: String, button: String, column: Int, row: Int, mods: Int) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         socket(key.group)?.send(["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID,
                                  "mouse": ["action": action, "button": button, "at": [column, row], "mods": mods]])
     }
@@ -3151,6 +3170,7 @@ final class AppModel {
     func launcherDefaultsChanged() {
         launcherCache = [:]
         launcherDefaults = [:]
+        assistantLauncherCache = [:]
     }
 
     /// The list a start picks from (New Agent, Run Agent Here): always read again, and the cache with it. Each launcher's
@@ -3166,6 +3186,69 @@ final class AppModel {
         launcherCache[machine] = r.launchers
         launcherDefaults[machine] = r.default
         return r.launchers
+    }
+
+    /// The main chat's picker data (`GET …/launchers?purpose=assistant`, #5033): the launchers that can run the
+    /// assistant on this machine, the effective Main chat default (`default`, what the next message runs with no pick),
+    /// and the ones that can't with why. Cached until Model Settings change or a `refresh`.
+    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false) async throws -> APIClient.LaunchersResponse {
+        if !refresh, let cached = assistantLauncherCache[machine] { return cached }
+        guard let api = api(machine.group) else { return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil) }
+        let r = try await api.launcherList(machine: machine.id, purpose: "assistant")
+        assistantLauncherCache[machine] = r
+        return r
+    }
+
+    /// Keeps a launcher / model / effort pick for the assistant conversation `key` (#5033, PUT
+    /// …/assistant/conversations/{id}/model): drawn at once, put back with the hub's words if it says no. The pick
+    /// holds from the next message, on every device.
+    @discardableResult
+    func keepConversationModel(_ key: SessionKey, pick: ModelPick) async -> Bool {
+        guard let api = api(key.group) else { return false }
+        let before = session(key)?.modelPick
+        patchSession(key) { $0.modelPick = pick }
+        do {
+            try await api.putConversationModel(machine: key.machineID, conversation: key.sessionID,
+                                                body: APIClient.ConversationModelBody(launcher: pick.launcher, model: pick.model,
+                                                                                      effort: pick.effort, machineID: key.machineID))
+            Haptics.success()
+            return true
+        } catch {
+            patchSession(key) { $0.modelPick = before }
+            show(error)
+            Haptics.error()
+            return false
+        }
+    }
+
+    /// The conversation follows Model configuration › Main chat again (DELETE …/conversations/{id}/model, #5033).
+    @discardableResult
+    func dropConversationModel(_ key: SessionKey) async -> Bool {
+        guard let api = api(key.group) else { return false }
+        let before = session(key)?.modelPick
+        patchSession(key) { $0.modelPick = nil }
+        do {
+            try await api.deleteConversationModel(machine: key.machineID, conversation: key.sessionID)
+            Haptics.success()
+            return true
+        } catch {
+            patchSession(key) { $0.modelPick = before }
+            show(error)
+            Haptics.error()
+            return false
+        }
+    }
+
+    /// Whether the connected hub keeps a conversation's own model pick (`assistant_model_pick`, #5033); an older hub
+    /// keeps nothing and the app leaves the model row read-only.
+    func keepsConversationModelPick(_ group: String) -> Bool {
+        features(group).contains("assistant_model_pick")
+    }
+
+    /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).
+    /// The composer title reads this so it shows the effective Main chat model, not only the running process's last one.
+    func cachedAssistantLaunchers(_ machine: MachineRef) -> APIClient.LaunchersResponse? {
+        assistantLauncherCache[machine]
     }
 
 

@@ -327,6 +327,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Fix**: use a minimum-size frame for text containers, or cap the digit with `dynamicTypeSize(...accessibility2)`.
 
 #### HIG-030 Shell top bar and viewer chrome Dynamic Type caps
+- **Deliberate deviation (2026-11-13, #6448)**: the whole interface now stops at xxxLarge, not only the top bars and viewer chrome, and gets the Large Content Viewer; reading content grows to AX5 (`docs/design/DESIGN_SYSTEM.md` section 6.2). This departs from the HIG's advice to support the accessibility sizes in every control. Why: about 35 pull requests since 2026-11-10 patched the accessibility sizes screen by screen, each with a layout of its own, and screens kept breaking (labels cut to "1…", rows stacked into single letters, strips wider than the page). One rule that a test can check replaces them, and what a person reads, the text that matters most to a low-vision reader, still scales to AX5. VoiceOver is unchanged.
 - **Severity**: P2. **Platform**: iOS, iPadOS.
 - **Location**: `apple/Shared/Design/Theme.swift:865`, `apple/Shared/Design/Theme.swift:870`, `apple/Persona/DesignSystem/ShellComponents.swift:377`, `apple/Persona/DesignSystem/ShellComponents.swift:163`, `apple/Persona/DesignSystem/ViewerChrome.swift:34`, `apple/Persona/Views/Chat/ImageViewer.swift:217`, `apple/Persona/Views/Inbox/Lark/LarkConversationsView.swift:289`.
 - **Violates**: [Typography][typo] and [Accessibility][a11y]: support enlargement of at least 200%.

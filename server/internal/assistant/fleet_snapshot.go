@@ -20,6 +20,7 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 	r := &s.fleet.rep
 	r.mu.Lock()
 	oldSessions, oldWork, oldOn, oldLinks, oldQuiet, oldMarks := r.sessions, r.work, r.workOn, r.links, r.quiet, r.marks
+	oldCompleted := r.completed
 	views := make(map[string]SessionView, len(snap.Sessions))
 	for _, v := range snap.Sessions {
 		views[v.SessionID] = v
@@ -36,6 +37,10 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 		r.links = map[[2]string]TodoLink{}
 		for _, l := range t.Links {
 			r.links[[2]string{l.MachineID, l.SessionID}] = l
+		}
+		r.completed = map[[2]string]TodoLink{}
+		for _, l := range t.Completed {
+			r.completed[[2]string{l.MachineID, l.SessionID}] = l
 		}
 		r.quiet = map[[2]string]bool{}
 		for _, q := range t.Quiet {
@@ -92,6 +97,16 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 	}
 	for k := range oldLinks {
 		if _, ok := r.links[k]; !ok {
+			add(k[0])
+		}
+	}
+	for k, l := range r.completed {
+		if o, ok := oldCompleted[k]; !ok || o != l {
+			add(k[0])
+		}
+	}
+	for k := range oldCompleted {
+		if _, ok := r.completed[k]; !ok {
 			add(k[0])
 		}
 	}

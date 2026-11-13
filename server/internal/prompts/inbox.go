@@ -47,7 +47,8 @@ type InboxGroupInput struct {
 	Context string   // their text, as the connector wrote it
 	Events  string   // the events tool's answer without a query (JSON)
 	Calls   []InboxGroupCall
-	Left    int // tool calls still allowed
+	Left    int    // tool calls still allowed
+	Problem string // the previous answer's validation or JSON error, shown once for correction
 }
 
 // InboxGroupCall is one tool call and its result (JSON as the tool answered, cut).

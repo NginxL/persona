@@ -1,6 +1,7 @@
 package persona.core.hub
 
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.SessionKey
 
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.InboxBulkAction
@@ -129,6 +130,18 @@ class HttpInboxAssistantTransport private constructor(
         require(itemId.isNotBlank() && text.isNotBlank() && clientId.isNotBlank())
         return json(url("api", "v1", "inbox", itemId, "handoff"), buildJsonObject {
             put("text", text); put("client_id", clientId)
+        })
+    }
+    override suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject {
+        require(itemId.isNotBlank() && session.machineId.isNotBlank() && session.sessionId.isNotBlank() && clientId.isNotBlank())
+        return json(url("api", "v1", "inbox", itemId, "handoff"), buildJsonObject {
+            put("session", buildJsonObject {
+                put("machine_id", session.machineId)
+                put("session_id", session.sessionId)
+            })
+            put("kind", "agent")
+            title.takeIf { it.isNotBlank() }?.let { put("title", it) }
+            put("client_id", clientId)
         })
     }
     override suspend fun suggestion(itemId: String, version: Long, action: String, text: String?, clientId: String): JsonObject {

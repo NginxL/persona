@@ -16,6 +16,14 @@ data class MessageContext(val kind: String, val title: String, val url: String?,
     val label: CoreText get() = (title.takeIf(String::isNotBlank) ?: url)?.let(CoreText::plain) ?: CoreText.of(Key.ContextQuote)
 }
 
+/** The hub's mid-turn interject note title (server/internal/prompts/assistant/interject.md, pinned by
+ *  assistant_interject_test.go): model instructions inside a context block, never a quote the owner picked (#6595). */
+const val INTERJECT_CONTEXT_TITLE = "插话" // i18n-ignore: canonical hub prompt title
+
+/** Whether [context] is the hub's interject note rather than user-picked context: drop it from the owner bubble. */
+fun MessageContext.isInterjectContext(): Boolean =
+    (kind.ifBlank { "context" }) == "context" && title == INTERJECT_CONTEXT_TITLE
+
 // The canonical context tag used by the hub, nodes and apps.
 private val contextBlock = ProtocolCompatibility.contextBlock
 private val contextAttribute = Regex("([\\w-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")

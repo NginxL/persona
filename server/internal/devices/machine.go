@@ -510,6 +510,16 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 		}
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), key)}
 	}
+	if (method == "session.skills" || method == "session.send") && !nodeHas(info, nodeproto.SessionSkills) {
+		var fields struct {
+			SkillOwner string `json:"skill_owner"`
+		}
+		raw, _ := json.Marshal(params)
+		_ = json.Unmarshal(raw, &fields)
+		if method == "session.skills" || method == "session.send" && strings.HasPrefix(fields.SkillOwner, "agents:") {
+			return refusalSessionSkillNode()
+		}
+	}
 	if !nodeHas(info, nodeproto.ModelConfiguration) && (method == "assistant.send" || method == "assistant.warm" || devicewire.IsSessionStart(method) || method == "session.send") {
 		raw, _ := json.Marshal(params)
 		var fields struct {

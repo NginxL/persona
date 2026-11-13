@@ -46,6 +46,10 @@ func (n *Node) codexSkillCatalog(ctx context.Context, in skillCatalogRequest) ([
 	} else if err := n.probeCodexSkills(ctx, in.Launcher, cwd, params, &out); err != nil {
 		return nil, false, err
 	}
+	return n.codexSkillEntries(cwd, out)
+}
+
+func (n *Node) codexSkillEntries(cwd string, out codexSkillList) ([]assistantskills.Entry, bool, error) {
 	entries := []assistantskills.Entry{}
 	found, complete := false, true
 	for _, data := range out.Data {
@@ -58,10 +62,12 @@ func (n *Node) codexSkillCatalog(ctx context.Context, in skillCatalogRequest) ([
 			if s.Enabled && s.Name != "" && filepath.IsAbs(s.Path) && filepath.Base(s.Path) == "SKILL.md" {
 				st, err := os.Stat(s.Path)
 				if err != nil || !st.Mode().IsRegular() {
+					complete = false
 					continue
 				}
 				path, err := filepath.EvalSymlinks(s.Path)
 				if err != nil {
+					complete = false
 					continue
 				}
 				root := filepath.Dir(filepath.Dir(s.Path))

@@ -7,11 +7,11 @@ import { openAsk, todoDueBy, todoStatus, type SessionLookup, type Todo, type Tod
 import { todoStageIndex } from "./todo-stage";
 
 /** Where a to-do shows. */
-export type TriageSection = "waiting" | "working" | "just_done" | "pr" | "other" | "shelved" | "done";
+export type TriageSection = "waiting" | "working" | "parked" | "just_done" | "pr" | "other" | "shelved" | "done";
 
 /** The page's order (#5707): what the owner has to act on, the unfinished work, what just finished, then the folded
  *  ones, Done last. A merged row is led by its member in the first of these. */
-export const TRIAGE_SECTIONS: readonly TriageSection[] = ["waiting", "working", "pr", "other", "just_done", "shelved", "done"];
+export const TRIAGE_SECTIONS: readonly TriageSection[] = ["waiting", "working", "pr", "parked", "other", "just_done", "shelved", "done"];
 
 /** Sections that start folded: the rest start open, unfinished to-dos included. */
 export const FOLDED_SECTIONS: ReadonlySet<TriageSection> = new Set(["shelved", "done"]);
@@ -29,6 +29,7 @@ export type TriageRule =
   | "agent_asks"
   | "owner_decides"
   | "agent_running"
+  | "parked"
   | "closed"
   | "accepted"
   | "deployed"
@@ -130,6 +131,11 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
   if (!todo.done_at && (reviewState(todo) === "needs_user" || ask?.outcome === "decide" || ask?.outcome === "cannot")) return at("waiting", "owner_decides");
   if (status === "working" || status === "waiting") return at("working", "agent_running");
   if (todo.done_at) return at(fresh(ms(todo.done_at)) ? "just_done" : "done", "closed");
+  // A stopped turn is not a completed task. When the wait expires it needs review, not filing as done.
+  if (reviewState(todo) === "parked") {
+    const until = ms(todo.supervision?.parked?.until);
+    return at(until && until <= now ? "other" : "parked", "parked");
+  }
   if (acceptanceStands(todo)) return at(fresh(ms(latestReview(todo.supervision)?.at)) ? "just_done" : "done", "accepted");
   if (todo.delivery?.state === "live") return at(fresh(ms(todo.delivery.at) || last) ? "just_done" : "done", "deployed");
   const finished = status === "unread" || reviewState(todo) === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done";

@@ -152,6 +152,34 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if !m.Reachable {
 		return "", "", machineOffline(m.Name)
 	}
+	// The resource/direction admission gate (admission.go): fixed tasks are refused here, flexible tasks may have
+	// been moved to a less loaded machine. The claim is stored on the task and held until its agent is linked or the
+	// start fails for good (runPlanTaskStart), so it still counts while metrics and the ledger catch up.
+	release, err := s.admitTaskStart(ctx, t)
+	if err != nil {
+		return "", "", err
+	}
+	t.admissionRelease = release
+	defer func() {
+		// A failure before the caller takes ownership of the claim releases it here; the success path keeps it on the
+		// task for runPlanTaskStart to release after linking.
+		if err != nil && t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
+	if m.ID != t.Machine { // a flexible reroute inside the gate: every later step must use the machine it landed on
+		m, ok = s.machineByName(ctx, t.Machine)
+		if !ok {
+			return "", "", fmt.Errorf("unknown machine %q", t.Machine)
+		}
+		if err := s.leaderOnWorkMachine(t, m); err != nil {
+			return "", "", err
+		}
+		if !m.Reachable {
+			return "", "", machineOffline(m.Name)
+		}
+	}
 	// On the computer it landed on (a flexible task may have moved): a default it lacks gives way to one it has, a
 	// launcher the plan named that it lacks is refused before any tab opens (#2640). Before the health check below,
 	// which is then about the launcher that will run.
@@ -236,6 +264,12 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		Session proto.Session `json:"session"`
 	}
 	picked, _ := params["launcher"].(string)
+	// Remember the sessions already there, so a start whose answer never comes back can adopt only the session it
+	// created (the same reconciliation agent_start gets, tools.go): a slow link can leave the node building the tab
+	// after the hub's wait ends (#6540). Its own short bound keeps a slow list out of the start's wait.
+	lctx, lcancel := context.WithTimeout(ctx, agentStartListTimeout)
+	knownIDs := s.knownSessionIDs(lctx, m.ID)
+	lcancel()
 	s.setPlanThen(ctx, m.ID, params)
 	err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
 	skipped, refused := s.ultracodeRefusal(ctx, err, params)
@@ -246,6 +280,15 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	if err != nil {
 		s.recordStartFailure(ctx, m.ID, s.startLauncher(ctx, picked), err)
+		if startResultUnknown(err) {
+			// The node may still have built the tab and launched the agent. Ask the machine itself before this is
+			// called a failure: an adopted session returns through the normal success path, so the task is linked
+			// once, with no failure receipt, retry or reroute (and no duplicate agent on another computer, #6540).
+			if sess, ok := s.adoptTaskStartSession(ctx, m, s.startLauncher(ctx, picked), t.Cwd, knownIDs); ok {
+				s.logf("task %s: start answered late on %s; adopted session %s from the machine's own list", t.TodoID, m.ID, sess.SessionID)
+				return m.ID, sess.SessionID, nil
+			}
+		}
 		return "", "", err
 	}
 	if res.Session.SessionID == "" || res.Session.MachineID != "" && res.Session.MachineID != m.ID {
@@ -268,6 +311,42 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		t.noteWhy(i18n.T(s.lang(ctx), "assistant-tasks.ultracode_skipped", i18n.Args{"reason": skipped}))
 	}
 	return m.ID, res.Session.SessionID, nil
+}
+
+// taskStartAdoptWait bounds how long after an unanswered task start the hub asks the machine for the session its
+// node may still be creating: a node's tab.create can land after the hub's wait ended (a tab 23 seconds late in
+// #6540's incident). taskStartAdoptPoll is the pause between lists. Vars so tests shorten them instead of sleeping
+// through the production bounds.
+var (
+	taskStartAdoptWait = 30 * time.Second
+	taskStartAdoptPoll = 2 * time.Second
+)
+
+// adoptTaskStartSession gives a task start whose answer never came back a second opinion from the target machine's
+// own session list, reusing agent_start's adoption rule (adoptStartedSession): a session absent from the pre-start
+// snapshot, hub-started, a non-assistant agent of the same launcher and directory with a fresh sign of life,
+// newest wins. The start's own context may be spent, so the reconciliation runs on a detached one. A pre-start
+// snapshot that failed (nil knownIDs) or a machine that cannot answer confirms nothing: the caller keeps its
+// failure behavior, and nothing is started elsewhere.
+func (s *Service) adoptTaskStartSession(ctx context.Context, m Device, launcher, cwd string, knownIDs map[string]bool) (proto.Session, bool) {
+	if knownIDs == nil {
+		return proto.Session{}, false
+	}
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskStartAdoptWait)
+	defer cancel()
+	for {
+		if sess, ok := s.adoptStartedSession(actx, m, launcher, cwd, knownIDs); ok {
+			return sess, true
+		}
+		if actx.Err() != nil {
+			return proto.Session{}, false
+		}
+		select {
+		case <-actx.Done():
+			return proto.Session{}, false
+		case <-time.After(taskStartAdoptPoll):
+		}
+	}
 }
 
 // updatePlanTask keeps the machine, directory and why task i of started plan planID runs with now, its actual launch

@@ -104,6 +104,39 @@ import Testing
         #expect(m.switches == nil && m.error == nil && !m.unsupported)
     }
 
+    /// Ask for a Closeout (#3612): a hub that does not know the switch names none, so there is no row and a PUT leaves
+    /// it out (the hub keeps its value); one that names it gets it back with the rest. `closeout_ask` has no switch here.
+    @Test func theCloseoutSwitchFollowsTheHub() async throws {
+        let older = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true}"#.utf8))
+        #expect(older.closeout == nil && !older.asksCloseout)
+        let kept = try JSONSerialization.jsonObject(with: JSONEncoder().encode(older)) as? [String: Any]
+        #expect(kept?["closeout"] == nil && kept?["enabled"] as? Bool == true)
+        let known = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true,"closeout":false,"closeout_ask":true}"#.utf8))
+        #expect(known.closeout == false && !known.asksCloseout)
+        var saved: [TriageSwitches] = []
+        let m = TriageSettingsModel(deps: .init(load: { known }, save: { saved.append($0); return $0 }))
+        await m.load()
+        #expect(m.canChange(\.asksCloseout))
+        await m.set(\.asksCloseout, true)
+        #expect(saved == [TriageSwitches(enabled: true, closeout: true)] && m.switches?.closeout == true && m.error == nil)
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(saved.first))) as? [String: Any]
+        #expect(sent?["closeout"] as? Bool == true && sent?["closeout_ask"] == nil)
+    }
+
+    /// Like what the triage may do: only while the triage is on, and a failed save puts the old value back and says why.
+    @Test func theCloseoutSwitchWaitsForTheTriageAndRevertsOnFailure() async {
+        let off = TriageSettingsModel(deps: .init(load: { TriageSwitches(closeout: false) }, save: { $0 }))
+        await off.load()
+        #expect(!off.canChange(\.asksCloseout))
+        await off.set(\.asksCloseout, true)
+        #expect(off.switches?.closeout == false)
+        let failing = TriageSettingsModel(deps: .init(load: { TriageSwitches(enabled: true, closeout: false) }, save: { _ in throw APIError(status: 503, message: "助手没有连上") }))
+        await failing.load()
+        await failing.set(\.asksCloseout, true)
+        #expect(failing.switches == TriageSwitches(enabled: true, closeout: false))
+        #expect(failing.error == "没改成：助手没有连上")
+    }
+
     /// Each switch's example (#1413): with the triage off a stopped agent is Unread; on, it says what it waits for;
     /// its decision is a question card; the reminder is worded as the hub's push.
     @Test func theExamplesShowWhatEachSwitchChanges() throws {

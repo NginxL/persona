@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import plistlib
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,9 @@ class AppleCIPreparationTests(unittest.TestCase):
                 'sudo': '#!/bin/bash\nexec "$@"\n',
                 'xcode-select': '#!/bin/bash\nprintf "select %s\\n" "$*" >> "$CALL_LOG"\n',
                 'xcodebuild': '#!/bin/bash\nprintf "initialize %s %s\\n" "$DEVELOPER_DIR" "$*" >> "$CALL_LOG"\nexit "$INITIALIZE_STATUS"\n',
+                # ci_run starts python3. On a Mac that is Xcode's /usr/bin/python3 stub, which asks the Xcode in
+                # DEVELOPER_DIR and fails when the pinned one is not installed: run this interpreter instead.
+                'python3': '#!/bin/bash\nexec %s "$@"\n' % shlex.quote(sys.executable),
             }
             for name, source in tools.items():
                 path = root / name

@@ -261,6 +261,15 @@ func (h *herdrHost) PaneReportResume(ctx context.Context, pane host.PaneRef, sou
 	return t.c.PaneReportResume(ctx, t.id, source, agent, sessionID, argv)
 }
 
+// serverID is herdr.Client.ServerID of the server the pane is in; "" when it cannot tell.
+func (h *herdrHost) serverID(ctx context.Context, pane host.PaneRef) string {
+	t, err := h.target(ctx, pane.ID)
+	if err != nil || t.c == nil {
+		return ""
+	}
+	return t.c.ServerID()
+}
+
 // has runs `herdr <args> --help` once: whether this herdr knows the command.
 func (h *herdrHost) has(cache *struct {
 	once sync.Once

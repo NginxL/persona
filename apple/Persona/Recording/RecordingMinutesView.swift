@@ -305,7 +305,7 @@ struct RecordingMinutesSections: View {
             ThemedIcon(symbol).font(Theme.Font.secondary).foregroundStyle(Theme.accent)
                 .scaledFrame(width: Theme.Size.iconXS)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                Text(item.text).font(Theme.Font.body).textSelection(.enabled)
+                Text(item.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
                 if let byline = RecordingMinutes.byline(item) {
                     Text(byline).font(Theme.Font.caption).foregroundStyle(.secondary)
                 }

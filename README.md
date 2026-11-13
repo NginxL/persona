@@ -77,11 +77,12 @@ You run a small hub on an always-on machine; your devices talk only to it, and i
 
 - **Just looking?** Install the [TestFlight beta](https://testflight.apple.com/join/vsjfy3hE) and tap **No Hub? Try the Demo**: no server or account needed.
 - **Your own setup:** one command from the [website](https://personaside.com/#start) installs the hub, then scan a QR code. See [Getting started](docs/operations/getting-started.md).
+- **HarmonyOS 7 phones and foldables:** [build the native ArkUI client from source](harmony/README.md) (API 26).
 - **From source:** [config](docs/operations/config.md) · [deploy](docs/server/server.md) · [contributing](CLAUDE.md)
 
 ## Docs
 
-[Getting started](docs/operations/getting-started.md) · [Architecture](docs/server/architecture.md) · [Protocol](docs/protocol/protocol.md) · [Docker](docs/operations/docker.md) · [iPhone / iPad / Watch](docs/apple/ios.md) · [Web](docs/web/web.md) · [Android](docs/android/android.md) · [Vision Pro](docs/apple/vision.md) · [Mac](docs/apple/mac.md) · [CarPlay voice](docs/apple/carplay.md) · [Engines](docs/integrations/engines.md) · [Agent runtimes](docs/integrations/runtimes.md) · [All docs](CLAUDE.md#docs-index)
+[Getting started](docs/operations/getting-started.md) · [Architecture](docs/server/architecture.md) · [Protocol](docs/protocol/protocol.md) · [Docker](docs/operations/docker.md) · [iPhone / iPad / Watch](docs/apple/ios.md) · [Web](docs/web/web.md) · [Android](docs/android/android.md) · [HarmonyOS](docs/harmony/harmony.md) · [Vision Pro](docs/apple/vision.md) · [Mac](docs/apple/mac.md) · [CarPlay voice](docs/apple/carplay.md) · [Engines](docs/integrations/engines.md) · [Agent runtimes](docs/integrations/runtimes.md) · [All docs](CLAUDE.md#docs-index)
 
 ## Star History
 

@@ -193,6 +193,14 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: modelTiersValue},
 			get: s.getModelTiers,
 			set: s.setModelTiers},
+		{Setting: Setting{Key: admissionSettingsKey, Title: "Execution Agent admission gate", Actions: getSet,
+			About: "the lines an execution Agent's start is checked against on every computer: enabled, load_per_core, min_memory_bytes, " +
+				"max_claude_procs (and the hub machine's own hub_* lines, per-machine overrides), and the per-direction cap. " +
+				"direction_cap_by_direction keys are a supervisor conversation id or a direction's displayed name and win over " +
+				"direction_cap_by_project, which wins over direction_cap and the code default; get first and send the whole object",
+			Value: "the full AdmissionSettings JSON object from get; a nil pointer keeps the code default, every set line must be positive"},
+			get: s.getAdmission,
+			set: s.setAdmission},
 	}
 }
 
@@ -313,7 +321,8 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
-	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded"}
+	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded",
+	admissionSettingsKey: "title_admission"}
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {

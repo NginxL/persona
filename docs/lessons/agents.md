@@ -444,6 +444,8 @@ passed in the login shell and reset the launcher to `ok`, so the assistant kept 
   - When herdr already detects the Agent process in the pane (Claude, Codex, pi…), `pane.report_agent_session` accepts and persists `resume_argv` directly without `pane.report_agent`. Do **not** claim detected panes with a one-shot `pane.report_agent {state: "idle"}`: in herdr 0.9.x a custom reporter's `hook_authority` overrides screen and OSC state detection in `recompute_effective_state`, locking `agent_status` to `idle` for the lifetime of the Agent (#4657). Clear any stale `custom:persona` authority with `pane.clear_agent_authority {source}` (never without `source`, which would also drop `herdr:pi`'s full-lifecycle authority), and fall back to `pane.report_agent` only when `pane.report_agent_session` returns `resume_not_accepted` (an Agent process herdr doesn't detect natively, such as a compatible CLI, where `traexAgents` reads state itself and must still merge session-less entries in `snap.Agents`). Releasing authority via CLI (`herdr pane release-agent`) also requires `--seq` greater than the last reported `seq`, or `accept_hook_report` drops the release.
   - herdr types argv into the pane shell: quote only necessary elements (an alias as the first element still expands); elements must not contain single quotes.
   - If official integration later reports the same or another session id, herdr retains the original `resume_argv`: after a session id change, explicitly report again or it restores the old session.
+  - herdr before 0.9.2 answers `ok` to `resume_argv` and drops it (2026-11-13: a dev machine ran 0.9.0 for days; the upgrade to 0.9.5 by live handoff carried nothing over, the node believed it had reported, and the next restart resumed Persona's Agents bare). A report holds only for the server that took it: the node records the server instance (`herdr.Client.ServerID`, the socket's mtime, new on every restart, handoff and upgrade) and `backfillResume` reports again when a Persona pane's server changed.
+  - The argv is `eval "<the start command with --resume <id>>"`: herdr only checks that the first word is a plain name (`eval` passes) and types it into the pane's shell, so `CLAUDE_CONFIG_DIR=…` prefixes and launchers that are shell functions work without a wrapper script on PATH. herdr also refuses control characters and more than 8 KiB (`resumeSayable`). Real-Claude check in a throwaway named session: `herdrresume_live_test.go`.
 
 
 ## Claude status line (2026-11-05, #1963)
@@ -940,6 +942,25 @@ prompt finishes, while that published text still exists. `streamEnd` uses the st
 watch to send its empty boundary, and cancels pending throttled text first. A native transcript may have a
 middle-truncated copy of the reply, so text reconciliation alone cannot retire the Hub's full cached copy.
 Cover unwatch before completion, a pending batch, and a later watcher in the SDK and AGY lifecycle tests.
+
+## A `-c` moves a Codex into the pane's environment (2026-11-12, #4860, codex-cli 0.167.1)
+
+- From 0.163, `codex` with any `-c` override other than a feature switch runs its own app-server in the pane instead
+  of joining the shared daemon (`codex-rs/tui/src/daemon_startup.rs`, `config_exclusion`). The tier effort
+  (`-c model_reasoning_effort=…`) counts. Besides the terminal-only route, Codex then makes its startup requests
+  with the pane's environment rather than the daemon's.
+- One computer reached `chatgpt.com` only through a proxy. The user's `codex` shell function set the proxy, and the
+  daemon had inherited it. `personad codex-start` ran the `codex` on `PATH` (#4876 covers that part), so a tier
+  with an effort made every start fail with `account/read failed during TUI bootstrap: … workspace routing discovery
+  timed out`. The same launcher with no effort worked, and so did a manual `codex`.
+- To tell the two modes apart, look in Codex's log database (`<CODEX_HOME>/logs_2.sqlite`, table `logs`). The span
+  for `account/read` says `rpc.transport="in-process"` (its own app-server) or `unix_socket` (the daemon). The TUI
+  also shows a warning that it runs without the shared background server.
+- An effort the Codex already runs at is now left out (`node/codex_start_effort.go`). A different effort still needs
+  `-c`, and that start still runs with the pane's environment.
+- Bare `codex` may instead be a shell function preserved by #4876. Its profile or `-c` can change the effective
+  effort without appearing in the node's words. Keep the tier's flag when that function exists or its resolution
+  cannot be checked; an explicit executable path does not go through the function.
 
 ## herdr's published state can be a reporter's word, not the screen's (2026-11-12, #4865)
 

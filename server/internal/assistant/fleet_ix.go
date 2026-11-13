@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // The interactions (docs/protocol/protocol.md "Interactions"): the cards the user answers on the phone — a hook's permission, question
@@ -503,6 +504,13 @@ func (s *Service) resolveApproved(id string, r proto.Resolution, approver *assis
 
 func (s *Service) resolveAnswer(id string, r proto.Resolution, remember bool, authorization *standingResolution,
 	approver *assistantwire.HandoffApprover) error {
+	// A manager work card is answered in the manager, not by the stopped agent. Its local dismiss/defer choices remain
+	// valid, but an answer that would send text must be refused before the card is claimed and its answer is retried.
+	if ix, ok := s.pendingIx(id); ok && ix.ToolName == workCardTool && workResolutionSends(ix, r) {
+		if sess, found := s.decoratedSession(ix.MachineID, ix.SessionID); found && stoppedAgent(sess) {
+			return &rpc.Error{Code: "agent_stopped", Message: "the agent has stopped and cannot receive this answer"}
+		}
+	}
 	s.fleet.mu.Lock()
 	p := s.fleet.interactions[id]
 	handoff := p != nil && p.ix.ToolName == proto.SecretHandoffTool

@@ -20,6 +20,8 @@ type suggestIn struct {
 	Handback bool        `json:"handback"`
 	Outcome  string      `json:"outcome"`
 	Recap    string      `json:"recap"`
+	Title    string      `json:"title"`
+	Summary  string      `json:"summary"`
 	Machine  string      `json:"machine"`
 	Cwd      string      `json:"cwd"`
 	Related  []string    `json:"related"`
@@ -34,6 +36,8 @@ var errNotProcessing = i18n.ErrEnglish("inbox-errors.not_processing")
 type errSuggestion struct{ msg string }
 
 func (e errSuggestion) Error() string { return e.msg }
+
+var errSuggestFiled = errSuggestion{"this inbox item is already filed, so the suggestion was not submitted and the user cannot see it; end this turn"}
 
 // check holds a suggestion to the rules before anything is kept.
 func (in *suggestIn) check() error {
@@ -75,18 +79,18 @@ func (in *suggestIn) check() error {
 // suggest keeps the suggestion of the conversation sessionID on its event: the item's id, or a change the item does
 // not offer (nothing kept then); errNotProcessing when no event's conversation runs there.
 func (s *Service) suggest(ctx context.Context, sessionID string, in suggestIn) (string, *DocChange, error) {
-	id, refused, _, err := s.suggestFrom(ctx, sessionID, in)
+	id, refused, _, _, err := s.suggestFrom(ctx, sessionID, in)
 	return id, refused, err
 }
 
 // suggestFrom is suggest, also naming the conversation the event was handed to when the suggestion came from one
-// (in.Item; nil for the event's processing conversation).
-func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestIn) (string, *DocChange, *SessionRef, error) {
+// (in.Item; nil for the event's processing conversation). titleIgnored says a source-named item kept its own title.
+func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestIn) (string, *DocChange, *SessionRef, bool, error) {
 	if err := in.check(); err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, false, err
 	}
 	if s.inboxReady(ctx) != nil {
-		return "", nil, nil, errInboxUnavailable
+		return "", nil, nil, false, errInboxUnavailable
 	}
 	b := &s.inbox
 	b.mu.Lock()
@@ -96,7 +100,7 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 		var err error
 		if it, from, err = b.handedItem(item, sessionID); err != nil {
 			b.mu.Unlock()
-			return "", nil, nil, err
+			return "", nil, nil, false, err
 		}
 	} else {
 		it = b.itemOfAgent(sessionID)
@@ -110,19 +114,34 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 		}
 		if it == nil {
 			b.mu.Unlock()
-			return "", nil, nil, errNotProcessing
+			return "", nil, nil, false, errNotProcessing
 		}
+	}
+	if from == nil && in.Kind != "" && !it.open() {
+		b.mu.Unlock()
+		return "", nil, nil, false, errSuggestFiled
 	}
 	for _, ch := range in.Changes {
 		if it.Doc == nil || !docOffers(*it.Doc, ch) {
 			b.mu.Unlock()
-			return it.ID, &ch, nil, nil
+			return it.ID, &ch, nil, false, nil
 		}
 	}
 	now := time.Now().UTC()
 	w := beginWrite(it)
 	if r := strings.TrimSpace(in.Recap); r != "" {
 		it.Recap = clip(r, recapMax)
+	}
+	titleIgnored := false
+	if title := strings.TrimSpace(in.Title); title != "" {
+		if suggestWritesTitle(it) {
+			it.Title, it.TitleBy = clip(oneLine(title), 40), TitleByAssistant
+		} else {
+			titleIgnored = true
+		}
+	}
+	if summary := strings.TrimSpace(in.Summary); summary != "" {
+		it.Summary, it.TitleBy = clip(oneLine(summary), 80), TitleByAssistant
 	}
 	for _, id := range in.Related {
 		relate(it, b.items[strings.TrimSpace(id)])
@@ -198,7 +217,7 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 	// restart would lose. Undone, the event is back where the turn found it, so handing it in again works. One that
 	// something else moved meanwhile stays (that move's save writes the row) and goes on as kept.
 	if s.saveWrites(ctx, []*inboxWrite{w}, "its suggestion"); w.undone {
-		return id, nil, from, errInboxNotPersisted
+		return id, nil, from, titleIgnored, errInboxNotPersisted
 	}
 	if card != nil {
 		s.messageCard(ctx, id, *card)
@@ -209,13 +228,19 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 	if stop {
 		s.tellSoon(ctx, it)
 	}
-	return id, nil, from, nil
+	return id, nil, from, titleIgnored, nil
+}
+
+// suggestWritesTitle is whether the processing conversation may name a chat event. Grouped events keep their
+// connector block too, so Group / Lark identify the chat; connector threads and source-titled items keep their title.
+func suggestWritesTitle(it *InboxItem) bool {
+	return (it.Group != nil || it.Lark != nil) && it.Mail == nil && it.Doc == nil && it.Moment == nil
 }
 
 // inboxDraft keeps the reply drafted in conversation sessionID (inbox_draft, the older name): suggest with kind reply.
 func (s *Service) inboxDraft(ctx context.Context, sessionID, text, note string, proposed []DocChange) (string, *DocChange, error) {
 	id, refused, err := s.suggest(ctx, sessionID, suggestIn{Kind: SuggestReply, Text: text, Note: note, Changes: proposed})
-	if err != nil && !errors.Is(err, errInboxNotPersisted) {
+	if err != nil && !errors.Is(err, errInboxNotPersisted) && !errors.Is(err, errSuggestFiled) {
 		return "", nil, nil
 	}
 	return id, refused, err
@@ -226,20 +251,24 @@ func (s *Service) toolInboxSuggest(ctx context.Context, self string, args json.R
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
 	}
-	_, refused, from, err := s.suggestFrom(ctx, self, in)
+	_, refused, from, titleIgnored, err := s.suggestFrom(ctx, self, in)
 	if err != nil {
 		return "", err
 	}
 	if refused != nil {
 		return "", fmt.Errorf("change %+v is not one the item lists (ref, field and one of its values)", *refused)
 	}
+	notice := ""
+	if titleIgnored {
+		notice = " The title was left unchanged because this item keeps its source's own title; the title argument was ignored."
+	}
 	if in.Kind == "" {
-		return "The recap is updated.", nil
+		return "The recap is updated." + notice, nil
 	}
 	if from != nil {
-		return "The suggestion is in the user's inbox and shown in this chat as a card (no need to repeat it in full); nothing goes out until they confirm. What they do with it is told here; later messages on the item are not.", nil
+		return "The suggestion is in the user's inbox and shown in this chat as a card (no need to repeat it in full); nothing goes out until they confirm. What they do with it is told here; later messages on the item are not." + notice, nil
 	}
-	return "The suggestion is in the user's inbox; nothing goes out until they confirm. End this turn: what comes next (their answer, new messages) is sent here.", nil
+	return "The suggestion is in the user's inbox; nothing goes out until they confirm. End this turn: what comes next (their answer, new messages) is sent here." + notice, nil
 }
 
 // legacySuggestion is an AI twin draft stored before suggestions, as a reply suggestion (version 1); nil for none.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Element, Root } from "hast";
-import { assignKeys, BACKLOG_STEP_MS, chunkState, createWordFadeState, FADE_MS, forgetShown, MAX_WAIT_MS, rehypeStreamWordFade, rememberShown, remainingMs, scheduleSegment, shownBefore, splitWords, STEP_MS } from "./wordFade";
+import { assignKeys, BACKLOG_STEP_MS, chunkState, createWordFadeState, FADE_MS, forgetShown, MAX_WAIT_MS, PACE_MAX_WAIT_MS, rehypeStreamWordFade, rememberShown, remainingMs, scheduleSegment, shownBefore, splitWords, STEP_MS } from "./wordFade";
 
 const text = (value: string) => ({ type: "text" as const, value });
 const el = (tagName: string, children: Element["children"], properties: Element["properties"] = {}): Element => ({ type: "element", tagName, properties, children });
@@ -146,6 +146,23 @@ describe("scheduleSegment", () => {
     expect(delays.slice(0, 4)).toEqual([0, STEP_MS, 2 * STEP_MS, 3 * STEP_MS]);
     expect(delays[7] - delays[6]).toBe(BACKLOG_STEP_MS);
     expect(Math.max(...delays)).toBe(MAX_WAIT_MS);
+  });
+
+  it("spreads a stream's bursts over the time between them instead of fading each in at once (#6651)", () => {
+    let now = 0;
+    const state = createWordFadeState();
+    state.timeline.now = () => now;
+    const starts: number[] = [];
+    // 8 words every 350 ms for 4 s, as a model's bursts come
+    for (let burst = 0; burst * 350 <= 4000; burst++) {
+      now = burst * 350;
+      for (let w = 0; w < 8; w++) starts.push(now + scheduleSegment(state, `b${burst}w${w}`, fakeEl().el));
+    }
+    const paced = starts.filter((s) => s > 1000);
+    const gaps = paced.slice(1).map((s, i) => s - paced[i]);
+    expect(Math.max(...gaps)).toBeLessThan(100); // no pause between bursts once the pace is known
+    expect(Math.min(...gaps)).toBeGreaterThan(STEP_MS); // and slower than one word a frame
+    starts.forEach((s, i) => expect(s - Math.floor(i / 8) * 350).toBeLessThanOrEqual(PACE_MAX_WAIT_MS));
   });
 
   it("writes the delay into --wf-delay and keeps a key's start when it mounts again", () => {

@@ -31,6 +31,7 @@
     <string name="chat_mention_quote_last">最近の発言：%1$s</string>
     <string name="chat_quote_yours">あなたのメッセージを引用</string>
     <string name="chat_quote_from">%1$s を引用</string>
+    <string name="chat_quote_selection">選択したテキストを引用 · %1$s</string>
     <string name="chat_quote_session">セッション %1$s を引用</string>
     <string name="chat_failure_retry">再試行</string>
     <string name="chat_host_open_feishu">Larkで開く</string>

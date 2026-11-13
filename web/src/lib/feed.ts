@@ -360,7 +360,7 @@ interface FeedState {
   plans: Record<string, TaskPlan>;
   taskCards: Record<string, TaskCardMetadata[]>;
   /** Conversation → the task the next message goes to ("Tell "xx""). */
-  routes: Record<string, string>;
+  routes: Record<string, string | { todoId: string; askedAt: string }>;
   busy: Record<string, boolean>;
   /** Message cards put off with "Later". */
   later: Record<string, boolean>;
@@ -717,7 +717,7 @@ export async function removeTask(todo: Todo, ask: (message: string) => boolean =
   if ((todo.agents ?? []).length > 0 && !ask(t("lib-feed.remove_confirm", { title: todo.title }))) return false;
   await deleteTodo(todo.id);
   const routes = { ...st.routes };
-  for (const [c, id] of Object.entries(routes)) if (id === todo.id) delete routes[c];
+  for (const [c, route] of Object.entries(routes)) if (routeTodoId(route) === todo.id) delete routes[c];
   set({ routes });
   const panel = getPanel();
   if (panel?.kind === "task" && panel.todo === todo.id) closePanel();
@@ -725,16 +725,21 @@ export async function removeTask(todo: Todo, ask: (message: string) => boolean =
   return true;
 }
 
-export function setRoute(conversation: string, todoId: string | null) {
+export function routeTodoId(route: FeedState["routes"][string] | undefined): string | undefined {
+  return typeof route === "string" ? route : route?.todoId;
+}
+
+export function setRoute(conversation: string, todoId: string | null, askedAt?: string) {
   const routes = { ...st.routes };
-  if (todoId) routes[conversation] = todoId;
+  if (todoId) routes[conversation] = askedAt ? { todoId, askedAt } : todoId;
   else delete routes[conversation];
   set({ routes });
 }
 
 /** Sends text straight to the task the conversation is routed to; false when none (send it to Persona as usual). */
 export async function sendRouted(conversation: string, text: string): Promise<boolean> {
-  const todoId = st.routes[conversation];
+  const route = st.routes[conversation];
+  const todoId = routeTodoId(route);
   if (!todoId) return false;
   // A failed send keeps the route for the retry, so a task gone elsewhere (its chip no longer drawn) must not hold it.
   const { todos, todosLoaded } = getState();
@@ -742,9 +747,11 @@ export async function sendRouted(conversation: string, text: string): Promise<bo
     setRoute(conversation, null);
     return false;
   }
-  const res = await api<{ item: FeedItem }>(`/assistant/conversations/${enc(conversation)}/route`, { method: "POST", json: { todo_id: todoId, text } });
-  if (st.routes[conversation] === todoId) setRoute(conversation, null);
+  const askedAt = typeof route === "object" ? route.askedAt : undefined;
+  const res = await api<{ item: FeedItem }>(`/assistant/conversations/${enc(conversation)}/route`, { method: "POST", json: { todo_id: todoId, text, ...(askedAt ? { asked_at: askedAt } : {}) } });
+  if (st.routes[conversation] === route) setRoute(conversation, null);
   if (res.item) received([res.item]);
+  if (askedAt) void refreshTodos();
   return true;
 }
 

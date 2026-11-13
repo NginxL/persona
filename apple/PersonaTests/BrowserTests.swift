@@ -27,6 +27,17 @@ struct BrowserTests {
         #expect(!AppModel.showsScreen(try machine("")))
     }
 
+    /// #3954: the Picture / Quality switcher appears only when the showing extension advertises the video channel — the
+    /// extension on, Screen Sharing answering, and the helper present. A shared screen without the helper stays RFB only.
+    @Test func theVideoSwitcherNeedsAnAdvertisedChannel() throws {
+        #expect(AppModel.advertisesVideo(try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true,\"screen_video\":{\"version\":1}}")))
+        #expect(AppModel.advertisesVideo(try machine(",\"browser\":{\"enabled\":true,\"screen_sharing\":true,\"screen_video\":{\"version\":1}}")))
+        #expect(!AppModel.advertisesVideo(try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true}")), "shows the screen, no helper: RFB only")
+        #expect(!AppModel.advertisesVideo(try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":false,\"screen_video\":{\"version\":1}}")), "not sharing")
+        #expect(!AppModel.advertisesVideo(try machine(",\"computer\":{\"enabled\":false,\"screen_sharing\":true,\"screen_video\":{\"version\":1}}")), "extension off")
+        #expect(!AppModel.advertisesVideo(try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true,\"screen_video\":{\"version\":0}}")), "version 0 is no video")
+    }
+
     @Test func theStepsSayWhatIsLeft() {
         let setUp = BrowserGuide.setUpSteps(MachineBrowser(installed: true))
         #expect(setUp.map(\.id) == ["open", "import", "finish", "recheck"])

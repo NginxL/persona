@@ -112,7 +112,6 @@
     <string name="assistant_make_leader_text">このチャットは常駐に移り、「最近」には出なくなります。</string>
     <string name="assistant_end_leader_title">常駐をやめますか？</string>
     <string name="assistant_end_leader_text">「%1$s」は「最近」に戻ります。進行中のタスクはメインチャットの監督に戻り、終了や削除はされません。</string>
-    <string name="assistant_leader_working">作業中 %1$d</string>
     <string name="assistant_leader_needs_you">対応待ち %1$d</string>
     <string name="assistant_direction_todos_of">%1$s の ToDo</string>
     <string name="assistant_direction_agents_of">%1$s の Agent</string>

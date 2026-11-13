@@ -26,6 +26,14 @@ struct VNCPage: View {
     /// The display shown alone (`VNCDisplay.id`, kept per Mac, #80); nil: all of them.
     @State private var display: String?
     @State private var pipLog = false
+    /// The picture channel for this Mac (#3954): hardware video or VNC. Loaded from the per-Mac pref on appear.
+    @State private var picture: ScreenPicture = .vnc
+    /// The video channel's quality bias (#3954, interface for #6396), per Mac.
+    @State private var quality: ScreenQuality = .auto
+    /// Whether the connection-stats overlay is shown (#3954), per Mac, off by default.
+    @State private var statsOn = false
+    /// A one-line reason shown when the video channel falls back to VNC (#3954); nil when there's nothing to explain.
+    @State private var fallbackReason: String?
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
@@ -60,9 +68,18 @@ struct VNCPage: View {
                 TimelineView(.periodic(from: .now, by: 1)) { ctx in
                     if let a = model.computerActivities[ref], a.shown(at: ctx.date) { stepLine(a) }
                 }
+                #if os(iOS) || os(visionOS)
+                if let reason = fallbackReason { fallbackBanner(reason) }
+                #endif
                 ZStack {
                     Color.black
                     if let s = session { content(s) }
+                    #if os(iOS) || os(visionOS)
+                    if statsOn, let stats = currentStats {
+                        ScreenStatsOverlay(stats: stats) { statsOn = false; ScreenStatsPref.set(false, for: ref) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    }
+                    #endif
                 }
                 #if os(iOS) || os(visionOS)
                 // Over the keyboard while it is up (the bars ride above it).
@@ -78,6 +95,21 @@ struct VNCPage: View {
             mode = VNCMode.of(ref)
             #if os(iOS) || os(visionOS)
             display = VNCDisplayChoice.of(ref)
+            // Picture defaults to VNC until the video channel's client wiring lands (it then defaults to video when the
+            // computer advertises `screen_video` and Screen Recording is granted); a saved choice always wins.
+            picture = ScreenPicture.of(ref) ?? .vnc
+            quality = ScreenQuality.of(ref)
+            statsOn = ScreenStatsPref.of(ref)
+            #if DEBUG
+            let args = ProcessInfo.processInfo.arguments
+            // `-showScreenVideoDemo` stands in for a node that advertises the video channel (videoAdvertised), and picks
+            // the video channel, so a screenshot shows the Picture and Quality items the switcher offers.
+            if args.contains("-showScreenVideoDemo") { picture = .video }
+            if args.contains("-showScreenStatsDemo") { statsOn = true }
+            if args.contains("-showScreenFallbackDemo") {
+                fallbackReason = String(localized: "Video couldn’t connect, switched to VNC: no route to the computer on this network.")
+            }
+            #endif
             #endif
         }
         .onDisappear {
@@ -313,6 +345,31 @@ struct VNCPage: View {
                 Label("Mouse Mode", systemImage: Theme.Icon.pointer).tag(VNCMode.mouse)
                 Label("Trackpad Mode", systemImage: Theme.Icon.trackpad).tag(VNCMode.trackpad)
             }
+            // Picture channel and its quality bias (#3954), remembered per Mac — only when this Mac's node advertises the
+            // video channel, so no Mac shows a control it can't use (the switcher stays hidden until it does). Input stays
+            // on RFB in both; only the picture path changes. Video falls back to VNC on its own and says why on the page.
+            if videoAdvertised {
+                Picker(selection: Binding(get: { picture }, set: { picture = $0; ScreenPicture.set($0, for: ref) })) {
+                    ForEach(ScreenPicture.allCases, id: \.self) { p in Label(p.label, systemImage: p.icon).tag(p) }
+                } label: {
+                    Label("Picture", systemImage: Theme.Icon.video)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("screen-picture")
+                if picture == .video {
+                    Picker(selection: Binding(get: { quality }, set: { quality = $0; ScreenQuality.set($0, for: ref) })) {
+                        ForEach(ScreenQuality.allCases, id: \.self) { q in Text(q.label).tag(q) }
+                    } label: {
+                        Label("Quality", systemImage: Theme.Icon.pluginGauge)
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("screen-quality")
+                }
+            }
+            Toggle(isOn: Binding(get: { statsOn }, set: { statsOn = $0; ScreenStatsPref.set($0, for: ref) })) {
+                Label("Connection Stats", systemImage: Theme.Icon.pluginChart)
+            }
+            .accessibilityIdentifier("screen-stats-toggle")
             let displays = offeredDisplays
             if displays.count > 1 {
                 Picker(selection: Binding(get: { shownDisplay?.id }, set: { display = $0; VNCDisplayChoice.set($0, for: ref) })) {
@@ -431,6 +488,42 @@ struct VNCPage: View {
             .padding(.bottom, Theme.Space.xs)
             .accessibilityIdentifier("screen-step")
     }
+
+    #if os(iOS) || os(visionOS)
+    /// A one-line reason under the bars when the video channel falls back to VNC (#3954).
+    private func fallbackBanner(_ reason: String) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(Theme.caution)
+            Text(reason).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.page)
+        .padding(.bottom, Theme.Space.xs)
+        .accessibilityIdentifier("screen-fallback")
+    }
+
+    /// The reading the stats overlay draws (#3954). The video channel isn't wired on the client yet, so today the live
+    /// picture is RFB and these are VNC-mode numbers; a `-showScreenStatsDemo` build shows sample video-mode numbers.
+    private var currentStats: ScreenStats? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
+        #endif
+        guard let s = session else { return nil }
+        return ScreenStats(mode: .vnc, path: .relay,
+                           bitrateMbps: s.mbps > 0 ? s.mbps : nil,
+                           fps: s.fps > 0 ? s.fps : nil,
+                           roundTripMs: s.latency)
+    }
+
+    /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture and Quality items appear only
+    /// then, so no Mac shows a control it can't use. A `-showScreenVideoDemo` build forces it on for screenshots.
+    private var videoAdvertised: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
+        #endif
+        return model.screenVideoAdvertised(ref)
+    }
+    #endif
 
     // MARK: Content
 

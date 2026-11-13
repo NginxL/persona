@@ -137,7 +137,13 @@ extension View {
         #endif
     }
 
-    @ViewBuilder func themedButton(prominent: Bool = false) -> some View {
+    /// The style's button; capped at the interface's largest size like everything but reading content, with the Large
+    /// Content Viewer for a long press at the accessibility sizes (`docs/design/DESIGN_SYSTEM.md` section 6.2).
+    func themedButton(prominent: Bool = false) -> some View {
+        styledButton(prominent: prominent).accessibilityShowsLargeContentViewer()
+    }
+
+    @ViewBuilder private func styledButton(prominent: Bool) -> some View {
         switch StyleSpec.current.buttons {
         case .glass:
             // .glassProminent keeps its full color when disabled (iOS 26.0): an empty composer's send looked tappable.

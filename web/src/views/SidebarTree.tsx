@@ -69,8 +69,9 @@ export function useMachineLabel(machines: Machine[]): MachineLabel {
 }
 
 /** Agents "By to-do" (#2526, #6458): the open to-dos at the top level, each over its agents (a spawned agent under the
- *  one that spawned it), then "Opened in the terminal" and "Not on a to-do", all rows of one kind; `after` (the sidebar's
- *  "Recent (not running)") last, in the same row. No repository or folder rows: those groupings have tabs of their own.
+ *  one that spawned it), then "Not on a to-do" (the ones opened in a terminal too, #6591), all rows of one kind; `after`
+ *  (the sidebar's "Recent (not running)") last, in the same row. No repository or folder rows: those groupings have tabs
+ *  of their own.
  *  "By pinned" (#4352, `sections`): its directions are sections over their tasks, and the groups follow as sections. */
 export function TodoTreeView({ tree, machines, activeKey, sections, after, ...p }: { tree: TodoTree; machines: Machine[]; sections?: boolean; after?: React.ReactNode } & Omit<TreeRowProps, "machineLabel">) {
   const machineLabel = useMachineLabel(machines);
@@ -100,8 +101,8 @@ const TreeProjectSection = memo(function TreeProjectSection({ k, name, state, fo
       title={<SectionTitle icon={direction ? (direction.secretary ? "person" : "target") : "folder"} name={name} />}
       folded={folded}
       onToggle={toggle}
-      // a pinned direction (#4352) says its two counts instead of one state word
-      right={direction ? <DirectionCountsText counts={direction.counts} /> : <TreeStateText state={state} />}
+      // a pinned direction (#4352) shows what it has going (its arc, its 等你 N, #6626) instead of one state word
+      right={direction ? <DirectionCountsText direction={direction} /> : <TreeStateText state={state} />}
     >
       {todos.map((td) => <TreeTodoRows key={td.key} td={td} {...p} activeKey={within(td.sessions, p.activeKey)} />)}
     </Section>
@@ -170,12 +171,13 @@ function GroupTitle({ name, onToggle }: { name: string; onToggle: () => void }) 
   return <button type="button" onClick={onToggle} className="min-w-0 truncate text-left font-medium text-ink">{name}</button>;
 }
 
-/** A group of agents beside the to-dos (#6458): "Opened in the terminal", "Not on a to-do", and the sidebar's "Recent (not
- *  running)". Its count, the most urgent of its agents' states, an ⓘ saying what it holds, which is also what an open,
- *  empty group says. `section`: drawn as the section headings around it are (the "By pinned" grouping's). */
-export function GroupBranch({ branch, name, hint, icon, n, state, folded, onToggle, section, children }: { branch: string; name: string; hint: string; icon: IconName; n: number; state: TreeState; folded: boolean; onToggle: () => void; section?: boolean; children?: React.ReactNode }) {
+/** A group of agents beside the to-dos (#6458): "Not on a to-do" and the sidebar's "Recent (not running)". Its count,
+ *  the most urgent of its agents' states, and, where its name does not say it (`hint`), an ⓘ saying what it holds, which
+ *  is also what an open, empty group says. `section`: drawn as the section headings around it are (the "By pinned"
+ *  grouping's). */
+export function GroupBranch({ branch, name, hint, icon, n, state, folded, onToggle, section, children }: { branch: string; name: string; hint?: string; icon: IconName; n: number; state: TreeState; folded: boolean; onToggle: () => void; section?: boolean; children?: React.ReactNode }) {
   const said = n > 0 ? state : undefined;
-  const info = <InfoTip name={name} text={hint} />;
+  const info = hint ? <InfoTip name={name} text={hint} /> : null;
   const body = n > 0 ? children : undefined;
   if (section) {
     return (
@@ -185,7 +187,7 @@ export function GroupBranch({ branch, name, hint, icon, n, state, folded, onTogg
         onToggle={onToggle}
         right={<span className="flex shrink-0 items-center gap-1.5">{info}<BranchEnd n={n} state={said} /></span>}
       >
-        {body ?? <EmptyHint text={hint} />}
+        {body ?? (hint ? <EmptyHint text={hint} /> : null)}
       </Section>
     );
   }
@@ -196,13 +198,12 @@ export function GroupBranch({ branch, name, hint, icon, n, state, folded, onTogg
   );
 }
 
-const LOOSE_ICON: Record<string, IconName> = { "todo:manual": "terminal", "todo:none": "layers" };
-
-/** "Opened in the terminal" or "Not on a to-do": its agents directly under it, no repository rows (#6458). */
+/** "Not on a to-do": its agents directly under it, no repository rows (#6458); a row opened in a terminal ends with its
+ *  source mark, as everywhere (#6591). */
 const LooseBranch = memo(function LooseBranch({ g, section, ...p }: { g: LooseGroup; section?: boolean } & TreeRowProps) {
   const [folded, toggle] = useFolded(g.key, g.folded, { follow: true, holds: holdsRow(g.sessions, p.activeKey) });
   return (
-    <GroupBranch branch={g.key} name={g.name} hint={g.hint} icon={LOOSE_ICON[g.key] ?? "layers"} n={g.sessions.length} state={g.state} folded={folded} onToggle={toggle} section={section}>
+    <GroupBranch branch={g.key} name={g.name} hint={g.hint} icon="layers" n={g.sessions.length} state={g.state} folded={folded} onToggle={toggle} section={section}>
       {g.agents.map((a) => <TreeAgentRows key={a.key} a={a} depth={0} {...p} activeKey={withinAgent(a, p.activeKey)} />)}
     </GroupBranch>
   );

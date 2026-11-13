@@ -464,7 +464,7 @@ func (s *Service) snapshotPlans(ctx context.Context, loc *time.Location, now tim
 			continue
 		}
 		seen[it.Ref] = true
-		sp := prompts.SnapshotPlan{At: p.CreatedAt.In(loc), Tasks: len(p.Tasks)}
+		sp := prompts.SnapshotPlan{ID: p.ID, At: p.CreatedAt.In(loc), Tasks: len(p.Tasks)}
 		for _, t := range p.Tasks {
 			if len(sp.Titles) == 3 {
 				break

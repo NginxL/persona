@@ -193,10 +193,10 @@ func TestInboxChangesAreListedBeforeTheirSave(t *testing.T) {
 		{"event moved by a group append", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
 			listed()
 			moved := thing("b", time.Now())
-			moved.ID, moved.Title = it.ID, "Moved"
+			moved.ID, moved.Preview = it.ID, "Moved"
 			h.putEvent(assistantwire.InboxSource{ID: it.Source, Name: "Example"}, moved.Thread, plannedEvent{messages: []string{"b"}}, moved, false)
 			return listed()
-		}, func(x InboxItem) bool { return x.Title == "Moved" }},
+		}, func(x InboxItem) bool { return x.Preview == "Moved" }},
 		{"Agent a handed-off conversation started", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
 			listed()
 			h.handoffAgentStarted(&handoffStart{item: it.ID}, "m1", "sess-handed", "look into it")

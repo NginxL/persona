@@ -491,7 +491,7 @@ struct RecordingDayTranscriptView: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text(RecordingDayStatus.clock(line.at, in: timeZone, seconds: true))
                 .font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-            Text(line.text).font(Theme.Font.body).textSelection(.enabled)
+            Text(line.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
         }
         .id(line.id)
         .listRowBackground(lit == line.id ? Theme.accentTint : nil)

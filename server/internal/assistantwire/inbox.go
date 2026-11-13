@@ -28,6 +28,7 @@ var InboxRoutes = []string{
 	"POST /api/v1/inbox/{id}/reply",
 	"POST /api/v1/inbox/{id}/suggestion",
 	"POST /api/v1/inbox/{id}/handoff",
+	"POST /api/v1/inbox/{id}/task-link/recheck",
 	"POST /api/v1/inbox/{id}/doc/status",
 	"PUT /api/v1/inbox/{id}/parent",
 	"PUT /api/v1/inbox/{id}/folder",

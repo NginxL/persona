@@ -1,6 +1,6 @@
-// Only assistant panels need execution catalogs. Keep that I/O and skill presentation off the base panel's idle path.
+// Keep execution-catalog I/O and skill presentation off the base panel's idle path.
 import { useCallback, useEffect, useState, useSyncExternalStore, type ComponentProps } from "react";
-import { api, credentialOwner, subscribeCredentialOwner } from "../../lib/api";
+import { api, enc, credentialOwner, subscribeCredentialOwner } from "../../lib/api";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { matchingSkills, type SkillCatalog } from "../../lib/skill-mentions";
 import { ComposerPanel, type MentionRow } from "./ComposerPanel";
@@ -13,7 +13,7 @@ export function AssistantComposerPanel(props: ComponentProps<typeof ComposerPane
   const source = props.source?.skills;
   const machine = props.machineId;
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, () => "");
-  const key = JSON.stringify([owner, machine, props.source?.cwd, source?.manager, source?.session, source?.launcher, source?.environment]);
+  const key = JSON.stringify([owner, machine, props.source?.cwd, source?.manager, source?.session, source?.launcher, source?.environment, source?.agent]);
   const [state, setState] = useState<SkillCatalogState & { key: string }>({ key: "" });
   useEffect(() => {
     if (!source || !machine) return;
@@ -21,7 +21,8 @@ export function AssistantComposerPanel(props: ComponentProps<typeof ComposerPane
     const query = new URLSearchParams({ machine_id: machine });
     if (source.session) query.set("session_id", source.session);
     if (source.launcher) query.set("launcher", source.launcher);
-    api<SkillCatalog>(`/assistant/skills?${query}`, { signal: ac.signal, headers: { [MANAGER_HEADER]: source.manager } })
+    const path = source.agent ? `/sessions/${enc(machine)}/${enc(source.session ?? "")}/skills` : `/assistant/skills?${query}`;
+    api<SkillCatalog>(path, { signal: ac.signal, headers: { [MANAGER_HEADER]: source.manager } })
       .then((catalog) => {
         if (!ac.signal.aborted) setState(catalog.catalog_version === 1 ? { key, catalog, status: catalog.complete ? undefined : "partial" } : { key, status: "error" });
       })

@@ -13,6 +13,19 @@ import (
 // exactly one version; empty batches may retain it or advance exactly one as an
 // accepted-event fence. They never encode a root replacement just for the fence.
 func Apply(t *Tree, d *Delta) (*Tree, error) {
+	next, err := replay(t, d)
+	if err != nil {
+		return nil, err
+	}
+	if err := next.check(nil); err != nil {
+		return nil, rejected(err)
+	}
+	return next, nil
+}
+
+// replay is Apply without the final check of the whole result: the delta's
+// identity, version and every operation are still checked as they apply.
+func replay(t *Tree, d *Delta) (*Tree, error) {
 	if t == nil || t.root == nil || d == nil {
 		return nil, rejected(errors.New("missing tree or delta"))
 	}
@@ -38,9 +51,6 @@ func Apply(t *Tree, d *Delta) (*Tree, error) {
 		if err := checkTopology(next.root); err != nil {
 			return nil, rejected(fmt.Errorf("operation %d: %w", i, err))
 		}
-	}
-	if err := next.check(); err != nil {
-		return nil, rejected(err)
 	}
 	return next, nil
 }

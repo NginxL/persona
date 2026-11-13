@@ -83,10 +83,20 @@ func TestAPIConnectionSendsThroughAComputer(t *testing.T) {
 
 	s, _, _ := modelService(t)
 	devs := &viaDevs{}
+	// A launcher list in the background (refreshZshrcLaunchers) reads s.devs on a goroutine of its own: wait for it, under
+	// the lock it ends under, before s.devs is changed.
+	settle := func() {
+		waitFor(t, "the launcher refresh", func() bool {
+			s.models.zshrcMu.Lock()
+			defer s.models.zshrcMu.Unlock()
+			return !s.models.zshrcRefreshing
+		})
+	}
 	save := func(method, path string, body map[string]any) (int, string) {
 		raw, _ := json.Marshal(body)
+		settle()
 		s.devs = devs // only for the call: the rest of the service has no fleet here
-		defer func() { s.devs = nil }()
+		defer func() { settle(); s.devs = nil }()
 		return launcherCall(t, s, method, path, string(raw))
 	}
 	conn := map[string]any{"name": "direct", "kind": "api", "api": "messages", "base_url": upstream.URL, "model": "m", "api_key": viaTestKey, "auth": "api_key"}
@@ -98,8 +108,9 @@ func TestAPIConnectionSendsThroughAComputer(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
+		settle()
 		s.devs = devs // only for the call: the rest of the service has no fleet here
-		defer func() { s.devs = nil }()
+		defer func() { settle(); s.devs = nil }()
 		return s.aiClient(c).Complete(context.Background(), "sys", "hi", 64)
 	}
 
@@ -125,8 +136,9 @@ func TestAPIConnectionSendsThroughAComputer(t *testing.T) {
 	}
 	// Test connection goes the same way; the form's choice overrides the stored one.
 	probe := func(in probeInput) map[string]any {
+		settle()
 		s.devs = devs
-		defer func() { s.devs = nil }()
+		defer func() { settle(); s.devs = nil }()
 		return s.providerTest(context.Background(), in)
 	}
 	if out := probe(probeInput{Name: "direct"}); out["ok"] != true || viaNodeHits.Load() != 2 || direct.Load() != 1 {

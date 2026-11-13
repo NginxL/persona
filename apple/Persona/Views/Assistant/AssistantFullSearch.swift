@@ -58,9 +58,11 @@ struct AssistantFullSearch: View {
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("full-search-field")
                 if !query.isEmpty {
-                    Button { query = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.tertiary) }
+                    // Hit as a finger-sized square over the field's end, the glyph where it was (#6577).
+                    Button { query = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.tertiary).tapTargetOutset(.all) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Clear Search")
+                        .accessibilityIdentifier("full-search-clear")
                 }
             }
             .padding(.horizontal, Theme.Space.l)

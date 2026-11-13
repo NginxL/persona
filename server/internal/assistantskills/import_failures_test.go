@@ -15,13 +15,13 @@ import (
 )
 
 func TestImportUsesExistingDefaultAndConfiguredUserDir(t *testing.T) {
-	home := t.TempDir()
+	home := realTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PERSONA_SKILLS_DIR", "")
 	t.Setenv("PERSONA_HOME", "")
 	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
-	for _, root := range []string{filepath.Join(home, ".persona"), filepath.Join(t.TempDir(), "custom-state")} {
+	for _, root := range []string{filepath.Join(home, ".persona"), filepath.Join(realTempDir(t), "custom-state")} {
 		if root != filepath.Join(home, ".persona") {
 			t.Setenv("PERSONA_HOME", root)
 		}

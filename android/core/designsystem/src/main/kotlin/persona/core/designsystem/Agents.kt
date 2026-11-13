@@ -292,9 +292,10 @@ fun AgentTreeHeader(
  * computer and drops its heading) and smaller than the computer. A [quiet] space (all finished and seen) is lighter
  * and says how many [sessions] it holds instead of [counts]. [counts] take a clock for the agents that only [waiting] in the
  * background, as iOS's `StateCounts` does. [menu] is the space's ⋯ (a [HeadingAction] and its sheet).
- * Under "By repository" the same heading is a repository or one of its working trees, told apart by [icon] (folder, ⌂ for the
- * main checkout, a branch for another tree) and one more [depth] step for a tree. [kind] names the level for TalkBack
- * (space, repository, main worktree, worktree): the caret says "Expand" / "Collapse" it, the icon says what it is, the heading whether it is open.
+ * Under "By repository" the same heading is a repository or one of its working trees, told apart by [icon] (folder for a
+ * repository, ⌂ for the main checkout, no icon for another tree) and one more [depth] step for a tree. [kind] names the
+ * level for TalkBack (space, repository, main worktree, worktree): the caret says "Expand" / "Collapse" it, the icon
+ * (when present) says what it is, the heading whether it is open.
  */
 @Composable
 fun AgentSpaceHeader(

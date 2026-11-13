@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorText } from "../../lib/api";
 import { assistantInfoText, conversationKey, effectiveLauncher, shortModel, usePickedLauncher } from "../../lib/assistant-chat";
+import { isBackgroundSupervisor } from "../../lib/background-supervisor";
 import {
   archivedMainTitle, COMPACT_FEATURE, compactBody, compactionView, compactPath, NEW_MAIN_FEATURE, NEW_MAIN_PATH, newMainBody, type CompactionView,
 } from "../../lib/compaction";
@@ -19,6 +20,7 @@ import type { Item, Session } from "../../lib/types";
 import { Button, copyText, Dialog, IconButton, Spinner, toast, type MenuItem } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { ModelFallbackCard } from "../chat/ModelFallbackCard";
+import { conversationArchiveItem } from "../ConversationMenu";
 import { Switch } from "./parts";
 import { PersonaDot, usePersona } from "./Persona";
 import { t } from "../../i18n";
@@ -36,8 +38,9 @@ export function AssistantFace({ session, last }: { session?: Session; last?: Pic
   return <PersonaDot size={30} state={state} fallback={null} className="-my-1" />;
 }
 
-/** The header menu's Persona part: "Details" (the profile), "Knowledge", "Back to main chat", the main conversation's "Compact context",
- *  "Clear context" and "New main chat" (when the hub can), "Copy info"; `dialogs` goes with them. Empty for an agent. */
+/** The header menu's Persona part: "Details" (the profile), "Knowledge", "Back to main chat", an ordinary conversation's
+ *  "Archive" (the sidebar row's action), the main conversation's "Compact context", "Clear context" and "New main chat"
+ *  (when the hub can), "Copy info"; `dialogs` goes with them. Empty for an agent. */
 export function useAssistantMenu(session: Session | undefined): { items: MenuItem[]; dialogs: React.ReactNode } {
   const assistant = useStore((s) => s.assistant);
   const machine = useStore((s) => (session ? s.machines.find((m) => m.id === session.machine_id)?.name ?? "" : ""));
@@ -56,6 +59,7 @@ export function useAssistantMenu(session: Session | undefined): { items: MenuIte
     { key: "profile", label: t("assistant-assistantchat.details"), icon: "info", onSelect: () => navigate({ name: "profile" }) },
     { key: "kb", label: t("assistant-assistantchat.knowledge"), icon: "book", onSelect: () => navigate({ name: "kb" }) },
     ...(assistant?.main && !isMain ? [{ key: "main", label: t("assistant-assistantchat.back_to_main"), icon: "home" as const, onSelect: () => navigate(conversationPage(assistant.main!, assistant.machine_id, shownManager())) }] : []),
+    ...(!isMain && !isBackgroundSupervisor(assistant, session.session_id) ? [conversationArchiveItem(session)] : []),
     ...(isMain && canCompact
       ? [{ key: "compact", label: compacting ? t("assistant-assistantchat.compacting") : t("assistant-assistantchat.compact"), icon: "layers" as const, disabled: compacting, onSelect: () => void startCompaction(session) }]
       : []),

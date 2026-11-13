@@ -84,7 +84,8 @@ fun MessageItem(
     val prominent = status == Status.NeedsYou
     val badge = when (source) { MessageSource.Lark -> PhIcons.ChatsCircle; MessageSource.Mail -> PhIcons.EnvelopeSimple; MessageSource.Other -> null }
     val badgeColor = if (style == AppStyle.Glass) (if (source == MessageSource.Mail) palette.needsYou.dot else palette.working.dot) else null
-    val click = Modifier.selectedRow(selected || checked == true).onSecondaryClick(onLongClick)
+    // The swipe around the row, if any, as the row's own actions for a screen reader (`swipeActionSemantics`).
+    val click = Modifier.selectedRow(selected || checked == true).onSecondaryClick(onLongClick).swipeActionSemantics()
         .then(if (checked != null) Modifier.semantics { toggleableState = androidx.compose.ui.state.ToggleableState(checked) } else Modifier)
         .combinedClickable(role = if (checked != null) Role.Checkbox else Role.Button, onClick = onClick, onLongClick = onLongClick)
     val body: @Composable ColumnScope.() -> Unit = {
@@ -142,7 +143,8 @@ fun MessageItem(
         }
         // JCard clips only inside this modifier: the clip here keeps the selection plate within the card's corners.
         prominent && style == AppStyle.Glass -> JCard(
-            modifier.padding(bottom = if (position.last) 0.dp else 12.dp.dense).clip(PersonaTheme.shapes.cardShape).selectedRow(selected).onSecondaryClick(onLongClick),
+            modifier.padding(bottom = if (position.last) 0.dp else 12.dp.dense).clip(PersonaTheme.shapes.cardShape).selectedRow(selected).onSecondaryClick(onLongClick)
+                .swipeActionSemantics(),
             onClick = onClick, onLongClick = onLongClick, padding = 16.dp.dense, content = body,
         )
         else -> JGroupItem(position, modifier) {
@@ -268,7 +270,10 @@ fun HomeNavigation(
             // past its two cells and left an empty box beside them.
             Box(Modifier.weight(1f)) {
                 JSegmented(items.map { JSegment(it.label, it.badge.takeIf { count -> count > 0 }) },
-                    items.indexOfFirst { it.key == selected }.coerceAtLeast(0), { select(items[it].key) })
+                    items.indexOfFirst { it.key == selected }.coerceAtLeast(0), { index ->
+                        val key = items[index].key
+                        if (key == selected && onSelectedMenu != null) onSelectedMenu() else select(key)
+                    })
             }
             trailing()
         }

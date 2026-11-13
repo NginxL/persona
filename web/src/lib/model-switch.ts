@@ -4,6 +4,7 @@
 // (lib/session-panel.ts pickPlan), and the node types `/model <id>` into Claude Code through the same guards as a
 // message (server/internal/node/model_switch.go).
 import { t } from "../i18n";
+import { agentId, sessionAgent } from "./agent-kind";
 import { sessionCan, stateOf } from "./format";
 import type { AgentModel } from "./launcher-models";
 import type { Session } from "./types";
@@ -24,8 +25,19 @@ export function modelBusy(s: Session): string {
   return st === "working" || st === "needs_you" ? t("composer.busy") : "";
 }
 
-/** The launcher whose list the panel shows first: the session's own, plain claude when it started without one. */
-export const sessionLauncher = (s: Pick<Session, "launcher">) => s.launcher || "claude";
+/** The node's name for the Codex App's launcher (#5726, server/internal/node/codexapp_new.go): its list is empty and
+ *  `locked`, since the App picks a chat's model. */
+export const CODEX_APP_LAUNCHER = "codex-app";
+
+/** The launcher whose list the panel shows first: the session's own; without one, its engine's: the Codex App's for one
+ *  of the App's chats (`space_kind` codex_app), plain codex for another Codex session, plain claude otherwise. A Codex
+ *  session used to read Claude Code's list (#6501): its pill named Claude's default entry, "Default (recommended)", when
+ *  the session reported no model, and the panel offered Claude's models as its own. */
+export const sessionLauncher = (s: Partial<Pick<Session, "launcher" | "agent" | "agent_label" | "source_kind" | "agent_surface" | "space_kind">>): string => {
+  if (s.launcher) return s.launcher;
+  if (agentId(sessionAgent(s).agent) !== "codex") return "claude";
+  return s.space_kind === "codex_app" ? CODEX_APP_LAUNCHER : "codex";
+};
 
 /** Whether `m` is the model the session runs now: `current` is what the transcript shows (a concrete model id), or
  *  the id the app switched to; the list has the alias (`opus`) and what it stands for (`resolved`), any case. The model

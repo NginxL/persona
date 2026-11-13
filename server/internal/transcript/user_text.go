@@ -9,9 +9,21 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// queuedNoticePrefix starts a system notice Claude Code queues like input (a cross-session message it held and then
+// released): something it wrote, not the user.
+const queuedNoticePrefix = "[Cross-session delivery notice]"
+
+// queuedInput is an entry of the queue Claude Code keeps while it works; a system notice stays in the order (a dequeue
+// takes the first entry, whoever wrote it) but is not shown.
+type queuedInput struct {
+	text   string
+	notice bool
+}
+
 func (m *Meta) applyQueue(op, content string) {
 	// Queued text keeps the <pasted_content> wrapper of long / voice input; show what the user wrote.
 	content = strings.TrimSpace(dropTagged(pastedRe, "pasted_content", content))
+	notice := strings.HasPrefix(content, queuedNoticePrefix)
 	if from, body, ok := CrossSession(content); ok {
 		if from == PersonaPeer {
 			body = personaWords(body) // the user's own words from the phone, as the chat shows them (peerItem)
@@ -19,9 +31,9 @@ func (m *Meta) applyQueue(op, content string) {
 		content = "【来自 " + from + "】" + body
 	}
 	removeOne := func() bool {
-		for i, q := range m.Queue {
-			if q == content {
-				m.Queue = append(m.Queue[:i:i], m.Queue[i+1:]...)
+		for i, q := range m.queued {
+			if q.text == content {
+				m.queued = append(m.queued[:i:i], m.queued[i+1:]...)
 				return true
 			}
 		}
@@ -30,19 +42,25 @@ func (m *Meta) applyQueue(op, content string) {
 	switch op {
 	case "enqueue":
 		if content != "" {
-			m.Queue = append(m.Queue, content)
+			m.queued = append(m.queued[:len(m.queued):len(m.queued)], queuedInput{content, notice})
 		}
 	case "dequeue":
-		if len(m.Queue) > 0 {
-			m.Queue = m.Queue[1:]
+		if len(m.queued) > 0 {
+			m.queued = m.queued[1:]
 		}
 	case "remove", "popAll":
 		if content == "" || !removeOne() {
 			if op == "popAll" {
-				m.Queue = nil
-			} else if len(m.Queue) > 0 {
-				m.Queue = m.Queue[1:]
+				m.queued = nil
+			} else if len(m.queued) > 0 {
+				m.queued = m.queued[1:]
 			}
+		}
+	}
+	m.Queue = nil
+	for _, q := range m.queued {
+		if !q.notice {
+			m.Queue = append(m.Queue, q.text)
 		}
 	}
 }

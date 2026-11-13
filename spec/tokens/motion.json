@@ -117,6 +117,95 @@
         "$description": "the keyboard spring's damping coefficient (mass 1)"
       }
     },
+    "composerSwap": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 400,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.composerSwap: Animation.timingCurve(0.38, 0.7, 0.125, 1, duration: 0.4), send growing into the composer's round button's place and leaving it, and the scale and blur that go with it"
+      },
+      "curveX1": {
+        "$type": "number",
+        "$value": 0.38,
+        "$description": "composerSwap's cubic Bezier, first control point x"
+      },
+      "curveY1": {
+        "$type": "number",
+        "$value": 0.7,
+        "$description": "composerSwap's cubic Bezier, first control point y"
+      },
+      "curveX2": {
+        "$type": "number",
+        "$value": 0.125,
+        "$description": "composerSwap's cubic Bezier, second control point x"
+      },
+      "curveY2": {
+        "$type": "number",
+        "$value": 1,
+        "$description": "composerSwap's cubic Bezier, second control point y"
+      },
+      "fadeDuration": {
+        "$type": "duration",
+        "$value": {
+          "value": 200,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.composerSwapFade: Animation.easeInOut(duration: 0.2), what fades with the swap fades faster than it grows"
+      },
+      "fadeCurve": {
+        "$type": "string",
+        "$value": "easeInOut",
+        "$description": "Theme.Motion.composerSwapFade: Animation.easeInOut"
+      },
+      "blur": {
+        "$type": "dimension",
+        "$value": {
+          "value": 4,
+          "unit": "px"
+        },
+        "$description": "Theme.Motion.composerSwapBlur: the blur send clears as it grows in, and takes on as it leaves (points on iOS, dp on Android)"
+      },
+      "from": {
+        "$type": "number",
+        "$value": 0.001,
+        "$description": "Theme.Motion.composerSwapFrom: where send grows from at the right edge, this small and not zero so the scale has a size to start at"
+      },
+      "scale": {
+        "$type": "number",
+        "$value": 0.2,
+        "$description": "Theme.Motion.composerSwapScale: what stop and voice shrink to (and grow from) as they fade"
+      }
+    },
+    "composerPress": {
+      "scale": {
+        "$type": "number",
+        "$value": 0.75,
+        "$description": "Theme.Motion.composerPressScale: send pressed down shrinks to this"
+      },
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 400,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.composerPress: Animation.easeOut(duration: 0.4), shrinking slowly while pressed"
+      },
+      "curve": {
+        "$type": "string",
+        "$value": "easeOut",
+        "$description": "Theme.Motion.composerPress: Animation.easeOut"
+      },
+      "releaseDuration": {
+        "$type": "duration",
+        "$value": {
+          "value": 250,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.composerRelease: Animation.timingCurve(0.38, 0.7, 0.125, 1, duration: 0.25), coming back quicker when let go, on composerSwap's curve"
+      }
+    },
     "needsYouBreath": {
       "duration": {
         "$type": "duration",

@@ -1,6 +1,7 @@
 package larkcli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,9 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 	if !auth.LoggedIn || auth.Expired {
 		return connector.ThreadPage{}, conversationError(&adapter.Error{Kind: adapter.KindNotLoggedIn})
 	}
+	// The chat's own record is read beside the messages: a first open waits for one of the two reads, not both.
+	record := make(chan chatRecord, 1)
+	go func() { record <- c.conversationChat(ctx, chatID) }()
 	source, err := c.runner.ListMessages(ctx, chatID, topic, before, limit)
 	if err != nil {
 		return connector.ThreadPage{}, conversationError(err)
@@ -86,7 +90,68 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 	if source.HasMore {
 		page.Before = source.PageToken
 	}
+	r := <-record
+	page.Chat.Kind = cmp.Or(page.Chat.Kind, r.kind)
+	page.Chat.Name = cmp.Or(page.Chat.Name, r.name)
+	if page.Chat.Kind == "dm" && page.Chat.Name == "" {
+		// A direct chat's record has no name: it is the other person's, as the item's title is.
+		for _, m := range page.Messages {
+			if !m.Mine && !m.Event && m.Sender.Name != "" {
+				page.Chat.Name = m.Sender.Name
+				break
+			}
+		}
+	}
 	return page, nil
+}
+
+// chatRecord is what a chat's own record says of it: its kind as a conversation page has it ("dm", "group"; "" when
+// it could not be read) and its name, until when that holds.
+type chatRecord struct {
+	kind, name string
+	until      time.Time
+}
+
+// How long a chat's record is kept: its kind never changes, a renamed group shows its new name within the hour. A
+// record that could not be read is asked for again a minute later.
+const (
+	chatRecordKeep  = time.Hour
+	chatRecordRetry = time.Minute
+)
+
+// conversationChat is the chat's kind and name from its own record (lark-cli `im chats get`). The message list carries
+// neither (lark-cli 1.0.98 to 1.0.100), and the apps show a page whose kind is not a chat's as the item's plain text:
+// a Lark conversation opened on iOS and Android as all of its messages run together.
+func (c *Connector) conversationChat(ctx context.Context, chatID string) chatRecord {
+	now := c.currentTime()
+	c.recordsMu.Lock()
+	r, ok := c.chatRecords[chatID]
+	c.recordsMu.Unlock()
+	if ok && now.Before(r.until) {
+		return r
+	}
+	r = chatRecord{until: now.Add(chatRecordRetry)}
+	if chat, err := c.runner.GetChat(ctx, chatID); err == nil {
+		switch chat.ChatMode {
+		case "p2p":
+			r.kind = "dm"
+		case "group", "topic":
+			r.kind = "group"
+		}
+		r.name = strings.TrimSpace(chat.Name)
+		if r.kind != "" {
+			r.until = now.Add(chatRecordKeep)
+		}
+	} else if ctx.Err() != nil {
+		return chatRecord{} // the page was given up on: nothing learned, nothing kept
+	}
+	c.recordsMu.Lock()
+	if c.chatRecords == nil {
+		c.chatRecords = map[string]chatRecord{}
+	}
+	c.chatRecords[chatID] = r
+	c.recordsMu.Unlock()
+	return r
 }
 
 // Media is deliberately unavailable until the CLI attachment contract is wired.

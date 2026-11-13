@@ -113,6 +113,8 @@ extension RuntimeCLI {
     /// The largest scroll view on screen, moved by `pages` screens (negative: up; 0.8 of its height each) or `to` top /
     /// bottom, without animation (no deceleration: what is under test is where things land, not the fling). Only one
     /// that is drawn: the shell's page behind has a list as large as the one on screen (`frame`: which one moved).
+    /// `at` [x, y] (screen points): the smallest one under that point instead, a list inside a panel over the page
+    /// (the Needs You tray over the chat).
     private static func scroll(_ a: Args) -> Reply {
         AgentsFeed.pagingProbe?.reader.cancel()
         var views: [UIScrollView] = []
@@ -123,9 +125,15 @@ extension RuntimeCLI {
             v.subviews.forEach(collect)
         }
         windows.forEach(collect)
-        guard let s = views.max(by: { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }) else {
-            return fail("no scroll view")
+        let area = { (v: UIScrollView) in v.bounds.width * v.bounds.height }
+        let picked: UIScrollView?
+        if let at = a["at"] as? [Double], at.count == 2 {
+            let point = CGPoint(x: at[0], y: at[1])
+            picked = views.filter { $0.convert($0.bounds, to: nil).contains(point) }.min { area($0) < area($1) }
+        } else {
+            picked = views.max { area($0) < area($1) }
         }
+        guard let s = picked else { return fail("no scroll view") }
         let top = -s.adjustedContentInset.top
         let bottom = max(top, s.contentSize.height + s.adjustedContentInset.bottom - s.bounds.height)
         var y = s.contentOffset.y

@@ -164,7 +164,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		return "", fmt.Errorf("%s: %w", h.label(), err)
 	}
 	commit()
-	n.notifySessions()
+	awaitList(n.notifySessionsSoon()) // as a Claude conversation's send: not the whole list's time
 	return id, nil
 }
 

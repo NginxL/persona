@@ -119,6 +119,32 @@ private struct CriterionRow: View {
     }
 }
 
+/// "Nobody is working on this · closed after an error" (#3618, docs/assistant/todos.md "Nobody is working on this"): an
+/// open task every agent of which is gone, with nothing set to bring one back. Drawn where the task's supervision
+/// state is (its to-do row, its page; the task board says it in its subtitle), in the caution color with the warning
+/// mark; not while the task waits for the user, which is not waiting on an agent. The native Mac app is frozen and does
+/// not draw it.
+struct OrphanedLine: View {
+    var todo: TodoItem
+    var state: TaskState
+
+    var body: some View {
+        #if !os(macOS)
+        if state != .needsYou, let line = todo.orphanedLine {
+            // Not a `Label`: in a list row its icon takes the row's icon column, far from the words.
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+                ThemedIcon(Theme.Icon.error).font(Theme.Font.labelStrong)
+                Text(line).lineLimit(2)
+            }
+            .font(Theme.Font.caption)
+            .foregroundStyle(Theme.cautionText)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("task-orphaned-line")
+        }
+        #endif
+    }
+}
+
 /// A review in the conversation (feed kind `review`): a capsule like the answered line, with the task (a tap opens it),
 /// the verdict and the supervisor's note.
 struct ReviewFeedLine: View {

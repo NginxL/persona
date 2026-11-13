@@ -23,6 +23,10 @@ final class FrameStats: NSObject {
 
     private var bodiesAtStart: [String: Int] = [:]
     private var pushAtStart = (passes: 0, ms: 0.0)
+    /// The streamed reply's visible length at the last frame, and the frames where it grew: (when, characters added).
+    private var shownAtLastFrame = 0
+    private var textChanges: [(CFTimeInterval, Int)] = []
+    private var cpuAtStart: Double = 0
 
     func start() {
         MainThreadWatchdog.shared.reset()
@@ -32,6 +36,9 @@ final class FrameStats: NSObject {
         busies = []
         busy = 0
         last = 0
+        shownAtLastFrame = StreamCadence.shown
+        textChanges = []
+        cpuAtStart = Self.mainThreadCPU()
         let wake = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
             MainActor.assumeIsolated { FrameStats.shared.passStart = CACurrentMediaTime() }
         }
@@ -57,6 +64,9 @@ final class FrameStats: NSObject {
     @objc private func tick(_ link: CADisplayLink) {
         if last > 0 { deltas.append(link.timestamp - last); busies.append(busy * 1000) }
         busy = 0
+        let shown = StreamCadence.shown
+        if shown > shownAtLastFrame { textChanges.append((link.timestamp, shown - shownAtLastFrame)) }
+        shownAtLastFrame = shown
         expected = max(link.targetTimestamp - link.timestamp, 1.0 / 120)
         last = link.timestamp
     }
@@ -79,6 +89,11 @@ final class FrameStats: NSObject {
         // Typed: in the `Any` literal below Swift 6.2 (Xcode 26.0) took `busy.last` for `last(where:)`, a closure
         // JSONSerialization throws on.
         let busyMax: Double = busy.last ?? 0
+        let cpu = Self.mainThreadCPU() - cpuAtStart
+        // The streamed reply's cadence as the reader sees it: the gaps between frames where its text grew.
+        let gaps = zip(textChanges, textChanges.dropFirst()).map { ($1.0 - $0.0) * 1000 }.sorted()
+        let added = textChanges.map { Double($0.1) }.sorted()
+        func q(_ v: [Double], _ p: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int(Double(v.count) * p))] }
         let result: [String: Any] = [
             "label": label,
             "frames": deltas.count,
@@ -99,6 +114,11 @@ final class FrameStats: NSObject {
             "push_passes": PerfCount.passes - pushAtStart.passes, "push_ms": PerfCount.totalMS - pushAtStart.ms,
             "main_thread_blocks": MainThreadWatchdog.shared.report,
             "busy_over_8ms": busy.filter { $0 > 8 }.count, "busy_over_16ms": busy.filter { $0 > 16 }.count,
+            "busy_ms_per_s": total > 0 ? busies.reduce(0, +) / total : 0,
+            "main_cpu_ms_per_s": total > 0 ? cpu * 1000 / total : 0,
+            "text_changes": textChanges.count,
+            "text_gap_p50_ms": q(gaps, 0.5), "text_gap_p95_ms": q(gaps, 0.95), "text_gap_max_ms": gaps.last ?? 0,
+            "text_added_p50": q(added, 0.5), "text_added_p95": q(added, 0.95), "text_added_max": added.last ?? 0,
         ]
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
@@ -107,6 +127,28 @@ final class FrameStats: NSObject {
         }
         return result
     }
+}
+
+extension FrameStats {
+    /// CPU seconds the main thread has used so far (user + system). Called on the main thread.
+    static func mainThreadCPU() -> Double {
+        var info = thread_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let thread = mach_thread_self()
+        defer { mach_port_deallocate(mach_task_self_, thread) }
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count) }
+        }
+        guard kr == KERN_SUCCESS else { return 0 }
+        func s(_ t: time_value_t) -> Double { Double(t.seconds) + Double(t.microseconds) / 1_000_000 }
+        return s(info.user_time) + s(info.system_time)
+    }
+}
+
+/// The streamed reply's visible length, written where it is drawn (`StreamingText`) and read once a frame by
+/// `FrameStats` (#6651): the frames where it grew are the reply's cadence as the reader sees it.
+@MainActor enum StreamCadence {
+    static var shown = 0
 }
 
 #if os(iOS) || os(visionOS)

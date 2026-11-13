@@ -170,7 +170,7 @@ func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send,
 		h.inboxAnswers.changed(id)
 	}
 	var res assistantwire.HTTPResponse
-	err = h.callBus(ctx, id, assistantwire.MethodHTTP, httpParams(req), &res)
+	err = h.callHTTP(ctx, id, req, &res) // a large body on a stream of its own (bus_body_stream.go)
 	if changes {
 		h.inboxAnswers.changed(id)
 	}

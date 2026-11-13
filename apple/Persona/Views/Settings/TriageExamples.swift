@@ -38,6 +38,12 @@ enum TriageExample {
          .init(symbol: Theme.Icon.search, text: String(localized: "Checks for itself"), look: .tone(StatusPalette.working))]
     }
 
+    /// The record an agent ends a turn with once it is asked for one (#3612), as its card in the chat.
+    static func closeout() -> Closeout {
+        Closeout(status: "done", did: [String(localized: "Fixed the sign-in test")], merged: "yes", deployed: "no",
+                 verified: String(localized: "The sign-in test passes"))
+    }
+
     /// The reminder push, worded as the hub words it (`reply_title`; its body is what the agent asked).
     static var reminderTitle: String { String(localized: "\(String(localized: "Clean up old branches")) is still waiting for your answer") }
     static var reminderMessage: String { String(localized: "Delete these 12 merged branches?") }
@@ -54,7 +60,7 @@ enum TriageExample {
 
 /// Each switch's example under it on Settings › Session Triage.
 struct TriageExampleView: View {
-    enum Kind { case triage, decide, autoContinue, wake, replyReminder }
+    enum Kind { case triage, decide, autoContinue, wake, replyReminder, closeout }
     var kind: Kind
     var replyMinutes: Int
 
@@ -78,6 +84,8 @@ struct TriageExampleView: View {
                 ExampleTimeline(steps: TriageExample.continueSteps)
             case .wake:
                 ExampleTimeline(steps: TriageExample.wakeSteps)
+            case .closeout:
+                CloseoutCard(closeout: TriageExample.closeout())
             case .replyReminder:
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Chip(text: String(localized: "Seen, no reply for \(replyMinutes) min"), symbol: Theme.Icon.replyReminder)

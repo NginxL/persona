@@ -873,6 +873,21 @@ func (c *Client) PaneReportResume(ctx context.Context, pane, source, agent, sess
 	return err
 }
 
+// ServerID names the server instance listening on c's socket: every server start (a restart, a live handoff, an
+// upgrade) binds the socket anew, so its modification time changes. "" when there is no socket. A reporter compares it
+// to the one it reported to: state a server keeps only in memory (or an older herdr ignored, such as resume_argv
+// before 0.9.2) has to be reported again to a new one.
+func (c *Client) ServerID() string {
+	if c.Socket == "" {
+		return ""
+	}
+	fi, err := os.Stat(c.Socket)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+}
+
 // ReportSeq orders a reporter's reports (herdr drops one older than the last it took); tests fix it.
 var ReportSeq = func() int64 { return time.Now().UnixNano() }
 

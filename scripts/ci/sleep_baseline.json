@@ -259,7 +259,6 @@
   "server/internal/node/herdrcorefake_test.go": 1,
   "server/internal/node/herdrinstall_test.go": 1,
   "server/internal/node/herdrstart_live_test.go": 5,
-  "server/internal/node/herdrstart_test.go": 6,
   "server/internal/node/hookagent_test.go": 1,
   "server/internal/node/hookdecided_test.go": 3,
   "server/internal/node/hostbotmux_test.go": 1,

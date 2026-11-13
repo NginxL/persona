@@ -2,7 +2,7 @@
 // text node; links are only GitHub's own download and release addresses (model.js isDirectDownload). The packages are
 // downloaded from GitHub directly: nothing here goes through this site.
 import {
-  DEVICES, COMPONENTS, GETTING_STARTED, GITHUB_RELEASES, TESTFLIGHT, WEB_GUIDE,
+  DEVICES, COMPONENTS, GETTING_STARTED, GITHUB_RELEASES, HARMONY_GUIDE, TESTFLIGHT, WEB_GUIDE,
   archLabel, areaLabel, compareVersions, countsLine, detectPlatform, downloadFor, formatAge, formatDate, formatSize,
   hasPackages, isDirectDownload, latestRelease,
 } from "./model.js";
@@ -29,6 +29,7 @@ function el(tag, props = {}, ...kids) {
 const ICONS = {
   ios: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.8"/><path d="M10.5 18.5h3"/>',
   android: '<path d="M5.5 17.5v-2a6.5 6.5 0 0 1 13 0v2z"/><path d="m8 10.2-1.6-2.6M16 10.2l1.6-2.6"/><circle cx="9.5" cy="14.2" r=".6" fill="currentColor"/><circle cx="14.5" cy="14.2" r=".6" fill="currentColor"/>',
+  harmony: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16M6.5 9.5h2.5M15 14.5h2.5"/>',
   macos: '<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M2 19.5h20"/>',
   windows: '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.2"/>',
   linux: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7.5 9.5 3 2.5-3 2.5M12.5 15h4"/>',
@@ -43,7 +44,7 @@ function icon(name) {
   return t.content.firstChild;
 }
 
-const PLATFORM_NAME = { macos: "Mac", linux: "Linux", windows: "Windows", android: "Android", web: "网页版" };
+const PLATFORM_NAME = { macos: "Mac", linux: "Linux", windows: "Windows", android: "Android", harmony: "鸿蒙" };
 const deviceOf = (id) => DEVICES.find((d) => d.id === id);
 
 function releaseURL(r) {
@@ -57,7 +58,7 @@ function fileChip(asset, label) {
 }
 
 function assetLabel(a) {
-  if (a.kind === "app") return "Android";
+  if (a.kind === "app") return a.platform === "harmony" ? "鸿蒙" : "Android";
   if (a.kind === "computer" || a.kind === "component") return `${PLATFORM_NAME[a.platform]} · ${archLabel(a.platform, a.arch)}`;
   return a.name;
 }
@@ -136,7 +137,7 @@ function drawDownload(data, dev, arch) {
     const arches = dev.arches.slice().sort((a, b) => (a === arch ? -1 : b === arch ? 1 : 0));
     const found = arches.map((x) => ({ arch: x, d: downloadFor(data, dev.id, x) })).filter((x) => x.d);
     found.forEach(({ arch: x, d }, i) => {
-      const text = dev.id === "android" ? "下载 APK" : archLabel(dev.id, x);
+      const text = dev.id === "android" ? "下载 APK" : dev.id === "harmony" ? "下载 HAP" : archLabel(dev.id, x);
       actions.append(primaryButton({ href: d.asset.url, text, size: formatSize(d.asset.size), cls: i === 0 ? "btn btn-cheek" : "btn btn-paper" }));
     });
     if (found.length) {
@@ -150,8 +151,13 @@ function drawDownload(data, dev, arch) {
           `${latest.tag} 的 ${dev.name} 安装包还在上传，先给你 ${first.tag} 的。传完后刷新这个页面就是新版。`)));
       }
     } else {
-      actions.append(primaryButton({ href: releaseURL(latest), text: "在 GitHub 上查看", external: true, cls: "btn btn-paper" }));
-      notices.append(notice("cheek", document.createTextNode(`现在还没有 ${dev.name} 的安装包，可以先看看其他设备。`)));
+      if (dev.id === "harmony") {
+        actions.append(primaryButton({ href: HARMONY_GUIDE, text: "从源码构建", external: true }));
+        $("tk-meta").textContent = "正式安装包尚未发布；先用 DevEco Studio 和签名配置构建。";
+      } else {
+        actions.append(primaryButton({ href: releaseURL(latest), text: "在 GitHub 上查看", external: true, cls: "btn btn-paper" }));
+      }
+      notices.append(notice("cheek", document.createTextNode(`现在还没有 ${dev.name} 的正式安装包，可以先看看其他设备。`)));
     }
   }
   if (data.stale) {
@@ -204,9 +210,14 @@ function drawDevices(data, det) {
       const arches = you ? dev.arches.slice().sort((a, b) => (a === det.arch ? -1 : b === det.arch ? 1 : 0)) : dev.arches;
       arches.forEach((arch, i) => {
         const d = downloadFor(data, dev.id, arch);
-        const label = dev.id === "android" ? "下载 APK" : archLabel(dev.id, arch);
+        const label = dev.id === "android" ? "下载 APK" : dev.id === "harmony" ? "下载 HAP" : archLabel(dev.id, arch);
         if (!d) {
-          box.append(el("span", { class: "dl off" }, el("span", { class: "l", text: label }), el("span", { class: "r", text: "暂无" })));
+          if (dev.id === "harmony") {
+            box.append(el("a", { class: "dl", href: HARMONY_GUIDE, target: "_blank", rel: "noopener" },
+              el("span", { class: "l" }, icon("out"), el("span", { text: "从源码构建" })), el("span", { class: "r", text: "GitHub" })));
+          } else {
+            box.append(el("span", { class: "dl off" }, el("span", { class: "l", text: label }), el("span", { class: "r", text: "暂无" })));
+          }
           return;
         }
         const side = formatSize(d.asset.size) + (d.current ? "" : ` · ${d.tag}`);

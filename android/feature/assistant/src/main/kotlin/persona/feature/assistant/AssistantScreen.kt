@@ -1085,10 +1085,10 @@ fun AssistantScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (sharedSidebar != null) {
             body(false)
-        } else if (maxWidth >= 840.dp) {
+        } else if (maxWidth >= Tokens.Android.Size.assistantSplitMin) {
             Row(Modifier.fillMaxSize()) {
                 // The list of conversations sits on the same background as the page beside it, not a panel of its own.
-                if (sidebarVisible) Box(Modifier.width(300.dp).fillMaxHeight()) {
+                if (sidebarVisible) Box(Modifier.width(Tokens.Size.box300).fillMaxHeight()) {
                     PageBackdrop()
                     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) { sidebar() }
                 }
@@ -1497,7 +1497,7 @@ internal fun AssistantDrawer(
                         onDiagnostics = onDiagnostics?.let { action -> { action(session) } },
                         leader = true, onLeader = onLeader?.let { action -> { action(session) } },
                         counts = leaderCountsLabel(groups.counts[session.sessionId], resources),
-                        working = (groups.counts[session.sessionId]?.working ?: 0) > 0,
+                        working = groups.counts[session.sessionId]?.running == true,
                         named = groups.names[session.sessionId], disclosure = disclosure)
                 }
             }
@@ -1598,7 +1598,7 @@ private fun ConversationRow(
     // [named]: a direction's name, shown instead of its leader conversation's title
     val title = named ?: session.conversationTitle(conversationWords())
     // One activity mark for the whole row (#6230): an own needs-you / unread / working turn still wins; otherwise a lead
-    // with work running under it spins.
+    // with anything running under it (the tree's `running`, an Agent at work, #6626) spins.
     val ownStatus = session.conversationStatus()
     val leadActive = working && ownStatus != Status.NeedsYou && ownStatus != Status.Unread && ownStatus != Status.Working
     // A hub title's day and kind ("1101 | Fix | ") in the quiet ink, so the topic is what the eye finds (iOS `titleText`); Glass.
@@ -1616,7 +1616,7 @@ private fun ConversationRow(
             titleAccessory = accessory, titleLead = dated?.head,
             subtitle = session.lastText?.takeIf { it.isNotBlank() },
             leading = {
-                if (leadActive) JSpinner(Modifier.size(20.dp), color = PersonaTheme.palette.accent, stroke = 1.8.dp)
+                if (leadActive) JSpinner(Modifier.size(Tokens.Size.iconXS), color = PersonaTheme.palette.accent, stroke = SpinnerTokens.compactStroke)
                 else JIcon(if (selected) PhIcons.CheckCircle else PhIcons.ChatCircle, null,
                     selected = selected, tint = if (selected) PersonaTheme.palette.accent else PersonaTheme.palette.ink2)
             },

@@ -958,10 +958,15 @@ private struct AgentsList: View {
                                       }
                                   })
 
+        // The list and the chain below are erased in a few places (#6735). Unoptimized, a function reserves a stack slot on
+        // entry for every opaque intermediate of a modifier chain, each holding everything before it: ~45 modifiers
+        // over the List made `observedAgentList` reserve 422 KB, and a Debug build on an iPhone (a 1 MB main-thread
+        // stack, the simulator's is 8 MB) overflowed on every launch into Agents. An erased type is the same on every
+        // update, so the list keeps its identity and state. `AgentsListStackTests` measures the page.
         observedAgentList(
-            agentList(base: base, filtered: filtered, unpinned: unpinned, pinnedAgents: pinnedAgents,
-                      needsYou: needsYou, unreadShown: unreadShown, active: active, quiet: quiet,
-                      tree: tree, byHost: byHost, hasSearchResults: projection.hasSearchResults),
+            AnyView(agentList(base: base, filtered: filtered, unpinned: unpinned, pinnedAgents: pinnedAgents,
+                              needsYou: needsYou, unreadShown: unreadShown, active: active, quiet: quiet,
+                              tree: tree, byHost: byHost, hasSearchResults: projection.hasSearchResults)),
             base: base, interactions: interactions, quiet: quiet, matching: matching)
             .codexTakeoverDialogs(coordinator: takeoverCoordinator) { adopted in
                 model.adopt(adopted)
@@ -1217,7 +1222,7 @@ private struct AgentsList: View {
 
     private func observedAgentList<Content: View>(_ content: Content, base: [Session], interactions: [Interaction],
                                                  quiet: [SpaceGroup], matching: Set<SessionKey>) -> some View {
-        let decorated = styledAgentList(content, base: base, interactions: interactions)
+        let decorated = AnyView(styledAgentList(content, base: base, interactions: interactions))
         .refreshable { await model.sessionLists.reload(); await model.refresh() }
         // Whether each machine's herdr runs, while the list is in sight (a modifier of its own: in this chain the
         // compiler ran out of time type-checking it).
@@ -1238,7 +1243,7 @@ private struct AgentsList: View {
         .confirmClose($closingSession)
         .confirmDeleteSession($deletingSession)
         .nodeActionPrompts()
-        let sheets = decorated
+        let sheets = AnyView(decorated)
         .sheet(item: $creatingChild, onDismiss: {
             guard let child = createdWorktree else { return }
             createdWorktree = nil
@@ -1266,7 +1271,7 @@ private struct AgentsList: View {
                 TodoLinkAgentSheet(space: TodoItem.Space(machineID: group.machineID, space: space))
             }
         }
-        let list = sheets
+        let list = AnyView(sheets)
         .onChange(of: model.visibleSession) { _, key in if key != nil { openedWorkspace = nil } }
         .task(id: listQuery) {
             paginationArmed = false
@@ -2464,7 +2469,7 @@ private struct AgentsList: View {
                             } else {
                                 Text(title).lineLimit(1)
                             }
-                            DirectionCountsLine(counts: e.direction.counts).textCase(nil)
+                            DirectionCountsLine(direction: e.direction).textCase(nil)
                         }
                     }
                 }

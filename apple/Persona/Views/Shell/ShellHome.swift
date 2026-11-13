@@ -426,24 +426,68 @@ struct ShellDestinations: ViewModifier {
     func body(content: Content) -> some View {
         if enabled {
             content
-                .navigationDestination(for: ShellRoute.self) { route in
-                    switch route {
-                    case .inbox: InboxPage(path: $path, accountState: accounts, embedded: true)
-                    case .todos: TodosView()
-                    case .machines: MachinesView()
-                    case .extensionPage(let r): ExtensionNavPage(route: r)
-                    }
-                }
-                .navigationDestination(for: TodoDetailRoute.self) { r in TodoDetailView(todoID: r.id) }
+                // ☰ beside Back on a place's pages: the sidebar opens at any depth, so a place is changed without
+                // popping it (docs/design/sidebar-navigation.md).
+                .navigationDestination(for: ShellRoute.self) { route in place(route).modifier(ShellPlaceSidebarButton()) }
+                .navigationDestination(for: TodoDetailRoute.self) { r in TodoDetailView(todoID: r.id).modifier(ShellPlaceSidebarButton()) }
                 .modifier(InboxDestinations(accounts: accounts.accounts))
-                .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref) }
-                .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine) }
+                .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref).modifier(ShellPlaceSidebarButton()) }
+                .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine).modifier(ShellPlaceSidebarButton()) }
                 .navigationDestination(for: SessionKey.self) { key in ChatView(key: key).id(key) }
                 .navigationDestination(for: InboxChatRoute.self) { r in ChatView(key: r.key, itemManager: r.manager).id(r.key) }
                 .environment(\.feishuOpen) { path.append($0) }
         } else {
             content
         }
+    }
+
+    @ViewBuilder private func place(_ route: ShellRoute) -> some View {
+        switch route {
+        case .inbox: InboxPage(path: $path, accountState: accounts, embedded: true)
+        case .todos: TodosView()
+        case .machines: MachinesView()
+        case .extensionPage(let r): ExtensionNavPage(route: r)
+        case .profile: AssistantProfileView()
+        case .routines: AssistantRoutinesView()
+        case .knowledge: KnowledgeView()
+        case .recordings:
+            #if os(iOS) || os(visionOS)
+            RecordingsPage()
+            #else
+            KnowledgeView() // the Mac records nothing: its Knowledge lists the hub's recordings
+            #endif
+        }
+    }
+}
+
+/// ☰ beside Back on the pages of a place the shell's sidebar opened (docs/design/sidebar-navigation.md): it opens the drawer
+/// over the page as it is, so the user can go to another place and come back to this one where they left it. Only in the
+/// iPhone shell; the iPad's sidebar is a column of its own.
+struct ShellPlaceSidebarButton: ViewModifier {
+    @Environment(\.shell) private var shell
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if let shell {
+            content.toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Haptics.tap()
+                        shell.drawer.open()
+                    } label: {
+                        Label(String(localized: "Chat History [Shell Components 60636b]"), systemImage: Theme.Icon.sidebarMenu)
+                            .labelStyle(.iconOnly)
+                    }
+                    .tint(Color.primary) // as Back beside it, not the accent
+                    .accessibilityIdentifier("shell-place-sidebar")
+                }
+            }
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 

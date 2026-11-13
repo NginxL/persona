@@ -145,9 +145,10 @@ fun AgentRepoHeader(
 
 /**
  * A working tree's line in its repository's card (iOS `RepoWorktreeLine`): ⌂ for the main checkout with its Primary chip,
- * the branch mark for the others, its [name], small after it what the name does not say ([branch], or [detached] HEAD in
- * the caution color), at the end [tally] ("N agents", Idle) and the chevron. [quiet] or [offline] (its computer out of
- * reach) put the name in the secondary color. A tap folds it.
+ * and no mark for the others so the name and indentation carry the meaning like the web sidebar, its [name], small after
+ * it what the name does not say ([branch], or [detached] HEAD in the caution color), at the end [tally] ("N agents",
+ * Idle) and the chevron. [quiet] or [offline] (its computer out of reach) put the name in the secondary color.
+ * A tap folds it.
  */
 @Composable
 fun AgentWorktreeLine(
@@ -178,7 +179,9 @@ fun AgentWorktreeLine(
                 offlineText.takeIf { offline }, tally).joinToString(separator)
             stateDescription = foldState
         },
-        mark = { JIcon(if (main) PhIcons.House else PhIcons.GitBranch, null, size = TreeWorktreeMark, tint = palette.ink2) },
+        // Only the main checkout wears a mark; other worktrees stay text-only, matching the web sidebar. RepoTreeLine
+        // reserves the mark column either way, so the names stay aligned.
+        mark = { if (main) JIcon(PhIcons.House, null, size = TreeWorktreeMark, tint = palette.ink2) },
     ) {
         val detail = branch ?: detachedText.takeIf { detached }
         NameFirst(Modifier.weight(1f), chip = main, detail = detail != null) {

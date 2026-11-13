@@ -29,10 +29,12 @@ func (s Session) IsSubtask() bool {
 }
 
 // SessionHierarchy is a Session's place among the sessions that started one another (docs/protocol/protocol.md
-// "Session hierarchy") and when it began. Each member is a key of the row itself on the wire. A Session holds it by
-// pointer (Session.Hierarchy, nil when every member is empty): the four fields inline would take every row past its
-// size class (TestSessionFitsItsSizeClass), and only a few rows have any of them.
+// "Session hierarchy"), when it began, and its completed task ownership. Each member is a key of the row itself on
+// the wire. A Session holds it by pointer (Session.Hierarchy, nil when every member is empty): these sparse fields
+// inline would take every row past its size class (TestSessionFitsItsSizeClass).
 type SessionHierarchy struct {
+	// CompletedTodo is display-only task ownership. Keep this sparse reference out of every Session's hot row.
+	CompletedTodo *TodoRef `json:"completed_todo,omitempty"`
 	// ParentAgentID is the session on the same machine this one is drawn under while staying a session of its own: its
 	// own row, state, sends, unread and counts (docs/protocol/protocol.md "Session hierarchy"). Unlike
 	// parent_session_id it makes no child: nothing folds it, and it is no subagent. Set by the node: a Claude desktop
@@ -96,7 +98,25 @@ type SessionChildren struct {
 
 func (h *SessionHierarchy) empty() bool {
 	return h.ParentAgentID == "" && h.StartedAt.IsZero() && h.AskingParentSessionID == "" && h.FoldedUnder == "" && h.FoldedAs == "" &&
-		h.Children == nil && len(h.EngineHistory) == 0
+		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil
+}
+
+// CompletedTodo is the last completed association for navigation, never active work.
+func (s *Session) CompletedTodo() *TodoRef {
+	if s.Hierarchy == nil {
+		return nil
+	}
+	return s.Hierarchy.CompletedTodo
+}
+
+// SetCompletedTodo preserves the copy-on-write sparse metadata shared by session copies.
+func (s *Session) SetCompletedTodo(todo *TodoRef) {
+	if s.CompletedTodo() == todo {
+		return
+	}
+	h := s.hierarchy()
+	h.CompletedTodo = todo
+	s.setHierarchy(h)
 }
 
 // hierarchy is a copy of s's hierarchy to change, its children copied too: the one s holds is shared.

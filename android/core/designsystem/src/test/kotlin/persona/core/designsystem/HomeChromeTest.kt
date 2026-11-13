@@ -22,6 +22,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -125,5 +126,38 @@ class HomeChromeTest {
         val label = rule.onNodeWithText("Agents").getBoundsInRoot()
         val action = rule.onNodeWithContentDescription("New chat").getBoundsInRoot()
         assertTrue("the trailing action covers the destination label: $label / $action", label.right <= action.left)
+    }
+
+    @Test fun briefRetappingAssistantOpensItsMenu() = retappingAssistantOpensItsMenu(AppStyle.Brief)
+
+    @Test fun boardRetappingAssistantOpensItsMenu() = retappingAssistantOpensItsMenu(AppStyle.Board)
+
+    private fun retappingAssistantOpensItsMenu(style: AppStyle) {
+        var selected by mutableStateOf("assistant")
+        val selections = mutableListOf<String>()
+        var menuOpens = 0
+        rule.setContent {
+            PersonaTheme(style = style, reduceMotion = true) {
+                HomeNavigation(
+                    items = listOf(
+                        NavItem("assistant", "Assistant", PhIcons.ChatCircle),
+                        NavItem("agents", "Agents", PhIcons.Robot),
+                    ),
+                    selected = selected,
+                    onSelect = { selected = it; selections += it },
+                    leading = {},
+                    onSelectedMenu = { menuOpens++ },
+                )
+            }
+        }
+
+        rule.onNodeWithText("Assistant").performClick()
+        assertEquals(1, menuOpens)
+        assertEquals(emptyList<String>(), selections)
+
+        rule.onNodeWithText("Agents").performClick()
+        assertEquals("agents", selected)
+        assertEquals(listOf("agents"), selections)
+        assertEquals("switching pages must not open the menu", 1, menuOpens)
     }
 }

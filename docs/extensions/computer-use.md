@@ -435,6 +435,75 @@ displays to offer; on a narrow screen the button keeps only its icon). The rules
   - VNC (`ScreenEntry`) on the machine page and in tool details opens the same thing (PiP or full page).
 - **Readable tools** (#1323, `ComputerSteps`): tool details show a step summary first (consecutive clicks become "tap AC → 6 → × → 7 → =", Calculator key names become symbols), then screenshot and VNC. Original JSON is tucked into Raw Input, visible only when expanded. Titles use machine display names (MacBook), resolving by id or name (same as hub), falling back to the tool's text if unknown. Truncate at the end if it doesn't fit (file paths still truncate in the middle).
 
+### Live screen video (#3954)
+
+A hardware video channel next to RFB, so the phone shows a Mac's screen at a fraction of today's bitrate for the same
+picture (from #3067's frames: 0.27–0.31 Mbit/s as HEVC at SSIM ≥ 0.98, against 2.1–2.6 as ZRLE). RFB stays open for
+input, the clipboard and as the fallback; only the picture moves to video. The phone and the web offer it only for a
+Mac whose node advertises `screen_video`, which a node does once it has the helper (the picture switcher in ⋯ stays
+hidden otherwise); until then every client shows RFB. The web, the Mac app and Android don't decode video yet.
+
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `PersonaScreenKit`): a Swift helper app inside
+  Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
+  with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
+  Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
+  (`open -g -n <helper> --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
+  per stream, whose first line is the token. `mac-link.sh` builds it the same way every time (no timestamp), so an
+  unchanged helper keeps its ad-hoc signature, and its grant, across Persona Link updates. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
+  `--preflight` prints whether Screen Recording is granted without asking (`CGPreflightScreenCaptureAccess()`), which
+  the node reports as `screen_video.permission`.
+  - **Capture** (`ScreenCaptureSource`): the encoder settings gate ① measured (`RealTime`, low-latency rate control,
+    no frame reordering, `MaxFrameDelayCount` 0, capture queue depth 3, NV12 straight into the encoder; ≈5 ms p50 and
+    ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
+    (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
+  - **Messages**: `start` gets `hello` (codec, display, size), then `format` and a keyframe; `format` again whenever the
+    parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did.
+    `update` changes the bitrate cap and frame rate in place; a new display, size or codec restarts capture with a
+    fresh `hello`, `format` and keyframe. `paused` says why capture stopped (`permission`, `locked`, `login_window`,
+    `display_gone`, `busy`); when the Mac unlocks it sends `resumed` and starts again. The stream closing ends the
+    helper.
+- **Node** (`screen.dial {id, pair, keep_awake}`, `node/screen.go`, `node/screenhelper.go`): starts the helper and
+  joins its socket to the stream, or refuses with `video_unavailable` (no helper or no permission), `not_signed_in` (no
+  RFB stream with this `pair` past Screen Sharing's SecurityResult) or `busy` (two streams already open). It binds the
+  video to the signed-in 5900 stream carrying the same `pair` and follows that handshake's security types (30, 2, 1)
+  to confirm the login; video ends when that RFB stream closes. `keep_awake` works as it does for 5900
+  (`node/awake.go`).
+  - **Which helper**: the one in Persona Link.app under `/Applications` or `~/Applications`. On a Mac with a node
+    signing certificate (`docs/operations/mac-node-signing.md`) the node runs its own copy instead,
+    `~/.persona/bin/Persona Screen.app`, signed with that certificate under the helper's bundle id, so its grant lasts
+    through helper updates too. It copies and signs again only when Persona Link installs another helper (a hash of its
+    executable and `Info.plist`, kept beside the copy), never touches the one inside Persona Link (that would break the
+    app's seal), and runs the installed one when signing fails.
+  - **Start**: the socket is in the user's own temporary directory (0700), 0600 itself, and goes as soon as the helper
+    is connected; the token is 16 random bytes, compared in constant time, and the line is read unbuffered so no
+    stream bytes go with it. The helper has 10 s to connect and say it.
+  - **Permission**: the helper's `--preflight`, run through LaunchServices (so it is about the helper's grant), at most
+    once a minute. `screen_video {version, codecs, permission}` carries it; the node leaves `screen_video` out of the
+    statuses (`advertiseScreenVideo`) until the iPhone's decoder is in the official TestFlight build, since apps
+    before it would show a picture switcher they can't use. `screen.dial` works either way.
+- **Hub** (`GET …/screen/video/connect?pair=…`): a binary WebSocket with the same checks as `…/ports/5900/connect`
+  (full device, `cua` or `ego` on), counted against the same 64 streams per machine. It calls `screen.dial` and relays
+  the bytes without parsing them.
+- **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
+  `frame`, `heartbeat`, `paused`, `resumed`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
+  are skipped by length, so either side may add more. `PersonaScreenKit` is the codec, shared with the app's client.
+- **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
+  delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
+  delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.
+  After a cut the next waits 500 ms, so one congested moment cuts once; while skipping, one frame still goes every
+  250 ms, so reports keep saying when the queue has drained. A stream starts at the phone's cap but at most 4 Mbit/s,
+  and never goes below 0.2. The phone caps it: 12 Mbit/s
+  on Wi-Fi, 4 on cellular, 1.5 in Low Data Mode; 15 fps in Low Power Mode or a serious thermal state.
+- **Switching**: RFB signs in first and shows until the first video frame decodes; the phone then stops asking RFB for
+  updates (Screen Sharing encodes nothing meanwhile). It returns to RFB within about a second on any of: the stream
+  closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
+  doubling to 5 min, and at once when the helper reports the Mac unlocked (`resumed`).
+- **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
+  the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
+  System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
+  binding); no password travels anywhere new. `computer.status` / `browser.status` gain `screen_video {version, codecs,
+  permission}` (absent from an old node or one without the helper, so an old app keeps RFB).
+
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 
 Reference: Computer Use settings in the Codex desktop app. The main session read only the UI strings in its package, took no code, and found:

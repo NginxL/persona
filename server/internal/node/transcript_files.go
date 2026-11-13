@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -75,7 +76,7 @@ func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 	at, fresh := n.pathsAt[id]
 	n.mu.Unlock()
 	known := p != "" && fileExists(p)
-	if known && fresh && time.Since(at) < 30*time.Second {
+	if known && fresh && time.Since(at) < pathRecheck {
 		return p
 	}
 	if !validID(id) {
@@ -83,6 +84,29 @@ func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 			return p
 		}
 		return ""
+	}
+	// Looking again is for a Claude transcript's newer copy in another projects directory. A rollout found before has
+	// none: it stays the thread's file while it exists (a moved one is looked up afresh below).
+	if known && !isClaudeTranscript(p, id) {
+		n.setPath(id, p)
+		return p
+	}
+	// A live Codex or compatible-CLI agent's conversation is its rollout: the projects directories have nothing of it.
+	if kind := n.rolloutAgent(id); kind != "" {
+		found := ""
+		if kind == traexAgent {
+			found = n.traexPath(id)
+		}
+		if found == "" {
+			found = n.codexPath(id)
+		}
+		if found == "" && kind != traexAgent {
+			found = n.traexPath(id)
+		}
+		if found != "" {
+			n.setPath(id, found)
+		}
+		return found
 	}
 	matches := n.globProjects("*", id+".jsonl")
 	if known && !slices.Contains(matches, p) {
@@ -100,6 +124,27 @@ func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 	}
 	n.setPath(id, matches[0])
 	return matches[0]
+}
+
+// pathRecheck is how long a found transcript path is trusted before transcriptPath looks for a newer copy.
+const pathRecheck = 30 * time.Second
+
+// isClaudeTranscript says whether path is a Claude transcript of session id (<projects>/<project>/<id>.jsonl) rather
+// than a Codex or compatible-CLI rollout (rollout-<time>-<id>.jsonl) or another agent's history.
+func isClaudeTranscript(path, id string) bool {
+	return filepath.Base(path) == id+".jsonl"
+}
+
+// rolloutAgent is the kind of a live agent whose conversation is a rollout (Codex, the compatible CLI), "" for any
+// other: such an agent never has a Claude transcript to look for.
+func (n *Node) rolloutAgent(id string) string {
+	n.mu.Lock()
+	a, ok := n.agents[id]
+	n.mu.Unlock()
+	if ok && (a.Agent == "codex" || a.Agent == traexAgent) {
+		return a.Agent
+	}
+	return ""
 }
 
 // setPath remembers session id's transcript path; transcriptPath looks for a newer copy after half a minute.

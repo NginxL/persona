@@ -3,7 +3,7 @@
     <string name="inbox_title">收件箱</string>
     <string name="inbox_retry">重试</string>
     <string name="inbox_done">已处理</string>
-    <string name="inbox_move_back">移回收件箱</string>
+    <string name="inbox_move_back">移回</string>
     <string name="inbox_hand_to_ai">交给 AI</string>
     <string name="inbox_ai_draft">AI 草拟</string>
     <string name="inbox_ai_summary">AI 摘要</string>

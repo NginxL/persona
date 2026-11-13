@@ -77,6 +77,28 @@ class InboxHandOffTest {
         assertEquals(listOf("live"), handOffTargets(listOf(history, live)).map { it.sessionId })
     }
 
+    @Test fun handOffDoesNotMarkDoneByDefaultForPersonaOrAnAgent() {
+        val agent = HandOffTarget("laptop", "s1", "Agent", "Computer")
+        assertFalse(handOffMarkDone(null))
+        assertFalse(handOffMarkDone(agent))
+    }
+
+    @Test fun aRememberedAgentDoesNotMarkDoneByDefault() {
+        val agent = HandOffTarget("laptop", "s1", "Agent", "Computer")
+        val resolved = InboxHandOffMemory.resolve("agent:${agent.key}") { path -> path == agent.key }
+        val remembered = agent.takeIf { resolved?.target == InboxHandOffMemory.agent(it) }
+        assertNotNull(remembered)
+        assertFalse(handOffMarkDone(remembered))
+    }
+
+    @Test fun changingTargetsKeepsTheExplicitDoneChoice() {
+        val agent = HandOffTarget("laptop", "s1", "Agent", "Computer")
+        assertTrue(handOffMarkDone(null, userChoice = true))
+        assertTrue(handOffMarkDone(agent, userChoice = true))
+        assertFalse(handOffMarkDone(agent, userChoice = false))
+        assertFalse(handOffMarkDone(null, userChoice = false))
+    }
+
     @Test fun aRetryKeepsItsOperationAndAnythingElseGetsANewOne() {
         val attempt = HandOffAttempt()
         val agent = HandOffTarget("laptop", "s1", "会话", "笔记本")

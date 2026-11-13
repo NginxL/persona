@@ -48,9 +48,11 @@ import Foundation
         let features = model.hubFeatures
         guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.conversationKey) }
         let conversation = features.contains(MeetingAttendanceDefaults.conversationFeature)
+        let liveView = conversation && features.contains(MeetingAttendanceDefaults.liveViewFeature)
         MeetingAttendanceDefaults.remember(conversation: conversation,
                                            photos: conversation && features.contains(MeetingAttendanceDefaults.photosFeature),
-                                           liveView: conversation && features.contains(MeetingAttendanceDefaults.liveViewFeature))
+                                           liveView: liveView,
+                                           highlights: liveView && features.contains(MeetingAttendanceDefaults.highlightsFeature))
         return conversation
     }
 
@@ -68,6 +70,14 @@ import Foundation
         let features = model.hubFeatures
         guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.liveViewKey) }
         return features.contains(MeetingAttendanceDefaults.liveViewFeature)
+    }
+
+    /// …and the highlights (phase 2b: the page's top card), which come only with the live view.
+    static func highlights(_ model: AppModel) -> Bool {
+        guard liveView(model) else { return false }
+        let features = model.hubFeatures
+        guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.highlightsKey) }
+        return features.contains(MeetingAttendanceDefaults.highlightsFeature)
     }
 
     // MARK: Sessions
@@ -172,7 +182,8 @@ import Foundation
     /// conversation a room meeting in the default role, not private (the one-tap rule, #3862); else `defaultAttendance`.
     static func startAttendance(_ model: AppModel) -> RecordingAttendance {
         guard conversation(model) else { return defaultAttendance(model) }
-        return .room(defaultRole(model), private: false, photos: photos(model), liveView: liveView(model))
+        return .room(defaultRole(model), private: false, photos: photos(model), liveView: liveView(model),
+                     highlights: highlights(model))
     }
 
     /// A recording's attendance once it becomes a meeting again mid-recording, at `at` on its clock (a note turned into a

@@ -230,7 +230,7 @@ private struct ToastWindowRoot: View {
     let onActionFrame: (CGRect) -> Void
 
     var body: some View {
-        let size = model.textSize.applied(to: systemTypeSize)
+        let size = Theme.interfaceTypeSize(model.textSize.applied(to: systemTypeSize))
         VStack(spacing: Theme.Space.s) {
             if let phase = notices?.pill {
                 ShellLinkPill(phase: phase)

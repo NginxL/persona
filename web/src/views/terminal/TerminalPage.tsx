@@ -28,7 +28,6 @@ import { Segmented } from "../assistant/parts";
 import { Empty } from "../session/files/parts";
 import { TerminalPanel } from "../session/TerminalPanel";
 import { ShellHeaderSlots } from "../ShellSwitch";
-import { StarPill } from "../agents/StarPrompt";
 import { useCloseFinished } from "./CloseFinished";
 import { interactiveSessionPane, standaloneShells, type ShellSpace, type ShellTab } from "./work-terminal-layout";
 import { t } from "../../i18n";
@@ -212,7 +211,7 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
           {detail ? detail.render(terminalAvailable)
             : shown ? !panesOn && <Empty icon="terminal" title={t("work-entry.terminal_unavailable")} />
             : listsTerminals ? <Empty icon="terminal" title={t("terminal-terminalpage.pick_terminal")} detail={t("terminal-terminalpage.pick_terminal_detail")} />
-            : <><Empty icon="chat" title={t("work-entry.pick_session")} detail={t("work-entry.pick_session_detail")} /><StarPill /></>}
+            : <Empty icon="chat" title={t("work-entry.pick_session")} detail={t("work-entry.pick_session_detail")} />}
         </section>
       </div>
       {finished.dialog}

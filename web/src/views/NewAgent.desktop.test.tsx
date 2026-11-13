@@ -18,12 +18,14 @@ vi.mock("../lib/store", () => ({
   getState: () => state,
   useStore: (selector: (value: typeof state) => unknown) => selector(state),
   hubHas: (features: string[], feature: string, unknown = false) => (features.length ? features.includes(feature) : unknown),
+  onHubEvent: () => () => {},
 }));
 vi.mock("react-dom", async (original) => ({ ...(await original<typeof import("react-dom")>()), createPortal: (children: React.ReactNode) => children }));
 const launched = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("../lib/new-agent", async (original) => ({ ...(await original<typeof import("../lib/new-agent")>()), launchAgent: (input: Record<string, unknown>) => { launched.push(input); return "local-1"; } }));
 
 import { NewAgent } from "./NewAgent";
+import { loadPages } from "../lib/lazy-page";
 import { resetModelListsForTests } from "../lib/session-models";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,8 +48,8 @@ const button = (text: string) => [...document.body.querySelectorAll("button")].f
 const folderInput = () => q<HTMLInputElement>("input[placeholder]")!;
 const temporary = () => q('[data-testid="new-agent-temporary"]');
 
-// the lazy chunk transformed once, so each test's flush finds it in
-beforeAll(async () => { await import("./NewAgentDesktop"); });
+// Warm the lazyPage wrappers through their real public components, not only the chunk they import.
+beforeAll(async () => { await loadPages(); });
 
 beforeEach(() => {
   resetModelListsForTests();
@@ -86,7 +88,7 @@ afterEach(() => {
 });
 
 async function open(key = "a") {
-  act(() => root.render(<NewAgent key={key} open onClose={() => {}} />));
+  await act(async () => root.render(<NewAgent key={key} open onClose={() => {}} />));
   await flush();
 }
 

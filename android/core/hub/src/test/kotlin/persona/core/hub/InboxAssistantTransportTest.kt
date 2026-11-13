@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.SessionKey
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import persona.core.hub.ProtocolCompatibilityMockServer as MockWebServer
@@ -22,6 +23,34 @@ class InboxAssistantTransportTest {
             assertEquals("/api/v1/inbox/item%2Fwith%23separator/handoff", request.path)
             assertEquals("Bearer test-token", request.getHeader("Authorization"))
             assertEquals("""{"text":"Please handle this","client_id":"attempt-id"}""", request.body.readUtf8())
+        }
+    }
+
+    @Test fun recordAgentHandOffPostsTheAcceptedSessionAndReturnsTheHubObject() = runBlocking {
+        MockWebServer().use { server ->
+            val transport = HttpInboxAssistantTransport("scope", server.url("/").toString(), "test-token", OkHttpClient())
+            val response = """{"item":{"id":"item/with#separator","done":true},"session":{"machine_id":"machine-1","session_id":"session-1"}}"""
+            server.enqueue(MockResponse().setBody(response))
+            assertEquals(JsonCodec.parseToJsonElement(response).jsonObject,
+                transport.recordAgentHandOff("item/with#separator", SessionKey("machine-1", "session-1"), "Fix the report", "operation-1"))
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/inbox/item%2Fwith%23separator/handoff", request.path)
+            assertEquals("""{"session":{"machine_id":"machine-1","session_id":"session-1"},"kind":"agent","title":"Fix the report","client_id":"operation-1"}""",
+                request.body.readUtf8())
+        }
+    }
+
+    @Test fun recordAgentHandOffOmitsABlankTitle() = runBlocking {
+        MockWebServer().use { server ->
+            val transport = HttpInboxAssistantTransport("scope", server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("{}"))
+            transport.recordAgentHandOff("item", SessionKey("machine-1", "session-1"), "", "operation-1")
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/inbox/item/handoff", request.path)
+            assertEquals("""{"session":{"machine_id":"machine-1","session_id":"session-1"},"kind":"agent","client_id":"operation-1"}""",
+                request.body.readUtf8())
         }
     }
 

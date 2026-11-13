@@ -1,0 +1,10 @@
+{
+  "menu": "画面",
+  "picture_video": "视频（流畅省流量）",
+  "picture_vnc": "VNC（兼容）",
+  "quality": "画质",
+  "quality_auto": "自动",
+  "quality_sharper": "清晰优先",
+  "quality_smoother": "流畅优先",
+  "picture_current": "画面：{current}"
+}

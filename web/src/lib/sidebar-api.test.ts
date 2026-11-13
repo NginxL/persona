@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENTS_FOLD, cycleGrouping, GROUPING_KEY, groupingLabel, nextGrouping, onFoldAll, onGrouping, setAgentsFolded, setAllFolded, stepIndex } from "./sidebar-api";
+import { AGENTS_FOLD, agentsFoldAction, cycleGrouping, GROUPING_KEY, groupingLabel, nextGrouping, onFoldAll, onGrouping, setAgentsFolded, setAllFolded, stepIndex } from "./sidebar-api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -82,5 +82,30 @@ describe("walking the rows", () => {
   });
   it("has no row to step to in an empty list", () => {
     expect(stepIndex(0, -1, 1)).toBe(-1);
+  });
+});
+
+describe("the Agents title row's fold-all button (#6447)", () => {
+  const at = (p: Partial<Parameters<typeof agentsFoldAction>[0]>) => agentsFoldAction({ blockFolded: false, groups: 3, open: true, ...p });
+
+  it("folds the groups while any is open, and opens them when none is", () => {
+    expect(at({})).toBe("fold-groups");
+    expect(at({ open: false })).toBe("open-groups");
+  });
+
+  it("opens the list and its groups when the list is folded under its title, whatever the groups are", () => {
+    expect(at({ blockFolded: true })).toBe("open-block");
+    expect(at({ blockFolded: true, groups: 0, open: false })).toBe("open-block");
+    expect(at({ blockFolded: true, flat: true })).toBe("open-block");
+  });
+
+  it("never folds the list under its title: it has nothing to do in the chat-list view, whose only groups are its end sections", () => {
+    // the first fix folded the whole block here, the grouping tabs, quick filters and search with it
+    expect(at({ flat: true })).toBeNull();
+    expect(at({ flat: true, open: false })).toBeNull();
+  });
+
+  it("has nothing to do in a list with no groups (a grouping still loading, nothing listed)", () => {
+    expect(at({ groups: 0, open: false })).toBeNull();
   });
 });

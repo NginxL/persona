@@ -37,6 +37,8 @@ struct TodoDecisionForm: Identifiable, Equatable {
     private(set) var unsupported = false
     /// The revised ones too, struck through.
     var showAll = false
+    /// The first five, every one, or none (#6447); each to-do opens at the first five, and nothing is stored.
+    var display = TodoDecisionsDisplay.first
     var form: TodoDecisionForm?
     @ObservationIgnored private(set) var todoID = ""
     /// Only the newest read lands: a slow earlier one must not put back an older list.
@@ -50,7 +52,24 @@ struct TodoDecisionForm: Identifiable, Equatable {
 
     var current: [TodoDecision] { TodoDecisionsLogic.current(all ?? []) }
     var revisedCount: Int { (all?.count ?? 0) - current.count }
-    var shown: [TodoDecision] { showAll ? all ?? [] : current }
+    /// The list Full History picks: the current decisions, or every one.
+    var listed: [TodoDecision] { showAll ? all ?? [] : current }
+    /// What the section draws of it (#6447).
+    var shown: [TodoDecision] { TodoDecisionsLogic.shown(listed, display) }
+    /// Folded under the header, which keeps its count: only a list with something in it.
+    var folded: Bool { display == .folded && !listed.isEmpty }
+    /// Show All under the first five, or Show First 5 under them all: only for a list longer than that.
+    var hasMore: Bool { !folded && listed.count > TodoDecisionsLogic.firstCount }
+
+    /// The header's fold-all button: Collapse All while any decision shows, Expand All (every one) once folded.
+    func toggleFold() {
+        display = folded ? .all : .folded
+    }
+
+    /// Show All under the first five, Show First 5 under them all.
+    func toggleMore() {
+        display = display == .first ? .all : .first
+    }
 
     func decision(_ id: String) -> TodoDecision? {
         all?.first { $0.id == id }
@@ -68,6 +87,7 @@ struct TodoDecisionForm: Identifiable, Equatable {
         all = nil
         failed = nil
         showAll = false
+        display = .first
         form = nil
     }
 
@@ -104,6 +124,7 @@ struct TodoDecisionForm: Identifiable, Equatable {
             deps.report(error)
             return false
         }
+        display = .all // the one just recorded or revised is last: show them all so it is in view
         await load()
         deps.toast(Toast(supersedes == nil ? String(localized: "Recorded [Todo Decisions]") : String(localized: "Decision revised"),
                          style: .success))

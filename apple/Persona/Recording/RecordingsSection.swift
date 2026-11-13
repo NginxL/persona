@@ -598,6 +598,7 @@ struct RecordingCaptureControls: View {
     private func record() {
         let start = RecordingStart.make(form.pickedKind, offered: MeetingAttendees.offered(model), conversation: MeetingAttendees.conversation(model),
                                         photos: MeetingAttendees.photos(model), liveView: MeetingAttendees.liveView(model),
+                                        highlights: MeetingAttendees.highlights(model),
                                         role: role, privateMark: form.pickedPrivate,
                                         attendee: chosenAttendee)
         form.pickedRole = nil; form.pickedAttendee = nil; form.pickedPrivate = false; form.pickedKind = .meeting
@@ -966,7 +967,7 @@ struct RecordingDetailView: View {
             ForEach(Array(entry.sentences.enumerated()), id: \.offset) { index, sentence in
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(RecordingFormat.clock(sentence.start)).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Text(sentence.text).font(Theme.Font.body).textSelection(.enabled)
+                    Text(sentence.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
                 }
                 .id(ids[index])
                 .listRowBackground(lit == index ? Theme.accentTint : nil)

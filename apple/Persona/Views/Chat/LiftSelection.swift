@@ -336,6 +336,8 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
         accessibilityIdentifier = "lift-text"
         addInteraction(menuInteraction)
         addGestureRecognizer(FingerFollower { [weak self] in self?.follow($0) })
+        // Reading content: not under the window's cap (`WindowTextSize`).
+        traitOverrides.preferredContentSizeCategory = WindowTextSize.readingCategory
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitUserInterfaceStyle.self]) { (v: LiftUITextView, _) in
             v.render(width: v.laidOut)
         }
@@ -595,6 +597,7 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
         }
         #if DEBUG
         if LiftLines.on { LiftLines.shared.select = LiftLines.lines(of: self, layout: layout) }
+        publishPicked()
         #endif
     }
 
@@ -745,9 +748,7 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
     }
 
     private func showMenu(for range: UITextRange) {
-        let rects = selectionRects(for: range).map(\.rect).filter { !$0.isEmpty && $0.width > 0 }
-        guard let first = rects.first else { return }
-        let box = rects.dropFirst().reduce(first) { $0.union($1) }.intersection(bounds)
+        guard let box = menuTarget(range) else { return }
         menuInteraction.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: CGPoint(x: box.midX, y: box.minY)))
     }
 
@@ -756,7 +757,36 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
         textView(self, editMenuForTextIn: selectedRange, suggestedActions: suggestedActions)
     }
 
+    /// The menu goes above or below the selection, never over it (#6005). Given only a point (its top's middle), the
+    /// system had put it under that point, over the selected words and their end handle.
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        selectedTextRange.flatMap(menuTarget) ?? CGRect(origin: configuration.sourcePoint, size: .zero)
+    }
+
+    /// What the menu stays off: the selected words that show, with room for their handles' knobs (the start's over
+    /// the first line, the end's under the last).
+    private func menuTarget(_ range: UITextRange) -> CGRect? {
+        let rects = selectionRects(for: range).map(\.rect).filter { !$0.isEmpty && $0.width > 0 }
+        guard let first = rects.first else { return nil }
+        let box = rects.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: 0, dy: -Theme.Lift.handleReach)
+        let shown = box.intersection(shownBounds)
+        return shown.isNull || shown.isEmpty ? nil : shown
+    }
+
+    /// The part of it the lifted message shows: inside its scroll view, on screen.
+    private var shownBounds: CGRect {
+        var shown = bounds
+        var v = superview
+        while let view = v, !(view is UIScrollView) { v = view.superview }
+        if let s = v { shown = shown.intersection(convert(s.bounds, from: s)) }
+        if let w = window { shown = shown.intersection(convert(w.bounds, from: w)) }
+        return shown
+    }
+
     func textViewDidChangeSelection(_ textView: UITextView) {
+        #if DEBUG
+        publishPicked()
+        #endif
         if let touched, draggedEnd == nil, selectedRange.length > 0, selectedRange != touched {
             draggedEnd = selectedRange.location != touched.location ? .start : .end
         }
@@ -868,6 +898,33 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
 }
 
 #if DEBUG
+extension LiftUITextView {
+    /// The selection's lines and its handles, in the window (`LiftLines.picked`), once they have settled.
+    func publishPicked() {
+        guard LiftLines.on else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            var lines: [CGRect] = [], handles: [CGRect] = []
+            if let r = selectedTextRange, !r.isEmpty {
+                lines = selectionRects(for: r).map(\.rect).filter { !$0.isEmpty && $0.width > 0 }.map { convert($0, to: nil) }
+                func walk(_ v: UIView) {
+                    for s in v.subviews {
+                        if s is UITextSelectionHandleView, !s.isHidden, s.alpha > 0.01 { handles.append(s.convert(s.bounds, to: nil)) }
+                        walk(s)
+                    }
+                }
+                walk(window ?? self)
+            }
+            let shown = convert(shownBounds, to: nil)
+            func code(_ rs: [CGRect]) -> String {
+                rs.map { String(format: "%.1f,%.1f,%.1f,%.1f", $0.minX, $0.minY, $0.width, $0.height) }.joined(separator: ";")
+            }
+            let s = lines.isEmpty ? "" : "lines=\(code(lines))/handles=\(code(handles))/shown=\(code([shown]))"
+            if LiftLines.shared.picked != s { LiftLines.shared.picked = s }
+        }
+    }
+}
+
 extension LiftLines {
     /// The text view's lines (`LiftUITextView`), as the chat's are written: a picture counts as a glyph.
     static func lines(of v: UITextView, layout: NSLayoutManager) -> String {

@@ -2,12 +2,15 @@ import SwiftUI
 
 /// A todo's Decisions (#1618), under its notes as on the web: the current ones, oldest first, and on request the revised
 /// ones struck through. Add records one; Revise records one that replaces it; the row's menu marks it as revising an
-/// earlier one, or undoes that. The model, its reload and the form are the page's (`TodoDetailView`): a modifier on a
-/// list section reaches each of its rows.
+/// earlier one, or undoes that. The first five show, with Show All under them; the header's fold button (the web Agents
+/// title row's Collapse all / Expand all, here as Agents' Collapse All / Expand All symbols) folds them away and shows
+/// them whole (#6447). The model, its reload and the form are the page's (`TodoDetailView`): a modifier on a list
+/// section reaches each of its rows.
 struct TodoDecisionsSection: View {
     let todo: TodoItem
     let lookup: TodosLogic.SessionLookup
     let decisions: TodoDecisionsModel
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         if !decisions.unsupported {
@@ -26,15 +29,48 @@ struct TodoDecisionsSection: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button { decisions.form = TodoDecisionForm() } label: {
-                Label("Add [Todo Decisions]", systemImage: Theme.Icon.add)
-                    .font(Theme.Font.captionStrong)
-                    .lineLimit(1)
+                // at the accessibility sizes the header keeps the count, Add and the fold button on one line: Add
+                // shows its icon, its name still spoken, rather than "…" (DESIGN_SYSTEM.md 1.2 rule 3)
+                if typeSize.isAccessibilitySize {
+                    Label("Add [Todo Decisions]", systemImage: Theme.Icon.add)
+                        .labelStyle(.iconOnly)
+                        .font(Theme.Font.captionStrong)
+                } else {
+                    Label("Add [Todo Decisions]", systemImage: Theme.Icon.add)
+                        .font(Theme.Font.captionStrong)
+                        .lineLimit(1)
+                }
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.accent)
             .textCase(nil)
             .accessibilityIdentifier("todo.decisions.add")
+            if decisions.all != nil, !decisions.listed.isEmpty {
+                foldButton
+            }
         }
+    }
+
+    /// Collapse All while any decision shows, Expand All once folded; the count beside it stays.
+    private var foldButton: some View {
+        let folded = decisions.folded
+        let label = folded ? String(localized: "Expand All") : String(localized: "Collapse All")
+        let hint = folded ? String(localized: "Shows all \(decisions.listed.count) decisions.")
+                          : String(localized: "Hides every decision. The count stays in the title.")
+        return Button {
+            withAnimation(Theme.Motion.standard) { decisions.toggleFold() }
+        } label: {
+            ThemedIcon(folded ? Theme.Icon.expandAll : Theme.Icon.collapseAll)
+                .font(Theme.Font.captionStrong)
+                .foregroundStyle(Theme.accent)
+                .tapTargetFrame()
+                .contentShape(.rect)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
+        .help(hint)
+        .accessibilityIdentifier("todo.decisions.fold")
     }
 
     @ViewBuilder private var rows: some View {
@@ -60,6 +96,8 @@ struct TodoDecisionsSection: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, Theme.Space.xs)
+        } else if decisions.folded {
+            EmptyView()
         } else if decisions.shown.isEmpty {
             Text("Decisions made on this to-do go here. Your answers to an agent's questions are recorded automatically, and so are the outcome, decisions and pitfalls when a task is finished; you can add your own. The current ones go along when you hand it to an agent.")
                 .font(Theme.Font.secondary)
@@ -70,6 +108,17 @@ struct TodoDecisionsSection: View {
         } else {
             ForEach(decisions.shown) { d in
                 row(d)
+            }
+            if decisions.hasMore {
+                Button {
+                    withAnimation(Theme.Motion.standard) { decisions.toggleMore() }
+                } label: {
+                    Text(decisions.display == .first ? String(localized: "Show All \(decisions.listed.count) Decisions")
+                                                     : String(localized: "Show First \(TodoDecisionsLogic.firstCount) [Todo Decisions]"))
+                        .font(Theme.Font.secondaryMedium)
+                        .lineLimit(1)
+                }
+                .accessibilityIdentifier("todo.decisions.more")
             }
             if decisions.revisedCount > 0 {
                 Button {

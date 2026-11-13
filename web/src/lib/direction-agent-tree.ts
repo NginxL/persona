@@ -68,7 +68,7 @@ export function buildDirectionAgentTree(tree: DirectionTree, all: Session[], mac
       todos,
       sessions: todos.flatMap((td) => td.sessions),
       folded: false,
-      direction: { counts: d.counts, secretary: !!d.secretary },
+      direction: { counts: d.counts, running: d.running, secretary: !!d.secretary },
     });
   }
   const rest = all.filter((s) => !placed.has(keyOf(s)));

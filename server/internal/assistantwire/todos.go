@@ -4,15 +4,16 @@ import "time"
 
 // ---- the todos (the assistant's, docs/assistant/todos.md) ----
 
-// TodoReport is what the hub shows of the todos: the todo each agent works for now (the open todos' active links: the
-// session lists' todo, the task named on its agents' cards) and the agents kept quiet (#1731: no pushes, badges or Live
+// TodoReport is what the hub shows of the todos: active links, display-only completed ownership and the agents kept
+// quiet (#1731: no pushes, badges or Live
 // Activity; those of quiet tasks open or done in the last week). Small, whole every time.
 type TodoReport struct {
-	Links []TodoLink   `json:"links"`
-	Quiet []SessionRef `json:"quiet,omitempty"`
+	Links     []TodoLink   `json:"links"`
+	Completed []TodoLink   `json:"completed,omitempty"` // display-only ownership; never active work or supervision
+	Quiet     []SessionRef `json:"quiet,omitempty"`
 }
 
-// TodoLink is one agent that works for an open todo.
+// TodoLink is one session association: active in Links, display-only history in Completed.
 type TodoLink struct {
 	MachineID string `json:"machine_id"`
 	SessionID string `json:"session_id"`

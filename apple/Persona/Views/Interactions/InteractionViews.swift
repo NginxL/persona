@@ -107,7 +107,7 @@ struct InteractionPreviewCard: View {
                     .foregroundStyle(StatusPalette.needsYou.dot)
                     .scaledFrame(width: Theme.Size.icon) // one column: the titles line up card to card
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    Text(title).font(Theme.Font.heading).lineLimit(1)
+                    Text(title).font(Theme.Font.heading).lineLimit(2) // a row title may wrap; the buttons below never do
                     if showsPlace {
                         Text(interaction.placeLine(machine: machine))
                             .font(Theme.Font.label)
@@ -825,7 +825,7 @@ struct PlanForm: View {
     @ViewBuilder private var plain: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ScrollView {
-                Markdown(MarkdownMemo.content(interaction.plan ?? ""))
+                Markdown(MarkdownMemo.content(interaction.plan ?? "")).readingContent()
                     .markdownTheme(.persona)
                     .markdownTextStyle { ForegroundColor(Theme.primaryText) }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -865,7 +865,7 @@ struct PlanForm: View {
         .sheet(isPresented: $showFull) {
             NavigationStack {
                 ScrollView {
-                    Markdown(MarkdownMemo.content(interaction.plan ?? "")).markdownTheme(.persona)
+                    Markdown(MarkdownMemo.content(interaction.plan ?? "")).readingContent().markdownTheme(.persona)
                         .markdownTextStyle { ForegroundColor(Theme.primaryText) }.padding()
                 }
                 .navigationTitle(PlanText.title(interaction.plan ?? ""))
@@ -1884,7 +1884,7 @@ struct BUIPlanForm: View {
             Task { await model.resolve(interaction, Self.resolution(answers)) }
         } context: { _ in
             ScrollView {
-                Markdown(MarkdownMemo.content(interaction.plan ?? ""))
+                Markdown(MarkdownMemo.content(interaction.plan ?? "")).readingContent()
                     .markdownTheme(.persona)
                     .markdownTextStyle { ForegroundColor(Theme.primaryText) }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1895,7 +1895,7 @@ struct BUIPlanForm: View {
         .sheet(isPresented: $showFull) {
             NavigationStack {
                 ScrollView {
-                    Markdown(MarkdownMemo.content(interaction.plan ?? "")).markdownTheme(.persona)
+                    Markdown(MarkdownMemo.content(interaction.plan ?? "")).readingContent().markdownTheme(.persona)
                         .markdownTextStyle { ForegroundColor(Theme.primaryText) }.padding()
                 }
                 .navigationTitle(PlanText.title(interaction.plan ?? ""))

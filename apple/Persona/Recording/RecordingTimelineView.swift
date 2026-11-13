@@ -11,6 +11,9 @@ struct RecordingTimelineRows: View {
     var paused: Bool
     /// Whether the Jump to Latest button should show, and how many arrived: reported to the page that draws it.
     @Binding var items: [RecordingTimeline.Item]
+    /// Rows lit for a moment (`Theme.accentTint`, and selected for VoiceOver): the meeting page's transcript opened at a
+    /// highlight's minute (#3862 phase 2b, `RecordingTimeline.focus`). Every other page passes none.
+    var lit: Set<RecordingTimeline.Item.ID> = []
 
     @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,6 +37,8 @@ struct RecordingTimelineRows: View {
             }
             ForEach(built) { item in
                 row(item)
+                    // The row's own id, so a page can scroll to it (`ScrollViewReader`).
+                    .id(item.id)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: Theme.Recording.arrivalOffset)))
             }
         }
@@ -45,7 +50,7 @@ struct RecordingTimelineRows: View {
     @ViewBuilder private func row(_ item: RecordingTimeline.Item) -> some View {
         switch item.kind {
         case .sentence(let text):
-            sentence(at: item.at, text: text)
+            sentence(at: item.at, text: text, lit: lit.contains(item.id))
         case .bookmark:
             Label(String(localized: "Bookmark at \(RecordingFormat.clock(item.at))"), systemImage: Theme.Icon.pin)
                 .font(Theme.Font.secondaryMedium).foregroundStyle(.secondary)
@@ -69,7 +74,7 @@ struct RecordingTimelineRows: View {
         }
     }
 
-    private func sentence(at time: Double, text: String) -> some View {
+    private func sentence(at time: Double, text: String, lit: Bool) -> some View {
         Group {
             if size.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) { stamp(time); words(text) }
@@ -77,8 +82,18 @@ struct RecordingTimelineRows: View {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) { stamp(time); words(text) }
             }
         }
+        // Lit: the tint reaches a little past the words, so the row's own place doesn't move when it comes and goes.
+        .background {
+            if lit {
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .fill(Theme.accentTint)
+                    .padding(-Theme.Space.xs)
+            }
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("recording-timeline-sentence")
+        // Lit is said, not only tinted (DESIGN_SYSTEM.md 6.3): VoiceOver reads the target lines as selected while lit.
+        .accessibilityAddTraits(lit ? .isSelected : [])
+        .accessibilityIdentifier(lit ? "recording-timeline-sentence-lit" : "recording-timeline-sentence")
     }
 
     private func stamp(_ time: Double) -> some View {

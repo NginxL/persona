@@ -12,12 +12,14 @@ enum RecordingStart: Equatable {
     /// attends (`attendee`: the one picked there and still listed, else the one picked last that isn't the main chat; read
     /// only when it matters). With nobody chosen to attend Persona starts off, and the main chat attends only when picked.
     static func make(_ kind: RecordingKindChoice, offered: Bool, conversation: Bool, photos: Bool, liveView: Bool = false,
-                     role: MeetingAttendance, privateMark: Bool,
+                     highlights: Bool = false, role: MeetingAttendance, privateMark: Bool,
                      attendee: @autoclosure () -> MeetingAttendees.Candidate?) -> RecordingStart {
         guard kind == .meeting else { return .note }
         guard offered else { return .meeting(nil) }
         // A room meeting whatever the role, off included: every upload carries `room` and the private mark.
-        if conversation { return .meeting(.room(role, private: privateMark, photos: photos, liveView: liveView)) }
+        if conversation {
+            return .meeting(.room(role, private: privateMark, photos: photos, liveView: liveView, highlights: highlights))
+        }
         guard role.attends, let chosen = attendee() else { return .meeting(RecordingAttendance(role: .off)) }
         return .meeting(MeetingAttendees.choose(chosen, in: RecordingAttendance(role: role)))
     }

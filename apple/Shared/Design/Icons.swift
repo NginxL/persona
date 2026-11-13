@@ -635,6 +635,11 @@ extension Theme {
         static let forwardMessage = routeToTask
         /// A pull request a task opened.
         static let pullRequest = "arrow.triangle.pull"
+        /// An agent's closeout (#3612): the record it ends a turn with, and the switch that asks for one.
+        static let closeout = "list.bullet.rectangle.portrait"
+        /// What a closeout names besides a pull request, a branch, a document or a link (#3612): a commit, a build.
+        static let commit = "dot.circle"
+        static let build = "hammer"
         /// GitHub's thread page: a merged pull request, an open issue, a review asking for changes, a check skipped
         /// or cancelled, a label.
         static let merged = "arrow.triangle.merge"

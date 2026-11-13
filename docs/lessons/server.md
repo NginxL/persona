@@ -1484,6 +1484,14 @@ allowing concurrent "set key" to pair a key with an unintended address; and only
 checking/deleting under the same operation lock in `SetConfig` / `SetSecret`. Address changes delete unconditionally (idempotent); `SecretsSet` only decides response wording.
 For future safety-driven delete/reject decisions, don't rely on error-swallowing read APIs or split check-then-write in handlers.
 
+## One large message on the bus holds up everything behind it (2026-11-13, #6574)
+
+- The bus between the hub and a manager is one WebSocket: `rpc.Peer` writes one message at a time, coder/websocket writes a message as one frame (it even compresses the whole message into a buffer first), and the reader decodes a whole line before it looks at the next. A 22 MB attachment inside `http.request` became a 30 MB line, and every other call to that manager (cards, to-dos, session lists, phone tools) waited until it was written. Compression makes the blocker smaller, not shorter-lived, and photos, PDFs and audio barely compress anyway.
+- On a slow link the same frame breaks the connection: the keepalive's ping waits at most 5 s for the frame lock (`writeControl`, hard-coded), so a frame that takes longer to drain drops the bus with every call on it, the upload included ("Heartbeat timeouts on slow links" below).
+- Move the bytes, not the request: `http.request_streamed` keeps the whole envelope (auth, caller, receipts, the answer) on the bus and sends only a large body on a relay of its own, in 256 KiB messages, read whole before the route runs. Nothing about the request's meaning changes, so there is nothing to keep in step but the body. A stream that fails is refused before anything ran, so the hub can send the request inline after it without running it twice.
+- Separate HTTP requests were never ordered by the bus (the hub reads each body before calling, the manager runs each call in its own goroutine), so a side stream breaks no order anyone relied on: a flow that needs one request after another waits for the first's answer.
+- Prove a stall with a control: `TestLargeBodyDoesNotHoldUpTheBus` throttles the manager's reads and measures a small call during a large upload both ways (3 ms streamed, 2.5 s inline). Without the inline run failing its own bound, a too-fast test link would pass for a fix.
+
 ## Heartbeat timeouts on slow links (2026-11-06, #3452)
 
 At about 30 KB/s from hub to a computer, its link repeatedly disconnected with "no pong within 5s", failing every message. Ping doesn't jump the queue: it follows bytes already given to TCP,

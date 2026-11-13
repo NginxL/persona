@@ -597,7 +597,7 @@ struct MeetingThreadView: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             ForEach(lines.indices, id: \.self) { index in
                 let stamp = Text(lines[index].clock).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-                let words = Text(lines[index].text).font(Theme.Font.secondary).textSelection(.enabled)
+                let words = Text(lines[index].text).readingContent().font(Theme.Font.secondary).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if size.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) { stamp; words }

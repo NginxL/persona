@@ -93,6 +93,13 @@ func waitCalls(t *testing.T, f *fakeHerdr, method string, n int) {
 	}
 }
 
+// waitReports waits until the resume report for pane has completed its per-pane turn. It follows the actual
+// asynchronous work rather than sleeping for a guessed amount of time before asserting that nothing was sent.
+func waitReports(n *Node, pane string) {
+	unlock := n.resumes.lock(pane)
+	unlock()
+}
+
 func personaDir(home string) string { return filepath.Join(home, ".persona") }
 
 func mkdir(t *testing.T, p string) string {

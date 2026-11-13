@@ -360,6 +360,14 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
 	defer s.releaseTaskWorkspace(t.TodoID)
+	// The admission claim (if the gate took one) is released when this start body ends either way: on success the
+	// agent is linked into the todo by then so the ledger's direction count carries it, and on failure nothing runs.
+	defer func() {
+		if t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
@@ -372,8 +380,12 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	if err != nil && ctx.Err() == nil && !startStalled(err) {
 		// The machine's link dropped (a node restarting, a tunnel blinking): try once more after a moment. Any other
 		// launcher failure may move a flexible task, after verifying its directory on the destination.
-		shouldRetry := transientStartErr(err)
-		if !shouldRetry && t.MachinePolicy == machineFlexible {
+		// An unknown result (the wait ran out or the link dropped while the answer was out) already went through
+		// adoption inside startTaskAgent: neither a blind retry nor a reroute may run, since the node can still be
+		// creating that first session and either one would open a second agent (#6540).
+		unknown := startResultUnknown(err)
+		shouldRetry := transientStartErr(err) && !unknown
+		if !shouldRetry && t.MachinePolicy == machineFlexible && !unknown {
 			shouldRetry = s.healthyPlace(ctx, &t)
 		}
 		if shouldRetry {
@@ -389,11 +401,18 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		s.updatePlanTask(ctx, planID, i, t)
 	}
 	if err == nil {
-		err = s.linkPlanAgent(ctx, t, mid, sid, false)
+		// The start's own context can be spent already: an unanswered start whose session was just reconciled
+		// (#6540) reaches here after taskStartTimeout, and a database write on that context fails at once, which
+		// would fail the task although its agent is running. The link gets its own time, like the bookkeeping below.
+		linkCtx, linkCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+		err = s.linkPlanAgent(linkCtx, t, mid, sid, false)
+		linkCancel()
 		if errors.Is(err, db.ErrTodoCompleted) {
 			// The user tapped "Done" while the agent was starting (a busy machine takes minutes, #1396). The task stays
 			// done and its agent stays in it: nothing reads failed, and the close loop still finds the agent to retire.
-			err = s.linkPlanAgent(ctx, t, mid, sid, true)
+			retryCtx, retryCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+			err = s.linkPlanAgent(retryCtx, t, mid, sid, true)
+			retryCancel()
 			if err != nil {
 				s.logf("task %s: link to the finished task: %v", t.TodoID, err)
 			}
@@ -660,6 +679,76 @@ func transientStartErr(err error) bool {
 	var re *rpc.Error
 	return errors.Is(err, rpc.ErrClosed) || errors.Is(err, apierr.ErrOffline) ||
 		errors.As(err, &re) && (re.Message == rpc.ErrClosed.Error() || re.Code == proto.CodeTerminalNotReady)
+}
+
+// taskPlanWithdrawnEvent: a conversation withdrew a plan card of its own (task_plan_withdraw). Detail: plan,
+// conversation, reason, tasks (their titles).
+const taskPlanWithdrawnEvent = "task_plan_withdrawn"
+
+// withoutWithdrawn is plans less those their own conversation withdrew (task_plan_withdrawn in events): dismissed as
+// the owner's Dismiss leaves them, but the owner did not answer them, so they say nothing about which kinds of task the
+// owner starts or turns down (rulePlanRuns, the setup suggestions).
+func withoutWithdrawn(plans []*TaskPlan, events []db.WorkEvent) []*TaskPlan {
+	withdrawn := map[string]bool{}
+	for _, e := range events {
+		if id, _ := e.Detail["plan"].(string); e.Kind == taskPlanWithdrawnEvent && id != "" {
+			withdrawn[id] = true
+		}
+	}
+	if len(withdrawn) == 0 {
+		return plans
+	}
+	out := make([]*TaskPlan, 0, len(plans))
+	for _, p := range plans {
+		if !withdrawn[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// toolTaskPlanWithdraw is task_plan_withdraw: the conversation that put up plan card plan_id takes it down while nothing
+// of it has started, as the owner's Dismiss does (dismissPlan), its reason kept as a task_plan_withdrawn work event
+// (#6739). A card whose work was done elsewhere, or that the owner dropped, otherwise waited for "Start" in every list
+// of what is the owner's to handle until they dismissed it themselves. Another conversation's plan, and one that
+// started or was dismissed, are refused, and nothing changes.
+func (s *Service) toolTaskPlanWithdraw(ctx context.Context, self string, args json.RawMessage) (string, error) {
+	var a struct {
+		PlanID string `json:"plan_id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	reason, err := remedyReason(a.Reason)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(a.PlanID)
+	if id == "" {
+		return "", errors.New("plan_id is required: the plan's id, as task_plan's answer or the snapshot's plans waiting to start give it")
+	}
+	p, err := s.loadPlan(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("plan %s: %w", id, err)
+	}
+	if p.Conversation != self {
+		return "", fmt.Errorf("plan %s was put up by another conversation: only that one withdraws it (or the user dismisses it); nothing was changed", id)
+	}
+	if p.State != planOpen {
+		return "", fmt.Errorf("plan %s is %s, no longer waiting for Start: nothing was withdrawn", id, p.State)
+	}
+	if p, err = s.dismissPlan(ctx, id); err != nil {
+		return "", fmt.Errorf("plan %s: %w; nothing was withdrawn", id, err)
+	}
+	titles := make([]string, 0, len(p.Tasks))
+	for _, t := range p.Tasks {
+		titles = append(titles, t.Title)
+	}
+	s.workEvent("", self, taskPlanWithdrawnEvent, map[string]any{"plan": id, "conversation": self, "reason": reason, "tasks": titles})
+	s.logf("plan %s: withdrawn by its conversation %s: %s", id, short(self), reason)
+	return fmt.Sprintf("Withdrew plan %s (%d task(s): %s): its card no longer waits for Start. Reason kept: %s", id, len(titles),
+		strings.Join(titles, "; "), reason), nil
 }
 
 func (s *Service) dismissPlan(ctx context.Context, id string) (*TaskPlan, error) {

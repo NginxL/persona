@@ -30,6 +30,7 @@ runtime errors. Shell launchers, managed launchers and older runtimes keep their
   and a "New Agent" answered at once (`async`) is followed in the machine's session list, from `starting` to started or to `start_error` (counted once while the node lists it: the starts counted are kept with the records, so one is not counted again after the manager restarts; the failure's `updated_at` is the node's clock and is not compared with the record's).
   A start whose outcome the hub does not know (the computer offline, the call timed out) and a request the node refused before running anything are not recorded.
   A timed-out call is one whose own context ran out or was cancelled (`context.DeadlineExceeded` / `context.Canceled`, or an uncoded relayed error with exactly those words, `startWaitEnded`, #6324): a node link stuck for the whole `taskStartTimeout` says nothing of the launcher, so it is only logged. A node's own timeout text (`session.start: context deadline exceeded`) still counts as `timeout`.
+  An unanswered task start is reconciled before it fails (#6540): the hub snapshots the machine's session list before `session.start`, and when the answer never comes back (`startResultUnknown`) it lists again for up to `taskStartAdoptWait` (30 s, polling every `taskStartAdoptPoll`). A session absent from the snapshot, hub-started, with the same launcher and directory and a fresh sign of life is adopted and linked to the task through the normal success path — no failure receipt, retry or reroute, so no second Agent opens on another computer. The same adoption rule as interactive `agent_start` applies (`adoptStartedSession`), including its newest-wins limitation for two simultaneous starts in one directory. If the pre-start list could not be read, the machine stops answering, or no matching session appears, the start fails as before and stays on its machine: an unknown result never triggers a retry or a flexible-task reroute.
 - **On-demand recheck before a reroute** (#2018): a start aimed at a machine whose launcher has a failing record probes that machine once on the spot before moving elsewhere, and a fixed-machine task probes it the same way before refusing (`launcherUnusableNow`, #6324).
   If the probe passes (the launcher was fixed after the record, for example a CLI installed or a PATH corrected), the record is cleared to `ok` at once and the start stays on the asked machine.
   If it fails again, or the machine cannot answer, the usual reroute applies. Concurrent starts for the same machine × launcher wait for one probe (single flight), and a probe is not repeated
@@ -166,6 +167,28 @@ asked for it) and uses it only on the detour path (`healthDetour`, the chokepoin
 - This first cut never reorders machines or blocks a start: one launcher maps to one provider, so every machine offering it sees the same
   provider-level capacity, and two different providers are not equivalent (an explicit model configuration is never silently changed,
   `docs/assistant/model-config.md`). Deferring starts until recovery, per-machine gateway attribution and the App/Lark entries are later work.
+
+## Execution-agent admission gate
+
+The hub machine once ran 40+ claude processes at load 160 and timed out, so starting an execution Agent is now gated on the target computer's
+reported resources (`server/internal/assistant/admission.go`, #6608). The gate runs on the two execution-Agent start paths only — a task plan's
+`startTaskAgent` and the `agent_start` tool — both of which use `session.start`. The assistant's own conversations (main, leaders, scheduled) start
+through `assistant.send` and never pass it.
+
+The data is the manager's retained 10-second node sample (`machines` monitoring, `docs/server/machines.md`): available memory
+(`MemTotal − MemUsed`), load1, the system's core count, and the node-reported `claude_procs` count (Linux only; nil skips the process condition).
+A start is refused when any line is hit: free memory below the threshold, the claude process count at its cap, load1 above cores × the multiplier,
+or the task's direction already at its running-Agent cap. Thresholds live in the `assistant.admission` setting with code defaults (hub machine 2.5
+GiB free / 20 processes, other machines 2 GiB, load multiplier 4, direction cap 3 with a per-project override map); machine-specific lines are keyed
+by machine id, never hard-coded. A managed machine whose sample is missing, stale (older than 30 s) or lacks a load reading is refused (unknown
+load denies); a computer the resource layer does not retain is skipped, and a hub without a devices manager leaves the gate inert.
+
+A refused `machine_policy=fixed` task stays put and gets the reason plus the least-loaded reachable alternative. A `flexible` task is moved to that
+alternative when its launcher runs there and its directory exists (the same `fs.stat` and reroute-trail rules as the launcher detour); no alternative means refusal. The
+direction cap refuses either policy, since moving machines does not free a direction slot. The check and the slot reservation happen in one critical section
+(`claimIfAllowed`), so concurrent admits cannot both take the last slot; a task's claim is held from the decision until its agent is linked into the todo or the start
+fails for good (an `agent_start` tool call has no todo, so its claim ends with the call), covering both the RPC race and the 10-second metrics/ledger gap. Other
+`session.start` callers (dispatch, self-heal, successor Agents, Feishu cards) are intentionally not wired in this first cut.
 
 ## Not done
 

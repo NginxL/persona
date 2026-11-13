@@ -112,6 +112,8 @@
   "codex_first_placeholder": "给 Codex 的第一条消息",
   "handoff_from": "从「{title}」跳来 · 点这里返回",
   "handoff_dismiss": "关闭返回提示",
+  "inbox_back_title": "回到「{title}」",
+  "inbox_back_generic": "回到收件箱里的这件事",
   "team": "协同",
   "team_needs_you": "协同：有子 Agent 在等你",
   "more_actions": "更多操作",
@@ -133,5 +135,6 @@
   "message_further_up": "这条消息在更早的记录里。",
   "search_origin_changed": "原来的记录已变化，请继续浏览当前记录",
   "search_return": "返回搜索前位置",
-  "search_menu": "会话内搜索"
+  "search_menu": "会话内搜索",
+  "todo_completed_label": "待办（已完成）：{title}"
 }

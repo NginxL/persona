@@ -17,6 +17,10 @@ type MetricSample struct {
 	NetTx     *float64  `json:"net_tx,omitempty"` // bytes/s sent
 	DiskUsed  int64     `json:"disk_used"`        // the system disk (/, or the macOS data volume), like df
 	DiskTotal int64     `json:"disk_total"`       // used + available
+	// ClaudeProcs is the node user's running claude processes at sampling time (the admission gate's process cap).
+	// Nil when the platform cannot count them (older nodes, non-Linux): callers skip the process check, never read it
+	// as zero.
+	ClaudeProcs *int `json:"claude_procs,omitempty"`
 }
 
 // MetricPoint is one step of a machine's history (GET /api/v1/machines/{id}/metrics): the average over the step,

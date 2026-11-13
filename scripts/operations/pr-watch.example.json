@@ -1,0 +1,25 @@
+{
+  "repositories": [
+    {
+      "name": "<owner>/<repository>",
+      "checkout": "<absolute path to a trusted local checkout>",
+      "base": "main",
+      "merge": false,
+      "verify": {
+        "profile": "commands",
+        "timeout_seconds": 3600,
+        "commands": [
+          {"name": "repository tests", "argv": ["<test command>", "<argument>"]}
+        ]
+      }
+    }
+  ],
+  "reviewer": {
+    "command": "claude",
+    "timeout_seconds": 900
+  },
+  "poll_seconds": 60,
+  "workers": 2,
+  "state": "<absolute path to a private state directory>/state.json",
+  "webhook": {"port": 18777}
+}

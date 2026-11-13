@@ -132,7 +132,11 @@ func TestCodexSkillCatalogToTypedTurnAndSteer(t *testing.T) {
 	probedLaunchers(t, map[string]string{"cx_test": "codex"})
 	n := codexTestNode(t)
 	withFakeHub(t, n)
-	cwd := t.TempDir()
+	// The catalog reports resolved paths; on macOS t.TempDir() is under a symlink.
+	cwd, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, c, f := newFakeCodex(t, n, cwd)
 	p.id, c.threadID = testThread, testThread
 	n.procs[testThread] = p

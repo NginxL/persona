@@ -25,6 +25,7 @@ import {
   removeTask,
   retryKey,
   retryTask,
+  routeTodoId,
   startFailure,
   setRoute,
   startPlan,
@@ -1536,18 +1537,20 @@ export const TaskDock = memo(function TaskDock({ conversation }: { conversation:
 
 /** "Talking to "xx"" while the next message goes straight to a task; × gives it back to Persona. */
 export const RouteChip = memo(function RouteChip({ conversation }: { conversation: string }) {
-  const todoId = useFeed((s) => s.routes[conversation]);
+  const route = useFeed((s) => s.routes[conversation]);
+  const todoId = routeTodoId(route);
   const todo = useTodo(todoId);
   if (!todo) return null;
   return (
-    <div className="flex">
-      <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-accent-tint pl-3 pr-1 text-[12.5px] font-semibold text-accent">
+    <div className="flex flex-col items-start gap-1">
+      <span title={typeof route === "object" ? t("todos.ask_chat_hint") : undefined} className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-accent-tint pl-3 pr-1 text-[12.5px] font-semibold text-accent">
         <Icon name="send" size={12} />
-        {t("assistant-tasks.say_to", { title: todo.title })}
+        <span className="min-w-0 truncate">{t(typeof route === "object" ? "todos.ask_chat_route" : "assistant-tasks.say_to", { title: todo.title })}</span>
         <button type="button" aria-label={t("assistant-tasks.give_back")} onClick={() => setRoute(conversation, null)} className="flex size-5 items-center justify-center rounded-full hover:bg-hover">
           <Icon name="x" size={11} />
         </button>
       </span>
+      {typeof route === "object" && <span className="text-xs text-ink-2">{t("todos.ask_chat_hint")}</span>}
     </div>
   );
 });

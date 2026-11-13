@@ -32,6 +32,7 @@ var RouteScopes = map[string]string{
 	"POST /api/v1/inbox/{id}/reply":                      ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/suggestion":                 ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/handoff":                    ScopeInboxWrite,
+	"POST /api/v1/inbox/{id}/task-link/recheck":          ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/doc/status":                 ScopeInboxWrite,
 	"PUT /api/v1/inbox/{id}/parent":                      ScopeInboxWrite,
 	"PUT /api/v1/inbox/{id}/folder":                      ScopeInboxWrite,

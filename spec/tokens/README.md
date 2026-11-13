@@ -14,7 +14,8 @@ Design values shared across clients and documented platform-specific differences
 | 同上 | `common.<mode>` | `Theme.brand/danger/positive/caution/cautionText/ai/loop/countBadge`、代码和终端色、`Theme.Diff`、`Theme.Hue`、`Theme.Fill` |
 | 同上 | `system.<mode>` | `Theme.systemPage/systemCard`、SwiftUI 的 `Color.primary/secondary`、UIKit 系统 fill 的显式回退值；见下文限制 |
 | `color.status.json` | `status.<mode>.<state>` | `ios/Shared/StatusPalette.swift`；待唤醒和已屏蔽的映射取 `ios/Persona/Views/Chats/ChatsView.swift` 的分组表 |
-| `dimension.json` | `radius`、`space`、`watch` | `Theme.Radius`、`Theme.Space`、`Theme.Watch`；触控区取 `docs/archive/redesign/README.md` D7，胶囊按短边的一半 |
+| `dimension.json` | `radius`、`space`、`size`、`watch` | `Theme.Radius`、`Theme.Space`、`Theme.Size`、`Theme.Watch`；触控区取 `docs/archive/redesign/README.md` D7，胶囊按短边的一半。共享 `size.*` 必须与 iOS 同名同值 |
+| `dimension-android.json` | `android.size` | Android 专用布局尺寸，不冒充 iOS 的 `Theme.Size`；由生成器输出 `Tokens.Android.Size`，与共享尺寸分开校验 |
 | `type.json` | `type.<level>` | `Theme.Font` 的九个层级（display、title、heading、body、secondary、caption、sectionHeader、label、code）：文本样式、字重，以及 `Theme.Level` 的 iPhone 字号和行高倍数 |
 | `type-glass.json` | `typeGlass.<level>` | Android Glass reading sizes only (#5780): body 16sp and secondary 14sp; an intentional platform difference that leaves the shared `type.*` values and iOS checks unchanged |
 | `motion.json` | `motion` | `Theme.Motion` 的共享动效：state、layout、expand、drawer、springBack 是弹簧（时长和弹性，Compose 取阻尼比 `1 - bounce`、刚度 `(2π / 时长)²`），reveal、conceal 是时长和曲线，keyboard 是系统键盘的刚度和阻尼，needsYouBreath 是“需要你”呼吸环；减少动态效果时所有时长为零。它们是配置值，不是运行耗时的实测数据 |

@@ -91,7 +91,7 @@ describe("/clear in the main conversation", () => {
     const { commands } = render();
     // with /permissions, which every Persona conversation offers (#6476)
     expect(commands.map((c) => c.word)).toEqual(["/clear", "/permissions"]);
-    expect(commands[0].confirm).toBeUndefined();
+    expect(commands.find((c) => c.word === "/clear")?.confirm).toBeUndefined();
   });
 
   it("clears the context in place instead of going to Persona", async () => {

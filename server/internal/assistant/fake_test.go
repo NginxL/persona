@@ -160,6 +160,7 @@ type fakeHub struct {
 	onRepair  func(f *fakeHub)
 	onSend    func(f *fakeHub, p map[string]any) // runs (under the fake's lock) after each session.send
 	onStart   func(f *fakeHub, p map[string]any) // runs (under the fake's lock) when session.start arrives, before slowStart blocks
+	onList    func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
 	// onAssistantSend runs (under the fake's lock) when assistant.send arrives, before it is answered
 	onAssistantSend func(f *fakeHub, p map[string]any)
 	// doctor is each machine's node.doctor claude-version detail (none: the report has no such check).
@@ -287,6 +288,10 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if f.sessionsFail[p.Device] > 0 { // a node that answers offline for a few tries, then recovers
 			f.sessionsFail[p.Device]--
 			return nil, fmt.Errorf("%s: %w", p.Device, apierr.ErrOffline)
+		}
+		if f.onList != nil {
+			f.onList(f, p.Device)
+			list = f.sessions[p.Device]
 		}
 		return json.Marshal(map[string]any{"sessions": slices.Clone(list), "muted": f.muted[p.Device]})
 	case DeviceSessionGet:

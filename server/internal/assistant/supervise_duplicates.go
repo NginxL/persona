@@ -35,7 +35,7 @@ func duplicateHints(t PlanTask, todos []Todo, sessions []proto.Session) []string
 				sameDir = true
 			}
 		}
-		if shared := sharedRef(refs, issueRefs(o.Title+" "+o.Notes)); shared != "" {
+		if shared := sharedRef(refs, issueRefs(o.Title+" "+o.Notes+" "+o.PRURL)); shared != "" {
 			add("todo:"+o.ID, fmt.Sprintf("任务「%s」（%s）也提到 %s", o.Title, o.ID, shared))
 		} else if sim := titleSimilarity(t.Title, o.Title); sim >= 0.7 || sameDir && sim >= 0.4 {
 			add("todo:"+o.ID, fmt.Sprintf("任务「%s」（%s）标题相近%s", o.Title, o.ID, map[bool]string{true: "，在同一个目录", false: ""}[sameDir]))

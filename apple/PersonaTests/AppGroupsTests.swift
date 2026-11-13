@@ -139,6 +139,41 @@ struct AppGroupsTests {
         #expect(AppGroups.project(of: otherHub)?.key != AppGroups.project(of: Self.placed("hub1", cwd: "/Users/me/code/app", updated: 1))?.key)
     }
 
+    /// The agents Persona and its assistant start in a terminal engine (#6567): a section per engine after the desktop
+    /// apps, in a fixed order, by project as a desktop app's is; an agent no engine placed (a claude in tmux or another
+    /// terminal, a runtime) stays in Other, which is not by project.
+    @Test func terminalEnginesHaveSectionsByProject() throws {
+        func cli(_ kind: String?, pane: String? = nil, repo: String? = nil) -> [String: Any] {
+            var f: [String: Any] = ["agent_surface": "cli"]
+            if let kind { f["space_kind"] = kind }
+            if let pane { f["pane_id"] = pane }
+            if let repo { f["repo_root"] = repo }
+            return f
+        }
+        let sessions = [
+            Self.placed("herdr-app", cwd: "/Users/me/code/app", updated: 50, extra: cli("herdr", pane: "w1:p1")),
+            Self.placed("herdr-gateway", agent: "codex", cwd: "/Users/me/code/gateway", updated: 40, extra: cli("herdr", pane: "w1:p2")),
+            Self.placed("herdr-app-sub", cwd: "/Users/me/code/app/web", updated: 30, extra: cli("herdr", pane: "w2:p1", repo: "/Users/me/code/app")),
+            Self.placed("herdr-home", cwd: "/Users/me", updated: 5, extra: cli("herdr", pane: "w3:p1")),
+            Self.placed("tern-x", cwd: "/srv/x", updated: 20, extra: cli("tern", pane: "tern:b1")),
+            Self.placed("orca-y", cwd: "/srv/y", updated: 25, extra: cli("orca", pane: "orca:p1")),
+            Self.placed("desk", cwd: "/Users/me/code/app", updated: 10),
+            Self.placed("tmux", cwd: "/Users/me/code/app", updated: 60, extra: cli(nil, pane: "tmux:%1")),
+            Self.placed("runtime", agent: "paseo", cwd: "/srv/z", updated: 15, extra: cli("paseo")),
+        ]
+        let groups = AppGroups.build(sessions)
+        #expect(groups.map(\.id) == ["app/desktop/claude code", "app/engine/herdr", "app/engine/orca", "app/engine/tern", AppGroups.otherID])
+        try #require(groups.count == 5)
+        let herdr = groups[1]
+        try #require(herdr.projects.count == 3)
+        #expect(herdr.engine == .herdr && herdr.kind == nil && herdr.title == "herdr" && herdr.showsProjects)
+        #expect(herdr.projects.map(\.name) == ["app", "gateway", ""]) // the latest project first; the home directory last
+        #expect(herdr.projects[0].sessions.map(\.sessionID) == ["herdr-app", "herdr-app-sub"])
+        #expect(herdr.projects[0].id.hasPrefix("app/engine/herdr/project/"))
+        #expect(groups[2].title == "Orca" && groups[3].title == "Tern" && groups[2].engine == .orca)
+        #expect(groups[4].sessions.map(\.sessionID) == ["tmux", "runtime"] && groups[4].engine == nil && !groups[4].showsProjects)
+    }
+
     /// Other's section (terminals and the like) is not by project: its agents are listed as before.
     @Test func otherIsNotByProject() {
         let other = AppGroups.build([Self.session("t", agent: "claude", surface: "cli", updated: 1)])[0]

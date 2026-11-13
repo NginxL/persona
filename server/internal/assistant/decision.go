@@ -338,6 +338,55 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bo
 	return true, nil
 }
 
+// routeDecisionAnswer is an explicitly addressed chat answer, not an inference from arbitrary conversation text.
+// The original round fences stale tabs; only a delivered, recorded answer ends the pending decision.
+func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, asked, text string) (FeedItem, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	st := s.todoDB()
+	if st == nil {
+		return FeedItem{}, errAcceptStore
+	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return FeedItem{}, err
+	}
+	t, ok := s.todoNow(id)
+	if !ok || t.Origin != conversation {
+		return FeedItem{}, i18n.Err("assistant-tasks.route_no_task")
+	}
+	if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
+		if err != nil {
+			return FeedItem{}, err
+		}
+		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	}
+	a, err := s.askRound(id, asked)
+	if err != nil {
+		return FeedItem{}, err
+	}
+	if a == nil {
+		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	}
+	s.deadlineAnswered(ctx, id, a.AskedAt)
+	item, err := s.routeToTaskChecked(ctx, conversation, id, text, func(cur Todo) bool {
+		return cur.DoneAt == nil && !acceptAskStale(a, cur)
+	})
+	if err != nil {
+		return FeedItem{}, err
+	}
+	at := decisionNow()
+	row := db.TodoDecisionRow{ID: "dec_" + randomHex(8), TodoID: id,
+		Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")),
+		Choice:   decisionText(text), Source: db.DecisionManual, SourceMessage: item.ID, CreatedAt: at}
+	if _, err := s.insertDecision(ctx, st, row); err != nil {
+		return FeedItem{}, err
+	}
+	s.decisionsChanged(ctx, id, at)
+	s.userDecided(ctx, id)
+	s.endAsk(ctx, id, a.AskedAt, "", row.Choice)
+	return item, nil
+}
+
 // askCardNow: card is one of the cards of task id's ask as it is now ("" when Feishu does not say: taken as one), so a
 // press on an earlier round's card answers nothing (#4853).
 func (s *Service) askCardNow(id, card string) bool {

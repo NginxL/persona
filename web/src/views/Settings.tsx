@@ -587,6 +587,13 @@ function General({ onModel }: { onModel: () => void }) {
       <AgentPreferences />
       <HubList />
       <About />
+      <Group title={t("settings.about_persona")} anchor="about-persona">
+        <Row label={t("settings.source_code")} stackOnNarrow>
+          <a href="https://github.com/nwverse/persona" target="_blank" rel="noopener noreferrer" className="touch-hit break-all text-accent-ink underline underline-offset-2">
+            github.com/nwverse/persona
+          </a>
+        </Row>
+      </Group>
     </>
   );
 }

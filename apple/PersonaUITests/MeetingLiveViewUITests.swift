@@ -6,7 +6,9 @@ import XCTest
 /// Live Activity says the current topic; a hub without the live view shows none. A made-up meeting stands in for the
 /// microphone (`-showMeetingSample room-taking-part`): its lines reach the hub as a real one's do, and the mock's room sets
 /// made-up topics after each batch (`meeting_topics_set`). Every test starts from a fresh mock (`POST
-/// /mock/recording_minutes`), with `/mock/meeting_live_view` switching the phase on or off. The app runs in zh-Hans:
+/// /mock/recording_minutes`), with `/mock/meeting_live_view` switching the phase on or off, and the highlights (phase 2b,
+/// `/mock/meeting_highlights`) off, so the page keeps phase 2's Live box (`MeetingHighlightsUITests` covers them, and a
+/// meeting started without them on a hub with them); every call to the mock must answer 2xx. The app runs in zh-Hans:
 /// elements are found by their identifiers. PERSONA_SHOTS=<dir> saves live-<appearance>-<name>.png.
 final class MeetingLiveViewUITests: XCTestCase {
     private let live = "00000000-0000-0000-0000-000000000002"
@@ -17,6 +19,7 @@ final class MeetingLiveViewUITests: XCTestCase {
         try post(hub, "/mock/meeting_conversation", ["on": true, "room": "ok", "end_seconds": 180])
         try post(hub, "/mock/meeting_attendance", ["on": true, "default": "participant", "answer": "ok", "kb_read_only": false])
         try post(hub, "/mock/meeting_live_view", ["on": true])
+        try post(hub, "/mock/meeting_highlights", ["on": false])
         // A voice extension from before phase 4 (on a MOCK_VOICE=1 mock): these questions go through `…/ask`, not a
         // meeting call's `text` frames (MeetingTalkUITests covers those). A mock without MOCK_VOICE has no such route.
         _ = try? Data(contentsOf: URL(string: hub + "/mock/voice_meeting?meeting=off")!)
@@ -27,6 +30,7 @@ final class MeetingLiveViewUITests: XCTestCase {
         try post(hub, "/mock/meeting_conversation", ["on": true, "room": "ok", "end_seconds": 180])
         try post(hub, "/mock/meeting_attendance", ["on": true, "default": "off"])
         try post(hub, "/mock/meeting_live_view", ["on": true])
+        try post(hub, "/mock/meeting_highlights", ["on": true])
     }
 
     /// The room sets topics after a batch of the meeting's lines: the page shows them as chips under its header, the
@@ -182,13 +186,20 @@ final class MeetingLiveViewUITests: XCTestCase {
         "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
     }
 
+    /// A call to the mock, which must answer 2xx: a mock without the route (404) or that refused it (400) fails here.
     private func post(_ hub: String, _ path: String, _ body: [String: Any]) throws {
         var request = URLRequest(url: URL(string: hub + path)!)
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let done = expectation(description: path)
-        URLSession.shared.dataTask(with: request) { _, _, _ in done.fulfill() }.resume()
+        let answer = LiveMockAnswer()
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            answer.status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            answer.body = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            done.fulfill()
+        }.resume()
         wait(for: [done], timeout: 5)
+        XCTAssertTrue((200..<300).contains(answer.status), "POST \(path) answered \(answer.status): \(answer.body)")
     }
 
     /// `GET /api/v1/recordings/{id}/live` as the hub answers it.
@@ -201,4 +212,10 @@ final class MeetingLiveViewUITests: XCTestCase {
     private func topics(_ hub: String, _ id: String) throws -> [[String: Any]] {
         try liveRead(hub, id)["topics"] as? [[String: Any]] ?? []
     }
+}
+
+/// What the mock answered a call (`post`), written from URLSession's queue and read after the wait.
+private final class LiveMockAnswer: @unchecked Sendable {
+    var status = 0
+    var body = ""
 }

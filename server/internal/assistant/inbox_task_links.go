@@ -215,6 +215,9 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 	var done []*InboxItem
 	b.mu.Lock()
 	for _, it := range b.items {
+		if !inboxTaskLinkEligible(it) {
+			continue
+		}
 		if !it.open() {
 			if it.Agent != nil && it.Agent.TodoID != "" {
 				done = append(done, it) // its detail still names a task: the one doing the work now (#6546)

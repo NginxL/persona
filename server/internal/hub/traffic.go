@@ -59,6 +59,8 @@ func trafficPlatform(platform string) string {
 		return "macos"
 	case "android":
 		return "android"
+	case "harmony":
+		return "harmony"
 	case "web":
 		return "web"
 	case "visionos":

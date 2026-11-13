@@ -367,7 +367,7 @@ private fun LarkConversationScreen(repository: InboxRepository, route: LarkRoute
                 if (record != null) JIconButton(PhIcons.CheckCircle, stringResource(if (record.item.isDone) R.string.inbox_move_back else R.string.inbox_done),
                     enabled = !markingDone, onClick = {
                         markingDone = true
-                        haptics(doneHaptic(!record.item.isDone))
+                        haptics(doneHaptic(!record.item.isDone, single = true))
                         scope.launch {
                             try { repository.setDone(record.item.id, !record.item.isDone); error = null; navigator.back() }
                             catch (e: CancellationException) { throw e }

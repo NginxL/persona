@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -96,10 +97,11 @@ private fun ChatMarkdownCards(text: String, id: String, fences: List<persona.cor
             at = fence.end
             when {
                 blocks == null -> CodeText(fence.raw.trimEnd('\n', '\r'), fence.language, syntax = true)
-                fence.isView -> key(fence.index) { blocks.block(viewKeys?.invoke(fence.index) ?: "$id/local/${fence.index}", fence.raw, fence.complete) }
+                // A card is not words: a selection of the message goes round it.
+                fence.isView -> key(fence.index) { DisableSelection { blocks.block(viewKeys?.invoke(fence.index) ?: "$id/local/${fence.index}", fence.raw, fence.complete) } }
                 else -> {
                     val card = remember(blocks, fence.raw, fence.complete) { if (fence.complete) blocks.parse(fence.language, fence.raw) else null }
-                    if (card != null) blocks.draw(card) else CodeText(fence.raw.trimEnd('\n', '\r'), fence.language, syntax = true)
+                    if (card != null) DisableSelection { blocks.draw(card) } else CodeText(fence.raw.trimEnd('\n', '\r'), fence.language, syntax = true)
                 }
             }
         }
@@ -137,7 +139,9 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
     // Inline code a tap copies, in the body's color on its well; inside a path's link it stays the link's (#2984).
     val copy = rememberCopy()
     val codeSpan = inlineCodeStyle(color)
-    val annotator = remember(codeSpan, copy) { copyingCode(codeSpan) { copy(it, null) } }
+    // …except in a message whose words "Select" has selected in place: a tap there is the selection's (#4210).
+    val selecting = LocalSelectionAbove.current
+    val annotator = remember(codeSpan, copy, selecting) { copyingCode(codeSpan, if (selecting) null else { words: String -> copy(words, null) }) }
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         if (parsed == null) ChatLinkText(text, Modifier.fillMaxWidth(), bodyStyle.copy(color = color))
         else Markdown(parsed!!, modifier = Modifier.fillMaxWidth(), imageTransformer = rememberMathImages(color, bodyStyle),
@@ -194,15 +198,20 @@ internal fun CodeText(text: String, language: String = "", syntax: Boolean = fal
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp.dense)) {
         if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text, null) } }
         else {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(language, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-                JTextButton(stringResource(R.string.chat_content_copy), { copy(text, null) }, icon = PhIcons.Copy)
+            DisableSelection {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(language, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                    JTextButton(stringResource(R.string.chat_content_copy), { copy(text, null) }, icon = PhIcons.Copy)
+                }
             }
             CodeBody(preview, language, colour)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            if (preview.length < text.length) JTextButton(stringResource(R.string.chat_content_show_all), { expanded = true })
-            ReaderEntry(text, language.ifBlank { stringResource(R.string.chat_content_full_text) })
+        // buttons, not words
+        DisableSelection {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                if (preview.length < text.length) JTextButton(stringResource(R.string.chat_content_show_all), { expanded = true })
+                ReaderEntry(text, language.ifBlank { stringResource(R.string.chat_content_full_text) })
+            }
         }
     }
 }
@@ -216,8 +225,8 @@ private fun CodeBody(preview: String, language: String, colour: Boolean, header:
     val palette = PersonaTheme.palette
     if (remember(preview) { ChatLinks.matches(preview).isNotEmpty() }) {
         Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.sunken)) {
-            header?.invoke()
-            SelectionContainer {
+            if (header != null) DisableSelection { header() }
+            SelectableOnItsOwn {
                 val linked = chatLinkAnnotations(preview)
                 Text(if (colour) remember(linked, language, palette) { CodeSyntax.highlight(linked, language, palette) } else linked, style = PersonaTheme.type.code, color = PersonaTheme.palette.ink,
                     softWrap = false, modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(Tokens.Space.m))

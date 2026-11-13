@@ -120,4 +120,21 @@ describe("a command's permission prompt", () => {
     expect(host.textContent).toContain("Yes");
     expect(host.querySelector("[data-screen-countdown]")).toBeNull();
   });
+
+  it("folds a long command read without its fields, so its choices sit right under it (#6638)", () => {
+    const old = card(104);
+    const command = Array.from({ length: 52 }, (_, i) => `echo step ${i + 1}`).join("\n");
+    old.dialog = { question: "Do you want to proceed?", rev: "r2", detail: `Check every step\n${command}`, options: old.dialog!.options };
+    act(() => root.render(<InteractionCard ix={old} />));
+    const fold = host.querySelector("[data-screen-detail]") as HTMLElement;
+    // the web's fold (ScrollFold): six lines tall, scrolling inside, the whole text still there to scroll to and select
+    expect(fold.className).toContain("max-h-[6lh]");
+    expect(fold.className).toContain("overflow-y-auto");
+    expect(fold.hasAttribute("data-fold-scroll")).toBe(true);
+    expect(fold.textContent).toContain("echo step 52");
+    // the choices come after the fold, not inside it
+    const yes = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Yes")) as HTMLButtonElement;
+    expect(fold.contains(yes)).toBe(false);
+    expect(fold.compareDocumentPosition(yes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

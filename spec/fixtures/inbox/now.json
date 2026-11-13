@@ -1,0 +1,1153 @@
+{
+  "schema_version": 1,
+  "operation": "inbox_now",
+  "description": "The item's state key (now) and the words every app shows for it. Go checks that the manager computes expected.now and expected.section (status) from the item; iOS, the web app and Android check that the key and the item's fields give expected.text in each language. An item without now (an older hub) keeps each app's own state words and is not covered here.",
+  "follow_by_lang": "When a case has input.follow_by_lang, an app checking language L reads follow.who and follow.next from follow_by_lang[L] (the model writes them in the user's language); Go reads the item as it is.",
+  "compose": "waiting: (follow.who ? waiting : waiting_anyone) + (follow.check_at ? look_again : '') + (follow.next ? next : ''). check_due: check_due + (follow.next ? next : ''). failed: handling.error ? failed : failed_plain. Every other key is its own text. Order when several hold: done first (by done_by, and by: muted on the newest done entry), then folded, the suggestion keys, then queued (the agent record says queued and has no session yet, while handling already says looking), then the handling keys (looking, agent_working, waiting, failed), follow_up_ask before check_due, then fyi or needs_you by tier. {reason} is handling.error as it was written (already in words, in the language of its time), never agent.error; without it, failed_plain. A key an app does not know, or no now at all, leaves the app on its own state words.",
+  "texts": {
+    "confirm_reply": {
+      "en": "Waiting for you to confirm a reply",
+      "zh-Hans": "等你确认回复",
+      "ja": "返信の確認待ち"
+    },
+    "confirm_agent": {
+      "en": "Waiting for you to start an Agent",
+      "zh-Hans": "等你启动 Agent",
+      "ja": "Agentの開始待ち"
+    },
+    "decide": {
+      "en": "Waiting for your decision",
+      "zh-Hans": "等你拿主意",
+      "ja": "あなたの判断待ち"
+    },
+    "queued": {
+      "en": "Queued for the AI",
+      "zh-Hans": "排队中，等 AI 看",
+      "ja": "AIの順番待ち"
+    },
+    "looking": {
+      "en": "AI is looking",
+      "zh-Hans": "AI 正在看",
+      "ja": "AIが確認中"
+    },
+    "agent_working": {
+      "en": "Agent working",
+      "zh-Hans": "Agent 在做",
+      "ja": "Agentが作業中"
+    },
+    "waiting": {
+      "en": "Waiting for {who}",
+      "zh-Hans": "等{who}",
+      "ja": "{who}を待っています"
+    },
+    "waiting_anyone": {
+      "en": "Waiting for a reply",
+      "zh-Hans": "等对方回复",
+      "ja": "相手の返信待ち"
+    },
+    "look_again": {
+      "en": " · look again {time}",
+      "zh-Hans": " · {time}再看",
+      "ja": " · {time}に再確認"
+    },
+    "next": {
+      "en": ": {next}",
+      "zh-Hans": "：{next}",
+      "ja": "：{next}"
+    },
+    "follow_up_ask": {
+      "en": "Checked 3 times with no news. Keep following?",
+      "zh-Hans": "看过 3 次还没动静，还要跟吗？",
+      "ja": "3回確認しても動きがありません。続けますか？"
+    },
+    "check_due": {
+      "en": "Time to look again",
+      "zh-Hans": "到了再看的时间",
+      "ja": "再確認の時間です"
+    },
+    "failed": {
+      "en": "AI couldn't finish: {reason}",
+      "zh-Hans": "AI 没处理完：{reason}",
+      "ja": "AIが処理を終えられませんでした：{reason}"
+    },
+    "failed_plain": {
+      "en": "AI couldn't handle it",
+      "zh-Hans": "AI 处理失败",
+      "ja": "AIの処理に失敗"
+    },
+    "needs_you": {
+      "en": "Needs you",
+      "zh-Hans": "需要你",
+      "ja": "要対応"
+    },
+    "fyi": {
+      "en": "FYI",
+      "zh-Hans": "知悉即可",
+      "ja": "参考"
+    },
+    "folded": {
+      "en": "Folded",
+      "zh-Hans": "已折叠",
+      "ja": "折りたたみ済み"
+    },
+    "done_replied": {
+      "en": "You replied",
+      "zh-Hans": "你回过了",
+      "ja": "返信済み"
+    },
+    "done_manager": {
+      "en": "Assistant checked: nothing to do",
+      "zh-Hans": "助手看完，不用管",
+      "ja": "アシスタント確認済み：対応不要"
+    },
+    "done_user": {
+      "en": "You marked it done",
+      "zh-Hans": "你标了已处理",
+      "ja": "処理済みにしました"
+    },
+    "done_read": {
+      "en": "Read elsewhere",
+      "zh-Hans": "在别处看过了",
+      "ja": "ほかで既読"
+    },
+    "done_dismissed": {
+      "en": "You dismissed it",
+      "zh-Hans": "你忽略了",
+      "ja": "無視しました"
+    },
+    "done_muted": {
+      "en": "Muted",
+      "zh-Hans": "已静音",
+      "ja": "ミュート済み"
+    },
+    "done_superseded": {
+      "en": "Replaced by a newer item",
+      "zh-Hans": "已被新的一条取代",
+      "ja": "新しい項目に置き換え済み"
+    }
+  },
+  "cases": [
+    {
+      "name": "reply_suggestion",
+      "description": "A reply suggestion waits for the user.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-1",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "suggestion": {
+            "version": 1,
+            "kind": "reply",
+            "text": "Friday works for us.",
+            "handback": false,
+            "at": "2026-01-01T09:02:00Z"
+          },
+          "now": "confirm_reply"
+        }
+      },
+      "expected": {
+        "now": "confirm_reply",
+        "section": "action",
+        "text": {
+          "en": "Waiting for you to confirm a reply",
+          "zh-Hans": "等你确认回复",
+          "ja": "返信の確認待ち"
+        }
+      }
+    },
+    {
+      "name": "agent_suggestion",
+      "description": "An Agent suggestion waits for the user to start it.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-2",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "suggestion": {
+            "version": 1,
+            "kind": "agent",
+            "text": "Check the quote against the price list",
+            "handback": false,
+            "at": "2026-01-01T09:02:00Z"
+          },
+          "now": "confirm_agent"
+        }
+      },
+      "expected": {
+        "now": "confirm_agent",
+        "section": "action",
+        "text": {
+          "en": "Waiting for you to start an Agent",
+          "zh-Hans": "等你启动 Agent",
+          "ja": "Agentの開始待ち"
+        }
+      }
+    },
+    {
+      "name": "handed_back",
+      "description": "A suggestion handed back to the user (handback) is theirs to decide, whatever its kind.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-3",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "suggestion": {
+            "version": 1,
+            "kind": "reply",
+            "text": "Friday works for us.",
+            "handback": true,
+            "at": "2026-01-01T09:02:00Z"
+          },
+          "now": "decide"
+        }
+      },
+      "expected": {
+        "now": "decide",
+        "section": "action",
+        "text": {
+          "en": "Waiting for your decision",
+          "zh-Hans": "等你拿主意",
+          "ja": "あなたの判断待ち"
+        }
+      }
+    },
+    {
+      "name": "queued",
+      "description": "Queued for the AI twin: no processing conversation yet.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-4",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "agent": {
+            "state": "queued"
+          },
+          "handling": {
+            "owner": "manager",
+            "state": "looking",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "now": "queued"
+        }
+      },
+      "expected": {
+        "now": "queued",
+        "section": "working",
+        "text": {
+          "en": "Queued for the AI",
+          "zh-Hans": "排队中，等 AI 看",
+          "ja": "AIの順番待ち"
+        }
+      }
+    },
+    {
+      "name": "looking",
+      "description": "A processing conversation is looking at it.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-5",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "agent": {
+            "state": "running",
+            "machine_id": "m1",
+            "session_id": "s1"
+          },
+          "handling": {
+            "owner": "manager",
+            "state": "looking",
+            "since": "2026-01-01T09:01:00Z",
+            "machine_id": "m1",
+            "session_id": "s1"
+          },
+          "now": "looking"
+        }
+      },
+      "expected": {
+        "now": "looking",
+        "section": "working",
+        "text": {
+          "en": "AI is looking",
+          "zh-Hans": "AI 正在看",
+          "ja": "AIが確認中"
+        }
+      }
+    },
+    {
+      "name": "looking_urgent",
+      "description": "Urgent while the AI looks: the section is Needs you, the words stay the same.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-6",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "urgent": true,
+          "agent": {
+            "state": "running",
+            "machine_id": "m1",
+            "session_id": "s1"
+          },
+          "handling": {
+            "owner": "manager",
+            "state": "looking",
+            "since": "2026-01-01T09:01:00Z",
+            "machine_id": "m1",
+            "session_id": "s1"
+          },
+          "now": "looking"
+        }
+      },
+      "expected": {
+        "now": "looking",
+        "section": "action",
+        "text": {
+          "en": "AI is looking",
+          "zh-Hans": "AI 正在看",
+          "ja": "AIが確認中"
+        }
+      }
+    },
+    {
+      "name": "agent_working",
+      "description": "An Agent it started is working.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-7",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "agent",
+            "since": "2026-01-01T09:01:00Z",
+            "machine_id": "m1",
+            "session_id": "s1"
+          },
+          "now": "agent_working"
+        }
+      },
+      "expected": {
+        "now": "agent_working",
+        "section": "working",
+        "text": {
+          "en": "Agent working",
+          "zh-Hans": "Agent 在做",
+          "ja": "Agentが作業中"
+        }
+      }
+    },
+    {
+      "name": "waiting_full",
+      "description": "Waiting on someone, with a time to look again and a next step: three parts joined.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-8",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "waiting",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "follow": {
+            "who": "Alex to confirm the date",
+            "next": "ask whether Friday works",
+            "check_at": "2026-01-02T09:00:00Z"
+          },
+          "now": "waiting"
+        },
+        "follow_by_lang": {
+          "en": {
+            "who": "Alex to confirm the date",
+            "next": "ask whether Friday works"
+          },
+          "zh-Hans": {
+            "who": "张三确认日期",
+            "next": "问周五行不行"
+          },
+          "ja": {
+            "who": "田中さんの日程確認",
+            "next": "金曜日で良いか聞く"
+          }
+        }
+      },
+      "expected": {
+        "now": "waiting",
+        "section": "working",
+        "text": {
+          "en": "Waiting for Alex to confirm the date · look again {time}: ask whether Friday works",
+          "zh-Hans": "等张三确认日期 · {time}再看：问周五行不行",
+          "ja": "田中さんの日程確認を待っています · {time}に再確認：金曜日で良いか聞く"
+        },
+        "time": "2026-01-02T09:00:00Z"
+      },
+      "note": "follow.who and follow.next are the model's words in the user's language: an app checking a language takes them from input.follow_by_lang. {time} is check_at in the app's own short format for a future moment, put in before comparing."
+    },
+    {
+      "name": "waiting_no_who",
+      "description": "Waiting with nobody named (an older waiting item, or no who written): the plain words, then the time.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-9",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "waiting",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "follow": {
+            "check_at": "2026-01-02T09:00:00Z"
+          },
+          "now": "waiting"
+        }
+      },
+      "expected": {
+        "now": "waiting",
+        "section": "working",
+        "text": {
+          "en": "Waiting for a reply · look again {time}",
+          "zh-Hans": "等对方回复 · {time}再看",
+          "ja": "相手の返信待ち · {time}に再確認"
+        },
+        "time": "2026-01-02T09:00:00Z"
+      }
+    },
+    {
+      "name": "waiting_no_follow",
+      "description": "Waiting from before follow existed: only the plain words.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-10",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "waiting",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "now": "waiting"
+        }
+      },
+      "expected": {
+        "now": "waiting",
+        "section": "working",
+        "text": {
+          "en": "Waiting for a reply",
+          "zh-Hans": "等对方回复",
+          "ja": "相手の返信待ち"
+        }
+      }
+    },
+    {
+      "name": "follow_up_ask",
+      "description": "Looked at again three times with nothing new: back to the user.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-11",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "follow": {
+            "who": "Alex to confirm the date",
+            "next": "ask whether Friday works",
+            "checks": 3
+          },
+          "now": "follow_up_ask"
+        }
+      },
+      "expected": {
+        "now": "follow_up_ask",
+        "section": "action",
+        "text": {
+          "en": "Checked 3 times with no news. Keep following?",
+          "zh-Hans": "看过 3 次还没动静，还要跟吗？",
+          "ja": "3回確認しても動きがありません。続けますか？"
+        }
+      }
+    },
+    {
+      "name": "check_due",
+      "description": "The time to look again came while the AI twin was off: back to the user with the next step.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-12",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "follow": {
+            "next": "ask whether Friday works",
+            "check_at": "2026-01-01T08:30:00Z",
+            "due": true
+          },
+          "now": "check_due"
+        },
+        "follow_by_lang": {
+          "en": {
+            "next": "ask whether Friday works"
+          },
+          "zh-Hans": {
+            "next": "问周五行不行"
+          },
+          "ja": {
+            "next": "金曜日で良いか聞く"
+          }
+        }
+      },
+      "expected": {
+        "now": "check_due",
+        "section": "action",
+        "text": {
+          "en": "Time to look again: ask whether Friday works",
+          "zh-Hans": "到了再看的时间：问周五行不行",
+          "ja": "再確認の時間です：金曜日で良いか聞く"
+        }
+      }
+    },
+    {
+      "name": "failed",
+      "description": "The AI could not finish: the reason follows.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-13",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "failed",
+            "since": "2026-01-01T09:01:00Z",
+            "error": "timed out"
+          },
+          "now": "failed"
+        }
+      },
+      "expected": {
+        "now": "failed",
+        "section": "action",
+        "text": {
+          "en": "AI couldn't finish: timed out",
+          "zh-Hans": "AI 没处理完：timed out",
+          "ja": "AIが処理を終えられませんでした：timed out"
+        }
+      }
+    },
+    {
+      "name": "failed_plain",
+      "description": "Failed without a reason: the plain words.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-14",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "handling": {
+            "owner": "manager",
+            "state": "failed",
+            "since": "2026-01-01T09:01:00Z"
+          },
+          "now": "failed"
+        }
+      },
+      "expected": {
+        "now": "failed",
+        "section": "action",
+        "text": {
+          "en": "AI couldn't handle it",
+          "zh-Hans": "AI 处理失败",
+          "ja": "AIの処理に失敗"
+        }
+      }
+    },
+    {
+      "name": "needs_you",
+      "description": "Needs the user, nothing prepared (the AI twin is off).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-15",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "now": "needs_you"
+        }
+      },
+      "expected": {
+        "now": "needs_you",
+        "section": "action",
+        "text": {
+          "en": "Needs you",
+          "zh-Hans": "需要你",
+          "ja": "要対応"
+        }
+      }
+    },
+    {
+      "name": "fyi",
+      "description": "Worth knowing.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-16",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "fyi",
+          "now": "fyi"
+        }
+      },
+      "expected": {
+        "now": "fyi",
+        "section": "fyi",
+        "text": {
+          "en": "FYI",
+          "zh-Hans": "知悉即可",
+          "ja": "参考"
+        }
+      }
+    },
+    {
+      "name": "folded",
+      "description": "Folded stays folded, whatever else it has.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-17",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "noise",
+          "now": "folded"
+        }
+      },
+      "expected": {
+        "now": "folded",
+        "section": "noise",
+        "text": {
+          "en": "Folded",
+          "zh-Hans": "已折叠",
+          "ja": "折りたたみ済み"
+        }
+      }
+    },
+    {
+      "name": "done_replied",
+      "description": "Done (done_by replied).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_replied",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "replied",
+          "now": "done_replied"
+        }
+      },
+      "expected": {
+        "now": "done_replied",
+        "section": "",
+        "text": {
+          "en": "You replied",
+          "zh-Hans": "你回过了",
+          "ja": "返信済み"
+        }
+      }
+    },
+    {
+      "name": "done_manager",
+      "description": "Done (done_by manager).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_manager",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "manager",
+          "now": "done_manager"
+        }
+      },
+      "expected": {
+        "now": "done_manager",
+        "section": "",
+        "text": {
+          "en": "Assistant checked: nothing to do",
+          "zh-Hans": "助手看完，不用管",
+          "ja": "アシスタント確認済み：対応不要"
+        }
+      }
+    },
+    {
+      "name": "done_user",
+      "description": "Done (done_by user).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_user",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "user",
+          "now": "done_user"
+        }
+      },
+      "expected": {
+        "now": "done_user",
+        "section": "",
+        "text": {
+          "en": "You marked it done",
+          "zh-Hans": "你标了已处理",
+          "ja": "処理済みにしました"
+        }
+      }
+    },
+    {
+      "name": "done_read",
+      "description": "Done (done_by read).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_read",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "read",
+          "now": "done_read"
+        }
+      },
+      "expected": {
+        "now": "done_read",
+        "section": "",
+        "text": {
+          "en": "Read elsewhere",
+          "zh-Hans": "在别处看过了",
+          "ja": "ほかで既読"
+        }
+      }
+    },
+    {
+      "name": "done_dismissed",
+      "description": "Done (done_by dismissed).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_dismissed",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "dismissed",
+          "now": "done_dismissed"
+        }
+      },
+      "expected": {
+        "now": "done_dismissed",
+        "section": "",
+        "text": {
+          "en": "You dismissed it",
+          "zh-Hans": "你忽略了",
+          "ja": "無視しました"
+        }
+      }
+    },
+    {
+      "name": "done_superseded",
+      "description": "Done (done_by superseded).",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_superseded",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "superseded",
+          "now": "done_superseded"
+        }
+      },
+      "expected": {
+        "now": "done_superseded",
+        "section": "",
+        "text": {
+          "en": "Replaced by a newer item",
+          "zh-Hans": "已被新的一条取代",
+          "ja": "新しい項目に置き換え済み"
+        }
+      }
+    },
+    {
+      "name": "done_muted",
+      "description": "Muted: done_by is read, and the item's newest chain entry says it was muted.",
+      "source": [
+        "docs/assistant/inbox.md: Following up"
+      ],
+      "derived": true,
+      "input": {
+        "item": {
+          "id": "n-done_muted",
+          "source": "chat",
+          "kind": "group",
+          "account": "chat",
+          "account_name": "Team chat",
+          "title": "Confirm the launch date",
+          "where": "Launch group",
+          "sender": "Alex",
+          "preview": "Can we move it to Friday?",
+          "count": 2,
+          "started_at": "2026-01-01T08:00:00Z",
+          "updated_at": "2026-01-01T09:00:00Z",
+          "tier": "action",
+          "done_at": "2026-01-01T10:00:00Z",
+          "done_by": "read",
+          "chain": [
+            {
+              "id": "c1",
+              "at": "2026-01-01T10:00:00Z",
+              "kind": "done",
+              "text": "Muted, done",
+              "by": "muted"
+            }
+          ],
+          "now": "done_muted"
+        }
+      },
+      "expected": {
+        "now": "done_muted",
+        "section": "",
+        "text": {
+          "en": "Muted",
+          "zh-Hans": "已静音",
+          "ja": "ミュート済み"
+        }
+      },
+      "note": "A muted item is done_by read; its newest done entry says by: muted (a value, not words), which is how the key is told apart from done_read."
+    }
+  ]
+}

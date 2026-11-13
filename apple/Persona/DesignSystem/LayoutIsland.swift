@@ -85,6 +85,7 @@ private struct IslandEnvironment: ViewModifier {
             .environment(\.buiTheme, env.buiTheme)
             .environment(\.shellBaseTypeSize, env.shellBaseTypeSize)
             .environment(\.dynamicTypeSize, env.dynamicTypeSize)
+            .environment(\.readingTypeSize, env.readingTypeSize)
             .environment(\.colorScheme, env.colorScheme)
             .environment(\.locale, env.locale)
             .environment(\.layoutDirection, env.layoutDirection)

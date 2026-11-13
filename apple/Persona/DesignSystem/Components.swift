@@ -223,6 +223,10 @@ struct Chip: View {
     var compact = false
 
     var body: some View {
+        chipBody.accessibilityShowsLargeContentViewer()
+    }
+
+    @ViewBuilder private var chipBody: some View {
         if compact {
             Text(text).lineLimit(1)
                 .font(Theme.Font.label)
@@ -388,6 +392,7 @@ struct CountBadge: View {
                 .background(fill, in: .capsule)
                 .fixedSize()
                 .accessibilityLabel(label ?? String(count))
+                .accessibilityShowsLargeContentViewer()
         }
     }
 

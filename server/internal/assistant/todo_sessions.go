@@ -570,11 +570,33 @@ func (s *Service) todoReport(ctx context.Context) *TodoReport {
 			r.Links = append(r.Links, TodoLink{MachineID: key[0], SessionID: key[1], TodoID: t.ID, Title: t.Title, Task: t.Origin != ""})
 		}
 	}
+	completed := map[[2]string]*Todo{}
+	for _, t := range s.todos.todos {
+		if t.DoneAt == nil {
+			continue
+		}
+		for _, a := range t.Agents {
+			key := [2]string{a.MachineID, a.SessionID}
+			if a.DismissedAt != nil || s.todos.activeBySession[key] != "" {
+				continue
+			}
+			old := completed[key]
+			if old == nil || t.DoneAt.After(*old.DoneAt) || t.DoneAt.Equal(*old.DoneAt) && t.ID > old.ID {
+				completed[key] = t
+			}
+		}
+	}
+	for key, t := range completed {
+		r.Completed = append(r.Completed, TodoLink{MachineID: key[0], SessionID: key[1], TodoID: t.ID, Title: t.Title})
+	}
 	for key := range s.quietSessionsLocked(now) {
 		r.Quiet = append(r.Quiet, SessionRef{MachineID: key[0], SessionID: key[1]})
 	}
 	sort.Slice(r.Links, func(i, j int) bool {
 		return r.Links[i].MachineID+"/"+r.Links[i].SessionID < r.Links[j].MachineID+"/"+r.Links[j].SessionID
+	})
+	sort.Slice(r.Completed, func(i, j int) bool {
+		return r.Completed[i].MachineID+"/"+r.Completed[i].SessionID < r.Completed[j].MachineID+"/"+r.Completed[j].SessionID
 	})
 	sort.Slice(r.Quiet, func(i, j int) bool {
 		return r.Quiet[i].MachineID+"/"+r.Quiet[i].SessionID < r.Quiet[j].MachineID+"/"+r.Quiet[j].SessionID

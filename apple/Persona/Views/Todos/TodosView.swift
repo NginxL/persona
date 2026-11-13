@@ -237,7 +237,7 @@ struct TodosView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: Theme.Space.s)
-                    DirectionCountsLine(counts: d.direction.counts)
+                    DirectionCountsLine(direction: d.direction)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
@@ -610,6 +610,9 @@ struct TodoRow: View {
                     }
                     if !todo.isDone { ReviewChip(todo: todo, compact: true) }
                 }
+
+                // Nobody is working on it (#3618): under its state, where its supervision shows.
+                OrphanedLine(todo: todo, state: status)
 
                 TodoPlanLine(todo: todo)
 

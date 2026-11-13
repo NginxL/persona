@@ -36,6 +36,7 @@ func (s *Service) inboxRoutes() {
 	s.inboxSuggestionRoutes()
 	s.inboxHandoffRoutes()
 	s.inboxHistoryRoutes()
+	s.inboxTaskLinkRoutes()
 	s.translateRoutes()
 	// Items of connectors (GitHub…) only go to apps that draw them (?sources=all): an older app would show a PR as
 	// a mail and send a reply as one. triage says how many new items wait for the model, and why (inbox_admit.go).

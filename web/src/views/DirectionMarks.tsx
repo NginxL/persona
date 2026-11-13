@@ -1,31 +1,24 @@
-// The direction tree's two marks (#4352) on the To-dos page and the Agents page: a direction's counts, in the words and
-// the shape of the sidebar's 常驻 rows (lib/direction-names.ts countsLabel: the non-zero parts), and a task's state word.
-// Text, so a state never rides on color alone.
+// The direction tree's two marks (#4352) in the sidebar's "By pinned" tree and on the To-dos page: what a direction has
+// going, as the sidebar's 常驻 rows show it, and a task's state word. Text where a state needs words, so it never rides
+// on color alone.
 import { memo } from "react";
 import { t } from "../i18n";
 import { countsLabel } from "../lib/direction-names";
-import { DIRECTION_STATE_TONE, directionStateName, type DirectionCounts, type DirectionTaskState } from "../lib/direction-tree";
+import { DIRECTION_STATE_TONE, directionStateName, type Direction, type DirectionTaskState } from "../lib/direction-tree";
 import { cx } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
 
-/** "在做 N · 等你 N" from the hub's counts as the sidebar's 常驻 rows say it (only the parts above zero, nothing when both
- *  are zero); "等你 N" in the needs-you tone. A direction with any task running carries the same working arc as a
- *  conversation running its own turn (#6230): one spinning mark, so "something under this row is running" reads the same
- *  whether the leader conversation itself thinks or its Agents work. */
-export const DirectionCountsText = memo(function DirectionCountsText({ counts, className }: { counts: DirectionCounts; className?: string }) {
-  const label = countsLabel(counts, t);
-  if (!label) return null;
-  const working = counts.working > 0 ? t("sidebar.leader_working", { count: counts.working }) : "";
-  const needsYou = counts.needs_you > 0 ? t("sidebar.leader_needs_you", { count: counts.needs_you }) : "";
+/** A direction's end, as its sidebar 常驻 row's (#6626): the working arc while anything under it runs (the hub's
+ *  `running`: an Agent of its tasks at work, the one rule on every client), then "等你 N" in the needs-you tone; nothing
+ *  when neither. The arc is the only way working is said: no "在做 N" beside it (one meaning, one expression); the
+ *  tasks listed under the direction each say their state. */
+export const DirectionCountsText = memo(function DirectionCountsText({ direction, className }: { direction: Pick<Direction, "counts" | "running">; className?: string }) {
+  const needsYou = countsLabel(direction.counts, t);
+  if (!direction.running && !needsYou) return null;
   return (
-    <span title={label} data-direction-counts className={cx("flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-ink-3 tabular-nums", className)}>
-      <span className="sr-only">{label}</span>
-      <span aria-hidden className="flex items-center gap-1">
-        {working && <StatusMark state="working" size="sm" label={false} />}
-        {working}
-        {working && needsYou && " · "}
-        {needsYou && <span className="font-semibold text-attention">{needsYou}</span>}
-      </span>
+    <span title={needsYou || undefined} data-direction-counts data-running={direction.running || undefined} className={cx("flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-ink-3 tabular-nums", className)}>
+      {direction.running && <StatusMark state="working" size="sm" />}
+      {needsYou && <span className="font-semibold text-attention">{needsYou}</span>}
     </span>
   );
 });
