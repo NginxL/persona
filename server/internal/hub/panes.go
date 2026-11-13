@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -125,6 +126,11 @@ func (h *Hub) nodeAction(a nodeAction) http.HandlerFunc {
 				params[k] = true
 			}
 		}
+		// What the node writes for people (its worktree refusals) is in the request's language: the client's locale
+		// when it sent one, else its Accept-Language, else the user's (locale.go).
+		if slices.Contains(a.optional, "locale") && params["locale"] == nil {
+			params["locale"] = string(h.requestLang(r))
+		}
 		for _, k := range a.required {
 			if params[k] == nil {
 				writeErr(w, http.StatusBadRequest, errors.New(k+" is required"))
@@ -189,7 +195,7 @@ var nodeActions = map[string]nodeAction{
 	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}},
 	// #6115 a new agent in a worktree of its own: made from its folder, told apart, removed when it is closed and the
 	// user says so (the node refuses uncommitted work and unmerged branches unless force, which the user confirms).
-	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind"}},
+	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind", "locale"}},
 	"worktree/status": {method: "worktree.status", timeout: 30 * time.Second, required: []string{"cwd"}, optional: []string{"kind"}},
 	"worktree/remove": {method: "worktree.remove", timeout: 90 * time.Second, required: []string{"path"}, optional: []string{"kind"}, flags: []string{"delete_branch", "force"}},
 }

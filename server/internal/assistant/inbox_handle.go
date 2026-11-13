@@ -22,13 +22,14 @@ type inboxNote struct {
 	Name    string `json:"name"`
 	Text    string `json:"text,omitempty"`
 	Edited  bool   `json:"edited,omitempty"`
+	Failed  bool   `json:"failed,omitempty"`
 	Context string `json:"context,omitempty"`
 	Machine string `json:"machine,omitempty"`
 	Session string `json:"session,omitempty"`
 }
 
 func renderNote(n inboxNote, owner string) string {
-	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited,
+	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited, Failed: n.Failed,
 		Context: n.Context, Machine: n.Machine, Session: n.Session})
 }
 

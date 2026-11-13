@@ -827,26 +827,40 @@ yet"); Android puts them first in the composer's one @ list under "Message a tas
 under "Mention a file or session", the typed word narrowing all of them, so the list takes no more room above the
 keyboard than before.
 
-New chat's @ (iOS `StarterComposer` with `MentionSource(machine:)`, Android `starterMentionSource`; #4339 C16): a
-conversation that doesn't exist yet has no tasks, files or folder, so the list offers the agents' sessions on every
-computer (newest first, at most eight, Persona's own conversations left out) and, once a typed word is an absolute or `~`
-path with a slash, that folder alone, read from the assistant's computer: folders first, then files, names that start with
-the word first, hidden ones only after a typed dot. A picked folder stays typed with its slash and the list browses it;
-a picked file types `@path `; a picked session waits over the composer as a chat's quote card and goes in front of the
-first message as a `<persona-context>` tag. While the list is open, what needs the user over the composer steps aside
-(iOS `MentionMenuOpen`): above the keyboard the lines, the list and the composer don't fit together. They fade and fold
-away as the list comes in and back as it goes, in the state motion (`Tokens.Motion.State`; iOS `withAnimation(Theme.Motion.standard)`;
-Android `NeedsStepAside`, the list growing in with the same spring on Glass), and the dock keeps the page's own backdrop
-meanwhile, so the things to ask fade out above it instead of being cut at the composer. Same rows and words
-as a chat's @ list ("Reading folder…", "Nothing matches in this folder" while browsing); every style draws it in its own
-list, since it is behaviour.
+New chat's @ (iOS `StarterComposer` with `MentionSource(machine:)`, Android `starterMentionSource`; #4339 C16, workspaces #2599): a
+conversation that doesn't exist yet has no tasks, files or folder, so on iPhone and iPad the list offers Persona's workspaces,
+then the agents' sessions on every computer (newest first, at most eight, Persona's own conversations left out) and, once a
+typed word is an absolute or `~` path with a slash, that folder alone, read from the assistant's computer: folders first, then
+files, names that start with the word first, hidden ones only after a typed dot. A picked folder stays typed with its slash and
+the list browses it; a picked file types `@path `; a picked workspace or session waits over the composer as a context card and
+goes in front of the first message as a `<persona-context>` tag. While the list is open, what needs the user over the composer
+steps aside (iOS `MentionMenuOpen`): above the keyboard the lines, the list and the composer don't fit together. They fade and
+fold away as the list comes in and back as it goes, in the state motion (`Tokens.Motion.State`; iOS
+`withAnimation(Theme.Motion.standard)`; Android `NeedsStepAside`, the list growing in with the same spring on Glass), and the
+dock keeps the page's own backdrop meanwhile, so the things to ask fade out above it instead of being cut at the composer.
+Same rows and words as a chat's @ list ("Reading folder…", "Nothing matches in this folder" while browsing); every style draws
+it in its own list, since it is behaviour.
 
 A chat's @ list (iOS `ComposerMentionMenu` with `MentionSource(machine:cwd:files:)`, Android `mentionRows`; #4339 C16) reads
 its session's computer: after the files its tools used it lists the session folder's own entries (folders first, then files,
 hidden ones only after a typed dot, at most twelve, none a used file already is; "Folder" for a folder and "Session folder"
-for a file beside the name), then the other sessions; a word with a slash lists that folder alone, relative to the session's,
-and a picked folder keeps the list browsing it. The + menu has the same list's first step, "Mention a file or session", in
-every composer that has an @ list: it types the `@` at the caret, as the @ button beside + does.
+for a file beside the name), then Persona's workspaces on iPhone and iPad, then the other sessions; a word with a slash lists
+that folder alone, relative to the session's, and a picked folder keeps the list browsing it. The + menu has the same list's
+first step, "Mention a file or session", in every composer that has an @ list: it types the `@` at the caret, as the @ button
+beside + does.
+
+Workspace rows (#2599) are the existing resource row with the folder mark, title and a second line computer · shortened folder
+(· branch), at most eight after the folder's entries and before sessions. They match title, raw folder, computer or branch,
+case-insensitively; title prefixes come first, then available before unavailable, stable in the hub's order. The first row for
+one computer and folder wins (trailing `/` ignored), and folderless rows are omitted. Unavailable rows stay pickable. Persona's
+conversations and the ordinary new conversation read `GET /api/v1/workspaces` once per opening; Agents, Health, Mac and
+visionOS don't offer them. The active hub link holds only its last good in-memory snapshot: later openings show it before
+the request answers, a different answer replaces it, and an old hub or unavailable manager keeps it. A hub that has never
+answered has none, so only that first opening can shift when the response arrives; there is no prefetch. Removing the hub
+group drops the link and its snapshot. A pick takes the @word out
+and adds a removable Workspace context using the existing `QuoteBar`; send writes `<persona-context kind="workspace"
+machine="…" cwd="…" branch="…">` before the message (`branch` when known), which the manager expands as for the web. No new
+component, token, style or setting is introduced. The separate legacy BeautifulUI `PromptComposer` @ menu is unchanged.
 
 Agent header permission mode (#3719, `HeaderModeButton` in `apple/Persona/Views/Chat/SessionModes.swift`): an icon-only
 capsule at the trailing end of the open Agents header's second row, under `⋯`, as tall as the tabs, with a 44 pt target that

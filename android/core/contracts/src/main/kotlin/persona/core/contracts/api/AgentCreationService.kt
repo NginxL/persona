@@ -33,16 +33,23 @@ interface AgentCreationService {
 
     /**
      * What [cwd] is in Git terms (`POST …/worktree/status`, docs/protocol/protocol.md): null when the computer can't say
-     * (an older node or hub, offline, an error), and then New Agent offers no worktree.
+     * (an older node or hub, offline, an error), and then New Agent offers no worktree. [kind]: the engine the agent
+     * opens in or ran in, which makes its worktree (`Session.worktreeKind`); null, the computer's default.
      */
-    suspend fun worktreeStatus(machineId: String, cwd: String): WorktreeStatus? = null
+    suspend fun worktreeStatus(machineId: String, cwd: String, kind: String? = null): WorktreeStatus? = null
 
-    /** A worktree for a new agent from the repository [cwd] is in (`…/worktree/add`); an empty [branch] is the node's pick. */
-    suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String): WorktreeAdded =
+    /**
+     * A worktree for a new agent from the repository [cwd] is in (`…/worktree/add`); an empty [branch] is the node's pick,
+     * [kind] the engine the agent opens in, which makes it (null: the computer's default).
+     */
+    suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String, kind: String? = null): WorktreeAdded =
         throw UnsupportedOperationException("Worktrees unavailable")
 
-    /** Removes a worktree Persona made (`…/worktree/remove`); [force] only after the user confirmed what it loses. */
-    suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean): WorktreeRemoved =
+    /**
+     * Removes a worktree Persona made (`…/worktree/remove`); [force] only after the user confirmed what it loses, by the
+     * engine the agent ran in ([kind]).
+     */
+    suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean, kind: String? = null): WorktreeRemoved =
         throw UnsupportedOperationException("Worktrees unavailable")
 }
 

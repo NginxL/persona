@@ -6,13 +6,14 @@
 // Everything Paseo-specific comes in through deps.paseo, so the tests drive it with a fake daemon.
 
 import { createHash, randomUUID } from 'node:crypto'
-import { realpathSync, statSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntime, light, page, RpcError, snippet } from '../../runtime-sdk/index.js'
 import {
-  CHECK_LABEL, EFFORTS, RUNTIME, SESSION_LABEL, agentRoot, agentRow, appAgent, archivedUnderOwnId, claudeId, codexThreadOf, defaultProvider,
-  formModel, interactionOf, launchersOf, linkedWorktree, parentAgentId, paseoMode, projectSpaces, promptKey, providerRoots, responseOf,
-  rewindOf, sessionIdOf, slotNameOf, spaceIdOf, strayRecord, timelineItems, transcriptOf,
+  CHECK_LABEL, EFFORTS, RUNTIME, SESSION_LABEL, WORKSPACE_ID, agentRoot, agentRow, appAgent, archivedUnderOwnId, claudeId, codexThreadOf,
+  defaultProvider, formModel, interactionOf, launchersOf, linkedWorktree, parentAgentId, paseoCheckouts, paseoMode, projectSpaces, promptKey,
+  providerRoots, responseOf, rewindOf, sessionIdOf, slotNameOf, spaceIdOf, strayRecord, timelineItems, transcriptOf, workspaceRow,
 } from './map.js'
 import { personaMcpServers } from './mcp.js'
 import { PaseoClient } from './paseo.js'
@@ -43,6 +44,10 @@ const SWEEP_EVERY = 120_000 // ms
 export const TIMELINES_MAX = 16
 const EVENTS = ['agent_permission_request', 'agent_permission_resolved', 'providers_snapshot_update', 'status.daemon_config_changed']
 const TIMEOUT = Symbol('timeout')
+// workspace.create waits for git worktree add (Paseo gives it 2 minutes), not for the workspace's setup, within the node's
+// 140 s for the call.
+const CREATE_WAIT = 135_000 // ms
+const WORKSPACES_DELAY = 200 // ms: workspace updates come in bursts (each agent's turn moves its workspace's status)
 // What Paseo 0.13 says when an agent config has MCP servers and its provider takes none (agent-manager requireExternalMcpSupport).
 const MCP_UNSUPPORTED = /does not support MCP servers/i
 // What Paseo says when a provider cannot preapprove MCP tools (provider-options ToolPolicyUnsupportedError, agent-manager).
@@ -95,6 +100,12 @@ export function createPaseoBridge(deps = {}, options = {}) {
   const rewinding = new Set() // agent ids a rewind is under way for
   const timelines = new Map() // agent id → { key, at, tl, history } (the last whole read), the least recently read first
   const canonical = new Map() // path → the path with symbolic links resolved (canon)
+  // Paseo's workspaces (its directory of them, followed like its agents): id → WorkspaceDescriptorPayload. Those with
+  // no agents too; not background ones, which Paseo shows nobody unless asked.
+  const workspaces = new Map()
+  let workspacesRead = false // read since the bridge connected to this Paseo: before that, an unknown id is no news
+  let workspacesTimer
+  let workspacesSaid // the rows told to the node last (JSON), so an update that changes nothing it lists says nothing
   let runtimeOn = false
   let awayTimer
   let started = false
@@ -123,6 +134,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
   }
   const rt = createRuntime({
     listSessions, unlistedTranscripts, items, cursor, item, send, interrupt, start, rename, close, modes, rewind, check, models, seen, watchChanged,
+    createWorkspace, prepareWorkspace,
   }, meta)
 
   // ---- Paseo's state ----
@@ -193,6 +205,8 @@ export function createPaseoBridge(deps = {}, options = {}) {
     if (agent.status === 'closed' && prev && prev.agent.status !== 'closed') closedSoon(agent.id)
     if (!transcriptOf(agent, roots) && agent.status !== 'closed' && prev?.agent.updatedAt !== agent.updatedAt) lastTextSoon(agent.id)
     for (const [sid, w] of watches) if (w.agentId === agent.id) scheduleRefresh(sid)
+    // Its placement names a space, which may file a worktree's own project record under its repository's (spaces).
+    if (!prev || prev.project?.projectKey !== agents.get(agent.id)?.project?.projectKey) scheduleWorkspaces()
   }
 
   /**
@@ -208,6 +222,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     lastTexts.delete(agentId)
     for (const [id, x] of asks) if (x.agentId === agentId) x.abort()
     reindex()
+    scheduleWorkspaces()
   }
 
   /**
@@ -426,6 +441,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
       providersChanged()
       void settleProviders()
       await loadAgents()
+      // Not needed to list and drive its agents: a Paseo that cannot say has its workspaces unlisted, as before.
+      workspacesRead = false
+      await loadWorkspaces().catch((err) => log(`paseo: reading its workspaces: ${err.message}`))
     } catch (err) {
       log(`paseo: reading its state: ${err.message}; connecting again`)
       paseo.ws?.close(4000, 'setup failed')
@@ -519,6 +537,89 @@ export function createPaseoBridge(deps = {}, options = {}) {
       cursor = p.pageInfo.nextCursor
     }
     return found
+  }
+
+  /**
+   * Paseo's workspaces, followed as its agents are (one subscription, the first page with it, the rest read after): its
+   * checkouts, worktrees and folders, agents in them or not (docs/integrations/paseo.md "Spaces and workspaces").
+   */
+  async function loadWorkspaces() {
+    const seen = new Set()
+    const take = (list) => {
+      for (const d of list ?? []) if (keepWorkspace(d)) seen.add(d.id)
+    }
+    const first = await paseo.subscribe('fetch_workspaces_request', { subscribe: {}, page: { limit: pageSize } }, onWorkspaceUpdate, { timeoutMs: 60_000 })
+    take(first?.entries)
+    let info = first?.pageInfo
+    for (let i = 1; info?.hasMore && info.nextCursor && i < PAGES_MAX; i++) {
+      const p = await paseo.request('fetch_workspaces_request', { page: { limit: pageSize, cursor: info.nextCursor } }, { timeoutMs: 60_000 })
+      take(p?.entries)
+      info = p?.pageInfo
+    }
+    // Gone while Paseo was away.
+    if (!info?.hasMore) for (const id of [...workspaces.keys()]) if (!seen.has(id)) workspaces.delete(id)
+    workspacesRead = true
+    scheduleWorkspaces(0)
+  }
+
+  /** Keep a workspace Paseo lists; one being archived or in the background is none of the list's. */
+  function keepWorkspace(d) {
+    if (typeof d?.id !== 'string' || !d.id) return false
+    if (d.background || d.archivingAt) {
+      workspaces.delete(d.id)
+      return false
+    }
+    workspaces.set(d.id, d)
+    return true
+  }
+
+  function onWorkspaceUpdate(inner) {
+    const p = inner.payload
+    if (inner.type !== 'workspace_update' || !p) return
+    if (p.kind === 'upsert' && p.workspace) keepWorkspace(p.workspace)
+    else if (p.kind === 'remove' && p.id) workspaces.delete(p.id)
+    scheduleWorkspaces()
+  }
+
+  function scheduleWorkspaces(delay = WORKSPACES_DELAY) {
+    if (workspacesTimer) {
+      if (delay > 0) return
+      clearTimeout(workspacesTimer)
+    }
+    workspacesTimer = setTimeout(() => {
+      workspacesTimer = undefined
+      pushWorkspaces()
+    }, delay)
+    workspacesTimer.unref?.()
+  }
+
+  /**
+   * The node's list of Paseo's workspaces (runtime.workspaces): told when what it lists changed, not at every status
+   * Paseo sends (a workspace's status moves with each of its agents' turns).
+   */
+  function pushWorkspaces() {
+    if (!workspacesRead) return
+    const rows = workspaceRows()
+    const said = JSON.stringify(rows)
+    if (said === workspacesSaid) return
+    workspacesSaid = said
+    rt.workspacesChanged(rows)
+  }
+
+  /** Every workspace as a runtime.workspaces row, in the space its agents' rows name. */
+  function workspaceRows() {
+    const s = spaces()
+    const rows = []
+    for (const d of workspaces.values()) {
+      const row = rowOfWorkspace(d, s)
+      if (row) rows.push(row)
+    }
+    return rows.sort((a, b) => (a.workspace_id < b.workspace_id ? -1 : a.workspace_id > b.workspace_id ? 1 : 0))
+  }
+
+  function rowOfWorkspace(d, s = spaces()) {
+    const spaceId = s.idOf(d.project)
+    return workspaceRow(d, { spaceId, spaceName: spaceId ? s.names.get(spaceId) : undefined, canon })
   }
 
   function onAgentUpdate(inner) {
@@ -1195,8 +1296,11 @@ export function createPaseoBridge(deps = {}, options = {}) {
     return c
   }
 
-  /** The project spaces of the agents Persona knows (map.js projectSpaces). */
-  const spaces = () => projectSpaces(agents.values(), canon)
+  /**
+   * The project spaces of the agents and workspaces Persona knows (map.js projectSpaces): a repository Paseo has a
+   * workspace of, with no agents, still takes its worktrees' own project records in.
+   */
+  const spaces = () => projectSpaces([...agents.values(), ...[...workspaces.values()].map((d) => ({ project: d.project }))], canon)
 
   function samePath(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false
@@ -1204,39 +1308,131 @@ export function createPaseoBridge(deps = {}, options = {}) {
   }
 
   /**
-   * The Paseo workspace a new or continued agent goes into: the one the form names when Paseo has it (a session's
-   * space was its workspace before #2784). Else the worktree workspace at its directory: handed a worktree's
-   * directory alone, Paseo files it under a project record of its own (#2784), while Paseo's own lookup by path takes
-   * the worktree workspace there. A checkout or a plain folder gets a new workspace of its project, as in Paseo.
-   * Several workspaces at that worktree: the one under its repository's project record, then the latest.
+   * The Paseo workspace a new or continued agent goes into: the one the form names when Paseo has it, agents in it or
+   * not (a session's space was its workspace before #2784). One named that Paseo no longer has is refused when the
+   * choice was the user's (strict: a stale catalog row), rather than the agent going elsewhere; a space (Paseo's
+   * project) or a folder names no workspace. Else the worktree workspace at its directory: handed a worktree's directory
+   * alone, Paseo files it under a project record of its own (#2784), while Paseo's own lookup by path takes the worktree
+   * workspace there (a worktree Persona had it make, #6115, too). A checkout or a plain folder gets a new workspace of
+   * its project, as in Paseo. Several workspaces at that worktree: the one under its repository's project record, then
+   * the latest.
    */
-  function workspaceFor(named, cwd) {
-    if (typeof named === 'string' && named && [...agents.values()].some(({ agent }) => agent.workspaceId === named)) return named
+  function workspaceFor(named, cwd, { strict = false } = {}) {
+    if (typeof named === 'string' && named) {
+      if (workspaces.has(named) || [...agents.values()].some(({ agent }) => agent.workspaceId === named)) return named
+      if (strict && workspacesRead && WORKSPACE_ID.test(named)) {
+        throw new RpcError(`Paseo no longer has this workspace (${named}): refresh the list and choose again. Nothing was started.`, 'workspace_missing')
+      }
+    }
     let best
+    const consider = (ws, rank) => {
+      if (!best || rank[0] > best.rank[0] || (rank[0] === best.rank[0] && rank[1] > best.rank[1])) best = { ws, rank }
+    }
     for (const { agent, project } of agents.values()) {
       const ws = agent.workspaceId
       if (typeof ws !== 'string' || !ws || agent.archivedAt || !linkedWorktree(project)) continue
       const c = project.checkout
       if (!samePath(c.worktreeRoot ?? c.cwd, cwd) && !samePath(agent.cwd, cwd)) continue
-      const rank = [strayRecord(project) ? 0 : 1, Date.parse(agent.updatedAt) || 0]
-      if (!best || rank[0] > best.rank[0] || (rank[0] === best.rank[0] && rank[1] > best.rank[1])) best = { ws, rank }
+      consider(ws, [strayRecord(project) ? 0 : 1, Date.parse(agent.updatedAt) || 0])
+    }
+    for (const d of workspaces.values()) {
+      // A worktree by its placement; one Paseo just made has none yet, only its kind.
+      if (!linkedWorktree(d.project) && !(d.workspaceKind === 'worktree' && !d.project)) continue
+      const c = d.project?.checkout
+      if (!samePath(d.workspaceDirectory, cwd) && !(c && samePath(c.worktreeRoot ?? c.cwd, cwd))) continue
+      consider(d.id, [strayRecord(d.project) ? 0 : 1, Date.parse(d.activityAt ?? d.createdAt) || 0])
     }
     return best?.ws
   }
 
   /**
-   * Where a session still being created is listed: its workspace's project and name; a new workspace, the project of
-   * an agent at the same directory; else the folder's own space.
+   * Where a session still being created is listed: its workspace's project and name (the workspace's own, agents in it
+   * or not); a new workspace, the project of an agent at the same directory; else the folder's own space.
    */
   function placeOf(workspaceId, cwd) {
+    const s = spaces()
+    const d = workspaceId ? workspaces.get(workspaceId) : undefined
+    const at = d?.project && s.idOf(d.project)
+    if (at) return { space_id: at, space_name: s.names.get(at) ?? d.project.projectName, slot_name: slotNameOf(d.project, cwd), workspace_id: workspaceId }
     const known = [...agents.values()]
     const a = (workspaceId && known.find(({ agent }) => agent.workspaceId === workspaceId)) ||
       known.find(({ agent, project }) => spaceIdOf(project) && (samePath(agent.cwd, cwd) || samePath(project.checkout?.cwd, cwd)))
-    const s = spaces()
     const space = s.idOf(a?.project)
     if (!space) return { space_id: cwd, space_name: basename(cwd) }
     const place = { space_id: space, space_name: s.names.get(space) ?? a.project.projectName }
-    return workspaceId ? { ...place, slot_name: slotNameOf(a.project, cwd) } : place
+    return workspaceId ? { ...place, slot_name: slotNameOf(a.project, cwd), workspace_id: workspaceId } : place
+  }
+
+  // ---- workspaces: worktrees made by Paseo (workspace.prepare, workspace.create) ----
+
+  /**
+   * Where Paseo puts the worktrees of a repository (workspace.prepare; repo_root its main checkout, physical): beside
+   * one it made of that repository already, Paseo's own word; else where its worktree code puts them (map.js
+   * paseoCheckouts). For the dialog to show: the folder Paseo reports once it made one is the worktree's.
+   */
+  async function prepareWorkspace(params) {
+    const root = canon(String(params.repo_root || params.cwd || ''))
+    if (!isAbsolute(root)) throw new RpcError('workspace.prepare: the repository is required', 'bad_request')
+    for (const d of workspaces.values()) {
+      const c = d.project?.checkout
+      const tree = c?.worktreeRoot ?? d.workspaceDirectory
+      if (d.worktreeSlug && c?.mainRepoRoot && tree && canon(c.mainRepoRoot) === root) return { checkouts: dirname(canon(tree)) }
+    }
+    return { checkouts: paseoCheckouts(worktreesBase(), root) }
+  }
+
+  /** Paseo's worktrees root: its config's worktrees.root, else <Paseo home>/worktrees (its config.js resolveWorktreesRoot). */
+  function worktreesBase() {
+    const home = options.home ?? paseo.home
+    if (typeof home !== 'string' || !home) throw new RpcError('Paseo home unknown', 'unavailable')
+    let root
+    try {
+      root = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))?.worktrees?.root
+    } catch {}
+    if (typeof root === 'string' && root.trim()) {
+      let r = root.trim()
+      if (r === '~' || r.startsWith('~/')) r = join(homedir(), r.slice(1))
+      return isAbsolute(r) ? resolve(r) : resolve(home, r)
+    }
+    return join(home, 'worktrees')
+  }
+
+  /**
+   * A worktree Paseo makes as a workspace of its own (workspace.create): from the workspace named (its folder), else the
+   * folder given; an existing branch checked out (create_branch false), else a new one cut from base; its folder named
+   * name ("" Paseo's choice: from the branch, or a generated name with no branch either). No agent goes with it: Paseo
+   * renames a new branch after a first agent's prompt, and the session Persona starts in it comes after. Paseo answers
+   * once git made the checkout; the workspace's own setup runs after.
+   */
+  async function createWorkspace(params) {
+    if (!paseo.connected) throw new RpcError('Paseo is not connected (not running, or restarting). Nothing was created.', 'unavailable')
+    const named = typeof params.workspace_id === 'string' && params.workspace_id ? params.workspace_id : undefined
+    const from = named ? workspaces.get(named) : undefined
+    if (named && !from) throw new RpcError(`Paseo no longer has this workspace (${named}): refresh the list and choose again. Nothing was created.`, 'workspace_missing')
+    const cwd = from?.workspaceDirectory || (typeof params.cwd === 'string' ? params.cwd : '')
+    if (!cwd || !isDir(cwd)) throw new RpcError(`No such folder: ${cwd || '(none)'}`, 'bad_request')
+    const branch = typeof params.branch === 'string' ? params.branch.trim() : ''
+    const source = { kind: 'worktree', cwd }
+    if (params.create_branch === false) {
+      if (!branch) throw new RpcError('workspace.create: the branch to check out is required', 'bad_request')
+      Object.assign(source, { action: 'checkout', refName: branch })
+    } else {
+      source.action = 'branch-off'
+      if (typeof params.base === 'string' && params.base.trim()) source.refName = params.base.trim()
+      if (branch) source.branchName = branch
+    }
+    if (typeof params.name === 'string' && params.name.trim()) source.worktreeSlug = params.name.trim()
+    const req = { source }
+    if (typeof params.key === 'string' && params.key) req.idempotencyKey = params.key.slice(0, 512)
+    const res = await paseo.request('workspace.create.request', req, { timeoutMs: CREATE_WAIT })
+    const d = res?.workspace
+    if (!d?.id) throw new RpcError(`Paseo did not create the worktree: ${res?.error || 'no reason given'}`, res?.errorCode || 'create_failed')
+    // Its answer has no placement yet; the update Paseo sends of it (or sent already) is kept over it.
+    if (!workspaces.get(d.id)?.project) keepWorkspace(d)
+    scheduleWorkspaces(0)
+    const row = rowOfWorkspace(workspaces.get(d.id) ?? d)
+    if (!row) throw new RpcError('Paseo did not report the created worktree', 'create_failed')
+    return { workspace: row }
   }
 
   /**
@@ -1277,7 +1473,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
       if (!opts.length || opts.includes(params.effort)) config.thinkingOptionId = params.effort
     }
     const prompt = typeof params.prompt === 'string' ? params.prompt : ''
-    const workspaceId = workspaceFor(params.workspace_id, cwd)
+    const workspaceId = workspaceFor(params.workspace_id, cwd, { strict: true })
     // The Persona session is fixed for this start: the row handed to the node while Paseo is still creating, the label,
     // the tools' PERSONA_SESSION_ID and the listed session are all it, whichever Paseo agent ends up holding it.
     let agentId = randomUUID()
@@ -1583,6 +1779,8 @@ export function createPaseoBridge(deps = {}, options = {}) {
       closedTimers.clear()
       for (const t of lastTextTimers.values()) clearTimeout(t)
       lastTextTimers.clear()
+      clearTimeout(workspacesTimer)
+      workspacesTimer = undefined
       for (const a of asks.values()) a.abort()
       rt.stop()
       runtimeOn = false
@@ -1591,7 +1789,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     runtime: rt,
     paseo,
     /** Tests: the bridge's view. */
-    state: { agents, bySession, archived, watches, asks, handedBack, echoes, timelines, get launchers() { return launchers } },
+    state: { agents, bySession, archived, watches, asks, handedBack, echoes, timelines, workspaces, get launchers() { return launchers } },
   }
 }
 

@@ -225,12 +225,13 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     const dir = cwd.trim();
     if (!open || !mid || !dir || workspace) return;
     const c = new AbortController();
-    const timer = setTimeout(() => void worktreeStatus(mid, dir, c.signal).then((st) => { if (!c.signal.aborted) setRepo(st); }), 400);
+    // the engine it opens in says where its worktree goes (Paseo makes its own)
+    const timer = setTimeout(() => void worktreeStatus(mid, dir, c.signal, host || undefined).then((st) => { if (!c.signal.aborted) setRepo(st); }), 400);
     return () => {
       clearTimeout(timer);
       c.abort();
     };
-  }, [open, mid, cwd, workspace, manager, credential]);
+  }, [open, mid, cwd, workspace, manager, credential, host]);
   const worktreeOffered = !workspace && Boolean(repo?.path);
   useEffect(() => {
     if (!open) return;
@@ -555,11 +556,11 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
       setForwards([]);
       dismiss();
     };
-    // in a worktree of its own (#6115): made first; a failure says why here, and nothing starts
+    // in a worktree of its own (#6115): made first, by the engine it opens in; a failure says why here, and nothing starts
     if (!workspace && inWorktree && worktreeOffered && !desktopScratch) {
       setWtBusy(true);
       setWtError("");
-      void addAgentWorktree(mid, cwd.trim(), agentNameHint(prompt, cwd), wtBranch, { signal: controller.signal, token, tokenOwner: owner })
+      void addAgentWorktree(mid, cwd.trim(), agentNameHint(prompt, cwd), wtBranch, { signal: controller.signal, token, tokenOwner: owner }, opensIn)
         .then(
           (wt) => launch(wt.path),
           (e) => {

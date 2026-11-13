@@ -33,8 +33,9 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
 
     var host: String { URL(string: url)?.host ?? url }
 
-    /// The extra attributes in the order they are written: a forward's metadata first, then any others by name.
-    static let extraOrder = ["role", "author", "chat", "project", "machine", "time"]
+    /// The extra attributes in the order they are written: a forward's metadata and a workspace's location first, then
+    /// any others by name.
+    static let extraOrder = ["role", "author", "chat", "project", "machine", "cwd", "branch", "time"]
 
     var xml: String {
         func esc(_ s: String) -> String {
@@ -105,6 +106,7 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
         case "instructions": Theme.Icon.info
         case "doc": Theme.Icon.document
         case "edit": Theme.Icon.ai
+        case "workspace": Theme.Icon.folder
         case ForwardMessage.kind: Theme.Icon.forwardMessage
         default: Theme.Icon.quote
         }

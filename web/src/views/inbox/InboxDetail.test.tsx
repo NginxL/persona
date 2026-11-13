@@ -44,6 +44,13 @@ describe("收件箱：扩展画的详情（inbox_item）", () => {
     expect(html).not.toContain("data-extension-inbox");
     expect(html).toContain("周四下午可以吗");
   });
+  it("offers Same matter as on open and done items without eagerly loading the picker", () => {
+    for (const current of [item({}), item({ done_at: "2026-01-01T00:00:00Z", done_by: "user" })]) {
+      const html = renderToStaticMarkup(<InboxDetail item={current} loaded />);
+      expect(html).toContain('aria-label="是同一件事…"');
+      expect(html).not.toContain("搜索标题和位置");
+    }
+  });
   it("falls back quietly when refused or there is nothing to draw, with why when the extension fails", () => {
     expect(fallbackOf(new ApiError(403, "这一条不是这个扩展的连接器收进来的", { code: "forbidden" }))).toEqual({ quiet: true });
     expect(fallbackOf(new ApiError(404, "收件箱里没有这一条", { code: "not_found" }))).toEqual({ quiet: true });

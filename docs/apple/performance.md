@@ -13,14 +13,14 @@ The full list of current problems the rules found is in "Survey of the current c
 
 | Rule | In one line | Checked by |
 | --- | --- | --- |
-| P1 | No system-framework or disk IO on the main actor; `.task` and `async` do not move work off it | ratchet, review, Time Profiler |
-| P2 | Keychain and UserDefaults: read once, off the hot path; nothing that changes often goes in UserDefaults | ratchet, review |
+| P1 | No system-framework or disk IO on the main actor; `.task` and `async` do not move work off it | isolation lint, review, Time Profiler |
+| P2 | Keychain and UserDefaults: read once, off the hot path; nothing that changes often goes in UserDefaults | isolation lint, ratchet, review |
 | P3 | `@State` initial values are cheap and have no side effects | review, `PerfTrace.body` counts |
 | P4 | `body` only arranges views: no sorting, parsing, formatting or decoding in it | review, SwiftUI instrument |
 | P5 | A view reads only what it draws; split readers into small views | `RenderBudgetTests`, `AllSessionsReadersTests` |
 | P6 | Lists have stable, unique identities and cheap rows | review, `PerfTrace.body` counts |
 | P7 | Coalesce high-frequency updates; no state ↔ layout feedback loops | `PerfCount` push time, review |
-| P8 | Decode and downsample images off the main thread, to the pixel size drawn, and cache them | ratchet, Allocations |
+| P8 | Decode and downsample images off the main thread, to the pixel size drawn, and cache them | isolation lint, Allocations |
 | P9 | Timers, polling and animations stop when nobody sees them | ratchet, `ContinuousMotionTests`, `HoldSourceTests` |
 | P10 | Launch draws the first frame before doing anything else | App Launch template, `XCTApplicationLaunchMetric` |
 | P11 | Caches and retained pages are bounded; extensions decode to the size they show | Allocations, Leaks, memory graph |
@@ -91,8 +91,8 @@ struct Assets: @unchecked Sendable { let list: [PHAsset] }
 Start the work before the user needs it where it is free to do so (prefetch when the composer appears, not when + is
 tapped), and show the panel at once with a placeholder.
 
-**Check.** `scripts/test/test_apple_perf_patterns.py` keeps the count of these calls per file from growing ("Automated
-checks"). In review: every new call to a system framework or the file system names the thread it runs on. Measure with
+**Check.** `scripts/test/isolation-lint.sh` reads where each Photos fetch, file read and directory listing runs and fails
+when a file gains one on the main actor, or one it cannot place ("Isolation lint"). In review: every new call to a system framework or the file system names the thread it runs on. Measure with
 Time Profiler (main thread, "Hide system libraries" off) or `sample <pid>` during the first tap on a cold launch.
 
 ### P2. Keychain and UserDefaults: read once, off the hot path
@@ -114,7 +114,7 @@ unlocking. Every UserDefaults write, for any key, makes every `@AppStorage` view
 **Do.** One reader, `Keychain` (`apple/Shared/Keychain.swift`), called from the code that loads credentials at launch or
 pairing; keep the value in the model and pass it down. For new persisted state pick `StateCache` first.
 
-**Check.** The ratchet counts `SecItemCopyMatching` and `synchronize()`; `AppStorageRatchetTests` keeps the list of files
+**Check.** The isolation lint counts `SecItemCopyMatching` on the main actor and the ratchet counts `synchronize()`; `AppStorageRatchetTests` keeps the list of files
 holding `@AppStorage` from growing. Review: no `@AppStorage` key written more than once per user action; no keychain read reachable from `body`, a row, or a push handler.
 
 ### P3. `@State` initial values are cheap and have no side effects
@@ -288,7 +288,7 @@ decode takes tens of milliseconds. `UIImage(data:)` decodes lazily at first draw
 `Task.detached { decode(data, maxPixel:) }` with a `nonisolated` ImageIO thumbnail, in-flight requests shared, an `NSCache`
 with a byte cost. Photos thumbnails come from `PHCachingImageManager` at the cell's pixel size.
 
-**Check.** The ratchet counts `UIImage(data:)` / `UIImage(contentsOfFile:)` / `NSImage(data:)`. Allocations shows
+**Check.** The isolation lint counts `UIImage(data:)` / `UIImage(contentsOfFile:)` / `NSImage(data:)` on the main actor. Allocations shows
 full-size `CGImage` backing stores.
 
 ### P9. Work stops when nobody sees it
@@ -424,15 +424,102 @@ Report the device or simulator, OS, build settings, data set, number of runs and
 
 | Check | What it does | State |
 | --- | --- | --- |
-| `scripts/test/test_apple_perf_patterns.py` | Ratchet over Swift under `apple/` (tests excluded): Photos fetches, `SecItemCopyMatching`, `Data` / `String(contentsOf:)`, directory listings, `UserDefaults.synchronize()`, `UIImage(data:)` / `(contentsOfFile:)` / `NSImage(data:)`, `TimelineView(.animation…)` without `paused:`, and localization lookups with an explicit locale (`interfaceText(`,
-`String(localized:…, locale:)`; P4). Each file's counts (`scripts/test/apple_perf_baseline.json`) may only go down; a call verified to run off the main thread is marked `// perf-ok: <reason>`. After removing calls, run it with `--update`; `--list` prints every counted call. Runs in `scripts/ci/python-tests.py`. | Implemented |
+| `scripts/test/test_apple_perf_patterns.py` | Ratchet over Swift under `apple/` (tests excluded): `UserDefaults.synchronize()`, `TimelineView(.animation…)` without `paused:`, and localization lookups with an explicit locale (`interfaceText(`, `String(localized:…, locale:)`; P4). Each file's counts (`scripts/test/apple_perf_baseline.json`) may only go down; a call verified to be fine is marked `// perf-ok: <reason>`. After removing calls, run it with `--update`; `--list` prints every counted call. Runs in `scripts/ci/python-tests.py`. | Implemented |
 | `RenderBudgetTests`, `AllSessionsReadersTests`, `AppStorageRatchetTests`, `HoldSourceTests`, `ContinuousMotionTests` | Views per push, who reads `allSessions`, files still holding `@AppStorage`, no self-managed waits, every unending animation stops under Reduce Motion | Existing |
 | `scripts/app/perf-test.sh` | Scroll, navigation and composer hitches per page | Existing, run by hand |
-| Isolation-aware lint | Flag the patterns above only where the compiler says the call is on the main actor (SwiftSyntax or a SourceKit index over the isolation of the enclosing declaration), so the ratchet can become a hard zero | Proposed, #4262 |
+| `scripts/test/isolation-lint.sh` | Isolation lint over Swift under `apple/` (tests excluded): Photos fetches, `SecItemCopyMatching`, `Data` / `String(contentsOf:)`, directory listings and `UIImage(data:)` / `(contentsOfFile:)` / `NSImage(data:)`, each with where it runs: on the main actor, off it, or unknown. Only the first and the last count; each file's counts (`scripts/test/apple_isolation_baseline.json`) may only go down, and no comment clears a call ("Isolation lint"). Runs in `scripts/ci/apple.sh`. | Implemented, #4262 |
 | `scripts/test/test_apple_state_initial_values.py` | P3 ratchet over Swift under `apple/`, including tests: class construction in `@State` with non-trivial `init` bodies or eager stored-property initial values. Each file/type count (`scripts/test/apple_state_initial_values_baseline.json`) may only go down; new entries start at zero. `--update` lowers the baseline; `--list` prints every counted site and its reason. Automatically discovered by `scripts/ci/python-tests.py` in the scripts lane. | Implemented, #4263 |
 | DEBUG main-thread watchdog | A background thread pings the main run loop and logs a `PerfTrace.event` plus a main-thread sample when it is blocked over 100 ms, so UI tests and runtime CLI scenarios catch blocks without Instruments | Implemented, #4264 |
 | MetricKit | Subscribe `MXMetricManager` in TestFlight builds; send hang (`MXHangDiagnostic`), launch and memory payloads into Copy Diagnostics | Proposed, #4265 |
 | Launch metric | A UI test with `XCTApplicationLaunchMetric` in `scripts/app/perf-test.sh` | Proposed, #4266 |
+
+### Isolation lint
+
+`scripts/test/isolation-lint.sh` builds the SwiftSyntax package in `scripts/test/isolation-lint` and runs it over `apple/`.
+It reads the sources and the project, not a build: about two seconds once built. For each blocking call (P1, P2, P8) it
+says where the call runs:
+
+| Verdict | Meaning | Counted |
+| --- | --- | --- |
+| `main` | On the main actor in at least one target that compiles the file | yes |
+| `unknown` | The lint cannot tell: nothing it can read says which thread runs the code | yes |
+| `off` | Off the main actor in every target, with every use the lint found listed in the reason | no |
+
+```sh
+scripts/test/isolation-lint.sh                # the check: PASS, or FAIL with each new call and why
+scripts/test/isolation-lint.sh --list --why   # every call, its verdict and the chain of reasons
+scripts/test/isolation-lint.sh --update       # lower the baseline after moving calls off the main actor
+scripts/test/isolation-lint.sh test           # the lint's own tests
+```
+
+The baseline may only go down: `--update` refuses when a count would rise, and a new call that is `main` or `unknown`
+fails the check. There is no comment that clears a call. To fix a finding, move the work ("Do" under P1), or make the
+code say where it runs in a form the lint reads; `--list --why` shows what it read.
+
+**Where the isolation comes from.** `xcodegen dump` of `apple/project.yml` gives each target's sources and its
+`SWIFT_DEFAULT_ACTOR_ISOLATION` and `SWIFT_APPROACHABLE_CONCURRENCY`; packages under `apple/` have no default isolation
+unless their manifest sets one. A file that several targets compile is on the main actor if any of them puts it there;
+a file no target compiles is `unknown`. Nothing is guessed from a path.
+
+**Declarations it understands** (each checked against the compiler, Swift 6 mode with MainActor as the default):
+
+- Unannotated declarations of a target that defaults to MainActor, explicit `@MainActor` on a type, extension,
+  function, property, initializer or closure, and the SwiftUI and UIKit types that are `@MainActor` in the SDK: `main`.
+- `actor` instance members and other global actors: `off`. An actor's static members, `nonisolated` members and nested
+  types are not on the actor.
+- `@concurrent`: `off`. `nonisolated async`: on its caller's actor where the target turns on
+  `NonisolatedNonsendingByDefault` (the app targets do), `off` where it does not.
+- `nonisolated` functions, properties, initializers, types and extensions run where they are called (below). The
+  modifier on a type covers its members and nested types, but not a plain `extension` of it, which is MainActor again
+  in a target that defaults to it.
+- Types the compiler infers `nonisolated`: one that conforms to `Error`, `LocalizedError` or `CodingKey` on its own
+  declaration (not in an extension), and a subclass of a `nonisolated` class.
+- A member that meets a requirement of a `@MainActor` protocol, or of a protocol declared in a MainActor-by-default
+  target, is `main` even inside a `nonisolated` type, unless the member itself says `nonisolated`.
+- `deinit` is `unknown` (it runs on whichever thread drops the last reference) unless it is `isolated deinit`.
+  A parameter's default value runs where the function is called; `async let` runs in a child task.
+
+**Closures it understands.**
+
+- Leave the actor: `Task.detached`, `Thread.detachNewThread`, `DispatchQueue.global().async` / `asyncAfter`, `async` /
+  `asyncAfter` on a queue the same file creates with `DispatchQueue(label:)`, a task group's `addTask` /
+  `addTaskUnlessCancelled` written inside the `with…TaskGroup` closure, and `{ @concurrent in }`.
+- Come back: `MainActor.run`, `MainActor.assumeIsolated`, `DispatchQueue.main.async` / `asyncAfter` / `sync`,
+  `OperationQueue.main.addOperation`, `RunLoop.main.perform`, `{ @MainActor in }`, and a `@MainActor` closure parameter
+  of a function in the scanned sources.
+- Stay where they are written: `Task { }` and `Task.immediate` (on the main actor in main-actor code, on the global
+  executor in code that is not isolated), closures a collection runs before it returns (`map`, `forEach`, `filter`, …),
+  `withCheckedContinuation` and the other `with…` scopes, `sync` on a queue that is not the main one, and `{ … }()`.
+- An explicit `{ @Sendable in }` is not isolated to the code around it: it runs where it is called.
+- A closure handed to a function of the scanned sources runs where that function calls its parameter; one kept in a
+  property (assigned, or through a struct's memberwise initializer) runs where the property is called.
+
+**Code that is not isolated runs where it is called.** The lint follows calls by name, argument labels and the declared
+type of the value they are made on. One caller on the main actor makes it `main`. It is `off` only when every use found
+is off the main actor and nothing can call it unseen.
+
+**What it does not understand, and what it says instead.** It never answers `off` for these:
+
+| Form | Answer |
+| --- | --- |
+| A closure handed to an SDK function not listed above (`URLSession` completion handlers, `NotificationCenter` observers, `PHImageManager` result handlers, `NSItemProvider` loaders) | `main` when written in main-actor code without `@Sendable`, otherwise `unknown` |
+| A closure literal that only its destination's type makes `@Sendable` | `main` when written in main-actor code (a false positive: write `{ @Sendable in` to say so) |
+| A closure kept in a local variable, or read out of a property and handed on | `unknown` outside main-actor code |
+| `map`, `filter` and the like on a lazy sequence, in a file that imports Combine, or in the sequence of a `for await` | `unknown` outside main-actor code |
+| A call on a value whose type no declaration states (`$0.load()`, a value out of an untyped closure) | may make the callee `unknown`, never `main` or `off` |
+| `@objc` members, `#selector`, overrides of SDK classes, callbacks of SDK delegate protocols | `unknown`: the caller is outside the sources |
+| A function handed on as a value, or a property named in a key path | `unknown` |
+| `nonisolated` code with no call in the sources | `unknown` |
+| A conformance other than `Error`, `LocalizedError` or `CodingKey` that makes the compiler infer `nonisolated` | read as MainActor |
+| `SWIFT_DEFAULT_ACTOR_ISOLATION` set per build configuration | the run stops with an error |
+
+Two limits can hide a call and are worth knowing. An async sequence's `map` or `filter` outside a `for await` header, in
+a file that does not import Combine, is taken for a collection's and so for running in place. A global actor other than
+`MainActor` is taken to run off the main thread. Types are matched by name across targets, which can only add callers.
+
+The lint is syntax-only on purpose: a SourceKit index would give the compiler's own answer for a declaration, but it
+needs a full build of every target for every platform first, and it still does not say where `nonisolated` code is
+called from, which is most of the answers above.
 
 ## Review checklist
 

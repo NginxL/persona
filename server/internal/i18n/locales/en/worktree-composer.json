@@ -44,5 +44,16 @@
   "field_invalid": "Worktree option fields must use the expected JSON types",
   "no_commits": "{path} has no commits yet, so a new worktree cannot be made from it; commit once, or work in the folder itself",
   "close_unsupported": "Closing this workspace is not supported by its engine",
-  "herdr_children": "Close the linked workspaces first, then reopen this workspace’s Close action."
+  "herdr_children": "Close the linked workspaces first, then reopen this workspace’s Close action.",
+  "runtime_away": "{engine} is not connected to Persona (not running, or just starting); open it and try again",
+  "runtime_workspace_missing": "{engine} no longer lists this workspace; refresh and try again",
+  "runtime_folder": "{engine} keeps its worktrees in {path}; only the folder name can be chosen",
+  "runtime_parent": "{engine} places a new worktree in the project of its source workspace; another parent cannot be chosen",
+  "runtime_unconfirmed": "{engine} did not report the created worktree; refresh before retrying",
+  "runtime_prepare": "{engine} did not say where it keeps worktrees; update it and try again",
+  "runtime_source_required": "Choose the workspace or folder to make the worktree from",
+  "runtime_folder_name": "{engine} can’t name a worktree folder “{name}”; use letters a–z or digits",
+  "runtime_folder_taken": "{path} already exists, so {engine} would put the worktree somewhere else; choose another name",
+  "runtime_slow": "{engine} didn’t finish making the worktree in time; refresh to see whether it appeared before retrying",
+  "agent_branch_exhausted": "No branch name is free for the Agent’s worktree: its name and the next 49 are all taken"
 }

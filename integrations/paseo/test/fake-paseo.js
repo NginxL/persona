@@ -19,6 +19,26 @@ export function agentSnapshot(fields = {}) {
 }
 
 /**
+ * A workspace descriptor (messages.ts WorkspaceDescriptorPayload) with what the bridge reads; fields override. A git
+ * one's project placement is its own unless given (project: null for none, as Paseo's answer to workspace.create).
+ */
+export function workspaceDescriptor(fields = {}) {
+  const now = new Date().toISOString()
+  const dir = fields.workspaceDirectory ?? '/tmp'
+  const kind = fields.workspaceKind ?? 'local_checkout'
+  const git = kind !== 'directory'
+  return {
+    id: `wks_${randomUUID().replaceAll('-', '').slice(0, 16)}`, projectId: 'prj_1', projectDisplayName: 'proj', projectRootPath: dir,
+    workspaceDirectory: dir, projectKind: git ? 'git' : 'non_git', workspaceKind: kind, name: fields.name ?? (git ? 'main' : 'notes'),
+    title: null, background: false, archivingAt: null, status: 'done', statusEnteredAt: null, activityAt: null, createdAt: now,
+    scripts: [], gitRuntime: git ? { currentBranch: 'main', isPaseoOwnedWorktree: false, isDirty: false } : null, githubRuntime: null,
+    project: { projectKey: fields.projectId ?? 'prj_1', projectName: fields.projectDisplayName ?? 'proj', workspaceName: fields.name ?? 'main',
+      checkout: git ? { cwd: dir, isGit: true, currentBranch: 'main', worktreeRoot: dir, mainRepoRoot: null, isPaseoOwnedWorktree: false } : { cwd: dir, isGit: false } },
+    ...fields,
+  }
+}
+
+/**
  * What Paseo 0.13.2's AgentSessionConfigSchema (messages.ts McpServerConfigSchema) takes in config.mcpServers: a record of
  * servers, each stdio (command, args, env), http or sse, discriminated by `type` — which stdio servers must carry.
  * Returns what is wrong, or null.
@@ -53,6 +73,8 @@ export async function startFakePaseo(t, o = {}) {
     providers: o.providers ?? {},
     entries: o.entries ?? [],
     agents: new Map((o.agents ?? []).map((e) => [e.agent.id, { agent: e.agent, project: e.project ?? null }])),
+    workspaces: new Map((o.workspaces ?? []).map((d) => [d.id, d])), // id → descriptor (archived ones leave)
+    worktreesRoot: o.worktreesRoot ?? '/tmp/paseo-worktrees', // where workspace.create puts a worktree
     timelines: new Map(), // agent id → { epoch, entries }
     conns: [],
     requests: [], // every session request, in order
@@ -139,6 +161,33 @@ export async function startFakePaseo(t, o = {}) {
           requestId: id, subscriptionId: msg.subscribe ? sub('agents') : null, entries: list.slice(from, from + limit),
           pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
         })
+      }
+      case 'fetch_workspaces_request': {
+        // Background workspaces only when asked (Paseo's matchesFilter); a page at a time.
+        const list = [...f.workspaces.values()].filter((d) => msg.includeBackground || msg.filter?.includeBackground || !d.background)
+        const from = Number(msg.page?.cursor) || 0
+        const limit = msg.page?.limit ?? list.length
+        const more = from + limit < list.length
+        return reply(c, 'fetch_workspaces_response', {
+          requestId: id, subscriptionId: msg.subscribe ? sub('workspaces') : null, entries: list.slice(from, from + limit), emptyProjects: [],
+          pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
+        })
+      }
+      case 'workspace.create.request': {
+        // A worktree: cut from the source's repository (Paseo 0.14 createWorktreeCore), its folder the slug or the branch,
+        // no agent with it here. Its answer has no project placement (describeCreatedWorktreeWorkspace).
+        const s = msg.source
+        if (s?.kind !== 'worktree' || (!s.cwd && !s.projectId)) {
+          return reply(c, 'workspace.create.response', { requestId: id, workspace: null, setupTerminalId: null, error: 'cwd or projectId is required', errorCode: 'source_required' })
+        }
+        const branch = s.action === 'checkout' ? s.refName : (s.branchName ?? s.worktreeSlug ?? 'generated-name')
+        const slug = (s.worktreeSlug ?? branch).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+        const dir = `${f.worktreesRoot}/${slug}`
+        const d = workspaceDescriptor({ workspaceDirectory: dir, projectRootPath: s.cwd, workspaceKind: 'worktree', name: branch, worktreeSlug: slug, project: undefined,
+          gitRuntime: { currentBranch: branch, isPaseoOwnedWorktree: true, isDirty: false } })
+        delete d.project
+        f.upsertWorkspace(d)
+        return reply(c, 'workspace.create.response', { requestId: id, workspace: d, setupTerminalId: null, error: null })
       }
       case 'fetch_agent_request': {
         // An archived agent's record is still there; a deleted one is a null agent, not an error.
@@ -251,6 +300,16 @@ export async function startFakePaseo(t, o = {}) {
       if (s.kind !== kind || !filter(s)) continue
       s.conn.write(JSON.stringify({ type: 'session', message: { ...inner, payload: { ...inner.payload, subscriptionId: sid } } }))
     }
+  }
+  /** A workspace appears or changes (the workspace directory's update; background ones are told nobody here). */
+  f.upsertWorkspace = (d) => {
+    f.workspaces.set(d.id, d)
+    if (!d.background) f.emit('workspaces', { type: 'workspace_update', payload: { kind: 'upsert', workspace: d } })
+  }
+  /** A workspace is archived: it leaves the list. */
+  f.removeWorkspace = (id) => {
+    f.workspaces.delete(id)
+    f.emit('workspaces', { type: 'workspace_update', payload: { kind: 'remove', id } })
   }
   /** An agent appears or changes (the directory's update). */
   f.upsert = (agent, project) => {

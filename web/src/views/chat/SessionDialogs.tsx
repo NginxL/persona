@@ -361,7 +361,7 @@ export function DeleteSessionDialog({ session, machineName, open, onClose }: { s
       if (location.pathname === href({ name: "session", mid: session.machine_id, sid: session.session_id })) navigate({ name: "home" }, true);
       toast(t("chat-sessiondialogs.deleted"), "ok");
       onClose();
-      await runCleanup(session.machine_id, wt, cleanup);
+      await runCleanup(session.machine_id, wt, cleanup, session.host);
     } catch (e) {
       toast(t("chat-sessiondialogs.delete_failed", { error: errorText(e) }), "error");
     } finally {
@@ -410,11 +410,12 @@ function useAgentWorktree(s: Session, open: boolean): WorktreeStatus | null {
     setSt(null);
     if (!open || !s.cwd) return;
     const c = new AbortController();
-    void worktreeStatus(s.machine_id, s.cwd, c.signal).then((x) => {
+    // asked of the engine it ran in, which made it (a Paseo agent's is Paseo's)
+    void worktreeStatus(s.machine_id, s.cwd, c.signal, s.host).then((x) => {
       if (!c.signal.aborted) setSt(x?.ours && x.path ? x : null);
     });
     return () => c.abort();
-  }, [open, s.machine_id, s.cwd]);
+  }, [open, s.machine_id, s.cwd, s.host]);
   return st;
 }
 
@@ -425,12 +426,13 @@ export function cleanupReady(st: WorktreeStatus | null, c: Cleanup): boolean {
   return c.confirmed || (loss.dirty === 0 && loss.unmerged === 0);
 }
 
-/** After the agent is closed or deleted: removes its worktree when asked, forced only for what the user confirmed. */
-async function runCleanup(mid: string, st: WorktreeStatus | null, c: Cleanup) {
+/** After the agent is closed or deleted: removes its worktree when asked, forced only for what the user confirmed, by
+ *  the engine the agent ran in (kind: its host). */
+async function runCleanup(mid: string, st: WorktreeStatus | null, c: Cleanup, kind?: string) {
   if (!st?.path || !c.remove) return;
   const loss = worktreeLoss(st, c.deleteBranch);
   try {
-    const r = await removeAgentWorktree(mid, st.path, { deleteBranch: c.deleteBranch, force: loss.dirty > 0 || loss.unmerged > 0 });
+    const r = await removeAgentWorktree(mid, st.path, { deleteBranch: c.deleteBranch, force: loss.dirty > 0 || loss.unmerged > 0, kind });
     toast(t(r.branch_deleted ? "chat-sessiondialogs.wt_removed_branch" : "chat-sessiondialogs.wt_removed"), "ok");
   } catch (e) {
     toast(t("chat-sessiondialogs.wt_remove_failed", { error: errorText(e) }), "error");
@@ -511,7 +513,7 @@ export function CloseAgentDialog({ open, onClose, onClosed, session, machineName
       onClose();
       if (onClosed) onClosed();
       else if (showsSession(parse(stripBase(location.pathname), location.search), session.machine_id, session.session_id)) navigate({ name: "home" });
-      await runCleanup(session.machine_id, wt, cleanup);
+      await runCleanup(session.machine_id, wt, cleanup, session.host);
     } catch (e) {
       toast(t("chat-chatview.close_failed", { error: errorText(e) }), "error");
     } finally {

@@ -103,7 +103,7 @@ final class ElementPicker {
     /// appears (`PreviewPage`), so it has been read by the time Pick is tapped.
     static let pickFunction = Task.detached(priority: .utility) { () -> String in
         let file = Bundle.main.url(forResource: "preview_pick", withExtension: "js")
-        return file.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "function () { return null; }" // perf-ok: in its own Task.detached
+        return file.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "function () { return null; }"
     }
 
     /// A tap (a touch that did not scroll) picks the element under it, a pointer's click too; the page's own handlers

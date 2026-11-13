@@ -238,7 +238,7 @@ func (s *Service) confirmReply(ctx context.Context, it *InboxItem, g *InboxSugge
 }
 
 // confirmAgent starts the Agent with the confirmed instruction, as the event's conversation would (agent_start from
-// it: the chain links the sub-session, the conversation is told when it is done).
+// it: the chain links the sub-session; when it stops, its last words or failure wake the conversation for the next suggestion).
 func (s *Service) confirmAgent(ctx context.Context, it *InboxItem, g *InboxSuggestion, text string, edited bool) (InboxItem, error) {
 	b := &s.inbox
 	b.mu.Lock()

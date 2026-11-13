@@ -145,8 +145,10 @@ This is a public open-source repository; everyone and every Agent maintains it t
 - **A PR that touches `apple/` names the rules it followed** and the reason for any deviation (its review checklist).
   A performance-sensitive change (chat list, composer, Agents list, push handling, launch, images) attaches before and
   after measurements from an optimized build ("Measuring" there).
-- `scripts/test/test_apple_perf_patterns.py` keeps blocking calls (Photos fetches, keychain and file reads, image decodes,
-  unpaused animation timelines) from growing per file; it never takes a raised baseline.
+- `scripts/test/isolation-lint.sh` reads where each blocking call runs (Photos fetches, keychain and file reads, directory
+  listings, image decodes) and counts it only on the main actor or where it cannot tell; no comment clears one.
+  `scripts/test/test_apple_perf_patterns.py` keeps per-call localization lookups and unpaused animation timelines from
+  growing per file. Neither takes a raised baseline.
 
 ## Development workflow
 

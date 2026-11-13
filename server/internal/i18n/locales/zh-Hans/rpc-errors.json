@@ -63,5 +63,6 @@
   "rewind_unsupported": "此会话不支持所选的回退操作。",
   "rewind_mismatch": "所选消息的位置发生了变化，请刷新对话后再回退。",
   "rewind_nothing": "没有可以回退到的消息。",
-  "rewind_failed": "尚未确认回退结果，请刷新对话检查当前历史。"
+  "rewind_failed": "尚未确认回退结果，请刷新对话检查当前历史。",
+  "preview_no_terminal": "这台电脑没有启用终端引擎，没法在这里运行服务器。在这台电脑的设置里启用一个后再试。"
 }

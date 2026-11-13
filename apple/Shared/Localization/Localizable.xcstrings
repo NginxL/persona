@@ -8200,13 +8200,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld message from another conversation is waiting [Queue Strip]"
+                  "value" : "%1$lld message from another conversation is waiting"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld messages from other conversations are waiting [Queue Strip]"
+                  "value" : "%1$lld messages from other conversations are waiting"
                 }
               }
             }
@@ -8215,13 +8215,13 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "別の会話からのメッセージが %1$lld 件待機中 [Queue Strip]"
+            "value" : "別の会話からのメッセージが %1$lld 件待機中"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "还有 %1$lld 条别的对话在排队 [Queue Strip]"
+            "value" : "还有 %1$lld 条别的对话在排队"
           }
         }
       }
@@ -82239,6 +82239,29 @@
       },
       "extractionState" : "manual"
     },
+    "Mention a file, workspace, or session" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mention a file, workspace, or session"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル、ワークスペース、またはセッションをメンション"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提及文件、工作区或会话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Mentioned" : {
       "localizations" : {
         "en" : {
@@ -91662,6 +91685,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有对得上的文件或会话"
+          }
+        }
+      }
+    },
+    "No matching files, workspaces, or sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No matching files, workspaces, or sessions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一致するファイル、ワークスペース、またはセッションはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有对得上的文件、工作区或会话"
           }
         }
       }
@@ -174483,6 +174529,121 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "个人的 Outlook / Hotmail 和公司的 Microsoft 365 邮箱都可以：跳到 Microsoft 登录并授权 Persona 收发邮件，不需要密码。授权失效时再登录一次即可恢复。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Branch: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Branch: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブランチ：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分支：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Computer: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Computer: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータ：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Folder: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダ：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目录：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Workspace · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workspace · %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ワークスペース · %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作区 · %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Workspace: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workspace: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ワークスペース：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作区：%1$@"
           }
         }
       },

@@ -12,7 +12,7 @@ const fake = vi.hoisted(() => ({
   state: {} as ReturnType<typeof import("../lib/store").getState>,
   initial: {} as ReturnType<typeof import("../lib/store").getState>,
   catalog: {} as WorkspaceCatalogSnapshot,
-  items: [] as MenuItem[], openChild: vi.fn(), refreshCatalog: vi.fn(),
+  items: [] as MenuItem[], node: undefined as { workspaceId?: string } | undefined, openChild: vi.fn(), refreshCatalog: vi.fn(),
 }));
 vi.mock("../lib/store", async (original) => {
   const real = await original<typeof import("../lib/store")>();
@@ -23,7 +23,7 @@ vi.mock("../lib/workspace-catalog", async (original) => ({
   ...await original<typeof import("../lib/workspace-catalog")>(), useWorkspaceCatalog: () => fake.catalog, refreshWorkspaceCatalog: fake.refreshCatalog,
 }));
 vi.mock("../lib/worktree-creation", () => ({ openChildWorktree: fake.openChild }));
-vi.mock("./NodeMenu", () => ({ NodeMenu: ({ before }: { before: MenuItem[] }) => { fake.items = before; return null; } }));
+vi.mock("./NodeMenu", () => ({ NodeMenu: ({ before, node }: { before: MenuItem[]; node: { workspaceId?: string } }) => { fake.items = before; fake.node = node; return null; } }));
 const { SpaceMenu } = await import("./SpaceMenu");
 let space: SpaceLike;
 const item = () => fake.items.find((item) => item.key === "new-worktree")!;
@@ -59,4 +59,9 @@ it("rechecks machine and owner changes before opening a source", async () => {
   await expect(item().onSelect()).rejects.toThrow(); expect(fake.openChild).not.toHaveBeenCalled();
   fake.state.machines[0].online = true; chooseManager("other");
   await expect(item().onSelect()).rejects.toThrow(); expect(fake.openChild).not.toHaveBeenCalled();
+});
+it("gives a runtime's space no terminal host's ID to copy, and a herdr space its workspace's", () => {
+  render(); expect(fake.node?.workspaceId).toBeUndefined();
+  space = { ...space, sessions: [{ machine_id: "computer", session_id: "herdr-session", title: "Agent", status: "idle", space_kind: "herdr", space_id: "w1", workspace_id: "w1", cwd: "/repo/sample" }] };
+  render(); expect(fake.node?.workspaceId).toBe("w1");
 });

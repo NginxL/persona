@@ -1131,9 +1131,17 @@ struct StarterComposer: View {
         return MentionToken.at(text, selection: selection)
     }
 
-    /// A new conversation has no files or folder yet: the other sessions, and what a typed absolute or ~ path lists on the
-    /// assistant's machine (the web's new conversation offers the same).
-    private var mentionSource: MentionSource { MentionSource(machine: machine) }
+    /// A new conversation has no files or folder yet: Persona's workspaces, the other sessions, and what a typed
+    /// absolute or ~ path lists on the assistant's machine. Health and the frozen Mac/visionOS starters keep theirs.
+    private var mentionSource: MentionSource { MentionSource(machine: machine, workspaces: offersWorkspaceMentions) }
+
+    private var offersWorkspaceMentions: Bool {
+        #if os(iOS)
+        return uploadDest == nil
+        #else
+        return false
+        #endif
+    }
 
     private func typeMention() {
         let caret = focused ? PathInsert.range(selection, in: text)?.lowerBound : nil // an unfocused field's is stale
@@ -1173,7 +1181,7 @@ struct StarterComposer: View {
             #endif
             if let token = mentionToken {
                 ComposerMentionMenu(token: token, text: textBinding, selection: $selection, source: mentionSource) { ref in
-                    if !quotes.contains(where: { $0.url == ref.url }) { quotes.append(ref) }
+                    if let updated = ContextRef.addingMention(ref, to: quotes) { quotes = updated }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

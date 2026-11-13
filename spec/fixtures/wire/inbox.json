@@ -50,6 +50,7 @@
             }
           ],
           "version": "d45aefe6809ea192",
+          "now": "confirm_reply",
           "status": "action",
           "handling": {
             "owner": "manager",
@@ -124,6 +125,7 @@
             }
           ],
           "version": "e9cde9aed8019733",
+          "now": "done_user",
           "chain": [
             {
               "id": "c1",

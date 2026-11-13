@@ -173,6 +173,7 @@ type InboxHandlingNote struct {
 	Owner            string
 	Text             string
 	Edited           bool
+	Failed           bool
 	Context          string
 	Machine, Session string
 	Handoff          bool // the note goes to a conversation the event was handed to (wrapped by inbox/handoff_note)
@@ -183,6 +184,7 @@ const (
 	NoteNewMessages  = "inbox/handling/new_messages"
 	NoteSent         = "inbox/handling/sent"
 	NoteAgentStarted = "inbox/handling/agent_started"
+	NoteAgentStopped = "inbox/handling/agent_stopped"
 	NoteHandback     = "inbox/handling/handback"
 	NoteRejected     = "inbox/handling/rejected"
 	NoteInstructed   = "inbox/handling/instructed"

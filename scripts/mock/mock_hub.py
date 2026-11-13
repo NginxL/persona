@@ -343,6 +343,13 @@ def mock_workspaces():
                     result.append({"id": "catalog-" + wid, "machine_id": mid, "source": "orca", "source_id": wid,
                                    "title": branch, "cwd": path, "index": 20, "parent_source_id": WORKSPACE_LINEAGE[mid, wid],
                                    "online": True, "available": True})
+    if os.environ.get("MOCK_PASEO"):
+        for wid, title, path, branch in [(w, t, PASEO_ROOT if tree is None else PASEO_TREES + tree, b)
+                                         for w, t, tree, b in PASEO_WORKSPACES] + PASEO_MADE:
+            result.append({"id": "catalog-" + wid, "machine_id": "server", "source": "paseo", "source_id": wid, "title": title,
+                           "cwd": path, "branch": branch, "workspace_kind": "git", "is_main": path == PASEO_ROOT,
+                           "project_id": "prj_app", "project_name": "app", "project_path": PASEO_ROOT,
+                           "online": True, "available": True, "last_seen": ago()})
     return list({(w["machine_id"], w["source"], w["source_id"]): w for w in result}.values())
 
 
@@ -1162,12 +1169,21 @@ if os.environ.get("MOCK_ROW_EDGES"):
 PASEO_LEAD = "9a5e0000-0000-4000-8000-000000000002"
 PASEO_ASKS = "paseo-9a5e0000-0000-4000-8000-000000000003"
 PASEO_CODEX = "paseo-9a5e0000-0000-4000-8000-000000000004"
+# Paseo's workspaces (#6295), as the node lists them in the catalog: the main checkout, the two worktrees its agents work
+# in and one it made with no agent yet: (workspace id, title, folder under its worktrees root or None, branch).
+PASEO_ROOT, PASEO_TREES = "/home/me/code/app", "/home/me/.paseo/worktrees/1a2b3c4d/"
+PASEO_WORKSPACES = [("wks_5a1e000000000001", "Triage", None, "main"),
+                    ("wks_5a1e000000000002", "Fix the login flow", "brave-fox", "fix/login"),
+                    ("wks_5a1e000000000003", "Speed up the importer", "calm-owl", "perf/importer"),
+                    ("wks_5a1e000000000004", "Try the new parser", "quiet-elk", "spike/parser")]
 if os.environ.get("MOCK_PASEO"):
-    _paseo_root = "/home/me/code/app"
+    _paseo_root = PASEO_ROOT
     def _paseo(sid, title, workspace, tree, branch, status, state, minutes, last, agent="claude", **kw):
-        cwd = _paseo_root if tree is None else "/home/me/.paseo/worktrees/1a2b3c4d/" + tree
+        cwd = _paseo_root if tree is None else PASEO_TREES + tree
+        # each agent names its workspace (workspace_id, #6295); a Paseo workspace is still no terminal slot (slot_name only)
+        wid = next((w for w, t, _, _ in PASEO_WORKSPACES if t == workspace), None)
         row = dict(space_kind="paseo", space_id="prj_app", space_name="app", space_index=None, slot_id=None, slot_name=workspace,
-                   slot_index=None, pane_id=None, tab_id=None, workspace_id=None, host="paseo",
+                   slot_index=None, pane_id=None, tab_id=None, workspace_id=wid, host="paseo",
                    source_kind="runtime", source_instance_id="paseo", repo_root=_paseo_root, worktree=cwd, workspace_cwd=cwd,
                    branch=branch, launcher="claude" if agent == "claude" else "codex", started_by_persona=False,
                    # Paseo declares rename and close: the node lists both, rename not on an agent another one started (#6294),
@@ -9651,10 +9667,20 @@ def mock_panes(mid):
     return {"hosts": [{"kind": "herdr", "stream": True, "control": True, "new_tab": True, "worktree": True, "workspaces": ws, "tabs": tabs, "panes": panes}]}
 
 
+PASEO_MADE = []  # worktrees made on Paseo's workspaces from the web (#6295), in the catalog after PASEO_WORKSPACES
+
+
 def worktree_route(h, p, body):
     """POST /api/v1/machines/{mid}/worktree/{prepare,create} (#2431)."""
     mid, verb = p.split("/")[4], p.split("/")[6]
     NODE_ACTIONS.append({"machine": mid, "route": "worktree/" + verb, **body})
+    if body.get("kind") == "paseo":  # Paseo makes it, in its own worktrees folder of the repository (#6295)
+        if verb == "prepare":
+            return h.send_json({"root": PASEO_ROOT, "repoName": "app", "branch": "main", "path": PASEO_TREES.rstrip("/"), "automatic_name": True})
+        branch, path = str(body.get("branch", "")), str(body.get("path", ""))
+        wid = "wks_5a1e00000000%04d" % (100 + len(PASEO_MADE))
+        PASEO_MADE.append((wid, branch, path, branch))
+        return h.send_json({"workspace_id": wid, "path": path, "branch": branch})
     if verb == "prepare":
         return h.send_json({"root": "/home/me/persona", "repoName": "persona", "branch": "main", "path": "/home/me/.herdr/worktrees/persona",
                             "choose_parent": body.get("kind") == "orca"})
@@ -20758,6 +20784,12 @@ if ENGINE_SETS:
     for _s in SESSIONS:
         if _s.get("session_id") == WIDGET:
             _s["host"], _s["also_open_in"] = "herdr", ["herdr-core"]
+if os.environ.get("MOCK_PASEO"):  # the server enables Paseo beside herdr: its workspaces are the catalog's (#6295)
+    for _m in MACHINES:
+        if _m["id"] == "server" and _m.get("online"):
+            _m["engines"] = [e for e in _m["engines"] if e["id"] != "paseo"] + [{"id": "paseo", "name": "Paseo", "available": True, "version": "0.14"}]
+            _m["engine_hosts"], _m["engine_default"] = ["herdr", "paseo"], "herdr"
+            _m["engine"] = legacy_engine(_m["engine_hosts"], _m["engine_default"])
 if RESUME_TERMINAL:  # the Mac mini enables no terminal engine: the empty set (#3302), herdr still named for older clients
     for _m in MACHINES:
         if _m["id"] == "mini":
@@ -22366,7 +22398,7 @@ MOCK_HELP = [
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",
     "MOCK_CHILD_SESSIONS=1  The Paseo computer (MOCK_PASEO) with its agent's four created agents (one waiting for you, one working with a Codex subagent of its own, one done, one failed) and an agent whose creator is not listed: the hub folds them (folded_under / children) and the lead's chat draws a card for each (#5120)",
-    "MOCK_PASEO=1  A computer whose engine is Paseo: a project with its main checkout and two titled worktree workspaces, an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
+    "MOCK_PASEO=1  A computer that enables Paseo beside herdr: a project with its main checkout, two titled worktree workspaces and one with no agent, all in the workspace catalog (New worktree… makes one in Paseo's folder, #6295), an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
     "MOCK_LIVE_STEP=bash|command|reads|parallel|thinking|thinking-folded  The widget chat a minute into a turn whose newest step is still going: the running work line names it (#2987)",
     "MOCK_TOOL_OUTCOMES=1  A turn whose tool results carry outcomes: a failed test run (exit code, the cut output's end), a denied edit, a refused write, an interrupted and a timed-out command; only the failure is red (#4303)",
     "MOCK_PERMISSION_DIFF=1  Two chats wait on a Claude Code permission card for an Edit (longer than the card's preview) and a Write; the card shows the change (#4621)",
@@ -23894,7 +23926,7 @@ class H(BaseHTTPRequestHandler):
         if plugins_route(self, p, self.last_body): return
         if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/(panes/(close|close_finished|split|agent|git)|tabs/(close|rename))", p):
             return node_action(self, p, json.loads(self.last_body or b"{}"))
-        if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(prepare|create)", p):
+        if (os.environ.get("MOCK_TERMINAL_PANES") or os.environ.get("MOCK_PASEO")) and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(prepare|create)", p):
             return worktree_route(self, p, json.loads(self.last_body or b"{}"))
         if AGENT_WORKTREE and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(status|add|remove)", p):
             return agent_worktree_route(self, p, json.loads(self.last_body or b"{}"))

@@ -63,5 +63,6 @@
   "rewind_unsupported": "This session does not support the requested rewind.",
   "rewind_mismatch": "The selected message moved. Reload the conversation before rewinding.",
   "rewind_nothing": "There is no message to rewind to.",
-  "rewind_failed": "Rewind could not be confirmed. Reload the conversation to check its current history."
+  "rewind_failed": "Rewind could not be confirmed. Reload the conversation to check its current history.",
+  "preview_no_terminal": "This computer has no terminal engine to run the server in. Turn one on in this computer’s settings, then try again."
 }

@@ -30,6 +30,9 @@ import { InboxLine } from "./InboxLine";
 import { InboxTaskLinks } from "./InboxTaskLinks";
 import { EventBody, type SourceAt } from "./InboxEvent";
 import { chatOfItem, LarkThread } from "./LarkThread";
+import { lazyDialog } from "../LazyOverlay";
+
+const SameMatterDialog = lazyDialog(() => import("./InboxSameMatter").then((m) => m.InboxSameMatter));
 
 export function InboxDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   // Whether an item's requests name its manager goes by the roster's default (docs/assistant/managers.md "Clients"): the page
@@ -46,7 +49,7 @@ export function InboxDetail({ item, loaded }: { item?: InboxItem; loaded: boolea
 }
 
 function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
-  const [dialog, setDialog] = useState<"" | "draft" | "handoff">("");
+  const [dialog, setDialog] = useState<"" | "draft" | "handoff" | "same">("");
   const [pins, setPins] = useState(false);
   // an event's own page (the chat, the mail) when "Original" or a source entry opened it; null: the event body
   const [source, setSource] = useState<SourceAt | null>(null);
@@ -62,7 +65,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   const [ownShown, setOwnShown] = useState(false); // under an extension's page: it fell back to the item's own body
   const muteMenu = useMenu();
   const moreMenu = useMenu();
-  // on a phone the title comes first: Pin and Mute fold into one ⋯ menu when both are there (#4144)
+  // on a phone the title comes first: Pin, Mute, Folder and Same matter fold into one ⋯ menu
   const phone = useMedia(PHONE);
   const event = Boolean(item && (item.now || hasEvent(item)));
   // A chat item's event sits above its chat (#3262), and a mail event above its message (#5471), whether an extension
@@ -122,13 +125,14 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                   {time && <span className="shrink-0 whitespace-pre">{detailMeta ? ` · ${time}` : time}</span>}
                 </p>
               </div>
-              {phone && canPin && muteRows.length > 0 ? (
+              {phone ? (
                 <IconButton icon="more" label={t("inbox-inboxdetail.more")} onClick={moreMenu.open} active={Boolean(moreMenu.anchor)} size={32} />
               ) : (
                 <>
                   {canPin && <IconButton icon="pin" label={t("inbox-inboxdetail.pin_messages")} onClick={() => setPins(true)} size={32} />}
                   {muteRows.length > 0 && <IconButton icon="bellOff" label={t("inbox-inboxdetail.mute")} onClick={muteMenu.open} active={Boolean(muteMenu.anchor)} size={32} />}
                   {foldersShown && <IconButton icon="folder" label={item.folder ? t("inbox-folders.move_from", { folder: item.folder }) : t("inbox-folders.move_menu")} onClick={() => openFolderDialog(item)} size={32} />}
+                  <IconButton icon="link" label={t("inbox-inboxline.same")} onClick={() => setDialog("same")} size={32} />
                 </>
               )}
               {muteMenu.anchor && <Menu anchor={muteMenu.anchor} onClose={muteMenu.close} align="right" width={224} items={muteRows} />}
@@ -138,6 +142,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                     ...(canPin ? [{ key: "pins", label: t("inbox-inboxdetail.pin_messages"), icon: "pin" as const, onSelect: () => setPins(true) }] : []),
                     ...muteRows.map((r, i) => (i === 0 && canPin ? { ...r, divider: true } : r)),
                     ...(foldersShown ? [{ key: "folder", label: t("inbox-folders.move_menu"), hint: item.folder, icon: "folder" as const, divider: true, onSelect: () => openFolderDialog(item) }] : []),
+                    { key: "same", label: t("inbox-inboxline.same"), icon: "link" as const, divider: canPin || muteRows.length > 0 || foldersShown, onSelect: () => setDialog("same") },
                   ]} />
               )}
               {done ? (
@@ -194,6 +199,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
         ) : showEvent ? <EventBody item={item} onSource={setSource} /> : !event && place ? <InboxExtensionBody key={`${itemKey(item)}/${place.extension}/${place.id}`} item={item} place={place} own={own} onOwn={setOwnShown} /> : own()}
         {dialog === "draft" && <DraftDialog item={item} onClose={() => setDialog("")} />}
         {dialog === "handoff" && <HandOffDialog item={item} onClose={() => setDialog("")} />}
+        <SameMatterDialog open={dialog === "same"} item={item} onClose={() => setDialog("")} />
       </div>
     </ItemManager.Provider>
   );

@@ -21,6 +21,11 @@ export interface WorktreeActionContext {
   linkedWorktree?: boolean;
 }
 
+/** Hosts that make worktrees of a workspace: herdr and Orca, and Paseo of its Git workspaces, where Paseo makes them itself
+ *  (docs/integrations/paseo.md, "Capabilities"); a Paseo folder has none. */
+const makesWorktrees = (host: string, workspace?: HostWorkspace) =>
+  ["herdr", "orca"].includes(host) || host === "paseo" && workspace?.workspace_kind === "git";
+
 /** All entry points resolve the exact host-owned catalog row; paths are checked for replacement, never used to find it. */
 export function resolveWorktreeAction(target: WorkspaceTarget, context: WorktreeActionContext) {
   const { catalog, machines, writable } = context;
@@ -43,7 +48,7 @@ export function resolveWorktreeAction(target: WorkspaceTarget, context: Worktree
   return { workspace, machine, parent, available, writable: !reason, reason, hasChildren,
     // These adapters implement host.Organizer + host.Launcher. Other runtimes retain copy/open compatibility.
     canRename: !reason && ["herdr", "orca"].includes(target.host),
-    canCreate: !reason && ["herdr", "orca"].includes(target.host),
+    canCreate: !reason && makesWorktrees(target.host, workspace),
     canReconcile: owned && writable && Boolean(machine?.online && currentHosts(machine).hosts.includes(target.host)
       && !machine.engines?.some((e) => e.id === target.host && !e.available))
       && (matches.length === 0 || Boolean(workspace && workspace.online !== false && workspace.available !== false)),
@@ -65,8 +70,10 @@ export function spaceWorktreeSources(space: SpaceLike, catalog: WorkspaceCatalog
     .map((s) => path(s.worktree || s.workspace_cwd || s.cwd || "")).filter(Boolean));
   return catalog.workspaces.filter((w) => w.machine_id === space.machineId && (bound.has(w) || folders.has(path(w.cwd))))
     .map((w) => workspaceTarget(w, catalog.owner, catalog.manager))
-    .filter((target) => ["herdr", "orca"].includes(target.host)
-      && resolveWorktreeAction(target, { catalog, machines, writable: false }).available);
+    .filter((target) => {
+      const action = resolveWorktreeAction(target, { catalog, machines, writable: false });
+      return action.available && makesWorktrees(target.host, action.workspace);
+    });
 }
 
 /** Preserve caller order, including pins, while using M2's exact attribution instead of matching cwd. */

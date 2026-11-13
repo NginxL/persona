@@ -117,7 +117,9 @@ export function SpaceMenu({
         detail: `${source.host} · ${source.cwd}`, onSelect: () => newWorktree(source) })) } : {}),
     }] : []),
   ];
-  const node: MenuNode = { kind: "workspace", mid: sp.machineId, online, host: first?.space_kind, label: sp.name, workspaceId: first?.workspace_id ?? first?.space_id, paneId: first?.pane_id, cwd: first?.cwd, fold };
+  // A runtime's space (Paseo's project, a runtime's folder) is no terminal host's workspace: no herdr ID to copy.
+  const node: MenuNode = { kind: "workspace", mid: sp.machineId, online, host: first?.space_kind, label: sp.name,
+    workspaceId: first?.source_kind ? undefined : first?.workspace_id ?? first?.space_id, paneId: first?.pane_id, cwd: first?.cwd, fold };
   return <NodeMenu node={node} at={at ?? { anchor }} onClose={onClose} header={t("agentmenus.space_header", { name: sp.name })} before={items} omit={["node-rename", "node-worktree"]} />;
 }
 

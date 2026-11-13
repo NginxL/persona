@@ -239,6 +239,8 @@ var rpcFailureKeys = map[string]string{
 	"worktree_in_use":   "rpc-errors.worktree_in_use",
 	"worktree_dirty":    "rpc-errors.worktree_dirty",
 	"worktree_unmerged": "rpc-errors.worktree_unmerged",
+	// a preview's server with no terminal engine to run in (node/preview_launch.go)
+	"preview_no_terminal": "rpc-errors.preview_no_terminal",
 	// a Claude session outside Persona's terminals, through its peer inbox (node/claudepeer.go)
 	"peer_unsupported": "rpc-errors.peer_unsupported",
 	"peer_unreachable": "rpc-errors.peer_unreachable",

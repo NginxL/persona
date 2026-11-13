@@ -107,6 +107,14 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = packages ]; then
   ci_run 'PersonaKit unit tests' 900 xcrun swift test --package-path "$SOURCE/apple/Packages/PersonaKit" --scratch-path "$SPM/PersonaKit"
   # The Persona Link menu bar app's package (apple/PersonaLink): its own SwiftPM package, outside apple/project.yml.
   ci_run 'Persona Link unit tests' 600 xcrun swift test --package-path "$SOURCE/apple/PersonaLink" --scratch-path "$SPM/PersonaLink" -Xswiftc -warnings-as-errors
+  # Blocking calls on the main actor (docs/apple/performance.md, "Automated checks"). The lint is built in a fixed
+  # folder beside its build output: the snapshot above moves on every run, and a package whose folder moved is rebuilt
+  # from scratch, swift-syntax included (seen with Xcode 27.2). Unchanged files keep their times (no -t), so an
+  # unchanged lint is not rebuilt at all. One release build serves the tests and the check (no testable imports).
+  mkdir -p "$SPM/IsolationLint/package"
+  ci_run 'Stage isolation lint package' 60 rsync -rlp --checksum --delete "$SOURCE/scripts/test/isolation-lint/" "$SPM/IsolationLint/package/"
+  ci_run 'Isolation lint unit tests' 900 xcrun swift test -c release --disable-testable-imports --package-path "$SPM/IsolationLint/package" --scratch-path "$SPM/IsolationLint/build"
+  ci_run 'Blocking calls on the main actor (isolation lint)' 300 "$SPM/IsolationLint/build/release/isolation-lint" --root "$SOURCE" --baseline "$SOURCE/scripts/test/apple_isolation_baseline.json"
 fi
 if [ "$LANE" = all ] || [ "$LANE" = ios ]; then
   for sdk in iphoneos iphonesimulator watchos watchsimulator; do

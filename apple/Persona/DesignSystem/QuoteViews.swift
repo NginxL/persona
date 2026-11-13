@@ -27,8 +27,22 @@ nonisolated extension ContextRef {
         return there ? nil : refs + [ref]
     }
 
-    /// What the user picked to go with a message (a message, a page's text, a session, a recording…), shown as a quote.
-    var isQuote: Bool { ["quote", "context", "edit", ForwardMessage.kind].contains(kind) }
+    /// A row picked in the @ menu, or nil when it is already over the box. Workspaces have an empty URL like an
+    /// ordinary quote, so their dedupe is kind + URL + body (the web's rule), never that shared URL alone. Other
+    /// mention kinds keep their existing URL-only behavior among themselves.
+    static func addingMention(_ ref: ContextRef, to refs: [ContextRef]) -> [ContextRef]? {
+        let there = refs.contains { old in
+            if ref.kind == "workspace" || old.kind == "workspace" {
+                return ref.kind == "workspace" && old.kind == "workspace" && old.url == ref.url && old.text == ref.text
+            }
+            return old.url == ref.url
+        }
+        return there ? nil : refs + [ref]
+    }
+
+    /// What the user picked to go with a message (a message, a page's text, a workspace, a session, a recording…),
+    /// shown as a quote.
+    var isQuote: Bool { ["quote", "context", "edit", "workspace", ForwardMessage.kind].contains(kind) }
 
     var isForward: Bool { kind == ForwardMessage.kind }
 
@@ -78,6 +92,7 @@ nonisolated extension ContextRef {
             if mine { return String(localized: "Quoting your message") }
             return String(localized: "Quoting \(who)")
         case "edit": return String(localized: "Text to change · \(label)")
+        case "workspace": return String(localized: "Workspace · \(label)")
         case ForwardMessage.kind: return ForwardMessage.heading(self)
         default:
             if isSession { return String(localized: "Quoting session \(label)") }
@@ -90,7 +105,7 @@ nonisolated extension ContextRef {
     var quoteSummary: String {
         if isWholePage { return host }
         var flat = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if isSession, flat.count > 1 { flat.removeFirst() } // 「另一个会话：…」: the heading names it already
+        if isSession || kind == "workspace", flat.count > 1 { flat.removeFirst() } // the heading names it already
         let joined = flat.joined(separator: " ")
         return joined.isEmpty ? String(localized: "No content") : String(joined.prefix(240))
     }

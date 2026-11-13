@@ -557,6 +557,52 @@ test('archive: caps.archive only with both ways, calls reach the driver, one way
   await assert.rejects(half.peer.call('session.archive', { session_id: 's1' }), (err) => err.code === 'unsupported')
 })
 
+test('workspaces: caps.workspaces with createWorkspace and prepareWorkspace, the list on change and to every node, creation and its folder', async (t) => {
+  const n = await startFakeNode(t)
+  const got = []
+  const row = { workspace_id: 'ws-1', title: 'main', cwd: '/w/app', kind: 'checkout', branch: 'main', space_id: 'p1', space_name: 'app' }
+  const rt = createRuntime(minimal({
+    createWorkspace: async (p) => {
+      got.push(['create', p])
+      return { workspace: { workspace_id: 'ws-2', title: p.branch, cwd: `/w/trees/${p.name}`, kind: 'worktree', branch: p.branch, owned: true } }
+    },
+    prepareWorkspace: async (p) => {
+      got.push(['prepare', p])
+      return { checkouts: '/w/trees' }
+    },
+  }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  rt.workspacesChanged([row]) // before any node: said once one is there
+  rt.start()
+  await n.ready
+  assert.equal(n.hello.caps.workspaces, true)
+  await until('the workspaces after hello', () => n.last('runtime.workspaces'))
+  assert.deepEqual(n.last('runtime.workspaces'), { workspaces: [row] })
+  assert.deepEqual(await n.peer.call('workspace.prepare', { cwd: '/w/app', repo_root: '/w/app' }), { checkouts: '/w/trees' })
+  const made = await n.peer.call('workspace.create', { cwd: '/w/app', workspace_id: 'ws-1', branch: 'feat', create_branch: true, base: 'main', name: 'feat', key: 'k1' })
+  assert.equal(made.workspace.cwd, '/w/trees/feat')
+  assert.deepEqual(got, [['prepare', { cwd: '/w/app', repo_root: '/w/app' }],
+    ['create', { cwd: '/w/app', workspace_id: 'ws-1', branch: 'feat', create_branch: true, base: 'main', name: 'feat', key: 'k1' }]])
+  rt.workspacesChanged([row, made.workspace])
+  await until('the new list', () => n.last('runtime.workspaces')?.workspaces.length === 2)
+
+  // Without both nothing is declared, said or answered: the node asks where the worktrees go before each one it has
+  // made, so either alone could make none.
+  for (const [name, half] of [['prepare-only', { prepareWorkspace: async () => ({ checkouts: '/x' }) }],
+    ['create-only', { createWorkspace: async () => ({ workspace: { workspace_id: 'ws-9', cwd: '/x/y' } }) }]]) {
+    const plain = await startFakeNode(t)
+    const rt2 = createRuntime(minimal(half), { runtime: name, socketPath: plain.path, retryMs: 20 })
+    t.after(() => rt2.stop())
+    rt2.workspacesChanged([row])
+    rt2.start()
+    await plain.ready
+    assert.equal(plain.hello.caps.workspaces, undefined, name)
+    await assert.rejects(plain.peer.call('workspace.create', { cwd: '/w/app' }), (err) => err.code === 'unsupported')
+    await assert.rejects(plain.peer.call('workspace.prepare', { cwd: '/w/app' }), (err) => err.code === 'unsupported')
+    assert.equal(plain.last('runtime.workspaces'), undefined, name)
+  }
+})
+
 test('a watch for a session the node reads from its transcript streams live text only', async (t) => {
   const n = await startFakeNode(t)
   let paged = 0

@@ -5231,10 +5231,20 @@ struct Composer: View, Equatable {
         return MentionToken.at(text, selection: selection)
     }
 
-    /// What the @ list offers here: this chat's files and its session's folder, then the other sessions.
+    /// What the @ list offers here: this chat's files and its session's folder, then Persona's workspaces and the other
+    /// sessions. The frozen Mac and visionOS composers keep their existing resources.
     private var mentionSource: MentionSource {
         MentionSource(machine: key.machineRef, cwd: model.session(key)?.cwd,
-                      files: { MentionRows.usedPaths(model.chat(key).items) }, except: key)
+                      files: { MentionRows.usedPaths(model.chat(key).items) }, except: key,
+                      workspaces: offersWorkspaceMentions)
+    }
+
+    private var offersWorkspaceMentions: Bool {
+        #if os(iOS)
+        return uploadDest == nil && model.session(key)?.assistant == true
+        #else
+        return false
+        #endif
     }
 
     /// The + menu's Mention: `@` at the caret, which opens the @ list (the web's @ button beside +).
@@ -5252,10 +5262,10 @@ struct Composer: View, Equatable {
         focused = true
     }
 
-    /// A session picked in the @ list: quoted over the box, once.
+    /// A workspace or session picked in the @ list: its context sits over the box, once.
     private func quoteMention(_ ref: ContextRef) {
-        guard !contexts.wrappedValue.contains(where: { $0.url == ref.url }) else { return }
-        contexts.wrappedValue.append(ref)
+        guard let updated = ContextRef.addingMention(ref, to: contexts.wrappedValue) else { return }
+        contexts.wrappedValue = updated
     }
 
     /// Effort and permission mode can change: Claude Code and the assistant (`SessionModeBar` shows them for the same).

@@ -279,6 +279,9 @@ describe("New Agent preparation ownership", () => {
     await click(t("common.cancel")); await click("Reopen start"); await flush();
     await click("Orca");
     const request = await prepare();
+    // the engine it opens in says where its worktree goes, and makes it
+    expect(calls.filter((c) => c.url.endsWith("/worktree/status")).at(-1)?.body).toMatchObject({ kind: "orca" });
+    expect(request.body).toMatchObject({ kind: "orca" });
     await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="start-host"] button')!.click());
     // a model picked in the panel after admission changes the form, not the start on its way
     await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=new-agent-model] [data-model-pill]")!.click());

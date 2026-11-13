@@ -620,7 +620,9 @@ struct CloseAgentSheet: View {
                             onClosed(session.key)
                             dismiss()
                             // Once it is gone: the node refuses a worktree an agent still works in.
-                            if let worktree { await model.cleanUpWorktree(session.machineRef, worktree, cleanup) }
+                            if let worktree {
+                                await model.cleanUpWorktree(session.machineRef, worktree, cleanup, kind: AgentWorktree.engine(of: session))
+                            }
                         } else {
                             failure = model.toast?.message ?? String(localized: "Couldn't stop. The agent and its tab were kept; try again.")
                             closing = false
@@ -739,7 +741,7 @@ struct DeleteAgentSheet: View {
                         if await model.deleteSession(session.key) {
                             onDeleted(session.key)
                             dismiss()
-                            await model.cleanUpWorktree(session.machineRef, worktree, cleanup)
+                            await model.cleanUpWorktree(session.machineRef, worktree, cleanup, kind: AgentWorktree.engine(of: session))
                         } else {
                             deleting = false
                         }

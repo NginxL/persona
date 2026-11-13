@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// On a phone-width screen the detail's title comes first (#4144): "Pinned messages" and "Mute" fold into one ⋯ menu when both are there, and the
+// On a phone-width screen the detail's title comes first (#4144): "Pinned messages", "Mute" and "Same matter as…" fold into one ⋯ menu, and the
 // time in the source line keeps its own span so it is not the part that gets cut.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -43,13 +43,15 @@ describe("收件箱详情在手机宽度", () => {
     expect(host.querySelector('button[aria-label="静音"]')).toBeNull();
     act(() => host.querySelector<HTMLButtonElement>('button[aria-label="更多"]')!.click());
     const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((r) => r.textContent);
-    expect(rows).toEqual([expect.stringContaining("Pin 消息"), expect.stringContaining("静音这个会话示例群"), expect.stringContaining("为这个会话设规则…示例群")]);
+    expect(rows).toEqual([expect.stringContaining("Pin 消息"), expect.stringContaining("静音这个会话示例群"), expect.stringContaining("为这个会话设规则…示例群"), expect.stringContaining("是同一件事…")]);
   });
 
-  it("keeps a lone Pin 消息 as its own button", () => {
+  it("folds a lone Pin 消息 with 是同一件事… into 更多", () => {
     act(() => root.render(<InboxDetail item={item({ mutes: [] })} loaded />));
-    expect(host.querySelector('button[aria-label="Pin 消息"]')).not.toBeNull();
-    expect(host.querySelector('button[aria-label="更多"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Pin 消息"]')).toBeNull();
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="更多"]')!.click());
+    const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((r) => r.textContent);
+    expect(rows).toEqual([expect.stringContaining("Pin 消息"), expect.stringContaining("是同一件事…")]);
   });
 
   it("keeps the time whole in its own span", () => {

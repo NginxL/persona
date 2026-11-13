@@ -85,6 +85,25 @@ class CatalogValidationTest(unittest.TestCase):
         self.assertEqual(apple_l10n.catalog_problems(data), [])
         self.assertEqual(data["strings"]["Open [connection]"]["localizations"]["zh-Hans"], unit("连接"))
 
+    def test_a_keys_context_never_shows_in_a_value(self):
+        # #6703: the queue strip's fold row read "还有 1 条别的对话在排队 [Queue Strip]" in every language.
+        for lang, values in (("en", ("Open [file]", "Open [file]", "打开", "開く")),
+                             ("zh-Hans", ("Open [file]", "Open", "打开 [file]", "開く")),
+                             ("ja", ("Open [Queue Strip]", "Open", "打开", "開く [Queue Strip]"))):
+            problems = apple_l10n.catalog_problems(catalog(*values))
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(f"{lang} stringUnit shows the key's context", problems[0])
+        # A plural form keeps it too.
+        data = catalog("%lld files [file]", "%1$lld files", "%1$lld 个文件", "%1$lld 件のファイル")
+        data["strings"]["%lld files [file]"]["localizations"]["en"] = {"variations": {"plural": {
+            "one": unit("%1$lld file [file]"), "other": unit("%1$lld files")}}}
+        problems = apple_l10n.catalog_problems(data)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("en /plural/one shows the key's context [file]", problems[0])
+        # Brackets that are the words themselves, or a format argument, are not a context.
+        for key, value in (("In [%@]", "In [%@]"), ("Use . _ - [ ]", "Use . _ - [ ]")):
+            self.assertEqual(apple_l10n.catalog_problems(catalog(key, value, value, value)), [])
+
     def test_duplicate_json_keys_are_rejected_before_data_is_lost(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "Localizable.xcstrings"

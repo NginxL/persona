@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The execution-agent admission gate. The hub machine once ran 40+ claude processes at load 160 and timed out, so an
@@ -62,7 +63,8 @@ type AdmissionSettings struct {
 	DirectionCap            *int           `json:"direction_cap,omitempty"`
 	DirectionCapByDirection map[string]int `json:"direction_cap_by_direction,omitempty"`
 	DirectionCapByProject   map[string]int `json:"direction_cap_by_project,omitempty"`
-	// Generic machine lines.
+	// Generic machine lines. MaxClaudeProcs bounds sessions working a turn at once on one computer (the fleet's working
+	// count); only a computer without a fleet snapshot falls back to its OS claude process count.
 	MinMemoryBytes *int64 `json:"min_memory_bytes,omitempty"`
 	MaxClaudeProcs *int   `json:"max_claude_procs,omitempty"`
 	// HubMachine* override the generic lines for the hub's own computer.
@@ -204,7 +206,7 @@ type admissionMachineFacts struct {
 	cores       int
 	load1       float64
 	available   int64
-	claudeProcs *int // nil: the node did not report a count, so the process condition is skipped
+	claudeProcs *int // nil: the node did not report a count, so the process condition is skipped; replaced by the fleet's working-session count when a snapshot exists
 }
 
 // machineFacts is what the gate reads for one machine. managed=false means the resource layer does not retain this
@@ -241,6 +243,29 @@ func (s *Service) machineFacts(machineID string) (facts admissionMachineFacts, m
 	}, true, nil
 }
 
+// workingSessions counts a machine's sessions the fleet last saw working a turn. ok is false only when the fleet has no
+// snapshot for the machine at all (the fleet bus is off, or it never reported a list): a reporting machine with an
+// empty or all-idle list is ok with the true count, including zero. It reads the same snapshot setSessions keeps for
+// the session lists, so it costs one short lock and no node RPC.
+func (s *Service) workingSessions(machineID string) (count int, ok bool) {
+	if s.devs == nil {
+		return 0, false
+	}
+	machineID = s.devs.Canonical(machineID)
+	s.fleet.mu.Lock()
+	prev, has := s.fleet.prev[machineID]
+	s.fleet.mu.Unlock()
+	if !has {
+		return 0, false
+	}
+	for _, p := range prev {
+		if p.Status == proto.StatusWorking {
+			count++
+		}
+	}
+	return count, true
+}
+
 // machineViolation checks the machine-level lines for machineID against the claims held right now, WITHOUT taking a
 // claim. It is the read-only view used when ranking recommendations and on the pre-confirmation agent_start check.
 // nil means it passes, including when the resource layer does not retain the machine (nothing to read, nothing to deny).
@@ -266,6 +291,15 @@ func (s *Service) machineViolationWith(machineID string, lim admissionLimits, cl
 		// sample, so claims deliberately do not decrement it the way they do the process and direction caps.
 		return admissionMessage("assistant-tasks.admission_memory", i18n.Args{
 			"available": humanBytes(facts.available), "limit": humanBytes(lim.minMemory)})
+	}
+	if facts.claudeProcs != nil {
+		// The line bounds agents actually working a turn, not OS processes: a session that finished, parks or stays
+		// idle keeps its claude process alive for hours, and counting those fills the machine while nothing runs. The
+		// fleet's last session snapshot says how many sessions are working; only when it has no snapshot for this
+		// machine (the fleet bus is off or the machine never reported a list) does the node's process count stand in.
+		if working, has := s.workingSessions(machineID); has {
+			facts.claudeProcs = &working
+		}
 	}
 	if facts.claudeProcs != nil && *facts.claudeProcs+claims >= lim.maxProcs {
 		return admissionMessage("assistant-tasks.admission_procs", i18n.Args{

@@ -365,6 +365,7 @@ struct InboxChainSection: View {
                     entry(e)
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("inbox.chain")
             .task(id: CutChain(key: item.key, count: item.chainCount)) { await readWhole() }
         }
@@ -575,6 +576,28 @@ struct InboxSourceRoute: Hashable {
 
 /// The source as the inbox detail drew it before events: 'view original', a chain entry's link.
 struct InboxSourcePage: View {
+    /// What the page draws, in the source's existing order. The native-chat branch skips the extension's intermediate page.
+    @MainActor enum Selection: Equatable {
+        case chat(LarkConversation)
+        case slot(Slot)
+
+        enum Slot: Equatable {
+            case document, connector, moment, mail, empty
+        }
+
+        static func of(item: InboxItem, position: String? = nil) -> Selection {
+            if item.doc != nil { return .slot(.document) }
+            if item.connector != nil { return .slot(.connector) }
+            if item.moment != nil { return .slot(.moment) }
+            if var conversation = item.larkConversation {
+                if let position { conversation.focus = position }
+                return .chat(conversation)
+            }
+            if item.mail != nil { return .slot(.mail) }
+            return .slot(.empty)
+        }
+    }
+
     var route: InboxSourceRoute
     var accounts: [MailAccount]
     @Environment(AppModel.self) private var model
@@ -587,33 +610,39 @@ struct InboxSourcePage: View {
     }
 
     private var item: InboxItem { route.item }
+    private var selection: Selection { .of(item: item, position: route.position) }
 
     var body: some View {
-        InboxItemSlotContent(item: item, slot: slot) { content }
-            .navigationTitle(item.title)
+        Group {
+            switch selection {
+            case .chat(let conversation):
+                LarkChatView(conversation: conversation, manager: model.linkManager(item.manager))
+            case .slot(let plain):
+                InboxItemSlotContent(item: item, slot: slot) { content(plain) }
+            }
+        }
+        .navigationTitle(item.title)
     }
 
-    @ViewBuilder private var content: some View {
-        if item.doc != nil {
+    @ViewBuilder private func content(_ body: Selection.Slot) -> some View {
+        switch body {
+        case .document:
             InboxDocDetailView(item: item)
-        } else if item.connector != nil {
+        case .connector:
             InboxConnectorDetailView(item: item)
-        } else if let m = item.moment {
-            LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(item.manager))
-        } else if let c = conversation {
-            LarkChatView(conversation: c, manager: model.linkManager(item.manager))
-        } else if let m = mail {
-            MailDetailView(summary: m, accounts: accounts)
-        } else {
+        case .moment:
+            if let moment = item.moment {
+                LarkMomentsPostView(postID: moment.postID, pushed: true, manager: model.linkManager(item.manager))
+            }
+        case .mail:
+            if let mail {
+                MailDetailView(summary: mail, accounts: accounts)
+            } else {
+                EmptyStateView(symbol: Theme.Icon.info, title: item.title, message: item.preview)
+            }
+        case .empty:
             EmptyStateView(symbol: Theme.Icon.info, title: item.title, message: item.preview)
         }
-    }
-
-    /// The Feishu chat, at the link's message when it names one.
-    private var conversation: LarkConversation? {
-        guard var c = item.larkConversation else { return nil }
-        if let p = route.position { c.focus = p }
-        return c
     }
 
     /// The mail the link names, else the thread's newest.

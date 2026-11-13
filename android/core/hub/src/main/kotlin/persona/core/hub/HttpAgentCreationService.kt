@@ -110,23 +110,28 @@ class HttpAgentCreationService(
         // Hubs without the list: no model picker, the launcher's own model as before.
         if (failure.status == 404) null else throw failure
     }
-    override suspend fun worktreeStatus(machineId: String, cwd: String): WorktreeStatus? = try {
-        JsonCodec.decodeFromJsonElement<WorktreeStatus>(worktree(machineId, "status", buildJsonObject { put("cwd", cwd) }))
+    override suspend fun worktreeStatus(machineId: String, cwd: String, kind: String?): WorktreeStatus? = try {
+        JsonCodec.decodeFromJsonElement<WorktreeStatus>(worktree(machineId, "status", buildJsonObject {
+            put("cwd", cwd)
+            kind?.let { put("kind", it) }
+        }))
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) { null } // an older node or hub, offline, an error: no worktree offered
 
-    override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String): WorktreeAdded =
+    override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String, kind: String?): WorktreeAdded =
         JsonCodec.decodeFromJsonElement(worktree(machineId, "add", buildJsonObject {
             put("cwd", cwd)
             if (nameHint.isNotEmpty()) put("name_hint", nameHint)
             branch.trim().takeIf(String::isNotEmpty)?.let { put("branch", it) }
+            kind?.let { put("kind", it) }
         }))
 
-    override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean): WorktreeRemoved =
+    override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean, kind: String?): WorktreeRemoved =
         JsonCodec.decodeFromJsonElement(worktree(machineId, "remove", buildJsonObject {
             put("path", path)
             if (deleteBranch) put("delete_branch", true)
             if (force) put("force", true)
+            kind?.let { put("kind", it) }
         }))
 
     // git can take a while on a big repository: the start's budget, not the list's.

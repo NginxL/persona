@@ -31,7 +31,7 @@ struct PreviewChooser: View {
     private var machineName: String { machine?.name ?? key.machineID }
     private var ports: [ListeningPort] { session?.ports ?? [] }
     private var options: [PreviewOption] { preview.options(ports: ports) }
-    private var canStart: Bool { session?.workspaceID?.isEmpty == false }
+    private var canStart: Bool { PreviewLogic.canStart(session) }
 
     var body: some View {
         NavigationStack {
