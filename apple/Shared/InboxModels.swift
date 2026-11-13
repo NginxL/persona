@@ -584,6 +584,29 @@ extension APIClient {
         try await get(Self.inboxTreePath(kind, id))
     }
 
+    /// The body of PUT /api/v1/inbox/{id}/parent is the parent object itself, or JSON null; it is never wrapped in
+    /// a `parent` field. An optional passed straight to `request` would instead leave the body empty.
+    private nonisolated struct InboxParentBody: Encodable, Sendable {
+        /// Only the value is encoded; this property name never appears in the JSON body.
+        var node: InboxParent?
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            if let node {
+                try container.encode(node)
+            } else {
+                try container.encodeNil()
+            }
+        }
+    }
+
+    /// Hangs an item under another item, a to-do or an Agent session, or removes that relationship with nil.
+    /// The hub answers with the changed item.
+    func setInboxParent(_ id: String, _ parent: InboxParent?) async throws -> InboxItem {
+        let data = try await request("PUT", "/api/v1/inbox/" + id + "/parent", body: InboxParentBody(node: parent))
+        return try JSON.decoder.decode(InboxItem.self, from: data)
+    }
+
     /// `/api/v1/inbox/tree/<kind>/<id>`: each segment escaped (an id may carry '#', a space…), a session's slash kept
     /// as the hub's `{id...}` takes it; ':' stays readable as in the item routes.
     nonisolated static func inboxTreePath(_ kind: String, _ id: String) -> String {

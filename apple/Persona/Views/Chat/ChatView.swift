@@ -3966,6 +3966,16 @@ struct ChatView: View {
     @ViewBuilder private var headerBack: some View {
         if hidesBack {
             Color.clear.dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+        } else if backShowsList && split?.drawer == true {
+            // The Sidebar layout on a phone (#6332): the chat is the drawer's pick, not a page to go back from. The
+            // persona's face opens the drawer, as on the conversation, with how many Agents need the user.
+            #if os(iOS)
+            ShellPersonaButton(id: "sidebar-drawer-button") { back() }
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                .overlay(alignment: .topTrailing) { SidebarWaitingBadge() }
+            #else
+            headerBackButton
+            #endif
         } else {
             headerBackButton
         }
@@ -6086,13 +6096,25 @@ extension UIImage {
 /// of the screen goes to it — no title, no tabs — under a slim bar that drags it back down (a tap on its handle or its
 /// Close too), there in every state, a session that isn't running included (#4328).
 /// Its size does not change with anything around it but the keyboard (a new size is a resize of the pane it drives).
+/// A plain terminal opened from Terminals renames its tab from the bar's ⋯ (#6996), the same prompt as its row's.
 struct TerminalCover: View {
     @Environment(\.dismiss) private var dismiss
     let key: SessionKey
     var switchTo: ((SessionKey) -> Void)?
     /// Resume in Terminal (#5521): resume the stopped Agent as the terminal comes up.
     var resumeOnOpen = false
+    /// Rename… in the bar's ⋯: the tab, and what saves a new name (true once the computer took it). Nil: the bar keeps
+    /// its settings button (an Agent's terminal: its chat's ⋯ renames it).
+    var rename: Rename? = nil
     @State private var offset: CGFloat = 0
+    @State private var renaming: TabRename.Target?
+    /// The name saved here, which the next Rename… starts from.
+    @State private var renamed: String?
+
+    struct Rename {
+        var target: TabRename.Target
+        var save: (TabRename.Target, String) async -> Bool
+    }
 
     var body: some View {
         TerminalPanel(key: key, switchTo: switchTo, resumeOnOpen: resumeOnOpen, grab: TerminalGrab(
@@ -6100,7 +6122,8 @@ struct TerminalCover: View {
             released: { distance, predicted in
                 if distance > 140 || predicted > 420 { close() } else { withAnimation(.spring(duration: 0.3)) { offset = 0 } }
             },
-            close: close))
+            close: close,
+            rename: rename.map { r in { renaming = current(r) } }))
             .padding(.horizontal, Theme.Space.xs)
             .padding(.bottom, Theme.Space.xxs)
             .offset(y: offset)
@@ -6109,6 +6132,18 @@ struct TerminalCover: View {
                 Color.black.opacity(Double(0.4 * (1 - min(offset / 500, 1)))).ignoresSafeArea()
             }
             .accessibilityAction(.escape) { close() } // VoiceOver's scrub, as on any sheet (#4328)
+            .renameTerminalAlert($renaming) { t, name in
+                guard let rename else { return }
+                let before = renamed
+                renamed = TabRename.cleaned(name)
+                Task { if !(await rename.save(t, name)) { renamed = before } }
+            }
+    }
+
+    private func current(_ r: Rename) -> TabRename.Target {
+        var t = r.target
+        if let renamed { t.name = renamed }
+        return t
     }
 
     private func close() { dismiss() }

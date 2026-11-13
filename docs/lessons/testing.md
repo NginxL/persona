@@ -716,6 +716,22 @@ Retain allow/deny assertions for data directories, private tmp, and proxy. Negat
 - `swift test` output arrives only after completion. Find hung cases with file traces or `sample <pid>`; Swift Testing `.timeLimit` cannot stop uncancellable waits.
 - System `.alert` buttons cannot be clicked through accessibility activation; `personactl.py tap` falls back to idb (not installed locally). Use XCUITest for alert-click flows (`app.alerts[...].buttons[...]`).
 
+## Home Screen widgets on a simulator (2026-11-14, #6946)
+
+- **A widget can be placed without touching the Home Screen**: with the simulator shut down, add an entry to
+  SpringBoard's `data/Library/SpringBoard/IconState.plist` (a page in `iconLists`: `elementType` `widget`,
+  `widgetIdentifier` the kind, `containerBundleIdentifier` the app, `bundleIdentifier` the widget extension, `gridSize`
+  `small` / `medium` / `large`, `iconType` `custom`, two fresh UUIDs), delete `DesiredIconState.plist`, then boot. A
+  widget with a static configuration draws from the App Group as on a phone (`-showHomeWidgetSample YES` fills it).
+- **Widgets with Edit Widget options (`AppIntentConfiguration`) never draw on the iOS 27 simulators here**, placed that
+  way or opened in Edit Widget, slim or stock: the extension logs "Unable to get LNAction from intent" after
+  `com.apple.siri.VoiceShortcuts.xpc` answers "No such process", WidgetKit gets no views (`CHSErrorDomain` 1101) and
+  keeps the placeholder entry, and the widget's buttons do nothing. The Agents widget shows the same, so it is not the
+  widget's code. Draw those widgets with the app's gallery (`-showHomeWidgets`, docs/apple/home-widgets.md
+  "Screenshots") and check their buttons on a device.
+- The gallery's rows (light and dark side by side) need a screen wider than an iPhone's: an iPad simulator made for
+  the shots and deleted after them.
+
 ## Verify nonempty udid before deleting simulators (2026-11-03)
 
 Reading udid from a file, then `xcrun simctl delete $SIM`: if the file is missing, `$SIM` is empty. This time it only printed usage, but `delete "$SIM" all` could delete everybody's simulators.

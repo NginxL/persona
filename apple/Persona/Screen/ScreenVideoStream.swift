@@ -146,6 +146,8 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
         /// Capture stopped (`paused`): locked, login_window, permission, display_gone or busy. The stream stays open.
         case paused(String)
         case resumed
+        /// The helper's side of the latency (capture, encode, network) and what it sent, about once a second.
+        case timing(TimingMessage)
         /// The stream is over; nothing more comes.
         case ended(Ending)
     }
@@ -175,6 +177,10 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
     /// Capture is paused (`paused` came): the helper sends no heartbeat then, so silence means nothing until `resumed`.
     private var quiet = false
     private var over = false
+    private var total = 0
+
+    /// Every byte that came so far (the overlay's bitrate is what arrived, not what was sent).
+    var receivedBytes: Int { lock.withLock { total } }
 
     init(transport: RFBTransport, start: StartMessage, silence: Duration = ScreenVideoStream.silence,
          onEvent: @escaping @Sendable (Event) -> Void) {
@@ -248,6 +254,7 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
             let chunk: [UInt8]
             do { chunk = try await transport.receive() } catch { throw Ended(why: .closed) }
             bytes += chunk.count
+            lock.withLock { total += chunk.count }
             let messages: [ScreenVideoWire.RawMessage]
             do { messages = try parser.push(Data(chunk)) } catch { throw Ended(why: .undecodable) }
             var newest: (CVPixelBuffer, Double)?
@@ -283,6 +290,8 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
                 case .resumed:
                     heard()
                     onEvent(.resumed)
+                case let .timing(t):
+                    onEvent(.timing(t))
                 default:
                     continue // phone → helper types, or ones newer than this app: skipped
                 }

@@ -54,6 +54,8 @@ struct MeetingPageBar: View {
     @State private var sync = RecordingSync.shared
     /// The meeting call and Talk (#3862 phase 4).
     @State private var call = MeetingCall.shared
+    /// Hub transcription (#3862 phase 5): the Talk line says hub mode's words in a meeting the hub transcribes.
+    @State private var transcription = MeetingTranscription.shared
     /// Read for one thing only: how many of the last pick couldn't be read.
     @State private var photos = MeetingPhotos.shared
     @State private var draft = ""
@@ -223,7 +225,7 @@ struct MeetingPageBar: View {
     /// under it may go to the call and marks it seen (`MeetingCall.showingPrivacy`, `MeetingTalkPrivacy.shown`).
     private var privacyLine: some View {
         let recording = entry.id
-        return Text(Self.talkPrivacy).font(Theme.Font.caption).foregroundStyle(.secondary)
+        return Text(talkPrivacy).font(Theme.Font.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("meeting-talk-privacy")
             .onAppear { call.showingPrivacy(true, recording: recording) }
@@ -231,7 +233,7 @@ struct MeetingPageBar: View {
     }
 
     private var talkButton: some View {
-        MeetingTalkButton(held: talking, hint: talkSendsAudio ? Self.talkPrivacy : String(localized: "Hold while you speak. Persona answers when you let go."),
+        MeetingTalkButton(held: talking, hint: talkSendsAudio ? talkPrivacy : String(localized: "Hold while you speak. Persona answers when you let go."),
                           press: { startTalk() }, release: { call.endTalk() }, window: { openTalkWindow() },
                           gone: { call.endHold(entry.id) })
     }
@@ -251,9 +253,10 @@ struct MeetingPageBar: View {
         }
     }
 
-    /// The contract's Wording for privacy mode (#3862 phase 4), where Talk sends its spans to the voice service.
-    static var talkPrivacy: String {
-        String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service.")
+    /// The contract's Wording where Talk sends its spans to the voice service: privacy mode's (#3862 phase 4), or in a
+    /// meeting the hub transcribes hub mode's (phase 5: all of its audio goes through the hub, Talk included).
+    private var talkPrivacy: String {
+        MeetingTranscriptionWords.pagePrivacy(hub: transcription.hubTranscribes(entry.id), service: transcription.service)
     }
 
     private func startTalk() {

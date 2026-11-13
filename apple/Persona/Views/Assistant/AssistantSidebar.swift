@@ -165,6 +165,9 @@ struct AssistantDrawerLayout<Sidebar: View, Page: View>: View {
     var backdrop: Color = Color(.secondarySystemBackground)
     /// The shell's Assistant | Agents strip: a drag sideways may page between them instead (`DrawerPan`).
     var pager: ShellPager? = nil
+    /// The Sidebar layout on a phone (#6332): what the sidebar opens is the page stack's first page, with no back, and a
+    /// drag on it opens the drawer as on the root (`DrawerPan.firstPages`).
+    var firstPages = false
     @ViewBuilder var sidebar: Sidebar
     var page: Page
     /// iPhone Duo's bars down the side (the shell's `shellRailEdge`): the page stays and the sidebar comes over it.
@@ -187,7 +190,7 @@ struct AssistantDrawerLayout<Sidebar: View, Page: View>: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
             .background { backdrop.ignoresSafeArea() }
             #if os(iOS)
-            .gesture(DrawerPan(drawer: drawer, enabled: enabled, pager: pager))
+            .gesture(DrawerPan(drawer: drawer, enabled: enabled, pager: pager, firstPages: firstPages))
             #endif
             .background { DrawerTabBarProbe(drawer: drawer) }
             .onAppear {
@@ -457,6 +460,9 @@ struct DrawerPan: UIGestureRecognizerRepresentable {
     /// In the shell: the Assistant | Agents strip. On Assistant a drag to the left pages to Agents (to the right is still the
     /// drawer); on Agents a drag to the right pages back to Assistant (the drawer opens from ☰ there).
     var pager: ShellPager? = nil
+    /// The Sidebar layout on a phone (#6332): a stack's first page is the sidebar's pick, not a page to go back from, so
+    /// only a second page under the finger keeps the drag for its back swipe.
+    var firstPages = false
 
     /// A drag to the left that starts on a row that swipes left (a drawer conversation's Archive, `SwipeRowMark`) is the
     /// row's, unless it starts this close to the screen's right edge, where the strip still pages (#2822). Agents' rows
@@ -470,6 +476,7 @@ struct DrawerPan: UIGestureRecognizerRepresentable {
         var drawer: AssistantDrawer
         var enabled = true
         var pager: ShellPager?
+        var firstPages = false
         var mode: Mode = .drawer
         init(drawer: AssistantDrawer) { self.drawer = drawer }
 
@@ -494,7 +501,7 @@ struct DrawerPan: UIGestureRecognizerRepresentable {
             }
             // Within 45° of horizontal: steeper is the page's own scrolling.
             guard abs(dx) > abs(dy) else { return refused("direction") }
-            if Self.pushed(at: start, in: view) {
+            if Self.pushed(at: start, in: view, beyond: firstPages ? 2 : 1) {
                 #if DEBUG
                 ShellTrace.shared.note("pan refused: pushed")
                 #endif
@@ -559,11 +566,12 @@ struct DrawerPan: UIGestureRecognizerRepresentable {
         /// the page last said about being at its root (`enabled`). That word comes through SwiftUI state and was stale
         /// now and then: on a chat opened on Agents the strip took the edge swipe and slid to Assistant, the chat still pushed
         /// (`ShellPagerTests.testPushedPagesSwipeBack`, 3 in 24 runs). UIKit's stack is what the swipe acts on.
-        static func pushed(at point: CGPoint, in view: UIView) -> Bool {
+        /// `beyond`: how many pages a stack has before one counts as pushed (2 in the Sidebar layout, its first page).
+        static func pushed(at point: CGPoint, in view: UIView, beyond: Int = 1) -> Bool {
             var r: UIResponder? = view.hitTest(point, with: nil)
             while let x = r, x !== view {
                 if let vc = x as? UIViewController, let nav = (vc as? UINavigationController) ?? vc.navigationController,
-                   nav.viewControllers.count > 1 {
+                   nav.viewControllers.count > beyond {
                     return true
                 }
                 r = x.next
@@ -638,6 +646,7 @@ struct DrawerPan: UIGestureRecognizerRepresentable {
     func updateUIGestureRecognizer(_ recognizer: Recognizer, context: Context) {
         context.coordinator.enabled = enabled
         context.coordinator.pager = pager
+        context.coordinator.firstPages = firstPages
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: Recognizer, context: Context) {

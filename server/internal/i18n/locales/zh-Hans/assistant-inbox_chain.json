@@ -18,6 +18,7 @@
   "agent": "开了子会话：{title}",
   "agent_stopped": "Agent 停了",
   "agent_stopped_failed": "Agent 失败了",
+  "reported": "助手说：{text}",
   "confirmed": "你确认了",
   "confirmed_edited": "你确认了（改过文字）",
   "rejected": "你驳回了",

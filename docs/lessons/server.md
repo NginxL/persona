@@ -2180,3 +2180,15 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   `server/internal/hub/settings_card_wait_test.go`), so fifteen minutes pass at once. Give the hub's end a loopback
   address (the bus refuses plaintext from an address it cannot place), and let what the hub does after a hang-up
   (`devicesGone` waits half a second) pass in a cleanup: the bubble's clock stops when the test's goroutine is done.
+
+## "A run after I asked" is not "the run I asked for" (2026-11-14, #7116)
+
+- `subscription_run` took a clock reading, recorded its request, and returned the first run whose time was not
+  before the reading. A scheduled run that started between the reading and the request passed for the requested one:
+  the caller got another run's counts and items, and when the scheduled run found the items first, the requested run
+  found none. Tell a requested run by what marks it as requested (its trigger), not by when it happened.
+- A request flag is taken by the run that honours it, never by whichever run comes next: the scheduled run cleared
+  the flag it had read as unset a moment earlier, and a "run now" made in between was lost without a trace.
+- It showed up as a test that failed 21 times in 200 under load, and the first reading was "the test's ordering".
+  Before making such a test deterministic, make the losing order happen on purpose (a store that runs the other
+  side inside the read) and look at what the caller gets.

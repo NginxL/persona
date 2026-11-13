@@ -3,7 +3,7 @@ import SwiftUI
 extension SettingsPage {
     @MainActor func belongsToCurrentAssistant(in model: AppModel) -> Bool {
         switch self {
-        case .models, .agents, .assistant, .claude, .codex, .modelConfiguration, .triage, .connectors, .plugins, .channels,
+        case .models, .agents, .assistant, .claude, .codex, .modelConfiguration, .triage, .standingAuthorizations, .connectors, .plugins, .channels,
              .mail, .feishuBot, .sent, .skills,
              .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .inboxSources, .sourcesGraph, .computers:
             true
@@ -87,6 +87,8 @@ enum SettingsCatalog {
                   aliases: String(localized: "settings.search.devices")),
             .init(id: "triage", title: String(localized: "Session Triage"), symbol: Theme.Icon.triage, group: .assistant, page: .triage,
                   aliases: String(localized: "settings.search.triage")),
+            .init(id: "standing-authorizations", title: String(localized: "Standing Authorizations"), symbol: Theme.Icon.standingAuthorization,
+                  group: .assistant, page: .standingAuthorizations, aliases: String(localized: "settings.search.standing_authorizations")),
             .init(id: "claude", title: String(localized: "Claude Code Settings"), symbol: Theme.Icon.options, group: .assistant, page: .claude,
                   aliases: "Claude Code"),
             .init(id: "codex", title: String(localized: "Codex Settings"), symbol: Theme.Icon.options, group: .assistant, page: .codex,

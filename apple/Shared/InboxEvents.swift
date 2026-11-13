@@ -113,8 +113,13 @@ extension InboxItem {
 
         enum CodingKeys: String, CodingKey { case id, at, kind, text, via, edited, detail, count, sender, messages, link }
 
+        /// A reported entry's detail is already its row's words, so it is not also expanded below the row.
+        var detailIsInLine: Bool { kind == "reported" && !(detail ?? "").isEmpty }
+
         /// What opens inline when there is no link: the reason, the words, the batch's messages.
-        var expandable: Bool { !(detail ?? "").isEmpty || !(messages ?? []).isEmpty }
+        var expandable: Bool {
+            !(messages ?? []).isEmpty || (!(detail ?? "").isEmpty && !detailIsInLine)
+        }
     }
 
     /// Where tapping a chain entry goes: the item's source (at a Feishu position, a mail uid, a URL, or just the source
@@ -168,9 +173,10 @@ extension InboxItem {
         return s
     }
 
-    /// The item is an event of inbox phase 1 (the hub sent any of its fields): its detail draws recap, the suggestion and
-    /// the chain; without them the detail is today's.
-    nonisolated var isEvent: Bool { handling != nil || suggestion != nil || !(chain ?? []).isEmpty || !(recap ?? "").isEmpty }
+    /// The processing fields or a shared state key make this an event; without them the detail is today's.
+    nonisolated var isEvent: Bool {
+        now != nil || handling != nil || suggestion != nil || !(chain ?? []).isEmpty || !(recap ?? "").isEmpty
+    }
 }
 
 extension SessionKey {
@@ -302,6 +308,19 @@ nonisolated enum InboxEventText {
             }
         default: Theme.Icon.dot
         }
+    }
+
+    /// The words of a chain row. A reported entry's server text already says "Assistant says" for older apps;
+    /// the new app's label carries that meaning, so it shows the original words from detail instead.
+    static func chainText(_ e: InboxItem.ChainEntry) -> String {
+        if e.detailIsInLine, let detail = e.detail { return detail }
+        return e.text.isEmpty ? e.kind : e.text
+    }
+
+    /// Detail to repeat in the expansion; reported detail is already in the row and is not repeated there.
+    static func expansionDetail(_ e: InboxItem.ChainEntry) -> String? {
+        guard !e.detailIsInLine, let detail = e.detail, !detail.isEmpty else { return nil }
+        return detail
     }
 
     /// Folded, the timeline keeps its three newest entries in their original order; expanded, it keeps every entry.

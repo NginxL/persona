@@ -2147,10 +2147,10 @@ nonisolated struct Item: Codable, Identifiable, Hashable, Sendable {
     var modelRefusal: ModelRefusal? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, supervisionUser, source, outcome
+        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, source, outcome
         case modelRefusal = "model_refusal"
         case toolUseID = "tool_use_id", toolName = "tool_name", toolInput = "tool_input", isError = "is_error", fullSize = "full_size",
-             clientMsgID = "client_msg_id"
+             clientMsgID = "client_msg_id", supervisionUser = "supervision_user"
     }
 
     /// The text without the line the hub adds where it cut it (the app offers the whole text itself).

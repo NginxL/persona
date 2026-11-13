@@ -3,11 +3,27 @@ import Foundation
 /// The shared words for an inbox matter's current state and row metadata (spec/fixtures/inbox/now.json and row.json).
 /// The manager sends keys and facts; each client resolves the same localized table instead of deriving its own state.
 nonisolated enum InboxNow {
+    /// The status mark shared by the row and detail: waiting is still, only active AI work spins, and action states
+    /// carry the existing Needs-you mark. Done, FYI, folded and unknown keys draw no mark.
+    enum Symbol: String, Equatable, Sendable {
+        case time, spinner, needsYou, failed
+    }
+
+    static func symbol(for item: InboxItem) -> Symbol? {
+        switch item.now {
+        case "waiting": .time
+        case "queued", "looking", "agent_working": .spinner
+        case "confirm_reply", "confirm_agent", "decide", "follow_up_ask", "check_due", "needs_you": .needsYou
+        case "failed": .failed
+        default: nil
+        }
+    }
+
     private static let wordMemo = TextMemo<String>(limit: 96)
     private static let timeMemo = TextMemo<String>(limit: 128)
 
     /// The row's state in the launched interface language. Only this convenience reads a clock; the compositor below is pure.
-    static func text(for item: InboxItem, now: Date = .now, calendar: Calendar = .current) -> String? {
+    static func text(for item: InboxItem, now: Date = AppClock.now, calendar: Calendar = .current) -> String? {
         let lang = interfaceTextLocale.identifier
         let formattedTime: String?
         if item.now == "waiting", let checkAt = item.follow?.checkAt {

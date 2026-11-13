@@ -210,13 +210,9 @@ struct MeetingPage: View {
     }
 
     /// "Persona takes part · On this iPhone · Private": the role (or that Persona can't take part now), where it records,
-    /// and the private mark when it is on.
+    /// in hub mode that the hub transcribes it (#3862 phase 5), and the private mark when it is on.
     private func subtitle(_ entry: RecordingEntry) -> some View {
-        let parts = [personaWords(entry), String(localized: "On this iPhone"), isPrivate(entry) ? String(localized: "Private") : nil]
-        return Text(parts.compactMap { $0 }.joined(separator: " · "))
-            .font(Theme.Font.secondary).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("meeting-page-subtitle")
+        MeetingPageSubtitle(id: entry.id, persona: personaWords(entry), privateMark: isPrivate(entry))
     }
 
     /// The role's words, unless it attends and the hub took the meeting without its room (an older manager,
@@ -682,30 +678,70 @@ struct MeetingPage: View {
     }
 }
 
+/// The subtitle under the meeting page's state line: the role, where it records, hub mode (#3862 phase 5) and the private
+/// mark. A view of its own, so the transcription store's changes (a caption a second in hub mode) redraw only it (P5).
+private struct MeetingPageSubtitle: View {
+    var id: UUID
+    var persona: String
+    var privateMark: Bool
+    @State private var transcription = MeetingTranscription.shared
+
+    var body: some View {
+        let parts = [persona, String(localized: "On this iPhone"),
+                     transcription.hubTranscribes(id) ? String(localized: "Transcribed on the hub") : nil,
+                     privateMark ? String(localized: "Private") : nil]
+        Text(parts.compactMap { $0 }.joined(separator: " · "))
+            .font(Theme.Font.secondary).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("meeting-page-subtitle")
+    }
+}
+
 /// The Live box: the newest transcript lines, how far the text is behind the room, and the whole transcript one tap away.
 /// A view of its own, so its lines are taken from the transcript (every segment sorted and filtered, `entry.sentences`)
 /// only when the recording changes, not on every pass of the page (P4). `folded` (the keyboard is up): only the newest
 /// line, so the thread under it keeps its height. The top card (`MeetingTopCard`) shows it where there can be no
 /// highlights (phase 2b).
+///
+/// In hub mode (#3862 phase 5) it shows what `MeetingTranscription.shown` says: the hub's lines and its caption being
+/// said now while the audio socket is up and no problem but `no_interim` stands; else the phone's own lines with a notice
+/// that transcription has fallen back to this iPhone; with Persona off, the hub's caption under the phone's own lines.
 struct MeetingLiveBox: View {
     var entry: RecordingEntry
     var exchanges: [MeetingAsk.Exchange]
     var folded: Bool
 
     @State private var capture = RecordingCapture.shared
+    @State private var transcription = MeetingTranscription.shared
     @State private var rows: [LiveRow] = []
 
     private var paused: Bool { capture.state == .paused }
 
     var body: some View {
+        let hub = transcription.meeting(entry.id)
+        let shown = transcription.shown(entry.id, role: entry.attendance?.role ?? .off)
+        // The hub's newest lines, keyed by their place in its live log (never renumbered): three, so cheap here.
+        let lines = shown.hubLines ? hub.lines.suffix(Theme.Recording.liveLines).map {
+            LiveRow(id: "hub-\($0.n)", start: $0.start, end: $0.end, text: $0.text)
+        } : rows
+        let caption = shown.hubInterim ? hub.interim.flatMap { $0.text.isEmpty ? nil : $0 } : nil
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 Text("Live").font(Theme.Font.captionStrong).foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: Theme.Space.s)
-                behind(rows.last)
+                // A caption is what is said now: nothing is behind.
+                if caption == nil { behind(lines.last) }
             }
-            ForEach(folded ? Array(rows.suffix(1)) : rows) { row in liveRow(row) }
+            if shown.fellBack { MeetingTranscriptionFallbackNotice(words: MeetingTranscriptionWords.fallback(hub)) }
+            // Folded, only the newest: the caption when there is one, else the last line.
+            ForEach(folded ? (caption == nil ? Array(lines.suffix(1)) : []) : lines) { row in
+                liveRow(row).accessibilityIdentifier(shown.hubLines ? "meeting-live-hub-line" : "meeting-live-line")
+            }
+            if let caption {
+                MeetingCaptionRow(caption: caption, lineLimit: Theme.Recording.liveLineLength)
+                    .accessibilityIdentifier("meeting-live-interim")
+            }
             if !folded {
                 HStack {
                     Spacer(minLength: Theme.Space.flush)
@@ -896,8 +932,15 @@ nonisolated struct MeetingTranscriptFocus: Identifiable, Hashable, Sendable {
 }
 
 /// The whole transcript of the meeting being recorded, with its bookmarks and questions: the live view's timeline, one
-/// tap from the Live box. Opened at a highlight's time (`focus`), it scrolls to the first of the phone's lines in its
-/// minute and lights them all for two seconds (`RecordingTimeline.focus`), as the recording's page lights a line.
+/// tap from the Live box or the Highlights card. Opened at a highlight's time (`focus`), it scrolls to the first of the
+/// lines in its minute and lights them all for two seconds (`RecordingTimeline.focus`), as the recording's page lights a
+/// line.
+///
+/// In hub mode (#3862 phase 5) its lines are what `MeetingTranscription.shown` says, as in the Live box: the hub's lines
+/// with its caption being said now under them while the audio socket is up and no problem but `no_interim` stands; else
+/// the phone's own, under the notice that transcription fell back; with Persona off, the phone's own and the hub's
+/// caption. The page reads none of the store itself: a feed hands it the hub's lines only when they change, and the caption
+/// and the notice are views of their own, so a caption a second redraws only its row (P5).
 struct MeetingTranscriptPage: View {
     var id: UUID
     var exchanges: [MeetingAsk.Exchange]
@@ -907,15 +950,23 @@ struct MeetingTranscriptPage: View {
     @State private var capture = RecordingCapture.shared
     @State private var items: [RecordingTimeline.Item] = []
     @State private var lit: Set<RecordingTimeline.Item.ID> = []
+    /// The hub's lines while the page shows them (`MeetingTranscriptHubFeed`); nil: the phone's own.
+    @State private var hubLines: [MeetingHubLine]?
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 if let entry = library.entry(id) {
-                    RecordingTimelineRows(entry: entry, exchanges: exchanges, paused: capture.state == .paused, items: $items,
-                                          lit: lit)
-                        .padding(.horizontal, Theme.Space.page)
-                        .padding(.vertical, Theme.Space.s)
+                    let role = entry.attendance?.role ?? .off
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        MeetingTranscriptionFallbackRow(id: id)
+                        RecordingTimelineRows(entry: entry, exchanges: exchanges, paused: capture.state == .paused, items: $items,
+                                              lit: lit, hubLines: hubLines)
+                        MeetingTranscriptCaption(id: id, role: role)
+                    }
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.vertical, Theme.Space.s)
+                    .background { MeetingTranscriptHubFeed(id: id, role: role, lines: $hubLines) }
                 }
             }
             .task(id: focus) { await jump(proxy) }

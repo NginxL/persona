@@ -107,6 +107,41 @@ struct ScreenVideoTests {
         s.close()
     }
 
+    /// The helper's `timing` comes through as it is (a chunk's picture, the newest of its burst, follows its other
+    /// messages, so the order within a chunk is not the wire's).
+    @Test func theHelpersTimingComesThrough() async throws {
+        var bytes = try Self.prefix(messages: 4)
+        bytes += Array(ScreenVideoMessage.timing(TimingMessage(captureMs: 0, encodeMs: 5.5, networkMs: 7, kbps: 900, fps: 30)).framed())
+        let t = VideoScript([bytes], holds: true)
+        let seen = Events()
+        let s = ScreenVideoStream(transport: t, start: Self.start) { seen.add($0) }
+        s.run()
+        try await seen.until { $0.contains { $0.hasPrefix("timing") } }
+        #expect(seen.all.contains("timing encode 5.5 network 7.0"), "\(seen.all)")
+        #expect(seen.all.first == "hello hevc 960x600")
+        #expect(s.receivedBytes == bytes.count, "every byte that came is counted")
+        s.close()
+    }
+
+    /// The overlay's reading (#3954): at most once a second, frames shown and megabits that came over it, the median
+    /// decode, and the helper's segments; the total only when encode, network and decode are all known.
+    @Test func theOverlayReadsOnceASecond() {
+        var tally = ScreenVideoTally()
+        let t0 = ContinuousClock.now
+        #expect(tally.reading(at: t0, received: 0) == nil, "no picture yet")
+        for (i, ms) in [4.0, 6.0, 5.0, 30.0].enumerated() { tally.picture(decodeMs: ms, at: t0.advanced(by: .milliseconds(250 * i))) }
+        #expect(tally.reading(at: t0.advanced(by: .milliseconds(900)), received: 200_000) == nil, "not a second yet")
+        let first = tally.reading(at: t0.advanced(by: .seconds(1)), received: 250_000)
+        #expect(first == ScreenVideoReading(fps: 4, mbps: 2, captureMs: nil, encodeMs: nil, networkMs: nil, decodeMs: 5.5))
+        #expect(first?.totalMs == nil, "no helper timing (a helper before it): no total")
+        tally.helper(TimingMessage(captureMs: 0, encodeMs: 5, networkMs: 8, kbps: 1000, fps: 2))
+        tally.picture(decodeMs: 3, at: t0.advanced(by: .milliseconds(1500)))
+        tally.picture(decodeMs: 5, at: t0.advanced(by: .milliseconds(1700)))
+        let second = tally.reading(at: t0.advanced(by: .seconds(2)), received: 375_000)
+        #expect(second == ScreenVideoReading(fps: 2, mbps: 1, captureMs: 0, encodeMs: 5, networkMs: 8, decodeMs: 4))
+        #expect(second?.totalMs == 17, "capture 0 + encode 5 + network 8 + decode 4")
+    }
+
     @Test func aFrameThatDoesNotDecodeEnds() async throws {
         var bytes = try Self.prefix(messages: 2)
         bytes += Array(ScreenVideoMessage.frame(VideoFrame(number: 1, captureMicros: 0, flags: .keyframe, sample: Data([0, 0, 0, 4, 1, 2, 3, 4]))).framed())
@@ -248,6 +283,7 @@ private final class Events: @unchecked Sendable {
         case let .picture(pb, _): word = "picture \(CVPixelBufferGetWidth(pb))x\(CVPixelBufferGetHeight(pb))"
         case let .paused(why): word = "paused \(why)"
         case .resumed: word = "resumed"
+        case let .timing(t): word = "timing encode \(t.encodeMs ?? -1) network \(t.networkMs ?? -1)"
         case let .ended(why): word = "ended \(why)"
         }
         lock.withLock { events.append(word) }

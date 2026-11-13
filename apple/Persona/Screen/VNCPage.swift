@@ -554,9 +554,10 @@ struct VNCPage: View {
         guard let s = session else { return nil }
         #if os(iOS) && canImport(PersonaScreenKit)
         if s.video.showing {
-            let v = s.video
-            return ScreenStats(mode: .video, path: .relay, fps: v.fps > 0 ? v.fps : nil, codec: v.codec,
-                               resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, decodeMs: v.decodeMs)
+            let v = s.video, r = v.reading
+            return ScreenStats(mode: .video, path: .relay, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
+                               resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, captureMs: r.captureMs,
+                               encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs)
         }
         #endif
         return ScreenStats(mode: .vnc, path: .relay,

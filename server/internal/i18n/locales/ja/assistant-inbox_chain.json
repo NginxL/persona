@@ -18,6 +18,7 @@
   "agent": "サブセッションを開始：{title}",
   "agent_stopped": "Agent が停止しました",
   "agent_stopped_failed": "Agent が失敗しました",
+  "reported": "アシスタントによると：{text}",
   "confirmed": "あなたが確認",
   "confirmed_edited": "あなたが確認（文面を変更）",
   "rejected": "あなたが却下",

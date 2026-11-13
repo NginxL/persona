@@ -38,6 +38,9 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
+	// Todo is the id of the open to-do the row is on ("" for none): what Options.Todo selects and Counts.Todo counts
+	// (#6662). The adapter knows which to-dos are open; the index only compares ids.
+	Todo string
 	// Fold is the item's place in the session hierarchy (#5120); nil for an item folded under none that shows its own
 	// State and BackgroundWaiting, as every item without children does. It sits behind a pointer to keep Item in its
 	// allocation size class: an adapter builds a whole batch as one []Item, as the hub does on every pass.
@@ -96,7 +99,19 @@ type Options struct {
 	// every pair with a machine.
 	Places []Place
 	Spaces []Place
+	// Todo (todo=<id>) selects the items on that to-do; TodoNone (todo=none) the items on none. Both bind a cursor as
+	// the other filters do (#6662).
+	Todo string
+	// Waiting (waiting=1) selects the items that only wait in the background (BackgroundWaiting, by their folded state
+	// with Roots), waiting=0 the others: with state=working, the sidebar's "Waiting in the background" and "Working"
+	// quick filters. ExcludePaneSource (exclude_pane_source=<origin>) leaves out the items of that origin (the
+	// sidebar's hidden botmux sessions). Both bind a cursor as the other filters do (#6662).
+	Waiting           string
+	ExcludePaneSource string
 }
+
+// TodoNone is the todo value that selects the items on no to-do: no to-do id is spelled so ("todo_<hex>").
+const TodoNone = "none"
 
 // Page contains transport values rather than adapter-specific session types.
 // Total is the filtered membership at Revision, not the number of delta events.
@@ -120,6 +135,8 @@ type Counts struct {
 	Group      map[string]int `json:"group"`
 	State      map[string]int `json:"state"`
 	PaneSource map[string]int `json:"pane_source,omitempty"`
+	// Todo counts the items by Item.Todo, "" for the items on no to-do (#6662).
+	Todo map[string]int `json:"todo"`
 	// BackgroundWaiting: how many of State["working"] only wait in the background (#6045): a client that shows them
 	// apart takes them out of its Working count.
 	BackgroundWaiting int    `json:"background_waiting,omitempty"`
@@ -159,7 +176,7 @@ type journalEntry struct {
 }
 
 type filters struct {
-	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under string
+	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource string
 	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
 	Places, Spaces   string
 	Roots, NoPrivate bool

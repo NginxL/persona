@@ -68,6 +68,18 @@ nonisolated struct GitStatus: Codable, Hashable, Sendable {
         case root, branch, head, upstream, ahead, behind, files, stashes, commits, gone
         case isRepo = "is_repo"
     }
+
+    /// The upstream branch, nil when there is none (a node leaves it out; the mock hub sends it empty).
+    var upstreamName: String? { upstream?.isEmpty == false ? upstream : nil }
+}
+
+/// What a write of the Git tab answers (#7013, docs/protocol/protocol.md `git/stage` · `git/commit` · `git/push`):
+/// the repository as it is after it, and the commit a commit made.
+nonisolated struct GitWriteResult: Decodable, Sendable {
+    var status: GitStatus
+    var commit: GitCommit?
+    /// What git said (a push's summary).
+    var output: String?
 }
 
 nonisolated struct GitPullResult: Codable, Hashable, Sendable {
@@ -157,6 +169,27 @@ extension APIClient {
     private struct GitPullRequest: Encodable { var cwd: String }
     func gitPull(machine: String, cwd: String) async throws -> GitPullResult {
         try await post(mp(machine) + "/git/pull", body: GitPullRequest(cwd: cwd), timeout: 100)
+    }
+    // The Git tab's writes (#7013, hub feature `git_write`): each a tap the app confirmed when it leaves the computer;
+    // the node never forces. A refusal is a 409 with `code` (and `files`), as the web's Git panel reads it.
+    private struct GitStageRequest: Encodable { var cwd: String; var paths: [String]; var unstage: Bool }
+    /// `git add` (or `git restore --staged` with unstage) of paths.
+    func gitStage(machine: String, cwd: String, paths: [String], unstage: Bool) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/stage", body: GitStageRequest(cwd: cwd, paths: paths, unstage: unstage), timeout: 100)
+    }
+    private struct GitCommitRequest: Encodable { var cwd, message: String }
+    /// Commits what is staged; hooks run, and the hub waits up to five minutes for them.
+    func gitCommit(machine: String, cwd: String, message: String) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/commit", body: GitCommitRequest(cwd: cwd, message: message), timeout: 330)
+    }
+    private struct GitPushRequest: Encodable {
+        var cwd: String
+        var setUpstream: Bool
+        enum CodingKeys: String, CodingKey { case cwd, setUpstream = "set_upstream" }
+    }
+    /// Pushes the branch to its upstream, never forced; setUpstream makes one on origin for a branch without one.
+    func gitPush(machine: String, cwd: String, setUpstream: Bool) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/push", body: GitPushRequest(cwd: cwd, setUpstream: setUpstream), timeout: 100)
     }
     func gitDiff(machine: String, cwd: String, path: String, staged: Bool) async throws -> GitDiff {
         try await get(mp(machine) + "/git/diff", query: ["cwd": cwd, "path": path, "staged": staged ? "1" : "0"])

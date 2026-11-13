@@ -40,6 +40,29 @@ struct InboxSpinner: View {
     }
 }
 
+/// The one rendering of `InboxNow.symbol(for:)`, used by both the list row and the event detail.
+struct InboxNowSymbol: View {
+    var symbol: InboxNow.Symbol?
+
+    var body: some View {
+        switch symbol {
+        case .time?:
+            ThemedIcon(Theme.Icon.time).font(Theme.Font.label).foregroundStyle(.secondary)
+                .accessibilityIdentifier("inbox.now.symbol.time")
+        case .spinner?:
+            InboxSpinner().accessibilityIdentifier("inbox.now.symbol.spinner")
+        case .needsYou?:
+            ThemedIcon(Theme.Icon.needsYou).font(Theme.Font.label).foregroundStyle(StatusPalette.needsYou.text)
+                .accessibilityIdentifier("inbox.now.symbol.needsYou")
+        case .failed?:
+            ThemedIcon(Theme.Icon.needsYou).font(Theme.Font.label).foregroundStyle(Theme.danger)
+                .accessibilityIdentifier("inbox.now.symbol.failed")
+        case nil:
+            EmptyView()
+        }
+    }
+}
+
 // MARK: - Blocks
 
 /// recap, the suggestion (or why there is none yet), the chain and related items, one under another: the iPhone's event page and
@@ -60,7 +83,8 @@ struct InboxEventBlocks: View {
     @State private var words = ""
 
     private var canSay: Bool { !item.isDone && item.currentSuggestion == nil }
-    private var failed: Bool { canSay && item.handling?.state == "failed" }
+    private var failed: Bool { canSay && (item.now == "failed" || item.handling?.state == "failed") }
+    private var nowSymbol: InboxNow.Symbol? { InboxNow.symbol(for: item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -128,9 +152,21 @@ struct InboxEventBlocks: View {
         }
     }
 
-    /// The processing conversation's state, when it has something to say: still at it, waiting, or failed (with why).
+    /// The shared current-state sentence when the hub supplies a key; otherwise the old processing / done line.
     @ViewBuilder private var status: some View {
-        if let filed = InboxEventText.doneBy(item) {
+        if let words = InboxNow.text(for: item) {
+            HStack(alignment: .top, spacing: Theme.Space.sm) {
+                InboxNowSymbol(symbol: nowSymbol)
+                Text(words)
+                    .font(Theme.Font.secondary)
+                    .lineHeight(.secondary)
+                    .foregroundStyle(nowSymbol == .failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inbox.now")
+        } else if let filed = InboxEventText.doneBy(item) {
             Label(filed, systemImage: Theme.Icon.done).font(Theme.Font.secondaryStrong).foregroundStyle(Theme.positive).lineLimit(1)
         } else if !item.isDone, let mark = InboxEventText.mark(item) {
             switch mark {
@@ -494,7 +530,7 @@ struct InboxChainSection: View {
                 Chip(text: InboxEventText.assistantSays, look: .neutral, compact: true)
                     .accessibilityIdentifier("inbox.chain.reported")
             }
-            Text(e.text.isEmpty ? e.kind : e.text)
+            Text(InboxEventText.chainText(e))
                 .font(Theme.Font.secondary)
                 .foregroundStyle(e.kind == "reported" ? .secondary : .primary)
                 .lineLimit(open ? nil : 2)
@@ -583,7 +619,7 @@ struct InboxChainSection: View {
                     .font(Theme.Font.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let d = e.detail, !d.isEmpty {
+            if let d = InboxEventText.expansionDetail(e) {
                 Text(d).font(Theme.Font.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -843,8 +879,9 @@ struct InboxEventPage: View {
         }
     }
 
-    /// Where it came from: Feishu · a name / the mail account.
+    /// Where it happens and who said the newest line; without `where`, the source and title as before.
     static func from(_ it: InboxItem) -> String {
+        if let meta = InboxNow.meta(it, lang: interfaceTextLocale.identifier) { return meta }
         let source = it.isLark ? String(localized: "Lark [Inbox Event Views 7e4419]") : it.accountName
         return [source, it.title].filter { !$0.isEmpty }.joined(separator: " · ")
     }

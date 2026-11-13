@@ -143,7 +143,9 @@ struct MeetingTopCard: View {
 /// waiting line, and Full Transcript at the trailing side. No transcript lines: during the meeting the owner reads the
 /// points, and the words as said are one tap away. Folded (the keyboard is up), only the newest highlight or the waiting
 /// line, without Full Transcript. It takes only what it draws (P5): the recording's id for Full Transcript, not the
-/// recording, so a save of its transcript (each segment, each revision) gives it nothing new and doesn't redraw it.
+/// recording, so a save of its transcript (each segment, each revision) gives it nothing new and doesn't redraw it. In
+/// hub mode (#3862 phase 5) the notice that transcription fell back to this iPhone sits under its title, as in the Live
+/// box; the hub's lines and caption are on the Full Transcript page.
 private struct MeetingHighlightsCard: View {
     var id: UUID
     var exchanges: [MeetingAsk.Exchange]
@@ -156,6 +158,9 @@ private struct MeetingHighlightsCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Highlights [Meeting]").font(Theme.Font.captionStrong).foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
+            // Hub transcription fell back to this iPhone (#3862 phase 5): said here as in the Live box, though the card shows
+            // no lines, since the transcript one tap away is the phone's own then. Only that row reads the store.
+            MeetingTranscriptionFallbackRow(id: id)
             // The waiting line and the first highlights cross-fade one over the other, from the top.
             ZStack(alignment: .topLeading) {
                 if rows.isEmpty {

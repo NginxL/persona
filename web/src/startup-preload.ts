@@ -269,7 +269,20 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // 475,286 B, zh-Hans 476,188 B to 476,273 B): the Knowledge page's first stylesheet (the card's tints and grid,
 // views/knowledge/minutes-overview.css) named in the app's preload map, and Button passing aria-controls and aria-label
 // (a topic's Show N more names its topic). The budget moves by the same 85 B, keeping that 31 B room.
-export const FIRST_SCREEN_BUDGET = 479_491;
+// #6662: the paged Agents list under the complete list's title row, grouping bar and quick filters (By to-do / By
+// status sections, the to-do names, the quick filters' hub keys, the quiet Load more line, the ⋯'s sorts ordering its
+// sections) adds 318 B to ja, measured in one environment against main at eeac9a579 (ja 479,359 B to 479,677 B; en
+// 475,650 B to 475,958 B, zh-Hans 476,635 B to 476,959 B). The budget moves by these 318 B on top of #6563's.
+// #6770's Electron bridge adds 135 B to ja (479,944 B; en 476,225 B, zh-Hans 477,226 B): fixed native notification/badge
+// calls, authenticated register/unregister presence, and clearing notifications on sign-out. The browser has no desktop
+// chunk or eager import. The existing 31 B room covers the hub's small build-environment difference.
+// #6589: the Agents list's Filter on its title row with its count, the chips with the query ⌘K put on the list (its text
+// reopens ⌘K) and the small store the palette sets it through, the paged list's search taken from it in place of its
+// own field, the phone page's search button: ja 480,189 B against 479,848 B on main at d916689d8, +341 B (en 476,485 B
+// against 476,155 B, zh-Hans 477,467 B against 477,133 B; the lists' fields and their strings went; ⌘K's matcher,
+// lib/agent-search.ts, and its Filter's menu load on intent, not here; the idle tier, 43,106 B with ⌘K's Filter button
+// against 41,966 B, stays under its ceiling). main's 96 B of room stay.
+export const FIRST_SCREEN_BUDGET = 480_285;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;

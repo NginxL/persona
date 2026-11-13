@@ -10,6 +10,8 @@ struct AssistantProfileView: View {
     @State private var runs: [APIClient.ScheduleRun]?
     @State private var memoryCount: Int?
     @State private var placeCount: Int?
+    /// How many standing authorizations the current assistant has (#7002); nil until read, or when this device can't.
+    @State private var standingCount: Int?
     @State private var nextSuggestionsModel = NextSuggestionsModel()
     /// The rename sheet (the assistant's own name, #6401).
     @State private var renaming = false
@@ -71,6 +73,7 @@ struct AssistantProfileView: View {
             case "runs": AssistantRunsView()
             case "memory", "memoryFile", "memoryEdit": AssistantMemoryView()
             case "places", "place", "newPlace": SavedPlacesView()
+            case "standing": StandingAuthorizationsView()
             default: AssistantNotesView()
             }
         }
@@ -100,6 +103,10 @@ struct AssistantProfileView: View {
                     row("Run History", Theme.Icon.recent, detail: runs.flatMap(\.first).map { AssistantRunText.statusWord($0) + " · " + Fmt.relative($0.at) })
                 }
                 NavigationLink { TaskTrustView() } label: { row("Auto-Start Tasks", Theme.Icon.taskTrust, detail: nil) }
+                NavigationLink { StandingAuthorizationsView() } label: {
+                    row("Standing Authorizations", Theme.Icon.standingAuthorization, detail: standingDetail)
+                }
+                .accessibilityIdentifier("assistant-standing-authorizations")
             } header: {
                 Text("On Its Own")
             } footer: {
@@ -211,6 +218,10 @@ struct AssistantProfileView: View {
                         buiRow("Run History", Theme.Icon.recent, detail: runs.flatMap(\.first).map { AssistantRunText.statusWord($0) + " · " + Fmt.relative($0.at) })
                     }
                     NavigationLink { TaskTrustView() } label: { buiRow("Auto-Start Tasks", Theme.Icon.taskTrust, detail: nil) }
+                    NavigationLink { StandingAuthorizationsView() } label: {
+                        buiRow("Standing Authorizations", Theme.Icon.standingAuthorization, detail: standingDetail)
+                    }
+                    .accessibilityIdentifier("assistant-standing-authorizations")
                 }
                 BUIListSection(String(localized: "Knowing You"), footer: String(localized: "“About Me” is what you tell Persona; “Memory” is what it notes down on its own in chats. You can edit both.")) {
                     NavigationLink { AssistantNotesView() } label: {
@@ -422,6 +433,7 @@ struct AssistantProfileView: View {
         async let h = try? api.scheduleRuns()
         async let m = try? api.assistantMemory()
         async let p = try? api.savedPlaces()
+        async let s = try? api.standingAuthorizations()
         // The switch shows once the hub says it has the setting (#1731): a hub updated since the app read it, too.
         let held = model.assistantConfig
         if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil { await model.refreshAssistant() }
@@ -429,9 +441,15 @@ struct AssistantProfileView: View {
         runs = await h
         if let files = await m { memoryCount = files.filter { $0.name != AssistantMemoryEntry.index }.count }
         placeCount = (await p)?.count
+        standingCount = (await s)?.authorizations.count
         #if os(iOS)
         await suggestionsRead
         #endif
+    }
+
+    /// Standing Authorizations' row detail: how many there are, nothing when none.
+    private var standingDetail: String? {
+        standingCount.flatMap { $0 > 0 ? $0.formatted() : nil }
     }
 
     /// Saved Places' row detail: how many there are, nothing when none.

@@ -198,7 +198,7 @@ describe("the list by computer", () => {
     expect(sections().map((s) => heading(s).getAttribute("aria-expanded"))).toEqual(["false", "true", "true", "false"]);
   });
 
-  it("shows a section's newest sessions first, then what it has read, then reads on", async () => {
+  it("shows a section's newest sessions first, then what it has read, then reads on, under a quiet Load more line", async () => {
     const many = Array.from({ length: 9 }, (_, i) => row(`m${i}`, "mac", "/big"));
     vi.mocked(api).mockImplementation((path) => {
       const q = params(path as string);
@@ -211,6 +211,8 @@ describe("the list by computer", () => {
     await browseBy("machine");
     const mac = () => sections()[0];
     const more = () => [...mac().querySelectorAll("button")].find((b) => b.textContent === t("paged-agents.more"))!;
+    // the sidebar's quiet line under a list's rows, not a button pill (#6662)
+    expect(more().className).toContain("text-ink-3");
     expect(rowsIn(mac())).toEqual(["m0", "m1", "m2", "m3", "m4", "m5"]);
     vi.mocked(api).mockClear();
     await act(async () => more().click());

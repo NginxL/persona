@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect public Cargo license notices for the Android core's locked registry closure."""
+"""Collect public Cargo notices for one explicitly selected target and crate, excluding dev-only packages."""
 import argparse
 import hashlib
 import json
@@ -14,16 +14,25 @@ def main():
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--registry-src', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--crate', default='persona-core-ffi')
+    parser.add_argument('--target', action='append')
+    parser.add_argument('--features', default='')
+    parser.add_argument('--exclude-crate', action='append', default=[])
+    parser.add_argument('--label', default='Android')
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
+    args.workspace = args.workspace.resolve()
+    args.registry_src = args.registry_src.resolve()
+    args.output = args.output.resolve()
     lock = tomllib.loads((args.workspace / 'Cargo.lock').read_text())
-    # `metadata --filter-platform` still includes other targets' conditional packages. cargo tree's normal+build
-    # edges name exactly the crates compiled for the two Android targets, excluding the typegen/dev-only workspace.
+    # Cargo tree names normal and build dependencies compiled for the selected target, not dev-only typegen packages.
     selected = set()
-    for target in ('aarch64-linux-android', 'x86_64-linux-android'):
-        tree = subprocess.run(['cargo', '+1.98.0', 'tree', '--locked', '-p', 'persona-core-ffi', '--target', target,
-                               '-e', 'normal,build', '--prefix', 'none'],
-                              cwd=args.workspace, check=True, capture_output=True, text=True).stdout
+    for target in args.target or ('aarch64-linux-android', 'x86_64-linux-android'):
+        command = ['cargo', '+1.98.0', 'tree', '--locked', '-p', args.crate, '--target', target,
+                   '-e', 'normal,build', '--prefix', 'none']
+        if args.features:
+            command += ['--features', args.features]
+        tree = subprocess.run(command, cwd=args.workspace, check=True, capture_output=True, text=True).stdout
         for line in tree.splitlines():
             fields = line.strip().split()
             if len(fields) >= 2 and fields[1].startswith('v'):
@@ -32,7 +41,7 @@ def main():
     entries = []
     documents = []
     for package in lock['package']:
-        if (package['name'], package['version']) not in selected:
+        if (package['name'], package['version']) not in selected or package['name'] in args.exclude_crate:
             continue
         if not package.get('source', '').startswith('registry+'):
             documents.append(('persona-' + package['name'], 'MIT', (args.workspace.parent.parent / 'LICENSE').read_bytes()))
@@ -84,16 +93,16 @@ def main():
     if args.check:
         for name, content in result.items():
             if not (args.output / name).is_file() or (args.output / name).read_text() != content:
-                raise ValueError('Out-of-date or missing Android core notice: ' + name)
+                raise ValueError('Out-of-date or missing core notice: ' + name)
     else:
         args.output.mkdir(parents=True, exist_ok=True)
         for name, content in result.items():
             (args.output / name).write_text(content)
-    print('Android core licenses: %d locked registry packages, %d notice files' % (len(entries), len(documents)))
+    print(args.label + ' core licenses: %d locked registry packages, %d notice files' % (len(entries), len(documents)))
 
 
 if __name__ == '__main__':
     try:
         main()
     except (OSError, ValueError, tomllib.TOMLDecodeError) as error:
-        sys.exit('Android core licenses: FAILED (' + str(error) + ')')
+        sys.exit('Core licenses: FAILED (' + str(error) + ': ' + str(getattr(error, 'filename', '')) + ')')

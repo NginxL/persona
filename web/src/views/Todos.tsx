@@ -1432,15 +1432,15 @@ const TodoListItem = memo(function TodoListItem({
         <div className="flex items-baseline justify-between gap-2">
           {view.ultracode ? (
             <span className="flex min-w-0 items-center gap-1">
-              <span className="truncate text-[13.5px] font-semibold text-ink">{todo.title}</span>
+              <span className="truncate text-[13.5px] font-semibold text-ink" data-testid="todo-title">{todo.title}</span>
               <UltraMark size={11} />
             </span>
           ) : (
-            <span className={cx("truncate text-[13.5px] font-semibold text-ink", !open && "line-through text-ink-3 font-normal")}>
+            <span className={cx("truncate text-[13.5px] font-semibold text-ink", !open && "line-through text-ink-3 font-normal")} data-testid="todo-title">
               {todo.title}
             </span>
           )}
-          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3">
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3" data-testid="todo-age">
             {thread && (
               <span data-testid="todo-thread-mark" role="img" aria-label={t("todos.thread_mark")} title={threadLine(thread)} className="inline-flex">
                 <Icon name="chat" size={12} stroke={2} />
@@ -1451,7 +1451,7 @@ const TodoListItem = memo(function TodoListItem({
         </div>
 
         {/* Status Line */}
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]">
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
           {open && <StatusMark state={dotState} size="sm" />}
           <span className={cx("shrink-0 whitespace-nowrap font-medium", toneClass)}>{todoStatusLabel(todo, status)}</span>
           {!todo.done_at && activeCount > 0 && (
@@ -1463,7 +1463,14 @@ const TodoListItem = memo(function TodoListItem({
           {!todo.done_at && activeCount === 0 && (
             <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
           )}
-          {!todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />}
+          {section === "just_done" && onSeen ? (
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {!todo.done_at && <ReviewBadge todo={todo} />}
+              <SeenButton onClick={() => onSeen(todo.id)} />
+            </span>
+          ) : (
+            !todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />
+          )}
         </div>
 
         {/* What it waits on from the user, with the one tap that answers it (#2056) */}
@@ -1523,25 +1530,31 @@ const TodoListItem = memo(function TodoListItem({
             </Button>
           </div>
         )}
-
-        {/* Just finished: Got it files it under Done at once (#5707); nothing else about it changes */}
-        {section === "just_done" && onSeen && (
-          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
-            <Button
-              tone="secondary"
-              icon="check"
-              testId="todo-seen"
-              onClick={() => onSeen(todo.id)}
-              className="h-7 text-[12px] whitespace-nowrap"
-            >
-              {t("todos.seen")}
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   );
 });
+
+/** Got it on a Just finished row (#5707): files it under Done at once. A small capsule at the end of the status line,
+ *  under the time (#6578), so the row is as tall as any other: its 20 px hang over the 18 px line (the negative margin
+ *  keeps them out of the line's height), and `touch-hit` gives a finger 44 px. Its press stays its own and never opens
+ *  the row. */
+function SeenButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="todo-seen"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="touch-hit -my-1 inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-surface px-2 text-[11.5px] font-medium whitespace-nowrap text-ink-2 shadow-btn transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <Icon name="check" size={11} stroke={2.2} />
+      {t("todos.seen")}
+    </button>
+  );
+}
 
 const PLAN_FIELD = "rounded-control border border-line bg-canvas px-2 py-1 text-[12.5px] text-ink outline-none focus:border-accent";
 

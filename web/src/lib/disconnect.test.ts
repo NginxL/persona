@@ -116,4 +116,12 @@ describe("signing out without the revoke", () => {
     signOutHere();
     expect(stored).toEqual({});
   });
+
+  it("clears the old account's native notifications before returning to sign-in", () => {
+    const clearNotifications = vi.fn();
+    vi.stubGlobal("window", { personaDesktop: { clearNotifications } });
+    signOutHere("dev_browser");
+    expect(clearNotifications).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/");
+  });
 });

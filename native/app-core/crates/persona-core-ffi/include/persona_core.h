@@ -14,7 +14,10 @@ extern "C" {
 typedef struct PersonaCore PersonaCore;
 
 // The client's callbacks. `changed` and `run` are called on the core's worker thread; `release` once, when the core
-// is freed. `context` is passed back unchanged.
+// is freed. `context` is passed back unchanged and must be safe to use from that thread. Its ownership transfers to
+// the core on every persona_core_new call, success or failure; release drops it exactly once. Callback pointers are
+// borrowed only for the call and must be copied before returning. Callbacks must not synchronously flush or free the
+// same core: the worker cannot join or wait for itself. A handle has one owner; free and calls on it are serialized.
 typedef struct PersonaCoreHost {
     void *context;
     void (*changed)(void *context, uint64_t version);

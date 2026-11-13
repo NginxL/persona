@@ -60,7 +60,6 @@
   "wt_removed": "Worktree removed",
   "wt_removed_branch": "Worktree and branch removed",
   "wt_remove_failed": "Couldn’t remove the worktree: {error}",
-  "archive_close_title": "Archive and close agent",
   "archive_close_detail": "Persona archives “{title}” and closes its tab and process on {machine}. Its conversation stays: restore it from Archived agents, then resume it from its terminal page.",
   "archive_close": "Archive and close",
   "bypass_confirm": "Switch to Full access",

@@ -99,6 +99,35 @@ public struct HeartbeatMessage: Codable, Equatable, Sendable {
     }
 }
 
+/// `timing` (helper → phone, #3954): once a second while frames go out, the helper's side of the latency the phone's
+/// connection-stats overlay breaks down, as medians over that second in milliseconds, and what went out. `captureMs`
+/// is ScreenCaptureKit's display time to its callback (about 0: frames come before their display time), `encodeMs`
+/// VideoToolbox in to out, `networkMs` half the round trip from a frame going out to the phone's report on it (no
+/// clocks to agree). A segment with nothing to measure in that second is nil. Apps before it skip the type by length.
+public struct TimingMessage: Codable, Equatable, Sendable {
+    public var captureMs: Double?
+    public var encodeMs: Double?
+    public var networkMs: Double?
+    public var kbps: Int
+    public var fps: Int
+
+    enum CodingKeys: String, CodingKey {
+        case captureMs = "capture_ms"
+        case encodeMs = "encode_ms"
+        case networkMs = "network_ms"
+        case kbps
+        case fps
+    }
+
+    public init(captureMs: Double?, encodeMs: Double?, networkMs: Double?, kbps: Int, fps: Int) {
+        self.captureMs = captureMs
+        self.encodeMs = encodeMs
+        self.networkMs = networkMs
+        self.kbps = kbps
+        self.fps = fps
+    }
+}
+
 /// `format` (helper → phone): the codec's parameter sets (HEVC VPS/SPS/PPS, or H.264 SPS/PPS), sent before the
 /// first keyframe and whenever they change.
 public struct FormatMessage: Equatable, Sendable {
@@ -163,6 +192,7 @@ public enum ScreenVideoMessage: Equatable, Sendable {
     case heartbeat(HeartbeatMessage)
     case paused(PausedMessage)
     case resumed
+    case timing(TimingMessage)
     case start(StartMessage)
     case report(ReceiverReport)
     case keyframe
@@ -178,6 +208,7 @@ public enum ScreenVideoMessage: Equatable, Sendable {
         case let .heartbeat(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.heartbeat.rawValue, body: Self.encodeJSON(m))
         case let .paused(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.paused.rawValue, body: Self.encodeJSON(m))
         case .resumed: return ScreenVideoWire.frame(ScreenVideoWire.Kind.resumed.rawValue, body: Data("{}".utf8))
+        case let .timing(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.timing.rawValue, body: Self.encodeJSON(m))
         case let .start(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.start.rawValue, body: Self.encodeJSON(m))
         case let .report(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.report.rawValue, body: Self.encodeReport(m))
         case .keyframe: return ScreenVideoWire.frame(ScreenVideoWire.Kind.keyframe.rawValue)
@@ -198,6 +229,7 @@ public enum ScreenVideoMessage: Equatable, Sendable {
         case .heartbeat: return .heartbeat(try decodeJSON(body))
         case .paused: return .paused(try decodeJSON(body))
         case .resumed: return .resumed
+        case .timing: return .timing(try decodeJSON(body))
         case .start: return .start(try decodeJSON(body))
         case .report: return .report(try decodeReport(body))
         case .keyframe: return .keyframe

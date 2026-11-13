@@ -406,6 +406,8 @@ enum SettingsPage: Hashable {
     case models, agents, appearance, about, pairing, computers
     /// Settings › Session Triage (docs/assistant/agent-work.md「开关」).
     case triage
+    /// Assistant Profile › Standing Authorizations (#7002): the go-aheads Persona answers for the owner, each revocable.
+    case standingAuthorizations
     /// Settings › Appearance › Layout (#2530): how the Agents list draws its agents.
     case layout
     /// Settings › Appearance › Navigation (#6332): Separate or Sidebar (`NavigationLayout`).
@@ -539,6 +541,7 @@ private struct SettingsDestinations: ViewModifier {
         case .storage: StorageView()
         case .translation: TranslationSettingsView()
         case .triage: TriageSettingsView()
+        case .standingAuthorizations: StandingAuthorizationsView()
         case .modelConfiguration: ModelConfigurationView()
         case .hubs: HubsView()
         case .sshTunnel(let id): HubSSHTunnelPage(hubID: id)

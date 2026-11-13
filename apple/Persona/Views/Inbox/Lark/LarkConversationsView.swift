@@ -295,7 +295,7 @@ private struct LarkConversationsPage: View {
 
     /// The section header pins below the page bar; the pinned shelf remains ordinary scrolling content above it.
     private func filters(proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: Theme.Space.flush) {
             filter(.all, title: String(localized: "lark.filter.all"), proxy: proxy)
             filter(.unread, title: String(localized: "lark.filter.unread"), proxy: proxy)
         }

@@ -45,10 +45,11 @@ struct TodoPlanLine: View {
                 }
                 if let due {
                     let overdue = TodosLogic.isOverdue(todo)
-                    HStack(spacing: Theme.Space.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
                         ThemedIcon(Theme.Icon.dueDate)
+                        // The date and time may break onto a second line at a large text size rather than be cut.
                         Text(overdue ? "Was due \(due)" : "Due \(due)")
-                            .lineLimit(1)
+                            .lineLimit(2)
                     }
                     .foregroundStyle(overdue ? Theme.danger : Color.secondary)
                 }

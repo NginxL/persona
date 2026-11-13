@@ -54,6 +54,8 @@ extension Theme {
         static let uncheckedBox = "square"
         /// A box ticked: a file marked viewed in a code review (`TickBoxToggleStyle`), a done to-do in a document.
         static let checkedBox = "checkmark.square.fill"
+        /// A box part of which is ticked: a file partly staged in a session's Git tab (`TickBox`, #7013).
+        static let partlyCheckedBox = "minus.square.fill"
         static let todo = "checklist"
         /// Recent, or waiting to come back (reconnecting, last used).
         static let recent = "clock.arrow.circlepath"
@@ -629,6 +631,10 @@ extension Theme {
         static let addedReminder = "checklist.checked"
         /// Kinds of tasks that start without asking first (Start These Directly).
         static let taskTrust = "bolt.shield"
+        /// A go-ahead the owner gave for future tasks on one computer and folder (Standing Authorizations, #7002).
+        static let standingAuthorization = "shield.lefthalf.filled.badge.checkmark"
+        /// Taking such a go-ahead back (Revoke).
+        static let revoke = "xmark.shield"
         /// A plan the assistant handed the user (the plan card).
         static let taskPlan = "list.clipboard"
         /// Saying something straight to a task (Message, and Message “xx”).
@@ -718,6 +724,12 @@ extension Theme {
         static let attendanceOff = "waveform.slash"
         /// Talk to Persona in the meeting (#3862 phase 4): held on the meeting page, a talk window from the Live Activity.
         static let talk = "mic.circle"
+        /// How a meeting is transcribed (#3862 phase 5: on this iPhone or on the hub): speech written as text, as captions.
+        static let meetingTranscription = voiceCaptions
+        /// The names and words the hub's transcription should spell right (#3862 phase 5, the meeting glossary).
+        static let glossary = "character.book.closed"
+        /// Hub transcription on Wi-Fi only (#3862 phase 5): Wi-Fi.
+        static let wifiOnly = pluginWifi
         /// The calendar event a meeting recording is named after (docs/apple/recording.md).
         static let calendarEvent = "calendar.day.timeline.left"
         /// A meeting's minutes (#2710): a key point, a decision, a question left open (action items are `todo`).

@@ -1035,6 +1035,30 @@ final class VNCTests: XCTestCase {
         try mock(hub!, "/mock/screen-video?resume=1")
     }
 
+    /// #3954: Connection Stats over the video breaks the latency down: the helper's capture, encode and network (the
+    /// mock's `timing`, its network half measured from the phone's reports) and the phone's decode, with the total first.
+    @MainActor func testTheOverlayBreaksTheLatencyDown() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_SCREEN_VIDEO"] == "1" else {
+            throw XCTSkip("needs the mock's video channel: MOCK_SCREEN_VIDEO=1 (PERSONA_SCREEN_VIDEO=1)")
+        }
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(picture(screen, "video"), "video took the picture: \(screen.value ?? "")")
+        app.buttons["vnc-more"].tap()
+        let toggle = app.descendants(matching: .any)["screen-stats-toggle"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Connection Stats in ⋯:\n\(app.debugDescription)")
+        toggle.tap()
+        let stats = app.descendants(matching: .any)["screen-stats"].firstMatch
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), "the overlay:\n\(app.debugDescription)")
+        let words = ["视频", "经 hub 中转", "fps", "HEVC", "采集", "编码", "网络", "解码"]
+        let deadline = Date.now.addingTimeInterval(8)
+        while Date.now < deadline, !words.allSatisfy(stats.label.contains) { usleep(250_000) }
+        XCTAssertTrue(words.allSatisfy(stats.label.contains), "every segment: \(stats.label)")
+        shot(app, "vnc-video-stats")
+        app.buttons["screen-stats-close"].firstMatch.tap() // kept per Mac: off again for the other tests
+        XCTAssertTrue(stats.waitForNonExistence(timeout: 5))
+    }
+
     /// The picture the screen shows, as its DEBUG value says (`picture=video|vnc`), within 20 s.
     @MainActor private func picture(_ screen: XCUIElement, _ want: String) -> Bool {
         let deadline = Date.now.addingTimeInterval(20)

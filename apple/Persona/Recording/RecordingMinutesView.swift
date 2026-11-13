@@ -26,6 +26,9 @@ import UIKit
     private(set) var status: String?
     /// The transcript expired on the hub (`trimmed_at`): its minutes stay, and none can be written again.
     private(set) var trimmed = false
+    /// How the hub transcribed it (#3862 phase 5, `detail.meta.transcription`): the mode, and in hub mode how far the hub
+    /// is (the page says "being finished" until `final`) and the stretches it has no audio for. nil: no mode decided.
+    private(set) var transcription: MeetingTranscriptionView?
     /// A write (Regenerate, Add to To-Dos) or the read-back after it is on its way: no other one starts meanwhile.
     private(set) var asking = false
     /// Bumped by Try Again: the page's polling starts over (its task is keyed on it).
@@ -39,7 +42,16 @@ import UIKit
         struct Meta: Decodable {
             var state: String?
             var trimmedAt: String?
-            enum CodingKeys: String, CodingKey { case state = "minutes_state", trimmedAt = "trimmed_at" }
+            var transcription: MeetingTranscriptionView?
+            enum CodingKeys: String, CodingKey { case state = "minutes_state", trimmedAt = "trimmed_at", transcription }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                state = try? c.decodeIfPresent(String.self, forKey: .state)
+                trimmedAt = try? c.decodeIfPresent(String.self, forKey: .trimmedAt)
+                // Read leniently: a `transcription` this app can't read leaves the rest of the page as it was.
+                transcription = MeetingTranscriptionView(try? c.decodeIfPresent(JSONValue.self, forKey: .transcription))
+            }
         }
         struct Detail: Decodable {
             var minutes: RecordingMinutes?
@@ -64,6 +76,7 @@ import UIKit
             state = Self.state(minutes: answer.detail.minutes, status: answer.detail.meta?.state, meeting: meeting, synced: synced)
             status = answer.detail.meta?.state
             trimmed = answer.detail.meta?.trimmedAt?.isEmpty == false
+            if transcription != answer.detail.meta?.transcription { transcription = answer.detail.meta?.transcription }
             #if os(iOS)
             MinutesRelay.shared.note(entry, state: state)
             #endif
@@ -161,10 +174,12 @@ import UIKit
 
     /// Whether to ask again soon: while they are on their way, or newer ones are.
     var waiting: Bool {
+        // The hub is still finishing a hub-mode transcript (#3862 phase 5): the page says so until it is final.
+        if let transcription, transcription.mode == .hub, !transcription.settled { return true }
         switch state {
-        case .writing, .waitingForSync, .waitingForText: true
-        case .ready: status == "pending"
-        default: false
+        case .writing, .waitingForSync, .waitingForText: return true
+        case .ready: return status == "pending"
+        default: return false
         }
     }
 }

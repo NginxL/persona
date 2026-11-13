@@ -2477,6 +2477,18 @@ that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder 
   that rose above it slides down, and a tap aimed at its button lands on whatever moved there. Submit with `"\n"` (the
   field's `onSubmit`), or wait for the layout to settle before tapping.
 
+## A disabled alert button is not drawn disabled (2026-11-14, #6996)
+
+- Rename Terminal (`RenameTerminalAlert` in `apple/Persona/Views/Chats/TerminalsView.swift`) first had
+  `Button("Save") { … }.disabled(!TabRename.canSave(name, …))`. On the iOS 27 simulator the accessibility tree called
+  Save disabled for the starting name, but the alert drew it in the same blue as Cancel: a button that looks ready and
+  does nothing. Check in the action instead (an empty or unchanged name saves nothing, as Rename Space and Rename Agent
+  do), and limit the length with `.onChange` on the field's text.
+- UI tests: a tap on an alert's button 0.75 s after `typeText` into its field was lost on every save on an iPhone
+  simulator (iOS 27) and on some on an iPad one; a second tap a few seconds later always went through. Turning
+  autocorrection off did not change it. `FilesActionsTests`, which takes a screenshot between typing and tapping, saw it
+  once. Tap again while the alert stays up, then check what reached the mock; a single tap reads as an app bug.
+
 ## A UI test's scroll drags whatever is under the finger (2026-11-13, #6783)
 
 `TodoStageBarUITests` scrolled the to-do's page by dragging from the middle of the window. Before the interface stopped

@@ -72,6 +72,34 @@ struct InboxTimelineFixtureTests {
         #expect(InboxEventText.symbol(reported) == Theme.Icon.reported)
     }
 
+    @Test func reportedShowsTheOriginalWordsWithoutRepeatingAssistantSays() {
+        let current = InboxItem.ChainEntry(id: "r1", kind: "reported", text: "Assistant says: Sent it", detail: "Sent it")
+        #expect(InboxEventText.chainText(current) == "Sent it")
+        let old = InboxItem.ChainEntry(id: "r2", kind: "reported", text: "Sent it")
+        #expect(InboxEventText.chainText(old) == "Sent it")
+        let empty = InboxItem.ChainEntry(id: "r3", kind: "reported", text: "Assistant says: Sent it", detail: "")
+        #expect(InboxEventText.chainText(empty) == "Assistant says: Sent it")
+        let program = InboxItem.ChainEntry(id: "p", kind: "agent", text: "Opened an Agent", detail: "More context")
+        #expect(InboxEventText.chainText(program) == "Opened an Agent")
+    }
+
+    @Test func reportedDetailIsNotRepeatedInAnExpansion() {
+        let plain = InboxItem.ChainEntry(id: "r1", kind: "reported", text: "Assistant says: Sent it", detail: "Sent it")
+        #expect(plain.detailIsInLine && !plain.expandable)
+        #expect(InboxChainTarget.of(plain) == .nothing)
+        #expect(InboxEventText.expansionDetail(plain) == nil)
+
+        let messages = [InboxItem.ChainEntry.Message(sender: "Agent", text: "A note", at: nil)]
+        let withMessages = InboxItem.ChainEntry(id: "r2", kind: "reported", text: "Assistant says: Sent it",
+                                                detail: "Sent it", messages: messages)
+        #expect(withMessages.expandable)
+        #expect(InboxChainTarget.of(withMessages) == .inline)
+        #expect(InboxEventText.expansionDetail(withMessages) == nil)
+
+        let program = InboxItem.ChainEntry(id: "p", kind: "agent", text: "Opened an Agent", detail: "More context")
+        #expect(program.expandable && InboxEventText.expansionDetail(program) == "More context")
+    }
+
     @Test func emptyViaFallsBackToTheKindAndBadViaDoesNotLoseTheEntry() throws {
         let chain = try JSON.decoder.decode(ChainOnly.self, from: Data(#"""
         {"chain":[

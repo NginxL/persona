@@ -85,6 +85,7 @@ PY
 # These are explicitly public synthetic values; persona_config never opens the
 # developer's config. DEVELOPER_DIR already selected above wins in its env helper.
 export PERSONA_META_WEARABLES=NO
+ci_run 'Build PersonaCore XCFramework before package resolution' 1200 "$SOURCE/native/app-core/scripts/build-apple.sh"
 ci_run 'Generate public unsigned Apple config' 60 python3 "$SOURCE/scripts/persona_config.py" xcconfig
 ci_run 'Generate Apple project' 120 xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"
 [ -s "$SOURCE/apple/PersonaTests/TokenBaseline.json" ] || { printf 'apple-ci: FAIL committed token baseline missing\n' >&2; exit 1; }
@@ -104,6 +105,7 @@ result() {
 }
 
 if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = packages ]; then
+  ci_run 'PersonaCore strict-concurrency tests and C-binding fixture replay' 900 xcrun swift test --package-path "$SOURCE/apple/Packages/PersonaCore" --scratch-path "$SPM/PersonaCore" -Xswiftc -warnings-as-errors
   ci_run 'PersonaKit unit tests' 900 xcrun swift test --package-path "$SOURCE/apple/Packages/PersonaKit" --scratch-path "$SPM/PersonaKit"
   # The live screen's video codec and capture decisions (#3954), shared by Persona Link's helper and the iOS app.
   ci_run 'PersonaScreenKit unit tests' 300 xcrun swift test --package-path "$SOURCE/apple/Packages/PersonaScreenKit" --scratch-path "$SPM/PersonaScreenKit" -Xswiftc -warnings-as-errors

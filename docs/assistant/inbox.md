@@ -425,7 +425,7 @@ with a chronological **handling chain**. Additive only: IDs, sources, existing f
 **Section calculation** (`status()`): collapsed stays collapsed (noise never upgrades); reply / Agent suggestion → Needs you; handling chat reviewing / sub-chat working → Working (urgent stays Needs you);
 awaiting response → Working; failure → Needs you; otherwise `tier` (FYI / Needs you; untriaged counts as Needs you). A `conclusion` suggestion uses its chosen tier.
 
-**Handling chain** records only key calls, **written by code where they occur**, not model-authored or investigative steps. Each entry is `{id, at, kind, text, detail?, count?, sender?, messages?, link?, via?, edited?}`.
+**Handling chain** records only key calls. Program-observed steps are **written by code where they occur**, not model-authored or investigative steps. The sole exception is `reported`: the processing conversation says that it or an Agent did something, the program records that statement without verifying it, and the apps draw it apart as "Assistant says". Each entry is `{id, at, kind, text, detail?, count?, sender?, messages?, link?, via?, edited?}`.
 `text` is a manager-written localized line; Apps may also render by `kind`. `link` is the tap destination: `{type: "source", position?}` (Lark: item's chat at that message),
 `{type: "source", uid}` (mail: that mail in the item), `{type: "source", url}` (connectors / Docs: in-App opening), `{type: "source"}` (item's source page),
 `{type: "session", machine_id, session_id}` (chat / sub-chat), `{type: "item", id}` (another item). Without `link`, tap expands `detail` / `messages` inline.
@@ -479,6 +479,8 @@ The manager refreshes `where` from the connector's `chat` tag (else its `repo` t
 
 **State keys.** The manager sends a key; every app puts it in words from one table, `spec/fixtures/inbox/now.json` (English, Simplified Chinese and Japanese, with the cases Go and the apps check). Without `now` (an older hub), or with a key an app does not know (a newer hub), the apps keep their own state words. When several states hold, the first wins: done, folded, a suggestion, queued (the agent record says queued and has no session yet, while `handling` already says looking), the processing state (looking, Agent working, waiting, failed), `follow_up_ask`, `check_due`, then the tier. `{reason}` is `handling.error` as it was written (already words, in the language of its time); without it the plain "AI couldn't handle it". An unrecognized `done_by` leaves `now` empty so the apps keep their own done words. A `conclusion` is not an action suggestion: as in `status()`, it suppresses the queued and processing-state keys, and the later follow-up or tier rules apply.
 
+**Visible in the assistant.** The main conversation's live snapshot has a "Following up" section for open `waiting`, `follow_up_ask` and `check_due` items: at most five, by `check_at`, with the title, place, who or what is waited on, next step and local check time. It says there are none when empty, so an incremental snapshot replaces rows that have since ended. Briefing facts separately give the model up to five matters waiting for more than a day and up to five whose check is due in the owner's today (including `follow_up_ask` and `check_due`). Both views are read-only: they never advance a check, rewrite a follow or change an item's state.
+
 | `now` | When | Section | English |
 | --- | --- | --- | --- |
 | `confirm_reply` / `confirm_agent` / `decide` | A reply or Agent suggestion waits; `decide` when it is handed back (`handback`) | Needs you | Waiting for you to confirm a reply / Waiting for you to start an Agent / Waiting for your decision |
@@ -500,7 +502,7 @@ The manager refreshes `where` from the connector's `chat` tag (else its `repo` t
 | `waiting` | The processing conversation waits on the other side, until a time to look again |
 | `check` | It was looked at again when that time came |
 | `agent_stopped` | An Agent started for it stopped, with its last words or failure |
-| `reported` | A step the assistant or an Agent says it took (an email it sent itself) that the program did not see: drawn apart from the program's own steps. `text` is the label and the words ("Assistant says: …") for apps from before; `detail` is the words alone, which apps that know the kind show under their own label |
+| `reported` | A step the processing conversation says it or an Agent took but the program did not observe, submitted as `inbox_suggest` `reported: {text, by}` (`by`: `agent` or `assistant`, default `assistant`). The entry's `via` matches `by`, its `text` is the server's localized "Assistant says" prefix plus the statement, and `detail` keeps the unprefixed statement on one line, clipped to 120 characters. It may accompany a suggestion, recap, `title` / `summary` or `follow`, but is refused on a filed item. Identical text matching the item's latest `reported` entry is not recorded twice. The program does not verify the statement; apps draw it apart from their own steps: `text` (the label and the words, "Assistant says: …") is for apps from before, and apps that know the kind show `detail` under their own label (`text` when `detail` is empty) |
 
 **An Agent's stop returns to the matter.** After a turn stays settled (not working, starting, blocked or waiting for the user, with no queued input or background work; a failed turn counts too), every open item whose `agent` entry links that session records `agent_stopped` with `via=agent`, the session link, and its last words or failure (one line, at most 300 characters). The persisted marker is the node's activity time, kept separately from the display timestamp and never listed, so another callback or a manager restart does not record the same stop twice; genuinely working again advances it and permits the next stop. A handling chat returns from `agent` to `looking` and is woken with the result to offer the next suggestion. An item without one only records the chain, and the AI twin being off records without waking. Task supervision notices are independent and may arrive separately; they never replace or suppress this Inbox wake. The sweep uses the same recording path to repair a missed report. Only a session known to be unsettled waits past four timeouts; an Agent link evicted by the chain cap, a session the node definitively reports missing, or an unreachable node uses that bounded failure fallback instead of hanging forever.
 
@@ -551,7 +553,7 @@ bound to that item (`handling` on the item; chat source `inbox`, `origin_ref` = 
 
 **Suggestion tool `inbox_suggest`** (`assistant/inbox_suggest.go`, description `prompts/mcp/inbox/inbox_suggest.md`; accepts the handling chat started for an item, and with `item` a
 conversation the item was handed to ("Item actions", Hand to AI), rejecting other chats):
-`{item?, kind, text, note?, handback?, outcome?, recap?, title?, summary?, machine?, cwd?, related?, changes?, follow?}`.
+`{item?, kind, text, note?, handback?, outcome?, recap?, title?, summary?, machine?, cwd?, related?, changes?, follow?, reported?}`.
 
 | kind | Meaning | After confirmation |
 | --- | --- | --- |

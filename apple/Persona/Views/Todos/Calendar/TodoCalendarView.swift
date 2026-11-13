@@ -95,9 +95,13 @@ struct TodosModeBar<ListControls: View>: View {
                         ForEach(TodosGrouping.allCases, id: \.self) { g in Text(g.title).tag(g) }
                     }
                 } label: {
-                    HStack(spacing: Theme.Space.xs) {
+                    // A button's text is never cut: when the word does not fit, the mark alone stands for it.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.xs) {
+                            ThemedIcon(grouping.wrappedValue.symbol)
+                            Text(grouping.wrappedValue.title).lineLimit(1)
+                        }
                         ThemedIcon(grouping.wrappedValue.symbol)
-                        Text(grouping.wrappedValue.title).lineLimit(1)
                     }
                 }
                 .menuStyle(.button)

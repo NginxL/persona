@@ -95,10 +95,10 @@ import { ChatLineView, closedRecap, closeRecap, dismissedError, dismissError, Er
 import { useTranscript } from "./useTranscript";
 import { useEarlierStretches } from "./useEarlierStretches";
 import { useFoldSearch } from "./useFoldSearch";
-import { ArchiveCloseDialog, CloseAgentDialog, DeleteSessionDialog, RenameDialog, RenameSpaceDialog, renameTitle, SessionInfoDialog } from "./SessionDialogs";
+import { DeleteSessionDialog, RenameDialog, RenameSpaceDialog, renameTitle, SessionInfoDialog } from "./SessionDialogs";
 import { PermissionPicker, usePlanMode } from "./PermissionPicker";
 import { permissionsCommand } from "../../lib/permissions-command";
-import { archiveItems } from "../AgentMenus";
+import { archiveCloseItems, closeItems } from "../AgentMenus";
 import { ChatSidebarButton } from "../ShellSwitch";
 import { appArchiveDeps, deleteInsteadOfArchive, restoreAgent, useArchived } from "../../lib/agent-archives";
 import { UltracodeLostNote } from "./Ultracode";
@@ -2307,8 +2307,6 @@ export const Header = memo(function Header({
   const tabs = useMenu();
   const panel = usePanel();
   const mutes = useStore((s) => s.mutes);
-  const [closing, setClosing] = useState(false);
-  const [archiveClosing, setArchiveClosing] = useState(false);
   const features = useStore((s) => s.features);
   // archived (the Archived page listed it, or it was archived here): the menu offers Restore instead of archive / delete
   const archived = useArchived(session?.machine_id ?? "", session?.session_id ?? "");
@@ -2444,10 +2442,10 @@ export const Header = memo(function Header({
         { key: "sid", label: t("chat-chatview.copy_session_id"), icon: "copy", onSelect: () => copyText(session.session_id) },
         ...(session.cwd ? [{ key: "cwd", label: t("chat-chatview.copy_folder"), icon: "folder" as const, onSelect: () => copyText(session.cwd) }] : []),
         ...(allowed.includes("resume") ? [{ key: "resume", label: t("chat-chatview.copy_resume_command"), icon: "terminal" as const, onSelect: () => copyText(resumeCommand(session)) }] : []),
-        ...(!assistant && allowed.includes("close") ? [{ key: "close", label: t("chat-chatview.close_agent_menu"), icon: "x" as const, danger: true, onSelect: () => setClosing(true) }] : []),
+        // Archive and Close… as the row's menu has them (#7125); archived, Restore, and Close… while its agent is still open
         ...(archived
-          ? [{ key: "restore", label: t("chat-chatview.restore"), icon: "undo" as const, divider: true, onSelect: () => void restoreAgent(archived, appArchiveDeps) }]
-          : archiveItems(session, features, () => setArchiveClosing(true))),
+          ? [{ key: "restore", label: t("chat-chatview.restore"), icon: "undo" as const, divider: true, onSelect: () => void restoreAgent(archived, appArchiveDeps) }, ...closeItems({ ...session, archived: true }, features)]
+          : archiveCloseItems(session, features)),
         ...(!archived && deleteInsteadOfArchive(features) && sessionDeletable(session) ? [{ key: "delete", label: t("chat-chatview.delete_chat"), icon: "trash" as const, danger: true, onSelect: () => setDialog("delete") }] : []),
       ]
     : [];
@@ -2546,8 +2544,6 @@ export const Header = memo(function Header({
           items={spaceRows}
         />
       )}
-      {session && <CloseAgentDialog open={closing} onClose={() => setClosing(false)} onClosed={() => navigate({ name: "home" })} session={session} machineName={machineName} />}
-      {session && archiveClosing && <ArchiveCloseDialog open onClose={() => setArchiveClosing(false)} session={session} machineName={machineName} />}
       {session && <SessionInfoDialog open={dialog === "info"} onClose={() => setDialog(null)} session={session} machineName={machineName} />}
       {session && <RenameDialog open={dialog === "rename"} onClose={() => setDialog(null)} session={session} />}
       {session && <RenameSpaceDialog open={dialog === "space"} onClose={() => setDialog(null)} session={session} />}

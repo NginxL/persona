@@ -528,10 +528,15 @@ struct AgentCounts: View {
     var tally: AgentTally
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
+        // Side by side; one under another when the three words do not fit the card's width.
+        let items = Group {
             item(tally.needsYou, StateName.needsYou.text, tone: StatusPalette.needsYou, ink: StatusPalette.needsYou.text)
             item(tally.working, StateName.working.text, tone: StatusPalette.working, ink: StatusPalette.working.text)
             item(tally.idle, String(localized: "Idle"), tone: StatusPalette.idle, ink: Color.primary)
+        }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { items }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) { items }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -543,7 +548,7 @@ struct AgentCounts: View {
             Circle().fill(n > 0 ? tone.dot : StatusPalette.offline.dot).scaledFrame(width: Theme.Size.dotS, height: Theme.Size.dotS)
             Text("\(n)").font(Theme.Font.bodyStrong.monospacedDigit()).foregroundStyle(n > 0 ? ink : Color.secondary)
                 .contentTransition(.numericText(value: Double(n)))
-            Text(label).font(Theme.Font.label).foregroundStyle(Color.secondary).lineLimit(1)
+            Text(label).font(Theme.Font.label).foregroundStyle(Color.secondary).lineLimit(1).fixedSize()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -562,7 +567,7 @@ struct MetricCell<Chart: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.xs) {
-                Text(title).font(Theme.Font.label).foregroundStyle(Color.secondary)
+                Text(title).font(Theme.Font.label).foregroundStyle(Color.secondary).lineLimit(1).minimumScaleFactor(0.6)
                 if level > .normal {
                     ThemedIcon(Theme.Icon.errorFilled).font(Theme.Font.label).imageScale(.small).foregroundStyle(MetricColor.level(level))
                 }

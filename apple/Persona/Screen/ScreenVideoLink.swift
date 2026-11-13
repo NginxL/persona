@@ -104,9 +104,9 @@ import UIKit
     private(set) var fallback: ScreenVideoFallback?
     /// Where the video goes on the framebuffer, in its pixels; nil: all of it.
     private(set) var rect: CGRect?
-    /// The stream as the stats overlay shows it.
-    private(set) var fps: Double = 0
-    private(set) var decodeMs: Double?
+    /// The stream as the stats overlay shows it, about once a second while video shows (not on every frame: only the
+    /// overlay reads it).
+    private(set) var reading = ScreenVideoReading()
     private(set) var codec: String?
     private(set) var size: CGSize?
     /// When video is tried again after it stopped (tests).
@@ -133,7 +133,7 @@ import UIKit
     @ObservationIgnored private let layers = NSHashTable<AVSampleBufferDisplayLayer>.weakObjects()
     @ObservationIgnored private let mailbox = ScreenVideoMailbox()
     @ObservationIgnored private var latest: CVPixelBuffer?
-    @ObservationIgnored private var shownAt: [Date] = []
+    @ObservationIgnored private var tally = ScreenVideoTally()
     @ObservationIgnored private let path = NWPathMonitor()
     @ObservationIgnored private var budget: ScreenVideoBudget
 
@@ -204,6 +204,7 @@ import UIKit
         }
         opened = target
         rect = target.0.rect
+        tally = ScreenVideoTally()
         let start = StartMessage(display: target.0.display, maxSize: Self.maxSize, fps: budget.fps, maxKbps: budget.maxKbps,
                                  codecs: ["hevc", "h264"])
         let mailbox = mailbox
@@ -218,6 +219,8 @@ import UIKit
                 Task { @MainActor in self?.paused(why) }
             case .resumed:
                 break // the next picture shows video again
+            case let .timing(t):
+                Task { @MainActor in self?.helperTiming(t) }
             case let .ended(why):
                 Task { @MainActor in self?.ended(why) }
             }
@@ -244,16 +247,25 @@ import UIKit
     private func takePicture() {
         guard stream != nil, let (pb, ms) = mailbox.take() else { return }
         latest = pb
-        decodeMs = ms
-        let now = Date.now
-        shownAt.append(now)
-        shownAt.removeAll { now.timeIntervalSince($0) > 1 }
-        fps = Double(shownAt.count)
+        tally.picture(decodeMs: ms, at: .now)
+        publish()
         if !showing {
             say(nil) // video is back: the line goes
             show(true)
         }
         Self.enqueue(pb, in: layers.allObjects)
+    }
+
+    private func helperTiming(_ t: TimingMessage) {
+        guard stream != nil else { return }
+        tally.helper(t)
+        publish()
+    }
+
+    /// A new reading for the overlay once a second has passed since the last.
+    private func publish() {
+        guard let s = stream, let r = tally.reading(at: .now, received: s.receivedBytes), r != reading else { return }
+        reading = r
     }
 
     private func paused(_ why: String) {
@@ -303,8 +315,7 @@ import UIKit
             // Video that stayed up a while starts the waits over; one that dropped soon after coming back keeps doubling.
             if let since = shownSince, ContinuousClock.now - since >= stable { backoff.reset() }
             shownSince = nil
-            fps = 0
-            decodeMs = nil
+            reading = ScreenVideoReading()
             latest = nil
             // Emptied, so when video shows again it never starts on an old picture.
             for l in layers.allObjects { l.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil) }
@@ -341,6 +352,64 @@ import UIKit
     static func hubTransport(_ r: Ready) -> RFBTransport? {
         guard let api = AppModel.shared.api(r.group) else { return nil }
         return RFBWebSocket(api: api, path: "/api/v1/machines/\(r.machine)/screen/video/connect", pair: r.pair)
+    }
+}
+
+/// What the stats overlay shows of the video channel (#3954): frames shown and megabits that came in the last second,
+/// the phone's decode time, and the helper's capture, encode and network times (from `timing`; absent from a helper
+/// before it). The total adds the segments up only when encode, network and decode are all known.
+nonisolated struct ScreenVideoReading: Equatable, Sendable {
+    var fps: Double?
+    var mbps: Double?
+    var captureMs: Double?
+    var encodeMs: Double?
+    var networkMs: Double?
+    var decodeMs: Double?
+
+    var totalMs: Double? {
+        guard let encodeMs, let networkMs, let decodeMs else { return nil }
+        return (captureMs ?? 0) + encodeMs + networkMs + decodeMs
+    }
+}
+
+/// Counts the pictures shown and keeps the helper's latest `timing`, and turns them into a reading once a second.
+nonisolated struct ScreenVideoTally {
+    private var frames = 0
+    private var decode: [Double] = []
+    private var since: ContinuousClock.Instant?
+    /// The stream's received bytes at the last reading (a new stream starts at 0).
+    private var bytesAt = 0
+    private var helperTiming: TimingMessage?
+
+    mutating func picture(decodeMs: Double, at now: ContinuousClock.Instant) {
+        if since == nil { since = now }
+        frames += 1
+        decode.append(decodeMs)
+    }
+
+    mutating func helper(_ t: TimingMessage) { helperTiming = t }
+
+    /// The last second's reading once a second has passed since the last one (or since the first picture); nil before.
+    mutating func reading(at now: ContinuousClock.Instant, received: Int) -> ScreenVideoReading? {
+        guard let since, now - since >= .seconds(1) else { return nil }
+        let d = now - since
+        let seconds = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+        defer {
+            frames = 0
+            decode = []
+            self.since = now
+            bytesAt = received
+        }
+        return ScreenVideoReading(fps: (Double(frames) / seconds).rounded(), mbps: (Double(max(0, received - bytesAt)) * 8 / 1e6 / seconds * 10).rounded() / 10,
+                                  captureMs: helperTiming?.captureMs, encodeMs: helperTiming?.encodeMs, networkMs: helperTiming?.networkMs,
+                                  decodeMs: Self.median(decode))
+    }
+
+    private static func median(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let s = values.sorted(), mid = s.count / 2
+        let m = s.count % 2 == 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+        return (m * 10).rounded() / 10
     }
 }
 

@@ -32,6 +32,10 @@ packages:
   # Vision apps, not the watch or widgets.
   PersonaKit:
     path: Packages/PersonaKit
+  # The shared Rust core: the iOS app and its tests only. No Shared/ source imports it, so watch, widgets, Vision,
+  # Persona Link and the frozen Mac app keep their existing dependencies and never link the XCFramework.
+  PersonaCore:
+    path: Packages/PersonaCore
   # The live screen's video channel (#3954, docs/extensions/computer-use.md「Live screen video (#3954)」): its wire codec, shared
   # with Persona Link's helper. The iOS app only; Mac and Vision compile the same sources and skip it with
   # `#if os(iOS) && canImport`, and the watch and widgets never see it.
@@ -84,6 +88,7 @@ targets:
       - package: BeautifulUI
       - package: PersonaSSH
       - package: PersonaKit
+      - package: PersonaCore
       - package: MarqueeGlow
       - package: PersonaScreenKit
     entitlements:
@@ -208,7 +213,7 @@ targets:
         NSHealthUpdateUsageDescription: "Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about."
         NSPhotoLibraryUsageDescription: "Persona shows your recent photos under the + button so you can attach them to a message, and lets Claude look at recent photos when you ask, for example to read a screenshot you took."
         NSPhotoLibraryAddUsageDescription: "Persona saves images Claude produces to your library when you ask, for example a chart it generated."
-        NSMicrophoneUsageDescription: "Persona records audio when you start a recording or dictate a message, for example a meeting or a spoken note. Recordings are transcribed on your iPhone and only the text is saved to the knowledge base on your hub; the audio stays on your iPhone. In a voice conversation you start — on the phone or in CarPlay — your voice is streamed through your hub to the realtime speech service it is set up with, only while the conversation is open."
+        NSMicrophoneUsageDescription: "Persona records audio when you start a recording or dictate a message, for example a meeting or a spoken note. Recordings are transcribed on your iPhone and only the text is saved to the knowledge base on your hub; the audio stays on your iPhone, except while you hold Talk in a meeting: what is said then goes to the voice service. A meeting you choose to transcribe on the hub sends its audio, Talk included, through your hub to the speech service it is set up with, and the hub deletes it once the meeting's minutes are written. In a voice conversation you start — on the phone or in CarPlay — your voice is streamed through your hub to the realtime speech service it is set up with, only while the conversation is open."
         NSSpeechRecognitionUsageDescription: "Persona turns your voice into text when you hold the mic button, for example to dictate a reply to Claude."
   # The native macOS app (docs/apple/mac.md): the iOS app's logic and content views, compiled for macOS, inside a Mac
   # shell (Mac/): windows, sidebar, toolbar, menus, keyboard shortcuts, Settings, the menu bar. iOS-only parts are
@@ -752,6 +757,7 @@ targets:
         excludes: ["*.json", "*.py"] # Static checks and TokenBaseline.json are read from the source tree, not the bundle
     dependencies:
       - target: Persona
+      - package: PersonaCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).tests

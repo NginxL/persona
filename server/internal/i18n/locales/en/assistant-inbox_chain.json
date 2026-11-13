@@ -22,6 +22,7 @@
   "agent": "Started a sub-session: {title}",
   "agent_stopped": "Agent stopped",
   "agent_stopped_failed": "Agent failed",
+  "reported": "Assistant says: {text}",
   "confirmed": "You confirmed",
   "confirmed_edited": "You confirmed (edited)",
   "rejected": "You rejected it",

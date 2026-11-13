@@ -617,8 +617,14 @@ struct KnowledgeDetailView: View {
     @State private var showRecent = false
     @State private var allLog = false
     @State private var openKinds: Set<String> = []
+    @State private var factsEditor = false
+    /// The link the user asked to remove, while the question is up.
+    @State private var unlinking: KBUnlink?
+    /// Links taken off the page while their removal is written and checked (`kind/id`).
+    @State private var hiddenLinks: Set<String> = []
     #if DEBUG
     @State private var debugDay: KBMatch?
+    @State private var debugOpened = false
     #endif
 
     /// `-showKnowledgeLower YES`: the header and Agents left out, so a screenshot reaches the timeline and what follows.
@@ -656,6 +662,7 @@ struct KnowledgeDetailView: View {
                     } header: { sectionHeader(String(localized: "Agents on This Project"), agents.count) }
                 }
                 if let log = d.log, !log.isEmpty { timeline(log) }
+                KBFactsSection(facts: KBFacts.text(d.meta), edit: { factsEditor = true }, delete: { Task { await deleteFacts() } })
                 // Empty once the header's parts are taken out (a summary that is just the one line): no blank card.
                 if let sum = d.summary, case let profile = Self.profile(sum, oneLine: shown.oneLine), !profile.isEmpty {
                     Section("Profile") {
@@ -708,6 +715,13 @@ struct KnowledgeDetailView: View {
         .sheet(isPresented: $editing) {
             KBTagEditor(entry: shown) { await load() }
                 .environment(\.knowledgeSettingsAPI, capturedAPI)
+        }
+        .sheet(isPresented: $factsEditor) {
+            KBFactsEditor(name: shown.name, initial: KBFacts.text(detail?.detail.meta)) { text in
+                try await saveFacts(text)
+            } delete: {
+                Task { await deleteFacts() }
+            }
         }
         #if DEBUG && os(macOS)
         // `-showKBEditor YES` with `-showKnowledgeEntry <kind>/<id>`: the tag editor open (Mac screenshots).
@@ -924,7 +938,7 @@ struct KnowledgeDetailView: View {
 
     /// Related entries by kind (projects, chats, people…), a few each with All for the rest; then the code directories.
     @ViewBuilder private func links(_ d: KBDetail) -> some View {
-        let links = d.links ?? []
+        let links = (d.links ?? []).filter { !hiddenLinks.contains($0.kind + "/" + $0.id) }
         let dirs = d.meta?["dirs"]?.array?.compactMap(\.string) ?? []
         let byKind = Dictionary(grouping: links, by: \.kind)
         ForEach(KBKind.allCases) { k in
@@ -932,7 +946,7 @@ struct KnowledgeDetailView: View {
                 let open = openKinds.contains(k.rawValue)
                 Section {
                     ForEach(open ? group : Array(group.prefix(Self.linksShown))) { e in
-                        NavigationLink { KnowledgeDetailView(entry: e) } label: { KBLinkRow(entry: e) }
+                        linkRow(e, removal: KBUnlink.removal(d, name: shown.name, linked: e))
                     }
                     if group.count > Self.linksShown {
                         Button {
@@ -956,6 +970,111 @@ struct KnowledgeDetailView: View {
                     }
                 }
             } header: { sectionHeader(String(localized: "Code Folders"), dirs.count) }
+        }
+    }
+
+    /// A related entry; one held in this entry's own list can also be taken off it (swipe, or touch and hold).
+    @ViewBuilder private func linkRow(_ e: KBEntry, removal: KBUnlink?) -> some View {
+        let row = NavigationLink { KnowledgeDetailView(entry: e) } label: { KBLinkRow(entry: e) }
+        if let removal {
+            row
+                .swipeActions(edge: .trailing) {
+                    Button { unlinking = removal } label: { Label("Remove Link", systemImage: Theme.Icon.clear) }.tint(Theme.danger)
+                }
+                .contextMenu {
+                    Button(role: .destructive) { unlinking = removal } label: { Label("Remove Link", systemImage: Theme.Icon.clear) }
+                }
+                // On the row, so the question points at the link it is about (on the page it pointed at the header).
+                .confirmationDialog(removal.question, isPresented: Binding(get: { unlinking?.id == removal.id },
+                                                                           set: { if !$0, unlinking?.id == removal.id { unlinking = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(String(localized: "Remove Link"), role: .destructive) { Task { await unlink(removal) } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(removal.explanation)
+                }
+        } else {
+            row
+        }
+    }
+
+    // MARK: Corrections
+
+    /// Saves the confirmed facts, shows them at once, then reads the entry back.
+    private func saveFacts(_ text: String) async throws {
+        guard let api = capturedAPI else { return }
+        try await api.kbCorrect(entry.kind, id: entry.id, KBCorrection(pinned: text))
+        if let detail { self.detail = KBFacts.with(text, in: detail) }
+        await load()
+    }
+
+    /// Deletes the confirmed facts at once; Undo writes them back.
+    private func deleteFacts() async {
+        guard let api = capturedAPI, let before = detail else { return }
+        let old = KBFacts.text(before.detail.meta)
+        guard !old.isEmpty else { return }
+        detail = KBFacts.with("", in: before)
+        do {
+            try await api.kbCorrect(entry.kind, id: entry.id, KBCorrection(pinned: ""))
+        } catch {
+            if let now = detail { detail = KBFacts.with(old, in: now) }
+            model.show(error)
+            return
+        }
+        Haptics.success()
+        model.toast = Toast(String(localized: "Confirmed facts deleted"), style: .success,
+                            action: Toast.Action(title: String(localized: "Undo")) { Task { await restoreFacts(old) } })
+        await load()
+    }
+
+    private func restoreFacts(_ old: String) async {
+        guard let api = capturedAPI else { return }
+        if let now = detail { detail = KBFacts.with(old, in: now) }
+        do { try await api.kbCorrect(entry.kind, id: entry.id, KBCorrection(pinned: old)) } catch { model.show(error) }
+        await load()
+    }
+
+    /// Removes a link: the row goes at once, the hub is told, then both entries are read back. A write that failed can
+    /// still have changed either one, so what is said comes from what was read, never from the write alone.
+    /// `checkOnly`: only read back after an earlier try (whether the hub took that write).
+    private func unlink(_ r: KBUnlink, checkOnly accepted: Bool? = nil) async {
+        guard let api = capturedAPI else { return }
+        let key = r.second.kind + "/" + r.second.id
+        hiddenLinks.insert(key)
+        var writeError: Error?
+        if accepted == nil {
+            do { try await api.kbCorrect(r.targetKind, id: r.targetID, r.update) } catch { writeError = error }
+        }
+        let taken = accepted ?? (writeError == nil)
+        var read: [KBDetail?] = []
+        var readError: Error?
+        for end in r.ends {
+            do { read.append(try await api.kbDetail(end.kind, id: end.id).detail) } catch {
+                read.append(nil)
+                readError = readError ?? error
+            }
+        }
+        await load()
+        hiddenLinks.remove(key)
+        let reason = { (e: Error) in e.shown ?? e.localizedDescription }
+        if r.confirmed(read) {
+            Haptics.success()
+            model.toast = Toast(String(localized: "Link removed"), style: .success)
+            return
+        }
+        Haptics.error()
+        if let readError {
+            let message = taken
+                ? String(localized: "Link removed, but checking it failed: \(reason(readError))")
+                : String(localized: "Couldn't confirm the link was removed: \(reason(readError))")
+            model.toast = Toast(message, style: .error,
+                                action: Toast.Action(title: String(localized: "Check Again")) { Task { await unlink(r, checkOnly: taken) } })
+        } else if !taken {
+            let message = writeError.map { String(localized: "Couldn't remove the link: \(reason($0))") } ?? String(localized: "Couldn't remove the link.")
+            model.toast = Toast(message, style: .error,
+                                action: Toast.Action(title: String(localized: "Try Again")) { Task { await unlink(r) } })
+        } else {
+            model.toast = Toast(String(localized: "The link is still there. The hub may need an update."), style: .error)
         }
     }
 
@@ -1027,6 +1146,17 @@ struct KnowledgeDetailView: View {
         do {
             detail = try await api.kbDetail(entry.kind, id: entry.id, query: query)
             error = nil
+            #if DEBUG
+            // `-showKnowledgeFacts YES` / `-showKnowledgeUnlink YES` with `-showKnowledgeEntry <kind>/<id>`: the confirmed
+            // facts editor, or the question for the first link that can be removed, up once the entry loads (screenshots).
+            if !debugOpened, let d = detail?.detail {
+                debugOpened = true
+                if UserDefaults.standard.bool(forKey: "showKnowledgeFacts") { factsEditor = true }
+                if UserDefaults.standard.bool(forKey: "showKnowledgeUnlink") {
+                    unlinking = d.links?.lazy.compactMap { KBUnlink.removal(d, name: Self.shown(entry, detail: detail).name, linked: $0) }.first
+                }
+            }
+            #endif
         } catch {
             // Cancelled (the page went away mid-load) is not an error to show.
             if let shown = error.shown { self.error = shown }

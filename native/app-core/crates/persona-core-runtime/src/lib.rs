@@ -83,21 +83,17 @@ impl Runtime {
         false
     }
 
-    /// The chat's encoded `wire::ChatPatch` since the last drain: the latest state and the list changes. Taking it
-    /// is a swap under a lock; the worker already built it.
+    /// The chat's encoded `wire::ChatPatch` since the last successful drain. Encoding and removal are committed in
+    /// that order: a failed encode leaves the pending operations and wake available for the next drain.
     pub fn drain(&self, chat: &str) -> Vec<u8> {
-        let patch = {
-            let mut patches = lock(&self.shared.patches);
-            patches.woken.remove(chat);
-            match patches.chats.get_mut(chat) {
-                Some(patch) => {
-                    let ops = std::mem::take(&mut patch.ops);
-                    ChatPatch { ops, ..patch.clone() }
-                }
-                None => ChatPatch::default(),
-            }
-        };
-        wire::encode(&patch)
+        let mut patches = lock(&self.shared.patches);
+        let patch = patches.chats.get(chat).cloned().unwrap_or_default();
+        let encoded = wire::encode(&patch);
+        if let Some(patch) = patches.chats.get_mut(chat) {
+            patch.ops.clear();
+        }
+        patches.woken.remove(chat);
+        encoded
     }
 
     /// Waits until every queued action is applied, up to `timeout`. For tests and shutdown; never on a main thread.
@@ -132,7 +128,10 @@ impl Drop for Runtime {
     fn drop(&mut self) {
         let _ = self.sender.send(Message::Stop);
         if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+            // The host's release callback runs on the worker. A final handle released there must not join itself.
+            if worker.thread().id() != std::thread::current().id() {
+                let _ = worker.join();
+            }
         }
     }
 }
@@ -346,25 +345,38 @@ fn apply(session: &mut Session, event: ChatEvent) -> Result<Step, String> {
 /// a changed item with the same position and id is an Update, preserving its native list identity.
 fn diff(old: &[Arc<Item>], new: &[Arc<Item>]) -> Vec<ListOp> {
     let common = old.iter().zip(new).take_while(|(a, b)| Arc::ptr_eq(a, b)).count();
+    let overlap = old.len().min(new.len());
     let mut ops = Vec::new();
-    for index in common..old.len().min(new.len()) {
+    let mut paired = vec![false; old.len()];
+    for index in common..overlap {
         if old[index].id == new[index].id && old[index].seq == new[index].seq && old[index].part() == new[index].part()
         {
-            ops.push(update(index, &new[index]));
+            paired[index] = true;
+            if old[index].json() != new[index].json() {
+                ops.push(update(index, &new[index]));
+            }
         }
     }
-    let kept: HashSet<*const Item> = new.iter().skip(common).map(Arc::as_ptr).collect();
+    let kept: HashSet<*const Item> = new
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !paired.get(*index).copied().unwrap_or(false))
+        .map(|(_, item)| Arc::as_ptr(item))
+        .collect();
     let mut survivors = Vec::new();
     for (index, item) in old.iter().enumerate().rev() {
-        if index >= common && kept.contains(&Arc::as_ptr(item)) {
+        if index >= common && !paired[index] && kept.contains(&Arc::as_ptr(item)) {
             survivors.push(item);
-        } else if index >= common {
+        } else if index >= common && !paired[index] {
             ops.push(ListOp::Remove { index: index as u32 });
         }
     }
     survivors.reverse();
     let mut next = 0;
     for (index, item) in new.iter().enumerate().skip(common) {
+        if paired.get(index).copied().unwrap_or(false) {
+            continue;
+        }
         if next < survivors.len() && Arc::ptr_eq(survivors[next], item) {
             next += 1;
         } else {
@@ -431,5 +443,39 @@ mod tests {
         let ops = diff(&old, &mixed);
         assert_eq!(replay(&old, &ops), vec!["0#0", "1#0", "3#0", "4#0"]);
         assert!(diff(&old, &old).is_empty());
+    }
+
+    #[test]
+    fn a_changed_item_is_only_updated_not_removed_and_reinserted() {
+        let old = items(r#"[{"id":"1#0","seq":1,"text":"old"},{"id":"2#0","seq":2}]"#);
+        let new = items(r#"[{"id":"1#0","seq":1,"text":"new"},{"id":"2#0","seq":2}]"#);
+        assert_eq!(diff(&old, &new), vec![update(0, &new[0])]);
+        assert_eq!(replay(&old, &diff(&old, &new)), vec!["1#0", "2#0"]);
+    }
+
+    #[test]
+    fn worker_release_does_not_join_itself() {
+        struct ReleaseHost {
+            runtime: Arc<Mutex<Option<Runtime>>>,
+        }
+        impl Host for ReleaseHost {
+            fn changed(&self, _version: u64) {}
+            fn run(&self, _effect: &[u8]) {}
+        }
+        impl Drop for ReleaseHost {
+            fn drop(&mut self) {
+                self.runtime.lock().unwrap().take();
+            }
+        }
+        let runtime = Arc::new(Mutex::new(None));
+        *runtime.lock().unwrap() = Some(Runtime::new(Arc::new(ReleaseHost {
+            runtime: runtime.clone(),
+        })));
+        let guard = runtime.lock().unwrap();
+        guard.as_ref().unwrap().dispatch(&wire::encode(&Action::OpenChat {
+            chat: "release".into(),
+            snapshot: ChatSnapshot::default(),
+        }));
+        assert!(guard.as_ref().unwrap().flush(Duration::from_secs(5)));
     }
 }

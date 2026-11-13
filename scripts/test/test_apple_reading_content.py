@@ -29,6 +29,7 @@ READING_FILES = {
     "Views/Interactions/CardFold.swift": "a plan's first lines in its approval card (CardPlan, #6605)",
     "Views/Mail/MailViews.swift": "an email's body",
     "Views/Knowledge/KnowledgeView.swift": "a knowledge page's body",
+    "Views/Knowledge/KBCorrections.swift": "an entry's confirmed facts, written by the user and read like its profile",
     "Views/Todos/TodoDetailView.swift": "a to-do's notes, read and edited",
     "Recording/MeetingThreadView.swift": "a transcript's words in the meeting's thread",
     "Recording/RecordingDayView.swift": "a day's transcript lines",

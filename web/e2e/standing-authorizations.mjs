@@ -73,7 +73,7 @@ try {
       for (const [index, grant] of fixture().entries()) {
         const row = group.locator("article").nth(index);
         assert.equal(await row.locator("dt").count(), 8);
-        for (const value of [grant.machine_id, grant.directory, grant.quote, grant.source]) assert((await row.textContent()).includes(value));
+        for (const value of [grant.machine_id, grant.directory, grant.quote, s.source_main_chat]) assert((await row.textContent()).includes(value)); // the source as the page words it (#7181)
         assert.equal(await row.locator("time").getAttribute("datetime"), grant.granted_at);
       }
       assert(await group.evaluate(el => el.scrollWidth <= el.clientWidth), "Grant group fits its scroller");

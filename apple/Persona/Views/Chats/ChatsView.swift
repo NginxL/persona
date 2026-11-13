@@ -396,13 +396,23 @@ struct ChatsView: View {
                 // Searching is not the root either: the drawer would slide the page with the keyboard up and the field open.
                 .onChange(of: path.isEmpty && !searching, initial: true) { _, root in shell?.workAtRoot = root }
                 .onChange(of: path) { _, p in
+                    #if os(iOS)
+                    // The Sidebar layout on a phone: what the drawer's list opened is in front, the drawer goes (#6332).
+                    if let unified, widthClass != .regular, !p.isEmpty { unified.drawer.close() }
+                    #endif
                     spaceAt = spaceAt.filter { $0.key < p.count }
                     if p.isEmpty, !leaving { AppModel.rememberChat(nil); model.chatSwitched = [:] } // back at the list: next launch starts here
                 }
                 .onChange(of: model.agentsListReveal) { _, request in
                     // The Sidebar layout: Agents is a part of the sidebar, not a page: choosing it shows that part, and
                     // the page beside it stays (#6332).
-                    if let unified { unified.scrollToAgents?(); return }
+                    if let unified {
+                        #if os(iOS)
+                        if widthClass != .regular { unified.drawer.open() } // on a phone the sidebar is the drawer
+                        #endif
+                        unified.scrollToAgents?()
+                        return
+                    }
                     let previousPath = path
                     stackStill.whenStill {
                         // A newer targeted open wins, even if the stable-stack opener already consumed it.
@@ -480,6 +490,10 @@ struct ChatsView: View {
             }
         }
         .environment(\.unifiedPath, unified == nil ? nil : pushing)
+        #if os(iOS)
+        // On a phone the sidebar is the drawer, the Persona conversation the page under everything it opens (#6332).
+        .environment(\.splitDrawer, unified?.drawer)
+        #endif
         .modifier(UnifiedFront(unified: unified, atRoot: path.isEmpty, query: $query))
         #if os(iOS)
         .tabActiveTask(id: model.api.map { PersonalAgentEntryModel.Connection($0) }) {
@@ -701,6 +715,8 @@ private struct AgentsList: View {
     /// get a heading of their own with the list's ⋯, Personal Agents and New Session (`UnifiedSidebarColumn`).
     var sidebarRows: AnyView? = nil
     @Environment(\.unifiedSidebar) private var unified
+    /// The split it is in (the Sidebar layout on a phone: the drawer's, `SplitDetail.drawer`).
+    @Environment(\.splitDetail) private var split
 
     @State private var searchClose = SearchCloseWatcher()
     #if os(iOS) || os(visionOS)
@@ -784,8 +800,13 @@ private struct AgentsList: View {
     /// iPhone Duo open the list beside a chat opened in code (the one remembered at launch, a card, New Session, a
     /// worktree line) was held as out of sight: its last lines, order and new agents stopped coming in (#3680).
     private var covered: Bool {
-        // The Sidebar layout's list is the sidebar, in sight beside whatever it opened (#6332).
+        // The Sidebar layout's list is the sidebar, in sight beside whatever it opened (#6332); on a phone, while the
+        // drawer is out.
+        #if os(iOS)
+        if let unified { return split?.drawer == true && !unified.drawer.isOut }
+        #else
         if unified != nil { return false }
+        #endif
         #if os(iOS) || os(visionOS)
         if ownsTop && !path.isEmpty { return true }
         if model.selectedTab != .chats && shell?.pager.moving != true { return true }

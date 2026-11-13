@@ -335,7 +335,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
             disabled={!openInView.length || picking}
             title={t("inbox-inboxlist.clean_all_scope", { scope })}
             onClick={runBulk}
-            className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-control bg-surface px-2.5 text-[12px] whitespace-nowrap text-ink-2 shadow-btn transition-colors duration-150 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 max-sm:hidden"
+            className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-control bg-surface px-2.5 text-label whitespace-nowrap text-ink-2 shadow-btn transition-colors duration-150 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 max-sm:hidden"
           >
             <Icon name="check" size={12} stroke={2.6} />
             {t("inbox-inboxlist.clean_all")}
@@ -491,7 +491,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
       <div role="toolbar" aria-label={t("inbox-inboxlist.selection")} data-pick-bar className="shrink-0 border-t border-line bg-inset px-3 py-2.5 sm:px-4 max-sm:pb-[calc(10px+env(safe-area-inset-bottom))]">
         <div className="mx-auto flex max-w-[760px] items-center gap-2">
           <Button tone="quiet" onClick={pickAll} disabled={!shownOpen.length}>{allChosen ? t("inbox-inboxlist.deselect_all") : t("inbox-inboxlist.select_all")}</Button>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3 tabular-nums" aria-live="polite">{chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
+          <span className="min-w-0 flex-1 truncate text-label text-ink-3 tabular-nums" aria-live="polite">{chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
           {/* Merge and Add to to-dos: a label on a wide bar, only the icon on a phone */}
           <Button tone="secondary" icon="merge" disabled={!mergeable} onClick={mergeChosen} className="max-sm:hidden">{t("inbox-inboxlist.merge")}</Button>
           <IconButton icon="merge" label={t("inbox-inboxlist.merge")} disabled={!mergeable} onClick={mergeChosen} size={32} className="sm:hidden" />
@@ -523,7 +523,7 @@ function Section({ k, title, count, open, onToggle, action, menu, children }: { 
   const jump = useMenu();
   const head = (
     <>
-      <span className={cx("text-[12px] font-medium whitespace-nowrap", k === "action" ? "text-ink" : "text-ink-3")} data-section-title>{title}</span>
+      <span className={cx("text-label font-medium whitespace-nowrap", k === "action" ? "text-ink" : "text-ink-3")} data-section-title>{title}</span>
       <span title={count.label} className="text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums"><span aria-hidden>{count.text}</span><span className="sr-only">{count.label}</span></span>
     </>
   );
@@ -798,7 +798,7 @@ function MutesDialog({ onClose }: { onClose: () => void }) {
       <li key={key} data-mute={m.id} className="flex items-center gap-3 rounded-control px-1 py-2 hover:bg-hover">
         <Icon name="bellOff" size={14} className="shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] text-ink" title={m.name}>{m.name}</span>
+          <span className="block truncate text-meta text-ink" title={m.name}>{m.name}</span>
           <span className="mt-0.5 block truncate text-[11.5px] text-ink-3">{muteLine(m)}</span>
         </span>
         <Button tone="quiet" busy={busy === key} disabled={busy !== null && busy !== key} onClick={() => void unmute(m)}>
@@ -833,7 +833,7 @@ function MutesDialog({ onClose }: { onClose: () => void }) {
             shownGroups.map((g) => (
               <section key={g.manager.id} data-mutes-manager={g.manager.id} className="mb-2">
                 {g.error ? (
-                  <p className="px-1 py-1.5 text-[12px] break-words text-ink-3">{g.manager.online ? t("inbox-inboxlist.mutes_load_failed", { error: g.error }) : t("inbox-inboxlist.mutes_offline")}</p>
+                  <p className="px-1 py-1.5 text-label break-words text-ink-3">{g.manager.online ? t("inbox-inboxlist.mutes_load_failed", { error: g.error }) : t("inbox-inboxlist.mutes_offline")}</p>
                 ) : (
                   <ul className="-mx-1 flex flex-col">{g.mutes!.map(row)}</ul>
                 )}
@@ -918,7 +918,7 @@ function BulkConfirm({ confirm, onClose }: { confirm: { items: InboxItem[]; scop
         </>
       }
     >
-      <p className="text-[13px] leading-relaxed text-ink-2">{t("inbox-inboxlist.confirm_body", { count: n, scope: confirm?.scope ?? "" })}</p>
+      <p className="text-meta leading-relaxed text-ink-2">{t("inbox-inboxlist.confirm_body", { count: n, scope: confirm?.scope ?? "" })}</p>
     </Dialog>
   );
 }
