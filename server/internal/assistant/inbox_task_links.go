@@ -212,9 +212,13 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 	var items []*InboxItem
 	var unlinked []string
 	var closes map[string][]uint64
+	var done []*InboxItem
 	b.mu.Lock()
 	for _, it := range b.items {
 		if !it.open() {
+			if it.Agent != nil && it.Agent.TodoID != "" {
+				done = append(done, it) // its detail still names a task: the one doing the work now (#6546)
+			}
 			continue
 		}
 		if a := it.Agent; a != nil && a.TodoID != "" {
@@ -261,4 +265,5 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 		}
 	}
 	s.superviseInbox(ctx, kept, linked)
+	s.followContinuations(ctx, done) // a handled item gets no signal, but its link follows the work as an open one's does
 }

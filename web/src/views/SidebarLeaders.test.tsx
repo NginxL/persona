@@ -2,7 +2,7 @@
 // The leader conversations in the sidebar (#3623, #4331): Persona chats are the main one (its row above) and the hub's
 // `assistant.leaders`, "常驻", in the hub's order under each one's name with what it has Working and Waiting on you
 // (the direction tree, GET /api/v1/assistant/directions/tree, #4352), then "最近", the newest of the user's other chats
-// (#4873; 15 by default, a setting, with Show more, #5146); every chat is under 全部对话. The hub's `directions` message makes an open sidebar read the tree
+// (#4873; 5 by default, a setting, with Show more, #5146; the scheduled tasks' chats stay out of it, #6228); every chat is under 全部对话. The hub's `directions` message makes an open sidebar read the tree
 // again (a leader made or ended anywhere).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -156,14 +156,15 @@ describe("the leader conversations in the sidebar", () => {
     expect(headings()).toEqual([t("sidebar.directions")]);
   });
 
-  describe("最近 (#5146)", () => {
+  describe("最近 (#5146, #6228)", () => {
     const pad = (d: number) => String(d).padStart(2, "0");
     // 20 older chats of the user's own, c20 the newest of them
     const older = Array.from({ length: 20 }, (_, i) => conversation(`c${pad(i + 1)}`, `Chat ${i + 1}`, `2026-10-${pad(i + 1)}T00:00:00Z`));
-    // every chat but the main one and the leaders, whoever opened it (#5195): the scheduled task's and the Inbox's lead
-    const own = ["task", "twin", "newest", "wx", "mine", ...older.map((c) => c.session_id).reverse()];
+    // the scheduled task's chat no longer takes a Recent row (#6228): the rest, whoever opened it, newest first
+    const own = ["twin", "newest", "wx", "mine", ...older.map((c) => c.session_id).reverse()];
     const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent === text);
-    const showMore = () => Array.from({ length: 15 }, (_, i) => button(t("sidebar.show_more", { count: i + 1 }))).find(Boolean);
+    const showMore = () => button(t("sidebar.show_more", { count: 5 }));
+    const recentHeading = () => [...host.querySelectorAll<HTMLElement>('[role="heading"] button')].find((b) => b.textContent?.includes(t("sidebar.recent_chats")));
     beforeEach(() => {
       conversations = [
         ...base,
@@ -174,47 +175,70 @@ describe("the leader conversations in the sidebar", () => {
       ];
     });
 
-    it("lists the newest 15 other chats whoever opened them, the hub's own with their origin's mark (#5195)", async () => {
+    it("lists the newest 5 other chats by default, never the scheduled task's chat, with the Inbox chat's origin mark", async () => {
       await renderSidebar();
-      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 15)]);
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 5)]);
+      expect(rowIds()).not.toContain("task");
       expect(host.querySelector('a[href="/history"]')!.textContent).toContain(String(conversations.length));
       const mark = (id: string) => row(id).querySelector("[data-origin-mark]");
-      expect(mark("task")?.getAttribute("data-origin-mark")).toBe("task");
-      expect(mark("task")?.getAttribute("aria-label")).toBe(t("assistant-conversations.origin_task"));
       expect(mark("twin")?.getAttribute("data-origin-mark")).toBe("inbox");
       for (const id of ["newest", "wx", "mine"]) expect(mark(id), id).toBeNull();
     });
 
-    it("shows 15 more for each Show more until none are left, Show less goes back, and a reload keeps what was open", async () => {
+    it("shows 5 more for each Show more until none are left, Show less goes back, and a reload keeps what was open", async () => {
       await renderSidebar();
       expect(button(t("sidebar.show_less"))).toBeUndefined();
-      act(() => button(t("sidebar.show_more", { count: 10 }))!.click());
-      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own]);
-      expect(button(t("sidebar.show_more", { count: 10 }))).toBeUndefined();
-      // a reload
+      act(() => showMore()!.click());
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 10)]);
+      act(() => button(t("sidebar.show_more", { count: 5 }))!.click());
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 15)]);
+      // a reload keeps Show more's state
       act(() => root.unmount());
       root = createRoot(host);
       await renderSidebar();
-      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own]);
-      act(() => button(t("sidebar.show_less"))!.click());
       expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 15)]);
+      act(() => button(t("sidebar.show_less"))!.click());
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 5)]);
       expect(button(t("sidebar.show_less"))).toBeUndefined();
     });
 
     it("lists as many as the setting says, and Show more adds as many again", async () => {
-      setRecentCount(5);
+      setRecentCount(10);
       await renderSidebar();
-      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 5)]);
-      act(() => button(t("sidebar.show_more", { count: 5 }))!.click());
       expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 10)]);
+      act(() => button(t("sidebar.show_more", { count: 10 }))!.click());
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 20)]);
     });
 
-    it("has no Show more when there are 15 or fewer", async () => {
+    it("has no Show more when the count covers every Recent chat", async () => {
       conversations = [...base, ...older.slice(0, 13)];
+      setRecentCount(25);
       await renderSidebar();
       expect(rowIds()).toHaveLength(2 + 15);
       expect(showMore()).toBeUndefined();
       expect(button(t("sidebar.show_less"))).toBeUndefined();
+    });
+
+    it("folds 最近 and keeps it folded after a reload; the open chat's row opens it by itself", async () => {
+      await renderSidebar();
+      const heading = recentHeading()!;
+      // the box that clips the recent rows: its grid row goes to 0fr at once when folded (the Collapse's inert follows the animation)
+      const recentBox = () => row("twin").closest(".grid") as HTMLElement;
+      expect(heading.getAttribute("aria-expanded")).toBe("true");
+      expect(recentBox().style.gridTemplateRows).toBe("1fr");
+      act(() => heading.click());
+      expect(heading.getAttribute("aria-expanded")).toBe("false");
+      expect(localStorage.getItem("fold:recent-chats")).toBe("1");
+      expect(recentBox().style.gridTemplateRows).toBe("0fr");
+      act(() => root.unmount());
+      root = createRoot(host);
+      await renderSidebar();
+      expect(recentHeading()!.getAttribute("aria-expanded")).toBe("false");
+      expect(recentBox().style.gridTemplateRows).toBe("0fr");
+      // unfold again
+      act(() => recentHeading()!.click());
+      expect(rowIds()).toEqual(["lead-a", "lead-b", ...own.slice(0, 5)]);
+      expect(localStorage.getItem("fold:recent-chats")).toBe("0");
     });
   });
 

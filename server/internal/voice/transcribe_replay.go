@@ -22,6 +22,7 @@ type trReplayWin struct {
 	edgeCut  bool  // cap is where it ends (a reference's edge, a hole)
 	to       int64 // -1 until known
 	covered  bool  // the reference covers its speech
+	aside    bool  // given more sessions, chosen as without a reference: too short to check against, too few agreed
 	sessions []*trSession
 	opening  int
 	state    int
@@ -76,7 +77,9 @@ func (j *trJob) replayStep() {
 			if !j.replayQuiet(rw) {
 				return
 			}
-			j.replayPick(rw)
+			if !j.replayPick(rw) {
+				continue // more sessions for the window
+			}
 			j.rw = nil
 		}
 	}
@@ -137,14 +140,19 @@ func (j *trJob) replayStart() bool {
 	if rw.covered {
 		n = trReplayWithRef
 	}
+	j.replayOpen(rw, n)
+	return true
+}
+
+// replayOpen opens n fresh sessions for window rw, each told the previous window's last sentences.
+func (j *trJob) replayOpen(rw *trReplayWin, n int) {
 	ins := j.instructions(trVerbatim, j.prev)
 	for range n {
 		s := newTrSession(j, trVerbatim, nil, rw.n, "replay")
 		rw.sessions = append(rw.sessions, s)
 		s.connect(j.ctx, ins)
 	}
-	rw.opening = n
-	return true
+	rw.opening += n
 }
 
 // bare are the spans the reference does not cover, trRefGap or longer, in order (the last one has no end).
@@ -248,7 +256,11 @@ func (j *trJob) replayUp(u trUp) {
 	s.run(u.up, rw.from)
 	j.all = append(j.all, s)
 	j.started++
-	j.logf("session %d (replay window %d from %.1f s, %s) started in %v", s.no, rw.n, trSeconds(rw.from), refNote(rw.covered),
+	note := refNote(rw.covered)
+	if rw.aside {
+		note = "another session: the reference is too short to check against"
+	}
+	j.logf("session %d (replay window %d from %.1f s, %s) started in %v", s.no, rw.n, trSeconds(rw.from), note,
 		logDur(time.Since(s.began)))
 	if rw.opening == 0 || rw.state == trOpening {
 		rw.state = trRunning
@@ -299,8 +311,10 @@ func (j *trJob) replayQuiet(rw *trReplayWin) bool {
 	return true
 }
 
-// replayPick chooses window rw's text, sends its sentences and its window frame, and closes its sessions.
-func (j *trJob) replayPick(rw *trReplayWin) {
+// replayPick chooses window rw's text, sends its sentences and its window frame, and closes its sessions; false: the
+// window was given more sessions instead (its reference too short to check against and fewer than two sessions
+// agreeing: one session is never taken uncorroborated), and is chosen again once they answered.
+func (j *trJob) replayPick(rw *trReplayWin) bool {
 	sp := j.vad.speech(rw.from, rw.to)
 	speech := make([][2]float64, len(sp))
 	for i, s := range sp {
@@ -343,13 +357,28 @@ func (j *trJob) replayPick(rw *trReplayWin) {
 			}
 			dist = append(dist, d)
 		}
-		pick, k := pickReplay(ref, texts, stopped)
+		pick, k, use := pickReplay(ref, rw.aside, texts, stopped, j.vad.speechIn(rw.from, rw.to))
+		if more := trReplayNoRef - len(rw.sessions); use == trRefShort && k && !rw.aside && more > 0 {
+			// As a window without a reference has: three sessions, two of which must agree.
+			rw.aside, rw.state = true, trRunning // it waits for them as for its first ones
+			j.replayOpen(rw, more)
+			j.logf("replay window %d [%.1f-%.1f s, %.1f s of speech, %s]: %s; the reference (%d characters) is too short to check the sessions "+
+				"against and fewer than two of them agree: %d more session(s) for the window", rw.n, trSeconds(rw.from), trSeconds(rw.to),
+				j.vad.speechIn(rw.from, rw.to), refNote(ref != nil), strings.Join(dist, ", "), runeLen(*ref), more)
+			return false
+		}
 		kept = k
 		if pick >= 0 {
 			sentences = spreadSentences(pieces[pick], speech, trSeconds(rw.from), trSeconds(rw.to))
 			how = fmt.Sprintf("sent session %d's text", rw.sessions[pick].no)
 		} else {
 			how = "none trusted: the hub keeps its text"
+		}
+		switch use {
+		case trRefShort:
+			how = fmt.Sprintf("the reference (%d characters) is too short to check the sessions against; %s", runeLen(*ref), how)
+		case trRefOutvoted:
+			how = "the sessions agree with each other, not with the reference; " + how
 		}
 		how = strings.Join(dist, ", ") + "; " + how
 	}
@@ -368,6 +397,7 @@ func (j *trJob) replayPick(rw *trReplayWin) {
 	j.buf.drop(rw.to)
 	j.vad.prune(rw.to)
 	j.ack(rw.to)
+	return true
 }
 
 func (j *trJob) sendWindow(from, to int64, kept bool) {

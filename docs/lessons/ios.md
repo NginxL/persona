@@ -1714,6 +1714,31 @@ no initial Working row so the message shifted by one row, and pending local remo
 - A multi-select drag guard cannot cover the single-select auto-send path: a 12 pt flick can still activate a Button. `DeliberateTap` marks a drag from 10 pt until 250 ms after it ends, and the option action checks that state; a short-drag regression must assert both no selection and no resolution while deliberate taps keep working.
 - Negative footer padding is visual overflow even when the accessibility frame still fits. A capped `ApprovalCard` keeps the host's horizontal and top alignment but has no bottom bleed, so its measured cap contains the whole button. Its footer pills also opt into `growsWithText`: a fixed 27 pt background does not grow when the label does at accessibility XXXL. The UI regression keeps actions above the outer area's 8 pt bottom fade, and screenshot pixel checks must confirm the visible capsule, not only `isHittable` and a successful resolution.
 
+## A lone question card past half the page (2026-11-13, #6277)
+
+- A cap that may grow past half the page uses only values the card does not move: the page's height, the header as it
+  stands open (`fixedHeader`) and what the footer holds besides the cards (`footerRest`). A DEBUG log of `PendingCards`'
+  body on iPhone 17 Pro showed a burst while launching, then no evaluation for about 9 s on the still page.
+- **What the footer holds besides the cards must not depend on the cards either.** The first version still froze the
+  app at 100% CPU when the composer was tapped. The field taking the focus grew the composer by its second row before
+  the keyboard came up. `footerRest` rose and the cap fell below the card. Measured one layout late, the card was over
+  the new cap, so the area switched to scrolling and showed "1 pending". That count is in `footerRest`, so the cap fell
+  again. The card then fitted itself, the count went and the cap rose: a 5 ms cycle between two states
+  (cap 477.98 / 454.31, `footerRest` 129.02 / 152.69, the difference being the count and its spacing). On `main` the
+  ring is open: outside the keyboard the cap is the fixed half page, and with the keyboard up the area is always laid
+  out as scrolling and the count is left off a lone card. Fix: a lone question that may grow is always laid out as
+  fitting (its form fits itself to `cardArea`), so `over` never comes from its late measure. Find such a ring by logging
+  the cap's inputs in `body` and looking for two lines that alternate.
+- Measured against the open header, the conversation keeps `cardThreadRoom` only while that header is open; once an
+  Agents header settles to its slim bar (40 pt, the open one is 90 pt with one row) the conversation keeps 50 pt more.
+- With a taller card the conversation overflows and the Agents header folds to its slim bar. XCUITest reports that bar's
+  back button as the 8 x 13 pt chevron and not hittable: a known limit of these tests, so
+  `PendingCardsTests.testLoneQuestionShowsEveryOption` checks it on screen and taps it by its coordinate. It is not a
+  way around the button itself: the slim bar's back is a plain button without `.contentShape(.rect)` (`ChatView`'s
+  `compactChrome`), so its real touch area may be little more than the chevron. That is on `main` and not fixed here.
+- `-ui.scheme light|dark` makes the app icon follow the appearance, and SpringBoard's "You have changed the icon"
+  alert covers the screenshot and takes taps: dismiss it through `com.apple.springboard` after launch.
+
 ## A view that places itself over the whole screen gets no keyboard avoidance (2026-11-10, #3004)
 
 Superseded for the + panel by #4312: it is a system sheet now, its bar a `safeAreaInset` that the system's keyboard

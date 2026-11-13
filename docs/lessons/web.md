@@ -1,5 +1,12 @@
 # Lessons: web UI and interactions
 
+## Pending cards need exact session metadata outside the loaded page (#6432)
+
+A task row can render from `taskRows` even when `getSession` has no row for its Agent. On a paging hub, hydrate every
+pending card's missing session, not only `folded_under` children, before checking approval capabilities. Keep missing
+and explicitly read-only sessions disabled. Test a root Agent outside the list window, and type without submitting.
+An expanded Needs you title opens the asking Agent; keep folding on its separate chevron, never on that title.
+
 ## A grey text selection over sidebar rows reads as a stuck highlight (#6458)
 
 The theme paints `::selection` with `--accent-tint`, a neutral grey in the default theme close to the hover fill. A

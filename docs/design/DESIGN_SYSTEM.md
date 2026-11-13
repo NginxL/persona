@@ -239,6 +239,7 @@ Outside the scale: composer 32 (`Shell.composerRadius`, `apple/Shared/Design/The
 - Hit target: `tapTarget` 44 (`:507`), drawn through `tapTargetFrame()` (a square for a small control) or `tapTargetHeight()` (a row or a heading that is a button and draws less, as wide as it is; #3753). A line of text that is a link in a row under a card, where a taller row would push the card's buttons under the composer, uses `tapTargetOutset()`: its touch area grows `Space.l` above and below, its layout does not (#5392). Same number under other names: `searchField`, `switchHeight`, `Watch.minRowHeight`, `Sidebar.row` (iOS), `voiceThreadRoom`. Android uses 48 as its platform floor (`Tokens.MinTouch`).
 - Dots 6-10, marks 12-18, icons 20-26, wells 28-38, avatars 40-48. Neighbors differ by 1 to 2 pt (DS-10).
 - Named by value: `box50` to `box380` (DS-10). Android's generated tokens carry only the sizes it draws with, under the same names (`spec/tokens/dimension.json`, checked against `Theme.Size`); the space page's cards added `hairline`, `line`, `dotL` and `box150`, the strip of the images a turn looked at `box64` and `box80`, the pill while a chat's model operates a Mac `box280`, the queue strip's number disc `badge`.
+- The conversation kept in view over the pending cards: `voiceThreadRoom` 44 in a voice call, `cardThreadRoom` 72 over a lone question card (section 4.8, #6277).
 - The Mac's pointer over its picture in the app's VNC: at least `pointer` 22 tall, about macOS's own size (`VNCPointerArt`, #3075).
 - Widths: `readable` 560 (web chat column 880, pages 760), sidebar 340/400/480, drawer `min(0.82 x width, 380)` (Android the same).
 - `cardColumn` 330 is the minimum logical column width of an adaptive machine card: iOS pt and Android dp, with the shared token's `px` representing each platform's design unit rather than a physical pixel. `spec/tokens/dimension.json` is the cross-platform record; Android reads the generated `Tokens.Size.cardColumn`.
@@ -1325,7 +1326,16 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   while they fit in half the page; past it they scroll on their own under "N pending", permissions first and then the
   newest, and a new card brings the stack back to its top. "N pending" counts the cards in the stack. With the keyboard
   up the cards take the conversation's room above the rest of the footer, the composer staying over the keyboard, and
-  "N pending" is left off a lone card. Each card folds on its own: a tap on its header folds it to one line, its title and
+  "N pending" is left off a lone card. One exception to the half page (iOS and iPadOS, #6277): a lone question card,
+  with the keyboard down and no voice call, may grow past half the page until the conversation keeps
+  `Theme.Size.cardThreadRoom` (72 pt, about two lines of a message) in view under the chat's header as it stands open
+  (more once an Agents header has folded to its slim bar), and never less than the half page it had. On an iPhone 17 Pro
+  a question with three options with descriptions then shows whole, with 54 pt to spare. What still does not fit scrolls
+  inside the card: on iPhone SE at the default text size the third option's description and Other, a fourth described
+  option in a card of several questions, the largest text sizes. The card is laid out as fitting (no "N pending", no
+  scrolling stack). The cap is made only from values the card does not move (the page, the open header, what the footer
+  holds besides the cards), so it settles at once. Several cards, the keyboard up and a
+  voice call keep their rules above. Each card folds on its own: a tap on its header folds it to one line, its title and
   what it asks, and another opens it; any can be folded to answer later. A message typed while a card waits is sent as
   any other, also while a permission holds the Agent (iOS sends it the same way). Each style keeps its own card: on
   Android, Glass a floating card inset like the composer, Brief a rounded card with a light shadow, Board a bordered card

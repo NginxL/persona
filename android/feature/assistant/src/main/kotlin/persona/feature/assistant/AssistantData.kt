@@ -80,14 +80,16 @@ internal fun AssistantConversationOrigin.accessibilityLabel(resources: android.c
 
 /**
  * The drawer's Recent (#4922, #5196; web `recentConversations`, iOS `AssistantSidebarGroups.recent`): every conversation
- * that is not the main one, not a leader, not archived and not the built-in background supervisor, newest first, equal
- * times by session id, at most [limit]. Automatic chats carry their source's mark; only the supervisor stays in All chats.
+ * that is not the main one, not a leader, not archived, not the built-in background supervisor and not a scheduled
+ * task's own chat (#6228: the Scheduled Tasks entry and All chats keep those), newest first, equal times by session id,
+ * at most [limit]. The other automatic chats carry their source's mark; only the supervisor stays in All chats.
  */
 internal fun recentConversations(snapshot: AssistantSnapshot, limit: Int = RECENT_LIMIT): List<Session> {
     val leaders = snapshot.leaders.toSet()
     return snapshot.conversations.distinctBy { it.key }
         .filter { it.key != snapshot.mainSession && it.sessionId !in leaders && !it.archived &&
-            it.sessionId != snapshot.backgroundSupervisor }
+            it.sessionId != snapshot.backgroundSupervisor &&
+            automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task }
         .map { it to it.updated }
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.sessionId })
         .take(limit).map { it.first }

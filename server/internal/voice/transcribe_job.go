@@ -60,8 +60,10 @@ var (
 	trExpiryMargin  = 2 * time.Minute  // and at the latest this long before the session ends (its expires_at)
 	trRollOverlap   = 10 * time.Second // and the session rolled over runs beside the new one at least this long
 	trRollRetry     = 30 * time.Second
-	trAssignSlack   = 300 * time.Millisecond
-	trInterimLag    = time.Second // a caption session this far behind the audio sends no interim captions
+	trAssignAhead   = 300 * time.Millisecond // a reply may be of speech that ended this long after its position (assign)
+	trInterimLag    = time.Second            // a caption session this far behind the audio sends no interim captions
+	trCaptionLag    = 500 * time.Millisecond // a caption's first frame comes about this long after its sentence began
+	trCaptionFresh  = time.Second            // a caption's frames this soon after its first one revise it (captionOf)
 	trBehindEvery   = time.Minute
 	// trReconnectWaits are the waits before the reconnects of a session in a row (maxReconnects of them).
 	trReconnectWaits = []time.Duration{0, 2 * time.Second, 4 * time.Second}
@@ -290,14 +292,7 @@ func (j *trJob) begin(f extwire.TranscriptionFrame) bool {
 		j.textLang = f.Language
 	}
 	j.glossary = cleanGlossary(f.Glossary)
-	lang := i18n.Resolve(j.textLang)
-	if lang == "" {
-		lang = j.uiLang
-	}
-	if lang == "" {
-		lang = j.pl.link.language()
-	}
-	j.lang = string(firstNonEmpty(string(lang), string(i18n.ZhHans)))
+	j.lang = string(trInstructionsLang(j.textLang, j.uiLang, j.pl.link.language()))
 
 	ctx, cancel := context.WithTimeout(j.ctx, startTimeout)
 	p, model, err := j.pl.transcriber(ctx)
@@ -348,6 +343,21 @@ func (j *trJob) begin(f extwire.TranscriptionFrame) bool {
 		j.open(sl, 0, "first")
 	}
 	return true
+}
+
+// trInstructionsLang is the language of a job's instructions: the recording's (tag) when it is Chinese, English or
+// Japanese, since the meeting's language is what the model hears, else the hub's (the caller's, else the hub link's),
+// else Chinese.
+func trInstructionsLang(tag string, caller, hub i18n.Lang) i18n.Lang {
+	if prompts.ChineseScript(tag) != "" {
+		return i18n.ZhHans
+	}
+	for _, l := range []i18n.Lang{i18n.Match(tag), caller, hub} {
+		if l != "" {
+			return l
+		}
+	}
+	return i18n.ZhHans
 }
 
 // cleanGlossary is the start's glossary as the instructions take it: each term on one line, trimmed and cut to

@@ -11,15 +11,70 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// agent is the live agent of session id, with a Claude's status as claudeStatus says.
+// agent is the live agent of session id, with its status as liveStatus says.
 func (n *Node) agent(id string) (host.Agent, bool) {
 	n.mu.Lock()
 	a, ok := n.agents[id]
 	n.mu.Unlock()
 	if ok {
-		a.AgentStatus = n.claudeStatus(id, a, time.Now())
+		a.AgentStatus = n.liveStatus(id, a, time.Now())
 	}
 	return a, ok
+}
+
+// liveStatus is an agent's status with its own signs of work over its host's: a Claude's as claudeStatus says, a
+// Codex's as codexStatus says; any other agent's is its host's.
+func (n *Node) liveStatus(id string, a host.Agent, now time.Time) string {
+	switch a.Agent {
+	case "claude":
+		return n.claudeStatus(id, a, now)
+	case "codex":
+		return n.codexStatus(id, a)
+	}
+	return a.AgentStatus
+}
+
+// codexStatus is a Codex's status with its own signs of a running turn over its host's (#4865). herdr's word for a
+// Codex can be wrong for a whole turn: a reporter holding the pane decides it instead of the screen (#4657), and herdr
+// said idle through a turn of a Codex joined on its app-server while its chat page showed the turn's live words. When
+// the host says done, idle or does not know, a Codex is working while
+//
+//   - the app-server the node is connected to runs a turn in its thread (codex_remote.go): turn/started, the reply to
+//     the node's own turn/start, or the status its read every 5 seconds gives; or
+//   - its terminal title shows the spinner Codex animates there while a turn runs (codexSpinnerTitle).
+//
+// blocked and working stay the host's, and so does a botmux session's whole state (botmux reports it). The list
+// still corrects a working whose rollout says the turn ended a while ago (codexTurnOver).
+func (n *Node) codexStatus(id string, a host.Agent) string {
+	if a.Agent != "codex" || host.ParsePane(a.PaneID).Kind == host.Botmux ||
+		a.AgentStatus != proto.StatusDone && a.AgentStatus != proto.StatusIdle && a.AgentStatus != proto.StatusUnknown {
+		return a.AgentStatus
+	}
+	if _, t, err := n.codexOwner(id); err == nil && t.status == proto.StatusWorking {
+		return proto.StatusWorking
+	}
+	if codexSpinnerTitle(a.RawTitle) {
+		return proto.StatusWorking
+	}
+	return a.AgentStatus
+}
+
+// codexSpinner: the frames of the spinner Codex animates in its terminal title while a turn runs, as herdr's own Codex
+// detection reads them (its osc_title_working rule).
+const codexSpinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+// codexSpinnerTitle: a word of the title is one spinner frame ("⠦ fix the build | repo"). A title asking for the
+// user (Codex's "Action Required" prefix) is not a running turn, whatever else it shows.
+func codexSpinnerTitle(title string) bool {
+	if strings.Contains(title, "Action Required") {
+		return false
+	}
+	for _, w := range strings.Fields(title) {
+		if r, size := utf8.DecodeRuneInString(w); size == len(w) && strings.ContainsRune(codexSpinner, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // claudeFresh: how recently a Claude transcript with an open turn must have been written to count as at work.

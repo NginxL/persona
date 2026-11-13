@@ -1420,6 +1420,8 @@ internal fun AssistantDrawer(
 ) {
     // "All chats" opens the rest of the conversations in place: this app has no all-conversations page.
     var showAllChats by rememberSaveable { mutableStateOf(false) }
+    // Recent folds on its own too (#6228): the choice is kept on this device, like "All chats"'s.
+    var recentFolded by rememberSaveable { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     val drawer = LocalHomeDrawer.current
     val resources = androidx.compose.ui.platform.LocalResources.current
@@ -1500,8 +1502,14 @@ internal fun AssistantDrawer(
                 }
             }
             // The newest eligible chats (#4922, #5196), the same rows and menu; All chats below still lists everything.
-            if (groups.recent.isNotEmpty()) item(key = "recent-header") { JSectionHeader(stringResource(R.string.assistant_recent)) }
-            itemsIndexed(groups.recent, key = { _, session -> "recent-" + session.key.path }) { index, session ->
+            // The heading folds them, and the choice is kept on this device (#6228).
+            if (groups.recent.isNotEmpty()) item(key = "recent-header") {
+                JSectionHeader(stringResource(R.string.assistant_recent),
+                    onClick = { recentFolded = !recentFolded }, open = !recentFolded,
+                    action = { JIcon(if (recentFolded) PhIcons.CaretDown else PhIcons.CaretUp, null,
+                        size = Tokens.Space.l, tint = PersonaTheme.palette.ink3) })
+            }
+            if (!recentFolded) itemsIndexed(groups.recent, key = { _, session -> "recent-" + session.key.path }) { index, session ->
                 ConversationRow(session, selected = session.key == active,
                     position = GroupPosition.of(index, groups.recent.size),
                     onOpen = { onOpen(session.key) }, onEnd = onEnd?.let { action -> { action(session) } },

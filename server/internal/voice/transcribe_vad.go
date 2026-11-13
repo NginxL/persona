@@ -106,6 +106,25 @@ func (v *trVAD) speech(from, to int64) [][2]int64 {
 	return out
 }
 
+// speechStart is where the speech going on at at began, or where the next speech before to begins when at is in a
+// silence; at when there is none.
+func (v *trVAD) speechStart(at, to int64) int64 {
+	spans := v.spans
+	if v.open {
+		spans = append(spans[:len(spans):len(spans)], [2]int64{v.from, v.last})
+	}
+	for _, s := range spans {
+		if s[1] <= at {
+			continue
+		}
+		if s[0] < to {
+			return s[0]
+		}
+		break
+	}
+	return at
+}
+
 // speechIn is the seconds of speech in [from, to).
 func (v *trVAD) speechIn(from, to int64) float64 {
 	var n int64

@@ -1,10 +1,12 @@
 // How many chats the sidebar's Persona chats › Recent lists (#5146): the count is a setting (Settings › General ›
 // Appearance), and each Show more adds that many again until none are left. Both live in this browser only, as the
 // text size does, so a reload keeps what was open. (⌘K's list of opened chats is lib/recent-chats.ts, not this.)
+// The default is 5 (#6228): one screenful under the main chat and 常驻, the same number iOS and Android list; the rest
+// are one tap away in All chats. A value stored before this change keeps working, so an explicit choice is never reset.
 import { useSyncExternalStore } from "react";
 
 export const RECENT_COUNTS = [5, 10, 15, 25] as const;
-export const RECENT_DEFAULT = 15;
+export const RECENT_DEFAULT = 5;
 const COUNT_KEY = "persona.sidebar-recent";
 const MORE_KEY = "persona.sidebar-recent.more";
 

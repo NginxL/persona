@@ -51,6 +51,8 @@ type Node struct {
 	questions questionCalls
 	// closeoutBriefs: what the manager said to tell each starting session of the closeout's form (closeout_start.go).
 	closeoutBriefs closeoutBriefs
+	// desktopSeen: when someone was found attending a session in Claude's desktop app (claudedesktop_unread.go).
+	desktopSeen desktopSeenStore
 
 	// bootAt: when this node started. A session whose record says it was started in a pane before this ran in the
 	// previous herdr server, so the restart is what ended it (interrupted.go).

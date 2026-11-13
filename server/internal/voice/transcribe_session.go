@@ -39,8 +39,10 @@ var (
 	// trCaptionJump is how far a live caption session may fall behind the live edge (a burst of audio: the manager's
 	// backlog after ready, a resend) before it skips to the edge. It is never given a backlog: captions break faster
 	// than real time (59% character error rate measured at four times), and paced at real time it would stay behind
-	// for good, its captions too late to be interim ones (trInterimLag).
-	trCaptionJump = time.Second
+	// for good, its captions too late to be interim ones (trInterimLag). Three seconds, not one: a busy hub's writer
+	// that stalls for a second (measured under load in the end-to-end test) catches up instead of leaving a window
+	// without captions.
+	trCaptionJump = 3 * time.Second
 )
 
 // trBuffer is a job's audio by recording position (samples), for its sessions' writers.
@@ -188,8 +190,8 @@ type trSession struct {
 	passed   map[int]time.Time
 	lastAt   int64 // replay: where it was when its last reply began
 	// caption sessions
-	items []*trItem
-	byID  map[string]*trItem
+	items  []*trItem // its captions not forgotten yet, in order
+	capCur *trItem   // the caption it writes now (nil: none yet, or the last one was final)
 }
 
 // trQuiet is n samples of silence to send once the session's audio reached recording position at.
@@ -211,12 +213,14 @@ func (r *trReply) String() string {
 	return string(r.text)
 }
 
-// trItem is one caption: the service's whole text so far of one sentence.
+// trItem is one caption: the service's whole text so far of one sentence (captionOf).
 type trItem struct {
-	id    string
-	start int64 // recording samples
-	text  string
-	parts []trPart // the windows its text is of, in order
+	id     string // the service's item_id (on the measured service the same for every caption of a session)
+	start  int64  // recording samples (captionStart)
+	at     int64  // where the session's audio was when its first frame came
+	text   string
+	parts  []trPart // the windows its text is of, in order
+	closed bool     // final, or written over by the next sentence: no later frame of its item is of it
 }
 
 // trPart: a caption's text from rune from on is of window window (up to the next part).
@@ -225,7 +229,7 @@ type trPart struct{ window, from int }
 func newTrSession(j *trJob, kind string, slot *trSlot, window int, why string) *trSession {
 	j.opened++
 	s := &trSession{j: j, no: j.opened, kind: kind, slot: slot, window: window, why: why, last: -1,
-		gone: make(chan struct{}), poke: make(chan struct{}, 1), passed: map[int]time.Time{}, byID: map[string]*trItem{}}
+		gone: make(chan struct{}), poke: make(chan struct{}, 1), passed: map[int]time.Time{}}
 	s.stop.Store(-1)
 	s.limit.Store(-1)
 	return s
@@ -258,24 +262,44 @@ type trUp struct {
 	err      error
 }
 
-// connect dials and starts s (in its own goroutine): the outcome goes to the job loop. A service that refuses the
-// text-only output gets the session again without it, remembered for that provider: its output audio is billed.
+// connect dials and starts s (in its own goroutine): the outcome goes to the job loop. Every session asks for the
+// interim-caption extension (a verbatim session uses none of its captions: with it the service ends a turn at each
+// sentence) unless the provider is known not to grant it. A service that refuses it on a verbatim session gets the
+// session again without it, and one that refuses the text-only output gets it again without that (its output audio
+// is then billed); both are remembered for that provider. A refusal on the caption session ends the job's captions
+// (errNoCaptions, sessionUp). What a session asks for is decided as the job opens it: the sessions a job opens
+// together ask alike, whichever of them the service answers first.
 func (s *trSession) connect(ctx context.Context, instructions string) {
 	j := s.j
+	caption := s.kind == trCaption
+	partial := caption || j.memo().captions.Load() != trNotGranted
+	textOnly := !j.memo().noTextOnly.Load()
 	go func() {
 		began := time.Now()
 		sctx, cancel := context.WithTimeout(ctx, startTimeout)
 		defer cancel()
-		caption := s.kind == trCaption
-		textOnly := !j.memo().noTextOnly.Load()
-		up, started, err := j.startOne(sctx, caption, textOnly, instructions)
-		var refused *sessionRefused
-		if err != nil && textOnly && errors.As(err, &refused) && upstreamCode(err) == "" && refusedField(refused, caption) == "text_only" {
-			if j.memo().noTextOnly.CompareAndSwap(false, true) {
-				j.logf("provider %s: the service refused text-only output (%s): its sessions get output audio, which is billed", j.p.ID,
-					firstNonEmpty(refused.code, "no code"))
+		var up upLink
+		var started tevent
+		var err error
+		for {
+			up, started, err = j.startOne(sctx, partial, textOnly, instructions)
+			var refused *sessionRefused
+			switch {
+			case err == nil:
+			case !caption && partial && errors.Is(err, errNoCaptions):
+				j.memo().captions.Store(trNotGranted)
+				j.logf("session %d (verbatim): the service refused the interim-caption extension: started again without it", s.no)
+				partial = false
+				continue
+			case textOnly && errors.As(err, &refused) && upstreamCode(err) == "" && refusedField(refused, partial) == "text_only":
+				if j.memo().noTextOnly.CompareAndSwap(false, true) {
+					j.logf("provider %s: the service refused text-only output (%s): its sessions get output audio, which is billed", j.p.ID,
+						firstNonEmpty(refused.code, "no code"))
+				}
+				textOnly = false
+				continue
 			}
-			up, started, err = j.startOne(sctx, caption, false, instructions)
+			break
 		}
 		granted := started.captions
 		if err == nil {
@@ -301,13 +325,13 @@ func (s *trSession) connect(ctx context.Context, instructions string) {
 }
 
 // startOne dials the upstream and starts one session on it: its session.started (whether the caption extension was
-// granted, when the session ends). A refusal of the caption extension is errNoCaptions.
-func (j *trJob) startOne(ctx context.Context, caption, textOnly bool, instructions string) (upLink, tevent, error) {
+// granted, when the session ends). partial asks for the caption extension; its refusal is errNoCaptions.
+func (j *trJob) startOne(ctx context.Context, partial, textOnly bool, instructions string) (upLink, tevent, error) {
 	up, err := dialUpstream(ctx, j.p, liveWire{}, j.model)
 	if err != nil {
 		return nil, tevent{}, err
 	}
-	if err := writeJSON(ctx, up, transcribeStart(j.model, instructions, caption, textOnly)); err != nil {
+	if err := writeJSON(ctx, up, transcribeStart(j.model, instructions, partial, textOnly)); err != nil {
 		_ = up.CloseNow()
 		return nil, tevent{}, err
 	}
@@ -333,7 +357,7 @@ func (j *trJob) startOne(ctx context.Context, caption, textOnly bool, instructio
 				switch {
 				case e.code == codeUpstreamUnavailable:
 					return nil, tevent{}, &upstreamError{code: codeUpstreamUnavailable, err: r}
-				case caption && refusedField(r, true) == "captions":
+				case partial && refusedField(r, partial) == "captions":
 					return nil, tevent{}, fmt.Errorf("%w (%s)", errNoCaptions, firstNonEmpty(e.code, "no code"))
 				}
 				return nil, tevent{}, r
@@ -556,21 +580,6 @@ func (s *trSession) skipped(from, to int64) bool {
 		}
 	}
 	return false
-}
-
-// toRecording is the recording position of session sample c.
-func (s *trSession) toRecording(c int64) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	i := sort.Search(len(s.marks), func(i int) bool { return s.marks[i].clock+s.marks[i].n > c })
-	if i == len(s.marks) {
-		return s.pos.Load()
-	}
-	m := s.marks[i]
-	if m.silent || c < m.clock {
-		return m.at
-	}
-	return m.at + (c - m.clock)
 }
 
 // clockAt is the session sample at which recording position at was sent, or the session went on past it (false: not

@@ -14,8 +14,8 @@ export function DesktopTemporaryRow({ codex }: { codex: boolean }) {
   return (
     <div data-testid="new-agent-temporary" className="mb-1.5 flex min-w-0 items-center gap-2 rounded-control bg-accent-tint px-3 py-2">
       <Icon name="folder" size={13} className="shrink-0 text-accent-ink" />
-      <span className="min-w-0 truncate text-[12.5px] font-medium text-accent-ink">{t("newagent.temporary_session")}</span>
-      <span className="min-w-0 truncate text-[11.5px] text-ink-3">{t(codex ? "newagent-desktop.temporary_codex" : "newagent-desktop.temporary_claude")}</span>
+      <span className="min-w-0 truncate text-meta font-medium text-accent-ink">{t("newagent.temporary_session")}</span>
+      <span className="min-w-0 truncate text-label text-ink-3">{t(codex ? "newagent-desktop.temporary_codex" : "newagent-desktop.temporary_claude")}</span>
     </div>
   );
 }
@@ -25,7 +25,7 @@ export function DesktopFolderNote({ codex, scratch, onUseTemporary }: { codex: b
   return (
     <div className="mt-1.5 flex flex-col items-start gap-1">
       {!scratch && <Button tone="quiet" onClick={onUseTemporary}>{t("newagent-desktop.use_temporary")}</Button>}
-      <p data-testid="new-agent-desktop-hint" className="text-[11.5px] leading-snug text-ink-3">
+      <p data-testid="new-agent-desktop-hint" className="text-label leading-snug text-ink-3">
         {t(codex ? "newagent-desktop.desktop_hint_codex" : "newagent-desktop.desktop_hint_claude")}
       </p>
     </div>
@@ -35,7 +35,7 @@ export function DesktopFolderNote({ codex, scratch, onUseTemporary }: { codex: b
 /** "New folder…" in the browser's header line. */
 export function NewFolderButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" data-testid="new-agent-new-folder" onClick={onClick} className="flex shrink-0 items-center gap-1 rounded-[4px] px-1 text-[11px] font-medium tracking-normal normal-case text-ink-2 hover:bg-hover hover:text-ink">
+    <button type="button" data-testid="new-agent-new-folder" onClick={onClick} className="flex shrink-0 items-center gap-1 rounded-[4px] px-1 text-xs font-medium tracking-normal normal-case text-ink-2 hover:bg-hover hover:text-ink">
       <Icon name="plus" size={11} stroke={2.4} />
       {t("newagent-desktop.new_folder")}
     </button>
@@ -67,12 +67,12 @@ export function NewFolderNaming({ folder, onUse, onCancel }: { folder: string; o
           aria-label={t("newagent-desktop.new_folder_name")}
           placeholder={t("newagent-desktop.new_folder_name")}
           spellCheck={false}
-          className="h-7 min-w-0 flex-1 rounded-control bg-inset px-2 text-[12.5px] text-ink shadow-hairline outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]"
+          className="h-7 min-w-0 flex-1 rounded-control bg-inset px-2 text-meta text-ink shadow-hairline outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]"
         />
         <Button tone="quiet" onClick={onCancel}>{t("common.cancel")}</Button>
         <Button tone="primary" disabled={!made} onClick={() => { if (made) onUse(made); }}>{t("newagent-desktop.new_folder_use")}</Button>
       </div>
-      <p className="mt-1 text-[11px] text-ink-3">{t("newagent-desktop.new_folder_hint", { folder: baseName(folder) })}</p>
+      <p className="mt-1 text-xs text-ink-3">{t("newagent-desktop.new_folder_hint", { folder: baseName(folder) })}</p>
     </div>
   );
 }

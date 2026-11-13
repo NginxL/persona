@@ -83,13 +83,14 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 const continuesHops = 8
 
 // followContinuations moves the items of items linked to a closed task to the one open task that carries it on
-// (currentTaskOf), and saves them. The move is no news: it raises nothing by itself.
+// (currentTaskOf), and saves them: open items from superviseInbox, handled ones from linkInboxTaskURLs (#6546). The
+// move is no news: it raises nothing by itself.
 func (s *Service) followContinuations(ctx context.Context, items []*InboxItem) {
 	b := &s.inbox
 	b.mu.Lock()
 	linkedTo := map[*InboxItem]string{}
 	for _, it := range items {
-		if it.Agent != nil && it.Agent.TodoID != "" && it.open() {
+		if it.Agent != nil && it.Agent.TodoID != "" {
 			linkedTo[it] = it.Agent.TodoID
 		}
 	}

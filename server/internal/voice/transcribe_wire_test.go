@@ -7,11 +7,12 @@ import (
 	"time"
 )
 
-// A transcription session's start: the live dialect's at 16 kHz, text-only output, the caption extension asked for on
-// the caption session only, no voice, no tools, and no language setting anywhere.
+// A transcription session's start: the live dialect's at 16 kHz, text-only output, the caption extension when asked
+// for (every session asks unless the provider is known not to grant it), no voice, no tools, and no language setting
+// anywhere.
 func TestTranscribeWireStartShape(t *testing.T) {
 	for _, tt := range []struct {
-		caption, textOnly bool
+		partial, textOnly bool
 		want              string
 	}{
 		{true, true, `{"session":{"audio":{"format":{"rate":16000,"type":"audio/pcm"}},"delegation":{"type":"client"},` +
@@ -21,9 +22,9 @@ func TestTranscribeWireStartShape(t *testing.T) {
 		{false, false, `{"session":{"audio":{"format":{"rate":16000,"type":"audio/pcm"}},"delegation":{"type":"client"},` +
 			`"instructions":"listen","model":"m1"},"type":"session.start"}`},
 	} {
-		b, _ := json.Marshal(transcribeStart("m1", "listen", tt.caption, tt.textOnly))
+		b, _ := json.Marshal(transcribeStart("m1", "listen", tt.partial, tt.textOnly))
 		if string(b) != tt.want {
-			t.Errorf("caption %v, text only %v:\n%s\nwant\n%s", tt.caption, tt.textOnly, b, tt.want)
+			t.Errorf("partial %v, text only %v:\n%s\nwant\n%s", tt.partial, tt.textOnly, b, tt.want)
 		}
 	}
 }
@@ -44,10 +45,11 @@ func TestTranscribeWireDecodesMeasuredFrames(t *testing.T) {
 			[]tevent{{kind: tevStarted, modalities: []string{"text"}}}},
 		{"started, an old service", `{"type":"session.started","session":{"audio":{"format":{"rate":16000}}}}`,
 			[]tevent{{kind: tevStarted}}},
-		{"interim caption", `{"type":"svc.input_transcript.partial","item_id":"9b1f","start_ms":2140,"text":"那这次 release 就只发 iOS","is_final":false}`,
-			[]tevent{{kind: tevCaption, item: "9b1f", at: 2.14, text: "那这次 release 就只发 iOS"}}},
+		// start_ms is not read: the measured service counts it from the session's start and never changes it in an item.
+		{"interim caption", `{"type":"svc.input_transcript.partial","item_id":"029f54e8","start_ms":9268,"text":"先说 ios 这边离线编辑基本做完了","is_final":false}`,
+			[]tevent{{kind: tevCaption, item: "029f54e8", text: "先说 ios 这边离线编辑基本做完了"}}},
 		{"caption withdrawn", `{"type":"svc.input_transcript.partial","item_id":"9b20","start_ms":5000,"text":"","is_final":true}`,
-			[]tevent{{kind: tevCaption, item: "9b20", at: 5, final: true}}},
+			[]tevent{{kind: tevCaption, item: "9b20", final: true}}},
 		{"the standard caption is not used", `{"type":"session.input_transcript.delta","delta":"iOS","start_ms":4714,"end_ms":37921}`, nil},
 		{"reply created", `{"type":"response.event","delegation_id":"d1","event":{"type":"response.created","response":{"id":"r1"}}}`,
 			[]tevent{{kind: tevReply}}},
@@ -78,12 +80,12 @@ func TestTranscribeWireDecodesMeasuredFrames(t *testing.T) {
 	}
 }
 
-// Which field of a start the service refused: the caption extension on a caption session, the text-only output, or
-// neither.
+// Which field of a start the service refused: the caption extension when the start asked for it, the text-only
+// output, or neither.
 func TestRefusedField(t *testing.T) {
 	for _, tt := range []struct {
 		r       sessionRefused
-		caption bool
+		partial bool
 		want    string
 	}{
 		{sessionRefused{code: "unsupported_extension", param: "session.extensions"}, true, "captions"},
@@ -96,8 +98,8 @@ func TestRefusedField(t *testing.T) {
 		{sessionRefused{code: "invalid_api_key", text: "bad key"}, true, ""},
 		{sessionRefused{code: "rate_limited"}, false, ""},
 	} {
-		if got := refusedField(&tt.r, tt.caption); got != tt.want {
-			t.Errorf("%+v caption %v: %q, want %q", tt.r, tt.caption, got, tt.want)
+		if got := refusedField(&tt.r, tt.partial); got != tt.want {
+			t.Errorf("%+v partial %v: %q, want %q", tt.r, tt.partial, got, tt.want)
 		}
 	}
 }

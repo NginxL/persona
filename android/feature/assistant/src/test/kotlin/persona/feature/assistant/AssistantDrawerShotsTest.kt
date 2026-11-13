@@ -362,6 +362,12 @@ class AssistantDrawerShotsTest {
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
             capture("drawer-recent-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
+        // #6228: the Recent heading folds its rows and opens them again.
+        rule.onNodeWithText("最近").performClick()
+        rule.onNodeWithText("整理收件箱").assertDoesNotExist()
+        rule.onNodeWithText("周末去哪儿").assertDoesNotExist()
+        rule.onNodeWithText("最近").performClick()
+        rule.onNodeWithText("整理收件箱").assertExists()
         groups = groups.copy(recent = emptyList())
         rule.waitForIdle()
         rule.onNodeWithText("最近").assertDoesNotExist()
@@ -441,9 +447,10 @@ class AssistantDrawerShotsTest {
         }
         // not among the user's recent chats; under All chats, which lists it with the scheduled task's conversation
         rule.onNodeWithText("后台督办").assertDoesNotExist()
+        rule.onNodeWithText("每日早报").assertDoesNotExist() // the scheduled task's chat left Recent too (#6228)
         rule.onNodeWithText("全部对话（4）").performClick()
         rule.onNodeWithText("后台督办").assertExists()
-        rule.onAllNodesWithText("每日早报").assertCountEquals(2) // Recent and All chats, with the same Scheduled mark.
+        rule.onAllNodesWithText("每日早报").assertCountEquals(1) // All chats only now, with the same Scheduled mark.
         rule.onAllNodesWithText("Background supervisor").assertCountEquals(0)
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
@@ -452,16 +459,16 @@ class AssistantDrawerShotsTest {
         }
         style = AppStyle.Glass; dark = false
         rule.waitForIdle()
-        // The rows with a menu, top to bottom: Persona, the three recent chats, then All chats newest first, where the
+        // The rows with a menu, top to bottom: Persona, the two recent chats, then All chats newest first, where the
         // background supervisor (3 minutes ago) is first.
-        rule.onAllNodesWithContentDescription("对话操作")[4].performClick()
+        rule.onAllNodesWithContentDescription("对话操作")[3].performClick()
         rule.onNodeWithText("拷贝会话 ID").assertExists()
         rule.onAllNodesWithText("设为常驻").assertCountEquals(0)
         rule.onAllNodesWithText("归档").assertCountEquals(0)
         rule.onAllNodesWithText("结束…").assertCountEquals(0)
         rule.onNodeWithText("拷贝会话 ID").performClick()
         // any other chat there keeps its whole menu
-        rule.onAllNodesWithContentDescription("对话操作")[5].performClick()
+        rule.onAllNodesWithContentDescription("对话操作")[4].performClick()
         rule.onNodeWithText("设为常驻").assertExists()
         rule.onNodeWithText("归档").assertExists()
         rule.onNodeWithText("结束…").assertExists()

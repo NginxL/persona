@@ -294,13 +294,13 @@ async function lookUpTaskAgents() {
 
 const cardRowsAsked = new Set<string>();
 let cardRowsFor: Interaction[] | null = null;
-/** A child session's card (`folded_under`, #5120) whose session no list holds: a paging hub leaves child sessions out of
- *  the Agents list's pages (`roots`). One exact lookup for its row (`sessions_lookup`) puts it among the row hints, so the
+/** A pending card whose session no list holds: a paging hub can leave both child and off-page root sessions out of
+ *  the Agents list's pages. One exact lookup for its row (`sessions_lookup`) puts it among the row hints, so the
  *  card can be answered wherever it shows (the main chat's Needs you, the Inbox), not only on its parent's open page. */
 async function lookUpCardSessions() {
   if (state.interactions === cardRowsFor || !state.features.includes(SESSIONS_LOOKUP_FEATURE)) return;
   cardRowsFor = state.interactions;
-  const missing = new Set(state.interactions.filter((ix) => ix.folded_under && ix.session_id && !getSession(ix.machine_id, ix.session_id))
+  const missing = new Set(state.interactions.filter((ix) => ix.session_id && !getSession(ix.machine_id, ix.session_id))
     .map((ix) => runtimeIdentity({ machine_id: ix.machine_id, session_id: ix.session_id } as Session)));
   for (const id of [...missing].filter((x) => !cardRowsAsked.has(x)).slice(0, 20)) {
     cardRowsAsked.add(id);

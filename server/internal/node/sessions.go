@@ -74,7 +74,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	for _, id := range slices.Sorted(maps.Keys(agents)) {
 		a := agents[id]
 		if !onList[id] { // a pane on Claude's agents list stays idle: the transcript is its parked session's (claudebg.go)
-			a.AgentStatus = n.claudeStatus(id, a, now)
+			a.AgentStatus = n.liveStatus(id, a, now)
 		}
 		s := proto.Session{
 			SessionID: id, Cwd: a.Cwd, Status: a.AgentStatus, PaneID: a.PaneID, TabID: a.TabID,
@@ -388,7 +388,7 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 		s.Title = filepath.Base(s.Cwd)
 	}
 	s.BypassAvailable = n.hooks.canBypass(s.SessionID) // modes.go claudeCanBypass
-	n.modeRestartRow(s) // mode_restart.go
+	n.modeRestartRow(s)                                // mode_restart.go
 	n.ultracodeRow(s, pass)
 }
 

@@ -31,12 +31,15 @@ extension EnvironmentValues {
     @Entry var cardArea: CGFloat = 0
     /// A question form's height cap including its fixed actions, after the panel's header and margins. 0: unconstrained.
     @Entry var cardFormCap: CGFloat = 0
+    /// The cards' area is the only cap on a question's form: a lone question card that may grow past half the page
+    /// (`PendingCards.growsAlone`, #6277). Otherwise 55% of the page would be the cap in its place.
+    @Entry var cardTakesArea = false
 }
 
 /// The agent's pending cards (questions, permissions) above the composer. Where they fit they are laid out as they
 /// always were; past half the page they scroll on their own under 「N 个待处理」, the permissions first and the newest
 /// next, so the most urgent is in sight: the page's header, its back button and the conversation stay on screen
-/// however many there are (#926).
+/// however many there are (#926). A lone question may take more than half (`growsAlone`, #6277).
 struct PendingCards: View {
     struct Card: Identifiable {
         var interaction: Interaction
@@ -68,7 +71,11 @@ struct PendingCards: View {
         // With the keyboard up the area is laid out as scrolling whether or not the cards fit: its margins, count and clip
         // then do not change as a card's form fits itself to it, so nothing goes back and forth.
         let keyboard = keyboardRoom
-        let over = cap > 0 && (keyboard || contentHeight > cap + 1)
+        // A lone question growing past half the page is laid out as fitting whatever it measures: its form fits itself to
+        // the area (`cardArea`). Measured one layout late, the card ran over a cap that had just come down (the composer
+        // growing as it takes the focus), and the count that came with it was more of what the footer holds besides the
+        // cards: the cap fell, the card shrank, the count went and the cap rose again, every frame (#6277).
+        let over = cap > 0 && (keyboard || (!growsAlone && contentHeight > cap + 1))
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             // Not over a lone card with the keyboard up: it says nothing there, and the room is the card's.
             if over, !(keyboard && cards.count == 1) {
@@ -113,6 +120,7 @@ struct PendingCards: View {
         .environment(\.cardRoom, containerLength)
         .environment(\.cardFits, keyboard ? cap - Theme.Space.l - Theme.Space.s : 0)
         .environment(\.cardArea, cap)
+        .environment(\.cardTakesArea, growsAlone)
         // The container's length, read out here where the container is still the page's, not the scroll area.
         .background {
             Color.clear.containerRelativeFrame(.vertical)
@@ -147,9 +155,29 @@ struct PendingCards: View {
     /// The keyboard is up and the page's room is known: the cards take the conversation's room (`cap`).
     private var keyboardRoom: Bool { KeyboardState.shared.isUp && room.footer > 0 }
 
+    /// One question card alone, the keyboard down and no voice call (#6277): it may grow past half the page. Its options
+    /// are what the user reads to answer, and half the page cut a short question's last options off while the
+    /// conversation above had room to spare. Several cards keep the half page (the count, the urgent first), the keyboard
+    /// its own room (#1912) and a call its captions. iPhone and iPad only: the Mac app is frozen.
+    private var growsAlone: Bool {
+        #if os(iOS)
+        cards.count == 1 && cards[0].interaction.kind == .question && !KeyboardState.shared.isUp && room.footer > 0 && !inCall
+        #else
+        false
+        #endif
+    }
+
     private var cap: CGFloat {
         let half = room.height * Self.share
         guard keyboardRoom else {
+            // A lone question takes the page down to the conversation's `cardThreadRoom` over the list's floor, never less
+            // than its half. Only from values the card does not move, so the cap settles at once (#1580): the header as it
+            // stands open (`fixedHeader`, not the fold, which moves with the list's height) and what the footer holds
+            // besides the cards (`footerRest`, not the footer as measured, which moves with the cap).
+            if growsAlone {
+                let rest = footerRest > 0 ? footerRest : room.footer - shown
+                return max(half, room.height - rest - room.fixedHeader - room.listFloor - Theme.Size.cardThreadRoom)
+            }
             // In a voice call the bar is taller than the composer it replaces (at large text sizes, much taller), and the
             // conversation's last rows are the call's captions: the cards give up what of their half would leave the
             // conversation less than `voiceThreadRoom` over the floor. Measured against the header as it stands open

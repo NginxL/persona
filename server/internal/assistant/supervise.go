@@ -324,6 +324,11 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 	case reviewParked: // waits on purpose (parked.go): below everything that needs the assistant
 		return parkedHealth(v.parked(), now.Location()), 6
 	}
+	if t.DoneAt != nil && t.StartError != "" && !t.Cancelled() {
+		// Its agent never started: stored done (#1077) but nothing was done. Only the supervisor can retry it, so it
+		// heads the list rather than sitting among the finished ones.
+		return "启动失败，待你处理（重试只有你能做）", 0 // i18n-ignore: the snapshot is the assistant's prompt
+	}
 	if t.DoneAt != nil {
 		return "", 8
 	}

@@ -3,8 +3,10 @@ package voice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/extwire"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/voice/voicetest"
 )
 
@@ -290,13 +293,14 @@ func TestTranscriptionLiveSentences(t *testing.T) {
 			s["voice"] != nil || s["tools"] != nil {
 			t.Errorf("session start %s", b)
 		}
+		if ext, _ := json.Marshal(s["extensions"]); string(ext) != `{"input_transcript_partial":"v1"}` {
+			t.Errorf("a session did not ask for the caption extension: %s", b)
+		}
 		ins, _ := s["instructions"].(string)
-		if _, ok := s["extensions"]; ok {
+		switch {
+		case ins == prompts.RenderVoiceTranscribeCaption(prompts.VoiceTranscribe{Lang: "zh-Hans"}):
 			captions++
-			if strings.Contains(ins, "Alice") {
-				t.Errorf("the caption session has the glossary: %s", ins)
-			}
-		} else if !strings.Contains(ins, "- Alice") || !strings.Contains(ins, "zh-CN") {
+		case !strings.Contains(ins, "- Alice") || !strings.Contains(ins, "zh-CN"):
 			t.Errorf("verbatim instructions: %s", ins)
 		}
 	}
@@ -306,6 +310,95 @@ func TestTranscriptionLiveSentences(t *testing.T) {
 	noMeetingText(t, logs.String(), append(scriptTexts(trScript), "export cap", "Alice", "MB")...)
 	if !strings.Contains(logs.String(), ": window 0 [0.0-6.1 s, 4.2 s of speech]: captions") || strings.Contains(logs.String(), "(dropped)") {
 		t.Errorf("log:\n%s", logs)
+	}
+}
+
+// Captions as the measured service writes them: the caption session's whole meeting is one item whose start_ms is the
+// first speech's, counted from the session's start, and never changes; no caption is final; the next sentence's text
+// replaces the last one's in the item. Each caption is told apart by its text and placed where the session's audio
+// was when it came: every window has its own sentences' captions, no session is dropped against them, and every
+// interim caption carries its sentence's start. A service that splits its captions by sentence (an item each, a final
+// one at its end) gets the same.
+func TestTranscriptionCaptionsAsMeasured(t *testing.T) {
+	for name, items := range map[string]bool{"one item": false, "an item per sentence": true} {
+		t.Run(name, func(t *testing.T) {
+			trFast(t)
+			_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionItems: items})
+			tc := startTr(t, srv, liveStart())
+			tc.next(extwire.TFReady)
+			tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
+			tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			frames := tc.done()
+			defer func() {
+				if t.Failed() {
+					t.Log(logs.String())
+				}
+			}()
+			sameTexts(t, frames, trScript)
+			windows := 0
+			for _, line := range strings.Split(logs.String(), "\n") {
+				if !strings.Contains(line, ": window ") || strings.Contains(line, " 0.0 s of speech") {
+					continue
+				}
+				windows++
+				if strings.Contains(line, "captions 0 characters") || strings.Contains(line, "no captions") ||
+					strings.Contains(line, "(dropped)") || strings.Contains(line, "the captions' text") {
+					t.Errorf("window without its captions: %s", line)
+				}
+			}
+			if windows < 3 {
+				t.Errorf("%d windows", windows)
+			}
+			interim := 0
+			for _, f := range trOfType(frames, extwire.TFInterim) {
+				if *f.Text == "" {
+					continue
+				}
+				interim++
+				said := -1
+				for i, l := range trScript {
+					if strings.HasPrefix(l.Text, *f.Text) {
+						said = i
+					}
+				}
+				switch {
+				case said < 0:
+					t.Errorf("interim %q is the beginning of no sentence", *f.Text)
+				case math.Abs(*f.Start-trScript[said].Start) > 0.6:
+					t.Errorf("interim %q starts at %.2f, its sentence at %.1f", *f.Text, *f.Start, trScript[said].Start)
+				}
+			}
+			if interim < len(trScript) {
+				t.Errorf("%d interim captions", interim)
+			}
+		})
+	}
+}
+
+// A caption session that revises each caption's first word at once, as the measured service did: the revised
+// hypothesis is part of its caption, never a caption of its own. With both verbatim sessions inventing (dropped,
+// then replaced) the first windows send the captions' text, which is what was said, once.
+func TestTranscriptionCaptionRevisions(t *testing.T) {
+	for name, items := range map[string]bool{"one item": false, "an item per sentence": true} {
+		t.Run(name, func(t *testing.T) {
+			trFast(t)
+			_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionItems: items, CaptionRevise: true,
+				Rogue: map[int]int{1: 0, 2: 0}})
+			tc := startTr(t, srv, liveStart())
+			tc.next(extwire.TFReady)
+			tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
+			tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			frames := tc.done()
+			defer func() {
+				if t.Failed() {
+					t.Log(logs.String())
+				}
+			}()
+			sameTexts(t, frames, trScript)
+			if !strings.Contains(logs.String(), "sent the captions' text") {
+				t.Error("no window sent the captions' text: the test checks nothing")
+			}
+		})
 	}
 }
 
@@ -341,7 +434,7 @@ func TestTranscriptionWithoutCaptions(t *testing.T) {
 	for _, refuse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "not granted", true: "refused"}[refuse], func(t *testing.T) {
 			trFast(t)
-			_, srv, _, live := trLive(t, voicetest.Script{Sentences: trScript, NoCaptions: !refuse, RefuseCaptions: refuse})
+			_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript, NoCaptions: !refuse, RefuseCaptions: refuse})
 			tc := startTr(t, srv, liveStart())
 			ready := tc.next(extwire.TFReady)
 			if strings.Join(ready.Features, ",") != "live" {
@@ -360,6 +453,9 @@ func TestTranscriptionWithoutCaptions(t *testing.T) {
 			if _, verbatim := live.Sessions(); verbatim != 3 {
 				t.Errorf("%d verbatim sessions", verbatim)
 			}
+			if refuse != strings.Contains(logs.String(), "refused the interim-caption extension: started again without it") {
+				t.Errorf("log:\n%s", logs)
+			}
 			asked := len(live.Starts())
 			tc = startTr(t, srv, liveStart())
 			if ready := tc.next(extwire.TFReady); strings.Join(ready.Features, ",") != "live" {
@@ -373,6 +469,116 @@ func TestTranscriptionWithoutCaptions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Verbatim sessions ask for the caption extension too (and do not use its captions): with it the measured service ends
+// a turn at each sentence and replies to each, where without it (and a prompt it does not follow sentence by
+// sentence) it wrote several sentences in one late reply. Every sentence comes in its window, none left to the
+// captions.
+func TestTranscriptionVerbatimSessionsAskForCaptions(t *testing.T) {
+	trFast(t)
+	_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript, CaptionNoise: 0.1, Bursts: 3})
+	tc := startTr(t, srv, liveStart())
+	tc.next(extwire.TFReady)
+	tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
+	tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+	frames := tc.done()
+	defer func() {
+		if t.Failed() {
+			t.Log(logs.String())
+		}
+	}()
+	sameTexts(t, frames, trScript)
+	if strings.Contains(logs.String(), "(dropped)") || strings.Contains(logs.String(), "the captions' text") {
+		t.Error("a verbatim session was dropped")
+	}
+	for _, s := range live.Starts() {
+		if _, ok := s["extensions"]; !ok {
+			t.Errorf("a session did not ask for the caption extension: %v", s["instructions"])
+		}
+	}
+}
+
+// Replies that come 0.1 and 0.2 s after their sentence ends, as the measured service's per-sentence replies did
+// (0.05-0.3 s), and the stand-in's usual 0.5 s: each reply is of its own sentence's window, none a sentence behind,
+// so no sentence is sent twice or left to the captions and no healthy session is dropped or replaced. Accelerated
+// with the short settle times, and at real time with the production ones.
+func TestTranscriptionFastReplies(t *testing.T) {
+	gaps := []float64{0.1, 0.2, 0.5}
+	check := func(t *testing.T, frames []extwire.TranscriptionFrame, logs *lockedLog) {
+		t.Helper()
+		defer func() {
+			if t.Failed() {
+				t.Log(logs.String())
+			}
+		}()
+		sameTexts(t, frames, trScript)
+		for _, bad := range []string{"(dropped)", "the captions' text", ": replaced"} {
+			if strings.Contains(logs.String(), bad) {
+				t.Errorf("the log has %q", bad)
+			}
+		}
+	}
+	for _, gap := range gaps {
+		t.Run(fmt.Sprintf("accelerated, %.1f s", gap), func(t *testing.T) {
+			trFast(t)
+			_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionNoise: 0.1, TurnGap: gap})
+			tc := startTr(t, srv, liveStart())
+			tc.next(extwire.TFReady)
+			tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
+			tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			check(t, tc.done(), logs)
+		})
+	}
+	t.Run("real time", func(t *testing.T) {
+		trProduction(t)
+		for _, gap := range gaps {
+			t.Run(fmt.Sprintf("%.1f s", gap), func(t *testing.T) {
+				t.Parallel()
+				_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionNoise: 0.08, TurnGap: gap})
+				tc := startTr(t, srv, liveStart())
+				tc.next(extwire.TFReady)
+				tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 1)
+				tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+				check(t, tc.done(), logs)
+			})
+		}
+	})
+}
+
+// The instructions are in the recording's language when it is Chinese, English or Japanese (the language the model
+// hears), else in the hub's (the caller's).
+func TestTranscriptionInstructionsLanguage(t *testing.T) {
+	trFast(t)
+	_, srv, _, live := trLive(t, voicetest.Script{Sentences: trScript})
+	opening := map[string]string{"zh-Hans": "你是", "en": "You are", "ja": "あなたは"}
+	for _, tt := range []struct{ tag, hub, want string }{
+		{"en-US", "zh-Hans", "en"},
+		{"ja-JP", "en", "ja"},
+		{"zh-TW", "en", "zh-Hans"},
+		{"yue-HK", "en", "zh-Hans"},
+		{"ko-KR", "ja", "ja"},
+		{"", "en", "en"},
+	} {
+		asked := len(live.Starts())
+		tc, _, err := dialTr(t, srv, TranscriptionContribution, http.Header{extwire.HeaderRole: {roleFull}, extwire.HeaderLang: {tt.hub}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tc.send(extwire.TranscriptionFrame{Type: extwire.TFStart, Mode: extwire.TranscriptionLive, Language: tt.tag, At: extwire.F(0.0)})
+		tc.next(extwire.TFReady)
+		tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+		tc.done()
+		starts := live.Starts()[asked:]
+		if len(starts) == 0 {
+			t.Fatalf("%q: no session", tt.tag)
+		}
+		for _, s := range starts {
+			if ins, _ := s["instructions"].(string); !strings.HasPrefix(ins, opening[tt.want]) {
+				t.Errorf("%q (hub %s): instructions not in %s:\n%s", tt.tag, tt.hub, tt.want, ins)
+			}
+		}
 	}
 }
 
@@ -633,6 +839,66 @@ func TestTranscriptionReplayKeepsTheReference(t *testing.T) {
 	}
 }
 
+// A poor reference does not keep a window's text from the sessions. The live check's opening window had as its
+// reference a live caption that caught a few words of it (22 characters over 14 s of speech) while both sessions
+// heard all of it: a reference much shorter than the sessions' text is not checked against, and the sessions, which
+// agree, are trusted. Sessions that agree with each other are trusted too over a reference of their length none of
+// them is near (another sentence's caption).
+func TestTranscriptionReplayPoorReference(t *testing.T) {
+	trFast(t)
+	_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript})
+	for _, tt := range []struct {
+		name string
+		refs []voicetest.Line
+		log  string
+	}{
+		{"too short", []voicetest.Line{{Start: 0.5, End: 5.6, Text: "Ford cap 这词还是"}}, "too short to check the sessions against"},
+		{"another sentence", []voicetest.Line{{Start: 0.5, End: 3.0, Text: trScript[4].Text}, {Start: 3.8, End: 5.6, Text: trScript[3].Text}},
+			"the sessions agree with each other, not with the reference"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := replayStart(t, srv, 40, tt.refs)
+			tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript[:2]}, 6.5), 1000)
+			tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			frames := tc.done()
+			sameTexts(t, frames, trScript[:2])
+			if ws := windowsCover(t, frames, 6.5); ws[0].Kept {
+				t.Errorf("windows %s", windowList(ws))
+			}
+			if !strings.Contains(logs.String(), tt.log) {
+				t.Errorf("log:\n%s", logs)
+			}
+		})
+	}
+}
+
+// The live check's opening window as measured: a reference too short to check against (a few words of a live caption)
+// and of the two sessions one heard all of it while the other said nothing. One session is never taken uncorroborated:
+// the window gets a third session, as a window without a reference has, and is chosen as without one.
+func TestTranscriptionReplayPoorReferenceOneSession(t *testing.T) {
+	trFast(t)
+	_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript, Mute: map[int]int{2: 0}})
+	tc := replayStart(t, srv, 40, []voicetest.Line{{Start: 0.5, End: 5.6, Text: "Ford cap 这词还是"}})
+	tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript[:2]}, 6.5), 1000)
+	tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+	frames := tc.done()
+	defer func() {
+		if t.Failed() {
+			t.Log(logs.String())
+		}
+	}()
+	sameTexts(t, frames, trScript[:2])
+	if ws := windowsCover(t, frames, 6.5); ws[0].Kept {
+		t.Errorf("windows %s", windowList(ws))
+	}
+	if _, verbatim := live.Sessions(); verbatim != 3 {
+		t.Errorf("%d sessions for the window", verbatim)
+	}
+	if !strings.Contains(logs.String(), "too short to check the sessions against") {
+		t.Error("the log does not say the reference was too short")
+	}
+}
+
 // Without a reference, three sessions per window and two of them must agree; the reference's edges cut windows.
 func TestTranscriptionReplayWithoutAReference(t *testing.T) {
 	trFast(t)
@@ -860,9 +1126,8 @@ func TestTranscriptionCaptionSkipsABurst(t *testing.T) {
 	tc := startTr(t, srv, liveStart())
 	tc.next(extwire.TFReady)
 	pcm := voicetest.PCM(voicetest.Script{Sentences: trScript4}, 13.4)
-	// The first 3 s in one frame: more than the caption session's writer can keep up with, as a backlog sent back to
-	// back may be.
-	burst := 2 * 16000 * 3
+	// The first 5 s in one frame: more than trCaptionJump behind, as a backlog sent back to back may be.
+	burst := 2 * 16000 * 5
 	if err := tc.c.Write(context.Background(), websocket.MessageBinary, pcm[:burst]); err != nil {
 		t.Fatal(err)
 	}
@@ -880,7 +1145,7 @@ func TestTranscriptionCaptionSkipsABurst(t *testing.T) {
 	sameTexts(t, frames, trScript4)
 	live := 0 // interim captions of the sentences said after the burst, while they were said
 	for _, f := range trOfType(frames[:streamed], extwire.TFInterim) {
-		if *f.Start >= 3.5 {
+		if *f.Start >= 5.5 {
 			live++
 		}
 	}
@@ -939,20 +1204,27 @@ func TestTranscriptionMergedReply(t *testing.T) {
 }
 
 // A service that refuses text-only output: its sessions start again without it (remembered for the provider), and
-// the sentences come as before.
+// the sentences come as before; one that also refuses the caption extension gets its verbatim sessions without both.
 func TestTranscriptionTextOnlyRefused(t *testing.T) {
-	trFast(t)
-	_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript, TextOnlyRefused: true})
-	tc := startTr(t, srv, liveStart())
-	tc.next(extwire.TFReady)
-	tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
-	tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
-	sameTexts(t, tc.done(), trScript)
-	if !strings.Contains(logs.String(), "refused text-only output") {
-		t.Errorf("log:\n%s", logs)
-	}
-	starts := live.Starts()
-	if _, textOnly := starts[len(starts)-1]["output_modalities"]; textOnly {
-		t.Error("a session started with text-only output after the service refused it")
+	for name, captions := range map[string]bool{"text only": false, "and the extension": true} {
+		t.Run(name, func(t *testing.T) {
+			trFast(t)
+			_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript, TextOnlyRefused: true, RefuseCaptions: captions})
+			tc := startTr(t, srv, liveStart())
+			tc.next(extwire.TFReady)
+			tc.stream(voicetest.PCM(voicetest.Script{Sentences: trScript}, trScriptLength), 20)
+			tc.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			sameTexts(t, tc.done(), trScript)
+			if !strings.Contains(logs.String(), "refused text-only output") {
+				t.Errorf("log:\n%s", logs)
+			}
+			starts := live.Starts()
+			if _, textOnly := starts[len(starts)-1]["output_modalities"]; textOnly {
+				t.Error("a session started with text-only output after the service refused it")
+			}
+			if _, verbatim := live.Sessions(); captions && verbatim != 3 {
+				t.Errorf("%d verbatim sessions", verbatim)
+			}
+		})
 	}
 }

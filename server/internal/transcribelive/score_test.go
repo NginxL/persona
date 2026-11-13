@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/kb"
 )
 
 func TestCER(t *testing.T) {
@@ -73,5 +76,29 @@ func TestEmbeddedMeeting(t *testing.T) {
 	}
 	if langs["zh"] < 5 || langs["en"] < 5 || langs["mixed"] < 5 || echo != 1 || m.Title == "" || len(m.Glossary) == 0 {
 		t.Errorf("meeting: %v languages, %d echo lines, title %q, glossary %v", langs, echo, m.Title, m.Glossary)
+	}
+}
+
+// What the check uploads is what the hub takes: a body the knowledge base refuses (a device that is not a phone)
+// would stop every live run at its first upload.
+func TestUploadBodyIsAValidMeetingUpload(t *testing.T) {
+	var m meeting
+	if err := json.Unmarshal(meetingJSON, &m); err != nil {
+		t.Fatal(err)
+	}
+	st, err := kb.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &kb.Engine{Store: st}
+	tl := map[string]any{"roles": []any{map[string]any{"at": 0.0, "attendance": "listener"}},
+		"speaking": []map[string]any{{"start": 52.1, "end": 55.8, "text": m.Lines[10].Text}}}
+	b, _ := json.Marshal(uploadBody(&m, "zh-CN", "listener", time.Now().UTC(), 1, tl))
+	var u kb.RecordingUpload
+	if err := json.Unmarshal(b, &u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.PutRecording("6f1c2d4e-1111-4abc-8def-0123456789ab", u, time.Now()); err != nil {
+		t.Fatalf("the hub refuses the check's upload: %v", err)
 	}
 }

@@ -93,12 +93,18 @@ describe("the sidebar's Recent (#4873, #5195)", () => {
   ];
 
   it("is every chat newest first whoever opened it, never the main one, a leader, an archived one or the background supervisor", () => {
-    expect(recentConversations(list, "main", ["lead"], "bg").map((c) => c.session_id)).toEqual(["inbox", "a", "lark", "b", "wx", "task", "e1", "e2", "never"]);
+    expect(recentConversations(list, "main", ["lead"], "bg").map((c) => c.session_id)).toEqual(["inbox", "a", "lark", "b", "wx", "e1", "e2", "never"]);
   });
 
-  it("takes an ended leader back, lists the background supervisor's chat as any other on a hub without one, and is empty when nothing else is left", () => {
+  it("leaves the scheduled tasks' own chats out of Recent, however new they are (#6228): they keep their entry on Scheduled Tasks and All chats", () => {
+    const taskFirst = [conv("main", { updated_at: at(0) }), conv("task", { origin: "task", updated_at: at(0.1) }), conv("mine", { origin: "user", updated_at: at(1) })];
+    expect(recentConversations(taskFirst, "main", []).map((c) => c.session_id)).toEqual(["mine"]);
+    // the background supervisor is a task-origin chat: a hub without its id still keeps it out of Recent, in All chats
+    expect(recentConversations(list, "main", ["lead"]).map((c) => c.session_id)).not.toContain("bg");
+  });
+
+  it("takes an ended leader back and is empty when nothing else is left", () => {
     expect(recentConversations(list, "main", [], "bg").map((c) => c.session_id).slice(0, 3)).toEqual(["inbox", "lead", "a"]);
-    expect(recentConversations(list, "main", ["lead"])[0].session_id).toBe("bg");
     expect(recentConversations(list.slice(0, 3), "main", ["lead"], "bg")).toEqual([]);
   });
 });

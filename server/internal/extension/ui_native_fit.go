@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 
@@ -33,11 +34,17 @@ func FitNative(raw []byte, slot UISlot, version int, lang i18n.Lang) (json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	var source, old, next any
+	var source any
 	_ = json.Unmarshal(raw, &source)
-	_ = json.Unmarshal(before, &old)
-	_ = json.Unmarshal(after, &next)
-	fitted, err := json.Marshal(restorePresence(source, old, next))
+	if !bytes.Equal(before, after) {
+		var old, next any
+		_ = json.Unmarshal(before, &old)
+		_ = json.Unmarshal(after, &next)
+		source = restorePresence(source, old, next)
+	}
+	// Equal bytes decode to equal values, which restorePresence answers with
+	// source itself: a view that fitting left alone skips both decodes.
+	fitted, err := json.Marshal(source)
 	if err != nil {
 		return nil, err
 	}

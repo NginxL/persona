@@ -42,8 +42,8 @@ describe("the background supervisor (#5082)", () => {
     const at = (h: number) => new Date(Date.UTC(2026, 10, 12, 12) - h * 3_600_000).toISOString();
     const list = [conv("main", { updated_at: at(0) }), conv("bg", { updated_at: at(0.1) }), conv("a", { updated_at: at(1) }), conv("lead", { updated_at: at(2) })];
     expect(recentConversations(list, "main", ["lead"], "bg").map((c) => c.session_id)).toEqual(["a"]);
-    // without its id (a hub from before it) a task's chat is one more scheduled task's, listed as every chat is (#5195)
-    expect(recentConversations([...list.slice(0, 1), conv("bg", { origin: "task" }), ...list.slice(2)], "main", ["lead"]).map((c) => c.session_id)).toEqual(["a", "bg"]);
+    // without its id (a hub from before it) a task's chat is still a scheduled task's, so it stays out of Recent too (#6228)
+    expect(recentConversations([...list.slice(0, 1), conv("bg", { origin: "task" }), ...list.slice(2)], "main", ["lead"]).map((c) => c.session_id)).toEqual(["a"]);
   });
 
   it("tells its reviews from the main chat's own and from a reviewer this page doesn't know", () => {

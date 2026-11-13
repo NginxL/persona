@@ -387,7 +387,7 @@ func (j *trJob) fromSession(r trRead) {
 			}
 			s.activity = time.Now()
 		case tevCaption:
-			j.caption(s, e, r.clock)
+			j.caption(s, e, r.pos, r.clock)
 		case tevUsage:
 			s.usage = e.seconds
 		case tevClosed:
@@ -416,15 +416,19 @@ func (j *trJob) replyBegins(s *trSession, pos int64) {
 }
 
 // assign is the window of a reply that began when the session's audio was at pos. A reply writes one turn: the first
-// speech it had not covered yet that ended before then (a reply follows the sentence it writes; all of a forced
-// window's speech has ended once the session got its end and the silence after it), with the speech after it within a
-// turn's gap (trWindowGap: the service hears one turn there). Speech that ended more than trReplyWait before pos is
+// speech it had not covered yet that was over when it began, with the speech after it within a turn's gap
+// (trWindowGap: the service hears one turn there). A reply follows the sentence it writes at once or seconds later:
+// the measured service's came 0.05-0.3 s after it with the measured wording, 1.5-3 s with other wording. Over when it
+// began is ended by pos, or at most trAssignAhead after it (the job's speech detection hears the audio before the
+// session is sent it, and may hear a sentence run on a moment past where the service ended it); so a reply right
+// after its sentence is of that sentence, never of the one before it, which would leave the session a sentence behind
+// and, across a window's end, its text in the window before. Speech that ended more than trReplyWait before pos is
 // covered too: a reply that late is not coming, so what is left of it was in this one or never had one. The reply is
 // of the window of the first speech it covers; with none, of the window of what it covered last; -1 when that window
 // was sent already (a reply too late for it, never used). When none of its replies was of speech the adapter heard (a
 // quiet room its detection misses), a reply is of the window its audio was in.
 func (j *trJob) assign(s *trSession, pos int64) int {
-	cut := pos - trSamples(trAssignSlack)
+	limit := pos + trSamples(trAssignAhead)
 	stale := pos - trSamples(trReplyWait)
 	n, turnEnd := -1, int64(-1)
 claim:
@@ -432,11 +436,9 @@ claim:
 		if w.n < s.window {
 			continue
 		}
-		end, limit := w.to, cut
+		end := w.to
 		if end < 0 {
 			end = j.edge
-		} else if w.forced && pos >= w.to {
-			limit = max(cut, w.to)
 		}
 		for _, sp := range j.vad.speech(w.from, end) {
 			switch {
@@ -459,10 +461,10 @@ claim:
 	if n >= 0 {
 		return n
 	}
-	if len(j.windows) > 0 && s.claimed == s.feed && len(j.vad.speech(j.windows[0].from, max(cut, j.windows[0].from))) == 0 {
+	if len(j.windows) > 0 && s.claimed == s.feed && len(j.vad.speech(j.windows[0].from, max(pos, j.windows[0].from))) == 0 {
 		// None of its replies was of speech the adapter heard: a quiet room its detection misses. The reply is of the
 		// window its audio was in.
-		if n := j.windowAt(max(cut, j.windows[0].from)); n >= s.window {
+		if n := j.windowAt(max(pos, j.windows[0].from)); n >= s.window {
 			return n
 		}
 		return -1
@@ -481,21 +483,22 @@ claim:
 	return max(s.window, j.nextWin-1)
 }
 
-// caption takes an interim caption of a caption session. A caption is of the window its sentence began in (start_ms);
-// one that goes on growing past that window's end once the window settled (one caption can run over a long stretch)
-// is of the next window from there. It goes to the manager as interim while the session keeps up with the audio.
-func (j *trJob) caption(s *trSession, e tevent, clock int64) {
+// caption takes an interim caption of a caption session that came when the session's audio was at pos (recording
+// samples) and clock (session samples). The service's start_ms is never a recording time: the measured service
+// counts it from the session's start and gives every caption of a session the same one, since it writes the whole
+// meeting as one item (captionOf). A caption is of the window it began in; one that goes on growing past that
+// window's end once the window settled (one caption can run over a long stretch) is of the next window from there.
+// It goes to the manager as interim, with its caption's start, while the session keeps up with the audio.
+func (j *trJob) caption(s *trSession, e tevent, pos, clock int64) {
 	if s.kind != trCaption || s.slot == nil {
 		return
 	}
-	it := s.byID[e.item]
+	s.activity = time.Now()
+	it := j.captionOf(s, e, pos)
 	if it == nil {
-		start := s.toRecording(int64(math.Round(e.at * trRate)))
-		it = &trItem{id: e.item, start: start, parts: []trPart{{window: j.windowAt(start)}}}
-		s.items = append(s.items, it)
-		s.byID[e.item] = it
+		return
 	}
-	if last := it.parts[len(it.parts)-1]; runeLen(e.text) > runeLen(it.text) && last.window >= 0 {
+	if last := it.parts[len(it.parts)-1]; it.text != "" && runeLen(e.text) > runeLen(it.text) && last.window >= 0 {
 		switch w := j.win(last.window); {
 		case w == nil && last.window < j.firstOpen(): // its window was sent: what it adds is of the first one not sent
 			it.parts = append(it.parts, trPart{window: j.firstOpen(), from: runeLen(it.text)})
@@ -504,7 +507,12 @@ func (j *trJob) caption(s *trSession, e tevent, clock int64) {
 		}
 	}
 	it.text = e.text // a final one with no text withdraws it
-	s.activity = time.Now()
+	if e.final {
+		it.closed = true
+		if s.capCur == it {
+			s.capCur = nil
+		}
+	}
 	if s != s.slot.cur || !j.readySent || j.buf.edgeNow()-s.pos.Load() > trSamples(trInterimLag) {
 		return
 	}
@@ -517,6 +525,57 @@ func (j *trJob) caption(s *trSession, e tevent, clock int64) {
 		}
 	}
 	j.send(extwire.TranscriptionFrame{Type: extwire.TFInterim, Start: secs(start), Text: extwire.F(string(rs[min(last.from, len(rs)):]))})
+}
+
+// captionOf is the caption a caption frame that came when the session's audio was at pos is of. The measured service
+// writes a caption session's whole meeting as one item, never final, the next sentence's text written over the last
+// one's, so a caption is told apart by its text: a frame of the caption being written that revises it (trRevises:
+// one within trCaptionFresh of its first frame, or one that grew it, its first or last words maybe revised) is of
+// it; one that does not begins a new caption, and the one before it keeps its last text. A final frame of its item is
+// of it whatever its text, before any of that (a service that marks a sentence's last caption final may write it in
+// another form: "twenty five", then "25."): it replaces the caption's text and closes it; one without text withdraws
+// it. A service that splits its captions by sentence gives each its own item: a frame of another item is of an
+// earlier caption of that item still open (one written after the next began), else it begins a new caption. A new caption begins where the session's audio was when its first frame came
+// (captionStart); nil: a frame with no text that withdraws nothing.
+func (j *trJob) captionOf(s *trSession, e tevent, pos int64) *trItem {
+	if !e.final && !trHasText(e.text) {
+		return nil
+	}
+	if cur := s.capCur; cur != nil && e.item == cur.id {
+		if e.final || !trHasText(e.text) || trRevises(cur.text, e.text, pos-cur.at <= trSamples(trCaptionFresh)) {
+			return cur
+		}
+		cur.closed = true // the next sentence, written over this one's text
+	} else {
+		for i := len(s.items) - 1; i >= 0; i-- {
+			if it := s.items[i]; it.id == e.item && !it.closed {
+				return it
+			}
+		}
+	}
+	if !trHasText(e.text) {
+		return nil
+	}
+	start := j.captionStart(s, pos)
+	it := &trItem{id: e.item, start: start, at: pos, parts: []trPart{{window: j.windowAt(start)}}}
+	s.items = append(s.items, it)
+	s.capCur = it
+	return it
+}
+
+// captionStart is where a caption began whose first frame came when caption session s's audio was at pos: its first
+// words come a moment after its sentence began (trCaptionLag), so it is the start of the speech going on then, or of
+// the next speech when that moment was in a silence (one before a window's end, say), never before the window that
+// moment is in nor before the session's first audio.
+func (j *trJob) captionStart(s *trSession, pos int64) int64 {
+	at := max(pos-trSamples(trCaptionLag), s.feed)
+	start := j.vad.speechStart(at, pos)
+	for _, w := range j.windows {
+		if w.from <= at && (w.to < 0 || at < w.to) {
+			start = max(start, w.from)
+		}
+	}
+	return start
 }
 
 // windowAt is the number of the window not sent yet that position at is in (-1: one sent already).
@@ -554,8 +613,8 @@ func (j *trJob) captionPast(s *trSession, w *trWin, clock int64) bool {
 	return ok && seen && clock >= c+trSamples(trCaptionSettle) && time.Since(passed) >= trSettleWall
 }
 
-// captionText is caption session s's captions of window w; those of the windows before it are forgotten (one of w
-// may still grow).
+// captionText is caption session s's captions of window w; those of the windows before it are forgotten, but for the
+// caption being written (one of w may still grow).
 func (j *trJob) captionText(s *trSession, w *trWin) string {
 	var b strings.Builder
 	keep := s.items[:0]
@@ -573,12 +632,11 @@ func (j *trJob) captionText(s *trSession, w *trWin) string {
 				b.WriteString(string(rs[p.from:to]))
 			}
 		}
-		if it.parts[len(it.parts)-1].window >= w.n {
+		if it.parts[len(it.parts)-1].window >= w.n || it == s.capCur {
 			keep = append(keep, it)
-		} else {
-			delete(s.byID, it.id)
 		}
 	}
+	clear(s.items[len(keep):])
 	s.items = keep
 	return b.String()
 }

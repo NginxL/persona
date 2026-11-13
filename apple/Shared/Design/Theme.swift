@@ -524,6 +524,11 @@ nonisolated enum Theme {
         static let meter: CGFloat = 12
         /// An Agent chat's header folded into its slim bar (Android `Tokens.Size.slimBar`).
         static let slimBar: CGFloat = 40
+        /// How much of the conversation a lone question card keeps in view over it when it grows past half the page
+        /// (`PendingCards`, #6277): about two lines of a message, under the chat's header as it stands open (more once an
+        /// Agents header has folded to its slim bar). The card the user has to answer gets the rest. A call keeps less for
+        /// its captions (`voiceThreadRoom`).
+        static let cardThreadRoom: CGFloat = 72
         /// How far a sideways strip fades out at an end with more to scroll to (`.edgeFade()`): a cut-off chip reads as
         /// "more", not as a broken row.
         static let fadeEdge: CGFloat = 24

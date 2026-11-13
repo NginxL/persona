@@ -527,3 +527,31 @@ Measured against a gateway's `/v1/realtime` (`gpt-realtime-1.5`, the GA Realtime
 - iOS holds the voice while nothing is playing until 200 ms has gathered, or the first piece has waited 300 ms, then
   plays it all at once (`VoicePlayout`); a player that runs dry mid-reply gathers again. A service that sends faster
   than it plays fills the lead almost at once, so this adds next to no latency there.
+
+## Meeting transcription against the real service (#3862, 2026-11-13)
+
+The first live check of hub transcription against a GPT-Live-compatible service, and six raw sessions probed on the
+same audio (a two-minute meeting of 24 sentences in Chinese, English and both mixed, sent in 100 ms frames):
+
+- **One caption item** (service-specific): with no model replies, a caption session writes the whole meeting as one
+  `…input_transcript.partial` item: one `item_id` and one `start_ms` in all 453 frames, `is_final` never true. The
+  text grows through a sentence, its words revised now and then ("andrea 那边", then "android 那边的…"), and the next
+  sentence replaces it (286 frames grew it, 166 replaced it). Items split only where the model replies (one per reply
+  on a verbatim session with the extension). Keyed on the item and `start_ms`, every window after the first had no
+  captions; the adapter now tells captions apart by their text and places each by where the session's audio was when
+  it came.
+- **`start_ms` counts from the session's start** (service-specific), not from its first audio: audio sent 8 s after
+  `session.started`, speech at 1.0 s of it came back as `start_ms` 9268. `end_ms` and `offset_ms` likewise.
+- **`response.output_text.done` has no text**: empty in all 76 replies, also when the deltas carried text. Join the
+  deltas.
+- **One reply per sentence depends on the prompt and the extension** (model): our Chinese prompt without the
+  interim-caption extension gave 9 replies of 1–4 sentences, every 10–20 s; our English prompt gave 2, one of them 23
+  sentences at the end (the live check's lost windows). An earlier experiment's prompt ("a meeting's verbatim
+  transcriber… each time someone finishes a sentence (a pause), output only that sentence's words") replied once per
+  sentence, 0.05–0.3 s after it ended, with or without the extension; our Chinese prompt with the extension also
+  replied per sentence but lost 5 sentences. Verbatim sessions now ask for the extension and follow the measured
+  wording, without "if nothing could be made out, write nothing" or long lists of prohibitions. The meeting's first
+  sentence never came back as a reply in any per-sentence session.
+- **A short reference hid the opening**: in the final pass the first window's reference was the live caption, 22
+  characters over 14 s of speech, while the sessions heard 164–204; checked against it, both were dropped and the
+  first 18 s were lost. A reference much shorter than the sessions' text no longer counts.

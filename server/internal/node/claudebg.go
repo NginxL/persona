@@ -138,6 +138,7 @@ func (n *Node) outsideSource(c claudeProc) string {
 func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.Session {
 	var out []proto.Session
 	listed := map[string]bool{}
+	var desktop *claudeDesktopIndex // read once, when a desktop session rests
 	for _, c := range procs {
 		id := c.SessionID
 		if seen[id] || listed[id] {
@@ -160,6 +161,16 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 		status, ok := claudeBgStatus[c.Status]
 		if !ok {
 			status = proto.StatusUnknown
+		}
+		if status == proto.StatusIdle && source == proto.SourceClaudeDesktop {
+			// Its last turn ended while nobody looked: Unread until it is seen (claudedesktop_unread.go).
+			if desktop == nil {
+				d := readClaudeDesktopIndex(n.home)
+				desktop = &d
+			}
+			if n.desktopTurnUnread(id, *desktop) {
+				status = proto.StatusDone
+			}
 		}
 		s := proto.Session{
 			SessionID: id, Cwd: c.Cwd, Status: status, Agent: "claude", Title: m.title, SourceKind: source,

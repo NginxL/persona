@@ -217,8 +217,9 @@ class AssistantTest {
         assertEquals("整理日程", repository.assistant.value.conversations.single { it.key == main }.lastText)
     }
 
-    /** #5196 (web `recentConversations`, iOS `AssistantSidebarGroups.recent`): every eligible chat in the drawer's Recent. */
-    @Test fun recentIsEveryNewestFiveWithoutMainLeadersArchivedOrBackground() {
+    /** #5196 (web `recentConversations`, iOS `AssistantSidebarGroups.recent`): every eligible chat in the drawer's Recent,
+     *  except the scheduled tasks' own chats (#6228: those have their own Scheduled Tasks entry and stay in All chats). */
+    @Test fun recentIsEveryNewestFiveWithoutMainLeadersArchivedBackgroundOrTasks() {
         fun chat(id: String, minutes: Long, origin: String? = null, archived: Boolean = false) = Session(machineId = "demo", sessionId = id,
             updatedAt = Instant.parse("2026-11-11T12:00:00Z").minusSeconds(minutes * 60).toString(), origin = origin, archived = archived)
         val main = chat("main", 0)
@@ -228,10 +229,14 @@ class AssistantTest {
         val snapshot = AssistantSnapshot(main.key, chats + chats.last(), leaders = listOf("lead"), backgroundSupervisor = "background")
         assertEquals("automatic chats included; newest first, equal times by session id, at most 5",
             listOf("ext", "future", "inbox", "lark", "spawned"), recentConversations(snapshot).map { it.sessionId })
+        assertFalse("a scheduled task's chat never takes a Recent row", recentConversations(snapshot).map { it.sessionId }.contains("task"))
+        // The task chat would be the newest one: it still leaves Recent, and the next eligible chat takes its place.
+        val taskFirst = AssistantSnapshot(main.key, listOf(main, chat("task", 1, "task"), chat("mine", 2, "user"), chat("inbox", 3, "inbox")))
+        assertEquals(listOf("mine", "inbox"), recentConversations(taskFirst).map { it.sessionId })
         assertEquals("ending the leader lets it back in", "lead", recentConversations(snapshot.copy(leaders = emptyList())).first().sessionId)
         val groups = conversationGroups(snapshot, "", words)
         assertEquals(listOf("ext", "future", "inbox", "lark", "spawned"), groups.recent.map { it.sessionId })
-        assertTrue("All chats still lists them", groups.others.map { it.sessionId }.containsAll(listOf("a", "b", "inbox")))
+        assertTrue("All chats still lists the task chats and everyone else", groups.others.map { it.sessionId }.containsAll(listOf("a", "b", "inbox", "task", "background")))
         assertTrue("no Recent while searching", conversationGroups(snapshot, "x", words).recent.isEmpty())
         assertTrue("only the main chat: no Recent", recentConversations(AssistantSnapshot(main.key, listOf(main))).isEmpty())
     }

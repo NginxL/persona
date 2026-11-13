@@ -221,3 +221,25 @@ func TestInboxJudgeRelinksAClosedTask(t *testing.T) {
 		t.Fatalf("linked to %q after %d judge calls, want %q", got, len(calls()), b.ID)
 	}
 }
+
+// A handled item linked to a closed task follows the task that carries it on too, so its detail names the work going on;
+// it raises no signal, being handled.
+func TestHandledInboxItemFollowsContinuation(t *testing.T) {
+	s, st := continuesService(t)
+	a := supervisedTodo(t, s, "核查会话关联")
+	b := supervisedTodo(t, s, "发版后核对补绑")
+	closeTodo(t, s, a.ID)
+	continuesTask(s, b.ID, a.ID)
+	it := heldItem(s, a.ID)
+	now := time.Now()
+	s.inbox.mu.Lock()
+	it.DoneAt = &now
+	s.inbox.mu.Unlock()
+	s.linkInboxTaskURLs(context.Background())
+	if got := linkOf(s, it); got != b.ID || storedLink(t, st, it.ID) != b.ID {
+		t.Fatalf("handled item linked to %q (stored %q), want %q", got, storedLink(t, st, it.ID), b.ID)
+	}
+	if g, ok := pendingInbox(s, b.ID); ok {
+		t.Fatalf("a handled item raised a signal: %+v", g.Inbox)
+	}
+}

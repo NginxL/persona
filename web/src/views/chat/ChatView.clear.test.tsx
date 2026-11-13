@@ -89,7 +89,8 @@ const paths = () => fetcher.mock.calls.map(([url, init]) => `${init?.method ?? "
 describe("/clear in the main conversation", () => {
   it("is in its command list, with no confirmation", () => {
     const { commands } = render();
-    expect(commands.map((c) => c.word)).toEqual(["/clear"]);
+    // with /permissions, which every Persona conversation offers (#6476)
+    expect(commands.map((c) => c.word)).toEqual(["/clear", "/permissions"]);
     expect(commands[0].confirm).toBeUndefined();
   });
 
@@ -118,11 +119,11 @@ describe("/clear in the main conversation", () => {
   it.each([
     ["another of Persona's conversations", "c9", true, ["assistant_main_clear"]],
     ["a hub that cannot clear it", "c1", true, []],
-  ] as const)("not in %s: no command, and /clear goes as words", async (_, sid, assistant, features) => {
+  ] as const)("not in %s: no /clear (only /permissions, #6476), and /clear goes as words", async (_, sid, assistant, features) => {
     captured.state = { main: "c1", features: [...features] };
     captured.session = { ...captured.session, session_id: sid };
     const { send, commands } = render(sid, assistant);
-    expect(commands).toEqual([]);
+    expect(commands.map((c) => c.word)).toEqual(["/permissions"]);
     expect(await send({ text: "/clear", images: [] })).toBe(true);
     expect(paths()).toEqual([`POST /api/v1/sessions/hub/${sid}/messages`]);
     captured.session = { ...captured.session, session_id: "c1" };

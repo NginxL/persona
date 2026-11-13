@@ -796,6 +796,8 @@ struct AssistantSidebar: View {
     @State private var leaderConfirm: Session?
     @State private var showArchived = false
     @State private var autoList: AutoConversationsRoute?
+    /// Whether Recent is folded, kept on this device (#6228): default open, the choice survives relaunches.
+    @AppStorage("assistant.sidebar.recent.folded") private var recentFolded = false
     @State private var feed = SidebarFeed()
     private let taskChats = AssistantTaskChatsStore.shared
     @FocusState private var searching: Bool
@@ -1294,10 +1296,10 @@ struct AssistantSidebar: View {
             }
         }
         let recent = AssistantSidebarGroups.recent(all, leaders: model.assistantLeaders, main: main,
-                                                   background: model.assistantConfig?.backgroundSupervisor)
+                                                   background: model.assistantConfig?.backgroundSupervisor,
+                                                   tasks: taskChats.known(on: model.api))
         if !recent.isEmpty {
-            heading(String(localized: "Recent")) { EmptyView() }
-            ForEach(recent) { row($0) }
+            recentHeading(recent)
         }
         allChatsRow
         archivedRow(archived)
@@ -1403,6 +1405,43 @@ struct AssistantSidebar: View {
         .padding(.leading, Theme.Space.m)
         .padding(.top, Theme.Space.l)
         .padding(.bottom, Theme.Space.xs)
+    }
+
+    /// The Recent heading and its rows (#6228): the heading folds them, like the web's and Android's, and the choice is
+    /// kept on this device. The open conversation's row still shows while folded, so folding never hides where a
+    /// message lands.
+    @ViewBuilder private func recentHeading(_ recent: [Session]) -> some View {
+        let holdsCurrent = current.map { key in recent.contains { $0.key == key } } ?? false
+        let open = !recentFolded || holdsCurrent
+        Button {
+            withAnimation(Theme.Motion.state) { recentFolded.toggle() }
+            Haptics.tap()
+        } label: {
+            HStack {
+                Text("Recent").font(Theme.Font.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                ThemedIcon(Theme.Icon.disclosure)
+                    .font(Theme.Font.captionStrong)
+                    .foregroundStyle(Color.secondary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .animation(Theme.Motion.state, value: open)
+            }
+            .padding(.leading, Theme.Space.m)
+            .padding(.top, Theme.Space.l)
+            .padding(.bottom, Theme.Space.xs)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "Recent"))
+        .accessibilityValue(open ? String(localized: "Expanded") : String(localized: "Collapsed [Assistant Sidebar e64447]"))
+        .accessibilityAction(named: open ? String(localized: "Collapse") : String(localized: "Expand")) {
+            withAnimation(Theme.Motion.state) { recentFolded.toggle() }
+        }
+        .accessibilityIdentifier("sidebar-recent-fold")
+        if open {
+            ForEach(recent) { row($0) }
+        }
     }
 
     /// A conversation's title on one line. A 「1101 | 修复 | 主题」 title (docs/assistant/assistant.md「Chat titles」) has its day and
@@ -1792,13 +1831,17 @@ nonisolated enum AssistantSidebarGroups {
     static let recentLimit = 5
 
     /// The sidebar's Recent (#4873, #5195): the newest `recentLimit` conversations by last activity, whoever opened them
-    /// (the user, a scheduled task, Lark /agent, the Inbox…; a row says which with its source's mark), except the main
-    /// one and the directions (listed above it) and the hub's built-in background supervisor (#4927, listed with the
-    /// scheduled tasks' ones in All Chats only). `sessions` are the open ones (no archived). `leaders`: the directions'
-    /// session ids; `background`: the background supervisor's.
-    static func recent(_ sessions: [Session], leaders: [String], main: SessionKey?, background: String?) -> [Session] {
+    /// (the user, Lark /agent, the Inbox…; a row says which with its source's mark), except the main one, the
+    /// directions (listed above it), the hub's built-in background supervisor (#4927, listed with the scheduled tasks'
+    /// ones in All Chats only) and the scheduled tasks' own chats (#6228: those have their own Scheduled Tasks entry and
+    /// stay in All Chats). `tasks` also catches a task chat a hub did not mark with `origin` (#2838). `sessions` are the
+    /// open ones (no archived). `leaders`: the directions' session ids; `background`: the background supervisor's.
+    static func recent(_ sessions: [Session], leaders: [String], main: SessionKey?, background: String?, tasks: AssistantTaskChats = .none) -> [Session] {
         let lead = Set(leaders)
-        let rest = sessions.filter { $0.key != main && !lead.contains($0.sessionID) && $0.sessionID != background }
+        let rest = sessions.filter {
+            $0.key != main && !lead.contains($0.sessionID) && $0.sessionID != background
+                && AutoConversations.source(of: $0, tasks: tasks) != .task
+        }
         return Array(newestFirst(rest).prefix(recentLimit))
     }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
-// What pins an Inbox item to its place before the task judge looks at it (#6424, docs/assistant/inbox.md "Task links").
+// What pins an Inbox item to its place before the task judge looks at it (#6424, docs/assistant/inbox.md "Task-related items").
 // A model asked "which of these tasks is it about" picks the closest-sounding one even when none is, so the judge only
 // sees the tasks that can be the one, and its answer only counts with a line it copied from that task.
 //

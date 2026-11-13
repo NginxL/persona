@@ -352,13 +352,13 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(head.tagName).toBe("BUTTON");
     expect(head.getAttribute("aria-expanded")).toBe("false");
     expect(host.querySelector("[data-card]")).toBeNull();
-    // it opens where it is (a real button: Enter and Space do the same as the click), and a click on the head folds it again
+    // it opens where it is (a real button: Enter and Space do the same as the click); its separate chevron folds it again
     act(() => head.click());
     const opened = host.querySelector('[data-needs-row="task:tray-task"]')!;
     expect(opened.hasAttribute("data-needs-open")).toBe(true);
     expect(opened.querySelector("button[aria-expanded=true]")).not.toBeNull();
     expect(opened.textContent).toContain("8080");
-    // its title is the fold toggle, so the opened card has its own way to the task (#6255)
+    // the additional Open entry still leads to the task (#6255); the title opens the asking Agent
     expect(opened.querySelectorAll("[data-needs-open-entry]")).toHaveLength(1);
     expect(opened.querySelector("[data-needs-open-entry]")!.getAttribute("title")).toContain("Demo task");
     act(() => opened.querySelector<HTMLButtonElement>("button[aria-expanded=true]")!.click());
@@ -400,6 +400,51 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.querySelector('[data-running-agent="demo/worker"]')).toBeNull();
     act(() => (host.querySelector('[data-running-agent="demo/by-hand-works"]') as HTMLButtonElement).click());
     expect(getPanel()).toEqual({ kind: "agent", mid: "demo", sid: "by-hand-works" });
+  });
+
+  it.each(["task", "agent"] as const)("opens the asking Agent from an expanded %s title without sending an answer", async (kind) => {
+    const sid = kind === "task" ? "worker" : "by-hand-asks";
+    const title = kind === "task" ? todo.title : "Hand asks";
+    mainChat = conversation;
+    moreSessions = [{ machine_id: "demo", session_id: sid, title, cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at } as Session];
+    moreInteractions = [{ id: "ix-title", machine_id: "demo", session_id: sid, kind: "question", questions: [{ question: "Which port?", options: null }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+    act(() => entry("needs").click());
+    await openRows();
+    const row = host.querySelector<HTMLElement>(`[data-needs-row="${kind === "task" ? "task:tray-task" : "agent:demo/by-hand-asks"}"]`)!;
+    const titleButton = [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === title)!;
+    act(() => titleButton.click());
+    expect(getPanel()).toEqual({ kind: "agent", mid: "demo", sid });
+    expect(row.hasAttribute("data-needs-open")).toBe(true);
+    closePanel();
+    setAgentOpenMode("page");
+    act(() => titleButton.click());
+    expect(opened()).toBe(`/s/demo/${sid}`);
+    expect(writes).toEqual([]);
+  });
+
+  it("keeps an expanded task question's free-text draft editable without sending it", async () => {
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at } as Session];
+    moreInteractions = [{ id: "ix-draft", machine_id: "demo", session_id: "worker", kind: "question", questions: [{ question: "Which port?", options: null }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+    act(() => entry("needs").click());
+    await openRows();
+    const input = host.querySelector<HTMLInputElement>('[data-card="ix-draft"] input')!;
+    expect(input.matches(":disabled")).toBe(false);
+    act(() => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Draft only; do not send");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("Draft only; do not send");
+    expect(document.activeElement).toBe(input);
+    expect(writes).toEqual([]);
   });
 
   it("draws the entries as the dock's old All / task capsules, with the open tray selected", () => {

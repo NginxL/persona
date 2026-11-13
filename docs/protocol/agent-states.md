@@ -8,7 +8,7 @@ whether there's a pending interaction, and whether the user has looked at it in 
 | State | Meaning | From herdr | Persona adds | Color |
 | --- | --- | --- | --- | --- |
 | `needs_you` Needs you | Stuck somewhere a person must step in | `blocked` (a question / confirm box in the TUI) | A pending question, plan, permission or terminal interaction (herdr still shows working while a hook holds it) | Blue, breathing |
-| `working` Working | Running | `working` | Claude: herdr reports `done` / `idle` / `unknown`, but the session has hooks (Persona's, or the global report-only ones) and the hook turn count says the turn isn't over (see "Hook turn signals" below); for sessions without hooks, the terminal title shows Claude Code's working spinner glyph (◐◓◑◒; older versions used braille dots), or the transcript shows this turn has started and not ended (no `turn_duration`, not interrupted) and was written within 45 seconds (#2069; if the transcript shows the turn ended, herdr's state is used). "Written" is its newest timestamped line, not the file's mtime: Claude Code rewrites its trailing metadata in place while idle (#5967); or the turn has stopped but its background commands / sub-Agents / Monitor / workflow are still running (#2228, #2935: when they finish they hand it the result and it carries on; assistant chats excluded) | Amber, breathing |
+| `working` Working | Running | `working` | Claude: herdr reports `done` / `idle` / `unknown`, but the session has hooks (Persona's, or the global report-only ones) and the hook turn count says the turn isn't over (see "Hook turn signals" below); for sessions without hooks, the terminal title shows Claude Code's working spinner glyph (◐◓◑◒; older versions used braille dots), or the transcript shows this turn has started and not ended (no `turn_duration`, not interrupted) and was written within 45 seconds (#2069; if the transcript shows the turn ended, herdr's state is used). "Written" is its newest timestamped line, not the file's mtime: Claude Code rewrites its trailing metadata in place while idle (#5967); or the turn has stopped but its background commands / sub-Agents / Monitor / workflow are still running (#2228, #2935: when they finish they hand it the result and it carries on; assistant chats excluded). Codex: herdr reports `done` / `idle` / `unknown`, but its app-server runs a turn in its thread or its title shows Codex's spinner ("Codex" below, #4865) | Amber, breathing |
 | Waiting in the background (a kind of `working`) | The turn is over and all the agent still runs only waits: background commands that sleep, loop on a check (`until … sleep`), `gh … --watch`, `tail -f` (#6045, `Session.background_waiting`) | — | The node looks at the processes under the session's `claude`: every background command is a shell Claude Code starts there (it sources its shell snapshot). One `ps` at most every 20 s, and only while an agent with background commands has ended its turn; CPU is what they used between two looks (Linux `ps` counts whole seconds). Waiting: only waiters, shells and filters in their pipes, near-zero CPU, a loop's short probes (younger than 10 s) left out. Working: a compiler, build tool, test runner or download runs, or CPU is used, or a process nothing here knows runs while their output grew in the last 2 minutes. No look to compare with yet, or no shell found: Working, as before. Subagents and workflows are work. `state` stays `working` (older apps show Working); new clients leave it out of the Working count | Amber, faded, still |
 | `unread` Unread | A turn finished and the result hasn't been seen | `done` (never focused in herdr) | And not viewed in the App since it finished | Green |
 | `idle` Seen | Finished and seen, waiting for input | `idle` (seen in herdr) | Or herdr still says `done` but it was viewed in the App | Gray |
@@ -65,6 +65,18 @@ forgotten. So a stopped session carries `awaits_reply` (`state` is unchanged; ol
 - **The assistant knows**: its live snapshot has a section for agents asking the user that the user saw and has not answered,
   and `agents_list`'s `active` lists them with an "asking you, unanswered" line.
 
+### Codex (#4865)
+
+herdr's word for a Codex can be wrong for a whole turn: a reporter holding the pane decides it instead of the screen
+(#4657). herdr said `idle` through a turn of a Codex joined on its app-server, so the Agents list, `agents_list` and its
+to-do said Seen while its chat page showed the turn's live words. When the host says `done` / `idle` / `unknown`, node lists a Codex
+as Working while the app-server it is connected to runs a turn in its thread (`turn/started`, the reply to node's own
+`turn/start`, or the status its read every 5 seconds gives), or while its terminal title shows Codex's spinner (one of
+`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` as a word of its own, what herdr's `osc_title_working` rule reads; a title with "Action Required" never
+counts). `blocked` and `working` stay the host's, botmux's sessions keep botmux's state, and a Working whose rollout says
+the turn ended more than 30 seconds ago is still listed as done (`codexStatus` and `codexTurnOver` in `server/internal/node/`).
+So a message sent from the phone or the web is listed Working as soon as `turn/start` answers.
+
 ### Non-Claude herdr agents (opencode, pi, unrecognized agents)
 
 When the agent herdr reports isn't Claude / Codex / compatible Codex forks, the state is **always what herdr reports** (`blocked` / `working` / `done` / `idle` / `unknown`); there are no hooks, transcripts or on-screen boxes to add to it.
@@ -93,6 +105,10 @@ before the hook and transcript rules below:
 
 Why (#6312): Claude Code 2.1.321 marks itself `waiting` the moment its question shows, but Persona listed such a Claude as Working for 45 seconds (its transcript's
 latest write), then as Unknown, which the overview does not show: it never needed the user and got no card. A finished turn stayed Unknown too.
+
+### Claude in the desktop app
+
+A Claude Code session of Claude's desktop app takes its status from its own `sessions/<pid>.json`, as above (`busy` → `working`, `waiting` → `blocked`). `idle` and `shell` are `done` while the session's last turn ended unseen. It counts as seen once the app brought it into view, or once the node found someone at the app with the session shown. Otherwise it is `idle`. The phone shows Unread for `done`, and the finished push follows the usual rules (#6477, `../integrations/claude-integration.md` ("Unread when a turn ends unseen")).
 
 ### Hook turn signals
 

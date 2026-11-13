@@ -479,8 +479,16 @@ func TestDecisionGoesInWhileTheOwnerKeepsTalking(t *testing.T) {
 	if q, sent := s.queuedFor("conv1"), f.sentTo("conv1"); q != 2 || sent != 0 {
 		t.Fatalf("at first: %d queued, %d sent", q, sent)
 	}
-	// Well past the old 150 ms decision cap, the gate still holds both: the owner's round is on.
-	time.Sleep(350 * time.Millisecond)
+	// Move the queued messages past the old 150 ms decision cap, without a wall-clock sleep. The owner's round must
+	// hold both until its own round is seen over.
+	s.relays.mu.Lock()
+	for i := range s.relays.st.Queue["conv1"] {
+		m := &s.relays.st.Queue["conv1"][i]
+		m.At = m.At.Add(-time.Second)
+		m.QueuedAt = m.QueuedAt.Add(-time.Second)
+	}
+	s.relays.mu.Unlock()
+	s.drainRelays("server", []proto.Session{session(proto.StatusIdle)})
 	if sent := f.sentTo("conv1"); sent != 0 {
 		t.Fatalf("the gate let %d message(s) in while the owner's round ran", sent)
 	}

@@ -177,9 +177,9 @@ struct AssistantTopBarTests {
         #expect(AssistantSidebarGroups.directions(all, leaders: [], main: main).isEmpty)
     }
 
-    /// The sidebar's Recent (#4873, #5195): the newest five chats whoever opened them (an Inbox item's, a scheduled
-    /// task's, a channel's), never the main one, a direction (listed above it) or the background supervisor; nothing
-    /// when no chat is left.
+    /// The sidebar's Recent (#4873, #5195): the newest five chats whoever opened them (an Inbox item's, a channel's),
+    /// never the main one, a direction (listed above it), the background supervisor or a scheduled task's chat (#6228:
+    /// those have their own Scheduled Tasks entry); nothing when no chat is left.
     @Test func recentIsTheNewestFiveOfTheRest() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func s(_ id: String, hoursAgo: Double?, origin: String? = nil) throws -> Session {
@@ -195,14 +195,35 @@ struct AssistantTopBarTests {
                    try s("e2", hoursAgo: 5), try s("e1", hoursAgo: 5), try s("never", hoursAgo: nil)]
         let main = all[0].key
         let recent = AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: "bg")
-        #expect(recent.map(\.sessionID) == ["inbox", "task", "a", "lark", "wx"])
+        #expect(recent.map(\.sessionID) == ["inbox", "a", "lark", "wx", "e1"])
         let more = AssistantSidebarGroups.recent(all.filter { !["inbox", "task", "a"].contains($0.sessionID) }, leaders: ["lead"],
                                                  main: main, background: "bg")
         #expect(more.map(\.sessionID) == ["lark", "wx", "e1", "e2", "never"]) // equal times: by session id; no time: last
-        // An ended direction comes back among the rest; a hub without a background supervisor lists that chat as any other.
-        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: "bg").map(\.sessionID) == ["inbox", "task", "lead", "a", "lark"])
-        #expect(AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: nil).map(\.sessionID).first == "bg")
+        // An ended direction comes back among the rest; a task-origin chat stays out even when the hub gives no background id.
+        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: "bg").map(\.sessionID) == ["inbox", "lead", "a", "lark", "wx"])
+        #expect(AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: nil).map(\.sessionID).first == "inbox")
         #expect(AssistantSidebarGroups.recent(Array(all.prefix(3)), leaders: ["lead"], main: main, background: "bg").isEmpty)
+    }
+
+    /// A scheduled task's chat the hub does not mark with an origin yet is still known from the tasks and runs
+    /// (#2838, #6228): it leaves Recent the same way an `origin == "task"` chat does.
+    @Test func recentLeavesOutTaskChatsKnownFromTheTasks() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func s(_ id: String, hoursAgo: Double, origin: String? = nil) throws -> Session {
+            var o: [String: Any] = ["session_id": id, "machine_id": "hub", "status": "idle", "title": id, "assistant": true]
+            if let origin { o["origin"] = origin }
+            var x = try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: o))
+            x.updatedAt = now.addingTimeInterval(-hoursAgo * 3600)
+            return x
+        }
+        let all = [try s("main", hoursAgo: 0), try s("taskrun", hoursAgo: 0.1), try s("mine", hoursAgo: 1, origin: "user")]
+        let main = all[0].key
+        var task = APIClient.ScheduledTask(id: "t1", title: "日报", prompt: "p", repeats: .daily)
+        task.runSessionID = "taskrun"
+        let known = AssistantTaskChats(tasks: [task], runs: [])
+        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: nil, tasks: known).map(\.sessionID) == ["mine"])
+        // without the tasks knowledge, an unmarked chat lists as any other (older hubs behave as before)
+        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: nil).map(\.sessionID) == ["taskrun", "mine"])
     }
 
     /// A direction's name comes from GET /api/v1/assistant/leaders: current ones with a name only.

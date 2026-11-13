@@ -252,6 +252,14 @@ func main() {
 	fmt.Println(string(rb))
 }
 
+// uploadBody is a hub-mode meeting upload as the phone sends it (docs/assistant/meeting-minutes.md "Choosing the
+// mode", "The timeline"): no segments of its own, the room's role, marked private.
+func uploadBody(m *meeting, lang, role string, started time.Time, rev int64, timeline map[string]any) map[string]any {
+	return map[string]any{"kind": "meeting", "title": m.Title, "language": lang, "started_at": started.Format(time.RFC3339),
+		"device": "phone", "transcription": "hub", "room": map[string]any{"attendance": role}, "private": true,
+		"segments": []any{}, "revision": rev, "timeline": timeline}
+}
+
 func run(c *client, m *meeting, pcm []byte, lang, role, kbDir, out string, keep bool) map[string]any {
 	dur := float64(len(pcm)) / 32000
 	report := map[string]any{"language": lang, "audio_seconds": dur}
@@ -276,9 +284,7 @@ func run(c *client, m *meeting, pcm []byte, lang, role, kbDir, out string, keep 
 	upload := func(extra map[string]any) map[string]any {
 		mu.Lock()
 		rev++
-		body := map[string]any{"kind": "meeting", "title": m.Title, "language": lang, "started_at": started.Format(time.RFC3339),
-			"device": "transcribelive", "transcription": "hub", "room": map[string]any{"attendance": role}, "private": true,
-			"segments": []any{}, "revision": rev, "timeline": timeline()}
+		body := uploadBody(m, lang, role, started, rev, timeline())
 		mu.Unlock()
 		for k, v := range extra {
 			body[k] = v

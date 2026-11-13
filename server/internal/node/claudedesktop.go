@@ -45,6 +45,10 @@ type claudeDesktopEntry struct {
 	title, cwd string   // as the sidebar shows it, and where it runs
 	local      string   // the app's own id of the session (sessionId, local_<uuid>): its link opens it (claudedesktop_open.go)
 	parent     string   // the local_<uuid> of the session that started this one (spawnedFrom.sessionId), or ""
+
+	// focused and turnEdge (ms, 0 unknown): when the app last brought the session into view (lastFocusedAt), and when a
+	// turn of it last began or ended (lastTurnEdgeAt). claudedesktop_unread.go reads them.
+	focused, turnEdge int64
 }
 
 type claudeDesktopFile struct {
@@ -66,6 +70,10 @@ type claudeDesktopIndex struct {
 	// parents: an unarchived session's current transcript → the current transcript of the unarchived session that
 	// started it (spawnedFrom), for linkSideSessions.
 	parents map[string]string
+	seen    map[string]claudeDesktopSeen // an unarchived session's current transcript → its two times (claudedesktop_unread.go)
+	// lastShown (ms) is the latest time the app brought any unarchived session into view: the session it shows now
+	// was brought into view then (claudeDesktopIndex.shown).
+	lastShown int64
 }
 
 type claudeDesktopAbout struct{ title, cwd, local string }
@@ -84,7 +92,7 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 		paths = append(paths, found...)
 	}
 	x := claudeDesktopIndex{visible: map[string]bool{}, earlier: map[string][]claudeDesktopNow{}, about: map[string]claudeDesktopAbout{},
-		parents: map[string]string{}}
+		parents: map[string]string{}, seen: map[string]claudeDesktopSeen{}}
 	claudeDesktopFiles.Lock()
 	defer claudeDesktopFiles.Unlock()
 	current := make(map[string]bool, len(paths))
@@ -108,6 +116,8 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 		x.visible[e.transcript] = x.visible[e.transcript] || !e.archived
 		if !e.archived {
 			x.about[e.transcript] = claudeDesktopAbout{e.title, e.cwd, e.local}
+			x.seen[e.transcript] = claudeDesktopSeen{focused: e.focused, turnEdge: e.turnEdge}
+			x.lastShown = max(x.lastShown, e.focused)
 			if e.parent != "" {
 				started = append(started, e)
 			}
@@ -146,6 +156,8 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		Local      string   `json:"sessionId"`
 		// Read on its own: a spawnedFrom of another shape leaves the entry readable, with no parent.
 		SpawnedFrom json.RawMessage `json:"spawnedFrom"`
+		Focused     float64         `json:"lastFocusedAt"`
+		TurnEdge    float64         `json:"lastTurnEdgeAt"`
 	}
 	if json.Unmarshal(b, &raw) != nil || !validID(raw.Transcript) {
 		return claudeDesktopEntry{}
@@ -161,7 +173,7 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		cwd = ""
 	}
 	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd,
-		local: localID(raw.Local), parent: localID(spawned.Local)}
+		local: localID(raw.Local), parent: localID(spawned.Local), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge)}
 }
 
 // localID is id when it is the app's own form of a session id (local_<uuid>), else "": it goes into a link.

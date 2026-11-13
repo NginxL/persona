@@ -91,10 +91,15 @@ func TestOwnerTurnGateHardCapAndRefresh(t *testing.T) {
 	s.queueRelay("conv1", relayMsg{From: "c2", FromTitle: "Research", Tool: "conversation_send", Text: "held", At: time.Now().UTC()})
 	s.UserSpoke(ctx, SessionRef{MachineID: "server", SessionID: "conv1"})
 	s.setSessions("server", []proto.Session{session, {SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusWorking}})
-	// The owner speaks again mid-round: the cap starts over.
-	time.Sleep(150 * time.Millisecond)
+	// The owner speaks again mid-round: the cap starts over. Put the first turn at an exact timestamp rather than
+	// sleeping to make it old enough; the second turn must still hold against its own refreshed timestamp.
+	s.relays.mu.Lock()
+	turn := s.relays.ownerTurns["conv1"]
+	turn.at = time.Now().UTC().Add(-150 * time.Millisecond)
+	s.relays.ownerTurns["conv1"] = turn
+	s.relays.mu.Unlock()
 	s.UserSpoke(ctx, SessionRef{MachineID: "server", SessionID: "conv1"})
-	time.Sleep(150 * time.Millisecond)
+	s.drainRelays("server", []proto.Session{{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusWorking}})
 	if sent := f.sentTo("conv1"); sent != 0 {
 		t.Fatalf("the refreshed gate let a message out: %d", sent)
 	}

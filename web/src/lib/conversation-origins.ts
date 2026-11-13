@@ -104,13 +104,15 @@ export function autoConversations(conversations: readonly Session[], main: strin
 }
 
 /** The sidebar's "Recent" under Persona chats (#4873, #5195), newest first: every conversation whoever opened it (the
- *  user, a scheduled task, Lark /agent, the inbox…; a row says which with its origin's mark) except the main one, the
- *  leaders (常驻, listed above it), the archived ones and the hub's built-in background supervisor (`background`, its
- *  id: listed with the scheduled tasks' chats in "All chats" only, #4927), by last activity (equal times by id, as
- *  iOS). The sidebar shows the first ones (lib/sidebar-recent.ts, #5146). */
+ *  user, Lark /agent, the inbox…; a row says which with its origin's mark) except the main one, the leaders (常驻,
+ *  listed above it), the archived ones, the hub's built-in background supervisor (`background`, its id: listed with the
+ *  scheduled tasks' chats in "All chats" only, #4927) and the scheduled tasks' own chats (#6228: those have their own
+ *  entry on Scheduled Tasks and stay in "All chats", so they no longer crowd Recent), by last activity (equal times by
+ *  id, as iOS). The sidebar shows the first ones (lib/sidebar-recent.ts, #5146). */
 export function recentConversations(conversations: readonly Session[], main: string | undefined, leaders: readonly string[], background?: string): Session[] {
   const lead = new Set(leaders);
   return conversations
-    .filter((c) => c.session_id !== main && !lead.has(c.session_id) && !c.archived && !(background && c.session_id === background))
+    .filter((c) => c.session_id !== main && !lead.has(c.session_id) && !c.archived && !(background && c.session_id === background)
+      && autoOrigin(c, background) !== "task")
     .sort((a, b) => byTime(b.updated_at, a.updated_at) || (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0));
 }

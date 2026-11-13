@@ -2,6 +2,7 @@ package voice
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -75,10 +76,74 @@ func levenshtein(a, b []rune) int {
 	return prev[len(b)]
 }
 
+// trCaptionRevise: a caption frame revises the caption before it when their beginnings are at most this share of
+// their length apart (normalized): the service revises a caption's last words as it grows ("andrea 那边" then
+// "android 那边的…" measured 0.38), while the next sentence written over it is about 1 away.
+const trCaptionRevise = 0.4
+
+// trRevises says whether caption text next revises prev, the text of the caption being written, rather than begin
+// the next sentence written over it (the measured service writes a caption session's whole meeting as one item).
+// fresh: next came within trCaptionFresh of the caption's first frame, and revises it whatever it says (the measured
+// service rewrote a caption's first words at once: "好人", then "how 人" at the same moment). Otherwise, compared
+// normalized (trNorm): next not under half as long as prev (that is a new sentence, also one that begins as the last
+// one did), and either as much of prev as next has (all of it when next is longer) within trCaptionRevise of a
+// beginning of next (grown, its last words maybe revised), or the second half of prev, two characters or more, within
+// trCaptionRevise of a stretch of next's beginning about as long as prev (its first words revised, the rest kept).
+// Text with no letters or digits revises anything.
+func trRevises(prev, next string, fresh bool) bool {
+	p, n := trNorm(prev), trNorm(next)
+	switch {
+	case fresh || len(p) == 0 || len(n) == 0:
+		return true
+	case 2*len(n) < len(p):
+		return false
+	}
+	k := min(len(p), len(n))
+	if float64(prefixDistance(p[:k], n)) <= trCaptionRevise*float64(k) {
+		return true
+	}
+	tail := p[len(p)/2:]
+	if len(tail) < 2 {
+		return false
+	}
+	head := n[:min(len(n), len(p)+max(4, len(p)/2))]
+	return float64(infixDistance(tail, head)) <= trCaptionRevise*float64(len(tail))
+}
+
+// prefixDistance is the least edit distance between a and a beginning of b (any length, none included).
+func prefixDistance(a, b []rune) int { return trAlign(a, b, false) }
+
+// infixDistance is the least edit distance between a and a stretch of b (anywhere, of any length).
+func infixDistance(a, b []rune) int { return trAlign(a, b, true) }
+
+// trAlign is the least edit distance between all of a and a part of b that ends anywhere and starts at b's beginning,
+// or anywhere when anyStart.
+func trAlign(a, b []rune, anyStart bool) int {
+	prev, cur := make([]int, len(b)+1), make([]int, len(b)+1)
+	for j := range prev {
+		if !anyStart {
+			prev[j] = j
+		}
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return slices.Min(prev)
+}
+
 // medoid is which of keep (indexes into texts) is closest to the others: the least summed distance. A tie goes to the
-// one closer to anchor when there is one (of two, the one closer to the captions or the reference), then the first.
+// one closer to anchor when there is one (of two, the one closer to the captions or the reference), then to the longer
+// (more letters and digits: of two that agree, the one that missed less), then the first.
 func medoid(texts []string, keep []int, anchor *string) int {
-	best, bestSum, bestAnchor := -1, 0.0, 0.0
+	best, bestSum, bestAnchor, bestLen := -1, 0.0, 0.0, 0
 	for _, i := range keep {
 		sum := 0.0
 		for _, k := range keep {
@@ -90,21 +155,31 @@ func medoid(texts []string, keep []int, anchor *string) int {
 		if anchor != nil {
 			a = normDistance(texts[i], *anchor)
 		}
+		n := len(trNorm(texts[i]))
 		const eps = 1e-9
-		if best < 0 || sum < bestSum-eps || (sum < bestSum+eps && a < bestAnchor-eps) {
-			best, bestSum, bestAnchor = i, sum, a
+		switch {
+		case best < 0 || sum < bestSum-eps:
+		case sum > bestSum+eps:
+			continue
+		case a < bestAnchor-eps:
+		case a > bestAnchor+eps || n <= bestLen:
+			continue
 		}
+		best, bestSum, bestAnchor, bestLen = i, sum, a, n
 	}
 	return best
 }
 
 // trAgree is which of keep agree with another: one further than trDropOver from every other one is left out. Of two,
 // both stay when they agree and neither does when they do not.
-func trAgree(texts []string, keep []int) []int {
+func trAgree(texts []string, keep []int) []int { return trAgreeWithin(texts, keep, trDropOver) }
+
+// trAgreeWithin is which of keep are within most of another one.
+func trAgreeWithin(texts []string, keep []int, most float64) []int {
 	var out []int
 	for _, i := range keep {
 		for _, k := range keep {
-			if k != i && normDistance(texts[i], texts[k]) <= trDropOver {
+			if k != i && normDistance(texts[i], texts[k]) <= most {
 				out = append(out, i)
 				break
 			}
@@ -157,35 +232,92 @@ func pickLive(caption string, texts []string) (pick int, dropped []bool) {
 	return medoid(texts, keep, nil), dropped
 }
 
-// pickReplay chooses a final-pass window's text. With a reference (ref has text): a session that stopped early or is
-// further than trDropOver from it is dropped, and the medoid of the rest wins (of two, the one closer to the
-// reference); with none left the reference stays (kept). Without one: of the sessions that did not stop early, one
-// that agrees with no other is dropped and the medoid of the rest wins; with fewer than two left the window gets no
-// text of the pass (kept: the hub keeps what it has).
-func pickReplay(ref *string, texts []string, stoppedEarly []bool) (pick int, kept bool) {
-	var keep []int
+// How a final-pass window's reference was used (pickReplay).
+type trRefUse int
+
+const (
+	trRefNone     trRefUse = iota // no reference
+	trRefChecked                  // the sessions were checked against it
+	trRefShort                    // too short to check against: chosen as without one
+	trRefOutvoted                 // the sessions agree with each other and none with it: trusted over it
+)
+
+// A final-pass window's reference that has fewer letters and digits (normalized) than trRefShortShare of the text of
+// the sessions that wrote any (their lower median), or than trRefPerSecond per second of the window's speech while
+// they wrote more, is not checked against: it caught only a few words of the window (measured: a live caption of 22
+// characters over 14 s of speech, against one session of 204 that heard all of it and one that wrote nothing), and a
+// session near it is no better than one that heard more. Sessions within trAgreeClose of each other are trusted over
+// a reference none of them is near.
+const (
+	trRefShortShare = 0.5
+	trRefPerSecond  = 2.0
+	trAgreeClose    = 0.3
+)
+
+// pickReplay chooses a final-pass window's text (speech: its seconds of speech). With a reference (ref has text): one
+// much shorter than the text of the sessions that wrote any (trRefShortShare, trRefPerSecond) counts as none, before
+// anything is checked against it (a session near a few words of the window is no better than one that heard all of
+// it), and so does one set aside already (aside: the window was given more sessions for it); the window is then
+// chosen as without one among the sessions that wrote text (ones that wrote nothing never agree a window empty over a
+// reference that has words), and with fewer than two of them that agree it is kept: one session is never taken
+// uncorroborated (the job gives the window more sessions, once). Otherwise a session that stopped early or is further
+// than trDropOver from it is dropped, and the medoid of the rest wins (of two, the one closer to the reference); with
+// none left, sessions that agree with each other (within trAgreeClose, two or more with text) are trusted over it
+// (their medoid), else the reference stays (kept). Without one: of the sessions that did not stop early, one that
+// agrees with no other is dropped and the medoid of the rest wins; with fewer than two left the window gets no text
+// of the pass (kept: the hub keeps what it has).
+func pickReplay(ref *string, aside bool, texts []string, stoppedEarly []bool, speech float64) (pick int, kept bool, use trRefUse) {
+	var keep, said []int
 	for i := range texts {
-		if !stoppedEarly[i] {
-			keep = append(keep, i)
+		if stoppedEarly[i] {
+			continue
+		}
+		keep = append(keep, i)
+		if trHasText(texts[i]) {
+			said = append(said, i)
 		}
 	}
-	if ref != nil && trHasText(*ref) {
+	switch {
+	case ref == nil || !trHasText(*ref):
+	case aside || refShort(*ref, texts, said, speech):
+		use, keep = trRefShort, said // chosen as without a reference
+	default:
 		var near []int
 		for _, i := range keep {
 			if normDistance(texts[i], *ref) <= trDropOver {
 				near = append(near, i)
 			}
 		}
-		if len(near) == 0 {
-			return -1, true
+		if len(near) > 0 {
+			return medoid(texts, near, ref), false, trRefChecked
 		}
-		return medoid(texts, near, ref), false
+		if close := trAgreeWithin(texts, said, trAgreeClose); len(close) >= 2 {
+			return medoid(texts, close, nil), false, trRefOutvoted
+		}
+		return -1, true, trRefChecked
 	}
 	keep = trAgree(texts, keep)
 	if len(keep) < 2 {
-		return -1, true
+		return -1, true, use
 	}
-	return medoid(texts, keep, nil), false
+	return medoid(texts, keep, nil), false, use
+}
+
+// refShort: reference ref is much shorter than the text of the sessions said (indexes into texts, those that wrote
+// text: one that wrote nothing does not make it long enough): under trRefShortShare of their lower median length (one
+// session that writes too much does not make it short), or under trRefPerSecond per second of speech while that is
+// longer.
+func refShort(ref string, texts []string, said []int, speech float64) bool {
+	if len(said) == 0 {
+		return false
+	}
+	lens := make([]int, len(said))
+	for k, i := range said {
+		lens[k] = len(trNorm(texts[i]))
+	}
+	slices.Sort(lens)
+	median, n := float64(lens[(len(lens)-1)/2]), float64(len(trNorm(ref)))
+	return n < trRefShortShare*median || (n < trRefPerSecond*speech && n < median)
 }
 
 func containsInt(s []int, v int) bool {

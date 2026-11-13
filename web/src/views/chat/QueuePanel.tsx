@@ -260,7 +260,7 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
         aria-expanded={relayedOpen}
         data-queue-relayed-summary
         onClick={() => setRelayedOpen((o) => !o)}
-        className="touch-hit flex h-8 w-full items-center gap-1.5 px-2 text-[12px] leading-none whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+        className="touch-hit flex h-8 w-full items-center gap-1.5 px-2 text-label leading-none whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink"
       >
         <Icon name="send" size={13} stroke={2} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate text-left">{t("chat-queuepanel.relayed_summary", { count: relayedRows.length })}</span>

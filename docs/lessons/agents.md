@@ -941,6 +941,18 @@ watch to send its empty boundary, and cancels pending throttled text first. A na
 middle-truncated copy of the reply, so text reconciliation alone cannot retire the Hub's full cached copy.
 Cover unwatch before completion, a pending batch, and a later watcher in the SDK and AGY lifecycle tests.
 
+## herdr's published state can be a reporter's word, not the screen's (2026-11-12, #4865)
+
+- `herdr agent get` / `agent list` / the snapshot give the pane's published `agent_status`; `herdr agent explain <pane>` runs the
+  screen detection again and names the rule it matched. When they disagree (explain says `working` from `osc_title_working`,
+  get says `idle`), a reporter holds the pane and its last report wins: on herdr 0.7.5 a single `pane.report_agent` with
+  `state: idle` kept a running Codex `idle` until the reporter released it (#4657). Compare the two before suspecting Persona's
+  own judgment, and test reporter behavior only on an isolated server (`env -i`, its own HOME and XDG directories).
+- An agent Persona can judge itself must not take herdr's word alone. Claude panes already had `claudeStatus`; a Codex pane
+  joined on its app-server listed Idle for a whole turn while the node knew the turn ran (its `turn/started`), and its chat
+  page showed Working from the live words, so the two pages disagreed. `codexStatus` counts the app-server's turn and Codex's
+  title spinner over the host's done / idle / unknown.
+
 ## Native preview exports can silently truncate assistant replies (#5644)
 
 AGY's compact export includes `<truncated N bytes>` inside long text while its complete export retains the body.

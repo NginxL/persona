@@ -53,23 +53,30 @@ final class AutoConversationsTests: XCTestCase {
         app.buttons.matching(identifier: "sidebar-conversation").matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
     }
 
-    /// The sidebar: Recent has the newest five whoever opened them (#5195); the ones Persona opened carry their source's
-    /// mark, named in the row's label as their filter is; no Auto Chats row any more.
+    /// The sidebar: Recent has the newest five whoever opened them except the scheduled tasks' chats (#6228: those have
+    /// their own Scheduled Tasks entry and stay in All Chats), each one Persona opened carries its source's mark; the
+    /// heading folds Recent and opens it again.
     @MainActor func testRecentListsEveryChatWithItsSourceMark() {
         launch()
         let all = openSidebar()
-        // The mock's newest after the main chat: three Inbox ones (6, 12, 40 minutes), Lark /agent's (2 hours), a
-        // scheduled task's (3 hours); the user's own (5 hours and older) are in All Chats.
+        // The mock's newest after the main chat: three Inbox ones (6, 12, 40 minutes), Lark /agent's (2 hours); the
+        // scheduled task's (3 hours) now stays out of Recent.
         XCTAssertTrue(conversation("1105 | 收件箱 | 回复韩梅梅").waitForExistence(timeout: 10), "the newest, an Inbox one, is not in 最近:\n\(app.debugDescription)")
         let task = conversation("1105 | 定时 | 晨间简报")
-        XCTAssertTrue(task.exists, "a scheduled task's conversation is not in 最近")
-        XCTAssertTrue(task.label.contains("定时任务"), "its mark is not named: \(task.label)")
+        XCTAssertFalse(task.exists, "a scheduled task's conversation is still in 最近 (#6228)")
         let lark = app.buttons.matching(identifier: "sidebar-conversation").matching(NSPredicate(format: "label CONTAINS %@", "来自 飞书 /agent")).firstMatch
         XCTAssertTrue(lark.exists, "Lark /agent's conversation is not in 最近 with its mark")
         XCTAssertEqual(app.buttons.matching(identifier: "sidebar-conversation").count, 5, "最近 lists five")
         XCTAssertFalse(conversation("帮我约周五").exists, "an older conversation of the user's is in 最近")
         XCTAssertFalse(app.buttons["sidebar-auto"].exists, "the Auto Chats row is back")
         XCTAssertTrue(all.exists)
+        // The heading folds Recent and keeps working while folded (#6228).
+        let fold = app.buttons["sidebar-recent-fold"].firstMatch
+        XCTAssertTrue(fold.waitForExistence(timeout: 5), "no foldable Recent heading")
+        fold.tap()
+        XCTAssertTrue(app.buttons.matching(identifier: "sidebar-conversation").firstMatch.waitForNonExistence(timeout: 5), "最近 did not fold")
+        fold.tap()
+        XCTAssertTrue(conversation("1105 | 收件箱 | 回复韩梅梅").waitForExistence(timeout: 5), "最近 did not open again")
         sleep(1)
         shot("sidebar")
     }
@@ -85,6 +92,10 @@ final class AutoConversationsTests: XCTestCase {
             XCTAssertTrue(app.buttons["auto-filter-" + id].exists, "no \(id) filter")
         }
         XCTAssertTrue(app.buttons["auto-filter-all"].isSelected, "全部 is not the filter All Chats opens on")
+        // The scheduled tasks' chats left Recent, not the app: the task filter still lists them (#6228).
+        app.buttons["auto-filter-task"].firstMatch.tap()
+        XCTAssertTrue(rows.matching(NSPredicate(format: "label BEGINSWITH %@", "1105 | 定时 | 晨间简报")).firstMatch.waitForExistence(timeout: 5), "定时任务 filter lacks the task's chat")
+        app.buttons["auto-filter-all"].firstMatch.tap()
         sleep(1)
         shot("list-opens-on-all")
         inbox.tap()

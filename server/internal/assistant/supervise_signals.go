@@ -120,6 +120,11 @@ func (g superviseSignal) urgent() bool {
 	return false
 }
 
+// immediate: a signal that does not wait out the gap after the last message, only p.gather. A start that failed is
+// the supervisor's to retry and nobody else's; the gap is shared by every supervisor, so a message just sent to
+// another (the background supervisor) held it back for minutes while the task sat as if finished.
+func (g superviseSignal) immediate() bool { return g.Kind == sigFailed }
+
 type superviseBook struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex // one ledger write at a time (updateSupervision)
@@ -174,12 +179,12 @@ func (s *Service) superviseTimings() superviseTimings {
 }
 
 // digestWait is how long until the pending signals are due (false: none): each waits p.gather after it came, and
-// p.every (p.urgent for an urgent one) after the last message (last; zero: none yet).
+// p.every (p.urgent for an urgent one) after the last message (last; zero: none yet), except an immediate one.
 func digestWait(now, last time.Time, pending []superviseSignal, p superviseTimings) (time.Duration, bool) {
 	var due time.Time
 	for _, g := range pending {
 		at := g.At.Add(p.gather)
-		if !last.IsZero() {
+		if !last.IsZero() && !g.immediate() {
 			gap := p.every
 			if g.urgent() {
 				gap = p.urgent

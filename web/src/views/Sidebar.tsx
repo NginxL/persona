@@ -296,6 +296,9 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   // one function for the sidebar's life: the conversation rows and the main row keep their memo across pushes
   const onConvMenu = useCallback<RowMenuFn>((s, anchor, at) => setConvMenu((m) => (!at && m?.anchor === anchor ? null : { s, anchor, at })), []);
   const [personaFolded, togglePersona] = useFolded("persona", false, { holds: activeKey === "history" || activeKey === "j:new" || [...directions, ...recent].some((c) => activeKey === `j:${c.session_id}`) });
+  // 最近 folds on its own too (#6228): the choice is kept in this browser, and it opens by itself while it holds the
+  // open conversation, so folding never hides where a message lands. The Agents block's Recent uses another key.
+  const [recentFolded, toggleRecent] = useFolded("recent-chats", false, { holds: recent.some((c) => activeKey === `j:${c.session_id}`) });
   // the pages fold under their own title (#2524); the drawer's grid of icons doesn't
   const [pagesFolded, togglePages] = useFolded("pages", false, { all: false, holds: more.some((p) => p.k === activeKey) });
   const { nav, reg, hover, highlight } = useGlide(activeKey);
@@ -365,21 +368,25 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
             {directions.length > 0 && <SubHeading label={t("sidebar.directions")} />}
             {/* each 常驻 row folds open to its tasks (#4352) */}
             {directions.map((c) => <SidebarDirectionRow key={c.session_id} id={c.session_id} name={directionLabel(directionNames, c.session_id, conversationTitle(c))} row={directionRow(c)} reg={reg} hover={hover} go={go} onNavigate={onNavigate} />)}
-            {recent.length > 0 && <SubHeading label={t("sidebar.recent_chats")} />}
-            {recent.map(recentRow)}
-            {(recentLeft > 0 || recentLess) && (
-              <div className="relative z-10 flex flex-wrap">
-                {recentLeft > 0 && (
-                  <button type="button" onClick={() => setRecentMore(recentMore + 1)} className={MORE_BUTTON}>
-                    {t("sidebar.show_more", { count: Math.min(recentCount, recentLeft) })}
-                  </button>
-                )}
-                {recentLess && (
-                  <button type="button" onClick={() => setRecentMore(0)} className={MORE_BUTTON}>
-                    {t("sidebar.show_less")}
-                  </button>
-                )}
-              </div>
+            {recent.length > 0 && <SubHeading label={t("sidebar.recent_chats")} folded={recentFolded} onToggle={toggleRecent} />}
+            {recent.length > 0 && (
+            <Collapse open={!recentFolded} sidebarFold>
+              {recent.map(recentRow)}
+              {(recentLeft > 0 || recentLess) && (
+                <div className="relative z-10 flex flex-wrap">
+                  {recentLeft > 0 && (
+                    <button type="button" onClick={() => setRecentMore(recentMore + 1)} className={MORE_BUTTON}>
+                      {t("sidebar.show_more", { count: Math.min(recentCount, recentLeft) })}
+                    </button>
+                  )}
+                  {recentLess && (
+                    <button type="button" onClick={() => setRecentMore(0)} className={MORE_BUTTON}>
+                      {t("sidebar.show_less")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </Collapse>
             )}
             {assistant && <NavRow k="history" reg={reg} hover={hover} active={activeKey === "history"} to={{ name: "history" }} go={go} icon="list" label={t("sidebar.all_chats")} hint={assistant.conversations.length > 0 ? String(assistant.conversations.length) : undefined} />}
           </Section>
