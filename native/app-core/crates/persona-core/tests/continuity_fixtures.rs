@@ -43,7 +43,6 @@ fn batch(event: &Map<String, Value>, backlog: bool) -> Batch {
 
 fn request_json(request: &Request) -> Value {
     match request {
-        Request::ScheduleFill { delay_ms } => json!({"kind": "schedule_fill", "delay_ms": delay_ms}),
         Request::FetchAfter { after_seq } => json!({"kind": "fetch_after", "after_seq": after_seq}),
         Request::FetchLatest { fold_work } => json!({"kind": "fetch_latest", "fold_work": fold_work}),
         Request::Subscribe { since_seq, fold_work } => match since_seq {
@@ -71,7 +70,7 @@ fn step(session: &mut Session, event: &Map<String, Value>, label: &str) -> Step 
             boolean(event, "has_more").expect("http_reload has_more"),
         ),
         Some("http_older") => session.older(items(event), boolean(event, "has_more").expect("http_older has_more")),
-        Some("fill_timer") => session.fill_timer(),
+        Some("continue_fill") => session.continue_fill(),
         Some("load_older") => session.load_older(),
         Some("reconnect") => session.reconnect(),
         Some("open_fold") => session.open_fold(&text(event, "fold_id").expect("open_fold fold_id")),

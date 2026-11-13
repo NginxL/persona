@@ -27,6 +27,7 @@ import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit,
 import { t } from "../i18n";
 import { byTime } from "../lib/times";
 import { STATE_LABEL } from "../lib/state-labels";
+import { PHONE, useMedia } from "../lib/viewport";
 import type { AssistantSearchAnswer, AssistantSearchHit } from "../lib/assistant-search";
 
 interface Hit {
@@ -225,6 +226,8 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
   // loaded on intent (the palette is idle-tier, src/startup-preload.ts IDLE_TIER_BUDGET): the first query typed loads
   // lib/assistant-search.ts; asked 200 ms after the last key, each query cancelling the one before
   const [found, setFound] = useState<{ q: string; answer?: AssistantSearchAnswer; marks?: typeof import("../lib/assistant-search").markParts }>({ q: "" });
+  // a found chat's line starts just before its match, as much of a lead-in as the row's width holds (#7045)
+  const phone = useMedia(PHONE);
   const asked = open && mode === "jump" && searchOn && Boolean(assistant) ? text.trim() : "";
   useEffect(() => {
     if (!asked) return;
@@ -490,7 +493,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                   </span>
                   {h.said ? (
                     <span className={ROW_DETAIL} data-said>
-                      {(found.marks?.(h.said.snippet, h.said.ranges) ?? [[h.said.snippet, false] as [string, boolean]]).map(([words, match], k) => (match ? <mark key={k} className="rounded-[3px] bg-accent-tint text-ink">{words}</mark> : <span key={k}>{words}</span>))}
+                      {(found.marks?.(h.said.snippet, h.said.ranges, phone ? "phone" : "wide") ?? [[h.said.snippet, false] as [string, boolean]]).map(([words, match], k) => (match ? <mark key={k} className="rounded-[3px] bg-accent-tint text-ink">{words}</mark> : <span key={k}>{words}</span>))}
                     </span>
                   ) : (
                     <span className={ROW_DETAIL}>{[meta, shortPath(h.s.cwd)].filter(Boolean).join(" · ")}</span>

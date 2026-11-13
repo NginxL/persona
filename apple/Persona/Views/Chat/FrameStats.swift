@@ -93,6 +93,9 @@ final class FrameStats: NSObject {
         // The streamed reply's cadence as the reader sees it: the gaps between frames where its text grew.
         let gaps = zip(textChanges, textChanges.dropFirst()).map { ($1.0 - $0.0) * 1000 }.sorted()
         let added = textChanges.map { Double($0.1) }.sorted()
+        // Typed, as `busyMax`: `gaps.last ?? 0` in the literal is `last(where:)`, and JSONSerialization aborts on it.
+        let gapMax: Double = gaps.last ?? 0
+        let addedMax: Double = added.last ?? 0
         func q(_ v: [Double], _ p: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int(Double(v.count) * p))] }
         let result: [String: Any] = [
             "label": label,
@@ -117,8 +120,8 @@ final class FrameStats: NSObject {
             "busy_ms_per_s": total > 0 ? busies.reduce(0, +) / total : 0,
             "main_cpu_ms_per_s": total > 0 ? cpu * 1000 / total : 0,
             "text_changes": textChanges.count,
-            "text_gap_p50_ms": q(gaps, 0.5), "text_gap_p95_ms": q(gaps, 0.95), "text_gap_max_ms": gaps.last ?? 0,
-            "text_added_p50": q(added, 0.5), "text_added_p95": q(added, 0.95), "text_added_max": added.last ?? 0,
+            "text_gap_p50_ms": q(gaps, 0.5), "text_gap_p95_ms": q(gaps, 0.95), "text_gap_max_ms": gapMax,
+            "text_added_p50": q(added, 0.5), "text_added_p95": q(added, 0.95), "text_added_max": addedMax,
         ]
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {

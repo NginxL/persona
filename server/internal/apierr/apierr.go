@@ -223,11 +223,14 @@ var rpcFailureKeys = map[string]string{
 	"attach_busy":              "rpc-errors.attach_busy",
 	proto.CodeTerminalNotReady: "rpc-errors.terminal_not_ready",
 	// a start's new tab stopped on its shell (node/shellsettle.go, #2570)
-	proto.CodeShellWaiting:      "rpc-errors.shell_waiting",
-	proto.CodeStartLineRejected: "rpc-errors.start_line_rejected",
-	"node_outdated":             "rpc-errors.node_outdated",
-	"readonly_unsupported":      "rpc-errors.readonly_unsupported",
-	"assistant_in_doubt":        "rpc-errors.in_doubt",
+	proto.CodeShellWaiting:               "rpc-errors.shell_waiting",
+	proto.CodeStartLineRejected:          "rpc-errors.start_line_rejected",
+	"node_outdated":                      "rpc-errors.node_outdated",
+	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
+	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
+	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
+	"readonly_unsupported":               "rpc-errors.readonly_unsupported",
+	"assistant_in_doubt":                 "rpc-errors.in_doubt",
 	// queued messages sent now (#6088)
 	"nothing_queued":        "rpc-errors.nothing_queued",
 	"send_now_unsupported":  "rpc-errors.send_now_unsupported",
@@ -309,6 +312,11 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	}
 	// a summary that names {reason} carries the original words (git's, for a failed pull or push)
 	body["error"] = i18n.T(l, key, i18n.Args{"reason": original})
+	switch code {
+	case "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
+		// The native diagnostic is not a person-facing instruction; the stable, translated refusal says what to do.
+		return
+	}
 	if _, hasDetail := body["detail"]; !hasDetail && original != body["error"] {
 		body["detail"] = original
 	}

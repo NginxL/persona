@@ -193,7 +193,7 @@ What the hub guarantees, so clients check only what "Clients" below says:
 - **No Markdown.** No text contains `**`. Bold is given by `strong` (below).
 - **Icons.** `icon` is one of `progress`, `schedule`, `release`, `performance`, `metrics`, `tooling`, `quality`, `design`, `people`, `customer`, `budget`, `risk`, `general`. A client treats a value it does not know as `general`, so the list can grow.
 
-Limits, in characters (Unicode code points):
+Limits, in characters (Unicode code points). A text cut to its limit ends in "…", which counts towards it:
 
 | Field | Limit |
 | --- | --- |
@@ -201,7 +201,7 @@ Limits, in characters (Unicode code points):
 | `conclusions` | At most 4, each at most 200. |
 | Group `title` | At most 24. |
 | Topics | At most 12 in all. `title` at most 40. |
-| Bullet `text` | 400, like every item. |
+| Bullet `text` | At most 400, like the text of every item (a cut keeps 399 and "…"). |
 | `strong` | At most 2 per text, each 1 to 20 characters, never the whole text. |
 
 ### Bold (`strong`)
@@ -212,7 +212,7 @@ Limits, in characters (Unicode code points):
 2. For each entry, find its first exact occurrence at or after that point (comparing code units, with no case folding or normalization) and bold it.
 3. Continue from the end of that occurrence. An entry that is not found is skipped; its words are still shown, just not in bold.
 
-The hub keeps an entry only when this rule finds the exact place the model marked, so a figure that appears twice is never bolded in the wrong place. It also moves spaces and punctuation at the ends of an entry outside it.
+The hub keeps an entry only when this rule finds the exact place the model marked, so a figure that appears twice is never bolded in the wrong place. It also moves spaces and punctuation at the ends of an entry outside it, except the signs a figure or a name holds (`%`, `‰`, `‱`, `#`, `@`, `&`, `-`): `**92%.**` gives `92%`, `**(-5%)**` gives `-5%`, and `**#42**` stays `#42`.
 
 `strong` uses substrings rather than offsets because Go, Swift, JavaScript and Kotlin count string positions differently. No client parses Markdown in these texts: words from a transcript or a photo could otherwise become live links.
 
@@ -220,11 +220,11 @@ The hub keeps an entry only when this rule finds the exact place the model marke
 
 - **What the model writes.** The prompts (`prompts/kb/minutes.md`, `minutes_merge.md`) ask for the same minutes in a new shape. Besides `title`, `where`, `attendees`, `actions` and `open`, the answer has:
   - `headline`: about 40 Chinese characters.
-  - `conclusions`: 2 to 4 entries, each `{text, line}` (or `photo`), saying where the meeting landed.
+  - `conclusions`: 2 to 4 entries, each `{text, line}` (or `photo`), saying where the meeting landed. A conclusion cites a photo only when a point or decision of a topic cites the same photo; otherwise it cites the line that supports it ("Conclusions" below).
   - `topics`: 2 to 8 of them (at most 10), in the order they were first discussed. Each is `{title, group, icon, points, decisions}`, and its points and decisions are written as before (`{text, line, who}`, `{text, line}`).
 
   Each point or decision is one short, self-contained line that names its subject and reads right without its topic or group heading (older apps and the meeting material show it on its own), and marks its key figure or status with `**…**`. Actions and open questions stay plain text, with no markers. It marks at most two places of a few words each, such as "module X **done**" or "QPS raised to **40K**". A topic has 2 to 4 of these lines, and one with more than 5 is split into two topics. `group` is a short name (about 8 Chinese characters), given only when there are 4 or more topics that fall into 2 to 4 groups. `icon` is one of the list above, always written in English.
-- **Checking it.** `buildMinutes` checks every point and decision in every topic exactly as it checks items today: an allowed citation, a name that was spoken or is on the calendar, no duplicates. It takes the `**` markers out of the text. The plain text goes into `points` or `decisions`, and the marked places into `strong`. The legacy lists are sorted and capped as before, and action ids (`a1`…) are numbered as before.
+- **Checking it.** `buildMinutes` checks every point and decision in every topic exactly as it checks items today: an allowed citation, a name that was spoken or is on the calendar, no duplicates. It takes the `**` markers out of the text. The plain text goes into `points` or `decisions`, and the marked places into `strong`. A stray `**` in the minutes' title, the place, a name or a deadline as said (actions and open questions too) is taken out as well, so a name still matches the calendar and the transcript. The legacy lists are sorted and capped as before, and action ids (`a1`…) are numbered as before.
 - **Conclusions** need an allowed citation too, lose their markers the same way, and are capped at 4. They never count as the citation that makes an answer usable: minutes still need an item that cites the transcript. A conclusion may cite a photo only when a bullet of the overview cites the same photo; otherwise its photo citation does not count, and it is dropped unless it also cites a line. So the photos the items cite are all the photos the minutes cite, which an older hub's photo delete and trim also see.
 - **Titles and icons.** The headline and the topic and group titles are put on one line, stripped of markers and clipped to their limits. An icon not in the list becomes `general`. Two topics with the same title (ignoring case) are merged into one.
 - **Groups.** Topics keep their groups only when there are at least 4 topics, every topic names a group, and there are 2 to 4 distinct groups. Otherwise all topics go into one group without a title.
@@ -235,8 +235,8 @@ The hub keeps an entry only when this rule finds the exact place the model marke
   - a topic with items has no title;
   - there are more than 12 topics.
 
-  A malformed `headline` or `conclusions` (or one entry of them), or a topic's malformed `title`, `group` or `icon`, never makes the answer unusable: that value is dropped (an icon becomes `general`, a topic left without a title leaves the overview out, as above), and the topic's points and decisions are kept. The answer is unusable only when `topics` is not a list, a topic is not an object, or a topic's `points` or `decisions` are malformed the way a malformed `points` is today; that counts towards `failed` ("How the hub generates them"). The minutes' own `title` is decoded as today.
-- **Long meetings.** Each part's notes keep every point and decision the part gives, inside `topics` or not. Those under a titled topic carry its title, so the merging call reads lines like `[12]〈Export〉 text`; the others carry no tag. Before the per-part cap (`max(2, 60/parts)` per section, as today), the notes are put in the order of the line or photo they cite, so the cap drops a part's latest lines rather than whole topics. The merging call is asked to:
+  A malformed `headline` or `conclusions` (or one entry of them), or a topic's malformed `title`, `group` or `icon`, never makes the answer unusable: that value is dropped (an icon becomes `general`, a topic left without a title leaves the overview out, as above), and the topic's points and decisions are kept. The answer is unusable only when `topics` is not a list (a `null` one is none, as for the answer's other lists), a topic is not an object (`null` included, even beside usable topics), or a topic's `points` or `decisions` are malformed the way a malformed `points` is today; that counts towards `failed` ("How the hub generates them"). The minutes' own `title` is decoded as today.
+- **Long meetings.** Each part's notes keep every point and decision the part gives, inside `topics` or not. Those under a titled topic carry its title, so the merging call reads lines like `[12]〈Export〉 text`; the others carry no tag. Before the per-part cap (`max(2, 60/parts)` per section, as today), the top-level and topic items of each section are put in the order of the line or photo they cite (photo first, as citations resolve). The cap then keeps a part's earliest notes whatever order the topics came in; later notes, a whole later topic included, can still be left out, as later items are today. The merging call is asked to:
   - merge the parts' topics (the same topic may have a different name in each part);
   - put every point and decision, tagged or not, into one merged topic;
   - write the headline and conclusions for the whole meeting from the notes, with later parts overriding earlier ones.

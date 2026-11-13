@@ -403,7 +403,7 @@ func (b *inboxBook) noteSelfReplied(it *InboxItem, at time.Time) {
 
 // noteSent records a message Persona sent for the item. Under b.mu.
 func (b *inboxBook) noteSent(it *InboxItem, at time.Time) {
-	key := "sent_other"
+	key := "sent_reply"
 	switch {
 	case it.Lark != nil:
 		key = "sent_lark"

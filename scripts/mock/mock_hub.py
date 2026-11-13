@@ -3383,7 +3383,18 @@ RECORDINGS_TRIMMED = {}
 # POST /api/v1/recordings/{id}/minutes/todos {version, actions} confirms action items as to-dos (#4062): each gets a to-do and
 # its todo_id; an old version is 409 minutes_stale. POST /mock/recording_minutes_rewrite {"id"} writes the next version at once
 # (what the user sees is then stale).
+# The minutes' shape (#6563, docs/assistant/meeting-minutes.md "Summary card (#6563)"): MOCK_RECORDING_MINUTES_SHAPE=legacy
+# (the default) writes them as a hub from before the summary card does, with no `overview`; overview adds the summary card
+# (`overview`, with every point and decision one bullet) and lays the Markdown out after it; malformed keeps the legacy
+# minutes and adds an `overview` that the contract's "Clients" rules clean down to nothing, so clients fall back to the
+# legacy layout. Every shape has `language` and `markdown`. POST /mock/recording_minutes {"mode", "shape"} switches both
+# (a body without `shape` goes back to the variable's; any other value is 400 and changes nothing).
+MINUTES_SHAPES = ("legacy", "overview", "malformed")
+MINUTES_SHAPE_START = os.environ.get("MOCK_RECORDING_MINUTES_SHAPE", "legacy")
+if MINUTES_SHAPE_START not in MINUTES_SHAPES:
+    sys.exit("mock hub: MOCK_RECORDING_MINUTES_SHAPE must be one of %s" % ", ".join(MINUTES_SHAPES))
 RECORDING_MINUTES = [os.environ.get("MOCK_RECORDING_MINUTES", "pending")]
+RECORDING_MINUTES_SHAPE = [MINUTES_SHAPE_START]
 RECORDING_MINUTES_ASKED = []
 # All-day recording fixtures (#4741): ready makes a recap from the stored text; the other modes let clients exercise
 # waiting, retry and the time before a recap is due. All recording routes share the lock, including delete and trim.
@@ -3739,31 +3750,267 @@ def minutes_span(body):
 
 def recording_minutes(body, rid=None):
     """Made-up minutes in the contract's shape (docs/assistant/meeting-minutes.md) from a recording's own sentences: the
-    first two are points, those that decide / assign / leave something open are decisions / actions / open questions.
+    first two with words are points, those that decide / assign / leave something open are decisions / actions / open
+    questions; a sentence without words (only punctuation, spaces or marks) is no item.
     Each item's `at` is its sentence's start (seconds into the recording). A photo with words (its caption, the text
-    the phone read, the room's note) is a point of its own that cites it (`"photo": n`, its `at` the photo's)."""
+    the phone read, the room's note) is a point of its own that cites it (`"photo": n`, its `at` the photo's).
+    In the overview shape (RECORDING_MINUTES_SHAPE) every sentence that neither decides, assigns nor leaves something
+    open is a point, in time order, so each topic has a few lines; a decision loses its "决定：" label; and the points
+    and decisions are also the summary card's bullets (minutes_overview). The malformed shape is the legacy minutes with
+    a broken `overview` (MINUTES_OVERVIEW_MALFORMED). Every shape has `language` and the hub's `markdown`
+    (minutes_markdown)."""
     segs = [x for x in (transcription_record(rid) if rid and transcription_hub(rid) else body.get("segments", []))
             if x.get("text") and not x.get("echo")]  # Persona's echo is not the meeting's (#5905)
+    shape = RECORDING_MINUTES_SHAPE[0]
     cal = body.get("calendar") or {}
-    item = lambda x: {"text": x["text"].rstrip("。"), "at": x["start"]}
+    # The summary card's texts carry no Markdown (bold is `strong`) and are cleaned as the hub cleans every item: the
+    # marks out, on one line, at most 400 characters (minutes_clip). An item left without words is dropped before
+    # either the legacy lists or the overview are made, as the hub drops it, in every shape.
+    plain = (lambda s: minutes_clip(" ".join(s.replace("**", "").split()), 400)) if shape == "overview" else (lambda s: s)
+    item = lambda x: {"text": plain(x["text"].rstrip("。")).rstrip("。"), "at": x["start"]}
+    worded = lambda xs: [x for x in xs if x["text"].strip()]
+    # A decision's own "决定：" label goes in the summary card's words: the Markdown says "Decided: " before it.
+    decided = (lambda s: re.sub(r"^\s*(?:决定|[Dd]ecided?|[Dd]ecision)\s*[:：]\s*(?=\S)", "", s)) if shape == "overview" else (lambda s: s)  # i18n-ignore: fixture keywords
     acts = [x for x in segs if "负责" in x["text"]]
+    photo_points = worded([{"text": plain((x.get("caption") or (x.get("text") or x.get("note") or "").split("\n")[0])[:200]), "at": x["at"], "photo": x["n"]}
+                           for x in (photos_listed(rid) if rid else []) if x.get("caption") or x.get("text") or x.get("note")])
+    if shape == "overview":  # in time order, as the hub sorts them
+        said = worded([item(x) for x in segs if not any(w in x["text"] for w in ("决定", "负责", "没定"))])  # i18n-ignore: fixture keywords
+        points = sorted(said + photo_points, key=lambda x: x["at"])[:100]
+    else:
+        points = worded([item(x) for x in segs])[:2] + photo_points
     out = {
         "version": 1,
         "title": cal.get("title") or body.get("title") or None,
         **minutes_span(body),  # `when`, and the same span as `start` / `end` for the apps to format (#4713)
         "where": cal.get("location"),
         "attendees": cal.get("attendees"),
-        "points": [item(x) for x in segs[:2]] + [
-            {"text": (x.get("caption") or (x.get("text") or x.get("note") or "").split("\n")[0])[:200], "at": x["at"], "photo": x["n"]}
-            for x in (photos_listed(rid) if rid else []) if x.get("caption") or x.get("text") or x.get("note")],
-        "decisions": [item(x) for x in segs if "决定" in x["text"]],
+        "points": points,
+        "decisions": worded([dict(item(x), text=decided(item(x)["text"])) for x in segs if "决定" in x["text"]]),
         # Who is named before 负责 ("does"), and a deadline when one is said ("周五前").
-        "actions": [{k: v for k, v in {"id": "a%d" % (i + 1), "who": x["text"].split("负责")[0][-3:] or None, "what": x["text"].rstrip("。"),
+        "actions": [{k: v for k, v in {"id": "a%d" % (i + 1), "who": x["text"].split("负责")[0][-3:] or None, "what": plain(x["text"].rstrip("。")),
                                       "by": "周五前" if "周五前" in x["text"] else None, "at": x["start"], "todo_id": ""}.items() if v is not None}
                     for i, x in enumerate(acts)],
-        "open": [item(x) for x in segs if "没定" in x["text"]],
+        "open": worded([item(x) for x in segs if "没定" in x["text"]]),
     }
-    return {k: v for k, v in out.items() if v}
+    out = {k: v for k, v in out.items() if v}
+    lang = minutes_lang(body)
+    if shape == "overview" and (overview := minutes_overview(out, segs, lang)):
+        out["overview"] = overview
+    elif shape == "malformed":
+        out["overview"] = copy.deepcopy(MINUTES_OVERVIEW_MALFORMED)
+    out["language"] = lang
+    out["markdown"] = minutes_markdown(out, body, lang, out.get("overview") if shape == "overview" else None)
+    return out
+
+
+# The summary card (#6563, docs/assistant/meeting-minutes.md "Summary card (#6563)"): the topic icons, in the contract's
+# order, which the mock's topics take in turn.
+MINUTES_ICONS = ("progress", "schedule", "release", "performance", "metrics", "tooling", "quality", "design", "people",
+                 "customer", "budget", "risk", "general")
+# The two groups of 4 or more topics: the meeting's first and second half, which is what they are (the topics go in time
+# order). Made-up words in the minutes' language, not the hub's.
+MINUTES_HALVES = {"zh-Hans": ("前半场", "后半场"), "en": ("First half", "Second half"), "ja": ("前半", "後半")}  # i18n-ignore: fixture words
+# What the contract's "Clients" rules clean down to nothing (no group, topic or bullet is left), so a client shows the
+# legacy minutes: a headline and conclusions of the wrong type, members that are no objects, a group without a list of
+# topics, topics without a title or a list of bullets, and bullets without words. A client that keeps any of them shows
+# words that say what it got wrong.
+MINUTES_OVERVIEW_MALFORMED = {
+    "headline": 3,
+    "conclusions": {"text": "Conclusions that are not a list", "at": 1},
+    "groups": [
+        "x", 7, None, [],
+        {"title": "A group without topics"},
+        {"title": "A group whose topics are not a list", "topics": "x"},
+        {"title": ["a title that is not a string"], "topics": [
+            "x", None,
+            {"title": "  ", "icon": "progress", "bullets": [{"text": "A topic with a blank title", "at": 1}]},
+            {"title": 3, "icon": "progress", "bullets": [{"text": "A topic whose title is a number", "at": 1}]},
+            {"icon": "progress", "bullets": [{"text": "A topic without a title", "at": 1}]},
+            {"title": "A topic whose bullets are not a list", "icon": "progress", "bullets": {"text": "x", "at": 1}},
+            {"title": "A topic without bullets", "icon": "progress"},
+            {"title": "A topic whose bullets have no words", "icon": "not-an-icon", "bullets": [
+                "x", 5, None, [], {"text": "   ", "at": 1}, {"text": 42, "at": 1}, {"text": None, "at": 1, "decision": True},
+                {"at": 1, "strong": ["x"]}]},
+        ]},
+    ],
+}
+
+
+def minutes_lang(body):
+    """The language the hub writes a recording's minutes in (kb/language.go outputLang): the recording's, when the hub has
+    a catalog for it, else Chinese (the mock has no owner's language)."""
+    primary = str(body.get("language") or "").strip().replace("_", "-").split("-")[0].lower()
+    return {"zh": "zh-Hans", "en": "en", "ja": "ja"}.get(primary, "zh-Hans")
+
+
+_MINUTES_CATALOGS = {}
+# The summary card's words in the hub's catalog (kb-minutes.json), for a tree whose catalog does not have them yet.
+_MINUTES_WORDS = {  # i18n-ignore: the hub's words
+    "en": {"conclusions": "Core conclusions", "decided": "Decided: ", "ai_note": "AI-generated from the recording. Check anything important."},
+    "zh-Hans": {"conclusions": "核心结论", "decided": "已决定：", "ai_note": "由 AI 根据录音生成，重要内容请核对。"},
+    "ja": {"conclusions": "主な結論", "decided": "決定：", "ai_note": "録音から AI が作成しました。重要な内容は確認してください。"},
+}
+
+
+def minutes_t(lang, key, **args):
+    """The hub's kb-minutes.json words (server/internal/i18n/locales/<lang>/kb-minutes.json), {name} filled from args."""
+    if lang not in _MINUTES_CATALOGS:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        try:
+            with open(os.path.join(root, "server", "internal", "i18n", "locales", lang, "kb-minutes.json"), encoding="utf-8") as f:
+                _MINUTES_CATALOGS[lang] = json.load(f)
+        except (OSError, ValueError): _MINUTES_CATALOGS[lang] = {}
+    s = _MINUTES_CATALOGS[lang].get(key) or _MINUTES_WORDS.get(lang, {}).get(key) or key
+    return re.sub(r"\{(\w+)\}", lambda m: str(args.get(m.group(1), m.group(0))), s)
+
+
+def minutes_clip(text, n):
+    """text at most n characters, as the hub clips an item (400), a conclusion (200) or a headline (120): a cut keeps
+    n - 1 characters and ends in "…"."""
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+
+def minutes_strong(text, limit=None):
+    """The text's bold places (`strong`) as the mock marks them: its first number (with a unit), or 完成 / done, whichever
+    comes first; kept only where the contract's rule finds it (its first occurrence) and when it is not the whole text.
+    In a text minutes_clip cut to limit, one that ends at the "…" is not bold: the mock cannot tell whether the cut
+    reached it, and the hub leaves out a mark the cut reaches."""
+    m = re.search(r"\d+(?:\.\d+)?(?:\s?(?:%|[KMGT]B\b|K\b|ms\b))?|完成|\b[Dd]one\b", text)  # i18n-ignore: fixture keywords
+    if not m or text.find(m.group(0)) != m.start() or len(m.group(0)) > 20 or m.group(0) == text.strip(): return []
+    if limit and len(text) == limit and text.endswith("…") and m.end() == limit - 1: return []
+    return [m.group(0)]
+
+
+def minutes_bold(text, strong):
+    """text as the Markdown writes it: a literal * escaped, the `strong` places wrapped in ** by the contract's rule (each
+    entry's first occurrence at or after the end of the one before; one not found bolds nothing)."""
+    out, i = [], 0
+    for s in strong or []:
+        j = text.find(s, i) if isinstance(s, str) and s else -1
+        if j < 0: continue
+        out += [text[i:j].replace("*", "\\*"), "**" + s.replace("*", "\\*") + "**"]
+        i = j + len(s)
+    return "".join(out) + text[i:].replace("*", "\\*")
+
+
+def minutes_topic_title(text, names=()):
+    """A topic's title from its first bullet: the subject it names before a colon ("导出：超过 4 MB 的条目会被丢弃",
+    "Export: entries over 4 MB are dropped"), unless that is an attendee's name (a speaker); else its first clause after
+    such a name, cut to 12 characters in Chinese or Japanese and to whole words within 40 otherwise."""
+    label = re.match(r"\s*([^\s:：，,。]{1,12}(?: [^\s:：，,。]+){0,3})\s*[:：]\s*(?=\S)", text)
+    if label and label.group(1) not in names: return label.group(1)[:40]
+    words = text[label.end():] if label else text
+    clause = re.split(r"[，,。;；!?！？、]|\.(?:\s|$)", words, maxsplit=1)[0].strip() or words.strip() or text.strip()
+    if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", clause): return clause[:12]
+    title = ""
+    for w in clause.split():
+        if len(title) + len(w) + 1 > 40: break
+        title = (title + " " + w).strip()
+    return title or clause[:40]
+
+
+def minutes_overview(m, segs, lang):
+    """The summary card (#6563) from minutes m, as the hub guarantees it ("The `overview` field"): every point and decision
+    is one bullet (same text, at and photo), the bullets of each transcript minute a topic titled by its first one
+    (minutes_topic_title; minutes merged when there would be more than 12, topics of the same title one), icons in turn,
+    two titled groups (the halves) when there are 4 or more topics, else one untitled. A bullet's and a conclusion's bold
+    place is minutes_strong's. The conclusions are the first 4 decisions, citing a photo only when a bullet cites it; the
+    headline is the first sentence. None when there is no point or decision, as the hub leaves the overview out."""
+    bullets = [{"text": x["text"], "at": x["at"], **({"photo": x["photo"]} if x.get("photo") else {}), "_decision": False}
+               for x in m.get("points") or []]
+    bullets += [{"text": x["text"], "at": x["at"], **({"photo": x["photo"]} if x.get("photo") else {}), "_decision": True}
+                for x in m.get("decisions") or []]
+    if not bullets: return None
+    at = lambda b: b["at"] if isinstance(b["at"], (int, float)) else 0
+    bullets.sort(key=at)
+    minutes = sorted({int(at(b) // 60) for b in bullets})
+    per = -(-len(minutes) // 12)  # transcript minutes per topic: at most 12 topics
+    buckets = {}
+    for b in bullets: buckets.setdefault(minutes.index(int(at(b) // 60)) // per, []).append(b)
+    topics = []
+    for k in sorted(buckets):
+        title = minutes_topic_title(buckets[k][0]["text"], m.get("attendees") or ())
+        same = next((t for t in topics if t["title"].casefold() == title.casefold()), None)
+        if same: same["bullets"] += buckets[k]
+        else: topics.append({"title": title, "icon": MINUTES_ICONS[len(topics) % len(MINUTES_ICONS)], "bullets": list(buckets[k])})
+
+    def bullet(b):
+        strong = minutes_strong(b["text"], 400)
+        return {"text": b["text"], **({"strong": strong} if strong else {}), "at": b["at"],
+                **({"photo": b["photo"]} if b.get("photo") else {}), **({"decision": True} if b["_decision"] else {})}
+
+    topics = [{"title": t["title"], "icon": t["icon"], "bullets": [bullet(b) for b in sorted(t["bullets"], key=at)]}
+              for t in topics]
+    if len(topics) >= 4:
+        half, names = (len(topics) + 1) // 2, MINUTES_HALVES[lang]
+        groups = [{"title": names[0], "topics": topics[:half]}, {"title": names[1], "topics": topics[half:]}]
+    else:
+        groups = [{"title": "", "topics": topics}]
+    cited = {b["photo"] for t in topics for b in t["bullets"] if b.get("photo")}
+    conclusions = []
+    for x in (m.get("decisions") or [])[:4]:
+        text = minutes_clip(x["text"], 200)
+        strong = minutes_strong(text, 200)
+        conclusions.append({"text": text, **({"strong": strong} if strong else {}), "at": x["at"],
+                            **({"photo": x["photo"]} if x.get("photo") in cited else {})})
+    first = minutes_clip(" ".join(segs[0]["text"].replace("**", "").split()).rstrip("。"), 120) if segs else ""
+    out = {}
+    if first and first != m.get("title"): out["headline"] = first
+    if conclusions: out["conclusions"] = conclusions
+    out["groups"] = groups
+    return out
+
+
+def minutes_markdown(m, body, lang, ov=None):
+    """minutes.md as the hub writes it (kb/minutes.go renderMinutes): with clock times in the local zone, sections with
+    nothing left out, the fixed words from the hub's kb-minutes.json in the minutes' language. With the overview ov (the
+    overview shape's; a malformed one is never laid out) it follows the contract's "Markdown" (#6563): the headline, the
+    core conclusions, the topics under their group headings (or as the sections with one untitled group) with decisions
+    after "Decided: ", the action items and open questions as before with no checkbox, a literal * escaped in every text
+    the minutes hold, then the AI note. Without one it is the legacy layout, byte for byte."""
+    try: start = datetime.fromisoformat(str(body.get("started_at")).replace("Z", "+00:00")).astimezone()
+    except (TypeError, ValueError): start = None
+    clock = lambda sec: "[" + ((start + timedelta(microseconds=math.trunc(sec * 1_000_000 if isinstance(sec, (int, float)) else 0)))
+                               .strftime("%H:%M:%S") if start else "00:00:00") + "] "
+    photo = lambda x: minutes_t(lang, "photo", n=x["photo"]) if x.get("photo") else ""
+    # The hub's title when none was given: the recording's name in Chinese (the mock's 录音), else when it started.
+    title = m.get("title") or ("录音" if lang == "zh-Hans" else  # i18n-ignore: the recording's name
+                               minutes_t(lang, "untitled", when=start.strftime("%Y-%m-%d %H:%M") if start else ""))
+    esc = (lambda s: str(s).replace("*", "\\*")) if ov else str
+    out = "# " + esc(title) + "\n\n- " + minutes_t(lang, "when", when=m.get("when") or "") + "\n"
+    if m.get("where"): out += "- " + minutes_t(lang, "where", where=esc(m["where"])) + "\n"
+    if m.get("attendees"): out += "- " + minutes_t(lang, "attendees", names=minutes_t(lang, "list_sep").join(map(esc, m["attendees"]))) + "\n"
+    if ov:
+        if ov.get("headline"): out += "\n" + esc(ov["headline"]) + "\n"
+        if ov.get("conclusions"):
+            out += "\n## " + minutes_t(lang, "conclusions") + "\n\n"
+            out += "".join("- " + clock(c["at"]) + minutes_bold(c["text"], c.get("strong")) + photo(c) + "\n" for c in ov["conclusions"])
+        named = len(ov["groups"]) > 1
+        for g in ov["groups"]:
+            if named: out += "\n## " + esc(g["title"]) + "\n"
+            for t in g["topics"]:
+                out += "\n" + ("### " if named else "## ") + esc(t["title"]) + "\n\n"
+                out += "".join("- " + clock(x["at"]) + (minutes_t(lang, "decided") if x.get("decision") else "")
+                               + minutes_bold(x["text"], x.get("strong")) + (minutes_t(lang, "who", who=esc(x["who"])) if x.get("who") else "")
+                               + photo(x) + "\n" for x in t["bullets"])
+    else:
+        if m.get("points"):
+            out += "\n## " + minutes_t(lang, "points") + "\n\n"
+            out += "".join("- " + clock(x["at"]) + x["text"] + (minutes_t(lang, "who", who=x["who"]) if x.get("who") else "")
+                           + photo(x) + "\n" for x in m["points"])
+        if m.get("decisions"):
+            out += "\n## " + minutes_t(lang, "decisions") + "\n\n" + "".join("- " + clock(x["at"]) + x["text"] + photo(x) + "\n" for x in m["decisions"])
+    if m.get("actions"):
+        out += "\n## " + minutes_t(lang, "actions") + "\n\n"
+        out += "".join("- " + clock(a["at"]) + (minutes_t(lang, "owner", who=esc(a["who"])) if a.get("who") else "") + esc(a["what"])
+                       + (minutes_t(lang, "by", by=esc(a.get("by") or a.get("due_date"))) if a.get("by") or a.get("due_date") else "")
+                       + photo(a) + "\n" for a in m["actions"])
+    if m.get("open"):
+        out += "\n## " + minutes_t(lang, "open") + "\n\n" + "".join("- " + clock(x["at"]) + esc(x["text"]) + photo(x) + "\n" for x in m["open"])
+    if m.get("partial"): out += "\n> " + minutes_t(lang, "partial") + "\n"
+    if ov: out += "\n*" + minutes_t(lang, "ai_note") + "*\n"
+    return out.rstrip("\n")
 
 
 # The managers' roster (docs/assistant/managers.md): the hub's own assistant (the default), one on another computer, one offline,
@@ -5530,9 +5777,17 @@ def photos_of(rid, make=False):
 
 
 def photos_cited(rid):
-    """The numbers of the photos the current minutes cite."""
+    """The numbers of the photos the current minutes cite: their items', and the summary card's conclusions' and bullets'
+    (#6563; a malformed overview's members that are no objects cite nothing)."""
     minutes = (KB_DETAIL.get(("recordings", rid)) or {}).get("minutes") or {}
-    return {x["photo"] for k in ("points", "decisions", "actions", "open") for x in minutes.get(k) or [] if isinstance(x.get("photo"), int)}
+    lists = [minutes.get(k) for k in ("points", "decisions", "actions", "open")]
+    ov = minutes.get("overview")
+    if isinstance(ov, dict):
+        lists.append(ov.get("conclusions"))
+        for g in ov.get("groups") if isinstance(ov.get("groups"), list) else []:
+            for t in g.get("topics") if isinstance(g, dict) and isinstance(g.get("topics"), list) else []:
+                if isinstance(t, dict): lists.append(t.get("bullets"))
+    return {x["photo"] for xs in lists if isinstance(xs, list) for x in xs if isinstance(x, dict) and isinstance(x.get("photo"), int)}
 
 
 def photos_listed(rid):
@@ -6618,8 +6873,14 @@ def recordings_route_locked(h, method, p):
                                              "segments": v["segments"], "fed": v["fed"], "asks": v["asks"]}
                                          for k, v in MEETING_LIVE.items()}}) or True
     if p == "/mock/recording_minutes" and method == "POST":
-        # A fresh start for the next test on the same mock: what an earlier one stored (its minutes) is gone too.
-        RECORDING_MINUTES[0] = json.loads(h.last_body or b"{}").get("mode", "pending")
+        # A fresh start for the next test on the same mock: what an earlier one stored (its minutes) is gone too. The
+        # minutes' shape (#6563) is the body's, else MOCK_RECORDING_MINUTES_SHAPE's; another one changes nothing.
+        try: body = json.loads(h.last_body or b"{}")
+        except ValueError: body = None
+        if not isinstance(body, dict) or body.get("shape", MINUTES_SHAPE_START) not in MINUTES_SHAPES:
+            return h.send_json({"error": "shape must be one of " + ", ".join(MINUTES_SHAPES)}, 400) or True
+        RECORDING_MINUTES[0] = body.get("mode", "pending")
+        RECORDING_MINUTES_SHAPE[0] = body.get("shape", MINUTES_SHAPE_START)
         for t in TRANSCRIPTIONS.values():
             if t.get("socket"): t["socket"]["fail"]("recording_deleted")
         TRANSCRIPTIONS.clear()
@@ -6628,7 +6889,7 @@ def recordings_route_locked(h, method, p):
         with PHOTO_LOCK: PHOTO_STORE.clear()
         KB["recordings"] = []
         for key in [k for k in KB_DETAIL if k[0] == "recordings"]: KB_DETAIL.pop(key)
-        return h.send_json({"mode": RECORDING_MINUTES[0]}) or True
+        return h.send_json({"mode": RECORDING_MINUTES[0], "shape": RECORDING_MINUTES_SHAPE[0]}) or True
     if p == "/mock/recordings" and method == "GET":
         return h.send_json({"recordings": RECORDINGS, "deleted": sorted(RECORDINGS_DELETED), "puts": RECORDING_PUTS[0],
                             "minutes_asked": RECORDING_MINUTES_ASKED, "trimmed": sorted(RECORDINGS_TRIMMED)}) or True
@@ -13072,7 +13333,7 @@ LAUNCHER_MODELS = {
     ]},
     "codex": {"agent": "codex", "models": [
         {"id": "gpt-5.5", "name": "GPT-5.5", "description": "Latest model for coding and everyday work", "default": True, "efforts": ["low", "medium", "high", "xhigh"], "default_effort": "medium"},
-        {"id": "gpt-5.5-codex", "name": "GPT-5.5-Codex", "description": "Tuned for long agentic coding", "efforts": ["low", "medium", "high", "xhigh"], "default_effort": "medium"},
+        {"id": "gpt-5.5-codex", "name": "GPT-5.5-Codex", "description": "Tuned for long agentic coding", "efforts": ["low", "medium", "high", "xhigh"], "default_effort": "medium", "service_tiers": [{"id": "default", "name": "Standard"}, {"id": "priority", "name": "Fast", "description": "Increased usage"}]},
         {"id": "gpt-5.5-mini", "name": "GPT-5.5-Mini", "description": "Smaller and cheaper", "efforts": ["low", "medium", "high"], "default_effort": "medium"},
     ]},
 }
@@ -15071,8 +15332,105 @@ def mock_peer_fold():
                          "有一件要你定：版本切换后搜索的范围。"))
 
 
-if os.environ.get("MOCK_PEER_FOLD") == "1":
+# Also with MOCK_PEER_FOLD=1 (or =live: its session pushed again every 1.5 s): work lines right under a long message from
+# another session, folded to a few lines with Expand (#6645: the folded words still took the long presses below the
+# card, so a long press on the answer under it lifted the card). A working Agent chat: the exchange reported (a tool
+# and a reply in its work line, 37 minutes long, a 2 KB answer); one with tools only; one with a reply only; then the
+# running one, its last tool still going. Synthetic text.
+PEER_FOLD = "a1f3c2d4-0000-4000-8000-000000006645"
+PEER_REPORT = ("合并队列的进展：\n"
+               "- 发布分支已经合上最新的主干，只有一个说明文件冲突，已经解决，不用变基。\n"
+               "- 打包脚本拆成构建和上传两步以后，构建在本机 3 分钟内跑完，上传单独重试。\n"
+               "- 弹窗的单测现在是 62 个，全部通过；界面测试还差两条，在跑。\n"
+               "- 要不要放进下一个小版本，由你和它定；我这边可以随时排进队列。\n"
+               "- 截图在 PR 里，深浅色各一套。\n"
+               "- 下一步：等界面测试跑完再报一次。\n"
+               "最后一行在这里。")
+# The reported exchange as the real one was shaped: a message from another session in English, folded to three lines;
+# a reply and the turn's end; 37 minutes later a background agent's result woke the agent (a wake tool_result, its call
+# on an earlier page), it sent a message, and a long answer came (about 2 KB, drawn in several rows).
+PEER_EN_REPORT = ("Got feature-split 1a2b3c4d. It merges onto the new main with only a .lane/REPORT.md conflict, so no "
+                  "rebase is needed. Whether it ships in the next patch release is up to you and the lead; I queued it "
+                  "behind the two open fixes. The popup count in PopupTests is now 62, all passing; two UI tests are "
+                  "still running and I will report again when they finish. Screenshots for light and dark are in the PR.")
+PEER_LONG_ANSWER = ("已经回复 release-worker，等它的界面测试结果。构建脚本的新版本也做完了，在 `core` 的 `build-split` 分支上，"
+                    "提交 `5e6f7a8b`，没有推送或合并；分支已经交给 release-worker 排进合并队列。\n\n"
+                    "**做了什么**\n"
+                    "- **拆分**：`release.sh` 现在分成构建和上传两步，上传失败只重试上传，不再从头构建；两步之间的产物放在 `dist/`，带校验和。\n"
+                    "- **结果**：原来一次失败要重跑 12 分钟，现在重试上传只要 40 秒；三次模拟的上传失败都在第二次重试时成功。\n"
+                    "- **没改 core 以外的文件**：守护进程和配置都不用改，旧的一步式命令还能用，会打印一行提示换成新命令。\n\n"
+                    "**验证**\n"
+                    "- 离线：`go build` 和 `go vet` 干净，`go test ./...` 全过（含新加的 9 个用例）。\n"
+                    "- 本机：完整走了一遍构建、上传、校验，产物和旧脚本逐字节一致。\n"
+                    "- 失败注入：上传中途断网三次，每次都只重试了上传，日志里能看到重试次数和耗时。\n"
+                    "- 兼容：旧的一步式命令在三台不同的构建机上各跑了一遍，结果和新命令一致，提示行也都打印出来了。\n"
+                    "- 回滚：把分支回退到拆分前再跑一遍，产物和拆分后的逐字节一致，说明拆分没有改动构建本身。\n\n"
+                    "**风险**\n"
+                    "- 上传那一步换了重试的写法，网络特别慢的时候第一次重试会等满 30 秒才开始，日志里会多一行等待提示，不影响结果。\n"
+                    "- 产物目录 `dist/` 现在会留到下一次构建开始才清，磁盘紧张的机器上要注意，我在说明里写了一句。\n"
+                    "- 旧命令的提示只打印一次，长期跑在定时任务里的机器可能看不到，建议发版说明里专门提一下。\n\n"
+                    "**还没做**\n"
+                    "- 文档里的发布步骤还是旧的一步式写法，等合并后一起改。\n"
+                    "- 签名证书下个月到期，下一次发版前要换，已经记进待办。\n"
+                    "- 是否放进下一个小版本，等你和 release-worker 定。")
+
+
+def mock_peer_fold_work():
+    items = [it("user", "text", 70, text="把发布脚本拆成构建和上传两步"),
+             *tool("Edit", {"file_path": "/Users/me/code/shop-app/scripts/release.sh", "old_string": "build && upload",
+                            "new_string": "build\nupload"}, "ok", 69),
+             it("assistant", "text", 68, text="拆好了：构建和上传现在是两步，上传失败只重试上传。")]
+    # The case reported, shaped as it was (see PEER_EN_REPORT): its work line reads "Tools 1 · Replies 1 · 37 min".
+    items += [it("user", "text", 62, text=PEER_EN_REPORT, **{"from": "release-worker"}),
+              it("assistant", "text", 61.9, text="先回它一句，说收到了；构建脚本那边还在后台跑，跑完再一起报。"),
+              it("system", "turn_duration", 61.9, turn_duration={"duration_ms": 7000}),
+              it("user", "tool_result", 25, tool_use_id="toolu_peer_fold_bg", text="构建脚本拆分完成，验证全过。", wake=True,
+                 task={"kind": "agent", "status": "completed", "title": "拆分构建脚本", "task_id": "bgsplit",
+                       "tool_use_id": "toolu_peer_fold_bg", "output_file": "/tmp/claude/bgsplit.output", "detail": "完成"}),
+              *tool("SendMessage", {"to": "release-worker", "message": "收到，界面测试跑完再报。"}, "sent", 24.8),
+              it("assistant", "text", 24.6, text=PEER_LONG_ANSWER),
+              it("system", "turn_duration", 24.6, turn_duration={"duration_ms": 26000})]
+    # Tools only.
+    items += [it("user", "text", 20, text=PEER_REPORT, **{"from": "docs-worker"}),
+              *tool("Read", {"file_path": "/Users/me/code/shop-app/docs/release.md"}, "# 发布", 19.6),
+              *tool("Bash", {"command": "git log --oneline -3", "description": "看最近的提交"}, "a1b2c3d 拆分发布脚本", 19.2),
+              it("assistant", "text", 18, text="发布文档和最近的提交都对得上，不用改。")]
+    # A reply only.
+    items += [it("user", "text", 15, text=PEER_REPORT, **{"from": "release-worker"}),
+              it("assistant", "text", 14.6, text="这条只是进展，不需要动手。"),
+              it("assistant", "text", 14, text="记下了，等它下一次报告。")]
+    # Running: a reply, a tool, then a tool still going.
+    items += [it("user", "text", 4, text=PEER_REPORT, **{"from": "docs-worker"}),
+              it("assistant", "text", 3.8, text="先跑一遍界面测试确认。"),
+              *tool("Bash", {"command": "npm run test:ui -- popup", "description": "跑弹窗的界面测试"}, "60 passed", 3.5),
+              it("assistant", "text", 3, text="还差两条，接着跑。"),
+              it("assistant", "tool_use", 2.9, tool_use_id="toolu_peer_fold_running", tool_name="Bash",
+                 tool_input={"command": "npm run test:ui -- popup --last-two", "description": "跑剩下两条"})]
+    ITEMS[PEER_FOLD] = items
+    SESSIONS.append(sess("macbook", PEER_FOLD, "发布脚本拆分", "/Users/me/code/shop-app", "working", "working", "shop-app", 22,
+                         "peers", 1, 0, "还差两条，接着跑。",
+                         background=[{"id": "bkload", "kind": "shell", "description": "压测第 1 轮", "command": "npm run load -- round1",
+                                      "output_file": "/tmp/claude/bkload.output", "started_at": ago(minutes=40)}]))
+
+
+def peer_fold_ticker():
+    """MOCK_PEER_FOLD=live: the session's row again every 1.5 s (a new rev and time, nothing else), as the hub sends it
+    while background work goes on: the reported chat was running when its work line would not open."""
+    while True:
+        time.sleep(1.5)
+        push = globals().get("push_machine")  # defined further down; the thread starts while the module still loads
+        if push is None:
+            continue
+        row = next(x for x in SESSIONS if x["session_id"] == PEER_FOLD)
+        row.update(updated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), rev=(row.get("rev") or 0) + 1)
+        push("macbook")
+
+
+if os.environ.get("MOCK_PEER_FOLD") in ("1", "live"):
     mock_peer_fold()
+    mock_peer_fold_work()
+    if os.environ.get("MOCK_PEER_FOLD") == "live":
+        threading.Thread(target=peer_fold_ticker, daemon=True).start()
 
 
 # MOCK_LONG_INPUT=1: your own long message folds (#5676): an Agent chat with a long pasted report (past 14 lines on a
@@ -18150,7 +18508,7 @@ def search_index_text(item):
         return None
     text = item.get("text") or ""
     if item.get("role") == "assistant":
-        text = search_card_text(text)
+        text = search_plain(search_card_text(text))
     elif item.get("role") == "user":
         if item.get("from") or item.get("injected"):
             return None
@@ -18165,26 +18523,142 @@ def search_index_text(item):
     return text if text.strip() else None
 
 
+# A reply's Markdown as the chat shows it (#7072): the manager's searchPlain (server/internal/assistant/search_text.go),
+# pattern for pattern; spec/fixtures/chat-search checks both.
+_PLAIN_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+_PLAIN_RULE = re.compile(r"^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")
+_PLAIN_TABLE_SEP = re.compile(r"^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$")
+_PLAIN_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+")
+_PLAIN_QUOTE = re.compile(r"^[ \t]{0,3}>[ \t]?")
+_PLAIN_LIST = re.compile(r"^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?")
+_PLAIN_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|>~<])")
+_PLAIN_INLINE = [
+    (re.compile(r"!\[([^\]\n]*)\]\([^)\n]*\)"), r"\1"),
+    (re.compile(r"\[([^\]\n]+)\]\([^)\n]*\)"), r"\1"),
+    (re.compile(r"\[([^\]\n]+)\]\[[^\]\n]*\]"), r"\1"),
+    (re.compile(r"<((?:https?|mailto):[^> \t\n]+)>"), r"\1"),
+    (re.compile(r"\*\*([^ \t\n*]|[^ \t\n*][^\n]*?[^ \t\n*])\*\*"), r"\1"),
+    (re.compile(r"(^|[^0-9A-Za-z_])__([^ \t\n_]|[^ \t\n_][^\n]*?[^ \t\n_])__($|[^0-9A-Za-z_])"), r"\1\2\3"),
+    (re.compile(r"~~([^~\n]+?)~~"), r"\1"),
+    (re.compile(r"\*([^ \t\n*]|[^ \t\n*][^*\n]*?[^ \t\n*])\*"), r"\1"),
+    (re.compile(r"(^|[^0-9A-Za-z_])_([^ \t\n_]|[^ \t\n_][^_\n]*?[^ \t\n_])_($|[^0-9A-Za-z_])"), r"\1\2\3"),
+]
+_PLAIN_ESCAPED = 0xE000
+
+
+def search_plain(md):
+    """A reply's Markdown as the chat shows it, without the markup (searchPlain)."""
+    if not any(c in md for c in "*_`#>[~|-+!<\\0123456789"):
+        return md
+    out, fence = [], ""
+    for line in md.split("\n"):
+        if fence:
+            t = line.strip()
+            if t.startswith(fence) and t.strip(fence[0]) == "":
+                fence = ""
+            else:
+                out.append(line)
+            continue
+        m = _PLAIN_FENCE.match(line)
+        if m:
+            fence = m.group(1)
+            continue
+        if _PLAIN_RULE.match(line) or _PLAIN_TABLE_SEP.match(line):
+            continue
+        line = _PLAIN_HEADING.sub("", line, count=1)
+        while _PLAIN_QUOTE.match(line):
+            line = _PLAIN_QUOTE.sub("", line, count=1)
+        line = _PLAIN_LIST.sub("", line, count=1)
+        t = line.strip()
+        if t.startswith("|"):
+            line = " ".join(c.strip() for c in t.strip("|").split("|"))
+        out.append(search_inline(line))
+    return "\n".join(out).strip()
+
+
+def search_code_span(s):
+    """The first code span: (where its backticks start, how many, where the closing run starts), or None."""
+    frm = 0
+    while True:
+        at = s.find("`", frm)
+        if at < 0:
+            return None
+        n = 0
+        while at + n < len(s) and s[at + n] == "`":
+            n += 1
+        j = at + n
+        while j < len(s):
+            k = s.find("`", j)
+            if k < 0:
+                break
+            m = 0
+            while k + m < len(s) and s[k + m] == "`":
+                m += 1
+            if m == n:
+                return at, n, k
+            j = k + m
+        frm = at + n
+
+
+def search_marks(s):
+    for r, w in _PLAIN_INLINE:
+        s = r.sub(w, s)
+        if w.endswith("\\3"):
+            s = r.sub(w, s)
+    return s
+
+
+def search_inline(line):
+    line = _PLAIN_ESCAPE.sub(lambda m: chr(_PLAIN_ESCAPED + ord(m.group(1))), line)
+    out = []
+    while line:
+        span = search_code_span(line)
+        if not span:
+            out.append(search_marks(line))
+            break
+        at, n, end = span
+        out.append(search_marks(line[:at]))
+        code = line[at + n:end]
+        if len(code) >= 2 and code[0] == " " and code[-1] == " " and code.strip(" "):
+            code = code[1:-1]
+        out.append(code)
+        line = line[end + n:]
+    return "".join(chr(ord(c) - _PLAIN_ESCAPED) if _PLAIN_ESCAPED <= ord(c) < _PLAIN_ESCAPED + 128 else c for c in "".join(out))
+
+
 def search_fold(s):
     return unicodedata.normalize("NFKC", s).lower()
+
+
+def search_fold_map(s):
+    """`s` folded a character at a time (`search_fold`), and for each folded character the index of the one it came
+    from: NFKC makes "…" three dots, so a cut snippet's folded text is longer than it (the manager's searchFoldRunes)."""
+    out, src = [], []
+    for i, ch in enumerate(s):
+        f = search_fold(ch)
+        out.append(f)
+        src.extend([i] * len(f))
+    return "".join(out), src
 
 
 def search_snippet(body, words):
     """The text around the first match on one line, "…" where cut, and every match's UTF-16 [start, end)."""
     start, end = 0, min(len(body), 120)
-    low = search_fold(body)
+    low, src = search_fold_map(body)
     for w in words:
         at = low.find(w)
-        if at >= 0 and len(low) == len(body):
-            start, end = max(0, at - 40), min(len(body), at + len(w) + 80)
+        if at >= 0:
+            first, last = src[at], src[at + len(w) - 1]
+            start, end = max(0, first - 40), min(len(body), last + 1 + 80)
             break
     snippet = ("…" if start else "") + " ".join(x.strip() for x in body[start:end].splitlines() if x.strip()) + ("…" if end < len(body) else "")
-    marked, low = [False] * len(snippet), search_fold(snippet)
+    marked = [False] * len(snippet)
+    low, src = search_fold_map(snippet)
     for w in words:
-        i = low.find(w) if len(low) == len(snippet) else -1
+        i = low.find(w)
         while i >= 0:
             for j in range(i, i + len(w)):
-                marked[j] = True
+                marked[src[j]] = True
             i = low.find(w, i + len(w))
     utf16 = [0]
     for ch in snippet:
@@ -19349,6 +19823,19 @@ LIVE = []  # (send, subscribed session ids) of each open WebSocket
 # GET /api/v1/messaging lists the source lark, /api/v1/messaging/lark/… answers in the protocol's shapes, the feature
 # messaging is on, every {type: lark} push goes out as {type: messaging} too.
 MOCK_MESSAGING = os.environ.get("MOCK_MESSAGING") == "1"
+# Settings › Inbox Sources › Source Relationships (`GET /api/v1/subscriptions/-/graph`, SourcesGraphView): one
+# extension's reads, two sources and the Inbox; `-openSourcesGraph YES`, then tap `graph.source.news` for its sheet.
+SOURCES_GRAPH = {
+    "extensions": [{"id": "mail", "name": "Mail", "line": "Two accounts"}],
+    "reads": [{"id": "mail.inbox", "extension": "mail", "title": "Inbox", "direct": True},
+              {"id": "mail.lists", "extension": "mail", "title": "Mailing lists", "push": True}],
+    "sources": [{"id": "news", "read": "mail.lists", "name": "Newsletters", "icon": "", "line": "Daily at 9:00",
+                 "badge": {"text": "On", "tone": "positive"}, "reading": True, "to": ["inbox"], "state": "active",
+                 "ask": "persona://assistant?q=newsletters"},
+                {"id": "work", "read": "mail.inbox", "name": "Work mail", "icon": "", "line": "As it arrives",
+                 "reading": True, "to": ["inbox"], "state": "active"}],
+    "destinations": [{"id": "inbox", "name": "Inbox", "line": "What needs you"}],
+}
 if MOCK_MESSAGING:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import lark_messaging
@@ -19537,6 +20024,124 @@ def zrle_rect(px, W, x, y, w, h, z):
                 out += b"\x00" + b"".join(cp(c) for c in tile)
     comp = z.compress(out) + z.flush(zlib.Z_SYNC_FLUSH)
     return struct.pack(">I", len(comp)) + comp
+
+
+# MOCK_SCREEN_VIDEO=1|missing (#3954): MacBook's node offers the live screen's video channel (`screen_video`; =missing:
+# Screen Recording isn't granted for Persona Screen), and …/screen/video/connect?pair=… plays
+# scripts/mock/screen_video/fixture.bin (a made-up desktop; make_fixture.sh makes it again) round and round at 30 fps:
+# `hello`, `format`, then its frames, numbered on and stamped with this clock. Only for a pair a 5900 connection carried
+# (else 403, as the node's not_signed_in). GET /mock/screen-video says what the phone sent (`start`s, report count) and
+# how many streams are open; …?drop=1 closes them all, ?refuse=1 refuses new ones (503, ?refuse=0 back), ?pause=locked
+# sends `paused` with that reason (no frames and no heartbeats, as the helper), ?resume=1 sends `resumed` and starts over
+# with `hello`, `format` and the keyframe.
+SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
+                "refuse": False}
+_SCREEN_VIDEO_FIXTURE = []
+
+
+def screen_video_fixture():
+    """The fixture's messages as (type, body), read once."""
+    if not _SCREEN_VIDEO_FIXTURE:
+        data = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "screen_video", "fixture.bin"), "rb").read()
+        i = 0
+        while i < len(data):
+            n = struct.unpack(">I", data[i:i + 4])[0]
+            _SCREEN_VIDEO_FIXTURE.append((data[i + 4], data[i + 5:i + 4 + n]))
+            i += 4 + n
+    return _SCREEN_VIDEO_FIXTURE
+
+
+def screen_video_control(h, q):
+    if q.get("drop", ["0"])[0] == "1":
+        for st in list(SCREEN_VIDEO["streams"]): st["open"] = False
+    if "refuse" in q: SCREEN_VIDEO["refuse"] = q["refuse"][0] == "1"
+    if "pause" in q:
+        for st in SCREEN_VIDEO["streams"]: st["pause"] = q["pause"][0]
+    if q.get("resume", ["0"])[0] == "1":
+        for st in SCREEN_VIDEO["streams"]: st["resume"] = True
+    h.send_json({"open": sum(1 for st in SCREEN_VIDEO["streams"] if st["open"]), "starts": SCREEN_VIDEO["starts"],
+                 "reports": SCREEN_VIDEO["reports"], "refuse": SCREEN_VIDEO["refuse"]})
+
+
+def screen_video_connect(h, mid):
+    """…/screen/video/connect?pair=…: the helper's side of the video channel, from the fixture (see MOCK_SCREEN_VIDEO)."""
+    pair = parse_qs(urlparse(h.path).query).get("pair", [""])[0]
+    if not pair: return h.send_json({"error": "a pair is required"}, 400)
+    if pair not in SCREEN_VIDEO["pairs"]:
+        return h.send_json({"error": "the paired screen-sharing stream has not signed in"}, 403)
+    if SCREEN_VIDEO["refuse"] or SCREEN_VIDEO["mode"] == "missing":
+        return h.send_json({"error": "no live-screen video helper on this node"}, 503)
+    key = h.headers.get("Sec-WebSocket-Key", "")
+    accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+    h.send_response(101, "Switching Protocols")
+    h.send_header("Upgrade", "websocket"); h.send_header("Connection", "Upgrade")
+    h.send_header("Sec-WebSocket-Accept", accept); h.end_headers(); h.wfile.flush()
+    st = {"open": True, "pause": None, "resume": False, "started": threading.Event()}
+    SCREEN_VIDEO["streams"].append(st)
+    lock = threading.Lock()
+
+    def ws(op, data):
+        n = len(data)
+        hdr = bytes([0x80 | op]) + (bytes([n]) if n < 126 else bytes([126]) + struct.pack(">H", n) if n < 65536 else bytes([127]) + struct.pack(">Q", n))
+        with lock:
+            h.wfile.write(hdr + data); h.wfile.flush()
+
+    def msg(t, body):
+        ws(0x2, struct.pack(">IB", len(body) + 1, t) + body)
+
+    def play():
+        msgs = screen_video_fixture()
+        hello, fmt, frames = msgs[0], msgs[1], msgs[2:]
+        if not st["started"].wait(10): st["open"] = False; return
+        number, i, restart = 0, 0, True
+        try:
+            while st["open"]:
+                if st["pause"]:
+                    msg(5, json.dumps({"reason": st["pause"]}).encode())
+                    st["pause"] = None
+                    while st["open"] and not st["resume"]: time.sleep(0.1)
+                if st["resume"]:
+                    st["resume"] = False
+                    msg(6, b"{}")
+                    restart = True
+                if restart: msg(*hello); msg(*fmt); i, restart = 0, False
+                body = frames[i][1]
+                number += 1
+                msg(3, struct.pack(">IQ", number, int(time.monotonic() * 1e6)) + body[12:])
+                i = (i + 1) % len(frames)
+                time.sleep(1 / 30)
+        except OSError:
+            pass
+        try: ws(0x8, struct.pack(">H", 1000))
+        except OSError: pass
+        st["open"] = False
+
+    threading.Thread(target=play, daemon=True).start()
+    buf, r = b"", h.rfile
+    try:
+        while st["open"]:
+            hd = r.read(2)
+            if len(hd) < 2: break
+            op = hd[0] & 0x0F; n = hd[1] & 0x7F
+            if n == 126: n = struct.unpack(">H", r.read(2))[0]
+            elif n == 127: n = struct.unpack(">Q", r.read(8))[0]
+            mask = r.read(4) if hd[1] & 0x80 else b"\0\0\0\0"
+            payload = bytes(b ^ mask[k % 4] for k, b in enumerate(r.read(n)))
+            if op == 8: break
+            if op == 9: ws(0xA, payload); continue
+            buf += payload
+            while len(buf) >= 4 and len(buf) >= 4 + struct.unpack(">I", buf[:4])[0]:
+                n = struct.unpack(">I", buf[:4])[0]
+                t, body, buf = buf[4], buf[5:4 + n], buf[4 + n:]
+                if t == 16:
+                    SCREEN_VIDEO["starts"].append(json.loads(body or b"{}"))
+                    st["started"].set()
+                elif t == 17:
+                    SCREEN_VIDEO["reports"] += 1
+    except OSError:
+        pass
+    st["open"] = False
+    h.close_connection = True
 
 
 def fake_screen_sharing():
@@ -20623,6 +21228,9 @@ def computer_of(machine_id, enabled):
     c = {"enabled": enabled, **COMPUTER_STATES.get(state, COMPUTER_STATES["ready"])}
     if machine_id == "macbook" and c.get("screen_sharing") and FAKE_NODE_DISPLAYS:
         c["displays"] = FAKE_NODE_DISPLAYS  # MOCK_SCREEN_DISPLAYS=2:node
+    if machine_id == "macbook" and c.get("screen_sharing") and SCREEN_VIDEO["mode"]:  # MOCK_SCREEN_VIDEO (#3954)
+        c["screen_video"] = {"version": 1, "codecs": ["hevc", "h264"],
+                             "permission": "missing" if SCREEN_VIDEO["mode"] == "missing" else "granted"}
     return c
 
 
@@ -22993,6 +23601,7 @@ class H(BaseHTTPRequestHandler):
         if preview_route and preview_route(self, "GET", p, q): return
         if p == "/api/v1/assistant/conversations/" + ASK1 + "/always":
             return self.send_json({"grants": ALWAYS_GRANTS})
+        if p == "/api/v1/subscriptions/-/graph": return self.send_json(SOURCES_GRAPH)
         if recordings_route(self, "GET", p): return
         if custom_models_route(self, "GET", p, q): return
         if managers_route(self, "GET", p): return
@@ -23135,6 +23744,9 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/ports": return self.send_json({"connects": PORT_LOG})
         if p == "/mock/lark/uploads": return self.send_json(LARK_UPLOAD_REPLIES)  # #1035: what each attachment quoted
         if MOCK_WEB and (p.startswith("/screen/") or p.startswith("/assets/")): return self.web_file(p)
+        if p == "/mock/screen-video": return screen_video_control(self, parse_qs(urlparse(self.path).query))
+        if SCREEN_VIDEO["mode"] and p.startswith("/api/v1/machines/") and p.endswith("/screen/video/connect"):
+            return screen_video_connect(self, p.split("/")[4])
         if p.startswith("/api/v1/machines/") and "/ports/" in p:
             parts = p.split("/")  # ['', 'api', 'v1', 'machines', mid, 'ports', port, ('connect')]
             port = int(parts[6]) if parts[6].isdigit() else 0
@@ -24829,7 +25441,8 @@ class H(BaseHTTPRequestHandler):
                                        "code": START_FAIL["code"], "delivered": "unknown", "retryable": False}, 502)
             body = json.loads(self.last_body or b"{}")
             prompt = body.get("prompt", "")
-            SENT.append({"text": prompt, "images": body.get("images"), **({"launcher": body["launcher"]} if body.get("launcher") else {})})
+            SENT.append({"text": prompt, "images": body.get("images"), **({"launcher": body["launcher"]} if body.get("launcher") else {}),
+                         **({"service_tier": body["service_tier"]} if body.get("service_tier") else {})})
             now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             sid = str(uuid.uuid4())
             session = assistant_sess(sid, "", 0, "")  # what the hub returns: no title, model or transcript rev yet
@@ -24841,6 +25454,16 @@ class H(BaseHTTPRequestHandler):
             session.update(machine_id=mid, **({"cwd": home + "/.persona/assistant"} if home and mid != "server" else {}))
             session.update(status="working", state="working", updated_at=now, launcher=body.get("launcher") or "claude",
                            permission_mode=body.get("permission_mode") or "", effort=body.get("effort") or "")
+            listed = next((m for m in LAUNCHER_MODELS.get(session["launcher"], {}).get("models", [])
+                           if m.get("id") == (body.get("model") or engine_default_model(session["launcher"]))), {})
+            tiers = listed.get("service_tiers") or []
+            requested_tier = body.get("service_tier")
+            if requested_tier and requested_tier not in {tier["id"] for tier in tiers}:
+                return self.send_json({"error": "This model cannot apply the requested service tier", "code": "assistant_service_tier_unsupported",
+                                       "delivered": "none", "retryable": False}, 409)
+            if tiers:
+                # thread/settings/update was acknowledged before the first turn: the response and sessions push agree.
+                session.update(service_tier=requested_tier or "default", service_tiers=copy.deepcopy(tiers))
             session["main"] = bool(body.get("main"))
             if body.get("space") == "health":
                 session.update(cwd="/home/me/.persona/health", space="health")
@@ -25662,6 +26285,8 @@ class H(BaseHTTPRequestHandler):
         except OSError:
             return self.send_json({"error": "nothing is listening on port %d" % port}, 404)
         PORT_LOG.append({"machine_id": mid, "port": port})
+        if port == 5900 and (pair := parse_qs(urlparse(self.path).query).get("pair", [""])[0]):
+            SCREEN_VIDEO["pairs"].add(pair)  # the video channel binds to it (MOCK_SCREEN_VIDEO, #3954)
         key = self.headers.get("Sec-WebSocket-Key", "")
         accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
         self.send_response(101, "Switching Protocols")
@@ -27915,7 +28540,7 @@ _features_without_model_pick = features
 
 
 def features():
-    return _features_without_model_pick() + (["assistant_model_pick"] if MODEL_PICK_MODE else [])
+    return _features_without_model_pick() + (["assistant_model_pick", "assistant_start_service_tier"] if MODEL_PICK_MODE else [])
 
 
 MOCK_HELP.append("MOCK_MODEL_PICK=1|picked  Persona 对话自己的模型（#5033）：features 带 assistant_model_pick；主对话的启动器（?purpose=assistant）带默认和 unavailable"

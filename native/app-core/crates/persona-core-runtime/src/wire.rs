@@ -5,13 +5,9 @@ use serde::{Deserialize, Serialize};
 
 pub use persona_core::continuity::Request;
 
-/// How the core is set up.
+/// How the core is set up. The continuity slice has no timers; reserved for later independently justified domains.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Config {
-    /// The client runs the timers: the core sends `Effect::StartTimer` and waits for `Action::TimerFired`. Tests use it
-    /// to replay waits without a clock; apps leave it off and the core's worker runs them.
-    pub manual_timers: bool,
-}
+pub struct Config {}
 
 /// Into the core, through `dispatch`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,9 +24,9 @@ pub enum Action {
         chat: String,
         event: ChatEvent,
     },
-    /// A timer the client ran (`Config::manual_timers`) ended.
-    TimerFired {
-        timer: u64,
+    /// Continue a chat's immediate fill, without waiting on a timer.
+    ContinueFill {
+        chat: String,
     },
 }
 
@@ -104,10 +100,8 @@ pub enum ChatEvent {
 /// Out of the core, through the client's `run` callback.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Effect {
-    /// A request for the client to send. Never `Request::ScheduleFill`: the core runs those itself.
+    /// A request for the client to send.
     Fetch { chat: String, request: Request },
-    /// Only with `Config::manual_timers`: start a timer and dispatch `Action::TimerFired` when it ends.
-    StartTimer { timer: u64, delay_ms: u32 },
     /// An action the core could not use. A bug in the client or the core; never shown to the user as is.
     Rejected { reason: String },
 }
@@ -133,6 +127,12 @@ pub enum ListOp {
     },
     /// `json` is the hub's item exactly as received.
     Insert {
+        index: u32,
+        id: String,
+        json: String,
+    },
+    /// A repeated id has a new full item, as in iOS's `ChatStore.merge`.
+    Update {
         index: u32,
         id: String,
         json: String,

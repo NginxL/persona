@@ -445,6 +445,9 @@ func (s *Service) replyInboxDoMode(ctx context.Context, id, text, clientID strin
 	kept := !file && it.open() || it.open() && it.Last != c.Last
 	// A direct reply with a processing conversation waits for the other side instead of filing the matter. Old-App
 	// card sends keep filing. If new messages arrived while the reply was out, the existing kept-open path is unchanged.
+	if followDirect && !fromCard && file {
+		resetInboxFollowChecks(it)
+	}
 	wait := followDirect && !fromCard && file && !kept && it.open() && it.Agent != nil && it.Agent.SessionID != ""
 	kept = kept || wait
 	once.keptOpen = kept

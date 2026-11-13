@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"testing"
 	"time"
 )
@@ -119,5 +120,48 @@ func TestAssistantSearchIndex(t *testing.T) {
 	}
 	if n, _ := d.SearchReset(ctx); n != 2 {
 		t.Fatalf("a purge counted as a reset: %d", n)
+	}
+}
+
+// 0513 (#7072) empties the index built before replies were kept without Markdown, and counts a reset as
+// `assistant search-reindex` does, so a running manager reads every conversation again; over a database with no index
+// it writes nothing (a new manager's own database stays empty until the move fills it).
+func TestAssistantSearchPlainMigrationEmptiesTheIndex(t *testing.T) {
+	ctx := context.Background()
+	d, err := Open(ctx, freshDatabase(t), ManagerSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	sql, err := fs.ReadFile(migrations, "migrations/manager/0513_assistant_search_plain.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.SearchReset(ctx); err != nil || n != 0 {
+		t.Fatalf("no index, yet resets %d, %v", n, err)
+	}
+	row := SearchItemRow{Seq: 1, ItemID: "i1#0", Role: "assistant", TS: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Body: "**粗**", Folded: "**粗**"}
+	if err := d.PutSearchItems(ctx, "server", "trip", "h1", 1, []SearchItemRow{row}, false); err != nil {
+		t.Fatal(err)
+	}
+	before, err := d.SearchReset(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal(err)
+	}
+	cursors, err := d.SearchCursors(ctx)
+	if err != nil || len(cursors) != 0 {
+		t.Fatalf("cursors %+v, %v", cursors, err)
+	}
+	if hits, err := d.SearchAssistantItems(ctx, []string{"server"}, []string{"trip"}, []string{"粗"}, 5); err != nil || len(hits) != 0 {
+		t.Fatalf("hits %+v, %v", hits, err)
+	}
+	if n, err := d.SearchReset(ctx); err != nil || n != before+1 {
+		t.Fatalf("resets %d (before %d), %v", n, before, err)
 	}
 }

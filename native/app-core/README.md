@@ -33,6 +33,11 @@ the library and replay the same fixtures through the real JNI binding:
 cd android && ./gradlew :core:rustcore:test
 ```
 
+Android's production packaging lives in `:core:rustcore-android`, leaving the JVM/JNI replay above intact. Its pinned
+NDK 29.0.14206865 / direct LLVM build, ABI sizes, uncompressed 16 KB packaging and real device fixture replay are
+described in `android/core/rustcore-android/README.md`. `scripts/build-android.sh` produces both ABIs without
+`cargo-ndk`; the Gradle task declares the core inputs so unchanged sources do not recompile Rust.
+
 ## Rules
 
 - **A wire type change ships with its regenerated codecs.** Never edit generated files by hand.

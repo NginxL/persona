@@ -1,22 +1,22 @@
 //! Runs persona-core on one worker thread (docs/plans/plan-rust-core.md, "A deterministic core").
 //!
 //! - `dispatch` only queues an action's bytes, so a client may call it on its main thread.
-//! - The worker applies actions, runs timers, sends requests to the client and builds each chat's patch.
+//! - The worker applies actions, sends requests to the client and builds each chat's patch.
 //! - `changed` wakes the client once per batch of changes; the client then pulls the patch with `drain` on its next
 //!   frame, so a burst of pushes reaches the screen as one patch.
 
 pub mod wire;
 
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use persona_core::Item;
-use persona_core::continuity::{Batch, Request, Session, Step};
-use wire::{Action, ChatEvent, ChatPatch, ChatSnapshot, Config, Effect, ListOp, WireBatch};
+use persona_core::continuity::{Batch, Session, Step};
+use wire::{Action, ChatEvent, ChatPatch, ChatSnapshot, Effect, ListOp, WireBatch};
 
 /// The client's side: called on the core's worker thread, so implementations must be thread-safe and quick.
 pub trait Host: Send + Sync + 'static {
@@ -42,9 +42,9 @@ struct Shared {
 #[derive(Default)]
 struct Patches {
     version: u64,
-    /// Woken since the last drain.
-    woken: bool,
     chats: HashMap<String, ChatPatch>,
+    /// Chats whose latest changes have not been drained. One chat's drain cannot consume another's wake-up.
+    woken: HashSet<String>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -58,13 +58,13 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(config: Config, host: Arc<dyn Host>) -> Runtime {
+    pub fn new(host: Arc<dyn Host>) -> Runtime {
         let (sender, receiver) = channel();
         let shared = Arc::new(Shared::default());
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("persona-core".into())
-            .spawn(move || Worker::new(config, host, worker_shared).run(receiver))
+            .spawn(move || Worker::new(host, worker_shared).run(receiver))
             .expect("start the core's worker thread");
         Runtime {
             sender,
@@ -88,7 +88,7 @@ impl Runtime {
     pub fn drain(&self, chat: &str) -> Vec<u8> {
         let patch = {
             let mut patches = lock(&self.shared.patches);
-            patches.woken = false;
+            patches.woken.remove(chat);
             match patches.chats.get_mut(chat) {
                 Some(patch) => {
                     let ops = std::mem::take(&mut patch.ops);
@@ -144,47 +144,25 @@ struct Chat {
 }
 
 struct Worker {
-    config: Config,
     host: Arc<dyn Host>,
     shared: Arc<Shared>,
     chats: HashMap<String, Chat>,
-    /// Deadline and timer id, earliest first.
-    timers: BinaryHeap<std::cmp::Reverse<(Instant, u64)>>,
-    timer_chats: HashMap<u64, String>,
-    next_timer: u64,
 }
 
 impl Worker {
-    fn new(config: Config, host: Arc<dyn Host>, shared: Arc<Shared>) -> Worker {
+    fn new(host: Arc<dyn Host>, shared: Arc<Shared>) -> Worker {
         Worker {
-            config,
             host,
             shared,
             chats: HashMap::new(),
-            timers: BinaryHeap::new(),
-            timer_chats: HashMap::new(),
-            next_timer: 1,
         }
     }
 
     fn run(mut self, receiver: Receiver<Message>) {
         loop {
-            let message = match self.timers.peek() {
-                Some(std::cmp::Reverse((deadline, _))) => {
-                    match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                        Ok(message) => Some(message),
-                        Err(RecvTimeoutError::Timeout) => None,
-                        Err(RecvTimeoutError::Disconnected) => return,
-                    }
-                }
-                None => match receiver.recv() {
-                    Ok(message) => Some(message),
-                    Err(_) => return,
-                },
-            };
-            match message {
-                Some(Message::Stop) => return,
-                Some(Message::Action(bytes)) => {
+            match receiver.recv() {
+                Ok(Message::Stop) | Err(_) => return,
+                Ok(Message::Action(bytes)) => {
                     self.guarded(|worker| worker.action(&bytes));
                     let mut pending = lock(&self.shared.pending);
                     *pending = pending.saturating_sub(1);
@@ -192,7 +170,6 @@ impl Worker {
                         self.shared.idle.notify_all();
                     }
                 }
-                None => self.guarded(Worker::due_timers),
             }
         }
     }
@@ -239,8 +216,9 @@ impl Worker {
             }
             Action::CloseChat { chat } => {
                 self.chats.remove(&chat);
-                lock(&self.shared.patches).chats.remove(&chat);
-                self.timer_chats.retain(|_, c| *c != chat);
+                let mut patches = lock(&self.shared.patches);
+                patches.chats.remove(&chat);
+                patches.woken.remove(&chat);
             }
             Action::Chat { chat, event } => {
                 let Some(state) = self.chats.get_mut(&chat) else {
@@ -252,49 +230,22 @@ impl Worker {
                 };
                 self.after_step(&chat, step);
             }
-            Action::TimerFired { timer } => self.fire(timer),
-        }
-    }
-
-    fn due_timers(&mut self) {
-        let now = Instant::now();
-        while let Some(std::cmp::Reverse((deadline, timer))) = self.timers.peek().copied() {
-            if deadline > now {
-                break;
+            Action::ContinueFill { chat } => {
+                let Some(state) = self.chats.get_mut(&chat) else {
+                    return self.reject(format!("fill for a chat that is not open: {chat}"));
+                };
+                let step = state.session.continue_fill();
+                self.after_step(&chat, step);
             }
-            self.timers.pop();
-            self.fire(timer);
         }
-    }
-
-    fn fire(&mut self, timer: u64) {
-        let Some(chat) = self.timer_chats.remove(&timer) else {
-            return;
-        };
-        let Some(state) = self.chats.get_mut(&chat) else { return };
-        let step = state.session.fill_timer();
-        self.after_step(&chat, step);
     }
 
     fn after_step(&mut self, chat: &str, step: Step) {
         for request in step.requests {
-            match request {
-                Request::ScheduleFill { delay_ms } => {
-                    let timer = self.next_timer;
-                    self.next_timer += 1;
-                    self.timer_chats.insert(timer, chat.to_owned());
-                    if self.config.manual_timers {
-                        self.host.run(&wire::encode(&Effect::StartTimer { timer, delay_ms }));
-                    } else {
-                        let deadline = Instant::now() + Duration::from_millis(delay_ms.into());
-                        self.timers.push(std::cmp::Reverse((deadline, timer)));
-                    }
-                }
-                request => self.host.run(&wire::encode(&Effect::Fetch {
-                    chat: chat.to_owned(),
-                    request,
-                })),
-            }
+            self.host.run(&wire::encode(&Effect::Fetch {
+                chat: chat.to_owned(),
+                request,
+            }));
         }
         self.publish(chat);
     }
@@ -327,9 +278,9 @@ impl Worker {
                 patches.version += 1;
                 let version = patches.version;
                 patches.chats.get_mut(chat).expect("patch inserted above").version = version;
-                let first = !patches.woken;
-                patches.woken = true;
-                first.then_some(version)
+                // Every real change wakes this chat, even if a previous frame's patch is still pending. The client
+                // coalesces at its frame boundary; another chat's drain cannot consume this chat's notification.
+                Some(version)
             }
         };
         if let Some(version) = wake {
@@ -391,32 +342,29 @@ fn apply(session: &mut Session, event: ChatEvent) -> Result<Step, String> {
     })
 }
 
-/// The list operations that turn `old` into `new`. Items are compared by identity: an item stays the same `Arc` for
-/// as long as it stays in the chat, and items that stay keep their relative order, so removals then insertions are
-/// enough. Removals go from the end so each index refers to the list as it is at that point.
+/// The list operations that turn `old` into `new`. Identical items retain their Arc. Removals go from the end;
+/// a changed item with the same position and id is an Update, preserving its native list identity.
 fn diff(old: &[Arc<Item>], new: &[Arc<Item>]) -> Vec<ListOp> {
     let common = old.iter().zip(new).take_while(|(a, b)| Arc::ptr_eq(a, b)).count();
-    if common == old.len() {
-        // Appends only: the usual case while a chat streams.
-        return new[common..]
-            .iter()
-            .enumerate()
-            .map(|(i, item)| insert(common + i, item))
-            .collect();
-    }
-    let kept: HashSet<*const Item> = new.iter().map(Arc::as_ptr).collect();
     let mut ops = Vec::new();
-    let mut survivors = Vec::with_capacity(old.len());
+    for index in common..old.len().min(new.len()) {
+        if old[index].id == new[index].id && old[index].seq == new[index].seq && old[index].part() == new[index].part()
+        {
+            ops.push(update(index, &new[index]));
+        }
+    }
+    let kept: HashSet<*const Item> = new.iter().skip(common).map(Arc::as_ptr).collect();
+    let mut survivors = Vec::new();
     for (index, item) in old.iter().enumerate().rev() {
-        if kept.contains(&Arc::as_ptr(item)) {
+        if index >= common && kept.contains(&Arc::as_ptr(item)) {
             survivors.push(item);
-        } else {
+        } else if index >= common {
             ops.push(ListOp::Remove { index: index as u32 });
         }
     }
     survivors.reverse();
     let mut next = 0;
-    for (index, item) in new.iter().enumerate() {
+    for (index, item) in new.iter().enumerate().skip(common) {
         if next < survivors.len() && Arc::ptr_eq(survivors[next], item) {
             next += 1;
         } else {
@@ -443,6 +391,14 @@ fn insert(index: usize, item: &Item) -> ListOp {
     }
 }
 
+fn update(index: usize, item: &Item) -> ListOp {
+    ListOp::Update {
+        index: index as u32,
+        id: item.id.clone(),
+        json: item.json().to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +415,7 @@ mod tests {
                     list.remove(*index as usize);
                 }
                 ListOp::Insert { index, id, .. } => list.insert(*index as usize, id.clone()),
+                ListOp::Update { index, id, .. } => list[*index as usize] = id.clone(),
             }
         }
         list

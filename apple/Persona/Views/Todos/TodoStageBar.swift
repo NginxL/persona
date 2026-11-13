@@ -5,67 +5,37 @@ import SwiftUI
 /// draws nothing, so the page only shows this when `TodoItem.todoStage` is set. The steps before the current one are
 /// done, the ones after it are still ahead — the same reading as the stage bar in the Feishu report (#2768).
 ///
-/// At the accessibility text sizes six names in a sixth of the width each all ended in "…" (#5892,
-/// `docs/design/HIG_AUDIT.md` HIG-027): there the dots are drawn as they are, without names, and one line under them
-/// names the current step and its place ("Step 2 of 6 · Develop"), wrapping if it must. VoiceOver reads each dot in full
-/// there (`dotLabel`); the line, which says the same, is hidden from it. Below those sizes nothing changes.
+/// The interface stops at xxxLarge (`docs/design/DESIGN_SYSTEM.md`, "Dynamic Type"), so the six names always fit their
+/// sixth of the width; the AX-size layout (dots without names, a "Step 2 of 6" line) is gone.
 struct TodoStageBar: View {
     var stage: TodoStage
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// The current step's place among the six, from zero.
     private var current: Int { stage.stepNumber - 1 }
 
     var body: some View {
-        if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                // The dots and their lines in the columns the names have below these sizes.
-                let steps = TodoStage.allCases
-                HStack(spacing: .zero) {
-                    ForEach(steps.indices, id: \.self) { index in
-                        HStack(spacing: .zero) {
-                            connector(reached: index <= current, shown: index > 0)
-                            dot(at: index)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel(Self.dotLabel(steps[index], current: stage))
-                                .accessibilityIdentifier("todo.stage." + steps[index].rawValue)
-                            connector(reached: index < current, shown: index < steps.count - 1)
-                        }
-                        .frame(maxWidth: .infinity)
+        let steps = TodoStage.allCases
+        HStack(spacing: .zero) {
+            ForEach(steps.indices, id: \.self) { index in
+                VStack(spacing: Theme.Space.xs) {
+                    HStack(spacing: .zero) {
+                        connector(reached: index <= current, shown: index > 0)
+                        dot(at: index)
+                        connector(reached: index < current, shown: index < steps.count - 1)
                     }
+                    Text(steps[index].label)
+                        .font(index == current ? Theme.Font.captionStrong : Theme.Font.caption)
+                        .foregroundStyle(index == current ? Theme.accent : (index < current ? Color.primary : Color.secondary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .multilineTextAlignment(.center)
                 }
-                Text(Self.summary(stage))
-                    .font(Theme.Font.captionStrong)
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityHidden(true)
+                .frame(maxWidth: .infinity)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("todo.stage")
-        } else {
-            let steps = TodoStage.allCases
-            HStack(spacing: .zero) {
-                ForEach(steps.indices, id: \.self) { index in
-                    VStack(spacing: Theme.Space.xs) {
-                        HStack(spacing: .zero) {
-                            connector(reached: index <= current, shown: index > 0)
-                            dot(at: index)
-                            connector(reached: index < current, shown: index < steps.count - 1)
-                        }
-                        Text(steps[index].label)
-                            .font(index == current ? Theme.Font.captionStrong : Theme.Font.caption)
-                            .foregroundStyle(index == current ? Theme.accent : (index < current ? Color.primary : Color.secondary))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Stage: \(stage.label) (step \(stage.stepNumber) of \(TodoStage.stepCount))")
-            .accessibilityIdentifier("todo.stage")
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stage: \(stage.label) (step \(stage.stepNumber) of \(TodoStage.stepCount))")
+        .accessibilityIdentifier("todo.stage")
     }
 
     /// The line under the dots at the accessibility sizes: the current step and where it is among the six. Each

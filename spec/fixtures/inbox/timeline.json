@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "operation": "inbox_timeline",
-  "description": "An item's timeline (its chain) in the detail. With via, icon is a meaning in spec/icons/meanings.json (agents, persona, person, reported), or 'source': the item's own source mark (its brand or the app's generic source icon; for a via that names another source, that source's mark). A reported step always draws reported, whatever its via, and is drawn apart from the program's steps. Without via (entries from before), icon is the iPhone's Theme.Icon name for the kind (kind_icons_without_via): each app keeps the icon it draws for that kind today, and these names are not all in meanings.json. An Agent step also shows the Agent's live state from the app's session list (running, stopped, asking), not covered here.",
+  "description": "An item's timeline (its chain) in the detail. With via, icon is a meaning in spec/icons/meanings.json (agents, persona, person, reported), or 'source': the item's own source mark (its brand or the app's generic source icon; for a via that names another source, that source's mark). A reported step always draws reported, whatever its via, and is drawn apart from the program's steps: the app shows its own label (Assistant says) with the entry's detail, the assistant's own words; text carries the same label for apps from before, so it is used only when detail is empty. Without via (entries from before), icon is the iPhone's Theme.Icon name for the kind (kind_icons_without_via): each app keeps the icon it draws for that kind today, and these names are not all in meanings.json. An Agent step also shows the Agent's live state from the app's session list (running, stopped, asking), not covered here.",
   "via_icons": {
     "<a source id>": "source",
     "assistant": "persona",
@@ -89,8 +89,9 @@
               "id": "c5",
               "at": "2026-01-01T11:20:00Z",
               "kind": "reported",
-              "text": "Sent an email: quote corrected",
-              "via": "agent"
+              "text": "Assistant says: Sent an email: quote corrected",
+              "via": "agent",
+              "detail": "Sent an email: quote corrected"
             },
             {
               "id": "c6",

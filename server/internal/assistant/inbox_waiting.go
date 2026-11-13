@@ -93,10 +93,30 @@ func defaultInboxFollow(now time.Time) *InboxFollow {
 	return &InboxFollow{CheckAt: &at}
 }
 
-// waitForOtherSide records what the item waits on and a server-written chain entry. Rewriting a follow keeps Checks
-// (only new messages reset them) and clears Due. clearTurn drops an interrupted turn's wake and restoration state when
-// this reply or follow is its outcome; a confirmed reply keeps any newer work that arrived while it was being sent.
-// Under b.mu.
+// ensureInboxFollowCheckAt keeps a waiting matter scheduled. A due check clears CheckAt before waking the processing
+// conversation; a turn that only updates the recap, times out or ends idle therefore gets the default next time.
+func ensureInboxFollowCheckAt(it *InboxItem, now time.Time) {
+	if it.Follow == nil {
+		it.Follow = defaultInboxFollow(now)
+		return
+	}
+	if it.Follow.CheckAt == nil {
+		at := now.Add(inboxFollowDefault).UTC()
+		it.Follow.CheckAt = &at
+	}
+}
+
+// resetInboxFollowChecks starts the no-news count over when the user takes the matter back into their own hands.
+func resetInboxFollowChecks(it *InboxItem) {
+	if it.Follow != nil {
+		it.Follow.Checks, it.Follow.Due = 0, false
+	}
+}
+
+// waitForOtherSide records what the item waits on and a server-written chain entry. The processing conversation's own
+// rewrite keeps Checks (new messages and user actions reset them before calling this) and clears Due. clearTurn drops
+// an interrupted turn's wake and restoration state when this reply or follow is its outcome; a confirmed reply keeps
+// any newer work that arrived while it was being sent. Under b.mu.
 func (b *inboxBook) waitForOtherSide(it *InboxItem, follow *InboxFollow, via string, now time.Time, loc *time.Location, clearTurn bool) {
 	if it.Follow != nil {
 		follow.Checks = it.Follow.Checks

@@ -72,5 +72,17 @@
   "loading_older": "Loading…",
   "older_failed": "Couldn't load older items: {error}",
   "subscriptions": "Subscriptions",
-  "sources": "Inbox Sources"
+  "sources": "Inbox Sources",
+  "merge": "Merge",
+  "merged_from_one": "Merged",
+  "merged_from_other": "Merged from {count} rows",
+  "todo_hour": "1 hour later",
+  "todo_today": "Today, all day",
+  "todo_pick": "Pick a date and time",
+  "todo_none": "No due date",
+  "todo_title_one": "Add to to-dos",
+  "todo_title_other": "Add {count} rows to to-dos",
+  "todo_add": "Add",
+  "todo_add_short": "Add to to-dos",
+  "todo_due": "Due"
 }

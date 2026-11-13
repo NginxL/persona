@@ -32,6 +32,11 @@ packages:
   # Vision apps, not the watch or widgets.
   PersonaKit:
     path: Packages/PersonaKit
+  # The live screen's video channel (#3954, docs/extensions/computer-use.md「Live screen video (#3954)」): its wire codec, shared
+  # with Persona Link's helper. The iOS app only; Mac and Vision compile the same sources and skip it with
+  # `#if os(iOS) && canImport`, and the watch and widgets never see it.
+  PersonaScreenKit:
+    path: Packages/PersonaScreenKit
   # The composer's glow while a reply is generating (Settings › Appearance › Glow While Replying, `ComposerGlow`): the iOS
   # app only. Mac and Vision compile the same sources and skip it with `#if os(iOS) && canImport`.
   MarqueeGlow:
@@ -80,6 +85,7 @@ targets:
       - package: PersonaSSH
       - package: PersonaKit
       - package: MarqueeGlow
+      - package: PersonaScreenKit
     entitlements:
       path: Persona/Resources/Persona.entitlements
       properties:

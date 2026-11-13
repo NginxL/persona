@@ -1,5 +1,5 @@
-//! When a chat asks the hub for lines: the settling delay before filling a gap, at most eight catch-up pages before
-//! the latest page instead, reconnect subscriptions, older history and an opened fold's pages. No clocks or transport:
+//! When a chat asks the hub for lines: immediate catch-up with an in-flight gate, at most eight pages before the
+//! latest page instead, reconnect subscriptions, older history and an opened fold's pages. No clocks or transport:
 //! the caller runs the requests and reports their results as events.
 
 use serde::{Deserialize, Serialize};
@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use super::reducer::{Batch, Gap, Reducer};
 use crate::item::Item;
 
-/// The settling delay before a gap is filled. A scheduling constant, not a measured latency.
-pub const FILL_DELAY_MS: u32 = 1_500;
 /// Catch-up pages before giving up and fetching the latest page.
 pub const MAX_FILL_PAGES: u32 = 8;
 /// Pages of one opened fold before publishing what arrived.
@@ -17,10 +15,6 @@ pub const MAX_RANGE_PAGES: u32 = 100;
 /// A request the chat makes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Request {
-    /// Wait, then fill the gap from whatever `covered` is by then.
-    ScheduleFill {
-        delay_ms: u32,
-    },
     FetchAfter {
         after_seq: i64,
     },
@@ -100,21 +94,21 @@ impl Session {
         }
     }
 
+    /// iOS starts a fill as soon as it finds a gap. An already-running fill is not duplicated: its pages re-read
+    /// `covered`, and `heard` / `asked` make a move heard in flight get another page when this one ends.
     fn settle(&mut self, gap: Gap) -> Vec<Request> {
         match gap {
             Gap::None => Vec::new(),
             Gap::Fill => {
                 self.heard += 1;
-                vec![Request::ScheduleFill {
-                    delay_ms: FILL_DELAY_MS,
-                }]
+                self.continue_fill().requests
             }
             Gap::Reload => vec![Request::FetchLatest { fold_work: true }],
         }
     }
 
-    /// The settling delay ended. Reads `covered` now, even if a backlog already closed the gap.
-    pub fn fill_timer(&mut self) -> Step {
+    /// Continues an existing fill, or starts one now from the current `covered`.
+    pub fn continue_fill(&mut self) -> Step {
         if self.filling {
             return Step::default();
         }
@@ -133,13 +127,16 @@ impl Session {
     pub fn after(&mut self, mut batch: Batch) -> Step {
         batch.backlog = false;
         batch.has_more = None;
+        let covered_before = self.reducer.covered();
+        let to_seq = batch.to_seq;
         let gap = self.reducer.apply(batch);
         self.fill_pages += 1;
-        // A move heard while this page was on its way may be past it: one more page reads it.
+        let progressed = self.reducer.covered() > covered_before || to_seq.is_some_and(|to| to > covered_before);
+        // A late capped page whose range is already covered must not request the same position again.
         let again = gap == Gap::None && self.behind();
         let requests = if gap == Gap::Reload || (gap == Gap::Fill || again) && self.fill_pages >= MAX_FILL_PAGES {
             vec![Request::FetchLatest { fold_work: true }]
-        } else if gap == Gap::Fill || again {
+        } else if (gap == Gap::Fill && progressed) || again {
             vec![Request::FetchAfter {
                 after_seq: self.reducer.covered(),
             }]

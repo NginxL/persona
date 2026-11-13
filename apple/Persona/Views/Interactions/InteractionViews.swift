@@ -283,7 +283,6 @@ struct CardFormKeepsEnd: PreferenceKey {
 /// so a long question never hides the conversation it is about.
 struct InteractionPanel: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var typeSize
     var interaction: Interaction
     @State private var collapsed = false
     @State private var formHeight: CGFloat = 0
@@ -394,9 +393,8 @@ struct InteractionPanel: View {
             ThemedIcon(interaction.symbol)
                 .font(Theme.Font.labelStrong)
                 .foregroundStyle(StatusPalette.needsYou.dot)
-            // Whole at the largest text sizes too: there the title takes up to three lines (#2970).
             Text(panelTitle).font(Theme.Font.labelStrong).foregroundStyle(StatusPalette.needsYou.text)
-                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                .lineLimit(1)
             VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
             if collapsed {
                 Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)

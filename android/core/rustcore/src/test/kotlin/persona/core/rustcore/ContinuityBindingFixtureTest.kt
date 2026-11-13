@@ -1,6 +1,5 @@
 package persona.core.rustcore
 
-import java.util.ArrayDeque
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -51,7 +50,7 @@ class ContinuityBindingFixtureTest(private val name: String, private val fixture
         val input = case.getValue("input").jsonObject
         val initial = input.getValue("initial").jsonObject
         val host = Recorder()
-        RustCore(Config(manual_timers = true), host).use { core ->
+        RustCore(Config(), host).use { core ->
             val snapshot = ChatSnapshot(
                 initial.itemsJson(), initial.text("history"), initial.number("covered")!!,
                 initial.boolean("has_more"), initial.flag("loaded_once"),
@@ -60,8 +59,7 @@ class ContinuityBindingFixtureTest(private val name: String, private val fixture
             val list = mutableListOf<String>()
             core.step(list)
             host.effects.clear()
-            val timers = ArrayDeque<ULong>()
-            val events = input.getValue("events").jsonArray
+                    val events = input.getValue("events").jsonArray
             val expected = case.getValue("expected").jsonArray
             assertEquals("$name: step count", events.size, expected.size)
             events.forEachIndexed { index, raw ->
@@ -82,7 +80,7 @@ class ContinuityBindingFixtureTest(private val name: String, private val fixture
                     "reconnect" -> chat(ChatEvent.Reconnected)
                     "load_older" -> chat(ChatEvent.LoadOlder)
                     "open_fold" -> chat(ChatEvent.OpenFold(requireNotNull(event.text("fold_id"))))
-                    "fill_timer" -> Action.TimerFired(timers.removeFirst())
+                    "continue_fill" -> Action.ContinueFill(CHAT)
                     else -> error("$label: unknown event $kind")
                 }
                 assertTrue("$label dispatch", core.dispatch(action))
@@ -92,10 +90,6 @@ class ContinuityBindingFixtureTest(private val name: String, private val fixture
                         is Effect.Fetch -> {
                             assertEquals(CHAT, effect.chat)
                             effect.request.json()
-                        }
-                        is Effect.StartTimer -> {
-                            timers.addLast(effect.timer)
-                            Request.ScheduleFill(effect.delay_ms).json()
                         }
                         is Effect.Rejected -> error("$label: rejected: ${effect.reason}")
                     }
@@ -120,6 +114,7 @@ class ContinuityBindingFixtureTest(private val name: String, private val fixture
             when (op) {
                 is ListOp.Remove -> list.removeAt(op.index.toInt())
                 is ListOp.Insert -> list.add(op.index.toInt(), op.json)
+                is ListOp.Update -> list[op.index.toInt()] = op.json
             }
         }
         return patch
@@ -139,7 +134,6 @@ private fun chat(event: ChatEvent): Action = Action.Chat("fixture/continuity", e
 
 private fun Request.json(): JsonObject = buildJsonObject {
     when (val request = this@json) {
-        is Request.ScheduleFill -> { put("kind", "schedule_fill"); put("delay_ms", request.delay_ms.toLong()) }
         is Request.FetchAfter -> { put("kind", "fetch_after"); put("after_seq", request.after_seq) }
         is Request.FetchLatest -> { put("kind", "fetch_latest"); put("fold_work", request.fold_work) }
         is Request.Subscribe -> {

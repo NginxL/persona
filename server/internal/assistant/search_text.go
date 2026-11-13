@@ -39,7 +39,8 @@ func searchIndexText(it proto.Item) (string, bool) {
 	var text string
 	switch it.Role {
 	case "assistant":
-		text = wire.AssistantCardText(it.Text) // a card as its fallback words, never its JSON
+		// a card as its fallback words, never its JSON; the rest as the chat shows it, without Markdown's markup (#7072)
+		text = searchPlain(wire.AssistantCardText(it.Text))
 	case "user":
 		if it.From != "" || searchInjected(it) {
 			return "", false // another session's message, or Persona's to the model: not the user's words
@@ -76,6 +77,150 @@ func searchUserText(s string) string {
 	s = searchImageNumRe.Regexp().ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 	return strings.TrimSpace(searchActionRe.Regexp().ReplaceAllString(s, ""))
+}
+
+// A reply's Markdown as the chat shows it (#7072): the patterns searchPlain takes the markup away with. The mock hub
+// (scripts/mock/mock_hub.py search_plain) keeps the same rule; spec/fixtures/chat-search checks both.
+var (
+	searchFenceRe    = lazyre.New("^[ \t]{0,3}(`{3,}|~{3,})")
+	searchRuleRe     = lazyre.New(`^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$`)
+	searchTableSepRe = lazyre.New(`^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$`)
+	searchHeadingRe  = lazyre.New(`^[ \t]{0,3}#{1,6}[ \t]+`)
+	searchQuoteRe    = lazyre.New(`^[ \t]{0,3}>[ \t]?`)
+	searchListRe     = lazyre.New(`^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?`)
+	searchEscapeRe   = lazyre.New("\\\\([\\\\`*_{}\\[\\]()#+\\-.!|>~<])")
+	// in order: images and links keep their text, autolinks their address, then emphasis keeps its words
+	searchInlineRes = []struct {
+		re   *lazyre.Regexp
+		with string
+	}{
+		{lazyre.New(`!\[([^\]\n]*)\]\([^)\n]*\)`), "$1"},
+		{lazyre.New(`\[([^\]\n]+)\]\([^)\n]*\)`), "$1"},
+		{lazyre.New(`\[([^\]\n]+)\]\[[^\]\n]*\]`), "$1"},
+		{lazyre.New(`<((?:https?|mailto):[^> \t\n]+)>`), "$1"},
+		{lazyre.New(`\*\*([^ \t\n*]|[^ \t\n*][^\n]*?[^ \t\n*])\*\*`), "$1"},
+		{lazyre.New(`(^|[^0-9A-Za-z_])__([^ \t\n_]|[^ \t\n_][^\n]*?[^ \t\n_])__($|[^0-9A-Za-z_])`), "$1$2$3"},
+		{lazyre.New(`~~([^~\n]+?)~~`), "$1"},
+		{lazyre.New(`\*([^ \t\n*]|[^ \t\n*][^*\n]*?[^ \t\n*])\*`), "$1"},
+		{lazyre.New(`(^|[^0-9A-Za-z_])_([^ \t\n_]|[^ \t\n_][^_\n]*?[^ \t\n_])_($|[^0-9A-Za-z_])`), "$1$2$3"},
+	}
+)
+
+// searchPlain is a reply's Markdown as the chat shows it: code fence lines, rules and table separators dropped (the
+// code kept), heading, quote, list and task-box markers taken off each line, a table row's cells joined with spaces,
+// then searchInline on each line. Snippets are cut from what it returns, so no marker shows in one.
+func searchPlain(md string) string {
+	if !strings.ContainsAny(md, "*_`#>[~|-+!<\\0123456789") {
+		return md
+	}
+	lines := strings.Split(md, "\n")
+	out := lines[:0]
+	fence := "" // the open code fence's marker, "" outside one
+	for _, line := range lines {
+		if fence != "" {
+			if t := strings.TrimSpace(line); strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "" {
+				fence = ""
+			} else {
+				out = append(out, line)
+			}
+			continue
+		}
+		if m := searchFenceRe.Regexp().FindStringSubmatch(line); m != nil {
+			fence = m[1]
+			continue
+		}
+		if searchRuleRe.Regexp().MatchString(line) || searchTableSepRe.Regexp().MatchString(line) {
+			continue
+		}
+		line = searchHeadingRe.Regexp().ReplaceAllString(line, "")
+		for searchQuoteRe.Regexp().MatchString(line) {
+			line = searchQuoteRe.Regexp().ReplaceAllString(line, "")
+		}
+		line = searchListRe.Regexp().ReplaceAllString(line, "")
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "|") {
+			cells := strings.Split(strings.Trim(t, "|"), "|")
+			for i, c := range cells {
+				cells[i] = strings.TrimSpace(c)
+			}
+			line = strings.Join(cells, " ")
+		}
+		out = append(out, searchInline(line))
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// searchEscaped stands for a backslash-escaped character while the markup is taken off, so `\*` stays a star.
+const searchEscaped = 0xE000
+
+// searchInline is a line without its inline markup: a code span keeps what is inside it, as it is; the text around
+// it loses link, image and emphasis syntax; an escaped character is itself.
+func searchInline(line string) string {
+	line = searchEscapeRe.Regexp().ReplaceAllStringFunc(line, func(m string) string { return string(rune(searchEscaped + int(m[1]))) })
+	var b strings.Builder
+	for line != "" {
+		at, n, end, ok := searchCodeSpan(line)
+		if !ok {
+			b.WriteString(searchMarks(line))
+			break
+		}
+		b.WriteString(searchMarks(line[:at]))
+		code := line[at+n : end]
+		if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.Trim(code, " ") != "" {
+			code = code[1 : len(code)-1]
+		}
+		b.WriteString(code)
+		line = line[end+n:]
+	}
+	return strings.Map(func(r rune) rune {
+		if r >= searchEscaped && r < searchEscaped+128 {
+			return r - searchEscaped
+		}
+		return r
+	}, b.String())
+}
+
+// searchCodeSpan finds the first code span in s: where its opening backticks start, how many there are, and where its
+// closing run (as many backticks, no more) starts; false when there is none.
+func searchCodeSpan(s string) (at, n, end int, ok bool) {
+	from := 0
+	for {
+		i := strings.IndexByte(s[from:], '`')
+		if i < 0 {
+			return 0, 0, 0, false
+		}
+		at = from + i
+		n = 0
+		for at+n < len(s) && s[at+n] == '`' {
+			n++
+		}
+		for j := at + n; j < len(s); {
+			k := strings.IndexByte(s[j:], '`')
+			if k < 0 {
+				break
+			}
+			k += j
+			m := 0
+			for k+m < len(s) && s[k+m] == '`' {
+				m++
+			}
+			if m == n {
+				return at, n, k, true
+			}
+			j = k + m
+		}
+		from = at + n // backticks with no closing run are themselves
+	}
+}
+
+// searchMarks is text outside code spans without link, image and emphasis syntax.
+func searchMarks(s string) string {
+	for _, r := range searchInlineRes {
+		s = r.re.Regexp().ReplaceAllString(s, r.with)
+		if strings.HasSuffix(r.with, "$3") {
+			s = r.re.Regexp().ReplaceAllString(s, r.with) // a match takes the character between two: again for the next
+		}
+	}
+	return s
 }
 
 // searchFold is what a search matches: NFKC (full and half width alike) and lower case.

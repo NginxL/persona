@@ -180,7 +180,8 @@ struct RecordingMinutesSections: View {
     /// The hub has this revision of its text (Regenerate needs the whole transcript there).
     var synced: Bool
     var jump: (Double) -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
+    /// The size its words read at: the row's layout follows them, not the interface's cap.
+    @Environment(\.readingTypeSize) private var reading
 
     var body: some View {
         switch model.state {
@@ -297,10 +298,10 @@ struct RecordingMinutesSections: View {
     }
 
     /// A point, decision, action item or open question: its words, who and by when, its time; `below` under the words (an
-    /// action item's Add to To-Dos). At the accessibility sizes the time goes under the words, which then have the row's
+    /// action item's Add to To-Dos). At the accessibility reading sizes the time goes under the words, which then have the row's
     /// width: beside it they broke every three characters and Add to To-Dos read "+ …" (#4062).
     private func row<Below: View>(_ item: RecordingMinutes.Item, _ symbol: String, @ViewBuilder below: () -> Below) -> some View {
-        let large = typeSize.isAccessibilitySize
+        let large = reading?.isAccessibilitySize == true
         return HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             ThemedIcon(symbol).font(Theme.Font.secondary).foregroundStyle(Theme.accent)
                 .scaledFrame(width: Theme.Size.iconXS)
@@ -337,18 +338,12 @@ struct RecordingMinutesSections: View {
 
 /// The minutes' Copy and Share: Markdown rendered on the phone (`RecordingMinutes.text`), headed by the minutes' title or
 /// else the recording's name. In the minutes' sections, and on iPhone under the Summary | Transcript switch, where they
-/// stay whichever view shows (#5026). At the accessibility sizes they stack, so neither is cut to "…".
+/// stay whichever view shows (#5026).
 struct RecordingMinutesActions: View {
     var entry: RecordingEntry
     var minutes: RecordingMinutes
-    @Environment(\.dynamicTypeSize) private var typeSize
-
     var body: some View {
-        // At the accessibility sizes one above the other: side by side, both read "…".
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
-            : AnyLayout(HStackLayout(spacing: Theme.Space.m))
-        layout {
+        HStack(spacing: Theme.Space.m) {
             Button { copy() } label: { Label("Copy", systemImage: Theme.Icon.copy).lineLimit(1) }
                 .themedButton()
                 .accessibilityIdentifier("minutes-copy")

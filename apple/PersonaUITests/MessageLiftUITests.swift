@@ -769,6 +769,49 @@ final class MessageLiftUITests: XCTestCase {
         }
     }
 
+    /// The long answer's last sentence (mock data).
+    private static let lastSentence = "有问题的话告诉我具体哪一页，我再调整。"
+
+    /// A long press on a word of the lifted long answer's last line selects that word, under the finger (#6552: at
+    /// xxxLarge it selected the start of a list item four lines up, at AX5 a space): at the default text size, at
+    /// xxxLarge and at AX5, since a message's words grow past the interface's largest size (#6448).
+    @MainActor func testALongPressOnTheLastLineOfALongAnswerSelectsThePressedWord() throws {
+        inEachScheme {
+            for (size, tag) in [("", ""), ("UICTContentSizeCategoryXXXL", "-xxxl"), ("UICTContentSizeCategoryAccessibilityXXXL", "-ax5")] {
+                app = XCUIApplication()
+                launch(long, ["-showLiftLines", "YES", "-openChatsFresh", "YES", "-openDraftsFresh", "YES"]
+                    + (size.isEmpty ? [] : ["-UIPreferredContentSizeCategoryName", size]))
+                liftTheLongAnswerAtItsEnd()
+                let end = lifted.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "有问题的话告诉我")).firstMatch
+                XCTAssertTrue(shows(end), "\(tag): the pressed line shows")
+                let press = CGPoint(x: end.frame.minX + 12, y: end.frame.maxY - 12)
+                pressInLift(press)
+                XCTAssertTrue(menuItem("拷贝").waitForExistence(timeout: 5), "\(tag): no edit menu:\n\(app.debugDescription)")
+                sleep(1)
+                attachLiftLines("last-line" + tag)
+                shot("last-line" + tag)
+                let p = picked()
+                XCTAssertTrue(p.lines.contains { $0.insetBy(dx: -4, dy: -4).contains(press) },
+                              "\(tag): the selection \(p.lines) is under the press \(press)")
+                menuItem("拷贝").tap()
+                XCTAssertTrue(app.textViews["lift-text"].waitForNonExistence(timeout: 3), "\(tag): 拷贝 put the answer back")
+                let copied = pasted().trimmingCharacters(in: .whitespacesAndNewlines)
+                XCTAssertFalse(copied.isEmpty, "\(tag): nothing was selected")
+                XCTAssertTrue(Self.lastSentence.contains(copied), "\(tag): the word selected is the pressed one, in 「\(Self.lastSentence)」: \(copied)")
+            }
+        }
+    }
+
+    /// What `-showLiftLines` says (the lines in the chat, the lifted copy and the text view, and what is selected), as
+    /// an attachment: where a selection lands against the words it lies over.
+    @MainActor private func attachLiftLines(_ name: String) {
+        let e = app.descendants(matching: .any)["lift-lines"].firstMatch
+        let a = XCTAttachment(string: e.waitForExistence(timeout: 3) ? (e.value as? String ?? "") : "no lift-lines")
+        a.name = "lift-lines-\(name)-\(scheme)"
+        a.lifetime = .keepAlways
+        add(a)
+    }
+
     /// A short answer, as before: lifted where it is, all of it; Copy copies it.
     @MainActor func testALongPressOnAShortAnswerLiftsAndCopiesIt() throws {
         inEachScheme {

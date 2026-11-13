@@ -25,6 +25,31 @@ class AssistantSearchRuleTests(unittest.TestCase):
             with self.subTest(case["name"]):
                 self.assertEqual(mock["search_index_text"](case["item"]), case["index"])
 
+    def test_a_reply_is_indexed_without_markdown(self):
+        # the manager's searchPlain cases (server/internal/assistant/search_text_test.go, #7072), the same answers
+        mock = runpy.run_path(str(HERE / "mock_hub.py"))
+        for md, want in [
+            ("2. **照片同步脚本**（Mac Studio）", "照片同步脚本（Mac Studio）"),
+            ("- [ ] 待办：~~旧的~~ 新的\n  * 嵌套 _斜体_ 项", "待办：旧的 新的\n嵌套 斜体 项"),
+            ("见 [文档](https://example.com/a_b) 和 ![图](x.png) 和 [引用][1]", "见 文档 和 图 和 引用"),
+            ("用 `**args` 和 `` a ` b `` 调用", "用 **args 和 a ` b 调用"),
+            ("```go\nx := 1 // **keep**\n```\n后面 **粗**", "x := 1 // **keep**\n后面 粗"),
+            ("| a | b |\n|---|---|\n| 1 | 2 |\n\n***", "a b\n1 2"),
+            ("2 * 3 * 4，snake_case_name，\\*星\\*，未闭合的 ` 反引号", "2 * 3 * 4，snake_case_name，*星*，未闭合的 ` 反引号"),
+        ]:
+            with self.subTest(md):
+                self.assertEqual(mock["search_plain"](md), want)
+        self.assertEqual(mock["search_index_text"]({"role": "user", "kind": "text", "text": "**不是** Markdown"}), "**不是** Markdown")
+
+    def test_a_cut_snippet_keeps_its_ranges(self):
+        # NFKC makes the leading "…" three dots: the ranges still point at the match in the snippet as sent (#7045)
+        mock = runpy.run_path(str(HERE / "mock_hub.py"))
+        body = "早" * 60 + "照片同步脚本（Ｍac）😀 Ａfter"
+        snippet, ranges = mock["search_snippet"](body, ["照片同步脚本", "after"])
+        self.assertTrue(snippet.startswith("…"))
+        utf16 = snippet.encode("utf-16-le")
+        self.assertEqual([utf16[a * 2:b * 2].decode("utf-16-le") for a, b in ranges], ["照片同步脚本", "Ａfter"])
+
 
 class AssistantSearchMockTests(unittest.TestCase):
     @classmethod

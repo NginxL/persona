@@ -9,6 +9,8 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     var account: String
     var accountName: String
     var title: String
+    /// Where the matter happens: a chat name, the other person in a direct chat, or a repository. Older hubs leave it out.
+    var `where`: String? = nil
     var sender: String?
     var avatar: String?
     var preview: String
@@ -59,6 +61,9 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     var recap: String?
     var handling: Handling?
     var suggestion: Suggestion?
+    /// What the matter waits on and when to look again. `now` is the manager's state key; clients put it in words.
+    var follow: Follow? = nil
+    var now: String? = nil
     var chain: [ChainEntry]?
     /// A done item listed with only its newest chain entry (the app asks with `chain=last`, #4742): how many it has.
     /// GET /api/v1/inbox/{id} has them all (InboxChainSection reads it when the item opens). nil: `chain` is all of it.
@@ -67,6 +72,24 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     /// The conversations it was handed to with Hand to AI's main chat (#1194), oldest first: they may write back to
     /// it, and the main conversation offers "Wrap up" for it (#5932). Older hubs leave it out.
     var handoffs: [Handoff]?
+
+    /// The follow-up facts a client reads (spec/fixtures/inbox/now.json); the manager keeps the counters and due flag.
+    nonisolated struct Follow: Codable, Hashable, Sendable {
+        var who: String?
+        var next: String?
+        var checkAt: Date?
+
+        init(who: String? = nil, next: String? = nil, checkAt: Date? = nil) {
+            self.who = who
+            self.next = next
+            self.checkAt = checkAt
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case who, next
+            case checkAt = "check_at"
+        }
+    }
 
     /// One hand-off of the item to a conversation (POST /api/v1/inbox/{id}/handoff).
     nonisolated struct Handoff: Codable, Hashable, Sendable {
@@ -283,8 +306,8 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, source, kind, account, title, sender, avatar, preview, count, tier, summary, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
-        case status, urgent, recap, handling, suggestion, chain, related, manager, handoffs
+        case id, source, kind, account, title, `where`, sender, avatar, preview, count, tier, summary, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
+        case status, urgent, recap, handling, suggestion, follow, now, chain, related, manager, handoffs
         case accountName = "account_name", startedAt = "started_at", updatedAt = "updated_at", doneAt = "done_at", doneBy = "done_by"
         case chainCount = "chain_count"
     }

@@ -41,12 +41,52 @@ struct TodosModeBar<ListControls: View>: View {
     @ViewBuilder var listControls: ListControls
     @StoredValue("todos.calendar.showDone") private var showDone = true
 
+    private var viewChoice: some View {
+        SegmentedChoice(String(localized: "View"), [(value: TodosViewMode.list, label: String(localized: "List")), (value: .calendar, label: String(localized: "Calendar"))], selection: $view)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier("todos.view")
+    }
+
+    private var modeChoice: some View {
+        SegmentedChoice(String(localized: "Calendar"), TodoCalendarMode.allCases.map { (value: $0, label: $0.label) }, selection: $mode)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier("todo.calendar.mode")
+    }
+
+    private var optionsMenu: some View {
+        Menu {
+            Toggle(String(localized: "Show Done"), isOn: $showDone)
+        } label: {
+            ThemedIcon(Theme.Icon.options)
+        }
+        .menuStyle(.button)
+        .themedButton()
+        .accessibilityLabel(Text("Calendar Options"))
+        .accessibilityIdentifier("todo.calendar.options")
+    }
+
     var body: some View {
+        if view == .calendar {
+            // At the interface's largest size the three controls do not fit one row: the day / week / month choice drops under.
+            ViewThatFits(in: .horizontal) {
+                bar
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    HStack(spacing: Theme.Space.m) { viewChoice; Spacer(minLength: Theme.Space.s); optionsMenu }
+                    modeChoice
+                }
+                .padding(.horizontal, Theme.Space.page)
+                .padding(.vertical, Theme.Space.xs)
+            }
+        } else {
+            bar
+        }
+    }
+
+    private var bar: some View {
         HStack(spacing: Theme.Space.m) {
-            SegmentedChoice(String(localized: "View"), [(value: TodosViewMode.list, label: String(localized: "List")), (value: .calendar, label: String(localized: "Calendar"))], selection: $view)
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityIdentifier("todos.view")
+            viewChoice
             Spacer(minLength: Theme.Space.s)
             if view == .list, let grouping {
                 // A grouping control, not a filter chip (docs/design/DESIGN_SYSTEM.md "List controls").
@@ -67,19 +107,8 @@ struct TodosModeBar<ListControls: View>: View {
                 .accessibilityIdentifier("todos.grouping")
             }
             if view == .calendar {
-                SegmentedChoice(String(localized: "Calendar"), TodoCalendarMode.allCases.map { (value: $0, label: $0.label) }, selection: $mode)
-                    .labelsHidden()
-                    .fixedSize()
-                    .accessibilityIdentifier("todo.calendar.mode")
-                Menu {
-                    Toggle(String(localized: "Show Done"), isOn: $showDone)
-                } label: {
-                    ThemedIcon(Theme.Icon.options)
-                }
-                .menuStyle(.button)
-                .themedButton()
-                .accessibilityLabel(Text("Calendar Options"))
-                .accessibilityIdentifier("todo.calendar.options")
+                modeChoice
+                optionsMenu
             } else {
                 listControls
             }
@@ -263,7 +292,7 @@ struct TodoCalendarView: View {
             // a phone's week ("Nov 8 – 14" with the buttons beside it) steps down a size rather than cut its dates
             ViewThatFits(in: .horizontal) {
                 Text(title).font(Theme.Font.title)
-                Text(title).font(Theme.Font.heading)
+                Text(title).font(Theme.Font.heading).minimumScaleFactor(0.6)
             }
             .lineLimit(1)
             .accessibilityElement(children: .ignore)

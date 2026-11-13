@@ -151,6 +151,10 @@ type Engine struct {
 	clock func() time.Time
 	// jobLeft is how long a recap job has left (tests); nil: until its context's deadline.
 	jobLeft func(ctx context.Context) time.Duration
+	// minutesCall and minutesPart are the transcript runes the minutes read in one call and in one part of a long
+	// meeting (tests; zero: minutesOneCall and minutesChunk): the behaviour check sends a short meeting through the
+	// merging call.
+	minutesCall, minutesPart int
 }
 
 // Retries are the knowledge base steps' failures and when each may be tried again (retrySet, one per step).

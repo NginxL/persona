@@ -869,7 +869,7 @@ struct AssistantSidebar: View {
                         }
                         conversations(all, archived: archived)
                     } else {
-                        results(AssistantSidebarSearch.filter(all, ui.query, names: model.directionNames))
+                        results(searchRows(all))
                     }
                 }
                 #if os(macOS)
@@ -913,6 +913,7 @@ struct AssistantSidebar: View {
                 }
             }
         }
+        .modifier(AskChatSearch(ui: ui))
     }
 
     #if os(iOS)
@@ -934,6 +935,7 @@ struct AssistantSidebar: View {
                     }
                 }
             }
+            .modifier(AskChatSearch(ui: ui))
     }
 
     /// The main conversation, held over the list as the web's is (#5581): it never scrolls away. A line under it.
@@ -973,7 +975,7 @@ struct AssistantSidebar: View {
                 } tally: { EmptyView() }
                 if !chatsFolded { conversations(all, archived: archived) }
             } else {
-                results(AssistantSidebarSearch.filter(all, ui.query, names: model.directionNames))
+                results(searchRows(all))
             }
         }
         .listRowInsets(EdgeInsets(top: 0, leading: Theme.Space.s, bottom: 0, trailing: Theme.Space.s))
@@ -1056,6 +1058,22 @@ enum AssistantSidebarPart {
     var autoList: AutoConversationsRoute?
     /// Lazy: made when the sidebar first lists, not as a view's state is set up (docs/apple/performance.md, P3).
     @ObservationIgnored lazy var feed = SidebarFeed()
+    /// What was said in the chats, found by the manager (#6284), merged into the title / last-message matches. Lazy (P3):
+    /// made by the first search; it is observable itself, so the results redraw when its answer comes.
+    @ObservationIgnored lazy var chatSearch = AssistantChatSearch()
+}
+
+/// Asks the manager for what was said in the chats as the search's words change (#6284): on the part that holds the
+/// search field (the whole sidebar, or the Sidebar layout's head), so one query asks once.
+private struct AskChatSearch: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let ui: AssistantSidebarUI
+
+    func body(content: Content) -> some View {
+        content.onChange(of: ui.query) { _, q in
+            ui.chatSearch.search(q, api: model.api, on: model.features(model.hub?.group ?? "").contains(AssistantChatSearch.feature))
+        }
+    }
 }
 
 /// The sheets and dialogs an `AssistantSidebar`'s rows open, around the sidebar (or the Sidebar layout's column).
@@ -1560,7 +1578,14 @@ extension AssistantSidebar {
         }
     }
 
-    @ViewBuilder private func results(_ hits: [Session]) -> some View {
+    /// The search's rows: the local matches, and once the manager answers, its results first (archived chats too).
+    private func searchRows(_ all: [Session]) -> [AssistantSearchMerge.Row] {
+        let local = AssistantSidebarSearch.filter(all, ui.query, names: model.directionNames)
+        guard let answer = ui.chatSearch.answer(for: ui.query) else { return local.map { AssistantSearchMerge.Row(session: $0) } }
+        return AssistantSearchMerge.rows(local: local, answer: answer, known: all + model.archivedConversations)
+    }
+
+    @ViewBuilder private func results(_ hits: [AssistantSearchMerge.Row]) -> some View {
         if hits.isEmpty {
             VStack(spacing: Theme.Space.sm) {
                 ThemedIcon(Theme.Icon.search).font(Theme.Font.title).foregroundStyle(.tertiary)
@@ -1570,7 +1595,13 @@ extension AssistantSidebar {
             .padding(.top, 40)
         } else {
             heading(String(localized: "\(hits.count) Chats [Assistant Sidebar a72a2a]")) { EmptyView() }
-            ForEach(hits) { row($0, named: model.directionNames[$0.sessionID]) }
+            if ui.chatSearch.answer(for: ui.query)?.partial == true {
+                Text("Still going through older chats; some may not show yet.")
+                    .font(Theme.Font.label).foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.m)
+                    .accessibilityIdentifier("sidebar-search-partial")
+            }
+            ForEach(hits) { r in row(r.session, named: model.directionNames[r.session.sessionID], said: r.hit) }
         }
     }
 
@@ -1671,7 +1702,8 @@ extension AssistantSidebar {
     /// A conversation: a round mark (Persona's face for the main one), its title on one line, its state on the right.
     /// `named`: a direction's name, shown instead of its leader conversation's title.
     /// `drawsShade` false: a direction's row with its fold chevron beside it, which draws the shade across both (#4352).
-    private func row(_ s: Session, named: String? = nil, drawsShade: Bool = true) -> some View {
+    /// `said`: the message a search found it by (#6284), shown under its title and opened at.
+    private func row(_ s: Session, named: String? = nil, drawsShade: Bool = true, said: AssistantSearchAnswer.Hit? = nil) -> some View {
         let selected = s.key == current
         let isMain = s.key == model.assistantMain
         // The main conversation and the hub's built-in background supervisor (#5083) stay: no Archive, Pin or End.
@@ -1687,7 +1719,10 @@ extension AssistantSidebar {
         let leadWorking = direction?.running ?? false
         // What opened it when Persona did (#5195): the rule All Chats' filters use, so its mark and its filter agree.
         let source = isMain ? nil : AutoConversations.source(of: s, tasks: taskChats.known(on: model.api))
-        return Button { open(s.key) } label: {
+        return Button {
+            if let said { model.messageJump = MessageJump(key: s.key, item: said.itemID) }
+            open(s.key)
+        } label: {
             HStack(spacing: Theme.Space.m) {
                 // The shell's list is ChatGPT's: titles only, all in one column (the marks made it busy); the main
                 // conversation (only in search results here) keeps the app's logo, as its first row has it (#2004).
@@ -1698,7 +1733,15 @@ extension AssistantSidebar {
                 } else {
                     ConversationMark(id: s.sessionID)
                 }
-                titleText(title, named: !isMain)
+                if let said {
+                    VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                        titleText(title, named: !isMain)
+                        SearchSaidLine(hit: said)
+                            .accessibilityIdentifier("sidebar-search-said")
+                    }
+                } else {
+                    titleText(title, named: !isMain)
+                }
                 ConversationSourceMark(source: source, channels: s.channels) // what opened it, or its latest message's channel
                 Spacer(minLength: Theme.Space.xs)
                 // What waits on you under a direction ("N need you", #4331); what runs is the mark after it (#6626).
@@ -1721,8 +1764,9 @@ extension AssistantSidebar {
         .buttonStyle(.plain)
         .tag(s.key)
         .macListRow(selected: selected, in: Rectangle(), drawsShade: false) // the row draws its own (`selectedFill`)
+        // a row a search found by a message says the manager's whole snippet in the last message's place (#6284)
         .accessibilityLabel([title, counts, isMain && s.title != title ? s.title : nil, source?.markLabel, stateWord(s, under: leadWorking),
-                             preview.isEmpty ? nil : preview]
+                             said?.snippet ?? (preview.isEmpty ? nil : preview)]
             .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(isMain ? "sidebar-main" : "sidebar-conversation")

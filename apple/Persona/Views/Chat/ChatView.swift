@@ -1546,9 +1546,10 @@ struct ChatView: View {
             // The line right after the last input: the start of what the agent did and said for it.
             if let i = lines.lastIndex(where: \.isInput), i + 1 < lines.count { id = lines[i + 1].id }
         case .message(let item):
-            // A hub link's message: brought to the middle and lit up, as a quote's is; further up than what is
-            // loaded, older pages the same way as for a saved place; not found, the chat stays at the newest.
-            if jumpToQuoted(ContextRef(kind: "quote", title: "", url: "", text: "", msg: item)) {
+            // A hub link's or a search result's message (#6284): brought to the middle and lit up as a quote's is, a
+            // little longer, as the chat has just opened (`landingHold`); further up than what is loaded, older pages
+            // the same way as for a saved place; not found, the chat stays at the newest.
+            if jumpToQuoted(ContextRef(kind: "quote", title: "", url: "", text: "", msg: item), hold: Theme.Quote.landingHold) {
                 entry = nil
             } else if store.backlogBuilt {
                 if store.hasMore, scratch.entryPages < Self.entryPageLimit { searchOlderForEntry() } else { entry = nil }
@@ -2324,7 +2325,8 @@ struct ChatView: View {
     /// From a quote in a sent bubble to the message it quotes (#986): brought to the middle of the list and lit up
     /// for a moment. False when it is not in the loaded chat (an older page, another conversation): the block shows
     /// its whole text instead.
-    private func jumpToQuoted(_ ref: ContextRef) -> Bool {
+    /// `hold`: how long the message stays lit (`Theme.Quote.landingHold` where the chat opened at it).
+    private func jumpToQuoted(_ ref: ContextRef, hold: Duration = Theme.Quote.flashHold) -> Bool {
         if ref.isForward { return openForwarded(ref) }
         if openContextLink(ref) { return true }
         guard ref.kind == "quote", !ref.msg.isEmpty else { return false }
@@ -2356,7 +2358,7 @@ struct ChatView: View {
             try? await Task.sleep(for: .milliseconds(120)) // an opened work line's steps are laid out first
             withAnimation(Theme.Motion.standard) { position.scrollTo(id: target, anchor: .center) }
             try? await Task.sleep(for: .milliseconds(250))
-            quoteFlash = QuoteFlashMark(line: target)
+            quoteFlash = QuoteFlashMark(line: target, hold: hold)
         }
         return true
     }
@@ -2838,7 +2840,7 @@ struct ChatView: View {
                     #if os(iOS)
                     .pickable(Self.pickBar(line), mark: Self.pickMark(line), pick: pick, selecting: pick.on, refused: pickRefused)
                     #endif
-                    .background { if quoteFlash?.line == line.id { QuoteFlash().id(quoteFlash?.id) } }
+                    .background { if let flash = quoteFlash, flash.line == line.id { QuoteFlash(hold: flash.hold).id(flash.id) } }
                     .flippedBack()
                     .debugLineY(line.id, scratch)
                     .landingFrame(line.id == landing, scratch)
@@ -6117,7 +6119,6 @@ struct TerminalCover: View {
 /// page and resumes it there (#5521), as the web's line does; the words go above the two buttons, which stay on one line.
 private struct StoppedAgentBar: View {
 #if os(iOS)
-    @Environment(\.dynamicTypeSize) private var typeSize
     var session: Session
     var coordinator: CodexTakeoverCoordinator
 #endif
@@ -6136,10 +6137,7 @@ private struct StoppedAgentBar: View {
                     CodexTakeoverControl(session: session, coordinator: coordinator, onSession: onSession)
                 }
                 if let resume {
-                    // At accessibility sizes, stack the actions so neither label is cut short.
-                    let buttons = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
-                        : AnyLayout(HStackLayout(spacing: Theme.Space.s))
-                    buttons {
+                    HStack(spacing: Theme.Space.s) {
                         terminal
                         Button(action: resume) {
                             Label("Resume Session", systemImage: Theme.Icon.resume).font(Theme.Font.labelStrong).lineLimit(1)
@@ -6238,7 +6236,6 @@ struct QueueStrip: View {
     @State private var relayedExpanded = false
     /// One row's height with its spacing, as drawn (it follows the text size and the rows' line counts).
     @State private var rowHeight: CGFloat = 0
-    @Environment(\.dynamicTypeSize) private var typeSize
     private static let visibleRows: CGFloat = 3
 
     var body: some View {
@@ -6253,24 +6250,11 @@ struct QueueStrip: View {
             .padding(.top, Theme.Space.sm)
         } label: {
             Group {
-                if typeSize.isAccessibilitySize {
-                    // Side by side, Send Now (which keeps its width) left the title a few points and took the tap that
-                    // opens the strip (#4846): at these sizes the title wraps and Send Now has the line under it.
-                    VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
-                            tray
-                            title.multilineTextAlignment(.leading) // the label centers wrapped lines
-                        }
-                        sendNowButton
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: Theme.Space.sm) {
-                        tray
-                        title.lineLimit(1)
-                        Spacer(minLength: 0)
-                        sendNowButton
-                    }
+                HStack(spacing: Theme.Space.sm) {
+                    tray
+                    title.lineLimit(1)
+                    Spacer(minLength: 0)
+                    sendNowButton
                 }
             }
             .font(Theme.Font.labelStrong)
@@ -7324,7 +7308,6 @@ struct WorkLine: View, Equatable {
     private let doing: WorkNow?
     @State private var shown: WorkNow?
     @State private var shownAt = Date.distantPast
-    @Environment(\.dynamicTypeSize) private var typeSize
     let openTerminal: (() -> Void)?
     let toggle: () -> Void
 
@@ -7442,25 +7425,15 @@ struct WorkLine: View, Equatable {
     }
 
     /// One line: the step's words give way (a path or a command in the middle, a sentence at the end), "+2" and the
-    /// time stay whole. At the accessibility text sizes, where beside those the words kept a letter: up to two lines of
-    /// words, room for both always kept so the line holds still as the steps change, and "+2" and the time on a line under them.
+    /// time stay whole.
     @ViewBuilder private func stepSummary(_ step: WorkNow, now: Date) -> some View {
         let took = Self.duration(from: start, to: now)
-        if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: Theme.Space.flush) {
-                Text(step.text).truncationMode(step.tail ? .tail : .middle).lineLimit(2, reservesSpace: true)
-                // Whole: on a line too narrow it wraps rather than cuts.
-                Text(step.trailer(took: took, alone: true)).lineLimit(nil)
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            HStack(spacing: Theme.Space.flush) {
-                Text(step.text).truncationMode(step.tail ? .tail : .middle)
-                Text(step.trailer(took: took)).fixedSize()
-            }
-            .lineLimit(1)
-            .accessibilityElement(children: .combine)
+        HStack(spacing: Theme.Space.flush) {
+            Text(step.text).truncationMode(step.tail ? .tail : .middle)
+            Text(step.trailer(took: took)).fixedSize()
         }
+        .lineLimit(1)
+        .accessibilityElement(children: .combine)
     }
 
     private func counted(now: Date) -> some View {

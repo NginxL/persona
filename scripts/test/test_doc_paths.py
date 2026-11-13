@@ -45,6 +45,7 @@ GENERATED = {
     "apple/PersonaCarPlay.entitlements",  # written by persona_config.py xcconfig when app.carplay_voice is on
     "apple/Persona.xcodeproj",
     "android/app/build/outputs/apk/debug/app-debug.apk",
+    "android/local.properties",  # each machine's own SDK location (sdk.dir), git-ignored
     "web/dist",
     "web/public/pake/THIRD_PARTY_NOTICES.txt",  # written by web/scripts/build-pake.mjs (THIRD_PARTY_NOTICES.md)
     "apple/Persona.xcodeproj",  # the kept compatibility symlink to the generated Persona.xcodeproj

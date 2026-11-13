@@ -693,6 +693,12 @@ nonisolated enum Theme {
     /// the persona's dot in the Persona tab's top bar (docs/apple/persona.md), the dot of a held mic (`DictationHold`) and,
     /// when it is turned on, the composer's glow while a reply is generating (`ComposerGlow`); those stop with Reduce Motion
     /// (the spinner is the system's).
+    /// The Agents' owner-requested single capsule: filter choices and a fixed grouping menu.
+    enum FilterCapsule {
+        static let separatorHeight: CGFloat = 22
+        static var selection: Color { Theme.accent.opacity(0.12) }
+    }
+
     enum Motion {
         static let state = Animation.snappy(duration: 0.25)
         static let layout = Animation.smooth(duration: 0.3)

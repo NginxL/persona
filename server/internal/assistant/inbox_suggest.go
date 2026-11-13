@@ -182,7 +182,11 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 			back = HandlingDone
 		}
 		it.Agent.Wake = false
-		b.setHandling(it, back, "", now)
+		if back == HandlingWaiting {
+			b.resumeInboxWaiting(it, now)
+		} else {
+			b.setHandling(it, back, "", now)
+		}
 	}
 	if in.Kind != "" && it.open() {
 		if legacySuggestion(it) != nil {

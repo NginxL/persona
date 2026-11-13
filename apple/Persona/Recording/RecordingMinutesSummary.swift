@@ -184,7 +184,7 @@ private struct MinutesCard: View {
 }
 
 /// An item: its words (and for an action, who and by when), the photo it cites, its time as a chip and the disclosure for
-/// its lines, then `below` (an action item's Add to To-Dos) under all of it. At the accessibility sizes the time and the
+/// its lines, then `below` (an action item's Add to To-Dos) under all of it. At the accessibility reading sizes the time and the
 /// disclosure go under the words, which then keep the card's whole width.
 private struct MinutesItemRow<Below: View>: View {
     var item: RecordingMinutesCards.Item
@@ -193,10 +193,11 @@ private struct MinutesItemRow<Below: View>: View {
     var toggle: () -> Void
     var show: (Double) -> Void
     @ViewBuilder var below: Below
-    @Environment(\.dynamicTypeSize) private var size
+    /// The size its words read at: the layout follows them, not the interface's cap.
+    @Environment(\.readingTypeSize) private var reading
 
     var body: some View {
-        let layout = size.isAccessibilitySize
+        let layout = reading?.isAccessibilitySize == true
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.xs))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Theme.Space.s))
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -268,7 +269,8 @@ private struct MinutesItemRow<Below: View>: View {
 /// primary color and the stronger weight (so it never rides on color alone), its neighbours in the secondary color.
 private struct MinutesContext: View {
     var lines: [RecordingMinutesCards.Line]
-    @Environment(\.dynamicTypeSize) private var size
+    /// The size its words read at: the layout follows them, not the interface's cap.
+    @Environment(\.readingTypeSize) private var reading
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -289,7 +291,7 @@ private struct MinutesContext: View {
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
         return Group {
-            if size.isAccessibilitySize {
+            if reading?.isAccessibilitySize == true {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) { stamp; words }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) { stamp; words }

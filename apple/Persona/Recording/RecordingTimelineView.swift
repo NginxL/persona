@@ -15,7 +15,6 @@ struct RecordingTimelineRows: View {
     /// highlight's minute (#3862 phase 2b, `RecordingTimeline.focus`). Every other page passes none.
     var lit: Set<RecordingTimeline.Item.ID> = []
 
-    @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var capture = RecordingCapture.shared
 
@@ -75,13 +74,7 @@ struct RecordingTimelineRows: View {
     }
 
     private func sentence(at time: Double, text: String, lit: Bool) -> some View {
-        Group {
-            if size.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) { stamp(time); words(text) }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) { stamp(time); words(text) }
-            }
-        }
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) { stamp(time); words(text) }
         // Lit: the tint reaches a little past the words, so the row's own place doesn't move when it comes and goes.
         .background {
             if lit {

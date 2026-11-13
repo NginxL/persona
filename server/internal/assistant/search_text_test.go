@@ -101,3 +101,33 @@ func TestSearchSnippetMarksMatchesInUTF16(t *testing.T) {
 		t.Fatalf("ranges %v in %q", ranges, snippet)
 	}
 }
+
+// A reply is indexed as the chat shows it (#7072): its words without Markdown's markup, so a snippet shows no marker
+// and words the markup split are found together; what is not markup stays.
+func TestSearchPlainKeepsAReplysWordsWithoutTheMarkup(t *testing.T) {
+	for _, c := range []struct{ md, want string }{
+		{"2. **照片同步脚本**（Mac Studio）", "照片同步脚本（Mac Studio）"},
+		{"# 标题 \n> > 引用的 *话*", "标题 \n引用的 话"},
+		{"- [ ] 待办：~~旧的~~ 新的\n  * 嵌套 _斜体_ 项", "待办：旧的 新的\n嵌套 斜体 项"},
+		{"见 [文档](https://example.com/a_b) 和 ![图](x.png) 和 [引用][1]", "见 文档 和 图 和 引用"},
+		{"用 `**args` 和 `` a ` b `` 调用", "用 **args 和 a ` b 调用"},
+		{"```go\nx := 1 // **keep**\n```\n后面 **粗**", "x := 1 // **keep**\n后面 粗"},
+		{"| a | b |\n|---|---|\n| 1 | 2 |\n\n***", "a b\n1 2"},
+		{"2 * 3 * 4，snake_case_name，\\*星\\*，未闭合的 ` 反引号", "2 * 3 * 4，snake_case_name，*星*，未闭合的 ` 反引号"},
+		{"__粗__ 和 _斜_ 和 __a__ __b__", "粗 和 斜 和 a b"},
+		{"plain words only", "plain words only"},
+	} {
+		if got := searchPlain(c.md); got != c.want {
+			t.Errorf("searchPlain(%q) = %q, want %q", c.md, got, c.want)
+		}
+	}
+	// the user's words stay as typed (neither app renders them as Markdown); a reply's split words are found together
+	user, _ := searchIndexText(proto.Item{Role: "user", Kind: proto.KindText, Text: "**不是** Markdown"})
+	reply, _ := searchIndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "**照片**同步脚本"})
+	if user != "**不是** Markdown" || !searchHolds(searchFold(reply), searchWords("照片同步")) {
+		t.Fatalf("user %q reply %q", user, reply)
+	}
+	if snippet, ranges := searchSnippet(reply, searchWords("照片同步")); snippet != "照片同步脚本" || !reflect.DeepEqual(ranges, [][2]int{{0, 4}}) {
+		t.Fatalf("snippet %q ranges %v", snippet, ranges)
+	}
+}

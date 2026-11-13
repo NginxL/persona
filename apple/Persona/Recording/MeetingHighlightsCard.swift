@@ -37,10 +37,9 @@ nonisolated enum MeetingHighlights {
     /// The card for a meeting started with the highlights (`shows`, `RecordingAttendance.highlights`): the highlights once
     /// there are any, whatever the role is by then; before them the waiting line while Persona attends (`attending`, the
     /// rule below), else the Live box. A meeting started without them always has the Live box. While the keyboard is up
-    /// (`writing`, the regular sizes only: at the accessibility sizes the page scrolls as one and nothing folds) the same
-    /// card, folded.
-    static func mode(shows: Bool, hasHighlights: Bool, attending: Bool, writing: Bool, accessibilitySize: Bool) -> Mode {
-        let folded = writing && !accessibilitySize
+    /// (`writing`) the same card, folded.
+    static func mode(shows: Bool, hasHighlights: Bool, attending: Bool, writing: Bool) -> Mode {
+        let folded = writing
         guard shows else { return .live(folded: folded) }
         if hasHighlights { return .highlights(folded: folded) }
         return attending ? .waiting(folded: folded) : .live(folded: folded)
@@ -105,7 +104,6 @@ struct MeetingTopCard: View {
     @Binding var transcriptAt: MeetingTranscriptFocus?
     private let rows: [MeetingHighlights.Row]
 
-    @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `highlights`: the room's, as the page read them (none for a meeting started without them).
@@ -121,7 +119,7 @@ struct MeetingTopCard: View {
 
     var body: some View {
         let mode = MeetingHighlights.mode(shows: entry.attendance?.highlights == true, hasHighlights: !rows.isEmpty,
-                                          attending: attending, writing: writing, accessibilitySize: size.isAccessibilitySize)
+                                          attending: attending, writing: writing)
         // One over the other while they fade, from the top: in a stack of their own the outgoing card would keep its slot
         // until it is gone, and push the thread down meanwhile. Only a change of the mode animates (the first highlights,
         // the keyboard, the role turned off before any), never the first frame. The waiting line and the highlights are
@@ -154,8 +152,6 @@ private struct MeetingHighlightsCard: View {
     /// The page's transcript pushed at a highlight's time.
     @Binding var transcriptAt: MeetingTranscriptFocus?
 
-    @Environment(\.dynamicTypeSize) private var size
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Highlights [Meeting]").font(Theme.Font.captionStrong).foregroundStyle(.secondary)
@@ -170,9 +166,7 @@ private struct MeetingHighlightsCard: View {
                         .accessibilityIdentifier("meeting-highlights-waiting")
                         .transition(.opacity)
                 } else {
-                    // At the accessibility sizes a time sits under its words: a block's gap between highlights keeps each
-                    // time with its own words, not the next ones.
-                    VStack(alignment: .leading, spacing: size.isAccessibilitySize ? Theme.Space.block : Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
                         ForEach(MeetingHighlights.shown(rows, folded: folded)) { row in
                             highlight(row)
                                 .transition(.opacity)
@@ -199,20 +193,13 @@ private struct MeetingHighlightsCard: View {
     }
 
     /// A highlight: its time as the minutes cards' chip, then its words (`Theme.Recording.highlightLines` lines at most,
-    /// cut at the end; VoiceOver reads them whole). At the accessibility sizes the words take what they need and the time
-    /// goes under them.
+    /// cut at the end; VoiceOver reads them whole).
     @ViewBuilder private func highlight(_ row: MeetingHighlights.Row) -> some View {
         let words = Text(row.text).font(Theme.Font.body)
-            .lineLimit(size.isAccessibilitySize ? nil : Theme.Recording.highlightLines)
+            .lineLimit(Theme.Recording.highlightLines)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-        Group {
-            if size.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: Theme.Space.flush) { words; time(row) }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) { time(row); words }
-            }
-        }
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) { time(row); words }
         // The words and their time together; the time stays its own button (a `.combine` would hide it from the tests).
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meeting-highlight")

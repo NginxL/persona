@@ -285,7 +285,6 @@ struct RecordingCaptureControls: View {
     #if os(iOS)
     @StoredValue(RecordingInput.storageKey) private var inputRaw = RecordingInput.phone.rawValue
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #endif
 
@@ -361,7 +360,6 @@ struct RecordingCaptureControls: View {
     @ViewBuilder private var idleControls: some View {
         let busy = preparing != .idle
         if part == .inline { hero(busy: busy) }
-        if part == .options, size.isAccessibilitySize, form.pickedKind == .meeting { calendarLine }
         if capture.state == .starting { startingRow }
         // Meeting or Note is a choice row under the one Record button, never a second button (#5243); a note has none
         // of the meeting's options (progressive disclosure).
@@ -414,11 +412,8 @@ struct RecordingCaptureControls: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Button { record() } label: {
                 HStack(spacing: Theme.Space.s) {
-                    // At accessibility sizes the icon goes: the words never truncate, they scale down a little instead.
-                    if size.isAccessibilitySize { Text("Record [Recordings Section ef2821]") } else {
-                        // White like the title: the symbol took the tint, drew in the button's own blue and pushed the title off-center.
-                        Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).foregroundStyle(Theme.onSolid)
-                    }
+                    // White like the title: the symbol took the tint, drew in the button's own blue and pushed the title off-center.
+                    Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).foregroundStyle(Theme.onSolid)
                     if busy { ProgressView() }
                 }
                 .font(Theme.Font.bodyStrong)
@@ -430,8 +425,7 @@ struct RecordingCaptureControls: View {
             .themedButton(prominent: true)
             .disabled(busy)
             .accessibilityIdentifier("recording-meeting-start")
-            // In the bottom bar at accessibility sizes the line would take the screen: it is the list's first row then.
-            if form.pickedKind == .meeting, !(part == .bar && size.isAccessibilitySize) {
+            if form.pickedKind == .meeting {
                 calendarLine.frame(maxWidth: .infinity, alignment: part == .bar ? .center : .leading)
             }
         }
@@ -453,7 +447,7 @@ struct RecordingCaptureControls: View {
                 }
             } label: {
                 Label("Name Recordings After Calendar Meetings", systemImage: Theme.Icon.calendarEvent).font(Theme.Font.caption)
-                    .lineLimit(size.isAccessibilitySize ? 4 : 1).multilineTextAlignment(.leading)
+                    .lineLimit(1).multilineTextAlignment(.leading)
             }
             .buttonStyle(.borderless)
         } else {
@@ -538,16 +532,15 @@ struct RecordingCaptureControls: View {
                 RecordingStateDot(paused: paused).scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(entry?.displayTitle ?? String(localized: "Recording")).font(Theme.Font.bodyStrong)
-                        .lineLimit(size.isAccessibilitySize ? 3 : 1)
+                        .lineLimit(1)
                         .accessibilityIdentifier("recording-now-title")
                     Text(capture.interrupted ? String(localized: "Paused by a call") : paused ? String(localized: "Paused") : String(localized: "Recording [Recordings Section 5254d3]"))
                         .font(Theme.Font.secondary)
                         .foregroundStyle(paused ? Color.secondary : Palette.recordingRed)
                         .accessibilityIdentifier("recording-now-state")
-                    if size.isAccessibilitySize { clock(paused: paused) }
                 }
                 Spacer(minLength: Theme.Space.s)
-                if !size.isAccessibilitySize { clock(paused: paused) }
+                clock(paused: paused)
                 ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong).foregroundStyle(.tertiary)
             }
             .contentShape(.rect)

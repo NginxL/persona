@@ -14,7 +14,7 @@
   "sent_lark": "Lark メッセージを送信",
   "sent_mail": "メールを送信",
   "sent_comment": "コメントを投稿",
-  "sent_other": "返信を送信",
+  "sent_reply": "返信を送信",
   "agent": "サブセッションを開始：{title}",
   "agent_stopped": "Agent が停止しました",
   "agent_stopped_failed": "Agent が失敗しました",
@@ -50,5 +50,10 @@
   "handed_conversation": "「{title}」に渡しました",
   "handed_conversation_generic": "会話に渡しました",
   "waiting_who": "{who}待ち · {at}に再確認",
-  "waiting_reply": "返信待ち · {at}に再確認"
+  "waiting_reply": "返信待ち · {at}に再確認",
+  "check_due_next": "再確認の時間です：{next}",
+  "check_due": "再確認の時間です",
+  "check_follow_up_ask": "3回確認しても動きがありません。続けますか？",
+  "check_started_next": "予定どおり再確認：{next}",
+  "check_started": "予定どおり再確認"
 }

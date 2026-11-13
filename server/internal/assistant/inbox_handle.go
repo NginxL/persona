@@ -26,11 +26,14 @@ type inboxNote struct {
 	Context string `json:"context,omitempty"`
 	Machine string `json:"machine,omitempty"`
 	Session string `json:"session,omitempty"`
+	Who     string `json:"who,omitempty"`
+	Next    string `json:"next,omitempty"`
+	Checks  int    `json:"checks,omitempty"`
 }
 
 func renderNote(n inboxNote, owner string) string {
 	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited, Failed: n.Failed,
-		Context: n.Context, Machine: n.Machine, Session: n.Session})
+		Context: n.Context, Machine: n.Machine, Session: n.Session, Who: n.Who, Next: n.Next, Checks: n.Checks})
 }
 
 // chainLine is a chain entry as the conversation reads it, its time in loc (the user's zone).

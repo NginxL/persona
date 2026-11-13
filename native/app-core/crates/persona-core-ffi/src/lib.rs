@@ -89,9 +89,9 @@ unsafe fn slice<'a>(pointer: *const u8, length: usize) -> &'a [u8] {
 }
 
 pub(crate) fn start(config: &[u8], host: Arc<dyn Host>) -> Option<Box<PersonaCore>> {
-    let config: Config = wire::decode(config).ok()?;
+    let _: Config = wire::decode(config).ok()?;
     Some(Box::new(PersonaCore {
-        runtime: Runtime::new(config, host),
+        runtime: Runtime::new(host),
     }))
 }
 

@@ -362,7 +362,7 @@ Normal receipts are written before judgment for both supervised and unsupervised
 | --- | --- | --- |
 | `done` | Requested work finished, reply gives results, user need do nothing more, no waiting for others | Yes |
 | `not_done` | Partial, failed, blocked, or only reporting progress/plan | No |
-| `waiting` | Own work finished, awaiting external result (review, CI, someone else's reply, release queue) | No |
+| `waiting` | Awaiting an external result (review, CI, someone else's reply, release queue), or no model is configured for the completion judge and the hub writes its own localized reason | No |
 | `needs_user` | User must decide, supply information, approve, act manually or accept | No |
 | `unsure` | Cannot tell | No |
 
@@ -373,7 +373,7 @@ Normal receipts are written before judgment for both supervised and unsupervised
 - Cheap signals: final reply has a GitHub PR link and mentions merging (merged / 已合并 / 合入, the latter two meaning merged), or mentions TestFlight plus a build number. Assistant includes these as hints only, never enough alone for completion.
 - Prompts: `server/internal/prompts/assistant/task_done.md`, `task_done_input.md` (`docs/assistant/prompts.md`).
 
-**The check on the to-do** (#3180): every automatic judgment, supervised tasks included (before `superviseJudged`), writes `check: {"verdict", "reason", "at", "work_since"}` on the to-do, so an open task can say why it is not done: `verdict` as judged (a made-up one becomes `unsure`; with Delivery on, `undelivered` too), `reason` the judge's line, `at` when it was judged, `work_since` the start of the stretch of work it judged. It is written only while the judgment is still current (`taskCompletionCurrent`, and no new turn since under `completionMu`), so one overtaken by new work writes nothing; a reopen and an Agent's new turn clear it. No model or a model error writes nothing.
+**The check on the to-do** (#3180): every automatic judgment, supervised tasks included (before `superviseJudged`), writes `check: {"verdict", "reason", "at", "work_since"}` on the to-do, so an open task can say why it is not done: `verdict` as judged (a made-up one becomes `unsure`; with Delivery on, `undelivered` too), `reason` the judge's line, `at` when it was judged, `work_since` the start of the stretch of work it judged. It is written only while the judgment is still current (`taskCompletionCurrent`, and no new turn since under `completionMu`), so one overtaken by new work writes nothing; a reopen and an Agent's new turn clear it. Having no configured model writes a hub-generated `waiting` check with the same localized explanation shown in model settings; a model error still writes nothing.
 - **Language**: the judge writes `reason` in the user's language (`{{if .Language}}` in `task_done.md`) without internal ids. The hub's own reasons (no reply read, a cut-off turn, a side-conversation reply with no evidence for this task) and the `done_reason` fallback for an empty reason come from the hub's i18n (`assistant-tasks.*`).
 - **Storage**: next to `delivery` in the `assistant.todo_stages` setting (`task_check.go`, `reports.go`), no migration. It is additive: no field changes meaning, `task_cards` is unchanged, and clients that don't know it show the to-do as before.
 - **Clients**: web `ProgressTaskRow` and Android `trayProgress` say "Stopped, not done yet · <reason>" for a task neither working nor done whose current check is not `done` / `unsure` (`docs/assistant/unified-entry.md` "Progress tray"). iOS doesn't draw it yet (#2879).

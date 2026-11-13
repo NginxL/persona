@@ -51,5 +51,7 @@
   "admission_direction_full": "This direction already has {running} agents running, at its limit of {limit}.",
   "admission_refused": "Computer {machine} cannot start this agent: {reason}.{recommend}",
   "admission_recommend": " Recommended computer: {machine}.",
-  "admission_reroute": "Moved from {from} to {to}: {reason}"
+  "admission_reroute": "Moved from {from} to {to}: {reason}",
+  "admission_queued": "Queued, the hub will retry automatically: {reason}",
+  "admission_queue_timeout": "Still queued after {limit} of waiting, so the start is given up. Last reason: {reason}"
 }

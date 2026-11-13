@@ -51,5 +51,7 @@
   "admission_direction_full": "这个方向已经有 {running} 个 Agent 在跑，达到上限 {limit}。",
   "admission_refused": "电脑 {machine} 现在不能启动这个 Agent：{reason}{recommend}",
   "admission_recommend": "推荐电脑：{machine}。",
-  "admission_reroute": "已从 {from} 改派到 {to}：{reason}"
+  "admission_reroute": "已从 {from} 改派到 {to}：{reason}",
+  "admission_queued": "排队中，hub 会自动重试：{reason}",
+  "admission_queue_timeout": "排队等待超过 {limit} 仍未启动，放弃本次启动。最后一次原因：{reason}"
 }

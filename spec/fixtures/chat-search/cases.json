@@ -221,6 +221,24 @@
    "index": "LastReplyWord 末句词：路线已发你。"
   },
   {
+   "name": "assistant_markdown",
+   "description": "A reply's Markdown as the chat shows it (#7072): search in chat matches the reply as it is, but the index keeps its words without the markup (emphasis, code spans, links, headings, lists and task boxes, quotes, tables, rules, code fences), so a snippet never shows a marker; code keeps what is inside it.",
+   "item": {
+    "id": "a9#0",
+    "seq": 9,
+    "role": "assistant",
+    "kind": "text",
+    "text": "## 今天的安排\n1. **照片同步脚本**（Mac Studio）的计划写好了，等你*批准*。\n- [x] 补齐 `NetworkClient` 的测试，见 [PR 页面](https://example.com/pr/42) 和 <https://example.com/notes>\n> 引用：__重要__ 的事\n\n| 项目 | 状态 |\n| --- | :---: |\n| 发布 | ~~周四~~ 周五 |\n\n---\n```swift\nlet x = 1 // **不动**\n```\n2 * 3 * 4 = 24，snake_case_name 和 \\*星号\\* 保持原样，``代码里的 ` 反引号``。"
+   },
+   "fields": [
+    [
+     "text",
+     "## 今天的安排\n1. **照片同步脚本**（Mac Studio）的计划写好了，等你*批准*。\n- [x] 补齐 `NetworkClient` 的测试，见 [PR 页面](https://example.com/pr/42) 和 <https://example.com/notes>\n> 引用：__重要__ 的事\n\n| 项目 | 状态 |\n| --- | :---: |\n| 发布 | ~~周四~~ 周五 |\n\n---\n```swift\nlet x = 1 // **不动**\n```\n2 * 3 * 4 = 24，snake_case_name 和 \\*星号\\* 保持原样，``代码里的 ` 反引号``。"
+    ]
+   ],
+   "index": "今天的安排\n照片同步脚本（Mac Studio）的计划写好了，等你批准。\n补齐 NetworkClient 的测试，见 PR 页面 和 https://example.com/notes\n引用：重要 的事\n\n项目 状态\n发布 周四 周五\n\nlet x = 1 // **不动**\n2 * 3 * 4 = 24，snake_case_name 和 *星号* 保持原样，代码里的 ` 反引号。"
+  },
+  {
    "name": "assistant_card",
    "description": "A reply with a card: the card counts as its fallback text (sdk/go/wire AssistantCardText), never its JSON.",
    "item": {

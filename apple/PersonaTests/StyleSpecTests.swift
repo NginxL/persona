@@ -84,6 +84,25 @@ struct StyleSpecTests {
         #expect(found.isEmpty, "the accent on the page under 3:1: \(found)")
     }
 
+    /// A secondary soft button (Clay, Island) draws its label in the tint on `card` (`SoftButtonStyle`, #6157): the accent
+    /// and the danger color ≥ 3:1 on it. The glass and bordered buttons' fills are the system's, not tokens:
+    /// `ButtonContrastUITests` measures those on screen.
+    @Test func secondarySoftButtonsRead() {
+        var found: [String] = []
+        for style in AppStyle.allCases where style.component.buttons == .soft {
+            for (name, colors) in Self.colors {
+                let spec = StyleSpec(style.component, colors)
+                for (look, ui) in Self.appearances {
+                    for (what, ink) in [("accent", spec.accent), ("danger", spec.extensionColors?.danger ?? Theme.Role.dangerColor)] {
+                        let c = Self.contrast(ink, spec.card, ui)
+                        if c < 3 { found.append("\(style.rawValue)+\(name) \(look) \(what): \(String(format: "%.2f", c))") }
+                    }
+                }
+            }
+        }
+        #expect(found.isEmpty, "a soft secondary button's label under 3:1 on the card: \(found)")
+    }
+
     /// What sits in the user's own message (#5204): its words, and the blocks it opens with (quotes, forwards, text to
     /// change, comments), whose rule, heading and words are the words' color, ≥ 4.5:1 on the block's fill laid over the
     /// bubble; a path linked in the words ≥ 3:1. On Persona's main conversation's box and on the style's bubble, at its

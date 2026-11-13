@@ -28,7 +28,7 @@ public enum ScreenVideoWire {
     }
 
     /// One framed message as it comes off the wire, before its body is decoded.
-    public struct RawMessage: Equatable {
+    public struct RawMessage: Equatable, Sendable {
         public var type: UInt8
         public var body: Data
         public init(type: UInt8, body: Data) {

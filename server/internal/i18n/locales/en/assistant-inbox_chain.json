@@ -18,7 +18,7 @@
   "sent_lark": "Sent a Lark message",
   "sent_mail": "Sent an email",
   "sent_comment": "Posted a comment",
-  "sent_other": "Sent a reply",
+  "sent_reply": "Sent a reply",
   "agent": "Started a sub-session: {title}",
   "agent_stopped": "Agent stopped",
   "agent_stopped_failed": "Agent failed",
@@ -54,5 +54,10 @@
   "handed_conversation": "Handed to “{title}”",
   "handed_conversation_generic": "Handed to a conversation",
   "waiting_who": "Waiting for {who} · look again {at}",
-  "waiting_reply": "Waiting for a reply · look again {at}"
+  "waiting_reply": "Waiting for a reply · look again {at}",
+  "check_due_next": "Time to look again: {next}",
+  "check_due": "Time to look again",
+  "check_follow_up_ask": "Checked 3 times with no news. Keep following?",
+  "check_started_next": "Checked again on schedule: {next}",
+  "check_started": "Checked again on schedule"
 }

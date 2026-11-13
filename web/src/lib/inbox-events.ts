@@ -27,13 +27,15 @@ export interface InboxHandling {
   error?: string;
 }
 
-export type SuggestionKind = "reply" | "agent" | "conclusion";
+export type SuggestionKind = "reply" | "agent" | "conclusion" | "todo";
 
 export interface InboxSuggestion {
   version: number;
   kind: SuggestionKind | string;
   text: string;
   note?: string;
+  /** A to-do suggestion's due: a day (2006-01-02, all day) or a moment (RFC 3339); absent: no due date. */
+  due?: string;
   /** Needs judgment: confirming hands it back to the processing conversation instead of running it. */
   handback?: boolean;
   machine_id?: string;
@@ -46,7 +48,8 @@ export interface InboxSuggestion {
 export type ChainLink =
   | { type: "source"; position?: string; uid?: number; url?: string }
   | { type: "session"; machine_id: string; session_id: string }
-  | { type: "item"; id: string };
+  | { type: "item"; id: string }
+  | { type: "todo"; id: string };
 
 export interface ChainMessage {
   sender?: string;
@@ -130,6 +133,8 @@ export function suggestionTitle(s: InboxSuggestion): string {
       return t("lib-inbox-events.kind_agent");
     case "conclusion":
       return t("lib-inbox-events.kind_conclusion");
+    case "todo":
+      return t("lib-inbox-events.kind_todo");
     default:
       return t("lib-inbox-events.kind_generic");
   }
@@ -150,6 +155,8 @@ export function suggestionButtons(s: InboxSuggestion): { confirm: string; edit: 
       return { confirm: t("lib-inbox-events.start"), edit: true };
     case "conclusion":
       return { confirm: t("lib-inbox-events.got_it"), edit: false };
+    case "todo":
+      return { confirm: t("lib-inbox-events.add_todo"), edit: false };
     default:
       return { confirm: t("lib-inbox-events.confirm"), edit: true };
   }
@@ -178,6 +185,7 @@ export function chainTap(e: ChainEntry, conversation: (mid: string, sid: string)
   if (l?.type === "session" && typeof l.machine_id === "string" && typeof l.session_id === "string" && l.machine_id && l.session_id) {
     return { kind: "route", route: conversation(l.machine_id, l.session_id) };
   }
+  if (l?.type === "todo" && typeof l.id === "string" && l.id) return { kind: "route", route: { name: "todos", id: l.id } };
   if (l?.type === "item" && typeof l.id === "string" && l.id) return { kind: "route", route: manager ? { name: "inbox", id: l.id, manager } : { name: "inbox", id: l.id } };
   return canExpand(e) ? { kind: "expand" } : { kind: "none" };
 }
@@ -216,10 +224,10 @@ export type SuggestionResult =
  * The version shown goes with it, so a suggestion that changed since is not run: the hub answers 409 suggestion_stale
  * with the item as it is now.
  */
-export async function actOnSuggestion(path: string, version: number, action: SuggestionAction, text?: string, clientID = uuid(), manager?: string): Promise<SuggestionResult> {
+export async function actOnSuggestion(path: string, version: number, action: SuggestionAction, text?: string, clientID = uuid(), manager?: string, due?: string): Promise<SuggestionResult> {
   try {
     // the item's manager (another than the default: docs/assistant/managers.md "Clients") is named on its request
-    const item = await api<InboxItem>(`${path}/suggestion`, { method: "POST", json: { version, action, text: text || undefined, client_id: clientID }, headers: itemHeaders(manager) });
+    const item = await api<InboxItem>(`${path}/suggestion`, { method: "POST", json: { version, action, text: text || undefined, due: due || undefined, client_id: clientID }, headers: itemHeaders(manager) });
     return { ok: true, item };
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body?.code === "suggestion_stale") {
@@ -242,6 +250,8 @@ export function actedText(s: InboxSuggestion, action: SuggestionAction): string 
       return t("lib-inbox-events.agent_started");
     case "conclusion":
       return t("lib-inbox-events.filed");
+    case "todo":
+      return t("lib-inbox-events.todo_added");
     default:
       return t("lib-inbox-events.handed_back");
   }

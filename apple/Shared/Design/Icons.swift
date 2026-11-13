@@ -265,6 +265,8 @@ extension Theme {
         /// A list filter menu: off, and on (something filtered).
         static let filter = "line.3.horizontal.decrease.circle"
         static let filterActive = "line.3.horizontal.decrease.circle.fill"
+        /// Grouping at the fixed end of the Agents filter capsule, without a second circle.
+        static let capsuleGrouping = "line.3.horizontal.decrease"
         /// A plain list layout.
         static let listView = "list.bullet"
         /// A calendar layout (the to-dos' Calendar, beside `listView`, #2029).
