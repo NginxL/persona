@@ -36,6 +36,12 @@ class PathTests(unittest.TestCase):
         # The trusted Deno adapter and the extension page tests bundle sdk/ts/src (#4221); the rest of sdk/ts is not.
         self.assertTrue(paths.select(["sdk/ts/src/wire.ts"])["server"])
         self.assertTrue(paths.select(["sdk/ts/src/wire.ts"])["runtimes"])
+        # The shared Rust core: its own lane, and Android, whose tests load it.
+        for filename in ["native/app-core/crates/persona-core/src/lib.rs", "spec/fixtures/continuity/append_and_gaps.json",
+                         "scripts/ci/core.sh"]:
+            self.assertTrue(paths.select([filename])["core"], filename)
+        self.assertTrue(paths.select(["native/app-core/Cargo.lock"])["android"])
+        self.assertFalse(paths.select(["web/src/App.tsx"])["core"])
         self.assertFalse(paths.select(["sdk/ts/README.md"])["server"])
 
     def test_source_authoring_sdk_and_gate_paths_select_runtime_ci(self):
@@ -210,7 +216,7 @@ class ManualWorkflowTests(unittest.TestCase):
         self.assertIn('CI_FULL: ${{ inputs.full }}', selection)
         self.assertIn('if [ "$CI_FULL" = true ]; then', selection)
         self.assertIn('python3 scripts/ci/paths.py --all', selection)
-        for name in ('server', 'web', 'android', 'apple', 'apple_macos', 'runtimes', 'scripts'):
+        for name in ('server', 'web', 'android', 'apple', 'apple_macos', 'core', 'runtimes', 'scripts'):
             block = re.split(r'\n  [a-z_]+:\n', ci.split('\n  ' + name + ':\n', 1)[1], maxsplit=1)[0]
             self.assertIn('needs: changes', block)
             self.assertIn('needs.changes.outputs.', block)
@@ -247,7 +253,7 @@ class ManualWorkflowTests(unittest.TestCase):
 
 class RequiredTests(unittest.TestCase):
     def needs(self):
-        outputs = {name: "false" for name in ("server", "web", "android", "apple", "runtimes", "scripts")}
+        outputs = {name: "false" for name in ("server", "web", "android", "apple", "core", "runtimes", "scripts")}
         outputs["scripts"] = "true"
         needs = {name: {"result": "skipped"} for name in outputs}
         needs["scripts"] = {"result": "success"}
@@ -291,14 +297,14 @@ class AppleWorkflowTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/ci.yml').read_text()
         ios = workflow.split('\n  apple:\n', 1)[1].split('\n  apple_macos:\n', 1)[0]
-        mac = workflow.split('\n  apple_macos:\n', 1)[1].split('\n  runtimes:\n', 1)[0]
+        mac = workflow.split('\n  apple_macos:\n', 1)[1].split('\n  core:\n', 1)[0]
         for block, lane in ((ios, 'ios'), (mac, 'macos')):
             self.assertIn('    needs: changes\n', block)
             self.assertIn("    if: needs.changes.outputs.apple == 'true'", block)
             self.assertIn('    uses: ./.github/workflows/apple-test.yml', block)
             self.assertIn('      lane: ' + lane, block)
         gate = workflow.split('\n  required:\n', 1)[1]
-        self.assertIn('needs: [changes, server, web, android, apple, runtimes, scripts]', gate)
+        self.assertIn('needs: [changes, server, web, android, apple, core, runtimes, scripts]', gate)
         self.assertNotIn('apple_macos', gate)
         self.assertNotIn('continue-on-error:', workflow)
 

@@ -5,6 +5,24 @@ import Foundation
 // one is optional, an older hub sends none and the app draws what it drew before.
 
 extension InboxItem {
+    /// The assistant's own row (#6430, source `assistant`): the manager puts a conversation into the Inbox itself.
+    var isAssistantRow: Bool { source == "assistant" }
+
+    /// The row's text repeats the summary under it (the assistant's own rows: their text is the summary), so it is drawn once.
+    var repeatsSummary: Bool {
+        guard isAssistantRow, let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty else { return false }
+        let text = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.isEmpty && text.hasPrefix(summary)
+    }
+
+    /// The assistant's own row whose text is only its title and summary, already shown above: no Content section.
+    func onlyTitleAndSummary(_ context: String?) -> Bool {
+        guard isAssistantRow, let summary, !summary.isEmpty else { return false }
+        func flat(_ s: String) -> String { s.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+        let text = flat(context ?? preview)
+        return text.isEmpty || text == flat(title + " " + summary) || text == flat(summary)
+    }
+
     /// The processing conversation bound to the item.
     nonisolated struct Handling: Codable, Hashable, Sendable {
         var owner: String?

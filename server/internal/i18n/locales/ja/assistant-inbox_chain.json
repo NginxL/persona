@@ -3,6 +3,7 @@
   "received_from_other": "新着メッセージ {count} 件 · {sender}",
   "received_mail_other": "メール {count} 通",
   "received_mail_from_other": "メール {count} 通 · {sender}",
+  "reopened": "新しいメッセージで再開",
   "tier_action": "要対応",
   "tier_fyi": "参考",
   "tier_noise": "折りたたみ",

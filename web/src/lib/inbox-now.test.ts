@@ -33,7 +33,7 @@ const item = (patch: Partial<InboxItem> = {}): InboxItem => ({
 const tomorrow: Record<Lang, string> = { en: "tomorrow", "zh-Hans": "明天", ja: "明日" };
 const waitingAt = (lang: Lang, time: string) => ({
   en: `Waiting for Alex · look again ${time}`,
-  "zh-Hans": `等Alex · ${time}再看`,
+  "zh-Hans": `等Alex · ${time} 再看`,
   ja: `Alexを待っています · ${time}に再確認`,
 })[lang];
 const clock = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

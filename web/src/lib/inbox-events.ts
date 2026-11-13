@@ -59,6 +59,10 @@ export interface ChainEntry {
   at?: string;
   kind: string;
   text: string;
+  /** Where this step happened: a source id, assistant, agent or user. */
+  via?: string;
+  /** How a done entry filed the item (a done_by value, or muted). */
+  by?: string;
   edited?: boolean;
   detail?: string;
   count?: number;
@@ -151,10 +155,10 @@ export function suggestionButtons(s: InboxSuggestion): { confirm: string; edit: 
   }
 }
 
-/** The chain as drawn: oldest first; folded, only the newest entry. */
+/** The chain as drawn: oldest first; folded, the three newest (all when there are three or fewer). */
 export function chainRows(chain: ChainEntry[] | undefined, open: boolean): ChainEntry[] {
   const all = chain ?? [];
-  return open || all.length <= 1 ? all : all.slice(-1);
+  return open || all.length <= 3 ? all : all.slice(-3);
 }
 
 /** What tapping an entry does: go somewhere, or expand its detail / messages in place (nothing to expand: nothing). */

@@ -102,6 +102,15 @@ cd server
 go test -count=1 -p 1 ./internal/transcript/...
 ```
 
+The shared Rust core (#6871) replays every case too: directly against `persona-core`, then through its runtime with
+encoded actions and the list rebuilt from drained patches. Android's `:core:rustcore` does the same through the real
+JNI binding:
+
+```bash
+cd native/app-core && cargo test --locked
+cd android && ./gradlew :core:rustcore:test
+```
+
 [continuity_fixtures_test.go](../../../server/internal/transcript/continuity_fixtures_test.go) 读取本目录全部 JSON，拒绝未知字段、未知事件、重复名称及缺少逐步期望的用例，逐步比较完整 items、位置、分页信息、加载标志和动作。
 
 Go 测试保持原有 corpus 测试不变，额外直接调用原有 `simClient.apply` 对照以下七个场景：`append_then_fill_lost_batch`、`empty_batch_advances_covered`、`overlapping_batch_never_regresses_covered`、`first_line_push_is_baseline`、`wait_for_first_backlog`、`capped_subscription_requests_rest`、`latest_page_replaces_distant_cache`。其余语义使用按当前 Store 和 Model 写的测试模型，避免改变 corpus 既有行为。

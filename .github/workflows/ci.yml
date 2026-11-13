@@ -7,7 +7,7 @@ on:
         type: boolean
         default: true
       lanes:
-        description: 'When full is false: all, auto (diff against origin/main), or comma-separated server,web,android,apple,runtimes,scripts'
+        description: 'When full is false: all, auto (diff against origin/main), or comma-separated server,web,android,apple,core,runtimes,scripts'
         type: string
         default: auto
       base:
@@ -29,6 +29,7 @@ jobs:
       web: ${{ steps.paths.outputs.web }}
       android: ${{ steps.paths.outputs.android }}
       apple: ${{ steps.paths.outputs.apple }}
+      core: ${{ steps.paths.outputs.core }}
       runtimes: ${{ steps.paths.outputs.runtimes }}
       scripts: ${{ steps.paths.outputs.scripts }}
     steps:
@@ -83,6 +84,10 @@ jobs:
     uses: ./.github/workflows/apple-test.yml
     with:
       lane: macos
+  core:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    uses: ./.github/workflows/core-test.yml
   runtimes:
     needs: changes
     if: needs.changes.outputs.runtimes == 'true'
@@ -95,7 +100,7 @@ jobs:
   # Mac has a visible independent result but does not block CI required.
   required:
     name: CI required
-    needs: [changes, server, web, android, apple, runtimes, scripts]
+    needs: [changes, server, web, android, apple, core, runtimes, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 12

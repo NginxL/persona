@@ -72,6 +72,7 @@ class HttpInboxAssistantTransport private constructor(
     // Connectors' items too (`sources=all`): each opens as its connector's thread (#2726); without it the hub lists
     // Feishu and mail only.
     override suspend fun inbox() = json(url("api", "v1", "inbox").newBuilder().addQueryParameter("sources", "all").build())
+    override suspend fun item(itemId: String) = json(url("api", "v1", "inbox", itemId))
     override suspend fun doneHistory(manager: String?, before: String?, beforeId: String?, limit: Int) =
         json(url("api", "v1", "inbox", "done").newBuilder().addQueryParameter("sources", "all").addQueryParameter("limit", limit.toString())
             .apply { if (before != null) { addQueryParameter("before", before); beforeId?.let { addQueryParameter("before_id", it) } } }
@@ -381,7 +382,7 @@ class HttpInboxAssistantTransport private constructor(
             val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).build()
             return { path, method, body, buffered ->
-                val target = base.hubUrl(path)
+                val target = base.hubUrl(path).withRequestManager()
                 http.newCall(Request.Builder().url(target).header("Authorization", "Bearer $token")
                     .method(method, body).build()).awaitResponse(buffered = buffered).also { response ->
                     if (!response.isSuccessful) throw response.use { HubFailure.from(it) }

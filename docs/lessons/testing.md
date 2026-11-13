@@ -361,6 +361,17 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Background builds/tests require pinned source snapshots; do not merge branches or edit their worktree while running. On 2026-11-05, targeted Go regression enumerated old files before a merge introduced a new caller, producing undefined-method compilation errors. Mixed snapshots cannot judge commits or count as passes. Freeze a commit in a separate detached worktree and rerun.
 - A Go test wrapper embedding a narrow `Store` interface does not gain methods by assigning real Postgres to it. Once card handlers checked optional persistence interfaces first, admin-page tests returned 503; old handlers rejected bad JSON first and hid the fixture gap. Real bus regressions explicitly pass the full DB to the assistant, while hub admin login keeps its wrapper. Retain status assertions, not longer waits or 503 as a pass.
 
+## A test that loads a native library must declare the library as an input (2026-11-13, #6871)
+
+`:core:rustcore`'s tests load a host build of the shared Rust core. They find it through a system property that holds its
+path, and Gradle treats that path as the only input. A change to the Rust code rebuilt the library at the same path, and
+Gradle then called the tests up to date and skipped them. A deliberately broken rule still "passed". The fix:
+
+- The Exec task that builds the library declares it with `outputs.file(...)`.
+- The test task takes that task's outputs as inputs, with `inputs.files(buildHostCore)`.
+
+**To check the setup**, break one rule on purpose and confirm the binding tests fail before trusting them.
+
 ## Running the hosted CI lanes on a Mac (2026-11-09)
 
 The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer machine:

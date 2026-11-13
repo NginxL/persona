@@ -75,14 +75,16 @@
               "link": {
                 "type": "source",
                 "position": "10"
-              }
+              },
+              "via": "lark"
             },
             {
               "id": "c2",
               "at": "2026-01-02T03:04:05Z",
               "kind": "triaged",
               "text": "分拣：需要你",
-              "detail": "需要你"
+              "detail": "需要你",
+              "via": "assistant"
             }
           ]
         },
@@ -132,7 +134,8 @@
               "link": {
                 "type": "source",
                 "uid": 11
-              }
+              },
+              "via": "mail"
             }
           ]
         }

@@ -4,7 +4,7 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 
 | Directory | Purpose | Common entry points |
 | --- | --- | --- |
-| `ci/` | Portable hosted-runner checks and path/result aggregation | `ci/server.sh`, `ci/web.sh`, `ci/android.sh`, `ci/apple.sh`, `ci/scripts.sh`, `ci/runtimes.sh`, `ci/hub-image.sh` |
+| `ci/` | Portable hosted-runner checks and path/result aggregation | `ci/server.sh`, `ci/web.sh`, `ci/android.sh`, `ci/apple.sh`, `ci/core.sh`, `ci/scripts.sh`, `ci/runtimes.sh`, `ci/hub-image.sh` |
 | `app/` | Apple / Android builds, simulator control and screenshots | `app/sim-boot.sh`, `app/sim.sh`, `app/android.sh`, `app/personactl.py`, `app/mac-link.sh` |
 | `deploy/` | Hub / node installation and service definitions | `deploy/deploy.sh`, `deploy/install.sh`, `deploy/link-systemd.sh` |
 | `release/` | App / binary releases, signing and artifact checks | `release/release.sh`, `release/publish.sh`, `release/asc_testflight.py`, `release/entitlements.py` |

@@ -92,8 +92,8 @@ describe("收件箱事件：建议的按钮", () => {
 });
 
 describe("收件箱事件：处理链条", () => {
-  it("folds to the newest entry", () => {
-    expect(ids(chainRows(waiting.chain, false))).toEqual(["c6"]);
+  it("folds to the three newest entries", () => {
+    expect(ids(chainRows(waiting.chain, false))).toEqual(["c4", "c5", "c6"]);
     expect(ids(chainRows(waiting.chain, true))).toEqual(["c1", "c2", "c3", "c4", "c5", "c6"]);
     expect(chainRows(undefined, false)).toEqual([]);
   });

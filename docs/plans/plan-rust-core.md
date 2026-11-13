@@ -260,6 +260,24 @@ What never crosses the boundary:
 Every phase after 0 opens its own issue under #6793. Markdown parsing is not on the list: iOS renders markdown text with
 MarkdownUI, and moving a syntax tree across FFI for every streamed chunk is a cost to measure before proposing it.
 
+### Progress
+
+Phase 1 (#6871) lands in several PRs.
+
+- **First PR.**
+  - `native/app-core` with `persona-core`'s `continuity`, the runtime, the C and JNI entry points and the Kotlin codecs.
+  - `cargo test` replays all 29 continuity cases (70 steps), directly and through the runtime.
+  - Android's `:core:rustcore` replays them through the real JNI binding on a host build.
+  - The new `core` CI lane runs these checks.
+  - Size, for orientation only: the stripped x86_64 release library is 678 KB (322 KB gzipped). The go / no-go numbers
+    come from the device ABIs.
+- **Still to come.**
+  - iOS: the `PersonaCore` package and its XCTest replay.
+  - HarmonyOS: the NAPI module and the on-device replay.
+  - Android: device libraries.
+  - The go / no-go measurements.
+  - License notices, with the first build that ships the library in an app.
+
 ### Migration rules (each domain)
 
 1. **Fixtures first.** The domain's fixtures cover the rules each client implements today. Gaps found while porting

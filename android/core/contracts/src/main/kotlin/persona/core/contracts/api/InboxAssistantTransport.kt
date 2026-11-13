@@ -20,6 +20,8 @@ class InboxSuggestionStale(val item: JsonObject?) : IllegalStateException("sugge
 interface InboxAssistantTransport {
     val scope: String
     suspend fun inbox(): JsonObject
+    /** One item by its hub id, including a done item the list no longer carries; 404 means it does not exist. */
+    suspend fun item(itemId: String): JsonObject = throw UnsupportedOperationException("Inbox item lookup unavailable")
     suspend fun larkConversations(cursor: String? = null): JsonObject = throw UnsupportedOperationException("Conversation metadata unavailable")
     suspend fun larkConversationsForAccount(account: Int?, cursor: String? = null): JsonObject {
         require(account == null) { "Account-specific conversation metadata unavailable" }

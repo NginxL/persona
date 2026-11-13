@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { ItemManager, useKnownDefault } from "../../lib/manager-choice";
 import { hasEvent, itemAtUid } from "../../lib/inbox-events";
 import { agentDraft, agentWorking, canDraft, isDone, itemKey, kindLabel, labelIsUrgent, muteItem, muteShortName, muteTitle, openTitle, policyMenuTitle, openURL, setDone, shortTime, sourceLine, useInbox, type InboxItem } from "../../lib/inbox";
+import { rowMeta } from "../../lib/inbox-now";
 import { openFolderDialog, useFoldersShown } from "./InboxFolders";
 import { openPolicyDialog } from "./PolicyDialog";
 import { useInboxItemPlace } from "../../lib/extension-slots";
@@ -63,7 +64,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   const moreMenu = useMenu();
   // on a phone the title comes first: Pin and Mute fold into one ⋯ menu when both are there (#4144)
   const phone = useMedia(PHONE);
-  const event = Boolean(item && hasEvent(item));
+  const event = Boolean(item && (item.now || hasEvent(item)));
   // A chat item's event sits above its chat (#3262), and a mail event above its message (#5471), whether an extension
   // offers a page for the source or not. A chain entry focuses the chat or mail in place instead of switching the page.
   const embed = event && Boolean(item?.lark || item?.mail);
@@ -84,6 +85,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   const draft = item.suggestion ? undefined : agentDraft(item);
   const translated = hubTranslation(item, prefs);
   const time = shortTime(item.updated_at);
+  const detailMeta = item.where ? rowMeta(item) : sourceLine(item);
   const canPin = Boolean(item.lark) && (embed || !place || ownShown) && (!showEvent || embed);
   const muteRows: MenuItem[] = [
     ...(item.mutes ?? []).map((m): MenuItem => ({ key: `${m.tag}:${m.value}`, label: muteTitle(m), detail: muteShortName(m), icon: "bellOff", onSelect: () => void muteItem(item, m) })),
@@ -115,9 +117,9 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                   {label && <Tag urgent={labelIsUrgent(item)}>{label}</Tag>}
                 </h2>
                 {/* the source line gives way first, so the time stays whole */}
-                <p className="mt-0.5 flex min-w-0 text-[12px] text-ink-3">
-                  <span className="truncate">{sourceLine(item)}</span>
-                  {time && <span className="shrink-0 whitespace-pre">{sourceLine(item) ? ` · ${time}` : time}</span>}
+                <p className="mt-0.5 flex min-w-0 text-[12px] text-ink-3" data-detail-meta>
+                  <span className="truncate">{detailMeta}</span>
+                  {time && <span className="shrink-0 whitespace-pre">{detailMeta ? ` · ${time}` : time}</span>}
                 </p>
               </div>
               {phone && canPin && muteRows.length > 0 ? (

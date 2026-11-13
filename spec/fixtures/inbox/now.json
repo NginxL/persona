@@ -47,7 +47,7 @@
     },
     "look_again": {
       "en": " · look again {time}",
-      "zh-Hans": " · {time}再看",
+      "zh-Hans": " · {time} 再看",
       "ja": " · {time}に再確認"
     },
     "next": {
@@ -502,7 +502,7 @@
         "section": "working",
         "text": {
           "en": "Waiting for Alex to confirm the date · look again {time}: ask whether Friday works",
-          "zh-Hans": "等张三确认日期 · {time}再看：问周五行不行",
+          "zh-Hans": "等张三确认日期 · {time} 再看：问周五行不行",
           "ja": "田中さんの日程確認を待っています · {time}に再確認：金曜日で良いか聞く"
         },
         "time": "2026-01-02T09:00:00Z"
@@ -547,7 +547,7 @@
         "section": "working",
         "text": {
           "en": "Waiting for a reply · look again {time}",
-          "zh-Hans": "等对方回复 · {time}再看",
+          "zh-Hans": "等对方回复 · {time} 再看",
           "ja": "相手の返信待ち · {time}に再確認"
         },
         "time": "2026-01-02T09:00:00Z"

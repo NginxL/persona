@@ -18,6 +18,7 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -262,10 +263,10 @@ func TestInboxGroupByTheModel(t *testing.T) {
 	}
 	old, fresh := h.inbox.items["lark:F1:1051"], h.inbox.items["lark:F1:1061"]
 	if old.Title != "示例 A 方案周四下午评审" || old.Summary != "丙说周四下午可以，等你确认" || old.Tier != TierAction || old.TriagedBy != "model" ||
-		old.Last != "1060" || old.TriagedAt != old.Last || string(old.Meta) != `{"messages":["m1051","m1060"]}` || old.Count != 2 {
+		old.TitleBy != TitleByModel || old.Last != "1060" || old.TriagedAt != old.Last || string(old.Meta) != `{"messages":["m1051","m1060"]}` || old.Count != 2 {
 		t.Fatalf("existing event %+v", old)
 	}
-	if fresh == nil || fresh.Tier != TierFYI || fresh.Title != "示例 B 接口变更" || fresh.TriagedBy != "model" || fresh.TriagedAt != fresh.Last ||
+	if fresh == nil || fresh.Tier != TierFYI || fresh.Title != "示例 B 接口变更" || fresh.TriagedBy != "model" || fresh.TitleBy != TitleByModel || fresh.TriagedAt != fresh.Last ||
 		fresh.Group == nil || fresh.Group.Thread != "chat:F1" || fresh.Lark == nil || fresh.Lark.FeedID != "F1" || fresh.Source != "lark" ||
 		!strings.Contains(string(fresh.Meta), `"continues":"lark:F1:900"`) {
 		t.Fatalf("new event %+v", fresh)
@@ -558,7 +559,7 @@ func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 		old.Title != "示例 A 方案评审" || old.Count != 2 || old.Last != "1060" || old.TriagedAt != old.Last {
 		t.Fatalf("existing event %+v", old)
 	}
-	if fresh == nil || fresh.Tier != TierNoise || fresh.Title != "示例结构分组" || fresh.TriagedBy != "rules" || fresh.Reason != "按规则" {
+	if fresh == nil || fresh.Tier != TierNoise || fresh.Title != "示例结构分组" || fresh.TriagedBy != "rules" || fresh.TitleBy != TitleByRules || fresh.Reason != "按规则" {
 		t.Fatalf("new event %+v", fresh)
 	}
 	before := len(model.asked())
@@ -860,7 +861,7 @@ func TestInboxGroupAnswerChecks(t *testing.T) {
 		"twice":          {`{"assign":[{"message":"m1","event":"e1"},{"message":"m1","event":"e1"},{"message":"m2","event":"e1"}],"events":[` + ev("e1", "fyi") + `]}`, false},
 		"not new":        {`{"assign":[{"message":"m1","event":"e1"},{"message":"m9","event":"e1"}],"events":[` + ev("e1", "fyi") + `]}`, false},
 		"unseen":         {`{"assign":[{"message":"m1","event":"e7"},{"message":"m2","event":"e7"}],"events":[` + ev("e7", "fyi") + `]}`, false},
-		"done":           {`{"assign":[{"message":"m1","event":"e0"},{"message":"m2","event":"e0"}],"events":[` + ev("e0", "fyi") + `]}`, false},
+		"done":           {`{"assign":[{"message":"m1","event":"e0"},{"message":"m2","event":"e0"}],"events":[` + ev("e0", "fyi") + `]}`, true},
 		"bad tier":       {`{"assign":[{"message":"m1","event":"e1"},{"message":"m2","event":"e1"}],"events":[` + ev("e1", "urgent") + `]}`, false},
 		"no title":       {`{"assign":[{"message":"m1","event":"e1"},{"message":"m2","event":"e1"}],"events":[{"event":"e1","tier":"fyi"}]}`, false},
 		"undescribed":    {`{"assign":[{"message":"m1","event":"e1"},{"message":"m2","event":"new:1"}],"events":[` + ev("e1", "fyi") + `]}`, false},
@@ -1114,4 +1115,507 @@ func TestInboxGroupEventCount(t *testing.T) {
 	if it = round(nil); it.Count != 5 || !it.StartedAt.Equal(started) || it.Last != "1064" {
 		t.Fatalf("after two more: count %d, last %s", it.Count, it.Last)
 	}
+}
+
+// A done event is a valid assignment target. The optional reopen flag is retained in the plan; omitted means reopen.
+func TestInboxGroupAnswerReopen(t *testing.T) {
+	seen := map[string]groupEvent{"e0": {ID: "e0", Done: true}}
+	for _, tc := range []struct {
+		name, field string
+		want        *bool
+	}{
+		{name: "omitted"},
+		{name: "true", field: `,"reopen":true`, want: func() *bool { v := true; return &v }()},
+		{name: "false", field: `,"reopen":false`, want: func() *bool { v := false; return &v }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			answer := `{"assign":[{"message":"m1","event":"e0"}],"events":[{"event":"e0","title":"示例","tier":"fyi"` + tc.field + `}]}`
+			var out groupAnswer
+			if err := json.Unmarshal([]byte(answer), &out); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := checkGroupAnswer(out, []string{"m1"}, seen)
+			if err != nil || len(plan.events) != 1 {
+				t.Fatalf("plan %+v, err %v", plan, err)
+			}
+			got := plan.events[0].reopen
+			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
+				t.Fatalf("reopen %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Follow-up messages append to the handled event itself. Reopening is the default: the model's triage replaces the old
+// version, completion clears, and received is recorded before reopened with the item's source as via.
+func TestInboxGroupReopensADoneEvent(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+		"events":[{"event":"lark:F1:900","title":"示例发布跟进","summary":"对方补充了时间","tier":"action","reason":"继续追问","urgent":true}]}`
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+	_, client := newGroupModel(t, answer)
+	h, _ := groupHub(t, g, client)
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Read = 1, true
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID || g.appends[0].Continues != "" ||
+		string(g.appends[0].Meta) != `{"messages":["m900"]}` || !slices.Equal(g.appends[0].Messages, []string{"m1060", "m1061"}) {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if h.inbox.items["lark:F1:1060"] != nil || len(h.inbox.items) != 2 {
+		t.Fatalf("a continuation was opened instead: %v", h.inbox.items)
+	}
+	if !it.open() || it.DoneBy != "" || it.Title != "示例发布跟进" || it.Summary != "对方补充了时间" ||
+		it.Tier != TierAction || it.Reason != "继续追问" || it.TriagedBy != "model" || it.TitleBy != TitleByModel || !it.Urgent ||
+		it.Count != 3 || it.Last != "1061" || it.TriagedAt != "1061" || it.Read {
+		t.Fatalf("reopened event %+v", it)
+	}
+	kinds := chainKinds(it)
+	if len(kinds) < 3 || kinds[0] != ChainReceived || kinds[1] != ChainReopened || !slices.Contains(kinds, ChainTriaged) {
+		t.Fatalf("chain %v", kinds)
+	}
+	if got := it.Chain[1]; got.Via != "lark" || got.Text != "又有新消息，重新打开" {
+		t.Fatalf("reopened entry %+v", got)
+	}
+}
+
+// An explicit reopen:false is a closeout: the messages and version advance, but completion, words, triage and read state stay.
+func TestInboxGroupCloseoutKeepsADoneEvent(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+		"events":[{"event":"lark:F1:900","title":"不应改掉的标题","summary":"不应改掉的总结","tier":"action","reason":"不应改掉的理由","urgent":true,"reopen":false}]}`
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+	_, client := newGroupModel(t, answer)
+	h, _ := groupHub(t, g, client)
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Read = 1, true
+	it.Summary, it.Reason, it.TriagedBy = "示例原总结", "示例原理由", "model"
+	doneAt := *it.DoneAt
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if it.open() || it.DoneAt == nil || !it.DoneAt.Equal(doneAt) || it.DoneBy != "user" ||
+		it.Title != "示例上周的发布" || it.Summary != "示例原总结" || it.Tier != TierFYI || it.Reason != "示例原理由" ||
+		it.TriagedBy != "model" || it.Urgent || !it.Read || it.Count != 3 || it.Last != "1061" || it.TriagedAt != "1061" ||
+		it.Preview != "示例预览" || string(it.Meta) != `{"messages":["m900","m1060","m1061"]}` {
+		t.Fatalf("closeout event %+v", it)
+	}
+	if kinds := chainKinds(it); len(kinds) != 1 || kinds[0] != ChainReceived {
+		t.Fatalf("closeout chain %v", kinds)
+	}
+	if h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatal("a closeout opened another event")
+	}
+}
+
+// A mute wins over the default reopen. The done item takes the closeout path directly, without a reopened-then-muted chain.
+func TestInboxGroupMutedDoneEventStaysDone(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+		"events":[{"event":"lark:F1:900","title":"示例新标题","tier":"action","reason":"继续追问"}]}`
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+	_, client := newGroupModel(t, answer)
+	h, _ := groupHub(t, g, client)
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Read, it.Reason = 1, true, "示例原理由"
+	h.inbox.mutes = []InboxMute{{ID: "m1", Source: "lark", Tag: connector.TagChat, Value: "F1", Name: "示例群"}}
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if it.open() || it.DoneBy != "user" || it.Title != "示例上周的发布" || it.Tier != TierFYI ||
+		it.Reason != "示例原理由" || !it.Read || it.Count != 3 || it.TriagedAt != "1061" {
+		t.Fatalf("muted event %+v", it)
+	}
+	if kinds := chainKinds(it); len(kinds) != 1 || kinds[0] != ChainReceived {
+		t.Fatalf("muted chain %v", kinds)
+	}
+}
+
+// The same title guard applies to an open event: grouping still retiers it but cannot replace words written by the
+// handling conversation or the user, and their provenance stays unchanged.
+func TestInboxGroupModelKeepsEstablishedTitle(t *testing.T) {
+	for _, titleBy := range []string{TitleByAssistant, TitleByUser} {
+		t.Run(titleBy, func(t *testing.T) {
+			g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+			_, client := newGroupModel(t, groupAnswerOK)
+			h, _ := groupHub(t, g, client)
+			it := h.inbox.items["lark:F1:1051"]
+			it.Tier, it.TitleBy, it.Summary = TierFYI, titleBy, "已经写过的总结"
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if it.Title != "示例 A 方案评审" || it.Summary != "已经写过的总结" || it.TitleBy != titleBy ||
+				it.Tier != TierAction || it.Reason != "等你确认" || it.TriagedBy != "model" {
+				t.Fatalf("open event %+v", it)
+			}
+		})
+	}
+}
+
+// Titles and summaries written by the handling conversation or the user survive a reopen; the new triage still applies.
+func TestInboxGroupReopenKeepsEstablishedTitle(t *testing.T) {
+	for _, titleBy := range []string{TitleByAssistant, TitleByUser} {
+		t.Run(titleBy, func(t *testing.T) {
+			answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+				"events":[{"event":"lark:F1:900","title":"模型新标题","summary":"模型新总结","tier":"action","reason":"继续追问"}]}`
+			g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+			_, client := newGroupModel(t, answer)
+			h, _ := groupHub(t, g, client)
+			it := h.inbox.items["lark:F1:900"]
+			it.Count, it.TitleBy, it.Summary = 1, titleBy, "已经写过的总结"
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if !it.open() || it.Title != "示例上周的发布" || it.Summary != "已经写过的总结" || it.TitleBy != titleBy ||
+				it.Tier != TierAction || it.Reason != "继续追问" || !slices.Contains(chainKinds(it), ChainReopened) {
+				t.Fatalf("reopened event %+v", it)
+			}
+		})
+	}
+}
+
+// An established handling conversation receives a reopened event's messages even when the new tier is only FYI.
+// putEvent marks it looking so the unchanged escalate handled branch, rather than the new-conversation tier gate, takes it.
+func TestInboxGroupReopenReturnsToHandlingConversation(t *testing.T) {
+	for _, tier := range []string{TierAction, TierFYI} {
+		t.Run(tier, func(t *testing.T) {
+			g := &groupLark{placed: map[string]bool{}}
+			h, _ := groupHub(t, g, nil)
+			it := h.inbox.items["lark:F1:900"]
+			it.Count = 1
+			it.Agent = &InboxAgent{State: AgentSkipped, MachineID: "server", SessionID: "s1", Of: it.Last,
+				Pending: []inboxNote{{Name: prompts.NoteClosed}}}
+			it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: "server", SessionID: "s1"}
+			h.inbox.items = map[string]*InboxItem{it.ID: it}
+			thing, err := g.GroupAppend(context.Background(), connector.GroupAppend{Thread: "chat:F1", Event: it.ID, Meta: it.Meta, Messages: []string{"m1060"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			planned := plannedEvent{existing: it.ID, messages: []string{"m1060"}, title: "示例重开", summary: "示例新进展", tier: tier, reason: "继续"}
+			if got := h.putEvent(sourceOf(g), "chat:F1", planned, thing, true); got != it {
+				t.Fatalf("putEvent %p, want %p", got, it)
+			}
+			if len(it.Agent.Pending) != 0 {
+				t.Fatalf("the old close note survived reopening: %+v", it.Agent.Pending)
+			}
+			now := time.Now()
+			writes := h.inbox.escalate(now.Add(-time.Hour), now)
+			if len(writes) != 1 || it.Agent.SessionID != "s1" || it.Agent.Of != "1060" || !it.Agent.Wake ||
+				len(it.Agent.Pending) != 1 || it.Agent.Pending[0].Name != prompts.NoteNewMessages ||
+				it.Handling.State != HandlingLooking {
+				t.Fatalf("escalation %+v, agent %+v, handling %+v", writes, it.Agent, it.Handling)
+			}
+		})
+	}
+}
+
+// If the model saw an open event but the user filed it before the append, the same event is appended and reopened;
+// no new continuation event is created.
+func TestInboxGroupAppendsToEventDoneMeanwhile(t *testing.T) {
+	g := &groupLark{placed: map[string]bool{}}
+	h, _ := groupHub(t, g, nil)
+	it := h.inbox.items["lark:F1:1051"]
+	now := time.Now()
+	it.DoneAt, it.DoneBy, it.Count = &now, "user", 1
+	plan := &groupPlan{model: true, events: []plannedEvent{{existing: it.ID, messages: []string{"m1060"},
+		title: "示例归档后继续", summary: "示例新进展", tier: TierFYI, reason: "补充"}}}
+	h.writeGroup(context.Background(), sourceOf(g), *groupBatch(), plan)
+
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID || g.appends[0].Continues != "" {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if h.inbox.items["lark:F1:1060"] != nil || !it.open() || it.DoneBy != "" || it.Title != "示例归档后继续" ||
+		!slices.Contains(chainKinds(it), ChainReopened) {
+		t.Fatalf("event done meanwhile %+v", it)
+	}
+}
+
+// Done noise and done stream events are not reopen candidates. Open events of the same shapes remain visible.
+func TestInboxGroupEventsSkipsDoneStreams(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	add := func(id string, done bool, tier string, count int) {
+		it := &InboxItem{ID: id, UpdatedAt: now, Tier: tier, Count: count, Group: &InboxGroup{Connector: "lark", Thread: "chat:F1"}}
+		if done {
+			it.DoneAt = &now
+		}
+		h.inbox.items[id] = it
+	}
+	add("done-noise", true, TierNoise, 1)
+	add("done-large", true, TierFYI, groupDoneCountMax)
+	add("done-ok", true, TierFYI, groupDoneCountMax-1)
+	add("open-noise", false, TierNoise, 1)
+	add("open-large", false, TierFYI, groupDoneCountMax)
+	got := map[string]bool{}
+	for _, e := range h.groupEvents("lark", "chat:F1", "") {
+		got[e.ID] = true
+	}
+	for _, id := range []string{"done-ok", "open-noise", "open-large"} {
+		if !got[id] {
+			t.Errorf("%s missing from %v", id, got)
+		}
+	}
+	for _, id := range []string{"done-noise", "done-large"} {
+		if got[id] {
+			t.Errorf("%s should be excluded from %v", id, got)
+		}
+	}
+}
+
+// Noise folding leaves every plan entry aimed at a done event alone: it neither absorbs those messages nor redirects
+// them to a new event, while unrelated new noise still folds into the conversation's open noise event.
+func TestInboxGroupFoldNoiseSkipsDoneEvents(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	add := func(id string, done bool, tier string) {
+		it := &InboxItem{ID: id, Tier: tier, Group: &InboxGroup{Connector: "lark", Thread: "chat:F1"}}
+		if done {
+			it.DoneAt = &now
+		}
+		h.inbox.items[id] = it
+	}
+	add("open-noise", false, TierNoise)
+	add("done-noise", true, TierNoise)
+	add("done-action", true, TierAction)
+	add("done-noise-high", true, TierNoise)
+	plan := &groupPlan{events: []plannedEvent{
+		{existing: "done-noise", messages: []string{"m1"}, tier: TierNoise},
+		{messages: []string{"m2"}, tier: TierNoise},
+		{existing: "done-action", messages: []string{"m3"}, tier: TierNoise},
+		{existing: "done-noise-high", messages: []string{"m4"}, tier: TierAction},
+	}}
+	h.inbox.foldNoise("lark", "chat:F1", plan)
+
+	if len(plan.events) != 4 {
+		t.Fatalf("folded plan %+v", plan.events)
+	}
+	for i, id := range []string{"done-noise", "open-noise", "done-action", "done-noise-high"} {
+		if plan.events[i].existing != id || len(plan.events[i].messages) != 1 || plan.events[i].messages[0] != fmt.Sprintf("m%d", i+1) {
+			t.Errorf("plan %d %+v, want only %s's own message", i, plan.events[i], id)
+		}
+	}
+}
+
+// A connector that keeps no meta reopens a done event the same way: the hub composes the append from the batch, the
+// event takes the model's words, clears completion and records received then reopened; no continuation is opened.
+func TestInboxGroupReopensDoneEventWithoutMeta(t *testing.T) {
+	answer := `{"assign":[{"message":"m2","event":"examplechat:chat:C1#m1"},{"message":"m3","event":"examplechat:chat:C1#m1"}],
+		"events":[{"event":"examplechat:chat:C1#m1","title":"示例 A 方案回到评审","summary":"丙说周四下午可以","tier":"action","reason":"等你定"}]}`
+	g := &groupChat{batch: chatBatch()}
+	_, client := newGroupModel(t, answer)
+	h := chatHub(t, g, client)
+	it := h.inbox.items["examplechat:chat:C1#m1"]
+	done := time.Now().Add(-2 * time.Hour)
+	it.DoneAt, it.DoneBy, it.Count, it.Tier = &done, "user", 1, TierFYI
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if !it.open() || it.DoneBy != "" || it.Title != "示例 A 方案回到评审" || it.Summary != "丙说周四下午可以" ||
+		it.Tier != TierAction || it.Reason != "等你定" || it.TriagedBy != "model" || it.TitleBy != TitleByModel ||
+		it.Count != 3 || it.Meta != nil || !strings.Contains(it.Context, "m2") || !strings.Contains(it.Context, "m3") {
+		t.Fatalf("reopened event %+v", it)
+	}
+	if kinds := chainKinds(it); len(kinds) != 3 || kinds[0] != ChainReceived || kinds[1] != ChainReopened || kinds[2] != ChainTriaged {
+		t.Fatalf("chain %v", kinds)
+	}
+	if len(h.inbox.items) != 1 || h.inbox.items["examplechat:chat:C1#m3"] != nil {
+		t.Fatalf("a continuation was opened instead: %d items", len(h.inbox.items))
+	}
+}
+
+// reopen has no effect on an open event: the model's words apply as before and no reopened entry is recorded.
+func TestInboxGroupReopenFalseOnAnOpenEvent(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:1051"},{"message":"m1061","event":"new:1"}],
+		"events":[{"event":"lark:F1:1051","title":"示例 A 方案周四下午","summary":"丙说周四下午可以","tier":"fyi","reason":"同步","reopen":false},
+		{"event":"new:1","title":"示例 B 接口变更","summary":"丁说接口改了","tier":"fyi","reason":"同步"}]}`
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+	_, client := newGroupModel(t, answer)
+	h, _ := groupHub(t, g, client)
+	it := h.inbox.items["lark:F1:1051"]
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if !it.open() || it.Title != "示例 A 方案周四下午" || it.Tier != TierFYI || it.Reason != "同步" || it.TriagedBy != "model" {
+		t.Fatalf("open event %+v", it)
+	}
+	if kinds := chainKinds(it); slices.Contains(kinds, ChainReopened) {
+		t.Fatalf("an open event was reopened: %v", kinds)
+	}
+}
+
+// The model saw an open event the user filed before its append, and the fallback wrote it (the model was unavailable
+// between the two steps): the fallback keeps its structural title and rule tier as it does for open events, and the
+// event reopens rather than gaining a continuation.
+func TestInboxGroupFallbackReopensAnEventDoneMeanwhile(t *testing.T) {
+	g := &groupLark{placed: map[string]bool{}}
+	h, _ := groupHub(t, g, nil)
+	it := h.inbox.items["lark:F1:1051"]
+	now := time.Now()
+	it.DoneAt, it.DoneBy, it.Count = &now, "user", 1
+	plan := &groupPlan{events: []plannedEvent{{existing: it.ID, messages: []string{"m1060"}}}}
+	h.writeGroup(context.Background(), sourceOf(g), *groupBatch(), plan)
+
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID || g.appends[0].Continues != "" {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if !it.open() || it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" || it.Tier != TierAction ||
+		it.TriagedBy != "model" || !slices.Contains(chainKinds(it), ChainReopened) {
+		t.Fatalf("fallback race %+v", it)
+	}
+}
+
+// A batch written twice (the connector hands it again) reopens the event once: the second write is the same last.
+func TestInboxGroupReopenOnce(t *testing.T) {
+	g := &groupLark{placed: map[string]bool{}}
+	h, _ := groupHub(t, g, nil)
+	it := h.inbox.items["lark:F1:900"]
+	it.Count = 1
+	plan := &groupPlan{model: true, events: []plannedEvent{{existing: it.ID, messages: []string{"m1060"},
+		title: "示例重开", summary: "示例进展", tier: TierAction, reason: "继续"}}}
+	h.writeGroup(context.Background(), sourceOf(g), *groupBatch(), plan)
+	h.writeGroup(context.Background(), sourceOf(g), *groupBatch(), plan)
+	n := 0
+	for _, k := range chainKinds(it) {
+		if k == ChainReopened {
+			n++
+		}
+	}
+	if n != 1 || it.Count != 2 {
+		t.Fatalf("%d reopened entries, count %d, chain %v", n, it.Count, chainKinds(it))
+	}
+}
+
+// A close note still queued when the event reopens is dropped with it: the conversation's next delivery carries the
+// new messages alone, never a stop followed by them.
+func TestInboxGroupReopenDropsTheClosedNote(t *testing.T) {
+	g := &groupLark{placed: map[string]bool{}}
+	h, _ := groupHub(t, g, nil)
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Context = 1, "示例群：m900"
+	it.Agent = &InboxAgent{State: AgentRunning, MachineID: "server", SessionID: "s1", Of: it.Last,
+		Pending: []inboxNote{{Name: prompts.NoteClosed, Text: "user"}}}
+	it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: "server", SessionID: "s1"}
+	thing, err := g.GroupAppend(context.Background(), connector.GroupAppend{Thread: "chat:F1", Event: it.ID, Meta: it.Meta,
+		Messages: []string{"m1060", "m1061"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned := plannedEvent{existing: it.ID, messages: []string{"m1060", "m1061"}, title: "示例发布跟进",
+		summary: "对方补充了时间", tier: TierAction, reason: "继续追问"}
+	// The batch the connector hands over is the one groupBatch's messages make: the append's answer carries its last.
+	thing.Last = "1061"
+	if got := h.putEvent(sourceOf(g), "chat:F1", planned, thing, true); got != it {
+		t.Fatalf("putEvent %p, want %p", got, it)
+	}
+	h.inbox.mu.Lock()
+	for _, n := range it.Agent.Pending {
+		if n.Name == prompts.NoteClosed {
+			h.inbox.mu.Unlock()
+			t.Fatalf("the stop note is still queued: %+v", it.Agent.Pending)
+		}
+	}
+	h.inbox.mu.Unlock()
+	now := time.Now()
+	if writes := h.inbox.escalate(now.Add(-time.Hour), now); len(writes) != 1 {
+		t.Fatalf("escalated %d", len(writes))
+	}
+	h.deliverPending(context.Background())
+	sent := notesOf(h.f, "s1")
+	if len(sent) != 1 || !strings.Contains(sent[0], "有了新消息") {
+		t.Fatalf("the conversation was told %v", sent)
+	}
+	for _, txt := range sent {
+		if strings.Contains(txt, "不用再做") || strings.Contains(txt, "停下") {
+			t.Fatalf("the filed event's stop note was sent after the reopen:\n%s", txt)
+		}
+	}
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if !it.open() || it.Handling.State != HandlingLooking {
+		t.Fatalf("reopened event %+v, handling %+v", it, it.Handling)
+	}
+}
+
+// With the AI twin off, or a policy that keeps the item the user's, a reopened event goes back to the open list as
+// any item would, and no processing conversation is woken: the twin's release would otherwise say it failed.
+func TestInboxGroupReopenLeavesTheTwinAlone(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+		"events":[{"event":"lark:F1:900","title":"示例发布跟进","summary":"对方补充了时间","tier":"action","reason":"继续追问"}]}`
+	for _, c := range []struct {
+		name   string
+		enable bool
+		twin   string
+	}{
+		{name: "twin off"},
+		{name: "policy never", enable: true, twin: TwinNever},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+			_, client := newGroupModel(t, answer)
+			h, _ := groupHub(t, g, client)
+			h.setConfig(func(cfg *assistantwire.InboxConfig) { cfg.Agent.Enabled = c.enable })
+			it := h.inbox.items["lark:F1:900"]
+			it.Count, it.Context = 1, "示例群：m900"
+			it.Agent = &InboxAgent{State: AgentRunning, MachineID: "server", SessionID: "s1", Of: it.Last}
+			it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: "server", SessionID: "s1"}
+			if c.twin != "" {
+				h.inbox.mu.Lock()
+				h.inbox.policies = []InboxPolicy{{ID: "p1", Source: "lark", Tag: connector.TagChat, Value: "F1", Name: "示例群", Twin: c.twin}}
+				h.inbox.mu.Unlock()
+			}
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if !it.open() || it.DoneBy != "" || it.Tier != TierAction || !slices.Contains(chainKinds(it), ChainReopened) {
+				t.Fatalf("reopened event %+v", it)
+			}
+			if it.Handling.State == HandlingLooking || it.status() != StatusAction {
+				t.Fatalf("the twin was woken on a reopened event: handling %+v, status %q", it.Handling, it.status())
+			}
+			h.inbox.mu.Lock()
+			for _, n := range it.Agent.Pending {
+				if n.Name == prompts.NoteNewMessages {
+					h.inbox.mu.Unlock()
+					t.Fatalf("new messages queued for a conversation the twin is not running: %+v", it.Agent.Pending)
+				}
+			}
+			h.inbox.mu.Unlock()
+			if got := notesOf(h.f, "s1"); len(got) != 0 {
+				t.Fatalf("the conversation was told %v", got)
+			}
+			h.handPass(context.Background()) // the twin's pass: nothing it did on the item is released
+			h.inbox.mu.Lock()
+			defer h.inbox.mu.Unlock()
+			if it.Handling.State == HandlingLooking || it.Handling.State == HandlingFailed || !it.open() ||
+				it.status() != StatusAction || it.Tier != TierAction {
+				t.Fatalf("after the twin's pass: event %+v, handling %+v, status %q", it, it.Handling, it.status())
+			}
+			if got := notesOf(h.f, "s1"); len(got) != 0 {
+				t.Fatalf("the twin's pass told the conversation %v", got)
+			}
+		})
+	}
+}
+
+// The same reopen with the twin on: it goes back to the conversation, which the new messages wake.
+func TestInboxGroupReopenWakesTheTwin(t *testing.T) {
+	answer := `{"assign":[{"message":"m1060","event":"lark:F1:900"},{"message":"m1061","event":"lark:F1:900"}],
+		"events":[{"event":"lark:F1:900","title":"示例发布跟进","summary":"对方补充了时间","tier":"fyi","reason":"同步"}]}`
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}}
+	_, client := newGroupModel(t, answer)
+	h, _ := groupHub(t, g, client)
+	h.setConfig(func(cfg *assistantwire.InboxConfig) { cfg.Agent.Enabled = true })
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Context = 1, "示例群：m900"
+	it.Agent = &InboxAgent{State: AgentRunning, MachineID: "server", SessionID: "s1", Of: it.Last}
+	it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: "server", SessionID: "s1"}
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if !it.open() || it.Handling.State != HandlingLooking || it.Agent.SessionID != "s1" {
+		t.Fatalf("reopened event %+v, handling %+v", it, it.Handling)
+	}
+	waitFor(t, "the new messages told to the conversation", func() bool {
+		return strings.Contains(strings.Join(notesOf(h.f, "s1"), "\n"), "有了新消息")
+	})
 }

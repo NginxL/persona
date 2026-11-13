@@ -123,8 +123,15 @@ class ShellLaneTests(unittest.TestCase):
         for directory in ("scripts/ci", "scripts/app", "android/gradle/wrapper", "jdk/bin",
                           "sdk/platforms/android-37.0", "sdk/build-tools/37.0.0"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
-        for name in ("android.sh", "android-shards.py"):
+        for name in ("android.sh", "android-shards.py", "common.sh"):
             shutil.copyfile(HERE / name, self.root / "scripts/ci" / name)
+        # The shared Rust core's pinned toolchain (core:rustcore's tests build it), with a stand-in rustup.
+        (self.root / "native/app-core").mkdir(parents=True)
+        (self.root / "native/app-core/rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.98.0"\n')
+        (self.root / "bin").mkdir()
+        rustup = self.root / "bin/rustup"
+        rustup.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$MOCK_RUSTUP_LOG"\n')
+        rustup.chmod(0o700)
         (self.root / "scripts/ci/test_android_shards.py").write_text("pass\n")
         for name in ("test_android_i18n_check.py", "test_android_token_baseline.py", "test_android_slot_order.py",
                      "android_i18n_check.py", "android_token_baseline.py", "android_slot_order.py"):
@@ -146,7 +153,8 @@ class ShellLaneTests(unittest.TestCase):
         self.env = dict(os.environ, JAVA_HOME=str(self.root / "jdk"),
                         ANDROID_HOME=str(self.root / "sdk"), ANDROID_SDK_ROOT=str(self.root / "sdk"),
                         ANDROID_CI_TIMEOUT_SECONDS="10", ANDROID_CI_MAX_WORKERS="2",
-                        MOCK_GRADLE_LOG=str(self.log))
+                        MOCK_GRADLE_LOG=str(self.log), MOCK_RUSTUP_LOG=str(self.root / "rustup-arguments"),
+                        PATH=str(self.root / "bin") + os.pathsep + os.environ.get("PATH", ""))
 
     def run_lane(self, *args):
         return subprocess.run(["bash", str(self.root / "scripts/ci/android.sh"), *args],
@@ -163,6 +171,7 @@ class ShellLaneTests(unittest.TestCase):
                 self.assertIn("--max-workers=2", arguments)
                 self.assertNotIn("--profile", arguments)
                 self.assertEqual("translation checker tests" in result.stdout, lane in ("full", "lint-build-test-0"))
+                self.assertIn("run 1.98.0 cargo --version", (self.root / "rustup-arguments").read_text())
 
     def test_profile_and_gradle_failure_are_preserved(self):
         self.env["MOCK_GRADLE_STATUS"] = "1"

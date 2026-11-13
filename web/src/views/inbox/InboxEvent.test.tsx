@@ -18,21 +18,26 @@ vi.hoisted(() => {
   globalThis.CSS ??= { escape: (s: string) => s } as unknown as typeof CSS;
 });
 
-const calls = vi.hoisted(() => ({ list: [] as { path: string; json?: unknown }[], items: [] as unknown[] }));
+const calls = vi.hoisted(() => ({
+  list: [] as { path: string; json?: unknown; headers?: unknown }[],
+  items: [] as unknown[],
+  suggestion: undefined as (() => Promise<unknown>) | undefined,
+}));
 vi.mock("../../lib/api", async (orig) => ({
   ...(await orig<typeof import("../../lib/api")>()),
-  api: (path: string, init?: { json?: unknown }) => {
-    calls.list.push({ path, json: init?.json });
+  api: (path: string, init?: { json?: unknown; headers?: unknown }) => {
+    calls.list.push({ path, json: init?.json, headers: init?.headers });
     if (path.startsWith("/inbox?")) return Promise.resolve({ items: calls.items });
     if (path === "/mail/accounts") return Promise.resolve({ accounts: [] });
     if (path.startsWith("/mail/messages/")) {
       const uid = Number(path.split("/").pop()?.split("?")[0]);
       return Promise.resolve({ message: { uid, text: `mail body ${uid}`, seen: false } });
     }
-    if (path.endsWith("/suggestion")) return Promise.reject(new Error("offline"));
+    if (path.endsWith("/suggestion")) return calls.suggestion ? calls.suggestion() : Promise.reject(new Error("offline"));
     return Promise.resolve({});
   },
 }));
+vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 // the store's first snapshot is in (the list waits for it), with no agents waiting
 vi.mock("../../lib/store", async (orig) => {
   const m = await orig<typeof import("../../lib/store")>();
@@ -42,10 +47,15 @@ vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: () => undefined
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined, translatesChat: () => false, translatesMail: () => false, languageName: () => "" }));
 
 import type { InboxItem } from "../../lib/inbox";
-import { resetInboxForTests } from "../../lib/inbox";
+import { resetInboxForTests, sourceLine } from "../../lib/inbox";
+import { chainRows, type ChainEntry } from "../../lib/inbox-events";
+import { ApiError } from "../../lib/api";
 import { resetMailForTests } from "../../lib/mail";
+import { getState } from "../../lib/store";
+import type { Session } from "../../lib/types";
+import { toast } from "../../ui/atoms";
 import { InboxDetail } from "./InboxDetail";
-import { EventBody } from "./InboxEvent";
+import { chainIconMeaning, EventBody } from "./InboxEvent";
 import { InboxList } from "./InboxList";
 import { settleRosterDefault } from "../../lib/manager-choice";
 
@@ -55,6 +65,14 @@ settleRosterDefault();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const fixture = JSON.parse(readFileSync(join(__dirname, "../../../../scripts/mock/inbox_events.json"), "utf8")) as { items: InboxItem[] };
+const showcase = JSON.parse(readFileSync(join(__dirname, "../../../../spec/fixtures/inbox/showcase.json"), "utf8")) as { items: InboxItem[] };
+const timeline = JSON.parse(readFileSync(join(__dirname, "../../../../spec/fixtures/inbox/timeline.json"), "utf8")) as {
+  cases: {
+    name: string;
+    input: { item: { chain: ChainEntry[] } };
+    expected: { folded: string[]; expanded: string[]; steps: { id: string; icon: string; reported: boolean }[] };
+  }[];
+};
 const byId = (id: string) => fixture.items.find((x) => x.id === id)!;
 const reply = byId("lark:oc_demo1:100");
 const urgent = byId("lark:oc_demo2:200");
@@ -64,7 +82,7 @@ const failed = byId("lark:oc_demo6:600");
 const conclusion = byId("lark:oc_demo7:700");
 const managerDone = byId("mail:a1:notice:110");
 const legacy = (it: InboxItem): InboxItem => {
-  const { status: _s, urgent: _u, recap: _r, handling: _h, suggestion: _g, chain: _c, related: _rel, ...rest } = it;
+  const { status: _s, urgent: _u, recap: _r, handling: _h, suggestion: _g, chain: _c, related: _rel, now: _n, ...rest } = it;
   // an older hub never files as the manager
   return rest.done_by === "manager" ? { ...rest, done_by: "user" } : rest;
 };
@@ -86,8 +104,11 @@ const press = async (text: string) => {
 beforeEach(() => {
   resetInboxForTests();
   resetMailForTests();
+  Object.assign(getState(), { sessions: {} });
   calls.list = [];
   calls.items = [];
+  calls.suggestion = undefined;
+  vi.mocked(toast).mockClear();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -98,19 +119,68 @@ afterEach(() => {
 });
 
 describe("收件箱事件：详情", () => {
-  it("draws 摘要, 总结, the reply suggestion with 驳回 · 修改 · 发送, then the chain folded to its newest entry", async () => {
+  it("matches every shared timeline case, including via and reported icons", () => {
+    for (const c of timeline.cases) {
+      const chain = c.input.item.chain;
+      expect(chainRows(chain, false).map((e) => e.id), c.name).toEqual(c.expected.folded);
+      expect(chainRows(chain, true).map((e) => e.id), c.name).toEqual(c.expected.expanded);
+      for (const step of c.expected.steps) {
+        const entry = chain.find((e) => e.id === step.id)!;
+        expect(chainIconMeaning(entry), `${c.name}/${step.id}`).toBe(step.icon);
+        expect(entry.kind === "reported", `${c.name}/${step.id}`).toBe(step.reported);
+      }
+    }
+  });
+  it("draws the reply suggestion, then 摘要 and 总结, then all three chain entries without a toggle", async () => {
     act(() => root.render(<EventBody item={reply} onSource={() => {}} />));
     const text = host.textContent ?? "";
+    expect(text.indexOf("建议回复")).toBeLessThan(text.indexOf(reply.summary!));
     expect(text.indexOf(reply.summary!)).toBeLessThan(text.indexOf(reply.recap!));
-    expect(text.indexOf(reply.recap!)).toBeLessThan(text.indexOf("建议回复"));
-    expect(text.indexOf("建议回复")).toBeLessThan(text.indexOf("处理链条"));
+    expect(text.indexOf(reply.recap!)).toBeLessThan(text.indexOf("处理链条"));
     expect(host.querySelector("[data-suggestion-text]")?.textContent).toBe(reply.suggestion!.text);
     expect(buttons()).toEqual(expect.arrayContaining(["驳回", "修改", "发送"]));
-    expect(host.querySelectorAll("[data-chain-entry]")).toHaveLength(1);
-    expect(host.querySelector("[data-chain-entry]")?.getAttribute("data-chain-entry")).toBe("handling");
-    await press("展开全部（3）");
+    expect(buttons()).not.toContain("说一句");
     expect([...host.querySelectorAll("[data-chain-entry]")].map((e) => e.getAttribute("data-chain-entry"))).toEqual(["received", "triaged", "handling"]);
-    expect(buttons()).toContain("收起");
+    expect(host.querySelector("[data-chain-toggle]")).toBeNull();
+  });
+  it("puts nowText and its conversation link before the suggestion and background", () => {
+    const item = { ...reply, now: "confirm_reply" } as InboxItem;
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    const status = host.querySelector("[data-event-now]")!;
+    expect(status.getAttribute("data-event-now")).toBe("confirm_reply");
+    expect(status.textContent).toContain("等你确认回复");
+    expect(status.textContent).toContain("处理对话");
+    const text = host.textContent ?? "";
+    expect(text.indexOf("等你确认回复")).toBeLessThan(text.indexOf("建议回复"));
+    expect(text.indexOf("建议回复")).toBeLessThan(text.indexOf(item.summary!));
+    expect(text.indexOf(item.summary!)).toBeLessThan(text.indexOf("处理链条"));
+  });
+  it("uses rowMeta and nowText for showcase sc-1, and keeps sourceLine without where", () => {
+    act(() => root.render(<InboxDetail item={showcase.items[0]} loaded />));
+    expect(host.querySelector("[data-detail-meta]")?.textContent).toContain("订单群 · 张三：好的，我看一下新的");
+    expect(host.querySelector("[data-event-now]")?.textContent).toContain("等张三确认新报价");
+    expect(host.querySelector("[data-event-now]")?.textContent).toContain("问更正后的报价行不行");
+    const old = plain(reply);
+    act(() => root.render(<InboxDetail item={old} loaded />));
+    expect(host.querySelector("[data-detail-meta]")?.textContent).toContain(sourceLine(old));
+  });
+  it("renders showcase sc-1 folded and expanded, with reported apart and the Agent's live state", async () => {
+    Object.assign(getState(), {
+      sessions: { m1: [{ machine_id: "m1", session_id: "s-agent", title: "核对报价单", cwd: "/work", status: "blocked", state: "needs_you" } as Session] },
+    });
+    act(() => root.render(<EventBody item={showcase.items[0]} onSource={() => {}} />));
+    const ids = () => [...host.querySelectorAll("[data-chain-id]")].map((e) => e.getAttribute("data-chain-id"));
+    expect(ids()).toEqual(["c5", "c6", "c7"]);
+    const reported = host.querySelector('[data-chain-id="c5"]')!;
+    expect(reported.getAttribute("data-chain-reported")).toBe("");
+    expect(reported.textContent).toContain("助手说");
+    expect(reported.querySelector('[data-chain-icon="reported"]')).not.toBeNull();
+    await press("展开全部（7）");
+    expect(ids()).toEqual(["c1", "c2", "c3", "c4", "c5", "c6", "c7"]);
+    expect(host.querySelector('[data-chain-id="c3"] [data-chain-agent-state]')?.textContent).toBe("需要你");
+    expect(host.querySelector('[data-chain-id="c4"] [data-chain-agent-state]')?.textContent).toBe("需要你");
+    await press("收起");
+    expect(ids()).toEqual(["c5", "c6", "c7"]);
   });
   it("labels each kind's buttons", () => {
     act(() => root.render(<EventBody item={agentSuggestion} onSource={() => {}} />));
@@ -128,9 +198,51 @@ describe("收件箱事件：详情", () => {
     expect(host.querySelector("[data-suggestion]")).toBeNull();
     act(() => root.render(<EventBody item={failed} onSource={() => {}} />));
     expect(host.querySelector("[data-event-failed]")?.textContent).toContain("处理超时了");
+    expect(buttons()).toContain("再试一次");
     act(() => root.render(<EventBody item={waiting} onSource={() => {}} />));
     expect(host.querySelector('[data-event-handling="waiting"]')?.textContent).toContain("等对方回复");
     expect(host.querySelector("[data-event-related]")?.textContent).toContain("评审材料");
+  });
+  it("说一句 without a suggestion sends version zero, the words and the item's manager", async () => {
+    const item: InboxItem = { ...failed, manager: "m-work", handling: undefined };
+    calls.suggestion = () => Promise.resolve({ ...item, handling: { owner: "manager", state: "looking" } });
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(buttons()).not.toContain("再试一次");
+    await press("说一句");
+    const input = host.querySelector<HTMLInputElement>("[data-event-say-input]")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, "接着看一下");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await press("说一句");
+    await flush();
+    const sent = calls.list.find((c) => c.path.endsWith("/suggestion"));
+    expect(sent?.path).toBe("/inbox/lark:oc_demo6:600/suggestion");
+    expect(sent?.json).toMatchObject({ version: 0, action: "instruct", text: "接着看一下" });
+    expect(sent?.headers).toEqual({ "X-Persona-Manager": "m-work" });
+    expect(host.querySelector("[data-event-say]")).toBeNull();
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["已交给 AI，等它重新出建议", "ok"]);
+  });
+  it("再试一次 sends the localized default instruction at once when now says failed", async () => {
+    const item = { ...failed, handling: undefined, now: "failed" } as InboxItem;
+    calls.suggestion = () => Promise.resolve({ ...item, handling: { owner: "manager", state: "looking" } });
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(buttons()).toContain("再试一次");
+    expect(buttons()).not.toContain("说一句");
+    await press("再试一次");
+    await flush();
+    const sent = calls.list.find((c) => c.path.endsWith("/suggestion"));
+    expect(sent?.json).toMatchObject({ version: 0, action: "instruct", text: "请再试一次。" });
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["已交给 AI，等它重新出建议", "ok"]);
+  });
+  it("a stale instruction refreshes the item and says why", async () => {
+    calls.suggestion = () => Promise.reject(new ApiError(409, "建议已更新", { code: "suggestion_stale" }));
+    act(() => root.render(<EventBody item={failed} onSource={() => {}} />));
+    await press("再试一次");
+    await flush();
+    expect(calls.list.some((c) => c.path === "/inbox?sources=all")).toBe(true);
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["建议已更新", "info"]);
   });
   it("修改: edits the text and confirms it, or 说一句话 goes back as an instruction", async () => {
     act(() => root.render(<EventBody item={reply} onSource={() => {}} />));
@@ -158,7 +270,6 @@ describe("收件箱事件：详情", () => {
   it("a chain entry goes to its source at its position, or opens its messages in place", async () => {
     const onSource = vi.fn();
     act(() => root.render(<EventBody item={reply} onSource={onSource} />));
-    await press("展开全部（3）");
     const received = host.querySelector('[data-chain-entry="received"]')!;
     await act(async () => received.querySelector("button")!.click());
     expect(onSource).toHaveBeenCalledWith({ position: "100", uid: undefined });
@@ -186,7 +297,6 @@ describe("收件箱事件：详情", () => {
     expect(host.querySelector('[data-event-body="embedded"]')).not.toBeNull();
     expect(buttons()).not.toContain("看原文");
     expect(around().at(-1)).toContain("around=102"); // the chat, at the first new message
-    await press("展开全部（3）");
     const received = host.querySelector('[data-chain-entry="received"]')!;
     await act(async () => received.querySelector("button")!.click());
     await flush();
@@ -204,7 +314,6 @@ describe("收件箱事件：详情", () => {
     expect(reads()).toEqual(["/mail/messages/a1/89?mailbox=INBOX"]);
     expect(flags()).toEqual(["/mail/messages/a1/89/flags"]); // an unseen body is really opened, not a seen fixture
     expect(host.textContent).toContain("mail body 89");
-    await press("展开全部（3）");
     const received = host.querySelector('[data-chain-entry="received"]')!;
     await act(async () => received.querySelector("button")!.click());
     await flush();
@@ -230,10 +339,18 @@ describe("收件箱事件：详情", () => {
 });
 
 describe("收件箱事件：已处理", () => {
+  it("uses nowText for a done item instead of the legacy manager line", () => {
+    const item = { ...managerDone, now: "done_manager" } as InboxItem;
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(host.querySelector("[data-event-now]")?.textContent).toContain("助手看完，不用管");
+    expect(host.querySelector("[data-event-manager-done]")).toBeNull();
+  });
   it("says the manager filed it, and draws the chain's 已处理 entry with its check, no link", async () => {
     act(() => root.render(<EventBody item={managerDone} onSource={() => {}} />));
     expect(host.querySelector("[data-event-manager-done]")?.textContent).toBe("助手处理了");
     expect(host.querySelector("[data-suggestion]")).toBeNull();
+    expect(buttons()).not.toContain("说一句");
+    expect(buttons()).not.toContain("再试一次");
     const done = host.querySelector('[data-chain-entry="done"]')!;
     expect(done.textContent).toContain("管理者看完，不用管");
     expect(done.querySelector("button")!.disabled).toBe(true); // no link, nothing to expand

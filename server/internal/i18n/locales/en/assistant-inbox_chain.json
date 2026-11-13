@@ -7,6 +7,7 @@
   "received_mail_other": "{count} emails",
   "received_mail_from_one": "{count} email · {sender}",
   "received_mail_from_other": "{count} emails · {sender}",
+  "reopened": "New messages: reopened",
   "tier_action": "Needs you",
   "tier_fyi": "FYI",
   "tier_noise": "Folded",

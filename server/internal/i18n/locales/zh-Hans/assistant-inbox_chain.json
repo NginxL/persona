@@ -3,6 +3,7 @@
   "received_from_other": "收到 {count} 条新消息 · {sender}",
   "received_mail_other": "收到 {count} 封邮件",
   "received_mail_from_other": "收到 {count} 封邮件 · {sender}",
+  "reopened": "又有新消息，重新打开",
   "tier_action": "需要你",
   "tier_fyi": "知悉即可",
   "tier_noise": "已折叠",

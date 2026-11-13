@@ -1,0 +1,44 @@
+# Persona's shared client core
+
+One Rust library under the iOS, Android and HarmonyOS clients' native UIs. Design, decisions and phases:
+[the plan](../../docs/plans/plan-rust-core.md) (#6793). Phase 1 is #6871.
+
+## Layout
+
+| Crate | What it is |
+| --- | --- |
+| `persona-core` | Pure logic: no IO, no clock, no FFI, no `unsafe`. Today it holds `continuity` (a chat's items, how far they are complete, and what to fetch), ported from the rules every client implements (`spec/fixtures/continuity`). |
+| `persona-core-runtime` | Runs `persona-core` on one worker thread. `dispatch` only queues an action's bytes. The worker applies actions, runs timers, sends requests to the client and builds each chat's patch. `changed` wakes the client once per batch, and the client pulls the patch with `drain`. `wire` holds every type that crosses the boundary. |
+| `persona-core-ffi` | The entry points, built as `libpersona_core`: C functions for Swift (`include/persona_core.h`) and JNI functions for Android's `persona.core.rustcore.NativeBridge`. Each catches panics and returns its failure value. |
+| `persona-core-typegen` | Generates the clients' bincode codecs for the `wire` types. Kotlin goes to android/core/rustcore; Swift and ArkTS follow with their bindings. |
+
+Hub items stay exactly as the hub sent them: the core reads the fields its rules use and passes each item's JSON through
+untouched, in `ListOp::Insert`.
+
+## Build and test
+
+Needs rustup; `rust-toolchain.toml` pins the compiler.
+
+```sh
+cargo test --locked                                # unit tests and the shared fixtures, directly and through the runtime
+cargo run --locked -p persona-core-typegen          # regenerate the clients' codecs after changing a wire type
+cargo run --locked -p persona-core-typegen -- --check
+cargo build --locked --release -p persona-core-ffi # libpersona_core.{a,so,dylib}
+```
+
+`scripts/ci/core.sh` runs all of these, plus formatting and clippy. Android's `:core:rustcore` tests build a host copy of
+the library and replay the same fixtures through the real JNI binding:
+
+```sh
+cd android && ./gradlew :core:rustcore:test
+```
+
+## Rules
+
+- **A wire type change ships with its regenerated codecs.** Never edit generated files by hand.
+- **Fixtures come first.** A rule changes in `spec/fixtures/<domain>`, then here; expectations are never generated from
+  this code.
+- **Text is out of scope.** No user-facing text: the core returns codes and enums, and each client words them from its
+  own localization resources.
+- **The main thread stays cheap.** Calls a client makes on its main thread (`dispatch`, `drain`) never do work that grows
+  with a chat; that work belongs to the worker.

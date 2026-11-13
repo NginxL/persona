@@ -9,6 +9,7 @@ usage() {
     '       scripts/ci/android.sh --help' \
     'Requires Bash, Python 3, timeout (or gtimeout), JAVA_HOME pointing to JDK 21,' \
     'and ANDROID_HOME (or ANDROID_SDK_ROOT) pointing to an installed Android SDK.' \
+    'Also requires rustup: core:rustcore tests build the shared Rust core (native/app-core).' \
     'SDK setup: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"' \
     'Accept SDK licenses using sdkmanager --licenses if required by your SDK tools.' \
     'Toolchain versions are read from android/gradle/libs.versions.toml.' \
@@ -93,6 +94,10 @@ export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK"
 [[ -f $SDK/platforms/android-$COMPILE_SDK.0/android.jar || -f $SDK/platforms/android-$COMPILE_SDK/android.jar ]] || fail "Install SDK platform android-$COMPILE_SDK.0"
 [[ -d $SDK/build-tools/$BUILD_TOOLS ]] || fail "Install SDK build-tools $BUILD_TOOLS"
 [[ -f $ROOT/android/gradlew && -f $ROOT/android/gradle/wrapper/gradle-wrapper.jar ]] || fail 'The Gradle wrapper is missing'
+# :core:rustcore's tests load a host build of the shared Rust core (native/app-core).
+source "$ROOT/scripts/ci/common.sh"
+ci_rust_toolchain || fail 'Install rustup (https://rustup.rs) for the shared Rust core'
+cd "$ROOT"
 
 # Capture the generator's status before reading its output; process substitution
 # would hide parse failures and could accidentally invoke Gradle's default tasks.

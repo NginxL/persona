@@ -32,6 +32,8 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
     val replyComposers: StateFlow<ReplyComposers?> get() = emptyReplyComposers
     suspend fun readingStore(): LarkReadingStore? = null
     val snapshot: StateFlow<InboxSnapshot>
+    /** The listed or paged-back record, else one read by id from the hub; null only when every lookup answers 404. */
+    suspend fun item(itemId: String): InboxRecord? = throw UnsupportedOperationException("Inbox item lookup unavailable")
     val mailTransport: StateFlow<MailTransport?> get() = disconnectedMail
     val personaOutbox: StateFlow<List<OutboxMessage>> get() = emptyPersonaOutbox
     val connectionState: Flow<ConnectionState> get() = flowOf(ConnectionState.Connecting)
@@ -235,6 +237,9 @@ object InboxItemKey {
     fun of(hubId: String, manager: String): String = "$hubId$SEPARATOR$manager"
 
     fun hubId(key: String): String = key.substringBefore(SEPARATOR)
+
+    /** The manager an app id carries, or null for a bare hub id and for the default manager. */
+    fun managerOf(key: String): String? = key.substringAfter(SEPARATOR, "").takeIf { it.isNotBlank() }
 
     /** The app's id of the item [hubId] of [manager] (null: unstamped). */
     fun appId(hubId: String, manager: String?): String =
