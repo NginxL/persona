@@ -4,9 +4,10 @@ import XCTest
 /// A recording's Summary on iPhone (#5026, docs/apple/recording.md「Minutes」): the made-up finished meeting
 /// (`-showMeetingSample minutes`) against a mock hub (PERSONA_MOCK_HUB) that writes made-up minutes from its sentences
 /// (`POST /mock/recording_minutes {"mode":"ready"}`): two key points, a decision at 0:44, an action item with an owner
-/// and a due date, and an open question. PERSONA_SHOTS=<dir> saves cards-<appearance>-summary / -context / -transcript
-/// and, at the largest text size, -summary-largest / -context-largest, and a cited photo's card -photo
-/// (PERSONA_SHOTS_APPEARANCE names the appearance; run once in light and once in dark).
+/// and a due date, and an open question. PERSONA_SHOTS=<dir> saves cards-<appearance>-summary / -context / -transcript,
+/// at xxxLarge (the interface's cap) and at the largest text size -summary-cap / -context-cap / -summary-largest /
+/// -context-largest, and a cited photo's card -photo (PERSONA_SHOTS_APPEARANCE names the appearance; run once in light
+/// and once in dark).
 final class MinutesCardsUITests: XCTestCase {
     private let cards = ["minutes-card-points", "minutes-card-decisions", "minutes-card-open", "minutes-card-actions"]
 
@@ -74,26 +75,53 @@ final class MinutesCardsUITests: XCTestCase {
         XCTAssertFalse(element(app, "recording-sentence").exists, "the transcript stays under the Summary")
     }
 
-    /// At the largest text size an item's time goes under its words, and the cards still read whole.
-    @MainActor func testLargestTextSizeStacksTheTime() throws {
-        let app = try openSummary(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        try shot(app, "summary-largest")
-        let decisions = element(app, "minutes-card-decisions")
-        let words = decisions.staticTexts["决定：默认用中文转写，中英混说也要能用"].firstMatch
-        let time = decisions.buttons["minutes-time"].firstMatch
-        reveal(time, in: app)
-        XCTAssertTrue(words.exists && time.exists, app.debugDescription)
-        XCTAssertGreaterThanOrEqual(time.frame.minY, words.frame.maxY - 1, "the time isn't under the words")
-        let disclosure = decisions.buttons["minutes-item-context"].firstMatch
-        XCTAssertTrue(disclosure.isHittable, app.debugDescription)
-        disclosure.tap()
-        XCTAssertTrue(decisions.descendants(matching: .any).matching(identifier: "minutes-item-lines").firstMatch.waitForExistence(timeout: 3),
-                      app.debugDescription)
-        try shot(app, "context-largest")
-        for id in cards {
-            let card = element(app, id)
-            reveal(card, in: app)
-            XCTAssertTrue(card.exists, "no \(id) at the largest size:\n\(app.debugDescription)")
+    /// At the largest text size (AX5) an item's words keep growing while its time and disclosure stay as at xxxLarge, where
+    /// #6813 caps the interface (`docs/design/DESIGN_SYSTEM.md` 6.2: the minutes are reading content, the time chip and the
+    /// disclosure a card's controls). At xxxLarge itself (`cap`, the first launch) the time sits after the words, beside
+    /// them and not under them, with the disclosure after it. At AX5 the time and the disclosure are as big as there, side
+    /// by side and on the screen, and the words are taller than there. Where the pair sits at AX5 (beside the words as at
+    /// xxxLarge, or under them) is left to #6448's follow-up. The disclosure opens the lines around the item, and every card
+    /// is there.
+    @MainActor func testLargestTextSizeCapsTheTimeAndGrowsTheWords() throws {
+        var atTheCap: (time: CGSize, disclosure: CGSize, words: CGFloat)?
+        for look in ["cap", "largest"] {
+            let app = try openSummary(Self.textSize(look))
+            try shot(app, "summary-\(look)")
+            let decisions = element(app, "minutes-card-decisions")
+            let words = decisions.staticTexts["决定：默认用中文转写，中英混说也要能用"].firstMatch
+            let time = decisions.buttons["minutes-time"].firstMatch
+            let disclosure = decisions.buttons["minutes-item-context"].firstMatch
+            reveal(disclosure, in: app)
+            let window = app.windows.firstMatch.frame
+            XCTAssertTrue(words.exists && window.contains(time.frame) && window.contains(disclosure.frame),
+                          "\(look): the decision's time and disclosure aren't on the screen:\n\(app.debugDescription)")
+            XCTAssertGreaterThanOrEqual(disclosure.frame.minX, time.frame.maxX - 1, "\(look): the disclosure isn't after the time")
+            XCTAssertLessThan(abs(disclosure.frame.midY - time.frame.midY), 1, "\(look): the disclosure isn't beside the time")
+            if let capped = atTheCap {
+                XCTAssertEqual(time.frame.width, capped.time.width, accuracy: 0.5, "\(look): the time is \(time.frame.size), \(capped.time) at xxxLarge")
+                XCTAssertEqual(time.frame.height, capped.time.height, accuracy: 0.5, "\(look): the time is \(time.frame.size), \(capped.time) at xxxLarge")
+                XCTAssertEqual(disclosure.frame.width, capped.disclosure.width, accuracy: 0.5,
+                               "\(look): the disclosure is \(disclosure.frame.size), \(capped.disclosure) at xxxLarge")
+                XCTAssertEqual(disclosure.frame.height, capped.disclosure.height, accuracy: 0.5,
+                               "\(look): the disclosure is \(disclosure.frame.size), \(capped.disclosure) at xxxLarge")
+                XCTAssertGreaterThan(words.frame.height, capped.words + 1,
+                                     "\(look): the words are \(words.frame.height) pt tall, \(capped.words) pt at xxxLarge: they stopped at the cap")
+            } else {
+                XCTAssertGreaterThanOrEqual(time.frame.minX, words.frame.maxX - 1, "\(look): the time isn't after the words")
+                XCTAssertLessThan(time.frame.minY, words.frame.maxY - 1, "\(look): the time is under the words")
+                atTheCap = (time.frame.size, disclosure.frame.size, words.frame.height)
+            }
+            XCTAssertTrue(disclosure.isHittable, app.debugDescription)
+            disclosure.tap()
+            XCTAssertTrue(decisions.descendants(matching: .any).matching(identifier: "minutes-item-lines").firstMatch.waitForExistence(timeout: 3),
+                          app.debugDescription)
+            try shot(app, "context-\(look)")
+            for id in cards {
+                let card = element(app, id)
+                reveal(card, in: app)
+                XCTAssertTrue(card.exists, "no \(id) at \(look):\n\(app.debugDescription)")
+            }
+            app.terminate()
         }
     }
 
@@ -165,6 +193,13 @@ final class MinutesCardsUITests: XCTestCase {
         let control = findSwitch(app, searching: !extra.isEmpty)
         XCTAssertTrue(segment(control, "recording-view-summary", 0).isSelected, "the default isn't Summary:\n\(app.debugDescription)")
         return app
+    }
+
+    /// The launch arguments for a text size: the system's, with the app's own Text Size at Standard so that only the
+    /// system's counts. `largest` AX5; `cap` xxxLarge, where #6813 caps the interface.
+    private static func textSize(_ look: String) -> [String] {
+        let size = look == "largest" ? "AccessibilityXXXL" : "XXXL"
+        return ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(size)", "-ui.textSize", "standard"]
     }
 
     /// The page's switch once the minutes are ready. At the accessibility sizes (the launch's, `searching`, or the
