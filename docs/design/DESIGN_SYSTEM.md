@@ -1269,6 +1269,12 @@ capsule, one per open item handed to it, at most two.
 
 Today there are seven mechanisms and the same action can use different ones (DS-24). Archive in the sidebar, to-do swipe delete and mail-account delete have no confirmation and no Undo. Only the Mac discards edits with a prompt.
 
+The web command palette's runtime-Agent search (#7624) adds a status line and More/retry controls outside the
+listbox. Local results appear immediately; bounded server pages supply authoritative matches and evidence. New
+results preserve the selected identity rather than the previous numeric row position; a removed selection requires
+a new keyboard choice before Enter opens anything. Loading, failed, expired and loaded-only fallback scopes are
+stated explicitly. This reuses the existing palette, controls and localization without a new search destination.
+
 The optional web workflow board's manual view supports bulk metadata edits (#7583). **Select** reveals native
 checkboxes and a selection bar using the existing `Button` and `Menu` components. **Select all visible** counts only
 cards in the current filters and, on a narrow board, the displayed column; hidden cards are not silently included.

@@ -235,7 +235,7 @@ The authenticated WS `hello.features` always lists server capabilities; trusted 
   - Avatars: `look_uploads` (`POST /api/v1/looks/uploads` and `DELETE /api/v1/looks/uploads/{id}` in the REST table, #2404; the apps offer making an avatar from an image only when the hub lists it).
   - Extensions ([extensions.md](../extensions/extensions.md)): `extensions` (`GET /api/v1/extensions` and the relay under `/api/v1/extensions/{id}/`), `extension_manager` (an extension's detail, form, settings, secrets and switch under `/api/v1/extensions/{id}/-/`), `extension_ui_slots` ("UI slots", `extension_ui` events), `extension_auto_upgrade` ("Auto-upgrade", `extension_upgrade` events), `extension_market_spec` (`PUT /api/v1/extensions/-/markets/{id}` with `spec`: a market moves and keeps its id), `extension_operations` (install, upgrade, uninstall in steps with progress, see "Extension install, upgrade and uninstall progress" below), `extension_auth` (extension sign-in `/api/v1/extensions/{id}/-/auth…`, `extension_auth` events, the install step `tools`, "Sign-in (auth)"), `extension_ui_v3` ("UI version 3"), `extension_widgets`, `extension_shortcuts` and `extension_notify_actions` (widgets, Shortcuts and notification buttons, "System-level placements"), `extension_secret_references` (a secret may hold a provider's reference: `PUT …/{id}/-/secrets/{name}` with `{reference}`, `secrets[].reference`, `secret_users` and `handoff_rules` in the details, `DELETE …/{id}/-/handoff-rules/{rule}`, [secret-providers.md](../extensions/secret-providers.md)). `plugins`, `plugin_manager`, `plugin_ui_slots` and `plugin_auto_upgrade` are the same under the old names (`/api/v1/plugins/…`, `plugin_ui` and `plugin_upgrade` events), kept for the apps out there until at least 2027-05-05 ("Naming and compatibility").
 - Added by the hub:
-  - Always: `sessions_list` (see "Bounded Agents lists"), `sessions_lookup` (see "Exact runtime-session detail"), `sessions_pane_source` (see "Pane/host origins"), `sessions_manager` (see "One manager's sessions"), `sessions_page_counts` and `agents_page_counts` (see "Counts with the page"), `sessions_hierarchy` (see "Session hierarchy"), `sessions_catalog` (see "Projects and spaces"), `sessions_todo` (see "Sessions by to-do"), `sessions_quick_filters` (see "Quick filters"), `machine_rename` (see "Renaming a computer").
+  - Always: `sessions_list` (see "Bounded Agents lists"), `sessions_lookup` (see "Exact runtime-session detail"), `sessions_search` (see "Ranked runtime search"), `sessions_pane_source` (see "Pane/host origins"), `sessions_manager` (see "One manager's sessions"), `sessions_page_counts` and `agents_page_counts` (see "Counts with the page"), `sessions_hierarchy` (see "Session hierarchy"), `sessions_catalog` (see "Projects and spaces"), `sessions_todo` (see "Sessions by to-do"), `sessions_quick_filters` (see "Quick filters"), `machine_rename` (see "Renaming a computer").
   - `mcp_wait_v1`: token-bearing MCP calls may opt into ephemeral, enum-only wait updates over the existing node and device channels (see "MCP tools (`personad mcp`)"). The node forwards that opt-in only when this hub feature is present, and reads that feature afresh for each local call. A manager independently names `mcp_wait_v1` in `manager.hello`; the hub sends it hub-mediated approval updates only while its current connection declares that capability. A target node separately names it in `node.info` to promise that `computer.call` preserves `call_id` through a nested `computer.elicit`; without that target capability the manager omits the id and reports `unknown` for the delegated RPC. Missing opt-in, capability or updates otherwise keeps the old single-response behavior and the `Still waiting` fallback.
   - `meeting_attendance` only while the default manager (the one recording routes go to) is connected and names it in its `manager.hello` capabilities (an extension's report cannot add it): attending a recorded meeting (the `attendance` / `attending_session` upload fields, `…/live`, `…/ask` and the `meeting_attendance_default` setting, see "Recording sync"). The phone offers a role only when the hub lists it, since an older hub or manager accepts the fields and ignores them.
   - `meeting_conversation` only while the default manager names both `meeting_attendance` and `meeting_conversation` in its `manager.hello` capabilities, the same way: the meeting conversation's phase 1 (the upload's `room` and `private`, the room conversation, `…/ask` answered by it, `…/just-me`, `…/private`, `…/followup`, the origins `meeting` and `meeting_followup`, the `meeting_live` event and the fields phase 1 adds to `GET …/live` and `detail.meta`; see "Meeting conversation (#3862)").
@@ -2228,6 +2228,7 @@ Any of `limit`, `cursor`, `since`, `summary`, `state`, `project`, `group`, or `c
 | `manager` | Runtime only: a manager's id; only the sessions on its computers. Requires the independently advertised `sessions_manager` capability, and does not opt into the bounded API by itself. See "One manager's sessions" below. |
 | `provider` | Runtime `agent` or personal-agent `provider`. Empty values on older runtime nodes stay empty; no agent name is guessed. |
 | `q` | Case-insensitive substring, at most 256 Unicode characters. Runtime title, cwd, repository, branch, space/slot/agent names and last preview; personal-agent title/provider/account id. With an opt-in parameter this is **row search**, never remote transcript/message search. |
+| `search` | Runtime only, opt-in ranked search, 1–1,024 UTF-8 bytes. Requires `sessions_search`; separate from legacy `q`. See "Ranked runtime search" below. |
 | `counts` | `1`/`true` returns aggregates instead of rows. `0`/`false` selects a normal page. The same filters apply. |
 | `since` | Opaque `revision` from the completed baseline/previous delta. Returns only changed rows and removals, including state/title-only changes when `updated_at` did not advance. Keep the same filters; changing a filter requires a new first-page baseline. |
 
@@ -2257,6 +2258,62 @@ GET /api/v1/agents/sessions?summary=1&limit=50&source=demo
 - A cursor traverses a **frozen filtered snapshot**: updates, deletions and inserts while scrolling cannot duplicate, omit or reorder rows in that snapshot. Every page returns its snapshot's same `revision` and `total`.
 - Snapshot retention is five minutes, with at most 32 active views per collection. A restart, expiry or eviction returns HTTP **409**, `code: "cursor_expired"`; restart at page one. Cursors bind filters and summary mode; a mismatched/tampered cursor returns 400.
 - The runtime collection includes Codex history. It uses the manager's already-decorated state, ownership, hidden/deleted-session rules and task metadata; it does not recompute business state in the hub.
+
+#### Ranked runtime search (`sessions_search`, #7624)
+
+The runtime collection advertises `sessions_search` independently. It searches the hub's already-indexed Agent
+metadata and latest available text, including unloaded historical sessions. It does not fetch transcripts, call models,
+search every past message, or search the separate personal-agent collection. Assistant conversations are excluded:
+the existing `assistant_search` contract owns them. Older hubs can ignore unknown parameters, so clients must gate
+on the capability and require `search_hits` in a successful response before calling the result complete.
+
+```http
+GET /api/v1/sessions?search=machine%3Astudio%20parser&summary=1&roots=1&limit=40
+```
+
+`search` accepts one nonempty, valid UTF-8 query of at most 1,024 bytes. The page size defaults to 40, with a maximum
+of 100; `q`, `since`, `counts`, `with_counts`, `catalog` and exact `session_id` lookup cannot be combined with it,
+even when those parameters are empty or false. Existing filtering and permission constraints still apply. Legacy
+`q` remains a contiguous substring and existing list/delta ordering is unchanged.
+
+The normal page fields are retained, with `search_hits` always present (an empty object for no matches). Its keys
+are the same JSON-encoded `[machine_id, session_id]` tuples used by runtime removals. Each value is
+`{score, evidence?: {role, before, match, after}}`; `role` is `user`, `agent`, `error` or `title`. Evidence contains a
+bounded fragment of actual indexed text, not model-generated explanation. Its match may fall after the summary's
+truncated title or preview, so a client must not discard the row by matching the compact summary again. The map
+contains only identities in the returned page, not other matches or inaccessible sessions.
+
+All whitespace-separated terms must match the same session, though different terms may match different fields.
+Explicit operators use case-insensitive substring values except exact states; values within a dimension are OR,
+dimensions and remaining words are AND. Unknown operators/values remain literal terms. Plain words never silently
+become filters. Supported spellings follow the existing web matcher:
+
+| Dimension | Operators |
+| --- | --- |
+| Computer ID/display name | `machine:`, `host:` |
+| Project name/folder | `project:`, `repo:`, `cwd:`, `path:` |
+| Agent runtime ID/name | `harness:`, `agent:`, `launcher:` |
+| Model | `model:` |
+| Unified state | `state:`, `status:`, `is:<state>`; `is:unknown` remains literal |
+| Pinned session | `is:pinned`, `is:pin`; workspace pins do not imply session pins |
+| Error or attention | `is:error`, `is:errors`, `is:failed`, `is:blocked` |
+| Recent update | `since:`, `after:`, `updated:` with `24h`, `7d`, `30d` and existing aliases |
+
+Time aliases retain current client behavior: `1d`, `2d`, `48h` select the 24-hour bucket; `1w` selects seven days and
+`1m` thirty days. The last recognized time operator wins. This search's time window is unrelated to the legacy
+`since` delta checkpoint. The shared corpus under `spec/fixtures/session-search/` checks client/server behavior.
+
+Global ranking is title prefix 100, title substring 80, all terms in title/project/computer/space/tab/folder 60,
+other indexed metadata/latest text 40, and operators-only 30. Add 5 unless the displayed state is offline. Sort by
+score descending, then update time descending and composite identity ascending. This happens before paging, not
+by sorting each newest-first page in the browser. `roots=1` preserves existing child-folding and folded-state rules.
+
+The first page freezes its ranking, evidence, membership, machine-name/pin/attention context and time cutoff.
+Continuations repeat the same query and filters but use that frozen result. Normal five-minute/32-view cursor limits
+apply; a 409 expiry requires an explicit new search. Authorization/private-session filtering precedes decoding,
+matching and totals; cursor scope includes the authorized machine set, manager and private-data policy. Runtime
+search remains hub-wide for ordinary credentials unless `manager` is explicitly supplied; a sidebar Assistant choice
+or an `X-Persona-Manager` header does not silently narrow it. Extension tokens remain limited to their own manager.
 
 #### Pane/host origins (`sessions_pane_source`, #994)
 

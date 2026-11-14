@@ -1509,6 +1509,34 @@ Two-column pages (Inbox, Knowledge) switch to one column according to their own 
 - **Browser sign-ins** (#1304, `machines/BrowserLogins.tsx`, `lib/cookies.ts`): when the ego extension is on and this Mac's ego lite has completed initial setup, the machine page lists signed-in websites in ego (count, latest expiry, no contents). Clear per website or all; import cookies.txt / JSON (parsed in the page, select websites, then forward via hub directly to that Mac without hub storage), see `docs/plans/plan-ego-browser.md`.
 - **Links**: see Links open inside the page below.
 
+### Search all runtime Agents (#7624)
+
+With `sessions_search`, Search chats (⌘K) finds runtime Agents throughout the hub's indexed collection, including
+sessions outside the browser's loaded window. Typing keeps immediate local hits and starts a cancellable server
+search after 200 ms. Empty input, command mode and a closed palette make no runtime-search request. This searches
+names, computers, projects, runtime/model metadata, current error/attention fields and latest available text, not
+full transcripts. Persona/Assistant conversation search remains separate and keeps its existing message navigation.
+
+The existing explicit operators and relevance order are retained; their wire contract is in
+[the protocol](../protocol/protocol.md#ranked-runtime-search-sessions_search-7624). Authoritative matches include a
+score and evidence, so a match beyond a truncated row preview still appears. Machine and session form one tuple
+identity; identical session IDs on different computers stay separate. The server's fields win, while a matching
+local version may supply longer display text. After the first successful server page, that frozen result window owns Agent membership; local-only previews leave
+the list and further matches appear through More. A failed continuation retains that authoritative window.
+
+**More Agents** loads another bounded page, without silently downloading the full collection. The status reports
+loaded server hits and total matches; loading or a failed search does not claim there are no results. A failed page
+keeps already-loaded hits and retries the same cursor. Expired cursors offer a fresh search instead of merging two
+snapshots. Old hubs explicitly say that only loaded Agents are searched. Commands, files, Inbox, pages, recent chats
+and **Filter Agents list** retain their existing behavior; query operators keep results scoped to Agents.
+
+Arrow keys keep the highlighted result's identity when asynchronous higher-ranked hits arrive. If the highlighted
+result disappears, Enter does not open a replacement until the user selects one. More/retry controls sit outside the
+listbox and are reachable with Tab. Closing, typing a new query or signing in again aborts and fences old responses.
+Runtime results remain hub-wide, independent of the selected Assistant. The shared query corpus and
+`web/e2e/palette-runtime-search.mjs` cover query parity, unseen sessions, evidence, pagination, keyboard identity,
+failures, compatibility and localized wide/narrow rendering.
+
 ### Keyboard shortcuts and the command palette (#2330)
 
 Key bindings follow Moshi's (`src/lib/shortcuts.ts` is the registry: id, Chinese name, default key, scope; in the App, `useShortcuts` (`src/lib/use-shortcuts.ts`) registers what each one does and attaches the single keydown listener).
