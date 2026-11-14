@@ -183,7 +183,7 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	item := sessionlist.Item{
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
-		Fold: indexedFold(row, root, todo, indexed.Fold), Private: healthSession(row),
+		Fold: indexedFold(row, root, todo, indexed.Fold), Private: healthSession(row), Assistant: row.Assistant,
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
 	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
@@ -621,6 +621,9 @@ func (h *Hub) extensionMachines(r *http.Request) (own []string, limited bool) {
 // ownCounts are the counts of opts over the machines own only (each machine's, added up).
 func ownCounts(index *sessionlist.Index, opts sessionlist.Options, own []string) (sessionlist.Counts, error) {
 	out := sessionlist.Counts{Machine: map[string]int{}, Project: map[string]int{}, Group: map[string]int{}, State: map[string]int{}}
+	if opts.Roots {
+		out.ActiveAgentsByMachine = make(map[string]int)
+	}
 	for _, mid := range own {
 		o := opts
 		o.Machine, o.Cursor = mid, "" // current membership (a cursor's frozen view is of every machine)
@@ -630,7 +633,7 @@ func ownCounts(index *sessionlist.Index, opts sessionlist.Options, own []string)
 		}
 		out.Total += c.Total
 		out.Revision = c.Revision
-		for dst, src := range map[*map[string]int]map[string]int{&out.Machine: c.Machine, &out.Project: c.Project, &out.Group: c.Group, &out.State: c.State} {
+		for dst, src := range map[*map[string]int]map[string]int{&out.Machine: c.Machine, &out.ActiveAgentsByMachine: c.ActiveAgentsByMachine, &out.Project: c.Project, &out.Group: c.Group, &out.State: c.State} {
 			for k, n := range src {
 				(*dst)[k] += n
 			}

@@ -113,6 +113,7 @@ func (i *Index) Counts(options Options) (Counts, error) {
 
 func copyCounts(c Counts) Counts {
 	c.Machine = maps.Clone(c.Machine)
+	c.ActiveAgentsByMachine = maps.Clone(c.ActiveAgentsByMachine)
 	c.Project = maps.Clone(c.Project)
 	c.Group = maps.Clone(c.Group)
 	c.State = maps.Clone(c.State)
@@ -180,8 +181,12 @@ func (i *Index) remember(key cacheKey, r *result) *result {
 	return r
 }
 
-func emptyCounts(revision string) Counts {
-	return Counts{Machine: make(map[string]int), Project: make(map[string]int), Group: make(map[string]int), State: make(map[string]int), PaneSource: make(map[string]int), Todo: make(map[string]int), Revision: revision}
+func emptyCounts(revision string, roots bool) Counts {
+	counts := Counts{Machine: make(map[string]int), Project: make(map[string]int), Group: make(map[string]int), State: make(map[string]int), PaneSource: make(map[string]int), Todo: make(map[string]int), Revision: revision}
+	if roots {
+		counts.ActiveAgentsByMachine = make(map[string]int)
+	}
+	return counts
 }
 
 // stateOf is the state v is filtered and counted by: its folded state for Options.Roots (Fold.State, its own state
@@ -201,6 +206,13 @@ func waitingOf(v Item, roots bool) bool {
 
 func addCount(c *Counts, v Item, roots bool, delta int) {
 	c.Total += delta
+	state := stateOf(v, roots)
+	if roots && !v.Assistant && state != "offline" {
+		c.ActiveAgentsByMachine[v.Machine] += delta
+		if c.ActiveAgentsByMachine[v.Machine] == 0 {
+			delete(c.ActiveAgentsByMachine, v.Machine)
+		}
+	}
 	if v.PaneSource != "" {
 		c.PaneSource[v.PaneSource] += delta
 		if c.PaneSource[v.PaneSource] == 0 {
@@ -214,7 +226,7 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 		m   map[string]int
 		key string
 	}{
-		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, stateOf(v, roots)}, {c.Todo, v.todo()},
+		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, state}, {c.Todo, v.todo()},
 	} {
 		pair.m[pair.key] += delta
 		if pair.m[pair.key] == 0 {
@@ -226,7 +238,7 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 // exactResult deliberately bypasses ordered views and their caches. A miss,
 // changed revision or new filter still touches only the selected map entry.
 func (i *Index) exactResult(f filters) *result {
-	r := &result{counts: emptyCounts(i.revisionToken()), ordered: true}
+	r := &result{counts: emptyCounts(i.revisionToken(), f.Roots), ordered: true}
 	if item := i.items[f.ID]; f.matches(item) {
 		addCount(&r.counts, item.item, f.Roots, 1)
 		r.events = []event{{id: f.ID, updated: item.item.UpdatedAt, value: item}}
@@ -249,7 +261,7 @@ func (i *Index) countsResult(f filters) *result {
 	if f == (filters{}) {
 		counts = copyCounts(i.counts)
 	} else {
-		counts = emptyCounts(i.revisionToken())
+		counts = emptyCounts(i.revisionToken(), f.Roots)
 		for _, item := range i.items {
 			if f.matches(item) {
 				addCount(&counts, item.item, f.Roots, 1)

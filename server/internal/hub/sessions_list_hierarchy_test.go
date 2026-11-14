@@ -109,6 +109,35 @@ func TestRuntimeListHierarchy(t *testing.T) {
 	}
 }
 
+func TestRuntimeListActiveAgentsByMachine(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	parent := proto.Session{MachineID: "demo", SessionID: "parent", State: proto.StateOffline}
+	parent.SetFold("", "", &proto.SessionChildren{Total: 1, Working: 1})
+	child := proto.Session{MachineID: "demo", SessionID: "child", State: proto.StateWorking}
+	child.SetFold("parent", proto.FoldedAsWorker, nil)
+	m.sessions = []proto.Session{
+		parent, child,
+		{MachineID: "demo", SessionID: "another", State: proto.StateIdle},
+		{MachineID: "demo", SessionID: "history", State: proto.StateOffline},
+		{MachineID: "demo", SessionID: "conversation", State: proto.StateWorking, Assistant: true},
+	}
+
+	w := httptest.NewRecorder()
+	h.listSessions(w, httptest.NewRequest("GET", "/api/v1/sessions?roots=1&limit=1&with_counts=1", nil))
+	var answer sessionlist.PageWithCounts
+	if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil || w.Code != 200 ||
+		!answer.HasMore || len(answer.Sessions) != 1 || answer.Total != 4 ||
+		len(answer.Counts.ActiveAgentsByMachine) != 1 || answer.Counts.ActiveAgentsByMachine["demo"] != 2 {
+		t.Fatalf("expected one page row and two active Agent roots: %d %s (%v)", w.Code, w.Body, err)
+	}
+	offline := hierarchyCounts(t, h, "roots=1&state=offline")
+	if offline.Total != 1 || offline.ActiveAgentsByMachine == nil || len(offline.ActiveAgentsByMachine) != 0 {
+		t.Fatalf("expected known zero active Agents: %+v", offline)
+	}
+}
+
 // A tab's workers come folded under its lead (folded_as worker, children.workers, #5180): roots=1 leaves them out of
 // the rows and every count and counts the lead by its folded state, parent_session_id=<lead> lists them, both kinds of
 // row carrying the keys; the tab's offline row and a tab of peers stay rows of their own.

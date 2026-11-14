@@ -38,6 +38,8 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
+	// Assistant marks an Assistant conversation, excluded from the active Agent aggregate.
+	Assistant bool
 	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
 	// (#6662). Nil for an item with neither, which shows its own State and BackgroundWaiting. It sits behind a pointer
 	// to keep Item in its allocation size class: an adapter builds a whole batch as one []Item, as the hub does on every
@@ -142,12 +144,14 @@ type Page struct {
 // Empty attribute values are counted under the empty string key. PaneSource
 // is omitted for adapters that do not supply an origin attribute.
 type Counts struct {
-	Total      int            `json:"total"`
-	Machine    map[string]int `json:"machine"`
-	Project    map[string]int `json:"project"`
-	Group      map[string]int `json:"group"`
-	State      map[string]int `json:"state"`
-	PaneSource map[string]int `json:"pane_source,omitempty"`
+	Total   int            `json:"total"`
+	Machine map[string]int `json:"machine"`
+	// ActiveAgentsByMachine is populated for roots counts, including an empty map for a known zero.
+	ActiveAgentsByMachine map[string]int `json:"active_agents_by_machine,omitzero"`
+	Project               map[string]int `json:"project"`
+	Group                 map[string]int `json:"group"`
+	State                 map[string]int `json:"state"`
+	PaneSource            map[string]int `json:"pane_source,omitempty"`
 	// Todo counts the items by Fold.Todo, "" for the items on no to-do (#6662).
 	Todo map[string]int `json:"todo"`
 	// BackgroundWaiting: how many of State["working"] only wait in the background (#6045): a client that shows them
@@ -272,7 +276,7 @@ func (i *Index) initialize() {
 	i.sources = make(map[string]map[string]*record)
 	i.cache = make(map[cacheKey]*cacheEntry)
 	i.snapshots = make(map[string]*snapshot)
-	i.counts = emptyCounts(i.revisionToken())
+	i.counts = emptyCounts(i.revisionToken(), false)
 	if i.now == nil {
 		i.now = time.Now
 	}

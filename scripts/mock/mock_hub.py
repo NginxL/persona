@@ -17589,10 +17589,16 @@ def paged_sessions(query):
         return session_catalog(rows, revision, state_of), 200
     if query.get("counts", [""])[0] == "1":
         counts = {"total": len(rows), "revision": revision, "machine": {}, "project": {}, "group": {}, "state": {}, "todo": {}, "pane_source": {}}
+        if roots:
+            counts["active_agents_by_machine"] = {}
         waits = sum(1 for s in rows if s.get("background_waiting") and state_of(s) == "working")
         if waits:
             counts["background_waiting"] = waits
         for s in rows:
+            if roots and not s.get("assistant") and state_of(s) != "offline":
+                active = counts["active_agents_by_machine"]
+                mid = s["machine_id"]
+                active[mid] = active.get(mid, 0) + 1
             values = {"machine": s["machine_id"], "project": s.get("repo_root") or s.get("workspace_cwd") or s.get("cwd", ""),
                       "group": s.get("space_id") or s.get("workspace_id", ""), "state": state_of(s), "todo": (s.get("todo") or {}).get("id", ""),
                       "pane_source": pane_origin(s)}

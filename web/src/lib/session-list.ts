@@ -47,6 +47,8 @@ export function filterQuery(filters: ListFilters, extra: Record<string, string> 
 export interface ListCounts {
   total: number;
   machine: Record<string, number>;
+  /** Non-offline Agent roots by computer. Missing on older hubs or without roots=1. */
+  active_agents_by_machine?: Record<string, number>;
   project: Record<string, number>;
   group: Record<string, number>;
   state: Record<string, number>;

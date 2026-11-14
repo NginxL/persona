@@ -2335,7 +2335,7 @@ Any of `limit`, `cursor`, `since`, `summary`, `state`, `project`, `group`, or `c
 | `provider` | Runtime `agent` or personal-agent `provider`. Empty values on older runtime nodes stay empty; no agent name is guessed. |
 | `q` | Case-insensitive substring, at most 256 Unicode characters. Runtime title, cwd, repository, branch, space/slot/agent names and last preview; personal-agent title/provider/account id. With an opt-in parameter this is **row search**, never remote transcript/message search. |
 | `search` | Runtime only, opt-in ranked search, 1–1,024 UTF-8 bytes. Requires `sessions_search`; separate from legacy `q`. See "Ranked runtime search" below. |
-| `counts` | `1`/`true` returns aggregates instead of rows. `0`/`false` selects a normal page. The same filters apply. |
+| `counts` | `1`/`true` returns aggregates instead of rows. `0`/`false` selects a normal page. The same filters apply. With `roots=1`, current hubs include `active_agents_by_machine` in standalone and inline counts. It counts roots whose folded state is not offline and excludes Assistant conversations. An absent machine in the map has zero matching Agents. An absent map means the count is unavailable. |
 | `since` | Opaque `revision` from the completed baseline/previous delta. Returns only changed rows and removals, including state/title-only changes when `updated_at` did not advance. Keep the same filters; changing a filter requires a new first-page baseline. |
 
 Repeated recognized parameters, malformed booleans/page sizes/states and malformed tokens return HTTP **400** with `code: "invalid_query"`. Unknown parameters are ignored for compatibility. Responses retain the usual localized `error` field.

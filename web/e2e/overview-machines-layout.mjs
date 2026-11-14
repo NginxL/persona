@@ -63,13 +63,11 @@ for (let cursor = ""; ;) {
 }
 const machines = (await hubGet("/machines")).machines ?? [];
 check([...expected.values()].some((n) => n > 0), "the fake hub has agents on a computer", JSON.stringify(Object.fromEntries(expected)));
-// Several assistants: Overview counts the current one's agents from the complete list; one: from the paged list, whose
-// first page is every agent only when it has no more
+// Several assistants read complete scoped rows. One assistant uses the Hub's aggregate on a paged list.
 const roster = await hubGet("/managers").catch(() => null);
 const several = (roster?.managers ?? []).filter((m) => !m.installing).length > 1;
 const firstPage = await hubGet("/sessions?summary=1&limit=50&roots=1");
-const whole = several || !firstPage.has_more;
-console.log(`roster: ${several ? "several assistants" : "one assistant"}; Overview counts computers: ${whole ? "yes" : "no, the paged list has more"}`);
+console.log(`roster: ${several ? "several assistants" : "one assistant"}; first page has more: ${firstPage.has_more}`);
 const tag = several ? "several" : "one";
 
 // the widest a rate gets before the next unit ("↓ 1023 MB/s", "↑ 1000 KB/s"), on the first online computer's card
@@ -162,8 +160,8 @@ async function failedList(theme) {
     const m = machines.find((x) => x.id === id);
     if (!m?.online) continue;
     const n = expected.get(id) ?? 0;
-    const want = whole ? `${n} agent${n === 1 ? "" : "s"}` : "";
-    check(whole ? line.startsWith(want) : !/\d+ agents?\b/.test(line), `${theme} ${tag}: ${m.name} ${whole ? `counts its ${n} agents` : "gets no count of the first page only"} after Retry`, line);
+    const want = `${n} agent${n === 1 ? "" : "s"}`;
+    check(line.startsWith(want), `${theme} ${tag}: ${m.name} counts its ${n} agents after Retry`, line);
   }
   check(errors.length === 0, `${theme} ${tag}: no page errors on Overview`, errors.join("; "));
   await page.screenshot({ path: join(out, `overview-retried-${tag}-${theme}.png`) });
