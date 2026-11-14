@@ -2366,7 +2366,12 @@ what was decided, and the transcript stays one tap away (principle 2) instead of
   `Theme.Recording.contextBefore` (1) line before it and `Theme.Recording.contextAfter` (2) after it in the secondary color.
   They fade in on `Theme.Motion.reveal` and out on `Theme.Motion.conceal`, at once with Reduce Motion. VoiceOver hears
   "Transcript around m:ss" with Expanded / Collapsed.
-- At the accessibility sizes an item's time and disclosure go under its words, and an opened line's time goes above it.
+- An item's time and disclosure are a card's controls and stop growing at xxxLarge (6.2); its words and its opened lines
+  are reading content and grow to AX5. Up to xxxLarge the time and the disclosure sit beside the words. At the
+  accessibility reading sizes they go under the words, which then keep the card's whole width, and an opened line's
+  time goes above it: `MinutesItemRow` and `MinutesContext` decide this from the size the words read at
+  (`\.readingTypeSize`), not the interface's capped size. The summary card's items go by width instead
+  ("By the width that is there" below).
 - **Transcript** is the transcript as it was; the minutes' sections are not repeated above it. The minutes' **Copy** and
   **Share** sit under the switch on the page's canvas, the same in both views; at the accessibility sizes they stack, so
   neither is cut to "…".

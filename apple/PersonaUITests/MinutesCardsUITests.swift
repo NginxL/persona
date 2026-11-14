@@ -78,10 +78,10 @@ final class MinutesCardsUITests: XCTestCase {
     /// At the largest text size (AX5) an item's words keep growing while its time and disclosure stay as at xxxLarge, where
     /// #6813 caps the interface (`docs/design/DESIGN_SYSTEM.md` 6.2: the minutes are reading content, the time chip and the
     /// disclosure a card's controls). At xxxLarge itself (`cap`, the first launch) the time sits after the words, beside
-    /// them and not under them, with the disclosure after it. At AX5 the time and the disclosure are as big as there, side
-    /// by side and on the screen, and the words are taller than there. Where the pair sits at AX5 (beside the words as at
-    /// xxxLarge, or under them) is left to #6448's follow-up. The disclosure opens the lines around the item, and every card
-    /// is there.
+    /// them and not under them, with the disclosure after it. At AX5 the row follows the size its words read at
+    /// (`MinutesItemRow`, `\.readingTypeSize`): the time and the disclosure go under the words, which keep the card's
+    /// width; the pair is as big as there, side by side and on the screen, and the words are taller than there.
+    /// The disclosure opens the lines around the item, and every card is there.
     @MainActor func testLargestTextSizeCapsTheTimeAndGrowsTheWords() throws {
         var atTheCap: (time: CGSize, disclosure: CGSize, words: CGFloat)?
         for look in ["cap", "largest"] {
@@ -106,6 +106,7 @@ final class MinutesCardsUITests: XCTestCase {
                                "\(look): the disclosure is \(disclosure.frame.size), \(capped.disclosure) at xxxLarge")
                 XCTAssertGreaterThan(words.frame.height, capped.words + 1,
                                      "\(look): the words are \(words.frame.height) pt tall, \(capped.words) pt at xxxLarge: they stopped at the cap")
+                XCTAssertGreaterThanOrEqual(time.frame.minY, words.frame.maxY - 1, "\(look): the time isn't under the words")
             } else {
                 XCTAssertGreaterThanOrEqual(time.frame.minX, words.frame.maxX - 1, "\(look): the time isn't after the words")
                 XCTAssertLessThan(time.frame.minY, words.frame.maxY - 1, "\(look): the time is under the words")
