@@ -284,3 +284,60 @@ func TestAdmissionQueueRetryStartsWhenGateOpensOnOlderPlan(t *testing.T) {
 		t.Fatalf("the old plan must start exactly once on its machine: %v", starts)
 	}
 }
+
+// A durable queue record outlives the recent-update window, so a long outage must not abandon it (#7722).
+func TestAdmissionQueueTimesOutAfterLookbackDowntime(t *testing.T) {
+	url := newDatabase(t)
+	database, err := db.Open(context.Background(), url, db.ManagerSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	s, f, d := admissionHubOn(t, database)
+	busyOverloaded(d)
+	p, _ := queuedStart(t, s, "busy")
+	if p.Tasks[0].Queue == nil {
+		t.Fatal("precondition: the task is queued")
+	}
+	aged := time.Now().Add(-2 * time.Hour)
+	if err := s.patchPlanTask(context.Background(), p.ID, 0, func(pt *PlanTask) {
+		pt.Queue.QueuedAt = aged
+		pt.Queue.NextAt = aged
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	if _, err := conn.Exec(context.Background(), `UPDATE task_plans SET created_at = $1, updated_at = $1 WHERE id = $2`, aged, p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	busyHealthy(d)
+	s.sweepAdmissionQueue(context.Background())
+	waitFor(t, "the persisted queue to time out after downtime", func() bool {
+		return todoNow(s, p.Tasks[0].TodoID).StartError != ""
+	})
+	wantError := i18n.T(s.lang(context.Background()), "assistant-tasks.admission_queue_timeout", i18n.Args{
+		"limit": admissionQueueMaxWait.Round(time.Minute).String(), "reason": p.Tasks[0].Queue.Reason})
+	todo := todoNow(s, p.Tasks[0].TodoID)
+	if todo.DoneAt == nil || todo.StartError != wantError {
+		t.Fatalf("the durable queue must end with its ordinary timeout: %+v, want %q", todo, wantError)
+	}
+	loaded, err := s.loadPlan(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Tasks[0].Queue != nil || loaded.Tasks[0].Error != wantError {
+		t.Fatalf("the timed-out queue must clear and retain its error: %+v", loaded.Tasks[0])
+	}
+	if starts := taskStartMachines(f); len(starts) != 0 {
+		t.Fatalf("an over-bounds queue must not start an Agent: %v", starts)
+	}
+	s.sweepAdmissionQueue(context.Background())
+	if receipts := strings.Count(feedKinds(s, "conv1"), feedReceipt); receipts != 1 {
+		t.Fatalf("the durable queue must produce exactly one failure receipt, got %d", receipts)
+	}
+}

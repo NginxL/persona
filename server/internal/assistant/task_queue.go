@@ -23,7 +23,7 @@ const (
 	admissionQueueMaxAttempts = 10
 	// admissionQueueMaxWait bounds the total time a task may spend queued before its start fails for good.
 	admissionQueueMaxWait = 30 * time.Minute
-	// admissionQueueLookback bounds the plan scan on a database-backed hub: a queued task is at most maxWait old.
+	// admissionQueueLookback bounds the recent-update side of the database scan; a serialized queue survives downtime.
 	admissionQueueLookback = time.Hour
 )
 
@@ -185,15 +185,15 @@ func (s *Service) failQueuedStart(ctx context.Context, p *TaskPlan, i int, pt Pl
 	s.logf("task %s: admission queue: gave up after %d attempt(s)", pt.TodoID, q.Attempt)
 }
 
-// taskQueueStore lists the recently updated plans whose task blobs may hold admission queue records.
+// taskQueueStore lists recently updated or durably queued plans whose task blobs may hold admission queue records.
 type taskQueueStore interface {
 	TaskPlansQueued(ctx context.Context, since time.Time) ([]db.TaskPlanRow, error)
 }
 
 var _ taskQueueStore = (*db.DB)(nil)
 
-// queueCandidatePlans returns recently updated started plans, from the database or the in-memory store, without
-// scanning historical plans. Queue writes refresh a plan's updated_at; its created_at may be arbitrarily older.
+// queueCandidatePlans returns recently updated or durably queued started plans, from the database or the in-memory
+// store, without returning unrelated historical plans. Queue writes refresh updated_at; created_at may be older.
 func (s *Service) queueCandidatePlans(ctx context.Context) []*TaskPlan {
 	st := s.store()
 	if st == nil {

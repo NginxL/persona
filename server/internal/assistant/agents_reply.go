@@ -223,9 +223,10 @@ func (s *Service) remindReply(machine string, sess proto.Session) error {
 	s.logf("reply reminder %s/%s: %s", machine, short(sess.SessionID), body)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return s.hub.NotifyRequest(ctx, NotifyRequest{Notification: Notification{ID: "ntf_" + randomHex(8),
+	_, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: Notification{ID: "ntf_" + randomHex(8),
 		Kind: assistantwire.NotifyReply, DeviceID: machine, SessionID: sess.SessionID, Subtitle: s.pushPlace(machine, sess),
 		Title: head, Body: body}})
+	return err
 }
 
 // replyAlert is the reminder's title and text, in l: the agent's name, and what it asks.

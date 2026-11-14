@@ -1319,7 +1319,7 @@ The new fields are stored in the existing interaction JSON payload; no database 
 Workflow, upgrades and persistence are covered in [Workspace board](../web/workspace-board.md). The APIs below belong to the manager (the hub forwards them unchanged over the bus `http.request`, see "Forwarding App requests"; `503 assistant_offline` when the manager isn't there), and the two events are sent by the manager via `ws.broadcast` and pushed unchanged by the hub. The APIs use the hub machine's Postgres as the only persistent state, with no fallback to in-memory or JSON file writes. `answer` may GET the board and the list; POST requires `full`. `can_write` says whether the current request's role can edit; it grants no extra file, Git or Agent permissions.
 
 ```text
-BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool }
+BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool, batch_cards?: bool, activity?: bool }
 Column { id, title }
 Card { id, machine_id, workspace_id, title, cwd, source, source_id?, branch?,
        column_id, pinned: bool, archived: bool }
@@ -1340,6 +1340,21 @@ POST must give `revision` explicitly; on success the database increments it atom
 | `update_column` | `id,title` |
 | `move_column` | `id,before_id?`; omitting before puts it at the end |
 | `delete_column` | `id,move_to?`; another column is required when it has cards (archived included); the last column can't be deleted |
+| `batch_cards` | `changes: CardChange[]`; atomically edits 1–1,000 distinct existing cards, as described below |
+
+`batch_cards: true` in a GET or successful POST response advertises `batch_cards` support; absent or false means
+clients must keep using single-card operations. A batch contains only `revision`, `action` and `changes`. Each
+`CardChange` has `id` and at least one of `column_id`, `pinned`, `archived`; optional `before_id` requires `column_id`.
+Omitted or empty `before_id` moves to the end; a nonempty anchor must be another card in the destination column at
+that point in the supplied operation order. Duplicate IDs, missing cards, malformed references, empty changes,
+unknown fields and batch fields on single actions are invalid. Batches cannot add/remove cards or columns, rename,
+change workspace bindings or contain nested operations. The request limit is 4 MiB for a batch and 64 KiB for
+single actions; the existing card, ID and state limits still apply.
+
+Changes run in the supplied order against an independent candidate state. Validation failure discards the whole
+candidate; success performs one compare-and-swap save, increments the revision once, and emits one `workspace_board`
+event. No node RPC runs. Undo is another batch at the last acknowledged revision; clients must not rebase or retry
+its inverse after a conflict. This preserves newer edits and the original binding authority.
 
 The workspace in `add_card` must belong to the given machine. The hub re-enumerates or checks the session directories, then has the node verify and resolve the physical directory with `workspace.resolve`; clients can't write `source/source_id/branch`. Only one new binding is allowed per effective machine and canonical directory, with archived cards counted in the duplicate check. Paths are handled in the remote syntax (POSIX, Windows drive letters, UNC); remote paths are never resolved with the hub's own filesystem. When a machine alias is later absorbed, it is only projected onto the current routing identity in responses; the original card's column and order are not merged or rewritten, and the original state still takes part in edits and CAS.
 
@@ -1352,6 +1367,52 @@ Session gains optional `workspace_cwd`: the physical directory verified by the n
 The board is off by default (#2475): `GET /api/v1/workspace-board/settings` returns `{enabled,can_write}`. The value lives in Postgres's `settings` table (key `workspace_board.settings`, `{"enabled":bool}`), one per hub, the same for all browsers and devices. If it was never set, it counts as on when `workspace_board`'s `revision > 0` (the board has been edited), otherwise off; the inferred value isn't written back, and only the first PUT stores it. PUT `{enabled}` requires `full`; on success WS pushes `{"type":"workspace_board_settings","enabled":bool}`. The toggle only decides whether clients show it: when off, the board and list APIs still work and no data is deleted. Old hubs without this API return 404; clients then treat it as on (the old version showed it to everyone) and hide the toggle.
 
 Board edits such as move and archive don't trigger Agent or Git operations. On success WS pushes `{"type":"workspace_board","revision":<new version>}`, and clients re-read. While the board is visible the web client also refreshes discovery every 10 seconds, and immediately when it comes back to the foreground, to catch changes in directories and connection state.
+
+### Board activity
+
+The optional `activity: true` capability means the manager's store journals board saves. These routes are read-only
+manager APIs relayed by the hub. Full and answer-role device tokens may read them; extension tokens need `agents.read`.
+A manager without the store capability returns 503 `not_supported`. No new event type is introduced: the existing
+`workspace_board` revision push can notify an open activity reader that newer history is available.
+
+| Method and path | Query | Response |
+| --- | --- | --- |
+| `GET /api/v1/workspace-board/activity` | `limit` (1–50, default 20), optional positive decimal `before` revision (exclusive), optional `card_id` | `ActivityPage` |
+| `GET /api/v1/workspace-board/activity/{revision}` | `offset` (default 0), `limit` (1–100, default 30) | `ActivityDetail`; 404 `activity_not_found` for a revision not retained |
+
+```text
+ActivitySummary { revision: decimal string, at: RFC3339, change_count, card_count, kinds: string[] }
+ActivityPage { entries: ActivitySummary[], next_cursor?: decimal string, latest_revision: decimal string,
+               oldest_revision?: decimal string, retention_limit: 500 }
+ActivityDetail { revision: decimal string, at: RFC3339, changes: ActivityChange[], total, next_offset?: integer }
+ActivityChange { kind, id?, title?, fields?: string[], before?: ActivityValue, after?: ActivityValue, card_ids?: string[] }
+ActivityValue { title, column_id?, column_title?, pinned?: bool, archived?: bool }
+```
+
+Activity revision strings preserve int64 identity in JavaScript. `next_cursor` is the last returned revision, passed
+as `before` for the next list page; absence ends pagination. New commits cannot duplicate older pages. Page rows,
+latest board revision and oldest retained revision share a repeatable-read snapshot. Retention can advance between
+pages, so a later page may be empty even when the earlier one had a cursor. `oldest_revision` describes all retained
+history, not just the requested card. An empty history returns `entries: []`, no oldest revision and the board's
+current revision (or `"0"` before it exists).
+
+`card_id` filters revisions by affected card IDs, including deleted/archived cards and surviving cards whose relative
+order changed. Summary counts and detail pages always describe the complete grouped revision, not only that card.
+`change_count` counts change records; `card_count` counts distinct affected card IDs. Expanding a large update reads
+only its requested detail page; `next_offset` is exclusive of changes already returned. Unknown future `kind` values
+must have a generic display rather than crashing the client.
+
+Kinds: `card_added`, `card_removed`, `card_updated`, `column_added`, `column_removed`, `column_renamed`,
+`cards_reordered`, `columns_reordered`. A `card_updated` record's fields are any of `title`, `column`, `pinned`,
+`archived`. Add/remove records omit the absent side. Reorder records are group-level facts, not actor attribution;
+card reorder records carry the column ID/title and affected surviving `card_ids`. Full snapshots, paths, machine IDs
+and transcripts are not journaled. A committed no-op has an empty change list but still advances revision once.
+
+The migration starts recording future writes, with no backfill. Save, journal insert and retention run in the same
+transaction under the board row lock. Keep the most recent 500 entries and at most 16 MiB encoded change details,
+always retaining the newest complete entry. A conflict, failed validation, failed journal insertion or failed commit
+leaves the prior board and history unchanged. Invalid query ranges, duplicate numeric query parameters and malformed
+card IDs return 400; storage errors return 503. No POST/PUT/DELETE activity route exists.
 
 ## Main chat readiness (`assistant_readiness`, #3710)
 
@@ -1969,9 +2030,10 @@ A browser that turned on **Settings › Notifications › When Persona is closed
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/api/v1/push/ln-mode` | Low-distraction mode switch state: `{"enabled": bool}` (default false) |
-| PUT | `/api/v1/push/ln-mode` | `{"enabled": bool}` → the same shape; full credentials only (extension tokens get 403); stored in `hub_settings` |
-| GET | `/api/v1/push/intercepts` | `{"intercepts": [{"at","level","reason","title"?,"body"?,"related_key"?,"manager"?,"also"?}]}` newest first, at most 200, the pushes low-distraction mode held back (`reason`: `ln_p1_held` / `ln_p2_silent` / `ln_dedup_12h`; `also`: titles merged into one same-minute P1 entry). Full credentials read every manager's; an extension token with the `notify` scope reads its own manager's only |
+| GET | `/api/v1/push/ln-mode` | Push grading switch state: `{"enabled": bool}` (default false). Full credentials and an extension token with the `notify` scope may read it |
+| PUT | `/api/v1/push/ln-mode` | `{"enabled": bool}` → the same shape; full credentials only (extension tokens get 403, even with `notify`); stored in `hub_settings` |
+| GET | `/api/v1/push/intercepts` | `{"intercepts": [{"at","level","reason","title"?,"body"?,"related_key"?,"manager"?,"also"?}]}` newest first, at most 200, the pushes the grading filter held back (`reason`: `ln_p1_held` / `ln_p2_silent` / `ln_dedup_12h`; `also`: titles merged into one same-minute P1 entry). Full credentials read every manager's. An extension token needs the `notify` scope **and** its extension ID in `hub.json` `intercept_readers`; any other extension token gets 403, and a listed extension still reads its own manager's only (the manager filter runs **before** the 200 limit, so other managers' bursts cannot push its entries out). `body` is a stored summary, not the full text: title plus at most 140 runes with an ellipsis when cut, because bodies can contain the owner's decision questions, agent replies or notify_user text |
+| GET | `/api/v1/push/stats/daily[?days=N\|&since=RFC3339]` | `{"since": RFC3339, "days": [{"date","manager","sent","intercepted","by_reason"?}]}` per UTC calendar day and manager: `sent` counts logical alert pushes allowed through to delivery (one entry however many devices were targeted, regardless of per-device mute/quiet filtering or APNs acceptance; counted with the switch off as well as on, including the hub's own pairing / joining receipts with `manager` empty; silent background and Live Activity pushes are not counted), `intercepted` with `by_reason` counts held pushes. Counts read the hub's full in-memory records (up to 500 held / 2000 delivered, 14 days), so they stay exact past the intercepts' 200-entry limit. `days` is 1 (today) to 14; `since` takes an RFC3339 timestamp and wins over `days`; windows older than 14 days are clamped; bad params get 400. Full credentials read every manager's; an extension token with the `notify` scope reads its own manager's only. There is no "opened / handled" count: the app has no push-open callback, and card-resolution events are not stored per push |
 | GET | `/api/v1/push/web` | `{key}`: the VAPID public key (uncompressed P-256, base64url), the browser's `applicationServerKey`. Made the first time it is asked for and kept in the hub's settings (`hub.web_push.vapid`); 503 when it can't be read or stored |
 | GET | `/api/v1/push/web/{device}` | `{subscribed, service?, host?, browser?, current?, endpoint?, created_at?, updated_at?, last_ok_at?, failed_at?, status?, error?}`. `{device}` is the browser's notification device id (`web-<uuid>`, the id its prefs go by). `service` is `FCM` / `Mozilla` / `Apple` / `Windows`; `current` false: made with a key the hub no longer has (the page subscribes again); the last delivery (`last_ok_at`, or `failed_at` with the push service's `status` and `error`) is kept in memory |
 | PUT | `/api/v1/push/web/{device}` | `{endpoint, keys:{p256dh, auth}, key, locale?, features?, browser?}` (`PushSubscription.toJSON()`, the key it subscribed with, the page's language, its `client_hello` features, "Chrome · macOS") → the status above. 400 `bad_device`; 400 `unknown_push_service`: the endpoint must be https on 443, without credentials, at FCM (`fcm.googleapis.com`), Mozilla (`*.push.services.mozilla.com`), Apple (`*.push.apple.com`) or Windows (`*.notify.windows.com`), so a device can't make the hub post to an address of its choosing; 400 `bad_endpoint`, `bad_keys`; 409 `key_changed` with `key` (subscribe again with it); 403 `owned`: another device credential made it, and the request doesn't present its endpoint (the same browser signed in again does); 503 when it can't be stored. `features` keeps only `elicitation`. At most 32 browsers, kept whole in `hub.web_push.subscriptions`: one more drops the one renewed longest ago; the same endpoint under another device id replaces that row |
@@ -2253,6 +2315,7 @@ GET /api/v1/sessions?summary=0&limit=50&machine_id=demo&session_id=<URL-encoded 
 - The `(machine_id, session_id)` tuple resolves directly in the existing transport-index map. Other row filters still apply to that one candidate. `summary=0` (the default) returns the identical complete, decorated/shown `Session` DTO used by the collection, including `background`, `subagents`, `workflows`, `queued`, ports and all session configuration. `summary=1` and `counts=1` retain their ordinary meanings for that candidate.
 - The ordinary collection envelope is unchanged: `sessions` has zero or one row, `total` is 0 or 1, `remove` is `[]`, `has_more` is false, `next_cursor` is absent, and `revision` is the current collection checkpoint. A missing, hidden or deleted session is an empty matching collection, not a 404. The existing `agents.read` scope and manager ownership restrictions apply; a foreign manager's machine still returns 403 `other_manager`.
 - Exact lookup cannot be combined with `since` or `cursor` (400 `invalid_query`). An active-chat getter takes a fresh exact baseline after coalesced `sessions_list` invalidations, rather than borrowing a list-summary delta checkpoint. Its revision is not a baseline for the whole collection.
+- An active-chat getter that asked for `sessions_list_changes` (below) skips that read for a hint whose `since` is the revision of its last exact answer and whose `changed` does not name its `[machine_id, session_id]`: the answer would be the same row, and it now stands at the hint's `revision`. Any other hint (no `since`/`changed`, another `since`, its id listed) reads as before. The web does this (`web/src/lib/runtime-session.ts` `SessionDetailLoader.hint`, #6685).
 - Older hubs ignore unknown query keys: sending `session_id` to one can silently return an unrelated first page of 50 sessions. Clients **must gate on `sessions_lookup`**, never assume `sessions_list` implies it. If absent, retain the older detail/full-list fallback. Requests without `session_id` and unknown parameters otherwise keep their existing behavior.
 
 The direct lookup/count path does not build, scan or sort unrelated session views, even on a missing id, new filter or changed revision. Runtime index initialization remains a one-off full-collection cost; upstream full-list reports still update the index normally. `BenchmarkExactLookup` measures uncached found/missing requests against 1, 8,000 and 32,000 rows separately from initialization.
@@ -2417,6 +2480,7 @@ Client sequence:
 - This small event is an **invalidation hint**, not a delta payload or authoritative baseline. Coalesce bursts, then call the HTTP `since`/counts API with the client's saved checkpoint. Do not advance the checkpoint merely by receiving the event. Reconnect always receives a current hint; HTTP epoch checks cover restart recovery.
 - Existing subscribed chat items, interactions, machines and terminal streams are unchanged. Personal-agent `agents` events remain unchanged; on those events use the personal-agent collection's own HTTP checkpoint, not the runtime checkpoint.
 - Older hubs do not advertise the feature; fall back to their existing full-list/delta behavior.
+- **Which rows changed (`sessions_list_changes`, #6685).** A client that also lists `sessions_list_changes` in `?features=` gets, on a hint that follows a change of the index, `since` (the revision before the change) and `changed` (the ids changed after `since` up to `revision`, sorted, the same `["<machine_id>","<session_id>"]` tuples `remove` holds): `{"type":"sessions_list","revision":"<r2>","since":"<r1>","changed":[["demo","s1"]]}`. `changed` may list rows a client's filters leave out, and a change made in between by another pass; it is never missing a row changed in that range. The hub leaves both out when it cannot say (more than 64 ids, `since` no longer in the change journal) and on hints with no starting point (connect, a hub-wide notice); an extension's token never gets them. Consecutive hints chain (`since` of one is `revision` of the one before) only while nothing changed unannounced; a client trusts `changed` only from a `since` it holds, and reads otherwise. Hubs that do not know the feature ignore it and send plain hints.
 - A view that needs every row keeps a **complete copy** instead of reading the query-free list per hint (#3759: that was a 373 KB list a few times a minute per client while agents worked): complete pages (`summary=0&limit=200`, no filters, all frozen pages) as its baseline, then `since` reads of complete rows, with new rows joining the copy. It reads complete pages again only on first use, `revision_expired`, a changed hub or an explicit refresh. A hint whose `revision` equals the client's checkpoint needs no read: the token includes the index epoch, so a restarted hub never repeats one. The web's pins / saved-grouping fallback and per-assistant lists (`web/src/lib/complete-sessions.ts`) and the iOS Agents list's complete fallback (grouping, filters, search, pins or mutes; `SessionListModel.complete`) do this; Android (#3760) still reads the whole list per hint.
 
 #### Cost and verification
@@ -3416,7 +3480,7 @@ The assistant uses `app.call connectors.owner {}` to get minimal metadata about 
 The assistant's dedicated one-way events `kb.changed {kind,id,what}` and `kb.forgotten {source}` are sent only by the current assistant connection; the hub turns them into `event.kb.*` only for extension subscribers granted `kb.read`, and doesn't broadcast them to the App.
 `todo.changed` and `todo.decision` ([todos.md](../assistant/todos.md) "Telling the extensions") go the same way: typed one-way events from the assistant, turned into `event.todo.*` only for subscribers granted `todos.read`, not broadcast to the App. `leader.changed` and `leader.report` ([extensions.md](../extensions/extensions.md) "Leader events") go that way too, for subscribers granted `leaders.read`.
 
-- Assistant → hub: `device.call`, `app.call` → the result as is; `notify.request {notification}` → `{ok:true}` (a notification `id` the hub took from that manager within two hours, recorded in its database, is not delivered again); `manager.outbox {items:[{id, at, notification | message}]}` → `{done:[id…]}`: what the manager kept while the hub was away, oldest first, sent after it reported its state on the connection, each id delivered once per manager and only about its own machines, sessions and cards (an older hub answers `unknown_method`; `docs/operations/hub-restart.md` ("The manager while the hub is away")); `manager.snapshot` → `{ok,seq}` (the snapshot carries `profile`: the parts of the assistant's settings the hub's own features need; the hub keeps the last one); one-way event `ws.broadcast` (see below).
+- Assistant → hub: `device.call`, `app.call` → the result as is; `notify.request {notification}` → `{ok:true}` (when low-distraction mode held the push: `{ok:true,held:true,reason}`, the reason being the same intercept reason as `GET /api/v1/push/intercepts`; the assistant's `notify_user` shows it to the model; a notification `id` the hub took from that manager within two hours, recorded in its database, is not delivered again); `manager.outbox {items:[{id, at, notification | message}]}` → `{done:[id…]}`: what the manager kept while the hub was away, oldest first, sent after it reported its state on the connection, each id delivered once per manager and only about its own machines, sessions and cards (an older hub answers `unknown_method`; `docs/operations/hub-restart.md` ("The manager while the hub is away")); `manager.snapshot` → `{ok,seq}` (the snapshot carries `profile`: the parts of the assistant's settings the hub's own features need; the hub keeps the last one); one-way event `ws.broadcast` (see below).
   Added 2026-11-04: `device.call` hands the node `assistant.prepare`, `assistant.warm`, `assistant.memory`, `assistant.compact`, `assistant.handoff`, `launchers.list`, `launchers.probe` (`devices.list` gained `kind`, `data_dir`), and `assistant.start`, which the hub answered itself, was removed;
   `app.call` gained `models.record`, `models.save`, `models.apply_picked`, `models.launchers`, `models.launcher_check`, `kb.dirs`, `connectors.signed_in`, `plugins.assistant`, `plugins.skills_need`, `settings.list`, and `models.assistant_send` was removed.
   When `app.call` carries `timeout_ms` (how long the assistant waits this time), the hub also stops at that time (for example, one model call).

@@ -413,7 +413,7 @@ A background wake can reopen an exchange before its recap. Find the live exchang
 
 ## Optional sidebar entries need both setup and list results (#2934)
 
-A paged list can publish rows before its independent source-status request completes. Gate the optional Personal agents section on both results, not merely a loaded count, and keep its subscription mounted while hidden. An `agents` event must reread source status as well as sessions in bounded mode; otherwise enabling a source leaves the entry hidden until a reload. Cold failures with no conversations stay hidden, while refresh errors for existing conversations retain their retry UI. Regress both result orders and live empty/setup transitions under StrictMode.
+A paged list can publish rows before its independent source-status request completes. Gate the optional Personal agents section on both results, not merely a loaded count, and keep its subscription mounted while hidden. An `agents` event that says the list changed (`session_ids: []`, which the hub sends when a source is added or removed, when its listing starts or stops failing, and for an extension's keyless `agentsrc.updated`) must reread source status as well as sessions in bounded mode; otherwise enabling a source leaves the entry hidden until a reload. An event naming sessions rereads only the sessions, and the status with them once it is a minute old (#7681): the status read asks every source's extension in turn, and a session's new message does not change it. Cold failures with no conversations stay hidden, while refresh errors for existing conversations retain their retry UI. Regress both result orders and live empty/setup transitions under StrictMode.
 
 ## Report evidence is separate from report prose (#2554)
 

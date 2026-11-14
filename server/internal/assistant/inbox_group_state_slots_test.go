@@ -237,7 +237,15 @@ func TestInboxWakeSlotsStateDeferredWakesPersistFIFO(t *testing.T) {
 	}
 
 	wakeSlotsStateTestCollect(t, h.Service, first, false, connector.DoneReplied)
-	time.Sleep(2 * time.Millisecond) // keep the persisted wake timestamps distinct as well as the collection order
+	// Keep the persisted wake timestamps distinct as well as the collection order: the second wake is collected only
+	// once the clock has passed the first one's, which is at once where the clock reads finer than a collection.
+	h.inbox.mu.Lock()
+	firstAt := first.Agent.DeferredAt
+	h.inbox.mu.Unlock()
+	if firstAt == nil {
+		t.Fatal("the first wake was not deferred at full capacity")
+	}
+	waitUntil(t, func() bool { return time.Now().After(*firstAt) })
 	wakeSlotsStateTestCollect(t, h.Service, second, true, "")
 	h.handPass(ctx)
 

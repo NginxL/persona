@@ -389,6 +389,14 @@ It signs in with the login keychain's generic password `persona-vnc-bench` (adde
   its own shown in a browser on that Mac; per scene the Mbit/s, updates a second, input-to-pixels latency (the page's
   marker changing colour, split into getting the input and drawing it back), and the picture's SSIM / PSNR against a
   second, lossless connection of the same moment. `-delay` and `-rate` add a phone link's latency and bandwidth.
+- `wheel -apps page,finder,terminal -browser <executable> [-replay <schedules.json>]` (#7775): how far wheel notches
+  scroll on that Mac. One notch at a time, then 20 at gaps from 100 ms down to none (does macOS speed quick notches up,
+  or merge them?), then each named schedule (`{"name": "ms:n,…"}`, a gesture's notches at the times the app sends
+  them). A browser page reports its own scroll position and each wheel event's `deltaY`; Finder and Terminal are
+  measured from the picture, by how far their rows moved. It uses only windows it opens itself (a browser of its own
+  with a profile of its own, a Finder window on a folder of its own, a Terminal window running its own script),
+  closes them and brings back the app that was in front. It starts only after a minute with no input on the Mac and
+  stops at the first key, click or pointer move it did not send.
 - `record`: what the server sends, for replaying through the app's own client (decode CPU, bytes copied).
 - `trace -scene <scene> -rec-mode <mode> [-trace-area x,y,w,h|page|stage]`: each request and each update's start, end,
   size and painted box in order, to see how the server answers a way of asking (or a part of the screen).
@@ -612,8 +620,10 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     1×15). Every tier keeps at least a pixel per point, so text stays readable. Each band is 0.02–0.08 bits per pixel per
     frame, the ceiling at the phone's cap; a tier whose floor is above the cap is left out, and ones that come out the
     same on a display merge. On `screenbench` the floor keeps scrolling text at SSIM ≥ 0.98 against what was encoded.
-    The band is per codec (`TierLadder.bitsFactor`): H.264's factor is 1, the same as HEVC's, until the bench measures
-    it (#6558: a browser without HEVC gets H.264).
+    The band is per codec (`TierLadder.bitsFactor`; #6558: a browser without HEVC gets H.264). H.264's factor is 1, the
+    same as HEVC's, as `screenbench` measured it (2026-11-14, every Auto tier, scene and band end at the same targets):
+    text (typing, scrolling) within 0.002 SSIM of HEVC, the video scene 0.003–0.007 lower, and 0–11% more data an hour
+    of the typical mix, so the cards' figures hold for both.
   - **Shared with the browser** (#6558): `spec/fixtures/screen-tiers` holds the ladder's and the signals' scenarios
     (input and expected output, one per file), which `TierFixtureTests` writes from these Swift types
     (`PERSONA_WRITE_TIER_FIXTURES=1`) and otherwise checks unchanged. The browser's port (`web/src/screen/tiers/`)
@@ -698,30 +708,41 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     same three lines (the Mac locked, video stopped, not allowed with "How to turn it on"), 3 s of silence, 30 s doubling
     to 5 min, reset after a minute of video, and nothing while the tab is in the background. A decoder that fails on the
     stream before any picture means this browser can't play it: no switcher, no retry on that page.
-  - **Connection stats**: video mode shows the iPhone's lines (Video · Via hub · total; bitrate · fps · codec · size;
-    capture · encode · network · decode); over VNC, when the Mac offers video but this page can't play it, one line
-    says why: not a secure address, a browser that can't play it, or a decoder that couldn't start.
+  - **Connection stats**: video mode shows the iPhone's lines (Video · Via hub · total; with tiers, Tier · Quality ·
+    scale · fps and, under it, why it last changed and how long ago; bitrate · fps · codec · size, the size the
+    encoder runs at after an `encoding`; capture · encode · network · decode); over VNC, when the Mac offers video but
+    this page can't play it, one line says why: not a secure address, a browser that can't play it, or a decoder that
+    couldn't start.
+  - **Quality tiers** (`video-tiers.ts`, the iPhone's `ScreenVideoTiers`, on the ported `tiers/` types): once the
+    helper's `hello` lists `tiers` with its display's points and pixels, the page's tiers start (`webTiers.supported`).
+    The stream feeds `ReceiverSignals` from each frame as it arrives (when its first bytes came, for a frame over
+    several reads; refinement passes apart), from each decode time and from each picture drawn or replaced before the
+    next animation frame; the helper's `timing` goes to the policy, which decides every 250 ms (not while capture is
+    paused). Each change goes out as an `update` (`scale`, `fps`, `min_kbps`, `target_kbps`, `max_kbps`). ⋯ › Quality
+    (Auto, Sharper, Smoother, kept per Mac) moves the bias at once; the data cap and the mobile-data choice go to the
+    policy (`setBudget`). The route is the hub's relay, read as an unmeasured one (the relay over Wi-Fi); the tier a
+    computer settles on is where its next stream on the page starts. A helper without tiers keeps the cap as before.
   - **Data use** (`data-use.ts`, the iPhone's `ScreenVideoBudget` and `ScreenMobileData`): the cap goes in
     `start.max_kbps` and, when `navigator.connection` changes, in an `update`. Without tiers the caps are the iPhone's:
     1.5 Mbit/s with the browser's Data Saver on (`saveData`, its Low Data Mode), 4 on mobile data, 12 otherwise. Chrome
     and Edge say `type: "cellular"`; Safari and Firefox say nothing, so a phone's browser (a coarse pointer and a screen
     no wider than 600 CSS pixels on its short side) gets 4 and nothing is asked, any other 12. With tiers on both sides
-    (`webTiers.supported`, PR 4) mobile data follows the user's choice as on the iPhone: Data Saver (1.5 Mbit/s and at
-    most one pixel per point, `maxScale` for the tier policy) until they choose, Clearer 4. The stream starts on the
-    cap without tiers, which aren't known before `hello`. The card (`MobileDataCard`: On mobile data, The screen is
+    mobile data follows the user's choice as on the iPhone: Data Saver (1.5 Mbit/s and at most one pixel per point,
+    the policy's `maxScale`) until they choose, Clearer 4. The stream starts on the cap without tiers, which aren't
+    known before `hello`; the tiers then pick under the cap with the choice. The card (`MobileDataCard`: On mobile data, The screen is
     saving data. Make it clearer?, Clearer about 0.6 GB an hour, Data Saver about 0.2–0.3 GB an hour) sits under the bar
     while video shows, is asked at most twice while nothing is chosen (once a page), and the choice is kept in this
     browser for every computer (`persona.screen.mobileData`). The web has no Settings row for it: it sits in ⋯ as
-    "Quality on mobile data" while it applies. The browser's Data Saver is always Data Saver and asks nothing. Until
-    the page drives tiers the card and the choice never show; a development server started with
-    `VITE_SCREEN_TIERS=1` shows them.
+    "Quality on mobile data" while it applies. The browser's Data Saver is always Data Saver and asks nothing. The card
+    and the choice show only with a helper that has tiers.
   - **Tests**: `video-wire.test.ts`, `video-bitstream.test.ts`, `video-probe.test.ts`, `video-stream.test.ts`,
-    `video-link.test.ts`, `rfb-hold.test.ts` (on the real noVNC), `data-use.test.ts`, `VideoPicture.test.tsx`,
-    `ScreenView.video.test.tsx`; `node web/e2e/screen-video-decode.mjs <web URL>` decodes both fixtures in a real
+    `video-link.test.ts`, `video-tiers.test.ts`, `rfb-hold.test.ts` (on the real noVNC), `data-use.test.ts`,
+    `VideoPicture.test.tsx`, `ScreenView.video.test.tsx`; `node web/e2e/screen-video-decode.mjs <web URL>` decodes both fixtures in a real
     browser, `node web/e2e/screen-video.mjs <web URL> <mock hub URL>` runs the page against the mock's helper side
     (`MOCK_SCREEN_VIDEO=1`, which plays `fixture.bin` (HEVC) or `fixture-h264.bin` as the helper picks from
-    `start.codecs`), and `node web/e2e/screen-data-use.mjs <web URL> <mock hub URL>` the card and the choice with
-    tiers on both sides (`MOCK_SCREEN_VIDEO_TIERS=1`, `VITE_SCREEN_TIERS=1`).
+    `start.codecs`), and `node web/e2e/screen-data-use.mjs <web URL> <mock hub URL>` the tiers against a helper with
+    them (`MOCK_SCREEN_VIDEO_TIERS=1`): the tier under each data choice, the card and the choice, and on Wi-Fi the
+    tier in the stats and Quality moving it.
 - **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
   the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
@@ -789,10 +810,13 @@ iPhone's side comes next.
   another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
   relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost
   route left at once and a degraded one (loss ≥ 5 %, or 50 ms over its own floor for 5 s) when another is healthy.
-- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`): off in release builds until the real-device
-  acceptance has passed (`ScreenRoutes.releaseEnabled`, one line to turn on); a DEBUG build launched with
-  `-showScreenRoutes` has it meanwhile. While offered, **Settings › This Device › Live Screen**
-  (`LiveScreenSettingsView`) has one switch, "Choose the Fastest Route Automatically", on by default; turned off, the
+- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`): on since the acceptance before real devices passed
+  (a simulator on a real hub and a Mac on the same LAN: the direct route within a second, back on the relay 2.6 s after
+  it went silent and 1.1 s after it broke, direct again 39 s after it recovered, every typed byte once). Still to check
+  on a real iPhone: the Tailscale route, the local network question, and Wi-Fi to cellular. `ScreenRoutes.releaseEnabled`
+  false turns it off in the next build; the hub's `screen_link_off` keeps every live screen on its relays at once.
+  **Settings › This Device › Live Screen** (`LiveScreenSettingsView`, shown when a computer offers its live screen)
+  has one switch, "Choose the Fastest Route Automatically", on by default; turned off, the
   phone asks for no session (everything through the hub, as before) and live sessions move back to their relays at
   once. The quality tiers (#6396) add their own section to the same page. The stats overlay's Route row shows the route's
   round trip and packet loss and why it last changed ("Faster route", "Previous route dropped", "Network changed", …, or
@@ -807,7 +831,7 @@ iPhone's side comes next.
   certificate accepted only by its SHA-256 from `paths`) as `ProbePlan` says (at once, then 30 s doubling to 5 min after a
   failure, again at once when the phone's networks change), and hands what connects to the session, which pings and
   measures every route (the one in use every second, the others every two) and runs the policy once a second.
-- **Moving** (still only with `-showScreenRoutes`): when the policy picks another route, every live channel moves
+- **Moving**: when the policy picks another route, every live channel moves
   there (to its own relay for the relay): `use` with what the phone has of each, and nothing more goes out on it until
   the node's `resumed` says what the node has; each side then sends on from there, so RFB loses and repeats nothing,
   and a stale video backlog is dropped for a keyframe on the node's side. A direct route that fails, or stays silent for
