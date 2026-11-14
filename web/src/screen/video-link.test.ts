@@ -126,4 +126,17 @@ describe("ScreenVideoLink", () => {
     // the second runs from the first picture: two pictures in it; the total is capture + encode + network + decode
     expect(readings[0]).toMatchObject({ fps: 2, captureMs: 0, encodeMs: 5, networkMs: 7.5, decodeMs: 0, totalMs: 12.5 });
   });
+
+  it("sends a new cap to the open stream as an update, nothing for the same cap, and starts the next stream with it", () => {
+    const { l, transports } = link();
+    l.setBudget({ maxKbps: 4_000, fps: 60 }); // nothing open: kept for the start
+    l.want({ display: null, rect: null });
+    l.rfb({ pair: "a" });
+    expect(transports[0].sent[0]).toMatchObject({ type: "start", max_kbps: 4_000, fps: 60 });
+    l.setBudget({ maxKbps: 1_500, fps: 60 });
+    l.setBudget({ maxKbps: 1_500, fps: 60 });
+    expect(transports[0].sent.slice(1)).toEqual([{ type: "update", fps: 60, max_kbps: 1_500 }]);
+    l.rfb({ pair: "b" });
+    expect(transports[1].sent[0]).toMatchObject({ type: "start", max_kbps: 1_500 });
+  });
 });
