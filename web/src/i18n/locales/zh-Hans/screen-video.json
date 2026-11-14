@@ -29,5 +29,13 @@
   "stats_no_video_insecure": "用 https 地址打开这页才能看高清画面。",
   "stats_no_video_unsupported": "这个浏览器放不了视频，画面用的是 VNC。",
   "stats_no_video_failed": "视频在这个浏览器里没能启动，画面用的是 VNC。",
-  "stats_ms": "{ms} ms"
+  "stats_ms": "{ms} ms",
+  "mobile_data_title": "正在使用移动数据",
+  "mobile_data_line": "画面正在省流量，要清晰一些吗？",
+  "mobile_data_clearer": "清晰一些",
+  "mobile_data_saver": "省流量",
+  "mobile_data_clearer_usage": "约 0.6 GB / 小时",
+  "mobile_data_saver_usage": "约 0.2–0.3 GB / 小时",
+  "mobile_data_quality": "移动数据下的画质",
+  "mobile_data_close": "关闭"
 }

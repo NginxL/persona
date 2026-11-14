@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 // What the page says about the video channel (#6558): the fallback line (with "How to turn it on" for a Mac that hasn't
 // allowed video, one sentence that depends on whether macOS has asked yet), and the stats panel in video mode (the
-// iPhone's lines) or, when the Mac offers video but this page can't play it, why.
+// iPhone's lines) or, when the Mac offers video but this page can't play it, why; and the mobile-data card.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../i18n";
 
 vi.mock("./probes", () => ({ countFrames: () => null, countBytes: () => () => {}, probeHub: () => () => {} }));
-import { FallbackLine } from "./VideoPicture";
+import { FallbackLine, MobileDataCard } from "./VideoPicture";
 import { StatsOverlay } from "./StatsOverlay";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -75,5 +75,25 @@ describe("the stats panel", () => {
     }
     act(() => root.render(<StatsOverlay {...props} noVideo="insecure" video={{ reading: {}, codec: "HEVC", size: null }} />));
     expect(host.querySelector('[data-testid="screen-stats-no-video"]')).toBeNull();
+  });
+});
+
+describe("the mobile-data card", () => {
+  it("asks in the iPhone's words, each choice with its data an hour on one line, and closes", () => {
+    const chose: string[] = [];
+    let closed = 0;
+    act(() => root.render(<MobileDataCard onChoose={(m) => chose.push(m)} onClose={() => closed++} />));
+    const card = host.querySelector('[data-testid="screen-mobile-data"]')!;
+    expect(card.getAttribute("aria-label")).toBe(t("screen-video.mobile_data_title"));
+    expect(card.textContent).toContain(t("screen-video.mobile_data_line"));
+    const clearer = host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-clearer"]')!;
+    const saver = host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-saver"]')!;
+    expect(clearer.textContent).toBe(t("screen-video.mobile_data_clearer") + t("screen-video.mobile_data_clearer_usage"));
+    expect(saver.textContent).toBe(t("screen-video.mobile_data_saver") + t("screen-video.mobile_data_saver_usage"));
+    expect(clearer.className).toContain("whitespace-nowrap");
+    act(() => clearer.click());
+    act(() => saver.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-close"]')!.click());
+    expect([chose, closed]).toEqual([["clearer", "saver"], 1]);
   });
 });

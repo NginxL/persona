@@ -7,7 +7,9 @@
 // a report goes back for its frames; Connection stats shows Video with the segments, the codec and the size; the Mac
 // locking says so and VNC shows until it's back; the stream dropping says video stopped. In a browser with no video
 // decoder, no Picture switcher and the panel says why; a decoder that fails on the stream: the panel says it couldn't
-// start, and video isn't tried again on that page (no switcher, no line promising it).
+// start, and video isn't tried again on that page (no switcher, no line promising it). Data use without tiers: a desktop
+// starts at 12 Mbit/s; on mobile data (navigator.connection says cellular) at 4, and Wi-Fi again sends an update for 12.
+// The mobile-data card with tiers: web/e2e/screen-data-use.mjs.
 // No page error. Ends with one line: PASS, FAIL or TIMEOUT.
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright-core";
@@ -91,6 +93,7 @@ try {
     }
     if (!sent.starts.length || !sent.starts.at(-1).codecs?.length) fail(`no start with codecs reached the helper: ${JSON.stringify(sent.starts)}`);
     if (sent.reports < 5) fail(`only ${sent.reports} reports reached the helper in 5 s`);
+    if (sent.starts.at(-1).max_kbps !== 12_000) fail(`a desktop started at ${sent.starts.at(-1).max_kbps} kbps, not 12000`);
     await page.click("[data-testid=screen-stats-toggle]");
     const panel = await page.waitForFunction(() => {
       const p = document.querySelector("[data-testid=screen-stats]");
@@ -113,6 +116,32 @@ try {
       await page.waitForSelector("[data-testid=screen-fallback]");
       if (shots) await page.screenshot({ path: `${shots}/video-lost-${scheme}.png` });
     }
+    await c.close();
+  }
+
+  // On mobile data without tiers: the iPhone's 4 Mbit/s, and Wi-Fi again sends 12 in an update.
+  {
+    const c = await context("light", () => {
+      const net = Object.assign(new EventTarget(), { type: "cellular", saveData: false });
+      Object.defineProperty(Navigator.prototype, "connection", { get: () => net, configurable: true });
+      window.__net = net;
+    });
+    const page = await open(c);
+    await videoShows(page);
+    const before = (await mock()).updates.length;
+    const start = (await mock()).starts.at(-1);
+    if (start.max_kbps !== 4_000) fail(`mobile data without tiers started at ${start.max_kbps} kbps, not 4000`);
+    await page.evaluate(() => {
+      window.__net.type = "wifi";
+      window.__net.dispatchEvent(new Event("change"));
+    });
+    let updates = [];
+    for (let i = 0; i < 25 && !updates.some((u) => u.max_kbps === 12_000); i++) {
+      await page.waitForTimeout(200);
+      updates = (await mock()).updates.slice(before);
+    }
+    if (!updates.some((u) => u.max_kbps === 12_000)) fail(`no update for 12000 kbps after Wi-Fi: ${JSON.stringify(updates)}`);
+    if (await page.$("[data-testid=screen-mobile-data]")) fail("a mobile-data card without tiers");
     await c.close();
   }
 
@@ -166,7 +195,7 @@ try {
   }
 
   if (errors.length) fail(`page errors: ${errors.join(" | ")}`);
-  console.log("PASS screen video: the picture is video with its stats in light and dark; locked, back, lost; no decoder, an insecure page and a failing decoder each say why");
+  console.log("PASS screen video: the picture is video with its stats in light and dark; locked, back, lost; 12 Mbit/s on a desktop, 4 on mobile data and 12 again on Wi-Fi; no decoder, an insecure page and a failing decoder each say why");
 } catch (e) {
   console.log(`FAIL screen video: ${e instanceof Error ? e.message : e}`);
   if (shots && current) await current.screenshot({ path: `${shots}/failed.png` }).catch(() => {});

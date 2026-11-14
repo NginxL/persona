@@ -20507,9 +20507,10 @@ def zrle_rect(px, W, x, y, w, h, z):
 # sends `paused` with that reason (no frames and no heartbeats, as the helper), ?resume=1 sends `resumed` and starts over
 # with `hello`, `format` and the keyframe. Once a second while frames go out it sends `timing` as the helper does: capture
 # 0 and encode 4.8 ms (made up: nothing is encoded here), the network as half the real round trip from a frame going out
-# to the phone's report on it.
+# to the phone's report on it. MOCK_SCREEN_VIDEO_TIERS=1: the hello says the helper has quality tiers (`features`,
+# #6396); GET /mock/screen-video also lists the `update`s the client sent (#6558: a new data budget).
 SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
-                "refuse": False}
+                "updates": [], "refuse": False, "tiers": os.environ.get("MOCK_SCREEN_VIDEO_TIERS") == "1"}
 _SCREEN_VIDEO_FIXTURE = {}
 _SCREEN_VIDEO_FILES = {"hevc": "fixture.bin", "h264": "fixture-h264.bin"}
 
@@ -20542,7 +20543,7 @@ def screen_video_control(h, q):
     if q.get("resume", ["0"])[0] == "1":
         for st in SCREEN_VIDEO["streams"]: st["resume"] = True
     h.send_json({"open": sum(1 for st in SCREEN_VIDEO["streams"] if st["open"]), "starts": SCREEN_VIDEO["starts"],
-                 "reports": SCREEN_VIDEO["reports"], "refuse": SCREEN_VIDEO["refuse"]})
+                 "reports": SCREEN_VIDEO["reports"], "updates": SCREEN_VIDEO["updates"], "refuse": SCREEN_VIDEO["refuse"]})
 
 
 def screen_video_connect(h, mid):
@@ -20575,6 +20576,7 @@ def screen_video_connect(h, mid):
         if not st["started"].wait(10): st["open"] = False; return
         msgs = screen_video_fixture(screen_video_codec(st.get("codecs")))
         hello, fmt, frames = msgs[0], msgs[1], msgs[2:]
+        if SCREEN_VIDEO["tiers"]: hello = (hello[0], json.dumps({**json.loads(hello[1]), "features": ["tiers"]}).encode())
         number, i, restart = 0, 0, True
         second, count, size = time.monotonic(), 0, 0
         try:
@@ -20631,6 +20633,8 @@ def screen_video_connect(h, mid):
                     SCREEN_VIDEO["starts"].append(start)
                     st["codecs"] = start.get("codecs")
                     st["started"].set()
+                elif t == 19:
+                    SCREEN_VIDEO["updates"].append(json.loads(body or b"{}"))
                 elif t == 17:
                     SCREEN_VIDEO["reports"] += 1
                     sent = st["sent"].pop(struct.unpack(">I", body[:4])[0], None) if len(body) >= 4 else None
