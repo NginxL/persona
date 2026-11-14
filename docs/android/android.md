@@ -114,16 +114,17 @@ sideways when a large font no longer fits them. The open tray is the chip's sele
   board, and task/Agent details plus routing controls remain accessible. The old chips were navigation and task routing,
   not an Agent-based message filter; this change does not invent a new conversation filter.
 
-Task plan/task/receipt/review/report cards, including historical ones, are no longer rendered in the conversation. A
-small dispatched line names each dispatched task (**Dispatched: <title> · Open**, or every title when there are several) and
-opens that task's detail sheet, never the whole tray (#3700); the task row in Progress is the only card. Tools and
+Task plan/task/receipt/review/report cards, including historical ones, are no longer rendered in the conversation. Each
+Agent a dispatch started or a task took over is one hand-off card (↳, title, New / Already active / Resumed, when it last
+moved and its state, ↗). A card with an Agent opens that Agent's page; before an Agent is up it opens the task. It never
+opens the whole tray (#3700, #5110). Tools and
 intermediate narration remain under a default-collapsed **Checked N places** summary, which can be opened manually.
 Housekeeping notices (compaction, restarts, schedule setup) are hidden while dates remain. Explicit message-source
 metadata identifies supervision/patrol/follow-up turns; normal user messages are never hidden by their title or emoji.
 Original events and background records remain inspectable rather than being deleted from history.
 
 On Glass the conversation draws the hub's task records as iOS does ([chats](../plans/android-ios-alignment/chats.md) C13):
-`AssistantTaskCards.isBackgroundEvent(inline = true)` keeps only plans and task cards (the dispatched line stands for them)
+`AssistantTaskCards.isBackgroundEvent(inline = true)` keeps only plans and task cards (the hand-off cards stand for them)
 behind, except a plan nobody started (`AssistantTaskCards.drawnPlans`, below), and `FeedLine` draws the receipt (its PR button and **View**), the review line, the report as
 "task → @Persona" and Persona's hand-off as "Persona → @task" (both in Persona's box, the first three lines and **Expand**,
 `ExchangeHeader` / `ExchangeText` in `feature/chat/AgentExchange.kt`), the user's own word to a task as "Me → @task" in the
@@ -141,7 +142,7 @@ A plan nobody started is a line of the Glass conversation too, at the end of the
 started like this**; each task with its number when there are several, where it would run as chips that wrap, and why; **Start
 these directly**; a task's model chip is its short name ("Opus 4.8", `planModelLabel`), the Edit field keeps the raw id; then **Start** / **Start N tasks**, **Edit** and **Don't start**, in one row while Start's whole label fits and
 stacked (Start above the other two) when it would be cut), a dismissed one reads **Not started · N
-tasks**. A started plan is the dispatched line in the card's place, and the card follows the store's latest plan, so a sheet that
+tasks**. A started plan is the hand-off cards in the card's place, and the card follows the store's latest plan, so a sheet that
 kept the plan it was opened with (the tray's Review) says **✓ Started N tasks** instead of offering Start again. Tests:
 `TaskRecordsTest` (core/domain), `PlanCardConversationTest`, `PlanCardFailureReasonTest`.
 
