@@ -881,6 +881,11 @@ a native agent that rejects `session/close`, and republish the closed inventory 
 
 ## Antigravity history freshness does not establish live execution (#3678)
 
+An externally driven AGY conversation needs a watched transcript poll even when Persona owns no ACP prompt. Native
+planner records can also gain response text at an existing step index. Carry those replacements through the history
+token and preserve the branch identity, then let the existing client continuity logic replace retained content. Use
+the last published sequence as an append batch's exclusive lower bound. Cover both cases through `session.watch`.
+
 A completed user-input or tool step can remain the transcript's last entry after a stopped or failed attempt. A 24-hour
 freshness window kept such history working for hours. Working requires an owned ACP turn or explicit native running state.
 Apply that native activity before internal-metadata filtering and history limits, and discover running native summaries even
