@@ -149,14 +149,25 @@ nonisolated enum InboxBulk {
 
     /// What Clear All covers, for the menu: the filters' names and the search, or All.
     static func scope(filters: [String], query: String) -> String {
-        var parts = filters.filter { !$0.isEmpty }
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !q.isEmpty { parts.append(String(localized: "Search “\(q)”")) }
+        let parts = scopeParts(filters: filters, query: query)
         return parts.isEmpty ? String(localized: "All") : parts.joined(separator: " · ")
     }
 
-    /// The menu's line under Clear All: what it covers and how many.
-    static func scopeLine(filters: [String], query: String, count: Int) -> String {
-        count == 0 ? String(localized: "Nothing left to handle") : String(localized: "\(scope(filters: filters, query: query)) · \(count) items")
+    /// The filters' names and the search, each a part of the scope; none when the list shows the whole Inbox.
+    private static func scopeParts(filters: [String], query: String) -> [String] {
+        var parts = filters.filter { !$0.isEmpty }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty { parts.append(String(localized: "Search “\(q)”")) }
+        return parts
+    }
+
+    /// The menu's line under Clear All: what it covers and how many. Nothing open under filters or a search names them
+    /// without a count: "Nothing left to handle" there read as the whole Inbox done, when the Inbox outside them may
+    /// still hold plenty (#7551, the web's since #7478). No line (nil) while there is nothing to count yet: the list is
+    /// still loading, or a read failed, with nothing shown.
+    static func scopeLine(filters: [String], query: String, count: Int, loading: Bool = false, failed: Bool = false) -> String? {
+        if loading || failed { return nil }
+        if count > 0 { return String(localized: "\(scope(filters: filters, query: query)) · \(count) items") }
+        return scopeParts(filters: filters, query: query).isEmpty ? String(localized: "Nothing left to handle") : scope(filters: filters, query: query)
     }
 }

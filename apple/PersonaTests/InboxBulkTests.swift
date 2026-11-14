@@ -52,7 +52,27 @@ final class InboxBulkTests: XCTestCase {
         XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: "", count: 12), "全部 · 12 件")
         XCTAssertEqual(InboxBulk.scopeLine(filters: ["飞书", "@我"], query: "", count: 3), "飞书 · @我 · 3 件")
         XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: " 周报 ", count: 2), "搜索「周报」 · 2 件")
-        XCTAssertEqual(InboxBulk.scopeLine(filters: ["飞书"], query: "", count: 0), "没有未处理的")
+        XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: "", count: 0), "没有未处理的", "the whole Inbox, nothing open")
+        XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: "  ", count: 0), "没有未处理的", "a blank search is no search")
+    }
+
+    /// Nothing open under filters or a search names them without a count (#7551): "Nothing left to handle" there read as
+    /// the whole Inbox done, when the Inbox outside them may still hold plenty.
+    func testScopeLineUnderFiltersWithNothingOpen() {
+        XCTAssertEqual(InboxBulk.scopeLine(filters: ["飞书"], query: "", count: 0), "飞书")
+        XCTAssertEqual(InboxBulk.scopeLine(filters: ["me", "群聊"], query: "", count: 0), "me · 群聊")
+        XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: " 周报 ", count: 0), "搜索「周报」")
+        XCTAssertEqual(InboxBulk.scopeLine(filters: ["", "@我"], query: "周报", count: 0), "@我 · 搜索「周报」")
+    }
+
+    /// While the list is still read, or after a read that failed, with nothing shown, there is nothing to count: no line
+    /// rather than one that says nothing is left (#7551, the web's audit item 84).
+    func testNoScopeLineBeforeTheListIsRead() {
+        XCTAssertNil(InboxBulk.scopeLine(filters: [], query: "", count: 0, loading: true))
+        XCTAssertNil(InboxBulk.scopeLine(filters: ["飞书"], query: "", count: 0, loading: true))
+        XCTAssertNil(InboxBulk.scopeLine(filters: [], query: "", count: 0, failed: true))
+        XCTAssertNil(InboxBulk.scopeLine(filters: [], query: "周报", count: 0, failed: true))
+        XCTAssertEqual(InboxBulk.scopeLine(filters: [], query: "", count: 0, loading: false, failed: false), "没有未处理的")
     }
 
     // MARK: Clear All (POST /api/v1/inbox/bulk)

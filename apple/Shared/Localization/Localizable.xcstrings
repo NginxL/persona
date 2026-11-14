@@ -29985,6 +29985,29 @@
       },
       "extractionState" : "manual"
     },
+    "Clear the filters to see the whole Inbox." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear the filters to see the whole Inbox."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絞り込みを解除すると、受信トレイ全体が表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除筛选后，可以看到整个收件箱。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "CPU, memory and network update every 10 seconds. Charts show the last hour." : {
       "localizations" : {
         "en" : {
@@ -101361,6 +101384,29 @@
           }
         }
       }
+    },
+    "Nothing Open Matches These Filters" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Open Matches These Filters"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絞り込みに一致する未対応の項目はありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有符合筛选的未处理条目"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Nothing recorded for %@ yet." : {
       "localizations" : {

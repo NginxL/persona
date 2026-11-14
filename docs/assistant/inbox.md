@@ -697,6 +697,8 @@ which users saw as one action: clear this batch they do not need to handle now. 
 - **Confirmation**: 10 or more items require confirmation ("Clean up N items (scope). New messages arriving later are unaffected; you can undo afterward."); fewer act directly with Undo. Scope / count are from the list at tap time.
 - **Entry points (one per client)**: web has Clean up all to the filter row's right (hidden at narrow widths), and one Clean up all item in ⋯ with scope / count below. With nothing open under filters or a search the web names the scope without a count ("Lark · Mail", not "Nothing to do"), and before the list has loaded, or after a failed read, it shows no scope (the Inbox entry in `docs/web/web.md`).
   Android top-bar More has one item; iOS More has one item with scope / count below ("All · 12 items", "Lark · Mentions · 3 items", "Search ‘weekly report’ · 2 items").
+  With nothing open iOS says "Nothing left to handle" only for the whole Inbox; under filters or a search it names them without a count ("Lark · Group chat"),
+  and while nothing is shown because the list is still being read, or its read failed, the item has no line at all (#7551, as the web).
   Mac has one toolbar button (scope on hover) and one Inbox-menu item, ⇧⌘E while Inbox is active. Apple passes `items` (ID + version) for current filtered / searched unhandled items, not `filter`.
   Section Mark All Seen / Clear All still use `/done`. Watch has only single-item done, no bulk entry, and reply-only devices cannot call `/bulk`; extensions need `inbox.write`.
 - **Old hubs**: without `/bulk` (404 / 405), fall back to `/done`. It lacks dismiss, so Clean up all records done (`done_by=user`), still removing items from the list. Reopen also falls back to `/done`.
@@ -740,9 +742,13 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   a folded group is picked through its title's tick (none / some / all of it), which picks or unpicks the whole group, folded or not, and its title says how many are picked.
   The web's bar also says how many picked rows are folded away. The one action is Mark as Done: `POST /api/v1/inbox/bulk` `action: done` per manager, with Undo ("Clean up all").
   There is no Mark as Read: Done stays Persona-only.
+- **Nothing open** (web, iOS / iPad): the check mark and All caught up only for the whole Inbox. When the chips leave nothing open (with or without a search), a neutral
+  filter mark, "Nothing open matches these filters", "Clear the filters to see the whole Inbox." and **Clear filters**; a search alone, the search mark, "No matches",
+  "Try a different search." and **Clear search**. Either button clears the chips and the search: the chips are kept on this device, so a list left filtered opens
+  filtered, and the Inbox outside them may still hold plenty (web #7478, `docs/web/web.md` "Pages"; iOS #7551, `InboxPage.emptyKind`).
 - DEBUG (iOS): `-showInboxPicked <n>`, `-showInboxPickedDone YES`, `-showInboxDone YES` (Done and its newest group open), `-showInboxPickGroups YES`, `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES` (the first two rows picked and the due sheet open / merged / added to to-dos for today, #6480; `MOCK_INBOX_TODO=1|time` puts a to-do suggestion on the mock's design-review mail),
   `-showInboxJump <group>` (Done jumped to that group, `week` or `month`, its first page loaded). Mock hub: `MOCK_INBOX_HISTORY=busy` (36 done a day for two months), `MOCK_INBOX_DAYS=none`.
-- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`.
+- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`, `InboxFilteredEmptyTests`.
 
 ## App
 
