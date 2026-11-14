@@ -767,7 +767,20 @@ type SuperviseEntry struct {
 type SuperviseInbox struct {
 	Item, Title, Sender, Preview string
 	Count                        int
+	// URL is a GitHub PR's or issue's address; ToAgent is "sent" once the note reached the task's agent (InboxToAgent,
+	// #7346), "" when the supervisor is the only one told.
+	URL, ToAgent string
 }
+
+// InboxToAgent is the note a task's agent gets when someone else writes on the task's GitHub thread (#7346): who,
+// how many new messages, a line of the newest, and the thread to read.
+type InboxToAgent struct {
+	Sender, Preview, URL string
+	Count                int
+}
+
+// RenderInboxToAgent is that note.
+func RenderInboxToAgent(d InboxToAgent) string { return render("assistant/inbox_to_agent", d) }
 
 // SuperviseParked is what a task was parked for (task_review parked), as its parked_due entry repeats it: the reason,
 // what kind of thing it waits on, until when (local), how many times in a row it was parked with no agent turn in
