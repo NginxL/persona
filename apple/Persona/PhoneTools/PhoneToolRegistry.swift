@@ -86,7 +86,7 @@ enum PhoneToolRegistry {
     /// A Mac has HealthKit's API but no health data: no health tools there.
     private static var healthTools: [PhoneTool] {
         #if os(iOS) || os(visionOS)
-        HealthTool.tools
+        HealthTool.tools + WorkoutTool.tools
         #else
         []
         #endif

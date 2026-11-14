@@ -259,8 +259,28 @@ HealthKit delivery. The device must reconnect to the same paired hub.
 
 Reports appear in the Health space using existing persona-card measurement cards,
 a minute-average heart-rate chart when available, and a brief interpretation. Missing
-measurements are omitted; route coordinates are not uploaded. Pace charts require
-measured splits and are not generated from the aggregate-only payload.
+measurements are omitted; route coordinates are not uploaded.
+
+Since #2526's second step, a report also carries:
+
+- the elevation gain;
+- the heart rate's average and maximum;
+- per-kilometre splits for runs, walks, hikes and rides, with pauses left out.
+
+The report then draws a pace chart from the splits, and compares the workout with the
+user's recent ones of the same activity through `phone_workouts_recent`. When the tool
+isn't available or finds nothing else, the comparison is skipped and not mentioned.
+The Health conversation's instructions point later questions at `phone_workouts_recent`
+and `phone_workout_detail` (`docs/apple/phone-tools.md`, "Workouts").
+
+The hub validates the new fields like the others:
+
+- the elevation is at most 20 km;
+- the heart rate is in (0, 300] bpm, with the average no higher than the maximum;
+- splits number kilometres 1, 2, … with positive seconds, at most 1000, summing to no
+  more than the workout.
+
+A report queued by an older app, without these fields, is still accepted.
 
 The device atomically stores its HealthKit cursor with a bounded upload outbox.
 Failed uploads are retried on the next foreground visit, except a report the hub
