@@ -55,6 +55,10 @@ bool persona_core_flush(PersonaCore *core, uint32_t timeout_ms);
 // Ordinary dispatch/drain calls never perform this worker join on their final lease.
 void persona_core_free(PersonaCore *core);
 
+// Projects the Agents list from a UTF-8 JSON input (sort::Input). Returns a UTF-8 JSON projection (sort::Projection).
+// Pure function: no core handle, no dispatch, no drain. Free the result with persona_core_bytes_free.
+PersonaCoreBytes persona_core_project_sort(const uint8_t *input, size_t length);
+
 #ifdef __cplusplus
 }
 #endif
