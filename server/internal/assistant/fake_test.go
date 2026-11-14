@@ -156,6 +156,7 @@ type fakeHub struct {
 	// checkWait, when set, runs before each launchers.check is answered, outside the fake's lock, with the call's
 	// context: a check that takes its time; its error is the call's.
 	checkWait func(ctx context.Context) error
+	checkedAt []time.Time
 	repairs   []map[string]any
 	repairRes *proto.LauncherRepair
 	onRepair  func(f *fakeHub)
@@ -343,6 +344,7 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if f.onCheck != nil {
 			f.onCheck(f)
 		}
+		f.checkedAt = append(f.checkedAt, time.Now())
 		if c, ok := f.checks[p.Device+"/"+name]; ok {
 			return json.Marshal(c)
 		}
