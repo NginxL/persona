@@ -7,15 +7,15 @@ import PersonaScreenKit
 
 // The live screen's routes on the iPhone (#6398, docs/extensions/computer-use.md "Live screen routes (#6398)"): the
 // hub's relays opened as a screen session when the hub and the node offer one, the node's direct candidates probed
-// and measured, and the route policy run. This stage measures and decides only: the picture and input stay on the
-// relay.
+// and measured, the route policy run, and the session's channels (picture and input) moved to the route it picks.
 
 enum ScreenRoutes {
     nonisolated static let log = Logger(subsystem: "persona", category: "screen-link")
 
-    /// Direct routes ship off until their real-device acceptance has passed (#6398); one line turns them on. A DEBUG
-    /// build launched with -showScreenRoutes has them meanwhile.
-    nonisolated static let releaseEnabled = false
+    /// Direct routes ship on since the acceptance before real devices passed (#6398); false again turns them off in the
+    /// next build, and the hub's `screen_link_off` keeps every live screen on its relays without one. A DEBUG build
+    /// launched with -showScreenRoutes has them whatever this says.
+    nonisolated static let releaseEnabled = true
 
     /// Whether this app offers direct routes at all (Settings shows the switch only then).
     nonisolated static var offered: Bool {
