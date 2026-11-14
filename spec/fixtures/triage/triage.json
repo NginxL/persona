@@ -3048,6 +3048,34 @@
       }
     },
     {
+      "name": "concern_closed_failed_start_old",
+      "description": "A closed concern whose agent failed to start over 48 hours ago is Done.",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Decision table\"",
+        "server/internal/assistant/todo_triage.go triageTodo"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [],
+        "todo": {
+          "id": "concern-closed-failed",
+          "title": "Answer the closed launch question",
+          "kind": "concern",
+          "created_at": "2026-11-01T00:00:00.000Z",
+          "updated_at": "2026-11-08T00:00:00.000Z",
+          "done_at": "2026-11-08T00:00:00.000Z",
+          "done_by": "reported",
+          "agents": [],
+          "origin": "main",
+          "start_error": "no launcher"
+        }
+      },
+      "expected": {
+        "section": "done",
+        "rule": "failed_start"
+      }
+    },
+    {
       "name": "concern_accepted",
       "description": "R3: an accepted review does not finish an open concern.",
       "source": [

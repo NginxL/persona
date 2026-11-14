@@ -390,6 +390,7 @@
     <string name="agents_todos_done">Done</string>
     <string name="agents_todo_reopen_failed">Couldn\'t reopen the to-do: %1$s</string>
     <string name="agents_todo_auto_done">Auto-completed</string>
+    <string name="agents_todo_concern">Concern</string>
     <string name="agents_todo_state_needs_you">Needs you</string>
     <string name="agents_todo_state_unread">To review</string>
     <string name="agents_todo_state_working">In progress</string>
