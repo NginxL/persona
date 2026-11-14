@@ -231,7 +231,7 @@ class AssistantDraftScopeTest {
         pick("工作")
         text("工作稿")
         pick("助手")
-        rule.onNodeWithText("codex-test · 仅这一次").assertExists()
+        rule.onNodeWithText("codex-test").assertExists()
         // The failed first message waits as a bubble on its assistant's page (#4339 C18): Resend sends it again.
         rule.onNodeWithText("重发").performClick()
         rule.waitForIdle()

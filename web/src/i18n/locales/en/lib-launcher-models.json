@@ -1,5 +1,4 @@
 {
   "default": "Default",
-  "default_named": "Default: {name}",
-  "one_off": "This time only"
+  "default_named": "Default: {name}"
 }

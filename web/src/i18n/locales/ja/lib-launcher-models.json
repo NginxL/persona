@@ -1,5 +1,4 @@
 {
   "default": "デフォルト",
-  "default_named": "デフォルト：{name}",
-  "one_off": "今回のみ"
+  "default_named": "デフォルト：{name}"
 }
