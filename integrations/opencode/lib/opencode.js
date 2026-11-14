@@ -278,6 +278,8 @@ export function createOpencodeHost(deps, options = {}) {
     }
     if (r.type === 'compaction') return t.status !== 'pending'
     if (typeof t.time?.completed === 'number' || t.finish) return true
+    if (r.type === 'shell' && t.status === 'running') return false
+    if (r.type === 'shell' && t.status) return true
     return now() - (r.time_updated ?? 0) > (s?.running ? STALE_MS : SETTLE_MS)
   }
 
