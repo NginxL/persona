@@ -283,7 +283,8 @@ machines.read        GET /api/v1/machines/{mid}/stat
 -                    GET /api/v1/phone/write-queue
 -                    GET /api/v1/pins
 notify               GET /api/v1/push/intercepts
--                    GET /api/v1/push/ln-mode
+notify               GET /api/v1/push/ln-mode
+notify               GET /api/v1/push/stats/daily
 -                    GET /api/v1/push/web
 -                    GET /api/v1/push/web/{device}
 -                    GET /api/v1/recordings
