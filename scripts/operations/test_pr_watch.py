@@ -1042,20 +1042,16 @@ class EventTests(unittest.TestCase):
 
 
 class VerifyTests(unittest.TestCase):
-    def test_persona_apple_cannot_be_silently_skipped(self):
+    def test_apple_change_does_not_require_macos_verifier(self):
         path = "apple/Persona/App/View.swift"
         with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
-        with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
-                patch.object(pr_watch_verify, "load_paths") as selector:
-            selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {"apple_command": ["verify", "{head}"],
-                                                                      "ui_evidence_command": ["visual", "{worktree}"]})
-        self.assertIn(("trusted Apple verification", ["verify", SHA_A]), commands)
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1,
+                                                       {"ui_evidence_command": ["visual", "{worktree}"]})
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
         self.assertIn(("visual evidence", ["visual", "."]), commands)
+        self.assertFalse(any(command[0] == "trusted Apple verification" for command in commands))
 
     def test_non_ui_apple_paths_are_explicit_and_diff_is_checked(self):
         path = "apple/Packages/PersonaKit/Sources/PersonaKit/StreamChunks.swift"
@@ -1110,7 +1106,7 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(title="chore: an example"), 1, {})
         self.assertEqual(commands, [("CI server", ["bash", "scripts/ci/server.sh"]),
                                     ("Exact-head privacy scan", commands[1][1]),
-                                    ("Apple non-UI review policy", ["true"])])
+                                    ("Apple semantic and portable verification policy", ["true"])])
         classifier.assert_called_once()
 
     def test_shared_core_lane_is_not_dropped(self):
@@ -1122,15 +1118,16 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(), 1, {})
         self.assertEqual(commands[:2], [("CI android", ["bash", "scripts/ci/android.sh"]),
                                     ("CI core", ["bash", "scripts/ci/core.sh"])])
-        self.assertEqual(commands[-1], ("Apple non-UI review policy", ["true"]))
+        self.assertEqual(commands[-1], ("Apple semantic and portable verification policy", ["true"]))
 
-    def test_apple_ffi_does_not_use_the_shared_non_ui_exception(self):
+    def test_apple_ffi_keeps_semantic_and_portable_checks_without_macos(self):
         names = "native/app-core/crates/persona-core-ffi/src/lib.rs\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "core": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+        self.assertIn(("CI core", ["bash", "scripts/ci/core.sh"]), commands)
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
 
     def test_extension_shared_changes_use_full_ci(self):
         with patch.object(pr_watch_verify, "extension_modules", return_value=None), \

@@ -240,15 +240,11 @@ def persona_checks(worktree, pr, timeout, config):
         commands.append(("Exact-head privacy scan", ["python3", "-I", str(scanner),
                                                     "--range", base + ".." + head]))
     if selected.get("apple"):
+        # Maintainer policy: a Mac verifier is not a merge prerequisite.
+        # Keep semantic review and every selected portable check; do not claim
+        # an Apple build, simulator or visual acceptance on this host.
+        commands.append(("Apple semantic and portable verification policy", ["true"]))
         non_ui = non_ui_apple_change(worktree, base, head, names)
-        if non_ui:
-            # Explicit maintainer policy for backend-only Apple PRs on a Linux
-            # host. This does not claim an Apple build or UI acceptance.
-            commands.append(("Apple non-UI review policy", ["true"]))
-        elif not config.get("apple_command"):
-            raise WatchError("Apple changes need the configured trusted macOS verifier; this host cannot verify them")
-        else:
-            commands.append(external_check(config["apple_command"], pr, worktree, "trusted Apple verification"))
     else:
         non_ui = False
     if ui_change(names) and not non_ui and not test_or_fix(pr, names):
