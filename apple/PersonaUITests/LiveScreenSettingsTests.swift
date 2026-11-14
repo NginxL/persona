@@ -1,10 +1,10 @@
 import XCTest
 
-/// Settings › This Device › Live Screen (#6398, #6396) against scripts/mock/mock_hub.py (TEST_RUNNER_PERSONA_SCREEN_HUB,
-/// MOCK_SCREEN_VIDEO=1): the route switch, first, above the quality on mobile data (which computers get the row:
-/// PersonaTests' LiveScreenRowTests); it is on by default and stays as set, and the page reads in light and dark, at the
-/// default size and at xxxLarge (where interface text stops growing), in English and Chinese. Screenshots are
-/// attachments (PERSONA_SHOTS also writes them out).
+/// Settings › This Device › Live Screen (#6398, #6396, #7775) against scripts/mock/mock_hub.py
+/// (TEST_RUNNER_PERSONA_SCREEN_HUB, MOCK_SCREEN_VIDEO=1): the route switch, first, above the quality on mobile data and
+/// Scroll Speed (which computers get the row: PersonaTests' LiveScreenRowTests); each keeps what was set, and the page
+/// reads in light and dark, at the default size and at xxxLarge (where interface text stops growing), in English and
+/// Chinese. Screenshots are attachments (PERSONA_SHOTS also writes them out).
 final class LiveScreenSettingsTests: XCTestCase {
     private var hub: String? { ProcessInfo.processInfo.environment["PERSONA_SCREEN_HUB"] }
 
@@ -62,6 +62,56 @@ final class LiveScreenSettingsTests: XCTestCase {
                     XCTAssertTrue(app.switches["settings-live-screen-routes"].firstMatch.waitForExistence(timeout: 10))
                     sleep(1) // the push settles
                     shot(app, "live-screen-settings-\(lang)-\(scheme)-\(short)")
+                    app.terminate()
+                }
+            }
+        }
+    }
+
+    /// The page reached by its row in Settings, as people reach it, then Scroll Speed's choice brought into view.
+    @MainActor private func scrollSpeed(_ app: XCUIApplication, choice: String) -> XCUIElement {
+        let row = app.buttons["settings-live-screen"].firstMatch
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15), "Settings:\n\(app.debugDescription)")
+        for _ in 0..<12 where !(row.exists && row.isHittable) { app.swipeUp() }
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the row:\n\(app.debugDescription)")
+        row.tap()
+        let button = app.buttons[choice].firstMatch
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10))
+        for _ in 0..<8 where !(button.exists && button.isHittable) { app.swipeUp() }
+        XCTAssertTrue(button.waitForExistence(timeout: 10), "Scroll Speed:\n\(app.debugDescription)")
+        app.swipeUp() // and its footer, the page's last words, at the largest sizes too
+        return button
+    }
+
+    /// Scroll Speed (#7775): Default until chosen; Faster stays chosen on the next launch.
+    @MainActor func testScrollSpeed() throws {
+        let english = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        let app = try launch(english)
+        let faster = scrollSpeed(app, choice: "Faster")
+        XCTAssertTrue(app.buttons["Default"].firstMatch.isSelected, "Default until chosen")
+        faster.tap()
+        XCTAssertTrue(faster.isSelected)
+        app.terminate()
+
+        let again = try launch(english)
+        let kept = scrollSpeed(again, choice: "Faster")
+        XCTAssertTrue(kept.isSelected, "kept on the next launch")
+        again.buttons["Default"].firstMatch.tap() // back for the next test
+        XCTAssertTrue(again.buttons["Default"].firstMatch.isSelected)
+    }
+
+    /// Scroll Speed for review (#7775): light and dark, default size and xxxLarge, English and Chinese; the same test on
+    /// an iPhone and an iPad.
+    @MainActor func testScrollSpeedShots() throws {
+        for lang in ["en", "zh-Hans"] {
+            for scheme in ["light", "dark"] {
+                for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryXXXL"] {
+                    let locale = lang == "en" ? "en_US" : "zh_CN"
+                    let app = try launch(["-ui.scheme", scheme, "-UIPreferredContentSizeCategoryName", size,
+                                          "-AppleLanguages", "(\(lang))", "-AppleLocale", locale])
+                    _ = scrollSpeed(app, choice: lang == "en" ? "Faster" : "较快")
+                    sleep(1) // the scroll settles
+                    shot(app, "live-screen-scroll-speed-\(lang)-\(scheme)-\(size.hasSuffix("XXXL") ? "xxxl" : "default")")
                     app.terminate()
                 }
             }

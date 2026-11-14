@@ -1,23 +1,25 @@
 #if os(iOS)
 import SwiftUI
 
-/// Settings › Live Screen (#6396, #6398): how the live screen of a computer reaches this iPhone. One page, two sections:
-/// the route (`ScreenRoutePrefs`: choose the fastest route automatically) and the picture's quality on mobile data
-/// (`ScreenMobileData`). Both are this iPhone's, for every computer.
+/// Settings › Live Screen (#6396, #6398, #7775): how the live screen of a computer reaches this iPhone and how it scrolls.
+/// One page, three sections: the route (`ScreenRoutePrefs`: choose the fastest route automatically), the picture's
+/// quality on mobile data (`ScreenMobileData`) and how far two fingers scroll (`VNCScrollSpeed`). All are this
+/// iPhone's, for every computer.
 struct LiveScreenSettingsView: View {
     /// Nothing is written until a choice is made here: an absent key still reads as Data Saver and keeps the page's
     /// one-time question (`ScreenMobileData.shouldAsk`).
     @StoredValue(ScreenMobileData.key) private var mobileData: ScreenMobileData = .saver
+    @StoredValue(VNCScrollSpeed.key) private var scrollSpeed: VNCScrollSpeed = .normal
     @StoredValue(ScreenRoutePrefs.automaticKey) private var automatic = true
 
-    /// Settings shows the page only when it can change something for a computer here: with direct routes offered, one
-    /// that shows its live screen (the route's section); else one that offers the live screen's video channel (quality on
-    /// mobile data applies to it). No computer, no page: someone using only the assistant never sees it.
-    static func isShown(machines: [Machine], routesOffered: Bool = ScreenRoutes.offered) -> Bool {
+    /// Settings shows the page only when it can change something for a computer here: one that shows its live screen
+    /// (Scroll Speed applies to every one, and the route's section too while direct routes are offered). No computer, no
+    /// page: someone using only the assistant never sees it.
+    static func isShown(machines: [Machine]) -> Bool {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
         #endif
-        return machines.contains(where: routesOffered ? AppModel.showsScreen : AppModel.advertisesVideo)
+        return machines.contains(where: AppModel.showsScreen)
     }
 
     var body: some View {
@@ -48,6 +50,18 @@ struct LiveScreenSettingsView: View {
                 Text("Quality on Mobile Data")
             } footer: {
                 Text("For watching a computer's screen on mobile data or a personal hotspot. On Wi-Fi the picture is always as clear as the connection allows, and with Low Data Mode on it always saves data.")
+            }
+            Section {
+                Picker(String(localized: "Scroll Speed"), selection: $scrollSpeed) {
+                    ForEach(VNCScrollSpeed.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+                .accessibilityIdentifier("settings-live-screen-scroll-speed")
+            } header: {
+                Text("Scroll Speed")
+            } footer: {
+                Text("How far a computer's screen scrolls when you drag two fingers on it.")
             }
         }
         .detailTitle(String(localized: "Live Screen"))

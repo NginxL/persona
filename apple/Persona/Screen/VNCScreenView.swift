@@ -70,8 +70,10 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     private var wheel = VNCWheel()
     private var wheelAt = CGPoint.zero
     private var wheelFrames: CADisplayLink?
-    /// Framebuffer pixels a point of the Mac's screen, read as two fingers go down (a notch scrolls a Mac point).
+    /// Framebuffer pixels a point of the Mac's screen, read as two fingers go down (a notch scrolls a Mac point), and
+    /// Settings' Scroll Speed then.
     private var macScale: CGFloat = 1
+    private var scrollSpeed: CGFloat = 1
     private var lastTap = Date.distantPast
     private var dragging = false
     private var lastPan = CGPoint.zero
@@ -311,6 +313,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         if g.state == .began {
             wheel.began()
             macScale = VNCDisplays.pixelsPerMacPoint(AppModel.shared.screenDisplays(s.ref), framebuffer: s.size)
+            scrollSpeed = VNCScrollSpeed.current.factor
         }
         // Trackpad Mode: only a scroll. Mouse Mode: a scroll or a pinch, whichever the fingers show first; until then the
         // travel stays in the translation, for the scroll.
@@ -332,7 +335,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             return
         }
         // Mac points a view point at this zoom: slowly, the Mac's content moves as far as the fingers over its picture.
-        let perPoint = viewport.pixelsPerPoint / macScale
+        let perPoint = viewport.pixelsPerPoint / macScale * scrollSpeed
         wheelAt = mode == .mouse ? toScreen(g.location(in: self)) : pointer(s)
         let velocity = g.velocity(in: self).y
         wheel.moved(t.y, velocity: velocity, perPoint: perPoint)

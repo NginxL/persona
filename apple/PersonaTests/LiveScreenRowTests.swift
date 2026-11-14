@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Persona
 
-/// Settings' Live Screen row (#6398, #6396): there only when the page can change something for a computer here, so
-/// someone using only the assistant never sees it.
+/// Settings' Live Screen row (#6398, #6396, #7775): there only when the page can change something for a computer here,
+/// so someone using only the assistant never sees it. Scroll Speed applies to every computer that shows its live screen.
 @MainActor
 struct LiveScreenRowTests {
     private func machine(_ extra: String) throws -> Machine {
@@ -11,20 +11,23 @@ struct LiveScreenRowTests {
     }
 
     @Test func noComputerWithALiveScreenNoRow() throws {
-        #expect(!LiveScreenSettingsView.isShown(machines: [], routesOffered: true), "no computer")
-        #expect(!LiveScreenSettingsView.isShown(machines: [try machine("")], routesOffered: true), "a computer without its live screen")
-        #expect(!LiveScreenSettingsView.isShown(machines: [try machine(",\"computer\":{\"enabled\":false,\"screen_sharing\":true}")],
-                                                routesOffered: true), "the extension off")
+        #expect(!LiveScreenSettingsView.isShown(machines: []), "no computer")
+        #expect(!LiveScreenSettingsView.isShown(machines: [try machine("")]), "a computer without its live screen")
+        #expect(!LiveScreenSettingsView.isShown(machines: [try machine(",\"computer\":{\"enabled\":false,\"screen_sharing\":true}")]),
+                "the extension off")
     }
 
-    @Test func withDirectRoutesAnyLiveScreen() throws {
+    @Test func anyLiveScreenHasTheRow() throws {
         let screen = try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true}")
-        #expect(LiveScreenSettingsView.isShown(machines: [screen], routesOffered: true), "the route's switch applies to it")
-        #expect(!LiveScreenSettingsView.isShown(machines: [screen], routesOffered: false), "without routes and video, nothing to set")
+        #expect(LiveScreenSettingsView.isShown(machines: [screen]), "Scroll Speed applies to it, with or without the video channel")
+        let video = try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true,\"screen_video\":{\"version\":1}}")
+        #expect(LiveScreenSettingsView.isShown(machines: [video]), "and quality on mobile data too")
     }
 
-    @Test func withoutDirectRoutesTheVideoChannel() throws {
-        let video = try machine(",\"computer\":{\"enabled\":true,\"screen_sharing\":true,\"screen_video\":{\"version\":1}}")
-        #expect(LiveScreenSettingsView.isShown(machines: [video], routesOffered: false), "quality on mobile data applies to it")
+    /// Scroll Speed: the default unless chosen, and what each choice does to the distance.
+    @Test func scrollSpeedScalesTheDistance() {
+        #expect(VNCScrollSpeed(rawValue: "default") == .normal && VNCScrollSpeed(rawValue: "odd") == nil)
+        #expect(VNCScrollSpeed.slower.factor < 1 && VNCScrollSpeed.normal.factor == 1 && VNCScrollSpeed.faster.factor > 1)
+        #expect(VNCScrollSpeed.allCases.map(\.rawValue) == ["slower", "default", "faster"], "Slower, Default, Faster, in that order")
     }
 }

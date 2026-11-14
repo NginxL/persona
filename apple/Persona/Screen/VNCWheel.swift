@@ -114,3 +114,31 @@ nonisolated struct VNCWheel {
         paced = min(max(paced, CGFloat(sent) - most), CGFloat(sent) + most)
     }
 }
+
+/// How far two fingers scroll a computer's screen (#7775): Settings › Live Screen › Scroll Speed, this device's, for
+/// every computer. It scales the whole of VNCWheel's curve, slow drags too; the top speed stays Screen Sharing's.
+nonisolated enum VNCScrollSpeed: String, CaseIterable, Sendable {
+    case slower, normal = "default", faster
+
+    static let key = "screen.scroll.speed"
+
+    /// As kept on this device: the default unless chosen.
+    static var current: VNCScrollSpeed { VNCScrollSpeed(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .normal }
+
+    /// Times the default's distance.
+    var factor: CGFloat {
+        switch self {
+        case .slower: 0.6
+        case .normal: 1
+        case .faster: 1.6
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .slower: String(localized: "Slower")
+        case .normal: String(localized: "Default")
+        case .faster: String(localized: "Faster")
+        }
+    }
+}
