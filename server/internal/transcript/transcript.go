@@ -220,8 +220,10 @@ type Meta struct {
 	// TurnErrorAfterWork: the failed turn did some work (a reply, a tool call, thinking) before the error ended it.
 	TurnErrorAfterWork bool
 	// turnWorked: the turn under way did some work so far (TurnErrorAfterWork when it fails); its end or the next
-	// turn's start sets it back. turnErrorLine: the uuid of the line that said TurnError (Tail.Settle).
-	turnWorked bool
+	// turn's start sets it back. turnSucceeded: that turn closed after a real reply; TurnSucceeded also checks its error.
+	// turnErrorLine: the uuid of the line that said TurnError (Tail.Settle).
+	turnWorked    bool
+	turnSucceeded bool
 	// turnParts: the latest turn's words so far, for TurnAnswer (answer.go).
 	turnParts     []AnswerPart
 	turnErrorLine string
@@ -633,6 +635,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		switch e.Subtype {
 		case "turn_duration":
 			meta.TurnOpen, meta.TurnClosed = false, true
+			meta.turnSucceeded = meta.turnWorked && meta.TurnError == ""
 			meta.turnWorked = false // the turn's work is done: Claude Code's own continuation after a limit opens with no prompt
 			ms, ok := recordedMilliseconds(e.DurationMS)
 			if !ok || strings.TrimSpace(e.ParentUUID) == "" {

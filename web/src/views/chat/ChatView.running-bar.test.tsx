@@ -2,7 +2,7 @@
 // While the main Persona conversation runs a foreground turn, its state is said in exactly one place for the whole turn:
 // the message stream (sending/preparing feedback, then the live work line). The dock's running status bar never repeats
 // it, including across transcript loads and state pushes; it returns only for work that outlives the turn (background
-// workflow / wait / subagent). Agent chats keep the full dock bar (#6230, rework after live verification).
+// workflow / subagent / wait / working command). Agent chats keep the full dock bar (#6230, rework after live verification).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,16 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     expect(dockBar()).not.toBeNull();
   });
 
+  it("draws an ended turn with a working background command finished and brings the dock bar back", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", background_working: true,
+      background: [{ id: "build", kind: "shell", description: "Build release", command: "make release", started_at: "2026-11-13T01:00:02Z" }] } as Session;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />));
+    await flush();
+    expect(liveWorkLine()).toBeNull();
+    expect(dockBar()).not.toBeNull();
+    expect(dockBar()?.getAttribute("data-running-background")).toBe("command");
+  });
+
   it("still draws the dock bar throughout in an Agent chat", async () => {
     captured.session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z" } as Session;
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
@@ -114,6 +124,23 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     act(() => { transcript.loading = true; });
     await flush();
     expect(dockBar()).not.toBeNull();
+  });
+
+  it("keeps an Agent's existing wait and subagent bars while the answer streams", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", background_working: true, background_waiting: true,
+      background: [{ id: "wait", kind: "shell", description: "Wait for CI", command: "gh pr checks --watch", started_at: "2026-11-13T01:00:02Z" }] } as Session;
+    transcript.streaming = "The answer so far";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(liveWorkLine()).not.toBeNull();
+    expect(dockBar()?.getAttribute("data-running-background")).toBe("waiting");
+
+    captured.session = { ...captured.session, background_waiting: false,
+      subagents: [{ id: "a", session_id: "c1@a", running: true, background: true }] } as Session;
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(liveWorkLine()).not.toBeNull();
+    expect(dockBar()?.getAttribute("data-running-background")).toBe("subtasks");
   });
 });
 

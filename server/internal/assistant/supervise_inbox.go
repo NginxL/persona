@@ -2,7 +2,9 @@ package assistant
 
 import (
 	"context"
+	"slices"
 
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -11,8 +13,9 @@ import (
 // an item, and the judge links the item to one of the user's tasks (linkTaskFor). When that task is supervised, its
 // supervisor gets the signal inbox through the usual digest: routed to the task's leader conversation or the main one,
 // gathered, deduplicated and spaced like any other signal, and several messages about one task before the message goes
-// out are one entry, the newest item's, with how many came. Off unless assistant.inbox_signals is on: each one is a
-// supervisor turn the user pays for.
+// out are one entry, the newest item's, with how many came. A GitHub thread's new messages also go straight to the
+// task's agent (inboxToAgent, #7346), the supervisor's entry then being the copy. Off unless assistant.inbox_signals is
+// on: each one is a supervisor turn the user pays for.
 //
 // Nothing Persona says itself raises one, so a supervisor's turn cannot feed the next: not the reply Persona sent for a
 // confirmed suggestion (SentOf), not a bot chat (where Persona's own bot posts its pushes and cards), and not the twin's
@@ -73,8 +76,54 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 	}
 	b.mu.Unlock()
 	for _, g := range out {
-		s.signal(g)
+		if g.Inbox.URL == "" || !s.taskHasAgent(g.Todo) {
+			s.signal(g)
+			continue
+		}
+		go s.inboxToAgent(context.WithoutCancel(ctx), g)
 	}
+}
+
+// inboxToAgent sends what someone else wrote on a task's GitHub thread straight to the task's agent (#7346): a line of
+// it and the thread's URL, as someone else's words for the agent to read there itself (sendToTaskAs, waiting for an
+// agent closed after a stretch of work to resume, up to 5 minutes; its turn ends the task's parking). The supervisor
+// still gets signal g, marked as the copy only once the note reached the agent; when no agent could take it (none, all
+// stopped, its machine offline, the resume or send failed) g goes as before. In the background: the twin's pass does
+// not wait on a node.
+func (s *Service) inboxToAgent(ctx context.Context, g superviseSignal) {
+	in := *g.Inbox
+	g.Inbox = &in
+	if t, ok := s.todoNow(g.Todo); ok && taskOpen(t) {
+		_, err := s.sendToTaskAs(ctx, t, prompts.RenderInboxToAgent(prompts.InboxToAgent{Sender: in.Sender,
+			Preview: in.Preview, URL: in.URL, Count: in.Count}), true)
+		if err != nil {
+			s.logf("task %s: inbox %s not sent to its agent: %v", t.ID, in.Item, err)
+		} else {
+			in.ToAgent = "sent"
+			s.logf("task %s: inbox %s sent to its agent", t.ID, in.Item)
+		}
+	}
+	s.signal(g)
+}
+
+// taskHasAgent: task id is open and has an agent neither released nor dismissed, one inboxToAgent may reach (without
+// asking any node, so a task with none is signaled at once, as before).
+func (s *Service) taskHasAgent(id string) bool {
+	t, ok := s.todoNow(id)
+	return ok && taskOpen(t) && slices.ContainsFunc(t.Agents, func(a TodoAgent) bool { return a.ReleasedAt == nil && a.DismissedAt == nil })
+}
+
+// githubThreadURL: a pull request's or an issue's page on github.com (a comment's anchor allowed), the discussions
+// whose new comments and reviews go to the task's agent; not a CI run (/actions…) or any other page.
+var githubThreadURL = lazyre.New(`^https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/[1-9][0-9]*(?:[/#?].*)?$`)
+
+// inboxThreadURL is the web address of a GitHub connector item's PR or issue discussion, the only kind whose new
+// messages go to the task's agent as well (#7346); "" for any other item, a GitHub CI item included.
+func inboxThreadURL(it *InboxItem) string {
+	if it.Source != "github" || it.Connector == nil || !githubThreadURL.MatchString(it.Connector.URL) {
+		return ""
+	}
+	return it.Connector.URL
 }
 
 // continuesHops bounds how far a closed task's link follows the tasks that continue it.
@@ -189,7 +238,7 @@ func inboxSignalOf(it *InboxItem, linked bool) (superviseSignal, bool) {
 	a.signaledOf = it.Last
 	return superviseSignal{Todo: a.TodoID, Kind: sigInbox, Key: it.ID + "@" + it.Last, Inbox: &prompts.SuperviseInbox{
 		Item: it.ID, Title: clip(oneLine(it.Title), 80), Sender: clip(oneLine(it.Sender), 40), Preview: clip(oneLine(it.Preview), 140),
-		Count: n}}, true
+		Count: n, URL: inboxThreadURL(it)}}, true
 }
 
 // receivedSince counts the messages received since the item's count was last signaled, and returns the current count

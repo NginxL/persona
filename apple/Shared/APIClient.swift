@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 nonisolated struct ServerConfig: Codable, Hashable, Sendable {
     var url: URL
@@ -195,6 +196,9 @@ nonisolated struct APIClient: Sendable {
     var sessionLookup = false
     /// The hub's hello has `sessions_list`: session lists come in pages with a revision that `since` follows.
     var sessionList = false
+    /// The hub's hello has `sessions_hierarchy`: windowed lists and counts send `roots=1`. Older hubs do not, so a
+    /// child stays a row of its own. A parent-session page is a separate request and never sends `roots`.
+    var sessionsHierarchy = false
     /// Execution surface is diagnostic only; authorization still uses the paired hub credential.
     var clientMetadata: RequestClientMetadata = .current
     /// Answers the demo config's requests (DemoHub registers it at launch); every endpoint goes through `request`.
@@ -765,6 +769,18 @@ nonisolated struct APIClient: Sendable {
         try await get("/api/v1/machines/\(machine)/launchers",
                       query: purpose.map { ["purpose": $0] } ?? [:], as: LaunchersResponse.self)
     }
+    /// Built-in catalog prices for the ids a turn used (`POST /api/v1/launchers/catalog`, #5426). An id the catalog
+    /// leaves out is absent; a known id with no price is present and nil. Empty in, empty out.
+    func catalogPrices(_ ids: [String]) async throws -> [String: ModelPrice?] {
+        if ids.isEmpty { return [:] }
+        struct Query: Encodable { var ids: [String] }
+        struct Row: Decodable { var id: String; var price: ModelPrice? }
+        struct List: Decodable { var models: [Row] }
+        let list: List = try await post("/api/v1/launchers/catalog", body: Query(ids: ids))
+        var out: [String: ModelPrice?] = [:]
+        for row in list.models where !row.id.isEmpty { out[row.id] = row.price }
+        return out
+    }
     /// Keeps a pick (launcher, optional model and effort) for one of the assistant's conversations (#5033): its next
     /// messages run on it, on every device, until it is changed or follows the default again (`deleteConversationModel`).
     func putConversationModel(machine: String, conversation: String, body: ConversationModelBody) async throws {
@@ -934,6 +950,16 @@ nonisolated struct APIClient: Sendable {
         // Images come without their bytes (`image(ref:)` fetches one when it is shown); a page is still worth
         // decoding off the main thread, which called us.
         return try await Task.detached(priority: .userInitiated) { try JSON.decoder.decode(ItemsResponse.self, from: data) }.value
+    }
+
+    /// One range of a transcript (`from_seq` through `through_seq`), a single page. A child card reads the head for
+    /// its prompt and a short fold tail for its last tool. It does not walk the whole transcript.
+    func itemRange(_ k: SessionKey, from: Int, through: Int) async throws -> [Item] {
+        struct Range: Decodable, Sendable { var items: [Item] }
+        let data = try await request("GET", sp(k) + "/items",
+                                     query: ["from_seq": String(from), "through_seq": String(through), "lazy_images": "1"])
+        let page = try await Task.detached(priority: .userInitiated) { try JSON.decoder.decode(Range.self, from: data) }.value
+        return page.items
     }
 
     /// The work a fold stands for (`Item.fold`): its lines, a page (about 1000 items) at a time.

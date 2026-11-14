@@ -14,10 +14,7 @@ func (h *Hub) fileRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/machines/{mid}/file/thumb", h.withMachine(h.fileThumb))
 	api.HandleFunc("GET /api/v1/machines/{mid}/file/convert", h.withMachine(h.fileConvert))
 	// stream=1: a binary file comes back described (stream, revision), its bytes from file/download.
-	api.HandleFunc("GET /api/v1/machines/{mid}/file", h.proxy("file.read", func(r *http.Request) any {
-		q := r.URL.Query()
-		return map[string]any{"path": q.Get("path"), "cwd": q.Get("cwd"), "offset": atoi(q.Get("offset")), "stream": q.Get("stream") == "1"}
-	}))
+	api.HandleFunc("GET /api/v1/machines/{mid}/file", h.withMachine(h.readFile))
 	// Which of the paths a conversation mentions are there on the machine (?paths=a%0Ab or ?path=a&path=b, and cwd):
 	// the phone links only those. detail=1: the file page's Info sheet (hub feature file_info).
 	api.HandleFunc("GET /api/v1/machines/{mid}/stat", h.proxy("fs.stat", func(r *http.Request) any {

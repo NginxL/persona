@@ -72,6 +72,12 @@ const (
 	DeviceLaunchersProbe = "launchers.probe"
 )
 
+// ConfigDirClaudeOnly is the node's refusal of a config_dir for a conversation whose launcher runs another agent than
+// Claude Code, which alone has profiles. The node refuses it before starting anything (node/assistant.go), so a caller
+// that asked for a profile without knowing what the launcher runs can start again without one (assistant
+// startSignedIn, #6884).
+const ConfigDirClaudeOnly = "config_dir is only supported for Claude assistant conversations"
+
 // StartParams is assistant.start's params.
 type StartParams struct {
 	Text           string        `json:"text"`

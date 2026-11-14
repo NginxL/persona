@@ -373,6 +373,7 @@
     <string name="agents_todos_done">已完成</string>
     <string name="agents_todo_reopen_failed">重新打开待办失败：%1$s</string>
     <string name="agents_todo_auto_done">自动完成</string>
+    <string name="agents_todo_concern">关注点</string>
     <string name="agents_todo_state_needs_you">等你</string>
     <string name="agents_todo_state_unread">待查看</string>
     <string name="agents_todo_state_working">进行中</string>

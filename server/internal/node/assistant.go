@@ -357,7 +357,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			return "", skillSelectionError(assistantskills.ErrReference)
 		}
 		if execution.ConfigDir != "" {
-			return "", errors.New("config_dir is only supported for Claude assistant conversations")
+			return "", errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		if id != "" && (onRuntime == nil || !runs) && !(runs && launcher == "") { // another kind of agent than its own
 			return "", errors.New("换到另一种 Agent 需要新建对话")
@@ -418,7 +418,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			return "", err
 		}
 	} else if executionOption(options).ConfigDir != "" {
-		return "", errors.New("config_dir is only supported for Claude assistant conversations")
+		return "", errors.New(assistantwire.ConfigDirClaudeOnly)
 	}
 	timing.mark("preflight_done", true)
 	var p *assistantProc

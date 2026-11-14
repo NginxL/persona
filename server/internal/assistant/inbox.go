@@ -137,6 +137,13 @@ type InboxItem struct {
 	FolderOf  string `json:"folder_of,omitempty"`  // Last when the model was asked for its folder
 	// Rules are the item's own triage rules, from its connector (InboxThing.Rules): they replace inbox.rules for it.
 	Rules string `json:"rules,omitempty"`
+	// TriageRev is the tier criteria's revision (inboxTriageRev) the model last sorted the item under: an open "Needs
+	// you" item sorted under older criteria is sorted again once (inbox_triage.go retriageStale).
+	TriageRev int `json:"triage_rev,omitempty"`
+	// SettledOf is the evidence the manager filed the item on as handled elsewhere (inbox_settle.go): the newest source
+	// position it read for a conversation, "mail:<uid>" for an answered mail, "todo:<id>" for a finished to-do. Reopened
+	// by hand, the same evidence never files it again.
+	SettledOf string `json:"settled_of,omitempty"`
 	// ArrivedAt is the clock here when the item first held Last (ArrivedOf), as listed or saved: a bulk "Done" over a
 	// filter leaves what arrived after the list it acted on (inbox_bulk.go). Rows stored before have UpdatedAt.
 	ArrivedOf string    `json:"arrived_of,omitempty"`
@@ -211,6 +218,7 @@ func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
 func (it *InboxItem) listed() InboxItem {
 	c := *it
 	c.Context, c.Last, c.TriagedAt, c.BodyOf, c.JudgedAt, c.Rules, c.ArrivedOf, c.FolderOf = "", "", "", "", "", "", "", ""
+	c.TriageRev, c.SettledOf = 0, ""
 	c.ArrivedAt = time.Time{}
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0

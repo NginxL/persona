@@ -88,12 +88,25 @@ internal object ExtensionText {
     }
 
     /** Whether an enabled extension's program runs right now (the detail page's small print); null for any other state. */
-    fun runNote(res: Resources, p: HubExtension): String? = when {
+    fun runNote(res: Resources, p: HubExtension, packMembersFollow: Boolean = false): String? = when {
         p.nodeStatus != null -> null // the node status line already says where it runs
-        p.kind == "extension_pack" -> res.getString(R.string.settings_ext_run_pack)
+        p.kind == "extension_pack" -> res.getString(if (packMembersFollow) R.string.settings_ext_run_pack_members_follow else R.string.settings_ext_run_pack)
         p.status == "running" -> res.getString(R.string.settings_ext_run_running)
         p.status == "stopped" -> res.getString(R.string.settings_ext_run_idle)
         else -> null
+    }
+
+    /** The Enabled switch's explanation, matching the web's pack decisions and the older-hub fallback. */
+    fun enabledFooter(res: Resources, detail: ExtensionDetail, memberNames: Map<String, String> = emptyMap()): String {
+        if (detail.extensionPack.isEmpty()) return res.getString(R.string.settings_extension_enabled_note)
+        if (!detail.packMembersFollow) return res.getString(R.string.settings_ext_enable_footer_pack_alone)
+        if (detail.extension.enabled == false && detail.packOff.isNotEmpty()) {
+            val names = detail.packOff.joinToString(res.getString(R.string.settings_ext_list_separator)) { id ->
+                memberNames[id]?.takeIf { it.isNotBlank() } ?: id
+            }
+            return res.getString(R.string.settings_ext_enable_footer_pack_off, names)
+        }
+        return res.getString(R.string.settings_ext_enable_footer_pack)
     }
 
     /** Broken: drawn in the danger colour, not as a status dot. */
@@ -454,12 +467,23 @@ internal class ExtensionListModel(private val api: ExtensionManagement, private 
     private val mutable = MutableStateFlow(ExtensionListState())
     val state = mutable.asStateFlow()
 
+    /** Identity distinguishes every push, even when it repeats the same auth. */
+    private class AuthPush(val auth: ExtensionAuth)
+    private val authPushes = MutableStateFlow<Map<Pair<String, String>, AuthPush>>(emptyMap())
+
     suspend fun load() {
         if (state.value.loading) return
+        val authAtStart = authPushes.value
         mutable.update { it.copy(loading = true) }
         try {
             val listing = api.listing()
-            mutable.update { it.copy(extensions = listing.extensions, markets = listing.markets, error = null) }
+            mutable.update {
+                val pushes = authPushes.value
+                it.copy(extensions = listing.extensions.map { extension ->
+                    val key = extension.id to ExtensionOwners.of(extension.manager)
+                    pushes[key]?.takeIf { push -> push !== authAtStart[key] }?.let { push -> extension.copy(auth = push.auth) } ?: extension
+                }, markets = listing.markets, error = null)
+            }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { mutable.update { it.copy(error = res.getString(R.string.settings_ext_load_failed, failureReasonText(error).resolve(res))) } }
         finally { mutable.update { it.copy(loading = false) } }
@@ -467,6 +491,7 @@ internal class ExtensionListModel(private val api: ExtensionManagement, private 
 
     /** Follows the hub's `extension_auth` pushes while the list is open: each changes its own manager's copy (#1834). */
     suspend fun watchAuth() = api.authUpdates.collect { event ->
+        authPushes.update { it + ((event.extension to pushManager(event.manager)) to AuthPush(event.auth)) }
         mutable.update { s ->
             s.copy(extensions = s.extensions?.map {
                 if (it.id == event.extension && ExtensionOwners.of(it.manager) == pushManager(event.manager)) it.copy(auth = event.auth) else it
@@ -503,6 +528,8 @@ internal data class ExtensionState(
     val error: String? = null,
     /** The hub would switch others off with it (409 `has_dependents`): asked before going on with `cascade`. */
     val cascade: ExtensionCascade? = null,
+    /** A new hub would switch the named pack members off too; nothing is sent before the user confirms. */
+    val packOff: Boolean = false,
     /** The pack's members were partly uninstalled (#1154): said in a dialog. */
     val partial: PackPartial? = null,
 ) {
@@ -573,6 +600,26 @@ internal class ExtensionModel(
     }
 
     suspend fun setEnabled(on: Boolean, cascade: Boolean = false) = busy { run { api.setEnabled(id, on, cascade) } }
+
+    /** A new hub's pack switch asks before taking enabled members off; every other switch writes directly. */
+    suspend fun requestEnabled(on: Boolean): Boolean {
+        val detail = state.value.detail
+        if (!on && detail?.packMembersFollow == true && detail.packOn.isNotEmpty()) {
+            mutable.update { it.copy(packOff = true) }
+            return false
+        }
+        mutable.update { it.copy(packOff = false) }
+        return setEnabled(on)
+    }
+
+    /** Confirms the pack member switch-off; a dependent refusal may still ask its own question. */
+    suspend fun confirmPackOff(): Boolean {
+        if (!state.value.packOff) return false
+        mutable.update { it.copy(packOff = false) }
+        return setEnabled(false, cascade = false)
+    }
+
+    fun dismissPackOff() = mutable.update { it.copy(packOff = false) }
 
     /** Asked about the dependents: switches them off with it and goes on with what was refused. */
     suspend fun confirmCascade(): Boolean {

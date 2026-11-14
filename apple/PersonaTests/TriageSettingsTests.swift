@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// Settings › Session Triage (`TriageSettingsModel`, `TriageSwitches`) without the page.
 @MainActor struct TriageSettingsTests {
@@ -105,22 +106,69 @@ import Testing
     }
 
     /// Ask for a Closeout (#3612): a hub that does not know the switch names none, so there is no row and a PUT leaves
-    /// it out (the hub keeps its value); one that names it gets it back with the rest. `closeout_ask` has no switch here.
+    /// it out (the hub keeps its value); one that names it gets it back with the rest. `closeout_ask` follows that rule too.
     @Test func theCloseoutSwitchFollowsTheHub() async throws {
         let older = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true}"#.utf8))
         #expect(older.closeout == nil && !older.asksCloseout)
+        #expect(older.closeoutAsk == nil && !older.asksForStatusAfterwards)
         let kept = try JSONSerialization.jsonObject(with: JSONEncoder().encode(older)) as? [String: Any]
         #expect(kept?["closeout"] == nil && kept?["enabled"] as? Bool == true)
+        #expect(kept?["closeout_ask"] == nil)
         let known = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true,"closeout":false,"closeout_ask":true}"#.utf8))
         #expect(known.closeout == false && !known.asksCloseout)
+        #expect(known.closeoutAsk == true && known.asksForStatusAfterwards)
         var saved: [TriageSwitches] = []
         let m = TriageSettingsModel(deps: .init(load: { known }, save: { saved.append($0); return $0 }))
         await m.load()
         #expect(m.canChange(\.asksCloseout))
         await m.set(\.asksCloseout, true)
-        #expect(saved == [TriageSwitches(enabled: true, closeout: true)] && m.switches?.closeout == true && m.error == nil)
+        #expect(saved == [TriageSwitches(enabled: true, closeout: true, closeoutAsk: true)] && m.switches?.closeout == true && m.error == nil)
         let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(saved.first))) as? [String: Any]
-        #expect(sent?["closeout"] as? Bool == true && sent?["closeout_ask"] == nil)
+        #expect(sent?["closeout"] as? Bool == true && sent?["closeout_ask"] as? Bool == true)
+    }
+
+    /// Ask for the Status Afterwards (#3616): decode explicit false and true, preserve every other switch on a save,
+    /// and never add the field to an older hub's payload on the way back.
+    @Test func theStatusAfterwardsSwitchDecodesSavesAndRoundTrips() async throws {
+        let older = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true,"closeout":true}"#.utf8))
+        #expect(older.closeoutAsk == nil && !older.asksForStatusAfterwards)
+        let oldModel = TriageSettingsModel(deps: .init(load: { older }, save: { $0 }))
+        await oldModel.load()
+        #expect(!oldModel.showsCloseoutAsk)
+        let oldBack = try JSONSerialization.jsonObject(with: JSONEncoder().encode(older)) as? [String: Any]
+        #expect(oldBack?["closeout_ask"] == nil && oldBack?["closeout"] as? Bool == true)
+
+        let initial = try JSON.decoder.decode(TriageSwitches.self, from: Data(#"{"enabled":true,"decide":true,"auto_continue":false,"wake":true,"reply_reminder":false,"reply_reminder_minutes":45,"closeout":false,"closeout_ask":false}"#.utf8))
+        #expect(initial.closeoutAsk == false && !initial.asksForStatusAfterwards)
+        var saved: [TriageSwitches] = []
+        let m = TriageSettingsModel(deps: .init(load: { initial }, save: { saved.append($0); return $0 }))
+        #expect(!m.showsCloseoutAsk)
+        await m.load()
+        #expect(m.showsCloseoutAsk)
+        #expect(m.canChange(\.asksForStatusAfterwards)) // Ask for a Closeout is off: it is not a dependency.
+        await m.set(\.asksForStatusAfterwards, true)
+        var expected = initial
+        expected.closeoutAsk = true
+        #expect(saved == [expected] && m.switches == expected && m.error == nil)
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(saved.first))) as? [String: Any]
+        #expect(sent?["closeout_ask"] as? Bool == true)
+        #expect(sent?["enabled"] as? Bool == true && sent?["decide"] as? Bool == true && sent?["auto_continue"] as? Bool == false)
+        #expect(sent?["wake"] as? Bool == true && sent?["closeout"] as? Bool == false)
+        #expect(sent?["reply_reminder"] as? Bool == false && sent?["reply_reminder_minutes"] as? Int == 45)
+    }
+
+    /// The row exists for an explicit false, is disabled with the triage, and never depends on Ask for a Closeout.
+    @Test func theStatusAfterwardsSwitchWaitsOnlyForTheTriage() async {
+        var saves = 0
+        let off = TriageSettingsModel(deps: .init(load: { TriageSwitches(closeout: true, closeoutAsk: false) }, save: { saves += 1; return $0 }))
+        await off.load()
+        #expect(off.showsCloseoutAsk && !off.canChange(\.asksForStatusAfterwards))
+        await off.set(\.asksForStatusAfterwards, true)
+        #expect(saves == 0 && off.switches?.closeoutAsk == false)
+
+        let independent = TriageSettingsModel(deps: .init(load: { TriageSwitches(enabled: true, closeout: false, closeoutAsk: false) }, save: { $0 }))
+        await independent.load()
+        #expect(independent.showsCloseoutAsk && independent.canChange(\.asksForStatusAfterwards))
     }
 
     /// Like what the triage may do: only while the triage is on, and a failed save puts the old value back and says why.
@@ -135,6 +183,12 @@ import Testing
         await failing.set(\.asksCloseout, true)
         #expect(failing.switches == TriageSwitches(enabled: true, closeout: false))
         #expect(failing.error == "没改成：助手没有连上")
+    }
+
+    @Test func theStatusAfterwardsExampleShowsOneQuestionAndAnswer() {
+        let steps = TriageExample.closeoutAskSteps
+        #expect(steps.count == 3)
+        #expect(steps.map(\.symbol) == [Theme.Icon.closeout, Theme.Icon.send, Theme.Icon.reported])
     }
 
     /// Each switch's example (#1413): with the triage off a stopped agent is Unread; on, it says what it waits for;

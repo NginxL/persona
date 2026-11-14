@@ -259,6 +259,7 @@ type InboxMailSummary struct {
 	Date      string        `json:"date"` // RFC3339, UTC
 	Snippet   string        `json:"snippet"`
 	Seen      bool          `json:"seen"`
+	Answered  bool          `json:"answered,omitempty"` // replied to from a mail client: IMAP \Answered
 }
 
 // InboxMailRef names one mail. Readable: a mail without a text part has its HTML as readable text (for translation:

@@ -1,5 +1,6 @@
 // Overview: what needs you, what is running, what just finished — Beautiful UI's Task Rows — and the computers.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SESSIONS_HIERARCHY_FEATURE } from "../lib/child-sessions";
 import { homeKey } from "../lib/folded-rows";
 import { ago, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
 import { usePendingLine } from "../lib/card-answer";
@@ -29,6 +30,7 @@ import { BUSY_MOTION, spinStyle } from "../lib/busy-motion";
 import type { AgentState, Interaction, Machine, Session } from "../lib/types";
 import { Button, Collapse, cx, EASE, IconButton, Loading, useNow } from "../ui/atoms";
 import { RecommendedTag } from "../ui/RecommendedTag";
+import { Tag } from "./assistant/parts";
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { MarkSeenDialog } from "./AgentMenus";
@@ -61,6 +63,18 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   // may not have been read yet, or its read failed: then nobody knows how many agents there are, and the page says so
   // instead of counting none. `whole`: it holds every agent, so each computer's can be counted.
   const { status: list, whole } = useScopedAgentListStatus();
+  // Only hierarchy hubs receive the roots counts that exclude folded children and Assistant conversations.
+  const hubAgentCounts = useStore((s) => s.features.includes(SESSIONS_HIERARCHY_FEATURE)
+    ? s.sessionCounts?.active_agents_by_machine : undefined);
+  const agentCounts = useMemo(() => {
+    if (list !== "loaded") return undefined;
+    if (!whole) return hubAgentCounts && new Map(Object.entries(hubAgentCounts));
+    const byMachine = new Map<string, number>();
+    for (const s of agentSessions) {
+      if (stateOf(s) !== "offline") byMachine.set(s.machine_id, (byMachine.get(s.machine_id) ?? 0) + 1);
+    }
+    return byMachine;
+  }, [list, whole, hubAgentCounts, agentSessions]);
   const now = useNow(5000, counts.working > 0);
 
   // the agents of one herdr tab are one row (#2320), filed under the most urgent of them; a card waiting counts as
@@ -235,10 +249,8 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
             <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
                 {machines.map((m) => {
-                  const mine = m.online ? sessions.filter((s) => s.machine_id === m.id && stateOf(s) !== "offline") : [];
-                  // its agents' count only from a list that holds them all: "0 agents" for a list that never came, or
-                  // a count of the first pages only, would be wrong (the Machines page counts the complete list)
-                  const line = m.online ? [whole && t("home.machine_agents", { count: mine.length }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
+                  const count = agentCounts && (agentCounts.get(m.id) ?? 0);
+                  const line = m.online ? [count !== undefined && t("home.machine_agents", { count }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
                   const hub = hubLabel(m, machines);
                   const detail = { name: "machine" as const, mid: m.id };
                   return (
@@ -321,6 +333,7 @@ function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
         <a href={href(to)} onClick={(e) => onLinkClick(e, to)} className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink hover:underline">
           {todo.title}
         </a>
+        {todo.kind === "concern" && <Tag><span data-testid="todo-concern">{t("todos.concern")}</span></Tag>}
         <span className={cx("inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap", TODO_TONE_CLASS[TODO_STATUS_INFO[status].tone])}>{todoStatusLabel(todo, status)}</span>
       </div>
       <TodoStageBar stage={todo.stage} stageKind={todo.stage_kind} prURL={todo.pr_url} />
@@ -409,6 +422,7 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
   const [failed, setFailed] = useState<{ id: string; why: string } | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const refocus = useRef(false);
+  const attempt = useRef(0);
   useEffect(() => {
     if (!to && refocus.current) {
       refocus.current = false;
@@ -423,13 +437,16 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
     const words = text.trim();
     if (!to || !words || phase === "sending") return;
     const { machine_id: mid, session_id: sid } = to;
+    const attempted = attempt.current;
     setPhase("sending");
     // the line again after a failure is the outbox's Retry of that message (same id while the hub never answered, so
     // it goes in once); changed, the old one is dropped and this one goes as new
     const prev = failed && outboxEntry(mid, sid, failed.id);
     if (prev && prev.text !== words) discardOutbox(mid, sid, prev.id);
     const r = prev?.state === "failed" && prev.text === words ? retryOutboxEntry(mid, sid, prev.id) : queueToSession(mid, sid, { text: words });
-    if (await r.sent) {
+    const ok = await r.sent;
+    if (attempted !== attempt.current) return;
+    if (ok) {
       setFailed(null);
       setText("");
       setPhase("sent");
@@ -465,7 +482,7 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
         </form>
       ) : (
         <div className="flex">
-          <Button tone="secondary" icon="send" onClick={() => { setTo(s); setPhase("idle"); }}>
+          <Button tone="secondary" icon="send" onClick={() => { attempt.current++; setTo(s); setPhase("idle"); }}>
             {t("home.continue")}
             {/* every row has one: the row's title tells them apart to a screen reader */}
             <span className="sr-only">{t("home.continue_label", { title })}</span>

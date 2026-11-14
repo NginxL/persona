@@ -141,6 +141,164 @@ func TestReportedTurnFailure(t *testing.T) {
 
 // Claude Code says once that it goes on by itself; the wait's wakes write request lines of hundreds of KB, and the
 // tail soon starts after the notice. What the last read found stands until a line in the tail takes it back (#1710).
+// A newer turn retires the old error preview only once its own closing record confirms success. Starting a turn,
+// receiving a reply without its closing record, or exiting then leaves the old failure visible; a newer failure replaces it.
+func TestQuickMetaSuccessfulTurnRetiresOldErrorPreview(t *testing.T) {
+	const (
+		firstError = "API Error: Connection lost mid-response"
+		newError   = "API Error: 503 no eligible upstream"
+	)
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	prompt := func(id, parent, at string) string {
+		return `{"type":"user","uuid":"` + id + `","parentUuid":"` + parent + `","timestamp":"` + at + `","message":{"role":"user","content":"continue"}}`
+	}
+	failure := func(id, parent, at, text string) string {
+		return `{"type":"assistant","uuid":"` + id + `","parentUuid":"` + parent + `","timestamp":"` + at + `","isApiErrorMessage":true,"error":"server_error","message":{"id":"m-` + id + `","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"` + text + `"}]}}`
+	}
+	end := func(id, parent, at string) string {
+		return `{"type":"system","subtype":"turn_duration","uuid":"` + id + `","parentUuid":"` + parent + `","timestamp":"` + at + `","durationMs":10}`
+	}
+	lines := []string{
+		prompt("u1", "", "2026-01-01T12:00:00Z"),
+		failure("e1", "u1", "2026-01-01T12:00:01Z", firstError),
+		end("d1", "e1", "2026-01-01T12:00:02Z"),
+	}
+	row := func(m quickMeta) proto.Session {
+		s := proto.Session{LastText: snippet(m.lastText)}
+		m.turnErr.set(&s)
+		return s
+	}
+	m := readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.TurnError != firstError || got.LastText != firstError {
+		t.Fatalf("the current failure: %+v", got)
+	}
+
+	lines = append(lines,
+		`{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`,
+		prompt("u2", "d1", "2026-01-01T12:01:00Z"))
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.LastText != firstError || !m.claudeTurn || m.turnClosed {
+		t.Fatalf("a turn still running became a success: row %+v, meta %+v", got, m)
+	}
+
+	lines = append(lines, `{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-01-01T12:01:01Z","message":{"id":"m-a2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"BOTMUX_NOTHING_TO_SEND"}]}}`)
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.LastText != firstError || !m.claudeTurn || m.turnClosed {
+		t.Fatalf("an unclosed reply became a success: row %+v, meta %+v", got, m)
+	}
+
+	lines = append(lines,
+		`{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`,
+		end("d2", "a2", "2026-01-01T12:01:02Z"))
+	st := writeLines(t, path, lines)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = readQuickMeta(path, st)
+	if got := row(m); got.TurnError != "" || got.LastText != "" || m.answer != "" {
+		t.Fatalf("the successful turn kept the old failure: row %+v, answer %q, meta %+v", got, m.answer, m)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) || !strings.Contains(string(after), firstError) {
+		t.Fatal("reading the successful turn rewrote the historical error")
+	}
+
+	lines = append(lines, `{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`)
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.TurnError != "" || got.LastText != "" {
+		t.Fatalf("a later read recovered the retired failure beyond the tail: %+v", got)
+	}
+
+	lines = append(lines, `{"type":"user","uuid":"u-large","parentUuid":"d2","timestamp":"2026-01-01T12:01:30Z","message":{"role":"user","content":"`+strings.Repeat("p", 9<<10)+`"}}`)
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.LastText != firstError || !m.claudeTurn || m.turnClosed {
+		t.Fatalf("a large unclosed prompt became a success: row %+v, meta %+v", got, m)
+	}
+
+	lines = append(lines,
+		prompt("u3", "u-large", "2026-01-01T12:02:00Z"),
+		failure("e3", "u3", "2026-01-01T12:02:01Z", newError),
+		end("d3", "e3", "2026-01-01T12:02:02Z"))
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	if got := row(m); got.TurnError != newError || got.LastText != newError {
+		t.Fatalf("the newer failure did not replace the old one: %+v", got)
+	}
+}
+
+func TestQuickMetaSuccessfulTurnKeepsOrdinaryReply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	lines := []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":"continue"}}`,
+		`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T12:00:01Z","message":{"id":"m-a1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Recovered normally"}]}}`,
+		`{"type":"system","subtype":"turn_duration","uuid":"d1","parentUuid":"a1","timestamp":"2026-01-01T12:00:02Z","durationMs":10}`,
+	}
+	assertReply := func(t *testing.T, m quickMeta) {
+		t.Helper()
+		if m.lastText != "Recovered normally" || assistantAnswer(m) != "Recovered normally" {
+			t.Fatalf("the ordinary reply was not kept: last %q, answer %q", m.lastText, assistantAnswer(m))
+		}
+	}
+	m := readQuickMeta(path, writeLines(t, path, lines))
+	assertReply(t, m)
+
+	lines = append(lines, `{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`)
+	m = readQuickMeta(path, writeLines(t, path, lines))
+	assertReply(t, m)
+}
+
+func TestQuickMetaSinceSuccessfulTurnRetiresKeptErrorPreview(t *testing.T) {
+	const firstError = "API Error: Connection lost mid-response"
+	prompt := func(id string) string {
+		return `{"type":"user","uuid":"` + id + `","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":"continue"}}`
+	}
+	end := `{"type":"system","subtype":"turn_duration","uuid":"d2","parentUuid":"u2","timestamp":"2026-01-01T12:01:02Z","durationMs":10}`
+	for _, c := range []struct {
+		name    string
+		reply   bool
+		success bool
+	}{
+		{name: "the reply closed", reply: true, success: true},
+		{name: "the turn closed without a model reply"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			lines := []string{
+				prompt("u1"),
+				`{"type":"assistant","uuid":"e1","parentUuid":"u1","timestamp":"2026-01-01T12:00:01Z","isApiErrorMessage":true,"error":"server_error","message":{"id":"m-e1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"` + firstError + `"}]}}`,
+				`{"type":"system","subtype":"turn_duration","uuid":"d1","parentUuid":"e1","timestamp":"2026-01-01T12:00:02Z","durationMs":10}`,
+				`{"type":"api-request-blob","content":"` + strings.Repeat("x", quickTail) + `"}`,
+			}
+			prev := readQuickMetaSince(path, writeLines(t, path, lines), quickMeta{})
+			if prev.lastText != firstError {
+				t.Fatalf("setup lost the failure preview: %q", prev.lastText)
+			}
+
+			lines = append(lines, prompt("u2"))
+			if c.reply {
+				lines = append(lines, `{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-01-01T12:01:01Z","message":{"id":"m-a2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"BOTMUX_NOTHING_TO_SEND"}]}}`)
+			}
+			lines = append(lines, `{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`)
+			prev = readQuickMetaSince(path, writeLines(t, path, lines), prev)
+			if prev.lastText != firstError || prev.turnClosed {
+				t.Fatalf("the unclosed turn changed the failure: last %q, closed %v", prev.lastText, prev.turnClosed)
+			}
+
+			lines = append(lines, end)
+			got := readQuickMetaSince(path, writeLines(t, path, lines), prev)
+			if c.success && (got.lastText != "" || got.answer != "") {
+				t.Fatalf("the incremental close kept the old failure: last %q, answer %q", got.lastText, got.answer)
+			}
+			if !c.success && got.lastText != firstError {
+				t.Fatalf("a close without a model reply retired the failure: %q", got.lastText)
+			}
+		})
+	}
+}
+
 func TestQuickMetaKeepsTheResumeNoticeOutOfTheTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	lines := []string{claudeLimitPrompt, claudeLimitWork, claudeLimitLine, claudeLimitNotice, claudeLimitEnd}

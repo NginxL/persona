@@ -108,7 +108,7 @@ function blockOrder(a: Pick<Item, "id" | "seq">, b: Pick<Item, "id" | "seq">) {
 }
 
 /** Fold bounds are seq + numeric block, not seq alone: a final answer can share the fold's last line. */
-function insideFold(i: Item, f: Item) {
+export function insideFold(i: Item, f: Item) {
   if (!f.fold || blockOrder(i, f) < 0 || i.seq > f.fold.through_seq) return false;
   return i.seq < f.fold.through_seq || !f.fold.through_id || blockPart(i.id) <= blockPart(f.fold.through_id);
 }

@@ -319,6 +319,7 @@ type PathStat struct {
 	LinkTarget string     `json:"link_target,omitempty"`
 	LinkReal   string     `json:"link_real,omitempty"`
 	LinkBroken bool       `json:"link_broken,omitempty"`
+	Mime       string     `json:"mime,omitempty"` // a regular file's type, as file.read would give it
 }
 
 // statTimeout bounds one fs.stat: a path on a mount that does not answer (a network share, a sleeping disk) is

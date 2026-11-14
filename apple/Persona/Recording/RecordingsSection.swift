@@ -872,7 +872,7 @@ struct RecordingDetailView: View {
         }
         .themedPage()
         // Each new revision (more text, the end) may bring or change the minutes; while they are on their way, ask again.
-        .task(id: "\(library.entry(id)?.revision ?? 0)|\(minutes.round)") { await followMinutes() }
+        .tabActiveTask(id: "\(library.entry(id)?.revision ?? 0)|\(minutes.round)") { await followMinutes() }
         .navigationTitle("Recording")
         .navigationBarTitleDisplayMode(.inline)
         .task {

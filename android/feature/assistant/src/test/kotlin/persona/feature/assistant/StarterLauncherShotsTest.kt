@@ -73,7 +73,7 @@ class StarterLauncherShotsTest {
         for (p in listOf(null, "sol")) for (s in AppStyle.entries) for (d in listOf(false, true)) {
             picked = p; style = s; dark = d
             rule.waitForIdle()
-            rule.onNodeWithText(if (p == null) "默认：ccc" else "sol · 仅这一次").assertExists()
+            rule.onNodeWithText(if (p == null) "默认：ccc" else "sol").assertExists()
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             File(out, "launcher-${p ?: "default"}-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream().use {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)

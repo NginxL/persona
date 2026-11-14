@@ -19,10 +19,10 @@ function fakeDb({ busy = true } = {}) {
       db.prepare('insert into session_v2 (id, parent_id, directory, title, model, revert, time_created, time_updated, time_archived) values (?,?,?,?,?,?,?,?,?)')
         .run(id, o.parent ?? null, o.directory ?? '/w/app', o.title ?? null, o.model ?? null, o.revert ?? null, o.created ?? T0, o.updated ?? Date.now(), o.archived ?? null)
     },
-    message(session, seq, type, data) {
+    message(session, seq, type, data, updated = Date.now()) {
       const id = `msg_${session}_${seq}`
       db.prepare('insert or replace into session_message (id, session_id, type, seq, time_created, time_updated, data) values (?,?,?,?,?,?,?)')
-        .run(id, session, type, seq, T0 + seq, Date.now(), JSON.stringify({ time: { created: T0 + seq, ...(data.time ?? {}) }, ...data, time2: undefined }))
+        .run(id, session, type, seq, T0 + seq, updated, JSON.stringify({ time: { created: T0 + seq, ...(data.time ?? {}) }, ...data, time2: undefined }))
     },
     user: (s, seq, text) => api.message(s, seq, 'user', { text }),
     assistant: (s, seq, text, extra = {}) => api.message(s, seq, 'assistant', { content: text ? [{ type: 'text', text }] : [], finish: 'stop', time: { completed: T0 + seq + 1 },
@@ -61,7 +61,7 @@ function fakeCtx(directory = '/w/app') {
 async function setup(t, opts = {}) {
   const n = await startFakeNode(t)
   const d = opts.db ?? fakeDb()
-  const host = createOpencodeHost({ openDb: d.openDb, pid: 4242, log: opts.log }, { socketPath: n.path, retryMs: 20, pushDelayMs: 5, answerFirst: opts.answerFirst, listDays: opts.listDays })
+  const host = createOpencodeHost({ openDb: d.openDb, pid: 4242, log: opts.log, now: opts.now }, { socketPath: n.path, retryMs: 20, pushDelayMs: 5, answerFirst: opts.answerFirst, listDays: opts.listDays })
   t.after(() => host.stop())
   return { n, d, host }
 }
@@ -196,6 +196,31 @@ test('a watched session gets each finished message once, as a continuous batch; 
   await until('done again', () => n.last('runtime.sessions')?.sessions.find((s) => s.session_id === 'ses_w')?.status === 'done')
   assert.equal(n.last('runtime.sessions').sessions.find((s) => s.session_id === 'ses_w').rev, 10)
   assert.ok(n.all('session.delta').at(-1).text === '', 'the live text ends with the turn')
+})
+
+test('a shell that runs past STALE_MS still publishes its same-seq result', async (t) => {
+  let now = Date.now()
+  const d = fakeDb()
+  d.session('ses_long_shell')
+  const { n, host } = await setup(t, { db: d, now: () => now })
+  const ctx = fakeCtx()
+  host.register(ctx)
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 'ses_long_shell', since_seq: 0 })
+  await host.commit('ses_long_shell')
+  await host.onEvent(ctx, { type: 'session.execution.started', data: { sessionID: 'ses_long_shell' } })
+
+  d.message('ses_long_shell', 5, 'shell', { command: 'sleep 61; echo done', status: 'running', time: { created: now } }, now)
+  await host.commit('ses_long_shell')
+  assert.equal(host.sessions.get('ses_long_shell').lastSeq, 0, 'running shell is not final at start')
+
+  now += 61_000 // the running turn's normal poll calls the same commit path
+  await host.commit('ses_long_shell')
+
+  d.message('ses_long_shell', 5, 'shell', { command: 'sleep 61; echo done', status: 'completed', exit: 0,
+    output: { output: 'done' }, time: { created: now - 61_000, completed: now } }, now)
+  await host.commit('ses_long_shell')
+  await until('completed shell result pushed', () => n.all('session.items').flatMap((b) => b.items).some((i) => i.kind === 'tool_result' && i.text === 'done'), 500)
 })
 
 test('what a watched session writes is pushed cut to the page limits, as its pages are', async (t) => {

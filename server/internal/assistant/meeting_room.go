@@ -32,6 +32,10 @@ import (
 // meeting's end; deleted at the transcript's cut or with the recording (meetingRoomsSweep). The feeder looks at a
 // room meeting as it looks at an attended one (attendLook → roomLook): it moves the room along and feeds it batches.
 
+// purposeMeetingRoom is the model purpose a room starts on (#7980, the In-meeting conversation): the main chat's
+// launcher, model and effort until it is set apart in Model settings, always on Claude Code's CLI (models_room.go).
+const purposeMeetingRoom = "meeting.room"
+
 // Origins of a meeting's conversations (proto.Session.Origin): the room, and the follow-up made after the meeting.
 const (
 	OriginMeeting         = "meeting"
@@ -242,8 +246,9 @@ func (s *Service) roomCreate(ctx context.Context, machine, sid string, r kb.Reco
 		"guest":          map[string]any{"tools": meetingRoomToolNames(), "kind": guestKindMeeting},
 		"message_source": &proto.MessageSource{Kind: proto.SourceMeeting, Title: feedMeetingName(r, s.location(ctx))},
 		"client_msg_id":  "meeting-" + r.ID}
-	// The main chat's launcher and model, on the CLI even when the main chat runs on the Agent SDK: a room never does.
-	if err := s.applyModelCLI(ctx, "assistant", params); err != nil {
+	// The In-meeting conversation's launcher and model (the main chat's while it follows it), on the CLI even when the
+	// main chat runs on the Agent SDK: a room never does. A room keeps them until it is deleted.
+	if err := s.applyModelCLI(ctx, purposeMeetingRoom, params); err != nil {
 		return "", "", err
 	}
 	delete(params, "permission_mode")

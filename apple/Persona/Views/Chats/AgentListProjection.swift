@@ -263,6 +263,8 @@ nonisolated struct AgentListProjection: Sendable {
         var machines: [Machine]
         var settings: Settings
         var workspaces: [HostWorkspace] = []
+        /// What a waiting child asks, keyed by the parent the card is shown on. Empty leaves every row's own line.
+        var asks: [SessionKey: String] = [:]
     }
 
     struct Rows: Sendable {
@@ -318,7 +320,9 @@ nonisolated struct AgentListProjection: Sendable {
         let plan = AgentSearchPlan.compile(query: settings.query, settings: settings)
         result.searchPlan = plan
         let parsed = plan.parsed
-        result.sessionsByKey = Dictionary(input.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        // Folded children are not rows. What the hub did not fold still goes through CodexTasks below.
+        let sessions = ChildSessions.fold(input.sessions, asks: input.asks)
+        result.sessionsByKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         result.machinesByRef = Dictionary(input.machines.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         // Subtasks go under the session that started them, as in the Codex App and on Android: the list and its counts
         // are the others'. A working one hangs under its parent only while the list draws a row above it (`runs`): the
@@ -326,7 +330,7 @@ nonisolated struct AgentListProjection: Sendable {
         let runs: ((Session) -> Bool)? = settings.grouping == "recent" || settings.grouping == "app" ? nil
             : { $0.state.isLive || settings.pinned($0.key) }
         // A row a quick filter showed stays a row while it is on, a subtask answered under Needs You too.
-        let forest = CodexTasks.build(input.sessions, ownRows: settings.filter == .all ? [] : settings.kept, runs: runs)
+        let forest = CodexTasks.build(sessions, ownRows: settings.filter == .all ? [] : settings.kept, runs: runs)
         let admits: (Session) -> Bool = { session in
             guard !session.assistant else { return false }
             guard settings.machine.isEmpty || session.machineRef.path == settings.machine else { return false }

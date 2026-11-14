@@ -498,17 +498,21 @@ func TestFourModelCategoriesCatalog(t *testing.T) {
 			if p.CategoryID != "agent.new" || p.Parent != "agent.new" || len(p.Fields) == 0 {
 				t.Fatalf("%s missing independent editor: %+v", p.ID, p)
 			}
-		} else if p.ID == purposeSupervise {
+		} else if p.ID == purposeSupervise || p.ID == purposeMeetingRoom {
 			if p.CategoryID != "assistant" || p.Parent != "assistant" || p.Launch != "headless" || len(p.Uses) != 0 || len(p.Fields) == 0 {
+				t.Fatalf("%s missing independent editor: %+v", p.ID, p)
+			}
+		} else if p.ID == purposeMeetingMinutes {
+			if p.CategoryID != "kb" || p.Parent != "kb" || p.Launch != "" || len(p.Uses) != 0 || len(p.Fields) == 0 {
 				t.Fatalf("%s missing independent editor: %+v", p.ID, p)
 			}
 		} else if p.CategoryID != p.ID || len(p.Uses) == 0 || len(p.Fields) == 0 {
 			t.Fatalf("category missing scope or editor: %+v", p)
 		}
 	}
-	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", purposeAgent, purposeLarkAgent, purposeSupervise}
+	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", purposeAgent, purposeLarkAgent, purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes}
 	if !reflect.DeepEqual(ids, want) || !reflect.DeepEqual(ids, modelConfigIDs) {
-		t.Fatalf("catalog is not the ordered categories, the AI twin, Lark /agent and the background supervisor: %v", ids)
+		t.Fatalf("catalog is not the ordered categories, the AI twin, Lark /agent, the background supervisor and the two meeting purposes: %v", ids)
 	}
 }
 

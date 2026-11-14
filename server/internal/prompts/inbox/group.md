@@ -12,11 +12,14 @@
 
 分级（tier）看动到之后这件事整体的情况：
 {{template "inbox/tiers" .}}
+批的开头一般写着这是群聊还是私聊。
 
 title：这件事是什么，{{with .Language}}用{{.}}，{{end}}不超过 20 个字，比如「周四下午的发布评审改期」。
 summary：一句{{if .Language}}{{.Language}}{{else}}中文{{end}}（不超过 40 个字），说清楚这件事现在是什么情况、要用户做什么。不要写「有人发了消息」这种空话。
 reason：不超过 12 个字，为什么这么分。
-urgent：急事才是 true：tier 是 action，而且有人正等着用户回、或截止时间就在眼前（今天、几个小时内）；其余一律 false。{{with .MetaDescription}}
+urgent：急事才是 true：tier 是 action，而且有人正等着用户回、或截止时间就在眼前（今天、几个小时内）；其余一律 false。
+settled：开着的事看完这一批已经结了、用户不用再管时才写：用户自己在会话里已经答复或处理了写 "replied"，对方说好了 / 已解决 / 不用了、
+或别人已经替用户答了写 "over"；这时 tier 不能是 action。还要用户做什么、或者拿不准，就不写。{{with .MetaDescription}}
 
 事件的 meta 是什么（连接器的说明）：
 {{.}}{{end}}
@@ -31,7 +34,7 @@ urgent：急事才是 true：tier 是 action，而且有人正等着用户回、
 每次回复一个 JSON 对象，二选一：
 - 要查：{"tool": "messages_before", "args": {"message": "…", "n": 10}}
 - 想好了：{"assign": [{"message": "新消息的 id", "event": "已有事件的 id，或 new:1、new:2…"}],
-  "events": [{"event": "同上", "title": "…", "summary": "…", "tier": "action|fyi|noise", "reason": "…", "urgent": false, "continues": "可省：接着哪件已处理的事", "reopen": "可省：已处理的事只是纯收尾时写 false"}]}
+  "events": [{"event": "同上", "title": "…", "summary": "…", "tier": "action|fyi|noise", "reason": "…", "urgent": false, "continues": "可省：接着哪件已处理的事", "reopen": "可省：已处理的事只是纯收尾时写 false", "settled": "可省：replied 或 over"}]}
 
 批里发送人写成「我（自己说的，不归类）」的行，是用户自己在会话里说的话，没有自己的消息 id（行尾的「回复」「话题」指的是别的消息），只作上下文：不要归类，也不要写进 assign。
 每条新消息恰好归到一件事；assign 里用到的每件事在 events 里写一项（已有的事写动到之后的标题、总结和分级）；

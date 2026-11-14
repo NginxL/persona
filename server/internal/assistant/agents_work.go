@@ -463,6 +463,22 @@ func sameTurn(c proto.Session, turnAt time.Time) bool {
 	return d > -2*time.Second && d < 2*time.Second
 }
 
+// retiredRetry retires a transient retry when a later stopped row no longer carries its model failure. The node has
+// already required closing evidence before dropping an old error-only preview; an offline or running row is not recovery.
+// With no newer words the work stays unsure rather than becoming an invented textual conclusion.
+func retiredRetry(c proto.Session, e db.SessionWork) (db.SessionWork, bool) {
+	retry := e.Work.On == proto.WaitTransient || e.Work.On == proto.WaitUser && e.Retries > 0
+	failure, _ := latestTurnError(c)
+	if !retry || c.Status != proto.StatusDone || !c.UpdatedAt.After(e.TurnAt) || failure != "" {
+		return e, false
+	}
+	e.TurnAt = c.UpdatedAt
+	e.Work = proto.WorkState{TurnAt: c.UpdatedAt, At: time.Now().UTC(), By: "rule"}
+	e.WakeAt, e.InteractionID = nil, ""
+	e.Retries, e.Wakes = 0, 0
+	return e, true
+}
+
 // loadWork reads session_work back (once; false while it cannot be read). A card the hub still has up (only the
 // manager restarted) stays up as it is, until it is answered, its agent goes on or it expires, as when the triage was
 // the hub's; the others (the hub restarted too, or it was answered meanwhile and the hub keeps the answer) are put back
@@ -494,6 +510,16 @@ func (s *Service) loadWork(ctx context.Context) bool {
 	var up map[string]proto.Interaction
 	for i := range rows {
 		e := rows[i]
+		if c, ok := v.session(e.MachineID, e.SessionID); ok {
+			if retired, recovered := retiredRetry(c, e); recovered {
+				rows[i] = retired
+				forgot = append(forgot, retired)
+				if e.InteractionID != "" {
+					forgotIDs = append(forgotIDs, e.InteractionID)
+				}
+				continue
+			}
+		}
 		if e.InteractionID == "" {
 			continue
 		}
@@ -615,9 +641,15 @@ func (s *Service) putWork(_ context.Context, e db.SessionWork) {
 
 // supersededCardLocked takes down the card current still has when e, the work of a later turn of the same session,
 // replaces it (a turn whose start the manager did not hear of, triaged afterwards): one card per session, the latest
-// turn's (#6709). Returns the card's id ("" when none goes) and whether it was out. Callers hold s.work.mu.
+// turn's (#6709). A retired retry needs only a strictly later row: retiredRetry has already checked its failure is gone.
+// Returns the card's id ("" when none goes) and whether it was out. Callers hold s.work.mu.
 func (s *Service) supersededCardLocked(current *db.SessionWork, e db.SessionWork) (string, bool) {
-	if current == nil || current.InteractionID == "" || current.InteractionID == e.InteractionID || !e.TurnAt.After(current.TurnAt.Add(2*time.Second)) {
+	if current == nil || current.InteractionID == "" || current.InteractionID == e.InteractionID {
+		return "", false
+	}
+	later := e.TurnAt.After(current.TurnAt.Add(2 * time.Second))
+	retired := current.Work.On == proto.WaitUser && current.Retries > 0 && e.Work.Phase == "" && e.Work.By == "rule" && e.TurnAt.After(current.TurnAt)
+	if !later && !retired {
 		return "", false
 	}
 	_, out := s.work.cards[current.InteractionID]

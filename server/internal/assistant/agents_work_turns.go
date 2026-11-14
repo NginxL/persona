@@ -260,7 +260,11 @@ func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c
 	}
 	s.work.tried[k] = triedTurn{c.UpdatedAt, time.Now()}
 	if had && sameTurn(c, prev.TurnAt) && (prev.Work.Phase != "" || prev.Work.By != "") {
+		retired, recovered := retiredRetry(c, *prev)
 		s.work.mu.Unlock()
+		if recovered {
+			s.putWork(ctx, retired)
+		}
 		return
 	}
 	s.work.triaging[k] = true

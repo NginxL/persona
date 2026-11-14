@@ -383,6 +383,17 @@ its task decision together before sending it to a hook. A plan approval must sel
 mode can fall back to bypass permissions on the node. Count confirmation dispatch at `tellUser`, not interaction
 creation or app presentation; quiet tasks and supervisor routing also show cards without ringing the user.
 
+## The supervision fingerprint only sees the agent's words (#6027)
+
+`digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
+last words are unchanged, because a new turn or a periodic sweep is not news. Some signals carry news that is not in the
+agent's words: the owner's answer to a decision's round, a recheck or undecidable review of a new round, a start
+attempt's failure or start. They were dropped: the owner's "You decide" after "Tell me the background first" ended the
+card but never reached the supervisor, and a retry that failed with the first try's error was never told although
+`task_retry` promised it. Such kinds now hash their key too (`keyIsNews`), and a failed start's key names its attempt.
+A new signal kind whose key names one event, rather than moving with every turn, belongs in `keyIsNews`; test it with
+the agent's words unchanged, which is the case that hides the drop (the task's agent is usually stopped while it waits).
+
 ## A card the chat waits on must be in the chat (#4883)
 
 A Persona conversation's first Bash waited three and a half minutes for approval while its card was only inside the

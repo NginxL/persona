@@ -68,6 +68,7 @@
     <string name="settings_ext_state_error">エラー</string>
     <string name="settings_ext_state_unknown">状態不明</string>
     <string name="settings_ext_run_pack">パック自体はプログラムを実行しません。メンバーはそれぞれ有効化、設定、アンインストールします。</string>
+    <string name="settings_ext_run_pack_members_follow">パック自体はプログラムを実行しません。メンバーはそれぞれ設定、アンインストールします。</string>
     <string name="settings_ext_run_running">実行中</string>
     <string name="settings_ext_run_idle">未実行。必要になると自動で起動します</string>
     <string name="settings_ext_source_builtin">組み込み</string>
@@ -161,6 +162,12 @@
     <string name="settings_ext_read_only">この拡張機能はアシスタントのmanager.jsonに書かれています。オン/オフと設定はそこで変更し、変更後にアシスタントを再起動してください。</string>
     <string name="settings_ext_enabled">有効</string>
     <string name="settings_ext_enabled_note">無効にすると実行が停止し、提供しているコネクタなども一緒にオフになります。設定とシークレットは保持されます。</string>
+    <string name="settings_ext_enable_footer_pack">パックをオフにすると、メンバーもオフになり、実行が止まります。パックをオンに戻すと、パックがオフにしたメンバーもオンに戻ります。自分で個別にオン・オフしたメンバーはそのままです。</string>
+    <string name="settings_ext_enable_footer_pack_off">パックをオンに戻すと、%1$s もオンに戻ります。自分で個別にオン・オフしたメンバーはそのままです。</string>
+    <string name="settings_ext_enable_footer_pack_alone">パックをオフにしても、オフになるのはパック自体だけです。メンバーはそれぞれのページでオン・オフしてください。</string>
+    <string name="settings_ext_disable_pack_title">「%1$s」とそのメンバーをオフにしますか？</string>
+    <string name="settings_ext_disable_pack_body">メンバーも一緒にオフになります：%1$s。オフにするだけで、アンインストールはしません。設定とデータは保持されます。パックをオンに戻すと、これらもオンに戻ります。</string>
+    <string name="settings_ext_disable_all">まとめて無効化</string>
     <string name="settings_ext_unavailable">読み込めません</string>
     <string name="settings_ext_still_needed">未設定：%1$s</string>
     <string name="settings_ext_channel_link">これはチャットチャネルです</string>

@@ -101,7 +101,7 @@ final class ReviewPageTests: XCTestCase {
     // MARK: Helpers
 
     @MainActor private func openReview(_ app: XCUIApplication) {
-        // The shell's chat header starts compact: a tap on its title brings the bar with ⋯.
+        // The shell's chat header starts compact, with the same ⋯ (#7962); not there yet, a tap on its title opens the header.
         let compact = app.buttons["chat.compactTitle"].firstMatch
         let more = app.buttons.matching(NSPredicate(format: "label == %@", "更多")).firstMatch
         XCTAssertTrue(waitUntil(20) { compact.exists || more.exists }, "the chat did not open:\n\(app.debugDescription)")

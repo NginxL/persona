@@ -3,6 +3,7 @@ package assistant
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,9 +12,25 @@ import (
 
 // ---- what the task's events say ----
 
-// taskNotice is what happened to task t (state: done, needs, interrupted, failed; ask, text as quietNotify has them):
+// taskNotice is what happened to task t (state: done, needs, interrupted; ask, text as quietNotify has them):
 // a supervised task's supervisor gets a signal, any other quiet task's conversation its notice.
 func (s *Service) taskNotice(ctx context.Context, t Todo, machine, state, ask, text string) {
+	s.taskNoticeOf(ctx, t, machine, state, ask, text, 0)
+}
+
+// taskStartFailed is taskNotice for task t's start that failed (reason) after start's retries (nil: none). Each
+// attempt's failure is news of its own, even with the error the one before had: task_retry promised the supervisor
+// how it ends (#6027).
+func (s *Service) taskStartFailed(ctx context.Context, t Todo, machine string, start *StartRemedy, reason string) {
+	attempt := 0
+	if start != nil {
+		attempt = start.Attempt
+	}
+	s.taskNoticeOf(ctx, t, machine, "failed", "", reason, attempt)
+}
+
+// taskNoticeOf is taskNotice; attempt is a failed start's retries so far.
+func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask, text string, attempt int) {
 	if t.Supervision == nil {
 		if !t.Quiet {
 			if state == "failed" && t.Origin != "" {
@@ -35,6 +52,9 @@ func (s *Service) taskNotice(ctx context.Context, t Todo, machine, state, ask, t
 	switch state {
 	case "failed":
 		g.Kind, g.Key = sigFailed, text
+		if attempt > 0 {
+			g.Key = fmt.Sprintf("retry %d: %s", attempt, text) // as the started signal names it (start_remedy.go)
+		}
 	case "interrupted":
 		g.Kind, g.Key = sigInterrupted, time.Now().UTC().Format(time.RFC3339)
 	case "needs":

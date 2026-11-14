@@ -315,6 +315,59 @@ func TestCodexRemoteSendAndSteerNeverFallback(t *testing.T) {
 	}
 }
 
+func TestCodexInterruptFindsTurnAlreadyRunningAtJoin(t *testing.T) {
+	n := remoteTestNode(t)
+	home := t.TempDir()
+	f, _ := connectRemoteFixture(t, n, home, "one", remoteRaw)
+	f.active = true
+	f.response = func(method string, p map[string]any) (any, bool) {
+		if method == "thread/read" && p["includeTurns"] == true {
+			return map[string]any{"thread": map[string]any{
+				"id": remoteRaw, "status": map[string]any{"type": "active", "activeFlags": []string{}},
+				"turns": []map[string]any{{"id": "turn-before-join", "status": "inProgress"}},
+			}}, true
+		}
+		return nil, false
+	}
+	id := n.registerCodex(home, remoteRaw, "")
+	if err := n.interruptCodex(context.Background(), id); err != nil {
+		t.Fatalf("Stop must interrupt the turn that began before the join: %v", err)
+	}
+	if got := f.count("turn/interrupt"); got != 1 {
+		t.Fatalf("turn/interrupt calls = %d, want 1", got)
+	}
+	for _, m := range f.got {
+		if m.Method != "turn/interrupt" {
+			continue
+		}
+		var p map[string]any
+		_ = json.Unmarshal(m.Params, &p)
+		if p["turnId"] != "turn-before-join" {
+			t.Fatalf("interrupted %v, want the pre-existing turn", p)
+		}
+	}
+}
+
+func TestCodexInterruptStillRefusesWhenNoTurnRuns(t *testing.T) {
+	n := remoteTestNode(t)
+	home := t.TempDir()
+	f, _ := connectRemoteFixture(t, n, home, "one", remoteRaw)
+	f.active = true
+	f.response = func(method string, p map[string]any) (any, bool) {
+		if method == "thread/read" && p["includeTurns"] == true {
+			return map[string]any{"thread": map[string]any{"id": remoteRaw, "status": map[string]any{"type": "active", "activeFlags": []string{}}, "turns": []map[string]any{}}}, true
+		}
+		return nil, false
+	}
+	id := n.registerCodex(home, remoteRaw, "")
+	if err := n.interruptCodex(context.Background(), id); err == nil {
+		t.Fatal("a thread with no running turn must not be interrupted")
+	}
+	if got := f.count("turn/interrupt"); got != 0 {
+		t.Fatalf("turn/interrupt calls = %d, want 0", got)
+	}
+}
+
 func TestCodexRemoteOwnerConflictAndStdioRefuse(t *testing.T) {
 	n := remoteTestNode(t)
 	home := t.TempDir()

@@ -64,4 +64,34 @@ struct AllSessionsReadersTests {
             \(wrong.joined(separator: "\n"))
             """)
     }
+
+    /// `childRows` used to read `allSessions` from inside `AppModel`, which this file's view scan cannot see
+    /// (docs/apple/ios-state.md "Step 5"). The open chat must read that parent's cell.
+    @Test func theOpenChatDoesNotReadEveryAgentForItsChildren() throws {
+        let model = try String(contentsOf: Self.apple.appending(path: "Persona/App/AppModel.swift"), encoding: .utf8)
+        for name in ["func childRows(", "func foldedChildren("] {
+            let body = Self.function(model, named: name)
+            #expect(!body.isEmpty, "\(name) not found")
+            #expect(Self.reads(body) == 0, "\(name) reads allSessions")
+        }
+        let chat = try String(contentsOf: Self.apple.appending(path: "Persona/Views/Chat/ChatView.swift"), encoding: .utf8)
+        let card = try String(contentsOf: Self.apple.appending(path: "Persona/Views/Chat/ChildSessionCard.swift"), encoding: .utf8)
+        #expect(Self.reads(chat) == 0)
+        #expect(Self.reads(card) == 0)
+    }
+
+    private static func function(_ text: String, named: String) -> String {
+        guard let start = text.range(of: named)?.lowerBound, let brace = text[start...].firstIndex(of: "{") else { return "" }
+        var depth = 0
+        var index = brace
+        while index < text.endIndex {
+            if text[index] == "{" { depth += 1 }
+            if text[index] == "}" {
+                depth -= 1
+                if depth == 0 { return String(text[start...index]) }
+            }
+            text.formIndex(after: &index)
+        }
+        return ""
+    }
 }

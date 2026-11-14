@@ -1765,13 +1765,14 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 // starting anything when it is in another one, and the run starts a new conversation, signed in (startConversation),
 // which the task keeps (#6186). One already in that profile is resumed as before, and so is any on a node too old to
 // be told a profile, whose conversations are all in that one. Only Claude Code has profiles: the node refuses a
-// config_dir for Codex or a runtime's conversation every time, so theirs are resumed as before.
+// config_dir for Codex or a runtime's conversation every time, so theirs are resumed as before, also one the node lists
+// with no agent: it says so before starting anything, and the run goes on in it without the profile (#6884).
 func (s *Service) resumeOwn(ctx context.Context, machine, sid string, params map[string]any) error {
 	if c, ok := s.session(ctx, machine, sid); ok && signedOut(c) && (c.Agent == "" || c.Agent == "claude") {
 		params["config_dir"] = meetingProfile
 	}
 	err := s.call(ctx, machine, DeviceAssistantSend, params, nil)
-	if _, asked := params["config_dir"]; asked && nodeOutdated(err) {
+	if _, asked := params["config_dir"]; asked && (nodeOutdated(err) || profileRefused(err)) {
 		delete(params, "config_dir")
 		err = s.call(ctx, machine, DeviceAssistantSend, params, nil)
 	}
@@ -1965,7 +1966,9 @@ func (s *Service) watchScheduledRun(run ScheduleRun, t Task, m Device) {
 		}
 	}
 	var limitTurn time.Time // the turn a usage limit stopped, when one did: the retry goes only while it is still the last
+	var limitedRun bool
 	if reset, turn, resumes, limited := s.runLimit(ctx, m.ID, run.SessionID, full); limited {
+		limitedRun = true
 		// A subscription's usage limit (docs/assistant/agent-work.md "Usage limits"): a retry before it resets is
 		// refused at once. The conversation that goes on by itself then needs none; otherwise the retry waits for the
 		// reset, however long that is — the watcher's time is for the turn, not for this.
@@ -1994,7 +1997,7 @@ func (s *Service) watchScheduledRun(run ScheduleRun, t Task, m Device) {
 	// again regardless, with the old prompt, and silently (a retry that fails is not pushed).
 	rctx, rcancel := context.WithTimeout(context.Background(), 10*time.Second)
 	cur, ok := s.retryStillDue(rctx, t.ID, run)
-	if ok && !limitTurn.IsZero() {
+	if ok && limitedRun {
 		// The wait for the reset is long: the conversation may have gone on meanwhile (the user said "go on" after the
 		// reset), and the work it did (a mail, a message) is not to be done twice.
 		if c, found := s.session(rctx, m.ID, run.SessionID); found && (c.Status == proto.StatusWorking || !sameTurn(c, limitTurn)) {

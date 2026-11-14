@@ -68,6 +68,7 @@
     <string name="settings_ext_state_error">出错了</string>
     <string name="settings_ext_state_unknown">状态未知</string>
     <string name="settings_ext_run_pack">合集本身不运行程序；成员独立启用、设置和卸载。</string>
+    <string name="settings_ext_run_pack_members_follow">合集本身不运行程序；成员独立设置和卸载。</string>
     <string name="settings_ext_run_running">正在运行</string>
     <string name="settings_ext_run_idle">暂未运行，用到时自动启动</string>
     <string name="settings_ext_source_builtin">内置</string>
@@ -161,6 +162,12 @@
     <string name="settings_ext_read_only">这个扩展写在它所属助手的 manager.json 里：开关和设置去那里改，改完重启这个助手。</string>
     <string name="settings_ext_enabled">启用</string>
     <string name="settings_ext_enabled_note">停用后它不再运行，提供的连接器等也一起关掉；设置和密钥留着。</string>
+    <string name="settings_ext_enable_footer_pack">停用合集会一起停用它的成员，成员随之停止运行。重新启用合集时，会重新启用当初由合集停用的成员；你自己单独启用或停用过的成员保持你的选择。</string>
+    <string name="settings_ext_enable_footer_pack_off">重新启用合集会重新启用 %1$s。你自己单独启用或停用过的成员保持你的选择。</string>
+    <string name="settings_ext_enable_footer_pack_alone">停用合集只会停用合集本身。请到每个成员自己的页面启用或停用它。</string>
+    <string name="settings_ext_disable_pack_title">停用「%1$s」和它的成员？</string>
+    <string name="settings_ext_disable_pack_body">它的成员也会一起停用：%1$s。只是停用，不会卸载，设置和数据都会保留。重新启用合集时会重新启用它们。</string>
+    <string name="settings_ext_disable_all">一起停用</string>
     <string name="settings_ext_unavailable">读不到</string>
     <string name="settings_ext_still_needed">还缺：%1$s</string>
     <string name="settings_ext_channel_link">这是一个对话渠道</string>

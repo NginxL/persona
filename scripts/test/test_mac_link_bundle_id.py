@@ -1,9 +1,12 @@
-"""mac-link.sh names Persona Link and its Persona Screen helper (#7569).
+"""mac-link.sh names Persona Link and its Persona Screen and Persona Input helpers (#7569, #7775, #7927).
 
 macOS keeps Persona Screen's Screen Recording grant per bundle id, so a build must never fall back to a placeholder id:
 without mac.link_bundle_id or PERSONA_LINK_BUNDLE_ID it takes the app's registered identity plus ".link", and with no
-identity at all it stops and says what to set. The script runs for real in a temporary copy of the files it reads, with
-xcodebuild, go, lipo, codesign and git replaced by stubs, so nothing is built, signed or installed.
+identity at all it stops and says what to set. Both helpers' grants are tied to their code while signed ad hoc, so each
+build is kept by a hash of its own sources and its narrow kit (PersonaScreenCore, PersonaInputKit) and reused until they
+change; a change elsewhere (PersonaScreenKit's tiers) builds nothing. With mac.link_signing_identity the helpers are
+signed with that certificate. The script runs for real in a temporary copy of the files it reads, with xcrun, go, lipo,
+codesign and git replaced by stubs, so nothing is built, signed or installed.
 """
 import json
 import os
@@ -17,14 +20,23 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 COPIED = ('scripts/app/mac-link.sh', 'scripts/persona_config.py', 'scripts/persona_identity.py',
-          'apple/PersonaLink/PersonaScreen-Info.plist', 'server/build-tags.txt')
+          'apple/PersonaLink/PersonaScreen-Info.plist', 'server/build-tags.txt',
+          'apple/PersonaLink/Input/Package.swift', 'apple/PersonaLink/Input/PersonaInput-Info.plist',
+          'apple/PersonaLink/Input/Sources/PersonaInput/main.swift', 'apple/PersonaLink/Input/Sources/PersonaInput/UnixSocket.swift',
+          'apple/Packages/PersonaInputKit/Package.swift', 'apple/Packages/PersonaInputKit/Sources/PersonaInputKit/ScrollRecord.swift',
+          'apple/PersonaLink/Package.swift')
+# Whole folders: Persona Screen, the kit it is built from, and a PersonaScreenKit file it is not built from.
+COPIED_TREES = ('apple/PersonaLink/Sources/PersonaScreen', 'apple/Packages/PersonaScreenCore/Sources',
+                'apple/Packages/PersonaScreenKit/Sources')
 STUBS = {
-    # The PersonaScreen scheme's product, where mac-link.sh copies it from (run in apple/PersonaLink).
-    'xcodebuild': 'mkdir -p build/dd/Build/Products/Release && : > build/dd/Build/Products/Release/PersonaScreen',
     'go': 'while [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done',
     'lipo': 'while [ $# -gt 0 ]; do [ "$1" = -output ] && : > "$2"; shift; done',
     'codesign': 'echo "$*" >> "$CODESIGN_LOG"',
     'git': 'echo v0.0.0-test',
+    # `swift build` of a helper: an empty executable named for --product in its scratch path, each real build logged by
+    # product; --show-bin-path says where.
+    'xcrun': 'while [ $# -gt 0 ]; do case $1 in --scratch-path) s=$2;; --product) p=$2;; --show-bin-path) show=1;; esac; shift; done\n'
+             'if [ -n "${show:-}" ]; then echo "$s/release"; else mkdir -p "$s/release" && : > "$s/release/$p" && chmod +x "$s/release/$p" && echo "$p" >> "$SWIFT_LOG"; fi',
 }
 
 
@@ -37,6 +49,8 @@ class MacLinkBundleIdTests(unittest.TestCase):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)
+        for name in COPIED_TREES:
+            shutil.copytree(ROOT / name, self.root / name)
         bin_dir = self.tmp / 'bin'
         bin_dir.mkdir()
         for name, body in STUBS.items():
@@ -47,8 +61,10 @@ class MacLinkBundleIdTests(unittest.TestCase):
         self.home.mkdir()
         self.config = self.tmp / 'config.json'
         self.log = self.tmp / 'codesign.log'
+        self.swift = self.tmp / 'swift.log'
         self.env = {'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'HOME': str(self.home), 'PERSONA_CONFIG': str(self.config),
-                    'CODESIGN_LOG': str(self.log)}
+                    'CODESIGN_LOG': str(self.log), 'SWIFT_LOG': str(self.swift),
+                    'PERSONA_INPUT_CACHE': str(self.tmp / 'input-cache'), 'PERSONA_SCREEN_CACHE': str(self.tmp / 'screen-cache')}
 
     def build(self, config=None, **env):
         if config is not None:
@@ -66,10 +82,76 @@ class MacLinkBundleIdTests(unittest.TestCase):
                              for line in self.log.read_text().splitlines() if '--identifier ' in line)
         return screen, identifiers
 
+    def input_id(self):
+        app = self.root / 'apple/PersonaLink/build/Persona Link.app/Contents/Helpers'
+        with open(app / 'Persona Input.app/Contents/Info.plist', 'rb') as f:
+            return plistlib.load(f)['CFBundleIdentifier']
+
+    def swift_builds(self, product='PersonaInput'):
+        return self.swift.read_text().splitlines().count(product) if self.swift.exists() else 0
+
+    def touch(self, name):
+        path = self.root / name
+        path.write_text(path.read_text() + '// changed\n')
+
+    def signed_with(self, bundle):
+        """The identity each codesign of `bundle` (a path ending) used."""
+        return [line.split('--sign ')[1].split()[0] for line in self.log.read_text().splitlines()
+                if '--sign ' in line and line.endswith(bundle)]
+
     def test_without_a_link_id_the_app_identity_names_link_and_screen(self):
         screen, signed = self.built_ids(self.build({'app': {'bundle_id': 'org.sample.assistant'}}))
         self.assertEqual(screen, 'org.sample.assistant.link.screen')
+        self.assertEqual(self.input_id(), 'org.sample.assistant.link.input')
         self.assertEqual(signed, ['org.sample.assistant.link.helper', 'org.sample.assistant.link.persona-node'])
+
+    def test_persona_input_is_built_once_until_its_sources_change(self):
+        config = {'app': {'bundle_id': 'org.sample.assistant'}}
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds(), 1)
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds(), 1, 'the same sources: the kept helper, not a new build')
+        source = self.root / 'apple/PersonaLink/Input/Sources/PersonaInput/main.swift'
+        source.write_text(source.read_text() + '// changed\n')
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds(), 2, 'changed sources: built again')
+        kit = self.root / 'apple/Packages/PersonaInputKit/Sources/PersonaInputKit/ScrollRecord.swift'
+        kit.write_text(kit.read_text() + '// changed\n')
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds(), 3, "the record's kit changed: built again")
+        self.built_ids(self.build(config, UNIVERSAL='1'))
+        self.assertEqual(self.swift_builds(), 4, 'other architectures: a build of their own')
+
+    def test_persona_screen_is_built_once_until_its_own_sources_or_its_core_change(self):
+        config = {'app': {'bundle_id': 'org.sample.assistant'}}
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds('PersonaScreen'), 1)
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds('PersonaScreen'), 1, 'the same sources: the kept helper, not a new build')
+        # the phone's side of the live screen (quality tiers, route session): not in Persona Screen, so nothing is built
+        self.touch('apple/Packages/PersonaScreenKit/Sources/PersonaScreenKit/TierPolicy.swift')
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds('PersonaScreen'), 1, "PersonaScreenKit's tiers changed: the helper is kept")
+        self.touch('apple/Packages/PersonaScreenCore/Sources/PersonaScreenCore/RateController.swift')
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds('PersonaScreen'), 2, 'its core changed: built again')
+        self.touch('apple/PersonaLink/Sources/PersonaScreen/ScreenCaptureSource.swift')
+        self.built_ids(self.build(config))
+        self.assertEqual(self.swift_builds('PersonaScreen'), 3, 'its own sources changed: built again')
+        self.assertEqual(self.swift_builds('PersonaInput'), 1, 'Persona Input is kept all along')
+
+    def test_helpers_are_signed_ad_hoc_unless_a_certificate_is_set(self):
+        config = {'app': {'bundle_id': 'org.sample.assistant'}}
+        self.built_ids(self.build(config))
+        self.assertEqual(self.signed_with('Persona Screen.app') + self.signed_with('Persona Input.app'), ['-', '-'])
+        self.log.unlink()
+        config['mac'] = {'link_signing_identity': 'Apple Development: Sample (TEAM123456)'}
+        self.built_ids(self.build(config))
+        self.assertEqual(self.signed_with('Persona Screen.app'), ['Apple'], 'the certificate, as configured')
+        self.assertEqual(self.signed_with('Persona Input.app'), ['Apple'])
+        self.assertTrue(all('--sign - ' in line for line in self.log.read_text().splitlines() if '--identifier ' in line),
+                        'persona-link and persona-node stay ad hoc')
+        self.assertEqual(self.swift_builds('PersonaScreen'), 1, 'a signature is not a build: the kept helpers are signed')
 
     def test_the_exported_app_identity_names_it_without_a_config(self):
         screen, signed = self.built_ids(self.build(PERSONA_BUNDLE_ID='org.sample.exported'))

@@ -482,6 +482,17 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(env["PERSONA_PRIVACY_ROOT"], "/tmp/pr-checkout")
         self.assertNotIn("GH_TOKEN", env)
 
+    def test_production_privacy_scan_uses_maintainer_environment_with_pr_root(self):
+        calls = []
+        def check(name, argv, root, timeout, environ=None, cwd=None):
+            calls.append(environ)
+            return {"name": name, "command": argv, "ok": True, "summary": "", "stdout": "", "stderr": ""}
+        with patch.object(pr_watch_verify, "checked", return_value="server/internal/agents/cache.go\n"), \
+                patch.object(pr_watch_verify, "run_check", side_effect=check):
+            pr_watch_verify.verify("example/one", pr(), ".", {"profile": "persona"}, environ={"HOME": "/isolated-home"})
+        self.assertEqual(calls[-1]["PERSONA_PRIVACY_ROOT"], ".")
+        self.assertNotEqual(calls[-1].get("HOME"), "/isolated-home")
+
     def test_fix_ui_change_runs_checks_without_visual_adapter(self):
         names = "web/src/views/ChatView.tsx\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
@@ -795,6 +806,29 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(self.comments), 1)
         self.assertIn("worker unavailable", self.comments[0])
 
+    def test_terminal_verification_failure_is_published_once(self):
+        clock = [1000.0]
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch, "semantic_review", return_value=[]) as review, \
+                patch.object(pr_watch, "verify", side_effect=pr_watch_common.WatchError("infrastructure unavailable")) as verify, \
+                patch.object(pr_watch.time, "time", side_effect=lambda: clock[0]):
+            for now in (1000.0, 1301.0, 1602.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+            self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "failed")
+            self.assertEqual(len(self.comments), 3)
+
+            for now in (1903.0, 1904.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+
+        terminal = [body for body in self.comments if "did not pass" in body]
+        self.assertEqual(1, len(terminal), "an already-published terminal failure was posted again")
+        self.assertEqual(len(self.comments), 4)
+        self.assertTrue(self.watcher.state.get("example/one", 7)["failure_posted"])
+        self.assertEqual(verify.call_count, 3)
+        self.assertEqual(review.call_count, 1)
+
     def test_semantic_failure_retries_with_backoff_without_comment_spam(self):
         for attempt in range(3):
             with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
@@ -1008,20 +1042,16 @@ class EventTests(unittest.TestCase):
 
 
 class VerifyTests(unittest.TestCase):
-    def test_persona_apple_cannot_be_silently_skipped(self):
+    def test_apple_change_does_not_require_macos_verifier(self):
         path = "apple/Persona/App/View.swift"
         with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
-        with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
-                patch.object(pr_watch_verify, "load_paths") as selector:
-            selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {"apple_command": ["verify", "{head}"],
-                                                                      "ui_evidence_command": ["visual", "{worktree}"]})
-        self.assertIn(("trusted Apple verification", ["verify", SHA_A]), commands)
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1,
+                                                       {"ui_evidence_command": ["visual", "{worktree}"]})
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
         self.assertIn(("visual evidence", ["visual", "."]), commands)
+        self.assertFalse(any(command[0] == "trusted Apple verification" for command in commands))
 
     def test_non_ui_apple_paths_are_explicit_and_diff_is_checked(self):
         path = "apple/Packages/PersonaKit/Sources/PersonaKit/StreamChunks.swift"
@@ -1076,7 +1106,7 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(title="chore: an example"), 1, {})
         self.assertEqual(commands, [("CI server", ["bash", "scripts/ci/server.sh"]),
                                     ("Exact-head privacy scan", commands[1][1]),
-                                    ("Apple non-UI review policy", ["true"])])
+                                    ("Apple semantic and portable verification policy", ["true"])])
         classifier.assert_called_once()
 
     def test_shared_core_lane_is_not_dropped(self):
@@ -1088,15 +1118,16 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(), 1, {})
         self.assertEqual(commands[:2], [("CI android", ["bash", "scripts/ci/android.sh"]),
                                     ("CI core", ["bash", "scripts/ci/core.sh"])])
-        self.assertEqual(commands[-1], ("Apple non-UI review policy", ["true"]))
+        self.assertEqual(commands[-1], ("Apple semantic and portable verification policy", ["true"]))
 
-    def test_apple_ffi_does_not_use_the_shared_non_ui_exception(self):
+    def test_apple_ffi_keeps_semantic_and_portable_checks_without_macos(self):
         names = "native/app-core/crates/persona-core-ffi/src/lib.rs\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "core": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+        self.assertIn(("CI core", ["bash", "scripts/ci/core.sh"]), commands)
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
 
     def test_extension_shared_changes_use_full_ci(self):
         with patch.object(pr_watch_verify, "extension_modules", return_value=None), \

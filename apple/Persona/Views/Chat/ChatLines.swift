@@ -78,9 +78,17 @@ struct ChatLines {
     /// Whether a call can join a run: a call that went to the background stays on its own line.
     var foldsIntoRun: (ToolCall) -> Bool = { _ in true }
 
+    /// Folded children placed into the exchanges that were going on when they started. Empty for every other chat.
+    var childPlaces: [ChildSessions.Place] = []
+    var childSessions: [String: Session] = [:]
+    /// History has been read back to the start, so a child that started earlier can sit in the first exchange.
+    var historyComplete = false
+
     /// The lines of these blocks with the open work lines unfolded.
     func build(_ blocks: [ChatBlock], live: String?, streaming: Bool = false) -> [ChatLine] {
-        unfold(lines(blocks, live: live, streaming: streaming))
+        let built = lines(blocks, live: live, streaming: streaming)
+        let placed = childPlaces.isEmpty ? built : ChildSessionLines.insert(built, places: childPlaces, sessions: childSessions, complete: historyComplete)
+        return unfold(placed)
     }
 
     /// The lines of these blocks, before open work lines are unfolded. `streaming`: the running turn's next words are

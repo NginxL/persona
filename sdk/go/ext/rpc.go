@@ -81,7 +81,7 @@ func (p *peer) serve(ctx context.Context, r io.Reader) error {
 			if p.onEvent != nil {
 				p.onEvent(f.Event, f.Params)
 			}
-		case f.ID != "":
+		case f.ID != "" && (f.Result != nil || f.Error != nil):
 			p.mu.Lock()
 			ch := p.pending[f.ID]
 			delete(p.pending, f.ID)

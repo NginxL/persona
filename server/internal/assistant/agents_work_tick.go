@@ -172,6 +172,10 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 	}
 	// Read again right before acting: the pass's view may be a send or two old.
 	c, why := s.workGuard(s.newWorkView(ctx), e, false)
+	if retired, recovered := retiredRetry(c, e); recovered {
+		s.putWork(ctx, retired)
+		return
+	}
 	switch why {
 	case "":
 	case "offline", "todo state unavailable":
@@ -430,6 +434,12 @@ func (s *Service) cardTick(ctx context.Context, v *workView, k [2]string, now ti
 	e, ok := s.workEntry(k)
 	if !ok || e.InteractionID == "" {
 		return
+	}
+	if c, listed := v.session(k[0], k[1]); listed {
+		if retired, recovered := retiredRetry(c, e); recovered {
+			s.putWork(ctx, retired)
+			return
+		}
 	}
 	s.work.mu.Lock()
 	_, out := s.work.cards[e.InteractionID]

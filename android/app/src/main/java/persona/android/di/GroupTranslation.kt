@@ -174,9 +174,19 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun sendQueuedNow(session: Session) = source.sendQueuedNow(names.rawSession(session))
         override suspend fun info(session: Session) = source.info(names.rawSession(session))
         override suspend fun completeRow(session: Session) = source.completeRow(names.rawSession(session))?.let(names::session)
+        override suspend fun childRows(session: Session) = source.childRows(names.rawSession(session)).map(names::session)
+        override suspend fun childPage(session: Session, since: String?): SessionListPage {
+            val page = source.childPage(names.rawSession(session), since)
+            return page.copy(sessions = page.sessions.map(names::session), remove = page.remove.map { encoded ->
+                val key = JsonCodec.decodeFromString<List<String>>(encoded)
+                require(key.size == 2) { "Invalid session removal key" }
+                JsonCodec.encodeToString(listOf(names.machineId(key[0]), key[1]))
+            })
+        }
         override suspend fun interactionHistory(session: Session) = source.interactionHistory(names.rawSession(session))
             .map { it.copy(interaction = names.interaction(it.interaction)) }
         override suspend fun restoreModel(session: Session) = source.restoreModel(names.rawSession(session))
+        override suspend fun catalogPrices(ids: List<String>) = source.catalogPrices(ids)
         override suspend fun fork(session: Session, atItemId: String) = source.fork(names.rawSession(session), atItemId)
         override suspend fun rewind(session: Session, target: RewindTarget, restore: RewindRestore) = source.rewind(names.rawSession(session), target, restore)
     }
@@ -271,6 +281,11 @@ internal fun AssistantManagement.inGroup(names: GroupNames): AssistantManagement
         override suspend fun archiveConversation(session: SessionKey) = source.archiveConversation(names.raw(session))
         override suspend fun unarchiveConversation(session: SessionKey) = source.unarchiveConversation(names.raw(session))
         override suspend fun archivedConversations() = source.archivedConversations().map(names::session)
+        override suspend fun searchChats(query: String, limit: Int) = source.searchChats(query, limit)?.let { answer ->
+            answer.copy(results = answer.results.map { result ->
+                result.copy(machineId = result.machineId.takeIf { it.isNotBlank() }?.let(names::machineId).orEmpty())
+            })
+        }
         override suspend fun renameConversation(session: SessionKey, title: String) = source.renameConversation(names.raw(session), title)
         override suspend fun makeDirection(session: SessionKey) = source.makeDirection(names.raw(session))
         override suspend fun endDirection(session: SessionKey) = source.endDirection(names.raw(session))

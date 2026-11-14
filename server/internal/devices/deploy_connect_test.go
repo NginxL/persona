@@ -29,6 +29,7 @@ type buildNode struct {
 	info    proto.NodeInfo
 	calls   []string
 	updates int
+	rows    []proto.Session
 }
 
 func (n *buildNode) dial(context.Context) (net.Conn, error) {
@@ -42,7 +43,7 @@ func (n *buildNode) dial(context.Context) (net.Conn, error) {
 		case "node.info":
 			return n.info, nil
 		case "sessions.list":
-			return map[string]any{"sessions": []proto.Session{}}, nil
+			return map[string]any{"sessions": n.rows}, nil
 		case "node.update.begin":
 			n.updates++
 			return map[string]any{"id": "update-one", "offset": 0}, nil

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -126,7 +125,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 				if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": t.Cwd}, &source); err != nil {
 					return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.resolve", i18n.Args{"path": t.Cwd}), err)
 				}
-				if !source.Available || !path.IsAbs(source.Cwd) {
+				if !source.Available || !proto.NodeAbs(source.Cwd) {
 					return i18n.ErrEnglish("assistant-tasks_workspace.unavailable", i18n.Args{"path": t.Cwd})
 				}
 				sourceCwd, owner = source.Cwd, s.taskWorkspaceOwner(ctx, t.Machine, source.Cwd, t.TodoID)
@@ -141,7 +140,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 		}
 		t.WorkspaceInferred = true
 	}
-	res := &TaskWorkspaceResolved{Machine: t.Machine, Path: path.Clean(t.Cwd)}
+	res := &TaskWorkspaceResolved{Machine: t.Machine, Path: proto.NodeClean(t.Cwd)}
 	switch t.Workspace.Mode {
 	case workspaceNone:
 	case workspaceExisting:
@@ -152,7 +151,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 		if m, ok := s.machineByName(ctx, t.Machine); ok {
 			selected = proto.ExpandHome(selected, m.Home)
 		}
-		if !path.IsAbs(selected) {
+		if !proto.NodeAbs(selected) {
 			var list proto.WorkspacesResponse
 			if err := s.call(ctx, t.Machine, "workspaces.list", map[string]any{}, &list); err != nil {
 				return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.list", i18n.Args{"machine": t.Machine}), err)
@@ -177,10 +176,10 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 		if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": selected}, &resolved); err != nil {
 			return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.resolve", i18n.Args{"path": selected}), err)
 		}
-		if !resolved.Available || !path.IsAbs(resolved.Cwd) {
+		if !resolved.Available || !proto.NodeAbs(resolved.Cwd) {
 			return i18n.ErrEnglish("assistant-tasks_workspace.unavailable", i18n.Args{"path": selected})
 		}
-		res.Path = path.Clean(resolved.Cwd)
+		res.Path = proto.NodeClean(resolved.Cwd)
 	case workspaceNew:
 		res.Branch = firstNonEmpty(t.Workspace.Branch, "task/"+firstNonEmpty(t.TodoID, t.ReservedTodoID))
 		var prep proto.WorktreePrepare
@@ -195,7 +194,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 						i18n.Args{"id": owner.ID, "title": owner.Title, "machine": t.Machine, "path": sourceCwd})
 				}
 				res.Branch = ""
-				t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, path.Clean(sourceCwd)
+				t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, proto.NodeClean(sourceCwd)
 				break
 			}
 			if t.WorkspaceInferred && sourceCwd != "" && engineCannotPrepare(err) {
@@ -205,16 +204,16 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 				if owner != nil {
 					t.Workspace, res.Shared = &TaskWorkspace{Mode: workspaceNone}, true
 				} else {
-					t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, path.Clean(sourceCwd)
+					t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, proto.NodeClean(sourceCwd)
 				}
 				break
 			}
 			return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.prepare", i18n.Args{"machine": t.Machine}), err)
 		}
-		if !path.IsAbs(prep.Path) {
+		if !proto.NodeAbs(prep.Path) {
 			return i18n.ErrEnglish("assistant-tasks_workspace.engine_path")
 		}
-		res.Path = path.Join(prep.Path, herdr.WorktreeDirName(res.Branch))
+		res.Path = proto.NodeJoin(prep.Path, herdr.WorktreeDirName(res.Branch))
 	default:
 		return fmt.Errorf("unknown task workspace policy %q", t.Workspace.Mode)
 	}
@@ -237,8 +236,9 @@ func repositoryWithoutCommits(err error) bool {
 
 // taskWorkspaceOwner checks durable active task links, and the gap between
 // admission and linking. Callers that admit a writer hold workspaceMu as well.
+// Directories compare by proto.NodeKey: on a Windows machine, case aside.
 func (s *Service) taskWorkspaceOwner(ctx context.Context, machine, cwd, except string) *Todo {
-	machine, cwd = s.effectiveBoardMachine(machine), path.Clean(cwd)
+	machine, cwd = s.effectiveBoardMachine(machine), proto.NodeKey(cwd)
 	s.tasks.mu.Lock()
 	owner := s.tasks.workspaceClaims[machine+"\x00"+cwd]
 	s.tasks.mu.Unlock()
@@ -252,7 +252,7 @@ func (s *Service) taskWorkspaceOwner(ctx context.Context, machine, cwd, except s
 			continue
 		}
 		for _, a := range t.Agents {
-			if a.ReleasedAt == nil && a.DismissedAt == nil && s.effectiveBoardMachine(a.MachineID) == machine && path.Clean(a.Cwd) == cwd {
+			if a.ReleasedAt == nil && a.DismissedAt == nil && s.effectiveBoardMachine(a.MachineID) == machine && proto.NodeKey(a.Cwd) == cwd {
 				return &t
 			}
 		}
@@ -288,10 +288,10 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.create"), err)
 			}
-			if !path.IsAbs(wt.Path) {
+			if !proto.NodeAbs(wt.Path) {
 				return i18n.ErrEnglish("assistant-tasks_workspace.engine_path")
 			}
-			t.WorkspaceResolved = &TaskWorkspaceResolved{Machine: t.Machine, Path: path.Clean(wt.Path),
+			t.WorkspaceResolved = &TaskWorkspaceResolved{Machine: t.Machine, Path: proto.NodeClean(wt.Path),
 				Branch: firstNonEmpty(wt.Branch, t.WorkspaceResolved.Branch), WorkspaceID: wt.WorkspaceID, Created: true}
 			// Once created it is machine-local, including automatic and explicit retries.
 			t.MachinePolicy = machineFixed
@@ -307,7 +307,7 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			if s.tasks.workspaceClaims == nil {
 				s.tasks.workspaceClaims = map[string]string{}
 			}
-			s.tasks.workspaceClaims[s.effectiveBoardMachine(t.Machine)+"\x00"+t.Cwd] = t.TodoID
+			s.tasks.workspaceClaims[s.effectiveBoardMachine(t.Machine)+"\x00"+proto.NodeKey(t.Cwd)] = t.TodoID
 			s.tasks.mu.Unlock()
 		}
 	}

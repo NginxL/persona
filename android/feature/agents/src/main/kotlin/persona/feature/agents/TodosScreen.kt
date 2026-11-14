@@ -34,6 +34,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
@@ -571,14 +572,32 @@ private fun prLabel(url: String): String {
 /** A related to-do under its row's lead (#3206): its title and section, a tap opens it. */
 @Composable
 private fun TodoRelatedLine(todo: Todo, section: TriageSection, modifier: Modifier = Modifier, onOpen: () -> Unit) {
-    Row(
-        modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).clickable(onClick = onOpen).padding(vertical = Tokens.Space.xs),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-    ) {
-        Text(todo.title, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        JTag(section.label)
+    if (todo.kind == "concern") {
+        Column(
+            modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).clickable(onClick = onOpen).padding(vertical = Tokens.Space.xs),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                Text(todo.title, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                JTag(section.label)
+            }
+            val label = stringResource(R.string.agents_todo_concern)
+            JTag(label, Modifier.clearAndSetSemantics { contentDescription = label })
+        }
+    } else {
+        Row(
+            modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).clickable(onClick = onOpen).padding(vertical = Tokens.Space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
+            Text(todo.title, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            JTag(section.label)
+        }
     }
 }
 
@@ -640,7 +659,8 @@ private fun TodoTriageRow(
                         todo.title,
                         style = if (finished) PersonaTheme.type.body.copy(textDecoration = TextDecoration.LineThrough) else PersonaTheme.type.headline,
                         color = if (finished) PersonaTheme.palette.ink3 else PersonaTheme.palette.ink,
-                        maxLines = 1,
+                        // A concern keeps its trailing state tag; one title wrap keeps both readable at large text sizes.
+                        maxLines = if (todo.kind == "concern") 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
@@ -654,6 +674,11 @@ private fun TodoTriageRow(
                         !todo.startError.isNullOrEmpty() -> JTag(stringResource(R.string.agents_todo_state_didnt_start), Tone.Danger)
                         else -> JTag(state.label)
                     }
+                }
+                if (todo.kind == "concern") {
+                    val label = stringResource(R.string.agents_todo_concern)
+                    // Directly below the title, never taking its width at large text sizes.
+                    JTag(label, Modifier.padding(start = Tokens.Space.xxl).clearAndSetSemantics { contentDescription = label })
                 }
                 if (finished) {
                     todo.autoDoneReason?.let { reason ->

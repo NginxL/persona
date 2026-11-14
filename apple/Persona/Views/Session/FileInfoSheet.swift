@@ -48,6 +48,23 @@ nonisolated enum FilePermissions {
     }
 }
 
+/// The type the Info sheet names a file by: the system's for its extension, except where the extension names two
+/// things. `.ts`, `.mts` and `.cts` are TypeScript as often as MPEG-2 transport streams, so the node's reading of the
+/// bytes decides (`mime`, docs/protocol/protocol.md "File details and links", #7974); without it (an older node) none.
+nonisolated enum FileKind {
+    static let scriptOrStream: Set<String> = ["ts", "mts", "cts"]
+
+    static func type(name: String, mime: String?) -> UTType? {
+        let ext = (name as NSString).pathExtension.lowercased()
+        guard !ext.isEmpty else { return nil }
+        guard scriptOrStream.contains(ext) else { return UTType(filenameExtension: ext) }
+        let media = (mime ?? "").split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        if media.hasPrefix("video/") { return .mpeg2TransportStream }
+        if media.hasPrefix("text/") { return .sourceCode }
+        return nil
+    }
+}
+
 struct FileInfoSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -158,7 +175,7 @@ struct FileInfoSheet: View {
         let base: String
         if isDir {
             base = String(localized: "Folder")
-        } else if let t = UTType(filenameExtension: (name as NSString).pathExtension), let d = t.localizedDescription, !(name as NSString).pathExtension.isEmpty {
+        } else if let t = FileKind.type(name: name, mime: info?.mime), let d = t.localizedDescription {
             base = d
         } else {
             base = String(localized: "File")

@@ -542,7 +542,7 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
 		}
 		if l, _ := a["launcher"].(string); a["config_dir"] != nil && launcherAgent(l) != "claude" { // node/assistant.go's preflight
-			return nil, errors.New("config_dir is only supported for Claude assistant conversations")
+			return nil, errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		if sid, _ := a["session_id"].(string); a["config_dir"] != nil && f.elsewhere[sid] {
 			return nil, errors.New("config_dir cannot move an existing conversation; start a new conversation instead")

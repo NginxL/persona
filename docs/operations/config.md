@@ -171,6 +171,7 @@ No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above s
 | `android.release_keystore` | Optional: the keystore `scripts/app/android.sh release` signs the release APK with (`~` is expanded). Needs `android.release_key_alias` and `android.release_keystore_password_command`, a shell command that prints the keystore's password; `android.release_key_password_command` prints the key's own password when it differs. Without `android.release_keystore` the command signs with the SDK's local debug keystore, for your own phone only (`docs/android/android.md`, "Build and install") |
 | `android.google_oauth_scheme` | The scheme the Android App uses for the Google sign-in callback for Gmail: the reversed client ID of the hub's `google.client_id` (`docs/extensions/mail.md` ("Android")); without it Gmail can only be added with an app-specific password |
 | `mac.link_bundle_id` | Bundle-id prefix of the independent Mac Persona Screen helper (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to `app.bundle_id` + `.link` (`PERSONA_BUNDLE_ID` + `.link` when exported), and the build stops when neither is set. macOS keeps Persona Screen's Screen Recording grant per bundle id, so changing it means allowing Screen Recording again on that Mac (#7569) |
+| `mac.link_signing_identity` | Optional: the code signing certificate (its name as `security find-identity -v -p codesigning` prints it, or its SHA-1) `scripts/app/mac-link.sh` signs Persona Screen and Persona Input with, instead of ad hoc, so their Screen Recording and Accessibility permissions survive changes to them; the env var `PERSONA_LINK_SIGNING_IDENTITY` wins. Build in a login-session Terminal; allow both permissions once after the first signed build (`docs/operations/persona-link-install.md`, "Keeping the helpers' permissions across updates") |
 
 `python3 scripts/persona_config.py env` prints shell variables (scripts `eval` it at the top), and `xcconfig` generates `apple/Config.xcconfig`;
 `sim.sh` / `release.sh` generate it automatically. Before running `xcodegen` directly or opening Xcode, run `python3 scripts/persona_config.py xcconfig` once.
@@ -319,6 +320,11 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
 - `screen_link_off` (default `false`): the hub never selects the live screen's session subprotocol, so every live screen stays on the
   plain relay through the hub, whatever the apps and nodes support ([computer-use.md](../extensions/computer-use.md) ("Live screen routes (#6398)")).
   The switch for when direct routes misbehave; it takes effect when the hub restarts.
+- `intercept_readers` (default empty): extension IDs whose tokens may read `GET /api/v1/push/intercepts`, on top of the
+  `notify` scope. Full credentials always may; an extension token whose ID is not listed gets 403 even with `notify`.
+  A listed extension still reads only its own manager's entries, and held-push bodies are stored and served as a
+  summary (title plus at most 140 runes), never as full text. Add the extension's ID (its manifest `name`) here when
+  its control panel needs the held-push list; it takes effect when the hub restarts.
 - `shutdown_timeout_seconds` (default 8): total hub shutdown budget, including closing the database connection pool; external `docker stop -t` must be longer (`docs/server/server.md` ("Shutdown")).
 - `auto_update_nodes` (default `false`): lets the managers update the computers' nodes by themselves, after a confirmed hub update and when a node on another build reconnects (the hub hands it over in `devices.config`).
   Off, a node changes only when someone picks **Redeploy** for its computer ([hub-update.md](hub-update.md) ("Node upgrade policy")).

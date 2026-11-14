@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"sync"
@@ -119,17 +120,65 @@ func TestUsageLimitScheduledRunThatWentOnIsNotRetried(t *testing.T) {
 	n := newFakeHub().withMachine()
 	h := newStorelessService(t, n)
 	h.runRetry = time.Hour
-	stopped := time.Now().Add(-time.Minute)
 	h.sched.limitWait = func(time.Time, time.Time) time.Duration {
 		n.mu.Lock()
 		for i := range n.sessions["server"] {
-			n.sessions["server"][i].UpdatedAt = time.Now() // a later turn ended meanwhile
+			n.sessions["server"][i].UpdatedAt = time.Now().Add(time.Minute) // a later turn ended meanwhile
 			n.sessions["server"][i].LastText = "发好了"
 		}
 		n.mu.Unlock()
 		return 50 * time.Millisecond
 	}
-	limitRun(t, n, h, func(c *proto.Session) { c.UpdatedAt = stopped })
+	limitRun(t, n, h, func(c *proto.Session) { c.UpdatedAt = time.Time{} })
+	time.Sleep(500 * time.Millisecond)
+	if n.sent() != 1 || retried(h) {
+		t.Fatalf("retried: %d sends", n.sent())
+	}
+}
+
+// The error text remains usable when the session record is temporarily unavailable. A later manual turn must still
+// cancel the retry even though runLimit had no UpdatedAt to carry through the wait.
+func TestUsageLimitScheduledRunThatWentOnAfterMissingSessionIsNotRetried(t *testing.T) {
+	n := newFakeHub().withMachine()
+	h := newStorelessService(t, n)
+	h.runRetry = time.Hour
+	hide := false // guarded by n.mu: node answers run under that lock
+	n.answerNode(DeviceSessionItems, func(machine string, params json.RawMessage) (any, error) {
+		var p struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.Limit == 8 { // watchScheduledRun's final lastTurnAPIError read; the record then disappears temporarily
+			hide = true
+		}
+		return map[string]any{"items": n.items}, nil
+	})
+	n.answerNode(DeviceSessionGet, func(machine string, params json.RawMessage) (any, error) {
+		if hide {
+			return map[string]any{"ok": false}, nil
+		}
+		var p struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(params, &p)
+		for _, c := range n.sessions[machine] {
+			if c.SessionID == p.SessionID {
+				return map[string]any{"session": c, "ok": true}, nil
+			}
+		}
+		return map[string]any{"ok": false}, nil
+	})
+	h.sched.limitWait = func(time.Time, time.Time) time.Duration {
+		n.mu.Lock()
+		hide = false
+		for i := range n.sessions["server"] {
+			n.sessions["server"][i].UpdatedAt = time.Now().Add(time.Minute) // the user's successful turn ended meanwhile
+			n.sessions["server"][i].LastText = "发好了"
+		}
+		n.mu.Unlock()
+		return 50 * time.Millisecond
+	}
+	limitRun(t, n, h, func(c *proto.Session) { c.UpdatedAt = time.Now().Add(-time.Minute) })
 	time.Sleep(500 * time.Millisecond)
 	if n.sent() != 1 || retried(h) {
 		t.Fatalf("retried: %d sends", n.sent())

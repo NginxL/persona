@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings › Session Triage (`TriageSettingsModel`): the triage and its model, then what it may do (asking for a
-/// closeout among them, on a hub that knows it and not on the frozen Mac app), then the
+/// closeout and for a status afterwards, on a hub that knows them and not on the frozen Mac app), then the
 /// reminder for a question seen and not answered (apart from the triage). Each switch shows under it what it changes, off
 /// against on or as steps in time (`TriageExampleView`, #1413).
 struct TriageSettingsView: View {
@@ -39,12 +39,17 @@ struct TriageSettingsView: View {
                     toggle(\.wake, String(localized: "Wake on Time"), String(localized: "Wakes an agent waiting on a deploy, CI or another agent to check again"), Theme.Icon.wakeUp, id: "triage-wake") {
                         TriageExampleView(kind: .wake, replyMinutes: replyMinutes)
                     }
-                    // Ask for a Closeout (#3612). A hub that does not know the switch names none: no row. The native Mac
-                    // app is frozen (docs/apple/mac.md) and draws no closeout, so it gets no switch for one either.
+                    // Ask for a Closeout (#3612) and for the status afterwards (#3616). A hub that does not know a
+                    // switch names none: no row. The native Mac app is frozen and gets neither row.
                     #if !os(macOS)
                     if model?.switches?.closeout != nil {
                         toggle(\.asksCloseout, String(localized: "Ask for a Closeout"), String(localized: "Holds an agent's stop once to ask what's done, merged, deployed and missing"), Theme.Icon.closeout, id: "triage-closeout") {
                             TriageExampleView(kind: .closeout, replyMinutes: replyMinutes)
+                        }
+                    }
+                    if model?.showsCloseoutAsk == true {
+                        toggle(\.asksForStatusAfterwards, String(localized: "Ask for the Status Afterwards"), String(localized: "Asks an unsupervised agent once for status when work stops without a closeout or clear finish; costs one model turn"), Theme.Icon.reported, id: "triage-closeout-ask", minimumScaleFactor: 0.6) {
+                            TriageExampleView(kind: .closeoutAsk, replyMinutes: replyMinutes)
                         }
                     }
                     #endif
@@ -88,9 +93,11 @@ struct TriageSettingsView: View {
 
     /// A switch with its example under it, in one row.
     private func toggle<Example: View>(_ key: WritableKeyPath<TriageSwitches, Bool>, _ title: String, _ hint: String, _ symbol: String,
-                                       id: String, @ViewBuilder example: () -> Example) -> some View {
+                                       id: String, minimumScaleFactor: CGFloat = 1, @ViewBuilder example: () -> Example) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             switchRow(key, title, hint, symbol, id: id)
+                // A long setting's name stays on one line, shrinking only as much as its row needs.
+                .minimumScaleFactor(minimumScaleFactor)
             example()
         }
     }

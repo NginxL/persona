@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   customModel, defaultDetail, defaultLabel, effortChoices, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, modelDetail, modelName, modelRows,
-  pickerLauncher, machineLaunchers, oneOff, providerModels, startPicks, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom, type AgentModel, type LauncherModels,
+  pickerLauncher, machineLaunchers, providerModels, startPicks, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom, type AgentModel, type LauncherModels,
 } from "./launcher-models";
 
 const all = ["low", "medium", "high", "xhigh", "max"];
@@ -201,7 +201,6 @@ describe("启动器的默认值 (#2455)", () => {
     expect(defaultLabel({ provider: "kcc", model: "" })).toBe("默认：kcc");
     expect(defaultLabel(null, "claude")).toBe("默认：claude");
     expect(defaultLabel(undefined)).toBe("默认");
-    expect(oneOff()).toBe("仅这一次");
   });
   it("titles the default's provider by its display name (#5029)", () => {
     const names = [{ name: "relay-example-com", display_name: "我的中转 站" }, { name: "kcc" }];

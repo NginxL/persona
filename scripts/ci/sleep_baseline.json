@@ -157,7 +157,6 @@
   "server/internal/hub/completion_delivery_test.go": 1,
   "server/internal/hub/echo_test.go": 3,
   "server/internal/hub/fleet_mirror_test.go": 1,
-  "server/internal/hub/fswatch_test.go": 3,
   "server/internal/hub/heartbeat_clock_test.go": 13,
   "server/internal/hub/herdrclient_test.go": 5,
   "server/internal/hub/hub_test.go": 1,

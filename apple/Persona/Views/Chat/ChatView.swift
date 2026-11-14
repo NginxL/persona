@@ -10,6 +10,7 @@ import UIKit
 #if DEBUG
 import notify
 #endif
+import PersonaWire
 
 enum ChatStyle {
     /// Develop: every step visible, tab bar hidden.
@@ -1006,6 +1007,9 @@ struct ChatView: View {
         // Frozen: the items up to the snapshot (they are in transcript order); what comes after waits.
         let cut = frozen.map { f in Self.prefixCount(items) { ($0.seq, $0.part) <= (f.seq, f.part) } } ?? items.count
         let feed = style == .assistant ? TasksStore.shared.feed(shownKey.sessionID) : []
+        let kids = model.childRows(shownKey)
+        scratch.childRows = kids
+        let childStamp = kids.map { "\($0.sessionID):\($0.rev ?? 0):\($0.state.rawValue):\($0.updatedAt?.timeIntervalSince1970 ?? 0)" }.joined(separator: "|")
         let key = ChatScratch.LinesKey(store: "\(shownKey.machineID)/\(shownKey.sessionID)", version: frozen == nil ? store.version : cut,
                                        first: items.first?.id, live: frozen == nil ? liveTurnID : frozen?.live, open: openWork,
                                        runs: openRuns, frozen: frozen, feed: ChatLines.feedKey(feed),
@@ -1013,7 +1017,7 @@ struct ChatView: View {
                                        quietAgents: quietSubagents, workflowCalls: workflowCalls,
                                        day: style == .assistant ? Calendar.current.startOfDay(for: .now) : nil,
                                        supervision: openSupervision, active: shownRoundActive, background: foldsBackground,
-                                       closeout: shownCloseout != nil)
+                                       closeout: shownCloseout != nil, children: childStamp)
         if scratch.linesKey == key { return scratch.lines }
         var blocks = store.blocks
         if frozen != nil {
@@ -1021,7 +1025,13 @@ struct ChatView: View {
             scratch.frozenSettled = built.settled
             blocks = built.blocks
         }
-        var lines = lineBuilder.build(Self.debugTrim(blocks), live: key.live, streaming: key.streaming)
+        var builder = lineBuilder
+        var seen = model.childIndex.seen
+        builder.childPlaces = ChildSessions.places(kids, seen: &seen)
+        model.childIndex.seen = seen
+        builder.childSessions = Dictionary(uniqueKeysWithValues: kids.map { ($0.sessionID, $0) })
+        builder.historyComplete = store.loadedOnce && !store.hasMore
+        var lines = builder.build(Self.debugTrim(blocks), live: key.live, streaming: key.streaming)
         #if os(iOS)
         // An Agent's long finished answers as several rows: one row many screens tall stuttered whenever it was on
         // screen (#4970). Persona's own conversation keeps its boxed answers whole.
@@ -1073,6 +1083,7 @@ struct ChatView: View {
         lineBuilder.runID(holding: call, group: group, items: items)
     }
     private func foldsIntoRun(_ call: ToolCall) -> Bool {
+        if call.id.hasPrefix(ChildSessions.callPrefix) { return false } // a child session's card stays its own step
         if SubagentCard.isAgent(call) { return false } // its card is a line of its own
         guard let id = call.use.toolUseID else { return true }
         if WorkflowCallCard.staysOut(call, listed: workflowCalls) { return false } // its run's card (#3436)
@@ -1471,8 +1482,11 @@ struct ChatView: View {
         case .row(let r):
             if r.errorCandidate != nil, let card = turnErrorCard(line, raw: r.errorCandidate?.text) { card } else { rowView(r, isLatest: false, live: true, showsSource: line.showsSource, hidesPrompt: line.hidesPrompt) }
         case .answerPart(let item, let part, let index, let count):
-            AssistantTextPart(item: item, part: part, index: index, count: count).equatable()
-                .chatMark(index == 0 ? "chat.answer." + item.id : "chat.answer.\(item.id).\(index)")
+            VStack(alignment: .leading, spacing: 0) {
+                AssistantTextPart(item: item, part: part, index: index, count: count).equatable()
+                    .chatMark(index == 0 ? "chat.answer." + item.id : "chat.answer.\(item.id).\(index)")
+                if index == count - 1 { ReplyUsageFooter(item: item) }
+            }
         case .feed(let item): FeedLine(item: item, group: shownKey.group)
         case .quick(let result): QuickResultCard(result: result)
         case .placeMap(let result): PlaceMapCard(result: result)
@@ -1988,6 +2002,15 @@ struct ChatView: View {
         return status.isActive || awaiting.turnID == t.id ? t.id : nil
     }
 
+    /// The live turn's reply, while it is still at work: no cost under it until the turn stops. Waiting on you, the
+    /// reply is in, so the cost shows (#5470).
+    private var hiddenUsageAnswer: String? {
+        guard let id = liveTurnID, session?.state != .needsYou,
+              case .turn(let turn) = store.blocks.last, turn.id == id,
+              case .assistant(let item) = turn.answer else { return nil }
+        return item.id
+    }
+
     /// Messages sent from here that the transcript does not have yet, minus those Claude holds in its queue (the queue
     /// strip shows them).
     private var shownPending: [PendingMessage] { pendingPlacement.chat }
@@ -2196,9 +2219,25 @@ struct ChatView: View {
             switchTo(next)
         }
         .environment(\.chatLayout, layout)
+        .modifier(ReplyUsageLoader(
+            items: store.items,
+            lines: currentLines(),
+            persona: style == .assistant,
+            hideAnswerID: hiddenUsageAnswer,
+            canAsk: model.api(shownKey.group) != nil,
+            catalog: { ids in
+                guard let api = model.api(shownKey.group) else { throw CancellationError() }
+                return try await api.catalogPrices(ids)
+            }))
         .environment(\.openSubagent, actions.openSubagent)
         .environment(\.openPlan, actions.openPlan)
         .environment(\.subagentsByCall, subagentsByCall)
+        .environment(\.childSessionRows, Dictionary(uniqueKeysWithValues: scratch.childRows.map { ($0.sessionID, $0) }))
+        .environment(\.showsChildHarness, style != .assistant)
+        .task(id: model.revealChild) {
+            guard let sid = model.revealChild?.sessionID, let group = ChildSessionLines.group(of: sid, in: currentLines()) else { return }
+            openWork.insert(group)
+        }
         .environment(\.workflowChat, key)
         .environment(\.chatActions, actions)
         .environment(\.subagentParent, key)
@@ -3284,8 +3323,8 @@ struct ChatView: View {
         withAnimation(.smooth(duration: 0.35)) { chrome.collapse = 0 }
     }
 
-    /// The chrome folded away: back, and the session's name as the open header says it — tap it for everything again,
-    /// where it runs included.
+    /// The chrome folded away: back, the session's name as the open header says it — tap it for everything again,
+    /// where it runs included — and the open header's ⋯.
     private var compactChrome: some View {
         HStack(spacing: 0) {
             Button { back() } label: {
@@ -3322,11 +3361,15 @@ struct ChatView: View {
             .accessibilityIdentifier("chat.compactTitle")
             .titleSaysLink() // the slim bar says Connecting… too: the shell's floating pill does not say it again
             Spacer(minLength: 0)
-            // Nothing on the right (#3719, the user's call): a spot as wide as ‹, so the capsule sits in the middle. The
-            // goal, the loop and background work and the mode are in the open header, a tap away.
-            Color.clear
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.wellM)
-                .accessibilityHidden(true)
+            // The open header's ⋯ and its menu (#7962, the user's call; #3719 had left this spot empty). As wide as ‹,
+            // so the capsule stays in the middle and no narrower; the open ⋯'s square to hit. Drawn bare like ‹: the
+            // bar is 40 pt, no room for the open header's 44 pt glass. The goal, the loop and background work and the
+            // mode are in the open header, a tap away.
+            moreMenu {
+                ThemedIcon(Theme.Icon.more).font(Theme.Font.secondaryStrong).dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                    .contentShape(.rect)
+            }
         }
         .padding(.horizontal, Theme.Space.xs)
         .frame(height: ChatChrome.compactHeight)
@@ -3389,6 +3432,15 @@ struct ChatView: View {
             .presentationSizing(.page) // the iPad's too: room for the diffs, not the small form
     }
     #endif
+
+    /// ⋯ and its menu, in the open header and in the folded slim bar (#7962): one menu, so an item added to
+    /// `moreMenuItems` shows in both. `label` is how each draws the button (the open one in glass, the slim bar's bare).
+    private func moreMenu<Look: View>(@ViewBuilder label: () -> Look) -> some View {
+        Menu(content: { moreMenuItems }, label: label)
+            .labelOnlyMenu()
+            .accessibilityLabel("More")
+            .accessibilityIdentifier("chat.more")
+    }
 
     @ViewBuilder private var moreMenuItems: some View {
             if style == .dev, let host { hostedMenuItems(host) }
@@ -3666,13 +3718,11 @@ struct ChatView: View {
                         if host != nil { hostedMarks }
                         // Files (a swipe to the left now quotes a message, #1058), the terminal (it comes up from the
                         // bottom, TerminalCover) and Git are in ···: one button there (#1205).
-                        Menu { moreMenuItems } label: {
+                        moreMenu {
                             ThemedIcon(Theme.Icon.more).font(Theme.Font.heading).dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
                                 .contentShape(.circle)
                         }
-                        .labelOnlyMenu()
                         .surface(interactive: true, in: .circle)
-                        .accessibilityLabel("More")
                     }
                 }
                 .padding(.horizontal, Theme.Space.l)
@@ -4764,7 +4814,11 @@ struct ChatView: View {
     @ViewBuilder private func rowView(_ row: ChatRow, isLatest: Bool, live: Bool, showsSource: Bool = true, hidesPrompt: Bool = false) -> some View {
         switch row {
         case .user(let i): userRow(i, showsSource: showsSource, hidesPrompt: hidesPrompt).chatMark("chat.user." + i.id)
-        case .assistant(let i): AssistantText(item: i).equatable().chatMark("chat.answer." + i.id)
+        case .assistant(let i):
+            VStack(alignment: .leading, spacing: 0) {
+                AssistantText(item: i).equatable().chatMark("chat.answer." + i.id)
+                ReplyUsageFooter(item: i)
+            }
         case .thinking(let i):
             if style == .dev && live { ThinkingRow(item: i) }
         case .tools(let steps):
@@ -6291,6 +6345,7 @@ struct QueueStrip: View {
     @State private var relayedExpanded = false
     /// One row's height with its spacing, as drawn (it follows the text size and the rows' line counts).
     @State private var rowHeight: CGFloat = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
     private static let visibleRows: CGFloat = 3
 
     var body: some View {
@@ -6305,11 +6360,24 @@ struct QueueStrip: View {
             .padding(.top, Theme.Space.sm)
         } label: {
             Group {
-                HStack(spacing: Theme.Space.sm) {
-                    tray
-                    title.lineLimit(1)
-                    Spacer(minLength: 0)
-                    sendNowButton
+                if typeSize >= Theme.interfaceLargestTypeSize {
+                    // At the interface's largest size, where the accessibility sizes land too, Send Now (which keeps its
+                    // width) left the title a few characters and took the tap that opens the strip (#4846, #7730):
+                    // unless both fit on one line, the title wraps and Send Now has the line under it. Smaller sizes
+                    // keep the one line, the title cut short where it must be.
+                    ViewThatFits(in: .horizontal) {
+                        oneLine
+                        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
+                                tray
+                                title.multilineTextAlignment(.leading) // the label centers wrapped lines
+                            }
+                            sendNowButton
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    oneLine
                 }
             }
             .font(Theme.Font.labelStrong)
@@ -6334,6 +6402,16 @@ struct QueueStrip: View {
 
     private var tray: some View { ThemedIcon("tray.and.arrow.down").accessibilityHidden(true) }
     private var title: Text { Text("\(total) queued · \(agent) will handle them in order [Queue Strip]") }
+
+    /// The tray, the title on one line and Send Now at the end.
+    private var oneLine: some View {
+        HStack(spacing: Theme.Space.sm) {
+            tray
+            title.lineLimit(1)
+            Spacer(minLength: 0)
+            sendNowButton
+        }
+    }
 
     /// Send Now when a Claude in a terminal has the user's own messages queued, or the spinner while the queue is being
     /// handed over.
@@ -7026,6 +7104,8 @@ struct WorkStepView: View, Equatable {
         #endif
         Group {
             switch item {
+            case .step(.call(let c)) where c.id.hasPrefix(ChildSessions.callPrefix):
+                ChildSessionCard(sessionID: String(c.id.dropFirst(ChildSessions.callPrefix.count)))
             case .step(.call(let c)) where SubagentCard.isAgent(c):
                 SubagentCard(call: c)
             case .step(.call(let c)) where WorkflowCallCard.isWorkflow(c):
@@ -7752,6 +7832,8 @@ final class ChatScratch {
         var background = false
         /// The header shows the session's closeout card: its raw block is left out of the last reply.
         var closeout = false
+        /// Folded children placed in this chat. A change of row rebuilds the lines.
+        var children = ""
     }
     /// What was sent from this chat lately: its transcript copy arriving brings you to the newest, others do not.
     var sentHere: [(id: UUID, text: String)] = []
@@ -7793,6 +7875,8 @@ final class ChatScratch {
     var lastActivity = Date.now
     var linesKey: LinesKey?
     var lines: [ChatLine] = []
+    /// Folded children of the open parent, read once while the lines are built and handed to the cards.
+    var childRows: [Session] = []
     /// Where each open work line's header is on screen (global midY), and the list's frame: folding or opening from
     /// the header keeps the header under the finger.
     var workHeadY: [String: CGFloat] = [:]

@@ -203,6 +203,7 @@ extension SlotRow {
                     needsYouChip
                 }
                 if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                RunningChildrenCaption(session: session)
                 if hasPlaceLine { placeLine().padding(.top, Theme.Space.xxs) }
             }
         }
@@ -238,6 +239,7 @@ extension SlotRow {
                     sourceLabel
                 }
                 if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                RunningChildrenCaption(session: session)
             }
         }
         .padding(.vertical, Theme.Space.xxs)
@@ -265,6 +267,7 @@ extension SlotRow {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+            RunningChildrenCaption(session: session)
             HStack(spacing: Theme.Space.s) {
                 if dot, let word {
                     Text(word).font(Theme.Font.captionMedium).foregroundStyle(tone.text).lineLimit(1).fixedSize()
