@@ -163,15 +163,32 @@ final class ChatHeaderPresentationTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Opens the multi-agent weather fixture from the list, as a user would, with its header open: its space has several
+    /// tabs. Not the list's first row: that is an unread agent alone in its space, which lands with the header folded and
+    /// has no tabs (#8003). Searched for when it is not on screen, as `ReturnToChatTests` does.
     @MainActor private func openChat() {
         app = XCUIApplication()
         app.launchArguments = ["-demo.on", "YES", "-app.tab", "chats", "-tab", "dev",
                                "-dev.openChat", "", "-openAgentsFresh", "YES", "-holdChromeOpen", "NO"]
         app.launchPinned()
-        let row = app.buttons.matching(identifier: "agents.row").firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "no agent in the list")
+        XCTAssertTrue(app.buttons.matching(identifier: "agents.row").firstMatch.waitForExistence(timeout: 15), "no agent in the list")
         sleep(1)
+        let row = app.buttons.matching(NSPredicate(format: "identifier == 'agents.row' AND label CONTAINS %@",
+                                                  "给天气 App 加主屏幕小组件")).firstMatch // i18n-ignore: bundled synthetic fixture title
+        if !row.exists || !row.isHittable {
+            app.revealAgentsSearch()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 5), "the Agents search did not open")
+            search.tap()
+            search.typeText("天气") // i18n-ignore: bundled synthetic fixture title
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "the multi-agent fixture is not in the list")
         row.tap()
+        // Landed folded (at its newest end): the slim bar's title opens the header, as a user would. A second is enough
+        // to tell; longer would eat into the 3 s the open header waits before folding itself.
+        sleep(1)
+        let compact = app.buttons["chat.compactTitle"].firstMatch
+        if compact.exists, compact.isHittable { compact.tap() }
     }
 
     @MainActor func testTheTabsSheetStays() {
@@ -179,7 +196,8 @@ final class ChatHeaderPresentationTests: XCTestCase {
         let tabs = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "同一空间的")).firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 5), "no ⋯ for the space's tabs")
         tabs.tap()
-        let sheet = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "个标签页")).firstMatch
+        // Its title, "6 个 Agent" (it said "N 个标签页" before b81594a005, 2026-11-05).
+        let sheet = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ 个 Agent")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "the tabs sheet did not open")
         sleep(6) // past the 3 s the header waits before folding
         XCTAssertTrue(sheet.exists, "the tabs sheet closed by itself")
