@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backgroundWork, taskBackgroundWork, waitingOnSubagents } from "./background-work";
+import { backgroundTurn, backgroundWork, taskBackgroundWork, waitingOnSubagents } from "./background-work";
 import type { Session } from "./types";
 import type { Todo } from "./todos";
 
@@ -43,5 +43,47 @@ describe("waitingOnSubagents (#5030)", () => {
     expect(waitingOnSubagents({ ...session, background_working: true, subagents: [{ ...sub, running: false }] })).toBe(false);
     expect(waitingOnSubagents({ ...session, background_working: true, subagents: [sub], workflows: [flow] })).toBe(false);
     expect(waitingOnSubagents(undefined)).toBe(false);
+  });
+});
+
+describe("backgroundTurn (#7341)", () => {
+  const quiet = { streaming: false, outgoing: false, awaiting: false };
+  const shell = { id: "build", kind: "shell", description: "Build release", command: "make release\nmake sign", started_at: "2026-11-13T01:02:03Z" };
+  const sub = { id: "a", session_id: "worker@a", running: true, background: true };
+
+  it("a real background command with the turn over returns the command kind and its own line", () => {
+    const s = { ...session, background_working: true, state_since: "2026-11-13T01:00:00Z",
+      background: [shell, { id: "watch", kind: "monitor", command: "watch logs", started_at: "2026-11-13T01:03:00Z" }] };
+    expect(backgroundTurn(s, undefined, quiet)).toEqual({ kind: "command", line: { what: "Build release", more: 1, since: shell.started_at } });
+  });
+
+  it("the flag alone still returns the command kind with an empty line for an older hub or runtime", () => {
+    expect(backgroundTurn({ ...session, background_working: true }, undefined, quiet)).toEqual({ kind: "command", line: { what: "", more: 0 } });
+  });
+
+  it("agent or workflow-only background payloads do not become a shell-command fallback", () => {
+    for (const kind of ["agent", "workflow"]) {
+      expect(backgroundTurn({ ...session, background_working: true, background: [{ id: kind, kind }] }, undefined, quiet)).toBeNull();
+    }
+  });
+
+  it("orders workflow, subagents, wait, then command without changing the existing wait line", () => {
+    const base = { ...session, background_working: true, background_waiting: true, state_since: "2026-11-13T01:01:00Z", background: [shell], subagents: [sub] };
+    expect(backgroundTurn({ ...base, workflows: [flow] }, [sub], quiet)).toEqual({ kind: "workflow" });
+    expect(backgroundTurn(base, [sub], quiet)).toEqual({ kind: "subtasks" });
+    expect(backgroundTurn(base, [], quiet)).toEqual({ kind: "waiting", line: { what: "Build release", more: 0, since: base.state_since } });
+  });
+
+  it("streaming, an outgoing message and awaiting each make it a live turn again", () => {
+    const s = { ...session, background_working: true, background: [shell] };
+    expect(backgroundTurn(s, undefined, { ...quiet, streaming: true })).toBeNull();
+    expect(backgroundTurn(s, undefined, { ...quiet, outgoing: true })).toBeNull();
+    expect(backgroundTurn(s, undefined, { ...quiet, awaiting: true })).toBeNull();
+  });
+
+  it("a foreground turn with a listed command, false background_working and an older hub stay live", () => {
+    expect(backgroundTurn({ ...session, background: [shell] }, undefined, quiet)).toBeNull();
+    expect(backgroundTurn({ ...session, background_working: false, background: [shell] }, undefined, quiet)).toBeNull();
+    expect(backgroundTurn(undefined, undefined, quiet)).toBeNull();
   });
 });

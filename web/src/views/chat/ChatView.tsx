@@ -4,7 +4,7 @@ import { LinkManager, useShownManager } from "../../lib/manager-choice";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, fullItem, pastHub, sessionPath } from "../../lib/api";
-import { attentionReason, backgroundWaiting, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
+import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
 import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type SessionView } from "../../lib/router";
 import { canShowTerminal, composerSlot, otherView, useSessionView, viewOnlyRow } from "../../lib/session-view";
@@ -79,8 +79,8 @@ import { RunningStatusBar } from "./RunningStatusBar";
 import { latestPlan, usePlanClosed, usePlanOutOfView } from "./latest-plan";
 import { ChatContext, LiveClockContext, type ChatContextValue } from "./chat-context";
 import { addFreshWords, resetFreshWords } from "./fresh-words";
-import { backgroundCount, backgroundLine, backgroundWaitLine, waitingOnWorkflow, workflowAgentFor, workflowCalls, workflowCallsKey } from "../../lib/workflows";
-import { waitingOnSubagents } from "../../lib/background-work";
+import { backgroundCount, backgroundLine, backgroundWaitLine, workflowAgentFor, workflowCalls, workflowCallsKey } from "../../lib/workflows";
+import { backgroundTurn, waitingOnSubagents } from "../../lib/background-work";
 import { doneSubagentLink, useSubagentLink } from "../../lib/subagent-link";
 import { childCall, childCardKey, childOfCall, childPlaces, exchangeStarts, placeChildren, type ChildPlace } from "../../lib/child-cards";
 import { useChildSessions } from "../../lib/use-child-sessions";
@@ -1183,14 +1183,13 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, awaiting, session, view, embedded, inPanel]);
 
-  // The hub says its turn is over and a workflow it launched keeps it working (#3434): the exchange is drawn finished
-  // (its work folded, the run's card inside it), and the running bar says the workflow, timed from its start, instead
-  // of the turn's "Working…" clock going on. Other background work (a command, a Monitor, a subagent) leaves the turn as
-  // it was. A message of yours on its way, or one it is answering, is a turn again.
-  // The same for an agent that only waits on background commands (#6045): its turn is drawn finished.
-  // The same for a background subagent still running after the turn ended (#5030, cindy's background subtasks).
-  const subtasks = waitingOnSubagents(session, subagents);
-  const backgroundOnly = (waitingOnWorkflow(session) || Boolean(session && backgroundWaiting(session)) || subtasks) && !tr.streaming && !outgoing && !awaiting;
+  // Once the hub says the turn is over, four kinds of background work draw the last exchange finished (its work folded,
+  // any run's card inside it) instead of keeping the turn's "Working…" clock going: first a workflow (#3434), then
+  // background subagents (#5030), commands that only wait (#6045), and finally a real background command or Monitor
+  // (#7341). A message of yours on its way, streaming, or an answer being written is a turn again.
+  const streaming = Boolean(tr.streaming);
+  const backgroundState = backgroundTurn(session, subagents, { streaming, outgoing: outgoing > 0, awaiting });
+  const backgroundOnly = backgroundState !== null;
   const lastLive = working && !backgroundOnly && !tr.loading;
   // the main conversation's readiness: the card for what is missing, and the send button saying it (4.4)
   const gate = useReadinessGate(isMain);
@@ -1744,19 +1743,23 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   ) : null;
   // Persona's own chats too (#3654), and from the moment the message is in, not from the hub's next push
   const background = useMemo(() => backgroundLine(session), [session]);
-  const wait = useMemo(() => (outgoing || awaiting ? null : backgroundWaitLine(session)), [outgoing, awaiting, session]);
+  // Streaming makes the turn live again, but an Agent's existing wait / subagent bar stays as it was while the answer
+  // streams. Only the new command line is withheld there; in a quiet turn the four-kind order decides the bar.
+  const wait = streaming && !outgoing && !awaiting ? backgroundWaitLine(session) : backgroundState?.kind === "waiting" ? backgroundState.line : null;
+  const subtasks = streaming ? waitingOnSubagents(session, subagents) && !outgoing && !awaiting : backgroundState?.kind === "subtasks";
+  const command = backgroundState?.kind === "command" ? backgroundState.line : null;
   // ✓ Done only for a turn that finished: one waiting on you, stopped or cut off by an error keeps its last words
   const done = turnDone(state, session, lastLine, tr.items);
   // In a Persona conversation the message stream already carries the turn's state for its whole life — the sending /
   // preparing feedback while the message is on its way, then the live work line ("Working…", spinner and clock) once the
   // hub accepts it — so the dock never repeats the foreground turn (#6230). The dock bar stays only for work that outlives
-  // the turn (a background workflow, background wait or subagent: `backgroundOnly`, where the stream shows only quiet fold
-  // rows) and, unchanged, for Agent chats, whose dock keeps the full cindy status bar. Gating on the foreground/background
+  // the turn (a background workflow, subagent, wait or working command: `backgroundOnly`, where the stream shows only
+  // quiet fold rows) and, unchanged, for Agent chats, whose dock keeps the full cindy status bar. Gating on the foreground/background
   // phase (not on the live line being mounted) keeps the bar out even while a transcript loads or a state push is in flight.
   // A Persona chat on either route — the Persona tab's prop, or on the generic /s route the session's own assistant
   // flag — so the dock never repeats its foreground turn (#6230). Background work keeps the bar either way.
   const dockBarShown = !(assistant || session?.assistant) || backgroundOnly;
-  const running = session && dockBarShown ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={background} wait={wait} subtasks={subtasks && !outgoing && !awaiting} /> : null;
+  const running = session && dockBarShown ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={!backgroundState || backgroundState.kind === "workflow" ? background : null} wait={wait} subtasks={subtasks} command={command} /> : null;
   // at the top of the composer's card, as cindy's pending queue (#5327); a phone on its side keeps it to one line beside
   // the run's status. The same element while nothing in it changes: the composer is memoized.
   const hasQueue = queued.length > 0;

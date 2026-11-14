@@ -7,14 +7,15 @@
 // whose card shows the speed history, or the tokens written so far ("↓ 1.2k tok"); never both. It breathes once each
 // time its words or count move (output, not just time passing); when the turn finishes it says ✓ Done for a second (a
 // turn waiting on you, stopped or cut off by an error keeps its last words), then fades out. Without a status line (another agent, an older hub) it counts from when the turn started.
-// Once the turn is over and a workflow keeps the agent working (#3434, `background_working`), it says what runs:
-// "Background workflow · Verify · 169/185+", timed from the workflow's start (the turn's own time read as if the agent
-// were still at it). The count stays whole on a narrow screen: the words before it give way first. An agent whose
-// background commands only wait (#6045, `background_waiting`) gets a still line instead: what it waits on (the header
-// says the state, #3956), timed from when it started waiting, with no breath and no tokens. A subagent still running in
-// the background after the turn (#5030, cindy's background subtasks) gets cindy's Activity mark and "Background subtasks
-// running, still consuming model usage…" with no time and no tokens (the turn's would be left over); cindy's "Stop all"
-// waits for a node that can stop a subagent (#5044). With the hub out of reach the bar says so in front of the last
+// Once the turn is over, background work takes over in this order: workflow, subagents, waiting commands, then working
+// commands. A workflow (#3434, `background_working`) says "Background workflow · Verify · 169/185+", timed from its start
+// (not the turn's leftover clock); the count stays whole on a narrow screen. A subagent still running (#5030, cindy's
+// background subtasks) gets cindy's Activity mark and "Background subtasks running, still consuming model usage…" with
+// no time and no tokens; cindy's "Stop all" waits for a node that can stop one (#5044). Commands that only wait (#6045,
+// `background_waiting`) get a still, lighter line, timed from when the wait began, with no breath and no tokens. A real
+// background command or Monitor (#7341) instead gets the working treatment: a terminal mark and "Background task", then
+// the command's description or one-line command and "N more", timed only from that command's own start, with no time
+// when it has none and never the turn's tokens or speed. With the hub out of reach the bar says so in front of the last
 // state it knew, its clock stands still (nothing new can have arrived) and it shows no speed.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useSessionLive } from "../../lib/live";
@@ -117,6 +118,8 @@ export interface RunningStatusProps {
   step?: RunStep;
   background?: BackgroundLine | null;
   subtasks?: boolean;
+  /** A real background command after the turn, with its own optional start (#7341). */
+  command?: WaitLine | null;
 }
 
 export function RunningStatusBar({ mid, sid, wait, ...props }: RunningStatusProps & { mid: string; sid: string; wait?: WaitLine | null }) {
@@ -175,39 +178,62 @@ function BackgroundWords({ line }: { line: BackgroundLine }) {
   );
 }
 
+function BackgroundCommandWords({ line }: { line: WaitLine }) {
+  return (
+    <span className="flex min-w-0 items-center whitespace-pre" data-running-verb>
+      <span className="shrink-0">{t("chat-runningstatusbar.background_task")}</span>
+      {line.what && (
+        <>
+          <span className="shrink-0" data-running-command-separator>{` · `}</span>
+          <span className="min-w-0 truncate">{line.what}</span>
+        </>
+      )}
+      {line.more > 0 && <span className="shrink-0">{` · ${t("chat-runningstatusbar.more_waits", { count: line.more })}`}</span>}
+    </span>
+  );
+}
+
 type Phase = "on" | "linger" | "fading" | "off";
 
 /** The bar for a given status line (RunningStatusBar subscribes; tests render this). `speedKey`: the conversation its
  *  speed history is kept for while the page is open. */
-export function RunningStatusView({ live, working, done: finished, startedAt, clock = true, plain, step, background, subtasks, offline, speedKey = "" }: RunningStatusProps & { live: SessionLive | null; offline?: boolean; speedKey?: string }) {
+export function RunningStatusView({ live, working, done: finished, startedAt, clock = true, plain, step, background, subtasks, command, offline, speedKey = "" }: RunningStatusProps & { live: SessionLive | null; offline?: boolean; speedKey?: string }) {
   const phase = usePhase(working);
   const [pinned, setPinned] = useState(false);
   // after the turn: what it last said, while it lingers and fades. Its status line goes a moment before the turn ends,
   // so the last one of this turn stays for that (not one from a turn before)
-  const last = useRef({ live, background, clock, subtasks, step });
+  const last = useRef({ live, background, clock, subtasks, command, step });
   const wasWorking = useRef(working);
-  if (working) last.current = { live: live ?? (wasWorking.current ? last.current.live : null), background, clock, subtasks, step };
+  if (working) last.current = { live: live ?? (wasWorking.current ? last.current.live : null), background, clock, subtasks, command, step };
   wasWorking.current = working;
-  const kept = working ? { live, background, clock, subtasks, step } : last.current;
+  const kept = working ? { live, background, clock, subtasks, command, step } : last.current;
   const shown = kept.live;
   const bg = kept.background;
   const behind = inBackground(bg, shown, kept.clock, kept.step);
   // the turn is over and background subagents run on: neither the turn's time nor its tokens say anything of them
   const usage = Boolean(kept.subtasks);
+  // a real background command has its own optional clock; there is no turn-clock or mount-time fallback for it
+  const task = kept.command;
+  const commandStart = task?.since ? Date.parse(task.since) : NaN;
+  // The hub can serialize Go's zero time as 0001-01-01: that is an absent start, not a gigantic elapsed time.
+  const commandTimed = Number.isFinite(commandStart) && commandStart > 0;
   // the turn's own work, measured: an Agent's, not the Persona conversation's, not background work's
-  const own = !plain && !behind && !usage;
-  const now = useNow(1000, phase === "on" && !offline && !usage);
+  const own = !plain && !behind && !usage && !task;
+  const now = useNow(1000, phase === "on" && !offline && !usage && (!task || commandTimed));
   // from the run's start; a run that does not say when it started, from the turn's (not from when the bar appeared).
   // After the turn it stays as it last was (cindy): the turn's start and its status line are gone by then.
-  const counted = useElapsed(behind ? null : shown, behind ? (bg.since ?? startedAt) : startedAt, now);
-  const lastElapsed = useRef(counted);
-  if (working) lastElapsed.current = counted;
-  const elapsed = working ? counted : lastElapsed.current;
+  const counted = useElapsed(behind || task ? null : shown, behind ? (bg.since ?? startedAt) : task ? undefined : startedAt, now);
+  const commandCounted = task && commandTimed ? Math.max(0, Math.floor((now - commandStart) / 1000)) : 0;
+  const visibleCounted = task ? commandCounted : counted;
+  const lastElapsed = useRef(visibleCounted);
+  if (working) lastElapsed.current = visibleCounted;
+  const elapsed = working ? visibleCounted : lastElapsed.current;
   const tokens = useCountUp(shown?.tokens_down ?? 0);
-  const done = !working && Boolean(finished) && !behind && !usage;
+  const done = !working && Boolean(finished) && !behind && !usage && !task;
   const state = statusWords(shown, kept.step, plain);
-  const words = behind ? "" : usage ? t("chat-runningstatusbar.background_subtasks") : done ? t("chat-runningstatusbar.done") : state.text;
-  const compacting = !behind && !usage && !done && state.compacting;
+  const commandWords = task ? [t("chat-runningstatusbar.background_task"), task.what, task.more > 0 ? t("chat-runningstatusbar.more_waits", { count: task.more }) : ""].filter(Boolean).join(" · ") : "";
+  const words = behind ? "" : usage ? t("chat-runningstatusbar.background_subtasks") : task ? commandWords : done ? t("chat-runningstatusbar.done") : state.text;
+  const compacting = !behind && !usage && !task && !done && state.compacting;
   const breath = useBreath(useMoves(`${words}\n${shown?.tokens_down ?? ""}`), phase === "on");
   const onPinned = useCallback((p: boolean) => setPinned(p), []);
   const SpeedView = useSpeed(working && own);
@@ -216,7 +242,7 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
   const hidden = phase === "off";
   // each side fades on its own: a pinned card's button stays as it is (cindy)
   const fade: CSSProperties | undefined = hidden ? undefined : { opacity: phase === "fading" ? 0 : 1, transition: `opacity ${FADE_OUT_MS}ms ease-out` };
-  const icon: IconName = behind ? "workflow" : usage ? "activity" : done ? "check" : compacting ? "layers" : "sparkles";
+  const icon: IconName = behind ? "workflow" : usage ? "activity" : task ? "terminal" : done ? "check" : compacting ? "layers" : "sparkles";
   const count = own && shown?.tokens_down ? (
     <>
       <Icon name="arrowDown" size={13} className="shrink-0" />
@@ -227,7 +253,7 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
   return (
     <div
       data-running-status={phase}
-      data-running-background={behind ? "workflow" : usage ? "subtasks" : undefined}
+      data-running-background={behind ? "workflow" : usage ? "subtasks" : task ? "command" : undefined}
       className="flex select-none items-center justify-between gap-3 px-2 py-1.5 text-[13px] font-medium"
     >
       <div
@@ -240,10 +266,10 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
       >
         <Icon name={icon} size={14} stroke={done ? 2.5 : undefined} className={`shrink-0 ${done ? "" : "-translate-y-px"}`} />
         {offline && <Disconnected />}
-        {behind ? <BackgroundWords line={bg} /> : <span className="truncate" data-running-verb>{words}</span>}
+        {behind ? <BackgroundWords line={bg} /> : task ? <BackgroundCommandWords line={task} /> : <span className="truncate" data-running-verb>{words}</span>}
       </div>
       <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-ink-3 tabular-nums" style={pinned ? undefined : fade}>
-        {usage ? null : own && SpeedView ? (
+        {usage || (task && !commandTimed) ? null : own && SpeedView ? (
           <SpeedView speedKey={speedKey} turn={startedAt} live={shown} working={working} paused={kept.step?.kind === "tool"} offline={offline} now={now} elapsed={elapsedText(elapsed)} time={time} count={count} onPinned={onPinned} />
         ) : (
           <>

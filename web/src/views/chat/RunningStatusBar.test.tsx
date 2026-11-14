@@ -1,11 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunStep } from "../../lib/run-step";
+import { Icon } from "../../ui/icons";
+import { FADE_OUT_MS, LINGER_MS } from "../../ui/motion";
 import { RunningStatusView, statusWords, WaitingView } from "./RunningStatusBar";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => vi.useRealTimers());
 
 const render = (props: Parameters<typeof RunningStatusView>[0]) => renderToStaticMarkup(<RunningStatusView {...props} />);
+const statusIcon = (name: "terminal" | "sparkles") => renderToStaticMarkup(<Icon name={name} size={14} className="shrink-0 -translate-y-px" />);
 const tool = (name: string, spawning?: boolean): RunStep => ({ kind: "tool", tool: name, ...(spawning ? { spawning } : {}) });
 const agent = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step).text;
 const plain = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step, true).text;
@@ -98,6 +106,68 @@ describe("RunningStatusView", () => {
     expect(html).not.toContain("data-running-elapsed");
     expect(html).not.toContain("tok");
     expect(html).not.toContain("全部停止");
+  });
+
+  it("a working background command uses its own start, with the label, details and N more, never the turn's metrics", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T10:04:05Z"));
+    const html = render({ live: { verb: "Frosting", elapsed_s: 975, tokens_down: 22_800 }, working: true, startedAt: "2026-11-05T10:00:00Z", command: { what: "Build release", more: 2, since: "2026-11-05T10:01:00Z" } });
+    expect(html).toContain('data-running-background="command"');
+    expect(html).toContain("后台任务");
+    expect(html).toContain("Build release");
+    expect(html).toContain('data-running-command-separator="true"> · </span>');
+    expect(html).toContain("还有 2 个");
+    expect(html).toMatch(/data-running-elapsed[^>]*>3m 5s</);
+    expect(html).not.toContain("16m 15s");
+    expect(html).not.toContain("4m 5s");
+    expect(html).not.toContain("tok");
+    expect(html).not.toContain("data-running-speed");
+    expect(html).toContain("text-status-accent");
+    expect(html).not.toContain("text-status-waiting");
+    expect(html).toContain(statusIcon("terminal"));
+    expect(html).not.toContain(statusIcon("sparkles"));
+  });
+
+  it("a finished background command keeps its terminal line while it lingers, then fades without becoming Done", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T10:04:05Z"));
+    const box = document.createElement("div");
+    document.body.append(box);
+    const root = createRoot(box);
+    const command = { what: "Build release", more: 0, since: "2026-11-05T10:01:00Z" };
+    const bar = (working: boolean, done = false) => <RunningStatusView live={working ? { verb: "Frosting", elapsed_s: 975, tokens_down: 22_800 } : null} working={working} done={done} startedAt="2026-11-05T10:00:00Z" command={working ? command : null} />;
+    try {
+      act(() => root.render(bar(true)));
+      act(() => root.render(bar(false, true)));
+      expect(box.querySelector('[data-running-status="linger"]')).not.toBeNull();
+      expect(box.querySelector('[data-running-background="command"]')).not.toBeNull();
+      expect(box.textContent).toContain("后台任务 · Build release");
+      expect(box.querySelector("[data-running-done]")).toBeNull();
+      expect(box.querySelector(".status-done")).toBeNull();
+      expect(box.querySelector("svg")?.getAttribute("stroke-width")).toBe("1.9");
+      expect(box.querySelector("svg")?.outerHTML).toBe(statusIcon("terminal"));
+      expect(box.innerHTML).not.toContain(statusIcon("sparkles"));
+      act(() => { vi.advanceTimersByTime(LINGER_MS); });
+      expect(box.querySelector('[data-running-status="fading"]')).not.toBeNull();
+      expect(box.textContent).toContain("后台任务 · Build release");
+      expect(box.querySelector("[data-running-done]")).toBeNull();
+      act(() => { vi.advanceTimersByTime(FADE_OUT_MS); });
+      expect(box.querySelector("[data-running-status]")).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      box.remove();
+    }
+  });
+
+  it("a background command with no listed detail, no start or an invalid start has no turn clock or tokens", () => {
+    for (const command of [{ what: "", more: 0 }, { what: "Build release", more: 0, since: "not a timestamp" }, { what: "Build release", more: 0, since: "0001-01-01T00:00:00Z" }]) {
+      const html = render({ live: { verb: "Frosting", elapsed_s: 975, tokens_down: 22_800 }, working: true, startedAt: "2026-11-05T10:00:00Z", command });
+      expect(html).toContain('data-running-background="command"');
+      expect(html).toContain("后台任务");
+      expect(html).not.toContain("data-running-elapsed");
+      expect(html).not.toContain("tok");
+      expect(html).not.toContain("Frosting");
+    }
   });
 
   it("a background workflow says so first, before background subagents", () => {
