@@ -121,9 +121,21 @@ and each merge moved what it compresses against. For the same reason a lazy spli
 alone: the sections' view is about 1.5 KB minified and compressed on its own, and moving it to its own chunk took 407 B
 off. Measure the branch and `main` at the same commit, after the last merge, and write that pair beside
 `FIRST_SCREEN_BUDGET`; never carry a delta over from an earlier base, and never estimate a split from a module's own
-size. A build under its budget prints no numbers: build a scratch checkout with the constant set to 1 B, and the error
-names every language's count. While the PR waits, `main` may raise the budget for its own changes: merge it, keep its
-note, and append yours with a new pair.
+size. Every build prints each language's count (#7418; before, a build under its budget printed none, and the way to
+see them was a scratch build with the constant at 1 B). While the PR waits, `main` may raise the budget for its own
+changes: merge it, keep its note, and append yours with a new pair.
+
+## A startup namespace ships every one of its strings in every first screen (#7418)
+
+The first-screen budget had 0 B of room after weeks of raises of 11 B, 25 B and 187 B, while the startup catalog sent
+whole namespaces for a key or two: `settings` (157 keys) for the sidebar's Avatar label, `terminal-full` (46) for one
+shortcut's name, `todos` (274) for 26 kicker and stage words, and five listed namespaces that no first-screen code named
+any more. That was about 54 KB of raw Japanese the first screen never read; ja pays the most, its strings being the
+longest in bytes. Listing those keys (`settings.avatar` in `startup-namespaces.json` takes every key that begins with
+it) took 8.3 to 8.8 KB off each language, and keeping test files and e2e scripts out of Tailwind's scan 157 B more:
+their assertions and fixtures (`not.toContain("outline-white")`, `[typed:zzz]`) had been written into every page's
+stylesheet. Before raising the budget, look at what the first screen sends and never reads: per startup namespace, the
+keys the built first-screen chunks name against all of its keys, and the CSS rules only words in tests produce.
 
 ## An idle-contracted chunk's growth raises the idle budget, it cannot move to on-intent (#5386)
 

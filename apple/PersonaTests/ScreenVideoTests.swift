@@ -142,6 +142,33 @@ struct ScreenVideoTests {
         #expect(second?.totalMs == 17, "capture 0 + encode 5 + network 8 + decode 4")
     }
 
+    /// The round trip to the hub the overlay shows (#6558): the median of the last five from the last 20 s, as the web
+    /// overlay's, so one slow answer doesn't make it jump and an old one isn't shown.
+    @Test func theHubRoundTripIsTheMedianOfTheRecentOnes() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var trips = HubRoundTrips()
+        #expect(trips.median(at: t0) == nil, "none yet: no number")
+        trips.add(ms: .nan, at: t0)
+        trips.add(ms: -1, at: t0)
+        #expect(trips.median(at: t0) == nil, "not a time: not counted")
+        trips.add(ms: 20, at: t0)
+        #expect(trips.median(at: t0) == 20)
+        trips.add(ms: 400, at: t0.addingTimeInterval(2)) // one slow answer
+        trips.add(ms: 22, at: t0.addingTimeInterval(4))
+        #expect(trips.median(at: t0.addingTimeInterval(4)) == 22)
+        for i in 0..<HubRoundTrips.kept { trips.add(ms: 30, at: t0.addingTimeInterval(6 + Double(i))) }
+        #expect(trips.median(at: t0.addingTimeInterval(10)) == 30, "only the last five count")
+        #expect(trips.median(at: t0.addingTimeInterval(10 + HubRoundTrips.fresh + 1)) == nil, "stale: the app was away")
+    }
+
+    /// Bitrates as the overlay writes them: two decimals under 1 Mbps, so a small stream doesn't read as 0.0 (the web's
+    /// rule).
+    @Test func smallBitratesKeepTwoDecimals() {
+        #expect(ScreenStats.mbpsText(12.34) == "12.3 Mbps")
+        #expect(ScreenStats.mbpsText(1) == "1.0 Mbps")
+        #expect(ScreenStats.mbpsText(0.034) == "0.03 Mbps")
+    }
+
     @Test func aFrameThatDoesNotDecodeEnds() async throws {
         var bytes = try Self.prefix(messages: 2)
         bytes += Array(ScreenVideoMessage.frame(VideoFrame(number: 1, captureMicros: 0, flags: .keyframe, sample: Data([0, 0, 0, 4, 1, 2, 3, 4]))).framed())

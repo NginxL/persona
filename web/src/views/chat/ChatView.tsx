@@ -2436,6 +2436,8 @@ export const Header = memo(function Header({
         ...(allowed.includes("stop") ? [{ key: "stop", label: t("chat-chatview.interrupt"), icon: "stop" as const, hint: "Esc", onSelect: onInterrupt }] : []),
         ...(feishu ? [{ key: "feishu", label: t("chat-chatview.open_in_lark"), icon: "external" as const, onSelect: () => openLink(feishu) }] : []),
         ...(onSearch ? [{ key: "search", label: t("chat-chatview.search_menu"), icon: "search" as const, onSelect: onSearch }] : []),
+        // the whole conversation as Markdown (#7375): its dialog is a chunk of its own
+        { key: "export", label: t("chat-chatview.export"), icon: "download", onSelect: () => import("./ExportDialog").then((m) => m.openExportDialog({ session, title, machineName, assistant: Boolean(assistant) }), (e: unknown) => toast(errorText(e), "error")) },
         { key: "info", label: t("chat-chatview.session_info"), icon: "info", onSelect: () => setDialog("info") },
         ...(canRename ? [{ key: "rename", label: t("chat-chatview.rename"), icon: "pencil" as const, onSelect: () => setDialog("rename") }] : []),
         ...(!assistant && session.space_id && !session.source_kind ? [{ key: "space", label: t("chat-chatview.rename_space"), icon: "folder" as const, onSelect: () => setDialog("space") }] : []),
