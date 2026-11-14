@@ -345,6 +345,15 @@ Phase 1 (#6871) lands in several PRs.
     for a changed full item. The `coreReplay` ohosTest is ready to replay that same corpus through the real NAPI handle.
   - The API 26 native SDK, HAP link, installed HAP and physical-device replay were not available in this environment;
     no device or performance claim is made. Its exact 38-package / 71-notice runtime closure is checked on the host.
+- **HarmonyOS host checks (#7414).**
+  - The core lane failed on every clean checkout: its HarmonyOS notices step compared against a build output only
+    the device build writes. It now writes that output itself (38 locked registry packages, 71 notice files).
+  - The lane adds the `aarch64-unknown-linux-ohos` Rust target and lints the binding with its `ohos` feature, so the
+    NAPI code is compiled by CI for the first time. Nothing is linked and no SDK is used.
+  - `build-ohos.sh` now exports `OHOS_NDK_HOME`, without which the binding's build script panicked before compiling.
+    Checked with a stub SDK layout only: the release closure compiles and the build stops at the link step.
+  - Still open in #7414: the NAPI callbacks pass a leading error argument and effects as a number array, which the
+    ArkTS declaration and adapter do not expect. The Node tests' fake hides it; it would fail on a device.
 - **Still to come.**
   - iOS: physical-device performance, launch, memory and download-size evidence remains open; Xcode 26.0 is not verified.
   - HarmonyOS: the API 26 `.so`, HAP build and on-device replay.
@@ -352,6 +361,26 @@ Phase 1 (#6871) lands in several PRs.
   - Continuity: both Apple bindings and Android's host/emulator replay pass the same corpus. HarmonyOS's native replay
     must still run before calling the slice three-platform consistent.
   - The go / no-go measurements, with the iOS baseline named for every comparative measurement.
+
+Phase 2 lands in several PRs.
+
+- **Continuity payloads decoded in the core (#7385): pure decoding only.**
+  - `persona_core::transport` decodes the latest / older page, the catch-up page, an opened fold's page and the
+    WebSocket `items` frame from raw bytes into `continuity`'s inputs, keeping each item's JSON byte for byte.
+    Acceptance follows iOS's `ItemsResponse`, `NewerResponse`, `foldedWork`'s `Range` and `ServerEvent.decode`.
+  - `cargo test` replays the 17 wire cases those decoders own, all accepted payloads, and rebuilds the continuity
+    corpus's 78 payload steps from bytes, with the same step and state as the hand-built batches. The corpus's three
+    `http_latest` steps without `has_more` are not wire pages; the decoder refuses them, as iOS's `ItemsResponse`
+    would. The refusal rules rest on the crate's unit tests, which try every key a decoder reads with every kind of
+    wrong value.
+  - Not done: no boundary action carries bytes, the runtime and the three entry points are unchanged, and no client
+    uses the decoder. Each client still decodes natively.
+  - Not full parity: envelope keys only other events use and nested structs the core does not read are not
+    checked, and whole numbers must be integer literals, the only spelling the hub writes
+    (`native/app-core/README.md`, "Transport decoding").
+  - Not executed on iOS: the rules were read from the Swift sources and swift-foundation's `JSONDecoder`, and the
+    wire cases' expectations are derived from the iOS sources too (checked by the hub's golden test and the Android
+    replay). No shared wire case was added for the refusal rules, which wait for an iOS run to confirm them.
 
 ### Migration rules (each domain)
 

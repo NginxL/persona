@@ -104,6 +104,11 @@ type Node struct {
 	logger   *log.Logger
 	// hubPersonaContracts is connection-local: Attach makes a fresh Node on each reconnect.
 	hubPersonaContracts atomic.Bool
+	// hubMCPWait gates the opt-in interim local-socket lines on the authenticated hub's advertised feature.
+	hubMCPWait atomic.Bool
+	// mcpWaits are only the local calls that asked for progress updates, by their opaque per-call id.
+	mcpWaitMu sync.Mutex
+	mcpWaits  map[string]*pendingMCPWait
 	// lcu drives amontlabs/lcu for the computer-use plugin when that backend is selected (lcu_mcp.go).
 	lcuMu   sync.Mutex
 	lcuSess *lcuSession
@@ -418,7 +423,7 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	defer n.streams.CloseAll()
 	defer n.closeFulls() // none of the web's full herdr clients outlives this hub connection (fullclient.go)
 	n.peer.OnEvent = func(event string, params json.RawMessage) {
-		if !n.streams.Event(event, params) && !n.onFullEvent(event, params) {
+		if !n.onMCPWait(event, params) && !n.streams.Event(event, params) && !n.onFullEvent(event, params) {
 			n.onTerminalEvent(event, params)
 		}
 	}
@@ -978,6 +983,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		if c.HubFeatures != nil || c.MachineID != "" {
 			n.hubPersonaContracts.Store(c.HubFeatures != nil && slices.Contains(*c.HubFeatures, nodeproto.PersonaContracts))
+			n.hubMCPWait.Store(c.HubFeatures != nil && slices.Contains(*c.HubFeatures, nodeproto.MCPWait))
 		}
 		if c.ClaudeDirs != nil || c.Keep == nil { // a call that only changes what is kept leaves the directories
 			n.setKnownClaudeDirs(c.ClaudeDirs)

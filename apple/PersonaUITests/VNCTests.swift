@@ -1019,6 +1019,17 @@ final class VNCTests: XCTestCase {
         shot(app, "vnc-video-lost")
     }
 
+    /// #6398: a phone that asks the hub for a screen session (direct routes on, `-showScreenRoutes`) and a hub that
+    /// doesn't offer one (the mock, like an older hub or node) keep today's live screen through the same raw streams:
+    /// RFB signs in and, with the mock's video channel, video takes the picture and reports frames.
+    @MainActor func testAskingForAScreenSessionKeepsTheRawStreams() throws {
+        let (app, _) = try signedInMachinePage(["-showScreenRoutes", "YES"])
+        guard ProcessInfo.processInfo.environment["PERSONA_SCREEN_VIDEO"] == "1" else { return }
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(picture(screen, "video"), "video took the picture: \(screen.value ?? "")")
+        XCTAssertGreaterThan(try mockJSON("/mock/screen-video")["reports"] as? Int ?? 0, 0, "the phone reports frames")
+    }
+
     /// #3954: the not-allowed line at the largest text size: the words and "How to turn it on" wrap, nothing cut off.
     @MainActor func testVideoNotAllowedAtTheLargestText() throws {
         guard ProcessInfo.processInfo.environment["PERSONA_SCREEN_VIDEO"] == "1" else {

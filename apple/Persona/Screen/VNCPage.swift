@@ -606,11 +606,11 @@ struct VNCPage: View {
         return model.screenVideoAdvertised(ref)
     }
 
-    /// Whether ⋯ › Quality is offered: once this session's helper said it has quality tiers (#6396, `hello.features`).
-    /// Before that the choice would change nothing, so it is not shown.
+    /// Whether ⋯ › Quality is offered: once this session's helper said it has quality tiers (#6396, `hello.features`)
+    /// and this app has its side of them (`ScreenTiers`). Before that the choice would change nothing, so it is not shown.
     private var qualityOffered: Bool {
         #if os(iOS) && canImport(PersonaScreenKit)
-        return session?.video.tiers == true
+        return ScreenTiers.offered(helperHasTiers: session?.video.tiers == true)
         #else
         return false
         #endif

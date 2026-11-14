@@ -190,8 +190,8 @@ const (
 	// the hub's clock and the user's time zone. The Lark bot's nudges (#6084) wait for it to turn false.
 	NotifyQuietGet = "notify.quiet"
 
-	// AppTool: {name, arguments, machine_id, session_id} → proto.ToolResult, one of the assistant's tools that is the
-	// app's to run (persona_settings).
+	// AppTool: {name, arguments, machine_id, session_id, call_id?} → proto.ToolResult, one of the assistant's tools that
+	// is the app's to run (persona_settings).
 	AppTool = "app.tool"
 )
 

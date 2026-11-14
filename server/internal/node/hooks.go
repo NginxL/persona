@@ -158,6 +158,8 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 	}
 
 	var resp any
+	var waitID string
+	var wait *pendingMCPWait
 	switch req.Kind {
 	case "hook":
 		out, err := n.handleHook(ctx, req)
@@ -220,13 +222,24 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 			resp = n.saveMailAttachment(ctx, req.Args, sid, assistant, req.Guest || n.guestOf(sid) != nil)
 			break
 		}
-		if err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
-			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}, &res); err != nil {
+		params := map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
+			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}
+		if req.WaitUpdates {
+			waitID, wait = n.beginMCPWait(c)
+			if wait != nil {
+				params["wait_updates"], params["call_id"] = true, waitID
+			}
+		}
+		if err := n.peer.Call(ctx, "mcp.call", params, &res); err != nil {
 			res = proto.TextResult("Persona hub error: "+err.Error(), true)
 		}
 		resp = res
 	default:
 		resp = map[string]any{"error": "unknown kind"}
+	}
+	if wait != nil {
+		n.finishMCPWait(waitID, wait, resp)
+		return
 	}
 	b, _ := json.Marshal(resp)
 	_, _ = c.Write(append(b, '\n'))

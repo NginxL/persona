@@ -268,7 +268,7 @@ func (l assistantLink) appCallFrom(ctx context.Context, from string, p assistant
 	if out, ok, err := h.extAppCall(ctx, from, p); ok { // what the manager's extensions ask of the hub (extensions_link.go)
 		return out, err
 	}
-	if out, ok, err := h.fleetAppCall(ctx, p); ok { // what the hub still runs for the nodes (fleet_link.go)
+	if out, ok, err := h.fleetAppCall(ctx, from, p); ok { // what the hub still runs for the nodes (fleet_link.go)
 		return out, err
 	}
 	if p.Method == assistantwire.AppTool {
@@ -285,10 +285,13 @@ func (h *Hub) appTool(ctx context.Context, from, app string, params json.RawMess
 		Arguments json.RawMessage `json:"arguments"`
 		MachineID string          `json:"machine_id"`
 		SessionID string          `json:"session_id"`
+		CallID    json.RawMessage `json:"call_id"`
 	}
 	if err := json.Unmarshal(params, &a); err != nil {
 		return nil, err
 	}
+	var callID string
+	_ = json.Unmarshal(a.CallID, &callID)
 	if len(a.Arguments) == 0 {
 		a.Arguments = json.RawMessage(`{}`)
 	}
@@ -300,7 +303,7 @@ func (h *Hub) appTool(ctx context.Context, from, app string, params json.RawMess
 		if m == nil {
 			return nil, fmt.Errorf("%w %q", assistantwire.ErrNoDevice, a.MachineID)
 		}
-		res, err = h.toolPersonaSettings(ctx, from, m, a.SessionID, a.Arguments)
+		res, err = h.toolPersonaSettings(ctx, from, m, a.SessionID, a.Arguments, h.mcpWaitReporter(from, a.MachineID, callID))
 	default:
 		return nil, fmt.Errorf("app %s has no tool %s", app, a.Name)
 	}

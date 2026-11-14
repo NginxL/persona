@@ -3,6 +3,9 @@ import CoreMedia
 import CoreVideo
 import Observation
 import SwiftUI
+#if os(iOS) && canImport(PersonaScreenKit)
+import PersonaScreenKit
+#endif
 
 /// One Mac's VNC (#1343): the native client (RFBClient) over the hub's relay, signed in with the sign-in this device
 /// keeps (ScreenCredentials, #1322) or the one typed in, and its frames for every layer that shows them (the page's,
@@ -80,7 +83,20 @@ import SwiftUI
         }
         let pair = RFBWebSocket.newPair()
         self.pair = pair
-        run(RFBClient(transport: RFBWebSocket(api: api, machine: ref.id, pair: pair)) { [weak self] in await self?.credentials() })
+        run(RFBClient(transport: Self.transport(api: api, machine: ref.id, pair: pair)) { [weak self] in await self?.credentials() })
+    }
+
+    /// The hub's relay of Screen Sharing for this connection (opening it connects). With direct routes on it asks for a
+    /// screen session (#6398): with a hub and a node that offer one, RFB is the session's channel; otherwise it is the
+    /// same raw stream.
+    private static func transport(api: APIClient, machine: String, pair: String) -> RFBTransport {
+        #if os(iOS) && canImport(PersonaScreenKit)
+        if ScreenRoutes.enabled {
+            let ws = RFBWebSocket(api: api, machine: machine, pair: pair, protocols: [ScreenLinkWire.subprotocol, "binary"])
+            return ScreenLinkRFBTransport(ScreenLinkRFBStream(socket: ScreenLinkRelaySocket(ws)) { ScreenRoutes.opened($0, pair: pair) })
+        }
+        #endif
+        return RFBWebSocket(api: api, machine: machine, pair: pair)
     }
 
     /// Follows this client and starts it: start's over the hub's relay, or a test's over a scripted transport.

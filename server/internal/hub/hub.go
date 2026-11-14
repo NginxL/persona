@@ -434,6 +434,11 @@ func (h *Hub) phoneToolList() []proto.Tool {
 }
 
 func (h *Hub) callPhone(ctx context.Context, name string, args json.RawMessage) proto.ToolResult {
+	return h.callPhoneWithWait(ctx, name, args, nil)
+}
+
+// callPhoneWithWait is callPhone with the ephemeral reporter for an opted-in MCP call; nil keeps the old behavior.
+func (h *Hub) callPhoneWithWait(ctx context.Context, name string, args json.RawMessage, report func(proto.MCPWaitKind)) proto.ToolResult {
 	if result, handled := h.phoneWriteTool(ctx, name, args); handled {
 		return result
 	}
@@ -484,6 +489,10 @@ func (h *Hub) callPhone(ctx context.Context, name string, args json.RawMessage) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
+	if confirmed && report != nil {
+		report(proto.MCPWaitApproval)
+		defer report(proto.MCPWaitComputer)
+	}
 	select {
 	case r := <-ch:
 		return r

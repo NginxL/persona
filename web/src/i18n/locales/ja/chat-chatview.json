@@ -135,5 +135,6 @@
   "search_origin_changed": "元の記録が変わりました。現在の記録をご覧ください",
   "search_return": "検索前の位置に戻る",
   "search_menu": "会話内を検索",
-  "todo_completed_label": "To-do（完了）：{title}"
+  "todo_completed_label": "To-do（完了）：{title}",
+  "export": "会話を書き出す…"
 }

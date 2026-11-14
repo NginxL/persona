@@ -42,15 +42,15 @@ Turning off the extension or a machine removes the tools and entry points; Cua D
 
 When LCU's runtime actually touches an App (and a website origin when Chrome is open), it asks the client through MCP `elicitation/create`: allow once, allow for this session, always allow, deny; high-risk actions carry its own warning, and websites offer allow or deny. Official adapters hand these to Claude, Codex and Pi's own interfaces.
 
-Persona doesn't register those adapters. The node handles this elicitation itself as the MCP client, and the hub's `computer.elicit` turns it into the **existing** phone and web approval cards (the same `permission` cards used by Ask Before First Operating an App and Confirm on Phone Before Acting; `question` when there are more options):
+Persona doesn't register those adapters. The node handles this elicitation itself as the MCP client, and the hub's `computer.elicit` turns it into the **existing** phone and web approval cards (the same `permission` cards used by Ask Before First Operating an App and Confirm on Phone Before Acting; `question` when there are more options). For an MCP call that opted into wait updates, the existing `computer.call` and `computer.elicit` requests carry only the node's opaque UUID `call_id`, and only when the target node advertises `mcp_wait_v1`. The manager keeps the live call's originating machine and wait state, so the nested card joins that same reporter even when the tool operates another computer; no machine-routing field crosses either request. An unknown or malformed id gets no reporter. An older target receives no id: the manager reports `unknown` (`Still waiting`) for that delegated RPC, then restores the previous state rather than implying that the target can correlate its approval:
 
 | Runtime request | Card |
 | --- | --- |
 | Allow once only, or also one of "this session" / "always" | Permission card: Allow / Always Allow (text specifies this session or permanently) / Deny |
-| Both "this session" and "always" | Question card: Allow once, allow for this session, always allow, deny. A permission card only has one Always Allow and can't represent two durations |
+| Both "this session" and "always" | Question card: Allow once, allow for this session, always allow, deny. A permission card only has one Always Allow and can't represent two durations; the wait kind is still `approval` |
 | Website origin, form without fields | Permission card: Allow / Deny. Doesn't invent "always allow" when the runtime didn't offer it |
 | Open a URL | Permission card includes the URL, allow or deny |
-| One enum field | Question card, with the enum values plus deny |
+| One enum field | Question card, with the enum values plus deny; the wait kind is `answer` |
 | Simple fields to fill in | Permission card input fields (phone can fill them; the web card can't, so missing required values never count as approval) |
 | Unknown structure | Still a card; even tapping Allow returns cancellation, never pretends consent |
 
@@ -497,8 +497,8 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     second frames did, `timing` carries the helper's medians for the phone's Connection Stats (`TimingWindow`):
     capture (display time to ScreenCaptureKit's callback, about 0), encode (VideoToolbox in to out) and network (half
     the round trip from a frame going out to the phone's report on it, so no clocks need to agree), and what went out.
-    `update` changes the bitrate cap and frame rate in place; a new display, size or codec restarts capture with a
-    fresh `hello`, `format` and keyframe. `paused` says why capture stopped (`permission`, `locked`, `login_window`,
+    `update` changes the bitrate cap, the frame rate and the size in place (a new size gets a new encoder, then `format`
+    and a keyframe; no new `hello`); a new display or codec restarts capture with a fresh `hello`, `format` and keyframe. `paused` says why capture stopped (`permission`, `locked`, `login_window`,
     `display_gone`, `busy`); when the Mac unlocks it sends `resumed` and starts again. The stream closing ends the
     helper.
 - **Node** (`screen.dial {id, pair, keep_awake}`, `node/screen.go`, `node/screenhelper.go`): starts the helper and
@@ -526,7 +526,7 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   (`…/ports/5900/connect?pair=…`, `RFBWebSocket`): 16 random bytes in hex, a new one each connection, so no other
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
-  `frame`, `heartbeat`, `paused`, `resumed`, `timing`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
+  `frame`, `heartbeat`, `paused`, `resumed`, `timing`, `encoding`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
   are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
   package for macOS and iOS) is the codec, shared by the helper and the app's client. `update.path`
   `{kind, via, min_rtt_ms}` (#6398) says the stream moved to another network route, so the helper can start its delay
@@ -540,6 +540,27 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   250 ms, so reports keep saying when the queue has drained. A stream starts at the phone's cap but at most 4 Mbit/s,
   and never goes below 0.2. The phone caps it: 12 Mbit/s
   on Wi-Fi, 4 on cellular, 1.5 in Low Data Mode; 15 fps in Low Power Mode or a serious thermal state.
+- **Quality tiers (#6396, the helper's side)**: a helper that can is a `hello` with `features: ["tiers"]` and the
+  display's size in `points` and `pixels`. A phone that picks tiers then adds the tier to `start` and `update`:
+  `scale` (pixels per point to encode at, never past the display's pixels, still capped by `max_size`), `min_kbps` (the
+  bitrate band's floor; `max_kbps` is its ceiling) and `target_kbps` (the bitrate to go to now). The helper applies a
+  new size or frame rate to the running capture and answers with `encoding` (type 8: width, height, fps, scale, band)
+  once it took effect, and after `hello`. With a band set, `RateController` keeps the bitrate inside it, a cut goes to
+  85% of the rate the last second's reports say arrived (30% down when they say too little), and the first 10 s raise
+  25% after each calm second until the first cut; the phone moves to another tier when the band no longer fits.
+  `update.path` (with or without a band) starts the 10 s delay floor, the delivered rate and the calm stretch over
+  (`RateController.pathChanged`): the new route's one-way delay is its own, not a queue.
+- **Idle refinement** (`Refinement`, `frame` flag 2; for a phone that sets a band): 300 ms after the screen stops
+  changing, the latest captured picture (even one skipped while a queue drained) is encoded again at four times the
+  target bitrate, then twice more 200 ms apart, so text sharpens at any tier. A pass goes only while the link is calm
+  (not skipping, the last frame's queueing under 150 ms) and the encoder holds nothing; one that comes back queued past
+  150 ms ends the passes until the next change. Its report changes nothing in `RateController` but a keyframe request,
+  and `timing` counts only its bytes. A still screen after a size change gets its keyframe through the first pass.
+  ScreenCaptureKit's queue depth is 4 for such a stream, since refinement holds one picture.
+  `timing` adds `target_kbps` (the bitrate asked of the encoder; `kbps` is what went out), `skipped` (frames left out
+  over the 500 ms queue), `blocked_ms` (time frames waited to be written to the stream) and `pending` (the most frames
+  the encoder held at once). An app without tiers sends none of the new fields and gets the adaptation above unchanged;
+  apps and helpers before it skip `encoding` by length and ignore the new JSON keys.
 - **Switching**: RFB signs in first and shows until the first video frame decodes; the phone then stops asking RFB for
   updates (Screen Sharing encodes nothing meanwhile). It returns to RFB within about a second on any of: the stream
   closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
@@ -553,7 +574,8 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   hidden meanwhile, so a picture of another shape leaves black, not a stale frame), and holds RFB's update requests while
   they show; the request held goes out when video stops, so RFB's picture catches up.
   Video is chosen by default on a Mac that offers it (⋯ › Picture, kept per Mac; ⋯ › Quality appears only once the
-  helper's `hello.features` has `tiers`, since before #6396 it would change nothing) and runs only while one display is
+  helper's `hello.features` has `tiers` and the app has its side of them too, `ScreenTiers.appSupported`, since one
+  release carries both and before #6396's iPhone policy the choice would change nothing) and runs only while one display is
   shown: the Mac's only one, or one picked from several the node numbered; all of several displays at once stay RFB.
   It pauses while Picture in Picture shows the screen or the app is in the background (RFB carries the picture then).
   When VNC shows instead, a line under the bars says why in plain words: the video stopped, the Mac is locked, or the
@@ -626,6 +648,17 @@ iPhone's side comes next.
   another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
   relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost
   route left at once and a degraded one (loss ≥ 5 %, or 50 ms over its own floor for 5 s) when another is healthy.
+- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`, for now only in a DEBUG build launched with
+  `-showScreenRoutes`): the RFB and video relays offer the subprotocol beside `binary`; `ScreenLinkRFBStream` /
+  `ScreenLinkVideoStream` (`PersonaScreenKit`) read the first message, and when the hub selected the subprotocol the
+  stream is the session's channel (`ScreenLinkSession`, an actor holding the channels, the transports, the pings and
+  `PathPolicy`), else the same raw stream as before, so the RFB client and the video stream don't change. A session
+  starts a `ScreenLinkProber` (its own actor): it reads the phone's interfaces (`NWPathMonitor`, `getifaddrs`), dials each
+  candidate `RouteEligibility` allows on that interface (`NWParameters.requiredInterface`, TLS 1.3 with the ALPN, the
+  certificate accepted only by its SHA-256 from `paths`) as `ProbePlan` says (at once, then 30 s doubling to 5 min after a
+  failure, again at once when the phone's networks change), and hands what connects to the session, which pings and
+  measures every route and runs the policy once a second. In this stage the picture and input stay on the relay; the
+  choice is only logged (category `screen-link`, route kinds and reasons, never addresses).
 - **Rejoining**: a relay that dropped while the session went on (a hub restart, the phone changing networks) is opened
   again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
   or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.
