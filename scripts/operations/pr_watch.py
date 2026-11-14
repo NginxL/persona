@@ -131,7 +131,8 @@ class Watcher:
         self.dry_run = dry_run
         self.verbose = verbose
         self.state = State(config["state"])
-        self.tasks = queue.Queue()
+        self.tasks = queue.PriorityQueue()
+        self.queue_sequence = 0
         self.pending = {}
         self.active = {}
         self.wake = threading.Event()
@@ -193,6 +194,21 @@ class Watcher:
             self.wake.set()
             raise
 
+    def queue_priority(self, repo, number, sha):
+        """Prioritize only a migration that process() will actually attempt."""
+        old = self.state.get(repo, number)
+        evidence_key = repo + "#" + str(number) + "@" + str(old.get("base", "")) + ".." + sha
+        if (old.get("head") == sha and old.get("evidence_key") == evidence_key
+                and old.get("retry_after", 0) <= time.time()
+                and old.get("outcome") != "merge_failed"
+                and old.get("format") == FORMAT_VERSION
+                and old.get("verification_policy") != VERIFICATION_POLICY_VERSION
+                and old.get("verification") not in ("passed", "base_failure")
+                and not old.get("repair_exhausted")
+                and old.get("outcome") not in ("merged", "continuation", "findings")):
+            return 0
+        return 1
+
     def enqueue(self, repo, number, sha, source):
         if repo not in self.repositories or not isinstance(number, int) or number < 1:
             return
@@ -205,7 +221,10 @@ class Watcher:
                     self.log("%s#%s: newer head noticed while busy" % (repo, number))
                 return
             self.active[key] = {"started": time.monotonic(), "phase": "queued", "source": source}
-        self.tasks.put(key)
+            priority = self.queue_priority(repo, number, sha)
+            sequence = self.queue_sequence
+            self.queue_sequence += 1
+            self.tasks.put((priority, sequence, key))
         self.log("%s#%s queued (%s)" % (repo, number, source))
 
     def phase(self, key, phase):
@@ -681,6 +700,7 @@ class Watcher:
             if key is None:
                 self.tasks.task_done()
                 return
+            _, _, key = key
             repo, number = key
             try:
                 self.process(repo, number)
