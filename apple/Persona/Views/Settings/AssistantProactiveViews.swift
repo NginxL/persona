@@ -32,7 +32,7 @@ enum AssistantScheduleText {
         return String(localized: "Every \(list)")
     }
 
-    /// The rule in words, as Reminders says it: "Every weekday 9:00 AM" / "Every Day 9:30 PM" / "Every Fri 5:00 PM" /
+    /// The rule in words: "Every weekday at 09:00" / "Every Day at 21:30" / "Every Fri at 17:00" /
     /// "Every 30 min" / "Once · Today 15:30" / "0 10 1 * * · At 10:00, on day 1 of the month".
     static func sentence(_ r: APIClient.ScheduledTask) -> String {
         switch r.repeats {
@@ -48,7 +48,7 @@ enum AssistantScheduleText {
         else if d == [6, 7] { days = String(localized: "Every weekend") }
         else { let list = dayList(d); days = String(localized: "Every \(list)") }
         let time = clock(r.time)
-        return String(localized: "\(days) \(time)", comment: "Repeat rule and time of day, e.g. Every weekday 9:00 AM")
+        return String(localized: "\(days) at \(time)", comment: "Repeat rule and 24-hour time of day, e.g. Every weekday at 09:00")
     }
 
     /// A cron task's rule: its expression, then the hub's words for it (first, so a one-line row always shows the
@@ -59,21 +59,13 @@ enum AssistantScheduleText {
         return String(localized: "\(cron) · \(text)")
     }
 
-    /// "09:00" → "9:00 AM", "21:30" → "9:30 PM", "00:15" → "12:15 AM".
+    /// A daily task's time the way `hm` writes a moment, 24-hour in every language: "09:00", "21:30", "00:15"
+    /// (#7499). The next and last runs on the same row come from `hm`, so a 12-hour rule beside them read one moment two
+    /// ways; the web says it the same way (`clockLabel`). Anything that is not a time of day stays as it came.
     static func clock(_ hhmm: String) -> String {
-        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
-        guard parts.count == 2 else { return hhmm }
-        let (h, m) = (parts[0], parts[1])
-        let h12 = h % 12 == 0 ? 12 : h % 12
-        let time = String(format: "%d:%02d", h12, m)
-        return switch h {
-        case 0..<5: String(localized: "\(time) AM [Assistant Proactive Views 44e8c1]", comment: "12-hour time, 0:00–4:59")
-        case 5..<9: String(localized: "\(time) AM [Assistant Proactive Views 699a88]", comment: "12-hour time, 5:00–8:59")
-        case 9..<12: String(localized: "\(time) AM [Assistant Proactive Views 125b02]", comment: "12-hour time, 9:00–11:59")
-        case 12..<13: String(localized: "\(time) PM [Assistant Proactive Views 989511]", comment: "12-hour time, 12:00–12:59")
-        case 13..<18: String(localized: "\(time) PM [Assistant Proactive Views c3a451]", comment: "12-hour time, 13:00–17:59")
-        default: String(localized: "\(time) PM [Assistant Proactive Views af60c6]", comment: "12-hour time, 18:00–23:59")
-        }
+        let parts = hhmm.split(separator: ":", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count == 2, let h = parts[0], let m = parts[1], (0..<24).contains(h), (0..<60).contains(m) else { return hhmm }
+        return String(format: "%02d:%02d", h, m)
     }
 
     /// The day part of a moment: "Today" / "Tomorrow" / "Yesterday" / "Wed" / "Nov 2".

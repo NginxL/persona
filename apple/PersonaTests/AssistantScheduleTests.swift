@@ -12,12 +12,11 @@ struct AssistantScheduleTests {
     }
 
     @Test func rulesInWords() {
-        #expect(AssistantScheduleText.sentence(routine("09:00", [1, 2, 3, 4, 5])) == "每个工作日 上午 9:00")
-        #expect(AssistantScheduleText.sentence(routine("21:30", [])) == "每天 晚上 9:30")
-        #expect(AssistantScheduleText.sentence(routine("17:00", [5])) == "每周五 下午 5:00")
-        #expect(AssistantScheduleText.sentence(routine("08:15", [6, 7])) == "每个周末 早上 8:15")
-        #expect(AssistantScheduleText.sentence(routine("00:05", [1, 3])) == "每周一、三 凌晨 12:05")
-        #expect(AssistantScheduleText.clock("12:30") == "中午 12:30")
+        #expect(AssistantScheduleText.sentence(routine("09:00", [1, 2, 3, 4, 5])) == "每个工作日 09:00")
+        #expect(AssistantScheduleText.sentence(routine("21:30", [])) == "每天 21:30")
+        #expect(AssistantScheduleText.sentence(routine("17:00", [5])) == "每周五 17:00")
+        #expect(AssistantScheduleText.sentence(routine("08:15", [6, 7])) == "每个周末 08:15")
+        #expect(AssistantScheduleText.sentence(routine("00:05", [1, 3])) == "每周一、三 00:05")
         #expect(AssistantScheduleText.sentence(.init(title: "巡检", prompt: "x", repeats: .interval, everyMinutes: 30)) == "每 30 分钟")
         #expect(AssistantScheduleText.every(120) == "每 2 小时")
         #expect(AssistantScheduleText.every(90) == "每 1 小时 30 分钟")
@@ -103,6 +102,20 @@ struct AssistantScheduleTests {
         let d = Calendar.current.date(bySettingHour: 17, minute: 5, second: 0, of: .now)!
         #expect(AssistantScheduleText.hm(d) == "17:05")
         #expect(AssistantScheduleText.moment(d) == "今天 17:05")
+    }
+
+    /// A daily rule's time reads like the next run under it (#7499): one clock on a row, with no part of the day. Anything that
+    /// is not a time of day stays as it came.
+    @Test func ruleTimeReadsLikeTheNextRun() {
+        for (hhmm, hour, minute) in [("00:05", 0, 5), ("08:15", 8, 15), ("12:30", 12, 30), ("17:00", 17, 0), ("21:30", 21, 30)] {
+            let next = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: .now)!
+            #expect(AssistantScheduleText.clock(hhmm) == AssistantScheduleText.hm(next))
+            #expect(AssistantScheduleText.sentence(routine(hhmm, [], next: next)).hasSuffix(" " + AssistantScheduleText.hm(next)))
+        }
+        #expect(AssistantScheduleText.clock("9:00") == "09:00")
+        for odd in ["", "9", "24:00", "09:60", "09:", "a:b", "09:00:00"] {
+            #expect(AssistantScheduleText.clock(odd) == odd)
+        }
     }
 
     @Test func upcomingMergesEveryKindSoonestFirst() {

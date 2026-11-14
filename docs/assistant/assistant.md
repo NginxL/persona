@@ -672,7 +672,7 @@ In the assistant's composer (web, and the iPhone/iPad shell composer's `Composer
 - **Another process replaces node's socket file** (2026-11-05): another node listened on the same path and didn't unlink on exit (`SetUnlinkOnClose(false)`), leaving an unserved socket;
   every `personad launch <Persona-managed launcher>` and hook got `connection refused`. The watchdog once checked only existence; now every 15 seconds it checks ownership (`os.SameFile`),
   dials if different, and recreates only when unanswered (`sockGone`). A responding newer node keeps the socket; don't take it back.
-- In Chinese locales, `.hour(.twoDigits(amPM: .omitted))` is 12-hour (17:00 appears "05:00"); always use `AssistantScheduleText.hm` (fixed `HH:mm`).
+- In Chinese locales, `.hour(.twoDigits(amPM: .omitted))` is 12-hour (17:00 appears "05:00"); always use `AssistantScheduleText.hm` (fixed `HH:mm`), and `AssistantScheduleText.clock` for a daily task's `HH:MM` (#7499).
 
 ## Live snapshots and prefix caching
 
@@ -1523,7 +1523,7 @@ DSH details (permission preset mapping, persistent `dsh web`): `docs/integration
   proactive work (scheduled tasks, run history), knowing you (About Me, memory), settings (Skills, Run on, Working directory;
   next-message suggestions on a supporting hub, off by default and hidden when the field is absent; model in Settings › Model
   Configuration › Main chat, #1291), accessible data. Settings › Assistant opens the same page.
-- Scheduled tasks: "Up Next" timeline (large times on the left, like Reminders), "Scheduled tasks" (daily / interval, natural rules "Every weekday at 9:00 AM", "Every 30 minutes"),
+- Scheduled tasks: "Up Next" timeline (large times on the left, like Reminders), "Scheduled tasks" (daily / interval, natural rules "Every weekday at 09:00", "Every 30 minutes"; a daily rule's time is 24-hour in every language, like the next run under it and the web, #7499),
   "One-time follow-ups"; rows show icon, next run, nondefault execution ("claude-fast · Auto · Low effort", Allow Everything red), last result, switch; swipe delete, long-press Run now,
   recent runs. Shared editor: repeat (Once / Daily / Interval), prompt, execution (model, permission, effort), Continue original chat (toggle off for new chats each run),
   Run now, history.

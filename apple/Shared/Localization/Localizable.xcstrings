@@ -499,7 +499,7 @@
       "shouldTranslate" : false
     },
     "%@ %@" : {
-      "comment" : "A day and a time of day\nDate and 24-hour time, e.g. Nov 2 09:00\nRepeat rule and time of day, e.g. Every weekday 9:00 AM",
+      "comment" : "A day and a time of day\nDate and 24-hour time, e.g. Nov 2 09:00",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1143,78 +1143,6 @@
       },
       "shouldTranslate" : true
     },
-    "%@ AM [Assistant Proactive Views 125b02]" : {
-      "comment" : "12-hour time, 9:00–11:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ AM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "午前%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上午 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "%@ AM [Assistant Proactive Views 44e8c1]" : {
-      "comment" : "12-hour time, 0:00–4:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ AM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "午前%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "凌晨 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "%@ AM [Assistant Proactive Views 699a88]" : {
-      "comment" : "12-hour time, 5:00–8:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ AM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "朝%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "早上 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "%@ Has a Question" : {
       "localizations" : {
         "en" : {
@@ -1329,78 +1257,6 @@
         }
       }
     },
-    "%@ PM [Assistant Proactive Views 989511]" : {
-      "comment" : "12-hour time, 12:00–12:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ PM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "午後%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "中午 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "%@ PM [Assistant Proactive Views af60c6]" : {
-      "comment" : "12-hour time, 18:00–23:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ PM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "夜%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "晚上 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "%@ PM [Assistant Proactive Views c3a451]" : {
-      "comment" : "12-hour time, 13:00–17:59",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ PM"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "午後%1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下午 %1$@"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "%@ Wants to Run a Command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1488,6 +1344,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ 答过了，后台还在跑"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "%@ at %@" : {
+      "comment" : "Repeat rule and 24-hour time of day, e.g. Every weekday at 09:00",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ at %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
           }
         }
       },

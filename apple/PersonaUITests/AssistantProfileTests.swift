@@ -61,7 +61,7 @@ final class AssistantProfileTests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "定时任务")).firstMatch.tap()
         let morning = app.descendants(matching: .any)["task-morning"]
         XCTAssertTrue(morning.waitForExistence(timeout: 5), "no 早报 routine:\n\(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["每个工作日 上午 9:00"].exists, "the rule is not in words")
+        XCTAssertTrue(app.staticTexts["每个工作日 09:00"].exists, "the rule is not in words")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "上次")).firstMatch.exists, "no last run")
         shot(app, "routines")
 
