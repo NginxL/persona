@@ -51,6 +51,7 @@ type Service struct {
 	polls     map[string]*pollMarks // source → what the poll saw of it; a new one each time the source is added
 	listings  map[string]listing    // source → how asking it for its sessions went; guarded by srcMu
 	cache     *cache
+	flights   listFlights // session lists being asked for, shared by the callers that miss the cache together
 	listIndex sessionlist.Index
 	out       *outbox
 	prefs     *prefsStore
@@ -219,19 +220,20 @@ func (s *Service) Statuses(ctx context.Context) []Status {
 }
 
 func (s *Service) sessionsOf(ctx context.Context, src Source, fresh bool) ([]Session, error) {
-	name := src.Name()
 	if !fresh {
-		if list, ok := s.cache.getSessions(name); ok {
-			return list, nil
-		}
+		return s.listShared(ctx, src) // inflight.go
 	}
-	gen := s.cache.generation(name)
+	return s.listNow(ctx, src, s.cache.generation(src.Name()))
+}
+
+// listNow asks src for its sessions and caches the answer unless the cache was invalidated since gen.
+func (s *Service) listNow(ctx context.Context, src Source, gen int) ([]Session, error) {
 	list, err := src.Sessions(ctx)
 	if err != nil {
 		s.noteListing(src, err)
 		return nil, err
 	}
-	s.cache.putSessions(name, gen, list)
+	s.cache.putSessions(src.Name(), gen, list)
 	s.noteListing(src, nil)
 	return list, nil
 }
