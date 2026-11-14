@@ -103,6 +103,9 @@ struct PersonaApp: App {
                 #if os(iOS)
                 ClipboardOfferWatcher.shared.returned(model) // copied something elsewhere: offer to send it to a computer
                 RemindersImporter.shared.activate(model) // Reminders imported as to-dos, when that is on (#4009)
+                // Refresh the health summary snapshot while unlocked, so a locked-phone phone_health_summary
+                // call later can serve it instead of HealthKit's inaccessible-database error.
+                Task { await HealthTool.refreshSnapshot() }
                 #endif
             } else if new == .background {
                 #if os(iOS)

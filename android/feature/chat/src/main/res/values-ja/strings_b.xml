@@ -350,7 +350,6 @@
     <string name="chat_queue_move_up">上へ移動</string>
     <string name="chat_queue_move_down">下へ移動</string>
     <string name="chat_queue_send_now">今すぐ送信</string>
-    <string name="chat_queue_send_now_title">送信待ちのメッセージを今すぐ送りますか？</string>
     <string name="chat_queue_send_now_message">送信待ちのメッセージを今すぐエージェントに送ります。実行中のコマンドはバックグラウンドで続き、書いている途中の返信はあなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_send_now_message_persona">%1$s は次のステップを待たずにすぐ受け取ります。今の作業は止まるか、できるものはバックグラウンドで続き、あなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_relayed_note">この会話が空いたら届きます</string>

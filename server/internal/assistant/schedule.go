@@ -486,11 +486,12 @@ func nextRun(t Task, after time.Time, loc *time.Location) time.Time {
 	mm, _ := strconv.Atoi(m[2])
 	at := after.In(loc)
 	for i := 0; i < 8; i++ {
-		d := time.Date(at.Year(), at.Month(), at.Day()+i, hh, mm, 0, 0, loc)
+		wall := time.Date(at.Year(), at.Month(), at.Day()+i, hh, mm, 0, 0, time.UTC)
+		d := wallInstant(wall, loc)
 		if !d.After(after) {
 			continue
 		}
-		wd := int(d.Weekday())
+		wd := int(wall.Weekday())
 		if wd == 0 {
 			wd = 7
 		}
