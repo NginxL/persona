@@ -48,7 +48,11 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     #if os(iOS)
     /// The mic held down (`ComposerHoldMic`): the box draws the strip, the circle and the lock over itself.
     @State private var hold = ComposerHold()
-    @State private var plusFrame: CGRect = .zero
+    /// Where 「+」 is in the window, for the panel it opens. Read when tapped, never drawn, so it is kept outside the
+    /// view's state: as a `@State` rectangle it was written on every frame the shell's pages slid (the window frame of
+    /// everything on a page changes with the strip) and the whole bar, its menus included, was drawn again 30 times a
+    /// switch (#5438, docs/apple/performance.md P7).
+    @State private var plusFrame = WindowFrame()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The draft's height at its full width, and a line's height at the current Dynamic Type size.
     @State private var textHeight: CGFloat = 0
@@ -134,7 +138,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("ShellComposerBar")
         #endif
-        VStack(alignment: .leading, spacing: 0) {
+        let box = VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
                 if expanded, let quotes, !quotes.wrappedValue.isEmpty {
                     QuoteBar(refs: quotes)
@@ -149,8 +153,17 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             #endif
             HStack(alignment: .bottom, spacing: Theme.Space.xs) {
                 if !expanded { plus }
-                TextField(placeholder, text: $text, selection: fieldSelection, axis: .vertical)
+                TextField("", text: $text, selection: fieldSelection, axis: .vertical)
+                    .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .font(Theme.Font.body)
+                    .overlay(alignment: .leading) {
+                        // The placeholder is interface text: capped with it, one line, shrunk before it is cut ("Ask Per…").
+                        if text.isEmpty {
+                            Text(placeholder).font(Theme.Font.body).foregroundStyle(.tertiary)
+                                .lineLimit(1).minimumScaleFactor(0.5).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                    }
+                    .accessibilityLabel(placeholder)
                     .lineLimit(expanded ? 1...maximumLines : 1...1)
                     #if os(iOS) || os(visionOS)
                     // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
@@ -241,6 +254,8 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        // Erased (#6735): generic, so every intermediate of the chain below took a run-time-sized stack slot holding the box.
+        AnyView(box)
         .padding(.horizontal, expanded ? 0 : Theme.Space.xs)
         .padding(.vertical, expanded ? 0 : Theme.Space.xxs)
         .modifier(ComposerSurface())
@@ -375,10 +390,10 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         #if os(iOS)
         if let openAttach {
             // A tap opens the panel; touch and hold opens the menu (Safari's tabs button, Mail's compose button).
-            Menu { attach() } label: { plusFace } primaryAction: { openAttach(plusFrame) }
+            Menu { attach() } label: { plusFace } primaryAction: { openAttach(plusFrame.rect) }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { plusFrame = $0 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [plusFrame] in plusFrame.rect = $0 } // perf-ok: kept unobserved (`WindowFrame`), read on a tap
                 .accessibilityLabel("Add photo or file")
                 .accessibilityIdentifier("shell-composer-add")
         } else {
@@ -603,6 +618,7 @@ private struct ComposerPageEditor: View {
                         .accessibilityIdentifier("composer-page-quotes")
                 }
                 TextEditor(text: $text, selection: $cursor)
+                    .readingContent()
                     .font(Theme.Font.body)
                     .focused($focused)
                     .scrollContentBackground(.hidden)
@@ -759,3 +775,9 @@ struct ComposerLines: Encodable, Equatable {
 }
 #endif
 
+#if os(iOS)
+/// A view's frame in the window, for an action to read when it runs. Not observed: writing it draws nothing again.
+@MainActor final class WindowFrame {
+    var rect: CGRect = .zero
+}
+#endif

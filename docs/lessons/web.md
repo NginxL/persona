@@ -1193,3 +1193,12 @@ task would make older consumers treat history as current work. The optional `com
 the Web menu useful without changing active links, supervision, counts or quiet rules.
 Put its completion marker before the variable-length title: end truncation can hide a suffix even when a DOM-text
 test finds it. Regress the order in every translation and inspect the actual long-title menu.
+
+## Measure a dialog after it has opened (#7189)
+
+`Dialog` slides its panel up with `slide-up` (`translateY(12px) scale(.985)` to none). A browser check that measures it
+right after `getByRole("dialog").waitFor()` reads the first frame: `getBoundingClientRect()` of a 44 px button gives 43.3
+px, while `offsetHeight` and the computed height say 44. Reduced motion only shortens the animation to 1 ms; the first
+frame is still drawn. Wait for the panel's animations before measuring:
+`await dialog.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)))`
+(`web/e2e/standing-authorizations.mjs`).

@@ -29,7 +29,7 @@ private struct NotebookCellView: View {
     var body: some View {
         switch cell.kind {
         case .markdown:
-            Markdown(MarkdownMemo.content(cell.source)).markdownTheme(.persona)
+            Markdown(MarkdownMemo.content(cell.source)).markdownTheme(.persona).readingContent()
         case .raw:
             Text(cell.source)
                 .font(Theme.Font.code)

@@ -236,6 +236,7 @@ type relayBook struct {
 	draining map[string]bool
 	holds    map[string]*time.Timer // by conversation: drains its queue again when the hold for the owner ends
 	stuck    map[string]relayMsg    // by conversation: the message that could not go in at the last drain (pickLocked)
+	doubted  map[string]time.Time   // by relayMsgID: when a try that ended in doubt began, its line not found then (relay_once.go)
 	// ownerTurns: the conversations whose round the owner is on, in memory only (#6394). While one is set, every
 	// queued message waits, whatever its rank: the owner's own message always goes before the queue. A restart falls
 	// back on the persisted Spoke presence window (relay_presence.go).
@@ -433,34 +434,48 @@ func (msg relayMsg) source() *proto.MessageSource {
 // deliverRelay sends one message into an assistant conversation and notes the hop it is working on. A quiet task's
 // notice (quiet.go) is its own text, and the work it starts is not a hop of any chain.
 func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg relayMsg) error {
-	text := relayText(msg)
-	if msg.Tool == noticeTool || msg.Tool == superviseTool || msg.Tool == askAnswerTool || msg.Tool == spawnNoticeTool || msg.Tool == taskEndTool {
-		text = msg.Text
-	}
+	text := relayDeliveryText(msg)
 	s.availInput(machine, to, relayKind(msg), time.Now()) // a notice has no message source of its own
 	if msg.Tool == superviseTool {
 		// Register before dispatch: a fast MCP call can arrive before assistant.send returns.
 		s.holdPushes(ctx, to)
 	}
-	params := map[string]any{"session_id": to, "text": text, "message_source": msg.source(), "resume_only": true, holdPushesParam: msg.Tool == superviseTool}
+	params := map[string]any{"session_id": to, "text": text, "message_source": msg.source(), "resume_only": true, holdPushesParam: msg.Tool == superviseTool,
+		"once_id": relayMsgID(to, msg)} // every try of it under one id: the node sends it once (relay_once.go)
 	if s.isBackground(ctx, to) {
 		s.backgroundModel(ctx, params) // its own model purpose, on every message as the main chat's is (supervise_background.go)
 	}
 	if err := s.call(ctx, machine, DeviceAssistantSend, params, nil); err != nil {
-		if msg.Tool == superviseTool {
+		if msg.Tool == superviseTool && !relayInDoubt(err) { // in doubt, drainRelays lets go once it knows it did not go in
 			s.releasePushes(ctx, to)
 		}
 		return err
 	}
+	s.relayDelivered(ctx, to, msg)
+	return nil
+}
+
+// relayDeliveryText is what a relayed message says in the conversation: a notice, a supervision message and an answer
+// are their own text; a message from another conversation says where it comes from.
+func relayDeliveryText(msg relayMsg) string {
+	if msg.Tool == noticeTool || msg.Tool == superviseTool || msg.Tool == askAnswerTool || msg.Tool == spawnNoticeTool || msg.Tool == taskEndTool {
+		return msg.Text
+	}
+	return relayText(msg)
+}
+
+// relayDelivered notes a message that went into conversation to: the hop it is working on, or the report turn a
+// notice starts.
+func (s *Service) relayDelivered(ctx context.Context, to string, msg relayMsg) {
 	if msg.Tool == superviseTool {
-		return nil
+		return
 	}
 	if msg.Tool == taskEndTool {
-		return nil // a record for the conversation that planned the task: no hop of any chain, no push of its own
+		return // a record for the conversation that planned the task: no hop of any chain, no push of its own
 	}
 	if msg.Tool == noticeTool || msg.Tool == askAnswerTool {
 		s.noteReportTurn(to) // the answer to a task's notice (or to the owner's late call) is pushed however quick it was (#3438)
-		return nil
+		return
 	}
 	b := &s.relays
 	b.mu.Lock()
@@ -469,7 +484,6 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 		s.saveRelayLocked()
 	}
 	b.mu.Unlock()
-	return nil
 }
 
 // drainRelays delivers the next queued message to every conversation of the machine that is not running (called
@@ -531,8 +545,18 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 				}
 			}
 			var err error
+			tried := time.Now()
 			if !stale && !keep {
-				err = s.deliverRelay(ctx, machine, id, msg)
+				if s.relayLanded(machine, id, msg) {
+					err = nil // an earlier try in doubt went in after all: nothing is sent again
+				} else {
+					err = s.deliverRelay(ctx, machine, id, msg)
+					if err == nil {
+						s.forgetDoubt(id, msg)
+					} else if s.relaySettled(machine, id, msg, tried, err) {
+						err = nil
+					}
+				}
 			}
 			cancel()
 			b.mu.Lock()

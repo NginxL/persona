@@ -369,6 +369,9 @@ struct SessionModesMenu: View {
     /// The main Persona chat: opens its conversation model sheet (#6542, the per-conversation pick, #5033). Nil on
     /// older hubs, which keep the row read-only.
     var assistantPick: (() -> Void)? = nil
+    /// What the main chat's next message runs on, from the same effective setup as the composer title (#6911 M7): the
+    /// menu row names this, not the process's last model. Nil on every other conversation, whose row names what it runs.
+    var assistantModelName: String? = nil
     /// A mode picked here goes through the page's `requestMode` (`SessionModeBar.pick`); nil applies it at once.
     var pick: ((String) -> Void)? = nil
 
@@ -417,9 +420,10 @@ struct SessionModesMenu: View {
                 }
             } else if let assistantPick {
                 // The main Persona chat (#6542): the row opens its conversation model sheet (pick kept on the hub, #5033).
+                // It names the next message's effective model, the one source the composer title uses (#6911 M7).
                 Button(action: assistantPick) {
                     Label {
-                        Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
+                        Text(assistantModelName ?? SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
                     } icon: {
                         ThemedIcon(Theme.Icon.agentChat)
                     }

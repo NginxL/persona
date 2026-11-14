@@ -223,6 +223,10 @@ struct Chip: View {
     var compact = false
 
     var body: some View {
+        chipBody.accessibilityShowsLargeContentViewer()
+    }
+
+    @ViewBuilder private var chipBody: some View {
         if compact {
             Text(text).lineLimit(1)
                 .font(Theme.Font.label)
@@ -388,6 +392,7 @@ struct CountBadge: View {
                 .background(fill, in: .capsule)
                 .fixedSize()
                 .accessibilityLabel(label ?? String(count))
+                .accessibilityShowsLargeContentViewer()
         }
     }
 
@@ -615,7 +620,9 @@ struct CloseAgentSheet: View {
                             onClosed(session.key)
                             dismiss()
                             // Once it is gone: the node refuses a worktree an agent still works in.
-                            if let worktree { await model.cleanUpWorktree(session.machineRef, worktree, cleanup) }
+                            if let worktree {
+                                await model.cleanUpWorktree(session.machineRef, worktree, cleanup, kind: AgentWorktree.engine(of: session))
+                            }
                         } else {
                             failure = model.toast?.message ?? String(localized: "Couldn't stop. The agent and its tab were kept; try again.")
                             closing = false
@@ -734,7 +741,7 @@ struct DeleteAgentSheet: View {
                         if await model.deleteSession(session.key) {
                             onDeleted(session.key)
                             dismiss()
-                            await model.cleanUpWorktree(session.machineRef, worktree, cleanup)
+                            await model.cleanUpWorktree(session.machineRef, worktree, cleanup, kind: AgentWorktree.engine(of: session))
                         } else {
                             deleting = false
                         }
@@ -921,6 +928,36 @@ struct FirstFitting: Layout {
     private static let away: CGFloat = 100_000
 }
 
+/// One view, measured once for each size it is offered: the answers are kept in the layout's cache, which SwiftUI makes
+/// again when the view changes. For a candidate of a `ViewThatFits` in a list row: a row is hosted by its own view graph,
+/// which works its size out again on every frame the row moves on screen (the shell's strip sliding the page), and
+/// `ViewThatFits` then measures each candidate anew, every chip's text with it. On the Agents list's filters that was
+/// about 2 ms a frame of a switch between Assistant and Agents (#5438, docs/apple/performance.md P7). Unlike
+/// `FirstFitting` only the shown candidate exists, so buttons can go in it.
+struct MeasuredOnce: Layout {
+    struct Offer: Hashable { var width: CGFloat?, height: CGFloat? }
+    struct Cache { var sizes: [Offer: CGSize] = [:] }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard let view = subviews.first else { return .zero }
+        let offer = Offer(width: proposal.width, height: proposal.height)
+        if let known = cache.sizes[offer] { return known }
+        let size = view.sizeThatFits(proposal)
+        // A handful of offers at most (ideal, the row's width); a resize that walks through widths starts over.
+        if cache.sizes.count >= Self.kept { cache.sizes.removeAll(keepingCapacity: true) }
+        cache.sizes[offer] = size
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+
+    private static let kept = 8
+}
+
 extension View {
     /// A `FirstFitting`'s candidates as one static text that says `text`, where the shown one is drawn.
     func firstFittingText(_ text: String) -> some View {
@@ -947,4 +984,37 @@ struct TickBoxToggleStyle: ToggleStyle {
 
 extension ToggleStyle where Self == TickBoxToggleStyle {
     static var tickBox: TickBoxToggleStyle { TickBoxToggleStyle() }
+}
+
+/// `TickBoxToggleStyle`'s box with a third state, for a mark that can cover part of an item (#7013: a file whose
+/// changes are partly staged in a session's Git tab): ticked, a dash, or empty. A tap runs `action`; a spinner takes
+/// the box's place while it runs. The box sits in a square as large as a tap; VoiceOver reads it as a toggle, with
+/// `label` saying what a tap does and `value` the state.
+struct TickBox: View {
+    enum Mark { case none, some, all }
+
+    var mark: Mark
+    var label: String
+    var value: String
+    var busy = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    ThemedIcon(mark == .all ? Theme.Icon.checkedBox : mark == .some ? Theme.Icon.partlyCheckedBox : Theme.Icon.uncheckedBox)
+                        .foregroundStyle(mark == .none ? Color.secondary : Theme.positive)
+                }
+            }
+            .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+        .accessibilityAddTraits(.isToggle)
+    }
 }

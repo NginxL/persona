@@ -8,9 +8,8 @@ import CoreGraphics
 // inside Persona Link.app so its Screen Recording grant is its own, not the node's (`design-3954.poc.md`). The node
 // starts it through LaunchServices with a per-stream Unix socket and token.
 //
-// This is the skeleton: it carries the wire protocol end to end with a stub capture source that reports the Screen
-// Recording permission as missing, so the phone stays on RFB. The real ScreenCaptureKit + VideoToolbox source is the
-// PoC on a real Mac.
+// On a Mac it captures with ScreenCaptureKit and encodes with VideoToolbox (`ScreenCaptureSource`); without
+// ScreenCaptureKit it carries the wire protocol with a stub source that pauses at once, so the phone stays on RFB.
 
 enum PersonaScreenMain {
     static func run(_ argv: [String]) -> Int32 {
@@ -24,6 +23,8 @@ enum PersonaScreenMain {
         switch args.mode {
         case .requestPermission:
             return requestPermission()
+        case .preflight:
+            return preflight()
         case let .stream(socket, token):
             do {
                 try runStream(socketPath: socket, token: token)
@@ -48,14 +49,29 @@ enum PersonaScreenMain {
         #endif
     }
 
+    /// `--preflight`: whether Screen Recording is granted, asking nothing (`CGPreflightScreenCaptureAccess()`). The
+    /// node reports this as `screen_video.permission`.
+    private static func preflight() -> Int32 {
+        #if canImport(CoreGraphics)
+        let granted = CGPreflightScreenCaptureAccess()
+        print("screen_recording: \(granted ? "granted" : "missing")")
+        return granted ? 0 : 1
+        #else
+        print("screen_recording: missing")
+        return 1
+        #endif
+    }
+
     private static func runStream(socketPath: String, token: String) throws {
         let socket = try UnixSocketClient.connect(path: socketPath)
         defer { socket.close() }
         try socket.writeAll(Data((token + "\n").utf8))
 
-        // PoC (real Mac): a ScreenCaptureSource (ScreenCaptureKit + VideoToolbox) replaces this stub. The stub reports
-        // the permission as missing on `start`, so the phone falls back to RFB.
+        #if canImport(ScreenCaptureKit)
+        let source: ScreenSource = ScreenCaptureSource()
+        #else
         let source: ScreenSource = UnavailableScreenSource(reason: "permission")
+        #endif
         let writeLock = NSLock()
         source.onMessage = { message in
             let framed = message.framed()

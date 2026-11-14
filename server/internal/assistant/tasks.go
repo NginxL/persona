@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -114,6 +115,10 @@ type PlanTask struct {
 	ErrorArgs map[string]string `json:"error_args,omitempty"`
 	// Start: the start being remedied after its agent did not start, or how that ended (start_remedy.go, #2570).
 	Start *StartRemedy `json:"start,omitempty"`
+	// Queue is set while the admission gate has refused this start for now: the task stays open (not failed, no
+	// failure receipt) and the admission queue loop retries it on a timer (task_queue.go, #6909). Cleared the moment
+	// a retry starts; the task's card reads as waiting with the queue's reason while it is set.
+	Queue *TaskQueue `json:"queue,omitempty"`
 	// defaulted: Launcher was filled in from a default by an earlier try of this start (startTaskAgent), not named by
 	// whoever planned the task, so a retry may still swap it for one its computer has (launcher_fit.go).
 	defaulted bool
@@ -209,6 +214,11 @@ type tasksState struct {
 	// limitLooks: when a task agent's usage-limit wait is looked at again (taskTurnEndedAfter), one look per agent
 	// however many turns the wait's wakes end.
 	limitLooks map[SessionRef]time.Time
+	// sentBy: by agent (machine, session), the conversation that last sent it text for a task and when (noteAgentSend:
+	// agent_send, the owner's message on a task's card). A task its supervisor accepted opens again on its agent's new
+	// turn only after its own conversation sent it more (closedTurnReopens, #6726). In memory only: after a restart
+	// such a task stays closed until its conversation sends again or the owner reopens it.
+	sentBy map[[2]string]agentSent
 	// retrying: the tasks whose agent is starting again after a failed start (one start at a time, #1396).
 	retrying map[string]bool
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
@@ -232,12 +242,17 @@ type tasksState struct {
 	// the task's agent link or failure is recorded.
 	workspaceMu     sync.Mutex
 	workspaceClaims map[string]string
+	// turns: the turns completion handling took up, kept in the database (task_turns.go).
+	turns turnsState
 }
 
 func newTasksState() tasksState {
 	return tasksState{recoverBefore: time.Now(), plans: map[string]*TaskPlan{}, feed: map[string][]FeedItem{},
 		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]bool{},
-		outcomes: map[string]time.Time{}, reusing: map[string]bool{}}
+		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, sentBy: map[[2]string]agentSent{},
+		turns: turnsState{again: map[string]bool{}, looked: map[string]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
+			retry:   map[string]turnRetry{},
+			judging: map[string]int{}, closed: map[SessionRef]turnLook{}}}
 }
 
 // ---- plans and the feed: storage ----
@@ -363,14 +378,27 @@ func (s *Service) appendFeed(ctx context.Context, conversation, kind, ref string
 
 // appendFeedAt is appendFeed for an item that belongs at another time (the "Today" card: the start of the day).
 func (s *Service) appendFeedAt(ctx context.Context, conversation, kind, ref string, body any, at time.Time) (FeedItem, error) {
+	it, _, err := s.appendFeedItem(ctx, "feed_"+randomHex(8), false, conversation, kind, ref, body, at)
+	return it, err
+}
+
+// appendFeedOnce is appendFeed for an item that has one id whoever writes it and however often (a turn's receipt,
+// receiptID): fresh is false when the feed has it already, and nothing is written or told then.
+func (s *Service) appendFeedOnce(ctx context.Context, id, conversation, kind, ref string, body any) (fresh bool, err error) {
+	_, fresh, err = s.appendFeedItem(ctx, id, true, conversation, kind, ref, body, time.Now())
+	return fresh, err
+}
+
+// appendFeedItem appends the item under id; once: unless the feed has that id already (fresh false).
+func (s *Service) appendFeedItem(ctx context.Context, id string, once bool, conversation, kind, ref string, body any, at time.Time) (it FeedItem, fresh bool, err error) {
 	if s.isLeaderRef(conversation) { // a task leader's agent is no conversation: nobody reads a feed there (task_leader.go)
-		return FeedItem{}, nil
+		return FeedItem{}, true, nil
 	}
-	it := FeedItem{ID: "feed_" + randomHex(8), Conversation: conversation, At: at.UTC(), Kind: kind, Ref: ref}
+	it = FeedItem{ID: id, Conversation: conversation, At: at.UTC(), Kind: kind, Ref: ref}
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return FeedItem{}, err
+			return FeedItem{}, false, err
 		}
 		it.Body = raw
 	}
@@ -378,26 +406,40 @@ func (s *Service) appendFeedAt(ctx context.Context, conversation, kind, ref stri
 		s.tasks.mu.Lock()
 		if kind == feedMessage && s.duplicateDismissedDraft(it) {
 			s.tasks.mu.Unlock()
-			return FeedItem{}, nil
+			return FeedItem{}, true, nil
+		}
+		if once && slices.ContainsFunc(s.tasks.feed[conversation], func(have FeedItem) bool { return have.ID == id }) {
+			s.tasks.mu.Unlock()
+			return FeedItem{}, false, nil
 		}
 		s.tasks.feed[conversation] = append(s.tasks.feed[conversation], it)
 		s.tasks.mu.Unlock()
 	} else {
+		if once {
+			if have, err := st.FeedItem(ctx, id); err != nil {
+				return FeedItem{}, false, err
+			} else if have != nil {
+				return FeedItem{}, false, nil
+			}
+		}
 		row := db.FeedRow{ID: it.ID, Conversation: conversation, At: it.At, Kind: kind, Ref: ref, Body: it.Body}
 		if ds, ok := st.(draftFeedStore); kind == feedMessage && ok {
 			inserted, err := ds.AppendDraftFeed(ctx, row)
 			if err != nil || !inserted {
-				return FeedItem{}, err
+				return FeedItem{}, true, err
 			}
 		} else if err := st.AppendFeed(ctx, row); err != nil {
-			return FeedItem{}, err
+			if have, lookErr := st.FeedItem(ctx, id); once && lookErr == nil && have != nil {
+				return FeedItem{}, false, nil // written meanwhile by another look at the same turn
+			}
+			return FeedItem{}, false, err
 		}
 	}
 	s.event(ctx, map[string]any{"type": "assistant_feed", "conversation": conversation, "item": it})
 	if kind == feedReceipt {
 		s.interruptsSoon() // a task went on after being cut off (interruptions.go)
 	}
-	return it, nil
+	return it, true, nil
 }
 
 const feedPage = 500

@@ -6,6 +6,7 @@ struct TodoDetailView: View {
     @Environment(\.tabIsActive) private var inFront
     @Environment(\.dismiss) private var dismiss
     var todoID: String
+    var openAgent: ((SessionKey) -> Void)? = nil
 
     @State private var store = TodoStore.shared
     @State private var text = TodoEditorText()
@@ -273,6 +274,7 @@ struct TodoDetailView: View {
 
                     if isEditingNotes {
                         TextField(String(localized: "To-do notes"), text: $editingNotesText, axis: .vertical)
+                            .readingContent()
                             .lineLimit(3...8)
                             .textFieldStyle(.plain)
                             .accessibilityIdentifier("todo.notes.field")
@@ -280,6 +282,7 @@ struct TodoDetailView: View {
                             .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
                     } else if !text.notes.isEmpty {
                         Text(text.notes)
+                            .readingContent()
                             .font(Theme.Font.body)
                             .foregroundStyle(Color.primary)
                     } else {
@@ -399,8 +402,12 @@ struct TodoDetailView: View {
         }()
 
         return Button {
-            dismiss()
-            openTodoAgentChat(key, in: model)
+            if let openAgent {
+                openAgent(key)
+            } else {
+                dismiss()
+                openTodoAgentChat(key, in: model)
+            }
         } label: {
             HStack(alignment: .top, spacing: Theme.Space.m) {
                 if isFailed {
@@ -486,39 +493,48 @@ struct TodoDetailView: View {
     }
 
     private func bottomBar(_ todo: TodoItem) -> some View {
-        HStack(spacing: Theme.Space.m) {
-            // A done to-do can't be handed over (the hub refuses, #1856): Reopen comes first.
-            if !todo.isDone {
-                Button {
-                    showHandoff = true
-                } label: {
-                    HStack(spacing: Theme.Space.xs) {
-                        ThemedIcon(Theme.Icon.handToAI)
-                        Text("Hand to Agent").lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .font(Theme.Font.heading)
-                    .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.wellS)
-                }
-                .themedButton(prominent: true)
-                .controlSize(.large)
-            }
-
-            Button {
-                store.toggleDone(todo)
-            } label: {
-                HStack(spacing: Theme.Space.xs) {
-                    ThemedIcon(todo.isDone ? Theme.Icon.undo : Theme.Icon.done)
-                    Text(todo.isDone ? String(localized: "Reopen") : String(localized: "Done [Extension System Presentation c0b3fb]")).lineLimit(1).minimumScaleFactor(0.8)
-                }
-                .font(Theme.Font.heading)
-                .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.wellS)
-            }
-            .themedButton(prominent: false)
-            .controlSize(.large)
+        // Side by side while both labels fit whole, else one above the other, Hand to Agent first (#6151): side by side
+        // they were cut to "Hand to A…" from xxLarge.
+        StackingButtonRow(spacing: Theme.Space.m, stackedSpacing: Theme.Space.s) {
+            bottomButtons(todo)
         }
         .padding(.horizontal, Theme.Space.page)
         .padding(.vertical, Theme.Space.s)
         .background(Theme.pageBackground)
+    }
+
+    @ViewBuilder private func bottomButtons(_ todo: TodoItem) -> some View {
+        // A done to-do can't be handed over (the hub refuses, #1856): Reopen comes first.
+        if !todo.isDone {
+            Button {
+                showHandoff = true
+            } label: {
+                HStack(spacing: Theme.Space.xs) {
+                    ThemedIcon(Theme.Icon.handToAI)
+                    // Its own string (#6151): the sheet's title keeps the longer Japanese, which the half-width button cut off.
+                    Text("Hand to Agent [To-do Page Button]").buttonLabelLine()
+                }
+                .font(Theme.Font.heading)
+                .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.wellS)
+            }
+            .themedButton(prominent: true)
+            .controlSize(.large)
+            .accessibilityIdentifier("todo.handToAgent")
+        }
+
+        Button {
+            store.toggleDone(todo)
+        } label: {
+            HStack(spacing: Theme.Space.xs) {
+                ThemedIcon(todo.isDone ? Theme.Icon.undo : Theme.Icon.done)
+                Text(todo.isDone ? String(localized: "Reopen") : String(localized: "Done [Extension System Presentation c0b3fb]")).buttonLabelLine()
+            }
+            .font(Theme.Font.heading)
+            .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.wellS)
+        }
+        .themedButton(prominent: false)
+        .controlSize(.large)
+        .accessibilityIdentifier("todo.toggleDone")
     }
 }
 

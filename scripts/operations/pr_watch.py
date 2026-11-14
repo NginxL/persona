@@ -159,13 +159,15 @@ class Watcher:
         try:
             for repo, config in self.repositories.items():
                 raw = gh_json(["pr", "list", "--repo", repo, "--state", "open", "--json",
-                               "number,headRefOid,isDraft,baseRefName", "--limit", "200"])
+                               "number,headRefOid,isDraft,baseRefName,mergeable", "--limit", "200"])
                 if not isinstance(raw, list):
                     raise WatchError("PR discovery did not return an array")
                 for item in raw:
                     if not isinstance(item, dict) or not isinstance(item.get("number"), int):
                         raise WatchError("invalid PR discovery entry")
                     if item.get("isDraft") or item.get("baseRefName") != config["base"]:
+                        continue
+                    if item.get("mergeable") == "CONFLICTING":
                         continue
                     if not isinstance(item.get("headRefOid"), str) or not SHA.fullmatch(item["headRefOid"]):
                         raise WatchError("PR discovery entry has no valid head SHA")
@@ -313,6 +315,8 @@ class Watcher:
     def mergeable(self, pr):
         if pr["state"] != "OPEN" or pr["isDraft"]:
             return False
+        if pr["mergeable"] == "CONFLICTING":
+            return False
         if pr["mergeable"] == "UNKNOWN":
             # Let the next round observe a definite state; never interpret an
             # unknown GitHub state as either permission or a conflict.
@@ -352,7 +356,7 @@ class Watcher:
                 return
             if old.get("outcome") == "failed":
                 self.comment(repo, number, "Automated review at `%s` did not pass. Not merged.\n\n```text\n%s\n```" %
-                             (head[:9], bounded(old.get("failure", "verification failed"), 4500)))
+                             (head[:9], bounded(old.get("failure", "verification failed"), 14000)))
                 self.state.put(repo, number, head, evidence_key=evidence_key, failure_posted=True)
                 return
         if not self.mergeable(pr):
@@ -385,7 +389,8 @@ class Watcher:
                 self.phase(key, "independent semantic review")
                 findings = semantic_review(repo, pr, str(worktree), self.config["reviewer"])
                 semantic = "findings" if findings else "passed"
-                current = self.state.put(repo, number, head, semantic=semantic, findings=findings,
+                current = self.state.put(repo, number, head, evidence_key=evidence_key,
+                                         semantic=semantic, findings=findings,
                                          review_fingerprint=fingerprint(repo, number, head, "semantic", findings))
             findings = current.get("findings", [])
             if current.get("semantic") == "findings":
@@ -401,7 +406,8 @@ class Watcher:
                 self.phase(key, "repository verification")
                 phase = "verification"
                 results = verify(repo, pr, str(worktree), config["verify"], environ=verification_env())
-                current = self.state.put(repo, number, head, verification="passed", checks=results)
+                current = self.state.put(repo, number, head, evidence_key=evidence_key,
+                                         verification="passed", checks=results)
             with self.merging(repo):
                 self.phase(key, "rechecking exact head")
                 current_pr = pr_snapshot(repo, number)
@@ -420,19 +426,19 @@ class Watcher:
                 self.finish_merge(config, current_pr, current)
         except WatchError as error:
             # A missing semantic answer never becomes approval. Verification
-            # failures are durable for this head; infrastructure errors get a
-            # bounded retry before one concise public failure comment.
+            # Infrastructure failures remain retryable with capped backoff;
+            # verification failures and semantic findings stay terminal for
+            # this exact base/head until the PR changes.
             attempts = int(old.get("review_attempts", 0)) + 1
-            retry = (phase in ("preparing", "semantic", "merge") and attempts < 3
-                     and old.get("verification") != "passed" and phase != "merge")
+            retry = phase in ("preparing", "semantic") and old.get("verification") != "passed"
             outcome = "retry" if retry else ("merge_failed" if phase == "merge" else "failed")
             self.state.put(repo, number, head, evidence_key=evidence_key, outcome=outcome,
-                           review_attempts=attempts, retry_after=time.time() + min(300, 30 * (2 ** (attempts - 1))),
+                           review_attempts=attempts, retry_after=time.time() + min(1800, 30 * (2 ** min(attempts - 1, 6))),
                            failure=str(error))
             if not retry and not old.get("failure_posted"):
                 if not self.dry_run:
                     self.comment(repo, number, "Automated review at `%s` could not complete. Not merged.\n\n```text\n%s\n```" %
-                                 (head[:9], bounded(error, 4500)))
+                                 (head[:9], bounded(error, 14000)))
                 self.state.put(repo, number, head, evidence_key=evidence_key, failure_posted=True)
             self.log("%s#%s %s failed: %s" % (repo, number, phase, bounded(error, 700)))
         finally:
@@ -443,13 +449,15 @@ class Watcher:
         try:
             merged = self.merge(config, pr)
             outcome = "merged" if merged else "passed"
-            self.state.put(repo, number, head, outcome=outcome, merged=merged)
+            self.state.put(repo, number, head, evidence_key=current.get("evidence_key"),
+                           outcome=outcome, merged=merged)
             if not self.dry_run:
                 self.notify(config, number, head, outcome)
         except WatchError as error:
             blocking = "not mergeable" in str(error) or "conflict" in str(error) or "issue" in str(error)
             retry = 0 if blocking else time.time() + min(900, 60 * (2 ** min(int(current.get("merge_attempts", 0)), 4)))
-            self.state.put(repo, number, head, outcome="merge_failed", blocking=blocking,
+            self.state.put(repo, number, head, evidence_key=current.get("evidence_key"),
+                           outcome="merge_failed", blocking=blocking,
                            merge_attempts=int(current.get("merge_attempts", 0)) + 1,
                            retry_after=retry, failure=str(error))
             self.log("%s#%s merge blocked: %s" % (repo, number, bounded(error, 700)))

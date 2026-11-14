@@ -5,6 +5,8 @@
 /api/
 /api/v1/admin/
 /api/v1/admin/cli/
+/api/v1/admin/plugins # legacy admin relay to the manager (before #1844)
+/api/v1/admin/plugins/ # legacy admin relay to the manager (before #1844)
 DELETE /api/v1/admin/devices/{id}
 DELETE /api/v1/admin/machines/{id}
 DELETE /api/v1/admin/peers/{hub_id}
@@ -24,6 +26,7 @@ GET /api/v1/admin/network
 GET /api/v1/admin/overview
 GET /api/v1/admin/peers
 GET /api/v1/admin/routes
+GET /api/v1/admin/sessions/{mid}/{sid}/ownership-inspection
 GET /api/v1/admin/state
 GET /api/v1/app/android/apk
 GET /api/v1/app/android/latest
@@ -105,6 +108,7 @@ POST /api/v1/admin/peers/{hub_id}/center
 POST /api/v1/admin/peers/probe
 POST /api/v1/admin/reload
 POST /api/v1/admin/restart
+POST /api/v1/admin/sessions/{mid}/{sid}/owner
 POST /api/v1/admin/setup
 POST /api/v1/admin/setup-code
 POST /api/v1/auth/pair-codes

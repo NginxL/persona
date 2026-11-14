@@ -40,6 +40,9 @@ export interface Sent {
   images: unknown[];
   /** When it was written here (ms). */
   at: number;
+  /** Its send ended in doubt: it is settled by words alone, so only a copy written after it counts (5 s for the
+   *  clocks, not CLOCK_SLACK_MS), and an earlier message with the same words does not stand in for it. */
+  inDoubt?: boolean;
 }
 
 export interface Seen {
@@ -64,7 +67,7 @@ export function isEcho(sent: Sent, user: Seen): boolean {
   if (user.client_msg_id && sent.id) return user.client_msg_id === sent.id;
   if (user.source || user.injected || user.from) return false;
   const at = user.ts ? Date.parse(user.ts) : NaN;
-  if (!Number.isNaN(at) && at < sent.at - CLOCK_SLACK_MS) return false;
+  if (!Number.isNaN(at) && at < sent.at - (sent.inDoubt ? 5_000 : CLOCK_SLACK_MS)) return false;
   if (user.images.length + (user.photos?.length ?? 0) < sent.images.length) return false;
   const cut = user.text.lastIndexOf(CUT_MARK);
   if (cut >= 0) {

@@ -393,7 +393,11 @@ func (s *Service) ruleCount(ctx context.Context, now time.Time) (map[string]*rul
 	for _, row := range rows {
 		plans = append(plans, planFromRow(row))
 	}
-	starts, task := rulePlanRuns(plans)
+	withdrawn, err := ev.WorkEventsBetween(ctx, since, now, []string{taskPlanWithdrawnEvent})
+	if err != nil {
+		return nil, err
+	}
+	starts, task := rulePlanRuns(withoutWithdrawn(plans, withdrawn)) // not the owner's answers (#6739)
 	trusted, err := s.trustedKindsErr(ctx)
 	if err != nil {
 		return nil, err

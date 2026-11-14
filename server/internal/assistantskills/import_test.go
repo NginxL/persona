@@ -45,9 +45,20 @@ func skillZIP(t *testing.T, entries ...zipEntry) []byte {
 
 const importManifest = "---\nname: example-skill\ndescription: A synthetic skill.\n---\n# Example\n"
 
+// realTempDir is a temp directory without symlinks in its path: the importer reports the resolved destination, and on
+// macOS t.TempDir() is under a symlink.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func importFixture(t *testing.T) (*Importer, ImportTarget) {
 	t.Helper()
-	t.Setenv("PERSONA_SKILLS_DIR", filepath.Join(t.TempDir(), "skills"))
+	t.Setenv("PERSONA_SKILLS_DIR", filepath.Join(realTempDir(t), "skills"))
 	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
 	return &Importer{}, ImportTarget{Scope: "example-manager", Cwd: t.TempDir()}
 }

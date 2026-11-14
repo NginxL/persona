@@ -270,6 +270,14 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	lctx, lcancel := context.WithTimeout(ctx, agentStartListTimeout)
 	knownIDs := s.knownSessionIDs(lctx, m.ID)
 	lcancel()
+	// Name the session ourselves for a Claude start, so an unanswered start is reconciled by this exact id: two
+	// workspace-none tasks share a directory and would otherwise be able to adopt each other's sessions. Agents that
+	// pick their own ids keep the heuristic fallback with its open-todo exclusion (session_adopt.go).
+	expectID := ""
+	if s.launcherAgent(ctx, m.ID, s.startLauncher(ctx, picked)) == "claude" {
+		expectID = newStartSessionID()
+		params["session_id"] = expectID
+	}
 	s.setPlanThen(ctx, m.ID, params)
 	err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
 	skipped, refused := s.ultracodeRefusal(ctx, err, params)
@@ -284,7 +292,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 			// The node may still have built the tab and launched the agent. Ask the machine itself before this is
 			// called a failure: an adopted session returns through the normal success path, so the task is linked
 			// once, with no failure receipt, retry or reroute (and no duplicate agent on another computer, #6540).
-			if sess, ok := s.adoptTaskStartSession(ctx, m, s.startLauncher(ctx, picked), t.Cwd, knownIDs); ok {
+			if sess, ok := s.adoptTaskStartSession(ctx, m, s.startLauncher(ctx, picked), t.Cwd, expectID, knownIDs); ok {
 				s.logf("task %s: start answered late on %s; adopted session %s from the machine's own list", t.TodoID, m.ID, sess.SessionID)
 				return m.ID, sess.SessionID, nil
 			}
@@ -323,19 +331,20 @@ var (
 )
 
 // adoptTaskStartSession gives a task start whose answer never came back a second opinion from the target machine's
-// own session list, reusing agent_start's adoption rule (adoptStartedSession): a session absent from the pre-start
-// snapshot, hub-started, a non-assistant agent of the same launcher and directory with a fresh sign of life,
-// newest wins. The start's own context may be spent, so the reconciliation runs on a detached one. A pre-start
-// snapshot that failed (nil knownIDs) or a machine that cannot answer confirms nothing: the caller keeps its
-// failure behavior, and nothing is started elsewhere.
-func (s *Service) adoptTaskStartSession(ctx context.Context, m Device, launcher, cwd string, knownIDs map[string]bool) (proto.Session, bool) {
+// own session list, reusing agent_start's adoption rule (adoptStartedSession): the start's own session id is matched
+// exactly first, then a session absent from the pre-start snapshot, hub-started, a non-assistant agent of the same
+// launcher and directory with a fresh sign of life that no open todo links, newest wins. The start's own context may
+// be spent, so the reconciliation runs on a detached one. A pre-start snapshot that failed (nil knownIDs) or a
+// machine that cannot answer confirms nothing: the caller keeps its failure behavior, and nothing is started
+// elsewhere.
+func (s *Service) adoptTaskStartSession(ctx context.Context, m Device, launcher, cwd, expectID string, knownIDs map[string]bool) (proto.Session, bool) {
 	if knownIDs == nil {
 		return proto.Session{}, false
 	}
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskStartAdoptWait)
 	defer cancel()
 	for {
-		if sess, ok := s.adoptStartedSession(actx, m, launcher, cwd, knownIDs); ok {
+		if sess, ok := s.adoptStartedSession(actx, m, launcher, cwd, expectID, knownIDs); ok {
 			return sess, true
 		}
 		if actx.Err() != nil {

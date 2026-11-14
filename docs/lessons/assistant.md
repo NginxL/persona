@@ -249,6 +249,8 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   modification time of `~/.persona/plugin-skills/<name>/.persona-plugin` on the assistant's machine with the upgrade's.
 
 - Inbox fixtures must wait for the first asynchronous roster count before writing directly to their items (#3459). `inboxReady` returns after scheduling `tellInboxNeedsYou`, whose goroutine holds the Inbox mutex while reading the map and status fields. Legacy fixture seeding bypassed that mutex and could crash the whole test process, even without the race detector. Use `waitNeedsYouIdle` at the fixture readiness boundary; later concurrent mutations must still use the Inbox mutex. Keep the real teller enabled and verify the complete Inbox test group under `-race`.
+  Observing a fake send is not the end of `tellSoon` (#7035). Before restoring a swapped `Service.store`, hold the fixture's handling pass and call `deliverNotes` synchronously for the item: its per-item lock waits through the background save, while `toldConv` returns as soon as the send is recorded.
+  Scheduling is not completion for transcription readiness either (#7232): after a fixture calls `transcriptionReadinessChanged`, `hubTr.wg.Wait` must precede a direct `Service.store` replacement because `transcriptionJobsCheck` reads settings through that store.
 - **An optional object in a tool's schema can come filled with zero values** (#3386): runtimes that fill in every field
   of a tool's schema send `agent_send`'s `task` as `{"title":"","done_when":[],"expect_minutes":0}` instead of leaving it
   out, and the server took any `task` as a hand-off: a reply to another conversation's agent was refused, and one to an
@@ -480,3 +482,62 @@ reached the upstream. When one request finds something out for many, let the oth
 by their own deadlines) and act on the first signal that settles it (the 200), not on the end of the work. Before
 fixing a suspected leak, count: a stress test over every exit path with the counter read afterwards settles it
 faster than reading the code again.
+
+## A send whose answer came too late may have gone in (2026-11-12)
+
+The manager waits 90 s for a relayed message (`drainRelays`) and kept it queued when no answer came. The node had
+written it after the first of two session-list rebuilds inside the send and was still building the second when the
+time ran out, so every later drain wrote it again: one conversation read the same message 32 times in an hour, and the
+messages queued behind it waited. A send in doubt is not a failure. Relays now carry one `once_id` per message
+(`relayMsgID`), which the node sends once (`sentLog`); a try in doubt first looks for the message's line in the
+conversation's latest turns (`relayArrived`: context blocks left out, no line older than the try, the sending
+conversation as its source), and one not found then is looked for again before the next try (`relayLanded`), which
+covers a line that lands late and a node restarted in between; and the send pushes the session list in the background, waiting for it only briefly
+(`notifySessionsSoon`, `listPushWait`). The id is deliberately not a `client_msg_id`: a line tied to one reads as the
+owner's own message everywhere (its source label, task briefs, user-input counts, extensions). The web had the same
+blind spot for the owner's own sends: a send answered 502 `delivered: "unknown"` stayed a failed bubble unless the hub
+tied a transcript line to its id, so the owner sent it again; a send in doubt now also settles by its words written
+after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts` allows 5 s for the clocks, not
+`CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
+in ChatView). A refusal never settles by words.
+
+## Name the thing an event is about, and keep what was done for it (#5718)
+
+Completion handling started only on a session list going from `working` to `done` / `idle`, and remembered "this stretch
+had its receipt" in memory. A node whose inventory never said `working` for Codex left finished turns with no receipt, no
+judgment and no supervision message; a manager restart forgot the receipt and wrote a second one when the same end was told
+again; a stale `working` row arriving after the end judged the same reply twice. Three faults, one cause: the work was
+keyed to the event that told of the turn, not to the turn.
+
+- Key the side effect to what it is about (here to-do, machine, session and the runtime's own turn end), give its row an
+  id derived from that key, and let the database refuse the second write.
+- Keep each later step on that key too (judged, told), so a process that stops between two steps resumes at the next one
+  instead of starting over or stopping for good.
+- Do not make a status transition the only trigger for something that must happen. Statuses are another component's
+  guess; reconcile from the record of what happened (the transcript) in a sweep that already runs, and bound what the
+  sweep reads per tick.
+- A reservation taken before a check must be given back on every path that leaves without doing the work, or one failed
+  check consumes the work for good (the second look at the task's agents failing on a dropped link).
+- When such a ledger is new, decide what it does with everything that happened before it existed. Here a turn that ended
+  before the ledger was first kept is recorded as seen and nothing is made of it; otherwise the first sweep after an
+  upgrade would have judged every stopped task again.
+- A recovery path changes state last. The first version took the start nobody heard (stage back, check cleared, review
+  wait cleared) and then ran the end's handler, which could still refuse: a cancelled task or a usage-limit wait lost its
+  state for an end that was never handled. Run every refusal of the path being recovered first, and only then the
+  missing step.
+- Every way a recovery look can end without doing the work needs an answer to "will looking again help?". Never (the
+  task refuses this end): record it and stop. Not until something changes (a usage-limit wait, a computer that is away):
+  do not look. Perhaps (the node did not answer): back off, and start over when the row moves. A boolean "not done"
+  that retries every tick reads the same transcript for hours.
+- Compare rows by what says the thing changed. The transcript's size says it was written to; the row's time can move
+  on a later list with nothing written, and a row compared on both was never the same row twice.
+- A mutex that is held across database calls must not be reachable from under a hot lock. The ledger's mutex is
+  held across its reads and writes; a counter that happened to live under it was read and set with the task lock
+  held, so one stuck write would have parked every user of the task lock behind it. Before putting a field under a
+  lock, ask who reads it and what they hold: in-memory state that a hot path needs gets a lock that is held across
+  nothing, and the order is written on the struct in one sentence a reader can check. Test it by stalling the store,
+  not by reading the code.
+
+## Reconciling a lost start needs an exact id, not a shape match (2026-11-13, #6908)
+
+When `session.start` never answers, the hub lists the machine and adopts the session its start probably created. The first version guessed from shape: not in the pre-start snapshot, `StartedByPersona`, same launcher and cwd, a fresh sign of life, newest wins. Three rows are indistinguishable by shape: a session the owner started by hand also carries `StartedByPersona` (the app's start path stamps it), and two workspace-none tasks run in the same directory with no workspace claim between them, so each could adopt the other's session — and nothing excluded a session already linked to another open todo. A heuristic over mutable, shared signals (`UpdatedAt`, cwd) cannot identify one specific start. The fix carries the identity instead: the hub generates a v4 UUID and sends it on the existing `session.start` `session_id`, the node starts Claude with `--session-id <id>` on every Claude path (the sync terminal path had been passing an empty id), and adoption matches that exact id first with no other condition. The heuristic is only the fallback for a node too old to honor the field, and even then it skips every session in `todos.activeBySession` and fails closed when the todo book cannot load. Lesson: when an action's result can be lost, make the request carry a unique correlation token and match on that; keep a heuristic only as a version-compatibility fallback, and have it exclude resources already claimed elsewhere rather than merely rank candidates.

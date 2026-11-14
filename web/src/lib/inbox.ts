@@ -93,6 +93,8 @@ export interface InboxItem {
   account: string;
   account_name: string;
   title: string;
+  /** Where the matter happens: a group's name, the other person of a direct chat, or a repository. */
+  where?: string;
   sender?: string;
   avatar?: string;
   preview: string;
@@ -133,6 +135,10 @@ export interface InboxItem {
   // ── events (docs/assistant/inbox.md "Events and handling chain"; lib/inbox-events.ts): absent from an older hub ──
   /** The section of an open item; absent: by `tier` as before. */
   status?: InboxStatus;
+  /** What or whom it waits on, the next step, and when to look again. */
+  follow?: { who?: string; next?: string; check_at?: string };
+  /** The manager's state key; apps translate it with the shared table in spec/fixtures/inbox/now.json. */
+  now?: string;
   /** Urgent: stays in "Needs you" while the AI prepares a suggestion. */
   urgent?: boolean;
   /** Summary by the manager: background, progress, where it is stuck. */
@@ -141,6 +147,8 @@ export interface InboxItem {
   suggestion?: InboxSuggestion;
   /** Handling chain, oldest first. */
   chain?: ChainEntry[];
+  /** The rows merged into this one by hand (the hub hides them; #6480). */
+  merged_from?: { id: string; source: string; account_name?: string; title?: string }[];
   related?: InboxRelated[];
   /** The conversations it was handed to with "Hand to AI" (POST /inbox/{id}/handoff), oldest first: they may write back to it. */
   handoffs?: InboxHandoff[];
@@ -500,7 +508,7 @@ export function matches(it: InboxItem, f: InboxFilter): boolean {
     const ok = it.kind === f.kind || (f.kind === "mention" && (it.kind === "doc" || (it.kind === "moment" && kindLabel(it) === AT_ME)));
     if (!ok) return false;
   }
-  return hasText([it.title, it.sender, it.preview, it.summary], f.query);
+  return hasText([it.title, it.sender, it.preview, it.summary, it.where], f.query);
 }
 
 const byUpdated = (a: InboxItem, b: InboxItem) => byTime(b.updated_at, a.updated_at) || a.id.localeCompare(b.id);
@@ -1048,6 +1056,17 @@ function keepStamp(fresh: InboxItem, before: InboxItem): InboxItem {
  *  unstamped: `manager` says whose (the item's the request was about); none: the default's. */
 export function replaceItem(item: InboxItem, manager?: string) {
   if (item?.id) patchItem({ id: item.id, manager: item.manager ?? manager }, (before) => keepStamp(item, before));
+}
+
+/** Rows the hub changed or took out of the list (a merge, a to-do): its copies replace ours (`manager` says whose answer it is:
+ *  the default's answers carry no stamp), and `gone` ids leave the list (a merged row's members are hidden by the hub). */
+export function applyInboxChange(changed: InboxItem[], gone: string[], manager?: string) {
+  const fresh = new Map(changed.map((it) => [it.id, it]));
+  const out = new Set(gone);
+  const same = (it: InboxItem) => sameManager(it.manager, manager);
+  set({
+    items: withPending(state.items.filter((it) => !(same(it) && out.has(it.id))).map((it) => (same(it) && fresh.has(it.id) ? keepStamp(fresh.get(it.id)!, it) : it))),
+  });
 }
 
 /** A done / open mark still being sent: what the item shows until the hub answers. A mute's mark also carries its
@@ -1753,13 +1772,13 @@ export async function sendReply(item: InboxItem, text: string, changes: DocChang
 
 /** "Send" / "Start" / "Got it" / "Confirm", "Reject", "Say something" on the item's suggestion: the hub's item replaces ours. A suggestion that
  * changed meanwhile is not run: "Suggestion updated" and the item as it is now. Resolves to whether it went through. */
-export async function suggestionAct(item: InboxItem, action: SuggestionAction, text?: string): Promise<boolean> {
+export async function suggestionAct(item: InboxItem, action: SuggestionAction, text?: string, due?: string): Promise<boolean> {
   const s = item.suggestion;
   const key = itemKey(item);
   if (!s || state.sending.includes(key)) return false;
   set({ sending: [...state.sending, key] });
   try {
-    const r = await actOnSuggestion(itemPath(item.id), s.version, action, text, undefined, item.manager);
+    const r = await actOnSuggestion(itemPath(item.id), s.version, action, text, undefined, item.manager, due);
     if (r.ok) {
       if (r.item?.id === item.id) replaceItem(r.item, item.manager);
       toast(actedText(s, action), "ok");

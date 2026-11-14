@@ -129,7 +129,7 @@ func TestAdmissionDirectionFull(t *testing.T) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Eight open tasks of dir-1, each with a live agent: the default cap is 8.
+	// Eight open tasks of dir-1, each with an agent whose session is working a turn: the default cap is 8.
 	s.todos.mu.Lock()
 	for i := 0; i < 8; i++ {
 		id := "dir-task-" + string(rune('a'+i))
@@ -139,6 +139,7 @@ func TestAdmissionDirectionFull(t *testing.T) {
 		}
 	}
 	s.todos.mu.Unlock()
+	admissionMarkWorking(s, "busy", "sa", "sb", "sc", "sd", "se", "sf", "sg", "sh")
 
 	_, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFlexible))
 	if err == nil || !strings.Contains(err.Error(), admissionText(s, "admission_direction_full", i18n.Args{
@@ -247,8 +248,8 @@ func TestAdmissionDoesNotBlockAssistantConversation(t *testing.T) {
 	}
 }
 
-// Fail-closed: unknown load (no sample, stale sample, nil load) refuses rather than reading as zero load.
-func TestAdmissionFailClosedOnUnknownLoad(t *testing.T) {
+// Fail-closed: a managed machine with no sample at all, or a stale sample, refuses rather than being read as healthy.
+func TestAdmissionFailClosedOnMissingOrStaleMetrics(t *testing.T) {
 	s, _, d := admissionHub(t)
 	healthyIdle(d)
 	d.machines["busy"] = admissionMachine(8)
@@ -267,13 +268,73 @@ func TestAdmissionFailClosedOnUnknownLoad(t *testing.T) {
 		!strings.Contains(err.Error(), admissionText(s, "admission_stale")) {
 		t.Fatalf("stale sample must refuse: %v", err)
 	}
-	// A fresh sample whose load was not measured.
+}
+
+// A fresh sample that simply has no load average (Windows nodes never report one) skips only the load condition:
+// the start is admitted, while the memory and process lines still apply and a reported overload still denies.
+func TestAdmissionMissingLoadSkipsLoadCondition(t *testing.T) {
+	s, _, d := admissionHub(t)
+	healthyIdle(d)
+	d.machines["busy"] = admissionMachine(8)
+	ctx := context.Background()
+
+	// Fresh sample without a load reading, otherwise healthy: admitted (the Windows case from #6907).
 	noLoad := admissionSample(0.2, 16*1024*1024*1024, 2*1024*1024*1024, 1)
 	noLoad.Load = nil
 	d.samples["busy"] = noLoad
+	release, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFixed))
+	if err != nil {
+		t.Fatalf("a missing load reading must skip the load condition, got %v", err)
+	}
+	release()
+
+	// The memory line still applies with no load reading.
+	noLoadMem := admissionSample(0.2, 16*1024*1024*1024, 15*1024*1024*1024, 1)
+	noLoadMem.Load = nil
+	d.samples["busy"] = noLoadMem
 	if _, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFixed)); err == nil ||
-		!strings.Contains(err.Error(), admissionText(s, "admission_no_load")) {
-		t.Fatalf("nil load must refuse: %v", err)
+		!strings.Contains(err.Error(), admissionText(s, "admission_memory", i18n.Args{
+			"available": humanBytes(1024 * 1024 * 1024), "limit": humanBytes(2 * 1024 * 1024 * 1024)})) {
+		t.Fatalf("low memory must still refuse with a missing load reading, got %v", err)
+	}
+
+	// The process-cap line still applies with no load reading.
+	noLoadProcs := admissionSample(0.2, 16*1024*1024*1024, 2*1024*1024*1024, 20)
+	noLoadProcs.Load = nil
+	d.samples["busy"] = noLoadProcs
+	if _, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFixed)); err == nil ||
+		!strings.Contains(err.Error(), admissionText(s, "admission_procs", i18n.Args{
+			"count": 20, "limit": 20})) {
+		t.Fatalf("the process cap must still refuse with a missing load reading, got %v", err)
+	}
+
+	// When the node does report a load, an overload still denies: skipping only applies to a missing reading.
+	d.samples["busy"] = admissionSample(99.0, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	if _, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFixed)); err == nil ||
+		!strings.Contains(err.Error(), admissionText(s, "admission_load", i18n.Args{
+			"load": "99.0", "cores": 8, "multiplier": 4.0})) {
+		t.Fatalf("a reported overload must refuse, got %v", err)
+	}
+}
+
+// A machine that reports no load average stays eligible for a reroute recommendation.
+func TestAdmissionRecommendIncludesMissingLoadMachine(t *testing.T) {
+	s, _, d := admissionHub(t)
+	// The usual idle machine is over its load line, so only the no-load machine can host the work.
+	d.machines["idle"] = admissionMachine(8)
+	d.samples["idle"] = admissionSample(99.0, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	d.machines["busy"] = admissionMachine(8)
+	windowsLike := admissionSample(0, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	windowsLike.Load = nil
+	d.samples["busy"] = windowsLike
+	ctx := context.Background()
+
+	got, ok := s.recommendMachine(ctx, "calm", nil)
+	if !ok {
+		t.Fatal("the no-load machine must be recommendable")
+	}
+	if got.ID != "busy" {
+		t.Fatalf("recommendation = %q, want the no-load busy machine", got.ID)
 	}
 }
 
@@ -432,6 +493,156 @@ func TestAdmissionAgentStartToolRefuses(t *testing.T) {
 }
 
 func ptrBool(b bool) *bool { return &b }
+
+// admissionMarkWorking puts the sessions into the fleet snapshot the gate reads (fleetPrevious) as working, the same
+// rows a node's session list would carry.
+func admissionMarkWorking(s *Service, machine string, sessionIDs ...string) {
+	rows := make([]proto.Session, 0, len(sessionIDs))
+	for _, id := range sessionIDs {
+		rows = append(rows, proto.Session{SessionID: id, Status: proto.StatusWorking, State: proto.StateWorking})
+	}
+	s.fleetKeepPrevious(machine, rows)
+}
+
+// admissionDirTask builds one open, supervised task of direction with a linked agent.
+func admissionDirTask(id, direction, machine, session string, extra func(*Todo)) *Todo {
+	t := &Todo{ID: id, Supervision: &Supervision{Supervisor: direction},
+		Agents: []TodoAgent{{MachineID: machine, SessionID: session}}}
+	if extra != nil {
+		extra(t)
+	}
+	return t
+}
+
+// The running count only counts agents actually working a turn: linked agents whose sessions are idle, and tasks
+// parked, waiting for the owner or finished and held short of live, occupy no direction slot.
+func TestAdmissionDirectionCountExcludesIdleAgents(t *testing.T) {
+	s, _, d := admissionHub(t)
+	healthyIdle(d)
+	d.machines["busy"] = admissionMachine(8)
+	d.samples["busy"] = admissionSample(0.8, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	ctx := context.Background()
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().Add(time.Hour)
+	put := func(t *Todo) {
+		s.todos.mu.Lock()
+		s.todos.todos[t.ID] = t
+		s.todos.mu.Unlock()
+	}
+	// One genuinely working agent.
+	put(admissionDirTask("work", "dir-1", "busy", "sw", nil))
+	// A linked agent whose session is idle.
+	put(admissionDirTask("idle", "dir-1", "busy", "si", nil))
+	// A parked task.
+	put(admissionDirTask("parked", "dir-1", "busy", "sp", func(t *Todo) {
+		t.Supervision.State = reviewParked
+		t.Supervision.Reviews = []TaskReview{{Verdict: reviewParked, Until: until}}
+	}))
+	// A task waiting for the owner's decision.
+	put(admissionDirTask("needs-user", "dir-1", "busy", "sn", func(t *Todo) {
+		t.Supervision.State = reviewNeedsUser
+	}))
+	// A task whose done judge is waiting on an owner decision.
+	put(admissionDirTask("owner-wait", "dir-1", "busy", "so", func(t *Todo) {
+		t.Supervision.Waits = &OwnerWait{At: time.Now()}
+	}))
+	// A finished task held short of live (merged, not deployed).
+	put(admissionDirTask("held", "dir-1", "busy", "sh", func(t *Todo) {
+		t.Delivery = &TodoDelivery{State: deliveryMerged}
+	}))
+	// Only "sw" works a turn; the rest stay idle or are filtered structurally.
+	admissionMarkWorking(s, "busy", "sw")
+	if got := s.directionInFlight(ctx, "dir-1"); got != 1 {
+		t.Fatalf("only the working agent must count, got %d", got)
+	}
+	// Once the idle agent's session starts working, it takes a second slot.
+	admissionMarkWorking(s, "busy", "sw", "si")
+	if got := s.directionInFlight(ctx, "dir-1"); got != 2 {
+		t.Fatalf("the now-working agent must count, got %d", got)
+	}
+}
+
+// The direction cap is taken from direction_cap_by_direction by supervisor conversation id, then by the direction's
+// displayed name; the project map stays as the fallback, and the global default comes last.
+func TestAdmissionDirectionCapResolution(t *testing.T) {
+	s, _, d := admissionHub(t)
+	healthyIdle(d)
+	d.machines["busy"] = admissionMachine(8)
+	d.samples["busy"] = admissionSample(0.8, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	ctx := context.Background()
+	cfg := AdmissionSettings{
+		DirectionCapByDirection: map[string]int{"dir-1": 2, "Infra": 3},
+		DirectionCapByProject:   map[string]int{"persona": 8},
+	}
+	// Exact supervisor id match wins over everything.
+	if got := s.directionCap(ctx, "dir-1", "persona", cfg); got != 2 {
+		t.Fatalf("supervisor id override must win, got %d", got)
+	}
+	// No id entry: the project fallback applies.
+	if got := s.directionCap(ctx, "dir-2", "persona", cfg); got != 8 {
+		t.Fatalf("project fallback must apply, got %d", got)
+	}
+	// Neither map names it: the code default.
+	if got := s.directionCap(ctx, "dir-3", "other", cfg); got != admissionDirectionCap {
+		t.Fatalf("code default must apply, got %d", got)
+	}
+	// A direction name entry resolves through the displayed name of a current leader.
+	s.prefs.cached = &Settings{Main: "main-conv", Leaders: []string{"dir-4"}}
+	s.prefs.at = time.Now()
+	s.directions.mu.Lock()
+	s.directions.m["dir-4"] = &direction{By: directionByUser, Name: "Infra", At: time.Now()}
+	s.directions.mu.Unlock()
+	if got := s.directionCap(ctx, "dir-4", "", cfg); got != 3 {
+		t.Fatalf("direction name override must resolve, got %d", got)
+	}
+	// The global DirectionCap still overrides the code default when no map entry matches.
+	four := 4
+	if got := s.directionCap(ctx, "dir-5", "", AdmissionSettings{DirectionCap: &four}); got != 4 {
+		t.Fatalf("global direction_cap must apply, got %d", got)
+	}
+}
+
+// With a narrow direction cap of 2, a third working agent of that direction is refused while another direction keeps
+// dispatching up to its own line.
+func TestAdmissionDirectionCapByDirectionDenies(t *testing.T) {
+	s, f, d := admissionHub(t)
+	healthyIdle(d)
+	d.machines["busy"] = admissionMachine(8)
+	d.samples["busy"] = admissionSample(0.8, 16*1024*1024*1024, 2*1024*1024*1024, 1)
+	ctx := context.Background()
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.todos.mu.Lock()
+	for _, sid := range []string{"s1", "s2"} {
+		id := "cap-task-" + sid
+		s.todos.todos[id] = admissionDirTask(id, "dir-1", "busy", sid, nil)
+	}
+	s.todos.mu.Unlock()
+	admissionMarkWorking(s, "busy", "s1", "s2")
+	s.admission.cached = &AdmissionSettings{Enabled: ptrBool(true),
+		DirectionCapByDirection: map[string]int{"dir-1": 2}}
+	s.admission.at = time.Now()
+
+	if _, err := s.admitTaskStart(ctx, admissionPlanTask("busy", machineFixed)); err == nil ||
+		!strings.Contains(err.Error(), admissionText(s, "admission_direction_full", i18n.Args{
+			"running": 2, "limit": 2})) {
+		t.Fatalf("the direction line of 2 must refuse a third working agent, got %v", err)
+	}
+	if starts := taskStartMachines(f); len(starts) != 0 {
+		t.Fatalf("a refused start reached a node: %v", starts)
+	}
+	// A task of another direction is not counted against dir-1's line.
+	task := admissionPlanTask("busy", machineFixed)
+	task.Supervisor = "dir-2"
+	release, err := s.admitTaskStart(ctx, task)
+	if err != nil {
+		t.Fatalf("another direction must dispatch under its own line: %v", err)
+	}
+	release()
+}
 
 // admissionText renders an admission i18n key (short name) in the test service's language, matching how the gate
 // words errors.

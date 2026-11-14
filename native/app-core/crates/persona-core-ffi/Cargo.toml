@@ -1,0 +1,25 @@
+[package]
+name = "persona-core-ffi"
+description = "The core's entry points: C for Swift, JNI for Android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "persona_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[features]
+test-support = []
+
+[dependencies]
+persona-core-runtime.workspace = true
+jni = { version = "=0.21.1", default-features = false }
+
+[dev-dependencies]
+persona-core-ffi = { path = ".", features = ["test-support"] }
+
+[lints]
+workspace = true

@@ -96,6 +96,14 @@ async function mount() {
   await act(async () => void (await import("./TaskDecision"))); // the row's code arrives with the first decision
   // the row is folded to a line until opened (#5569)
   await act(async () => host.querySelector<HTMLButtonElement>('button[data-needs-row="task:decision-task"]')?.click());
+  // The row is a lazy chunk: React.lazy suspends once on its first render even when the module is in, so the row is
+  // drawn a little after the click, as late as the machine is slow. Each poll runs in act so React's retry can flush.
+  if (ask?.options?.length) {
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(row().querySelector("[data-decision-row]")).not.toBeNull();
+    }, { timeout: 5000, interval: 20 });
+  }
 }
 
 beforeEach(() => {

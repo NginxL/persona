@@ -7,12 +7,14 @@ import {
   BULK_CONFIRM_AT, bulkScope, bulkScopeName, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, mailShort, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS,
   useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup,
 } from "../../lib/inbox";
+import { nowText, rowMeta } from "../../lib/inbox-now";
 import { dayGroupCounts, doneGroups, groupBySource, groupByTime, openAtFirst, sortTimeKeys, timeRange, timeTitle, type Grouping, type InboxGroup } from "../../lib/inbox-groups";
 import { useMailAccounts } from "../../lib/mail";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
 import { machineWithHub } from "../../lib/mesh";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { openedItemState } from "../../lib/inbox-nav";
+import { useInboxListScroll, useInboxView } from "../../lib/inbox-view-memory";
 import { useInboxSources } from "../../lib/inbox-sources";
 import { subscriptionsHref, useInboxSourcesShown, useSubscriptionsShown } from "../../lib/subscriptions";
 import { type Manager } from "../../lib/managers";
@@ -34,6 +36,8 @@ import { DraftDialog } from "./InboxDialogs";
 import { TriageBanner } from "./TriageBanner";
 import { UnreadNotice } from "./UnreadNotice";
 import { EventMark } from "./InboxEvent";
+import { canMerge, mergeItems } from "../../lib/inbox-actions";
+import { openTodoDialog } from "./InboxTodoDialog";
 import { FolderBar, FolderLine, FolderSettingsDialog, openFolderDialog, useFoldersShown } from "./InboxFolders";
 import { folderCrumbs, UNFILED } from "../../lib/inbox-folders";
 import { AgentWorking, Chip, Count, DraftCard, Glyph, ItemAvatar, Spark, StatusMenu, Tag, type GlyphName } from "./InboxParts";
@@ -74,6 +78,7 @@ type Picked = Set<string> | null;
 
 /** `selected`: the item opened (its id and manager). `picked` / `onPicked`: selecting, from the page's "Select". */
 export function InboxList({ selected, picked = null, onPicked }: { selected?: { id: string; manager?: string }; picked?: Picked; onPicked?: Dispatch<SetStateAction<Picked>> }) {
+  const view = useInboxView();
   // with several assistants the list is the current one's (docs/assistant/managers.md "Clients"); one: every item
   const mine = useScope();
   const items = useScoped(useInbox((s) => s.items));
@@ -99,7 +104,11 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const groupLoading = useInbox((st) => st.groupLoading);
   const groupComplete = useInbox((st) => st.groupComplete);
   const [storedFolder, setFolder] = useStored("inbox.folder");
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState(() => view.listQuery());
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    view.setListQuery(value);
+  };
   const foldersShown = useFoldersShown(items);
   // folders hidden (turned off, nothing filed): a folder picked before does not filter what can't be seen
   const folder = foldersShown ? storedFolder : "";
@@ -109,7 +118,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const agents = useScoped(useStore((st) => waitingAgents(st.interactions, st.sessions, st.mutes, { source, kind, query, folder })));
   // the sections opened or closed by hand, by "<manager group>:<section>" (each manager's group keeps its own; one
   // manager: the group ""), the others as they are at first
-  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const [toggled, setToggled] = useState<Set<string>>(() => view.listToggled());
   const isOpen = (group: string, k: string) => OPEN_AT_FIRST.has(k) !== toggled.has(`${group}:${k}`);
   const [editing, setEditing] = useState<InboxItem | null>(null);
   const accounts = useMailAccounts();
@@ -122,14 +131,15 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   // Clean up all over many items asks first; the items are the ones shown when it was asked.
   const [confirm, setConfirm] = useState<{ items: InboxItem[]; scope: string } | null>(null);
 
-  // The opened item stays in sight in the list (a link straight to it, a click in the detail).
+  // The opened item stays in sight in the list (a link straight to it, a click in the detail), except while a returned
+  // history entry's own scroll position is being put back.
   const selectedKey = selected ? itemKey(selected) : "";
-  useEffect(() => {
+  const listBox = useRef<HTMLDivElement>(null);
+  useInboxListScroll(listBox, view, selectedKey, loaded, storeLoaded, () => {
     if (!selected) return;
     const rows = [...document.querySelectorAll<HTMLElement>(`[data-item="${CSS.escape(selected.id)}"]`)];
     (rows.find((el) => sameItem({ id: selected.id, manager: el.dataset.manager }, selected)) ?? rows[0])?.scrollIntoView({ block: "nearest" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, loaded, storeLoaded]);
+  });
 
   const s = useMemo(() => sections(items, { source, kind, query, folder }), [items, source, kind, query, folder]);
   // what the folder bar counts: the items the other filters leave
@@ -265,19 +275,24 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     void setAllDone(chosen, "done");
     onPicked?.(null);
   };
+  // Merge: the picked rows become one row (undoable); Add to to-dos asks the due time once. Both end selecting when they went through.
+  const mergeable = canMerge(chosen);
+  const mergeChosen = () => void mergeItems(chosen).then((ok) => ok && onPicked?.(null));
+  const todoChosen = () => openTodoDialog(chosen, () => onPicked?.(null));
   // Clean up all files them as Dismiss (dismiss): the user set them aside, they did not handle them.
   const runBulk = () => {
     if (!openInView.length) return;
     if (openInView.length >= BULK_CONFIRM_AT) setConfirm({ items: openInView, scope: bulkScopeName(filterNames, query) });
     else void setAllDone(openInView, "dismiss");
   };
-  const toggle = (group: string, k: string) => setToggled((o) => {
-    const n = new Set(o);
+  const toggle = (group: string, k: string) => {
+    const n = new Set(toggled);
     const at = `${group}:${k}`;
     if (n.has(at)) n.delete(at);
     else n.add(at);
-    return n;
-  });
+    setToggled(n);
+    view.setListToggled(n);
+  };
   // Agents have no source: picking one leaves the Agent filter, and the Agent filter leaves the source.
   const pickSource = (v: string) => {
     setSource(source === v ? "" : v);
@@ -293,7 +308,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     {/* `overflow-y-auto` alone makes this a scroll container on both axes, so a row or a long chip (a connector's name)
         wider than the 380px column let the whole list scroll sideways and cut off every card (#3262); `overflow-x-clip`
         clips that overflow instead, and is not a scroll container, so `scrollIntoView` above cannot shift it either. */}
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined}>
+    <div ref={listBox} className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined} data-inbox-list-scroll>
       <div className="mx-auto max-w-[760px] px-3 pt-3 pb-16 sm:px-4">
         <label className="flex h-8 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
           <Icon name="search" size={13} stroke={2} className="shrink-0 text-ink-3" />
@@ -320,7 +335,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
             disabled={!openInView.length || picking}
             title={t("inbox-inboxlist.clean_all_scope", { scope })}
             onClick={runBulk}
-            className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-control bg-surface px-2.5 text-[12px] whitespace-nowrap text-ink-2 shadow-btn transition-colors duration-150 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 max-sm:hidden"
+            className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-control bg-surface px-2.5 text-label whitespace-nowrap text-ink-2 shadow-btn transition-colors duration-150 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 max-sm:hidden"
           >
             <Icon name="check" size={12} stroke={2.6} />
             {t("inbox-inboxlist.clean_all")}
@@ -476,7 +491,12 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
       <div role="toolbar" aria-label={t("inbox-inboxlist.selection")} data-pick-bar className="shrink-0 border-t border-line bg-inset px-3 py-2.5 sm:px-4 max-sm:pb-[calc(10px+env(safe-area-inset-bottom))]">
         <div className="mx-auto flex max-w-[760px] items-center gap-2">
           <Button tone="quiet" onClick={pickAll} disabled={!shownOpen.length}>{allChosen ? t("inbox-inboxlist.deselect_all") : t("inbox-inboxlist.select_all")}</Button>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3 tabular-nums" aria-live="polite">{chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
+          <span className="min-w-0 flex-1 truncate text-label text-ink-3 tabular-nums" aria-live="polite">{chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
+          {/* Merge and Add to to-dos: a label on a wide bar, only the icon on a phone */}
+          <Button tone="secondary" icon="merge" disabled={!mergeable} onClick={mergeChosen} className="max-sm:hidden">{t("inbox-inboxlist.merge")}</Button>
+          <IconButton icon="merge" label={t("inbox-inboxlist.merge")} disabled={!mergeable} onClick={mergeChosen} size={32} className="sm:hidden" />
+          <Button tone="secondary" icon="todo" disabled={!chosen.length} onClick={todoChosen} className="max-sm:hidden">{t("inbox-inboxlist.todo_add_short")}</Button>
+          <IconButton icon="todo" label={t("inbox-inboxlist.todo_add_short")} disabled={!chosen.length} onClick={todoChosen} size={32} className="sm:hidden" />
           <Button tone="primary" icon="check" disabled={!chosen.length} onClick={markChosenDone}>{t("inbox-inboxlist.mark_done_title")}</Button>
         </div>
       </div>
@@ -503,7 +523,7 @@ function Section({ k, title, count, open, onToggle, action, menu, children }: { 
   const jump = useMenu();
   const head = (
     <>
-      <span className={cx("text-[12px] font-medium whitespace-nowrap", k === "action" ? "text-ink" : "text-ink-3")} data-section-title>{title}</span>
+      <span className={cx("text-label font-medium whitespace-nowrap", k === "action" ? "text-ink" : "text-ink-3")} data-section-title>{title}</span>
       <span title={count.label} className="text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums"><span aria-hidden>{count.text}</span><span className="sr-only">{count.label}</span></span>
     </>
   );
@@ -627,11 +647,12 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   // a suggestion takes the AI twin's draft's place, and the event's handling the AI twin's "working on it"
   const draft = !done && !it.suggestion && agentDraft(it);
   const working = !done && !it.handling && agentWorking(it);
-  const mark = done ? (it.done_by === "manager" ? <EventMark it={it} /> : null) : it.suggestion || it.handling ? <EventMark it={it} /> : null;
+  const mark = nowText(it) !== undefined || (done ? it.done_by === "manager" : Boolean(it.suggestion || it.handling)) ? <EventMark it={it} /> : null;
   const rows = !done ? it.doc?.rows ?? [] : [];
   const first = rows[0];
   const translated = hubTranslation(it, useTranslatePrefs());
-  const from = fromLine(it, translated?.preview);
+  // Translated mail keeps the old optional-preview path exactly; mail has no `where`.
+  const from = translated ? fromLine(it, translated.preview) : rowMeta(it);
   // a right click: "Done" / "Move back", then what it can be muted by (iOS: the row's long press)
   // (the menu key / Shift+F10 open it next to the row, see ui/context-menu.ts)
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -642,7 +663,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
         <ItemAvatar it={it} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className={cx("truncate text-[13.5px]", done ? "text-ink-2" : "font-semibold text-ink")}>{translated?.subject || it.title}</span>
+            <span className={cx("truncate text-[13.5px] group-focus-within:pr-11 group-hover:pr-11", done ? "text-ink-2" : "font-semibold text-ink")}>{translated?.subject || it.title}</span>
             {translated && <span role="img" aria-label={t("inbox-inboxlist.translated")} title={t("inbox-inboxlist.translated")} className="shrink-0 text-ink-3"><Icon name="translate" size={12} /></span>}
             {label && <Tag urgent={labelIsUrgent(it)}>{label}</Tag>}
             <span className="flex-1" />
@@ -659,6 +680,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
               ) : (
                 <span className="line-clamp-2 text-[12.5px] leading-[1.5] break-words text-ink-2">{from}</span>
               )}
+              {it.merged_from && it.merged_from.length > 0 && <span className="mt-0.5 block truncate text-[11px] text-ink-3" data-merged>{t("inbox-inboxlist.merged_from", { count: it.merged_from.length + 1 })}</span>}
               {showAccount && !isLark(it) && !it.connector && <span className="mt-0.5 block truncate text-[11px] text-ink-3">{it.account_name}</span>}
               {folder !== undefined && <FolderLine it={it} folder={folder} />}
             </span>
@@ -670,14 +692,14 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   return (
     // selecting: a click anywhere on the card picks it (its draft and the rest under it are inert, so clicks there land here)
     <div data-item={it.id} data-manager={it.manager} data-picked={picked || undefined} onClick={pick ? () => pick(it) : undefined} {...(picking ? {} : contextMenuProps((at) => setMenu(at)))}
-      className={cx("group relative scroll-my-3 rounded-[14px] transition-[background-color,box-shadow,opacity] duration-150", !off && "hover:bg-inset", off && "opacity-45",
+      className={cx("group relative scroll-my-3 rounded-[14px] transition-[background-color,box-shadow,opacity] duration-150 has-[a:focus-visible]:shadow-[0_0_0_1.5px_var(--accent)]", !off && "hover:bg-inset", off && "opacity-45",
         picked ? "bg-accent-tint shadow-[0_0_0_1.5px_var(--accent)]" : selected && !picking ? "bg-inset shadow-[0_0_0_1.5px_var(--accent)]" : "bg-surface shadow-card")}>
       {pick ? (
         <button type="button" role="checkbox" aria-checked={picked} className="flex w-full gap-3 rounded-[14px] p-3 text-left outline-offset-[-2px]">{head}</button>
       ) : off ? (
         <div inert className="flex gap-3 rounded-[14px] p-3">{head}</div>
       ) : (
-        <a href={href(to)} onClick={(e) => onLinkClick(e, to, openedItemState())} aria-current={selected ? "page" : undefined} className="flex gap-3 rounded-[14px] p-3 outline-offset-[-2px]">{head}</a>
+        <a href={href(to)} onClick={(e) => onLinkClick(e, to, openedItemState())} aria-current={selected ? "page" : undefined} className="flex gap-3 rounded-[14px] p-3 outline-none!">{head}</a>
       )}
       {(first || draft || working || mark) && (
         <div inert={picking} className={cx("-mt-1 flex flex-col gap-2 pr-3 pb-3", pick ? "pl-[92px]" : "pl-[64px]")}>
@@ -719,6 +741,7 @@ export function rowMenu(it: InboxItem, done: boolean, folders = false): MenuItem
       ? { key: "undone", label: t("inbox-inboxlist.move_back"), icon: "inbox", onSelect: () => void setDone(it, false) }
       : { key: "done", label: t("inbox-inboxlist.done"), icon: "check", onSelect: () => void markFromRow(it, true, true) }, // a menu pick: "Undo" on any screen (#4162)
   ];
+  if (!done) items.splice(1, 0, { key: "todo", label: t("inbox-inboxlist.todo_add_short"), icon: "todo", onSelect: () => openTodoDialog([it]) });
   (it.mutes ?? []).forEach((m, i) => items.push({ key: `mute:${m.tag}:${m.value}`, label: muteTitle(m), detail: muteShortName(m), icon: "bellOff", divider: i === 0, onSelect: () => void muteItem(it, m) }));
   // then a rule for each (docs/assistant/inbox.md "Policies"): the tier its items get, what the AI twin does with them
   (it.mutes ?? []).forEach((m, i) => items.push({ key: `policy:${m.tag}:${m.value}`, label: policyMenuTitle(m), detail: muteShortName(m), icon: "target", divider: i === 0, onSelect: () => openPolicyDialog({ item: it, option: m, source: it.source }) }));
@@ -775,7 +798,7 @@ function MutesDialog({ onClose }: { onClose: () => void }) {
       <li key={key} data-mute={m.id} className="flex items-center gap-3 rounded-control px-1 py-2 hover:bg-hover">
         <Icon name="bellOff" size={14} className="shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] text-ink" title={m.name}>{m.name}</span>
+          <span className="block truncate text-meta text-ink" title={m.name}>{m.name}</span>
           <span className="mt-0.5 block truncate text-[11.5px] text-ink-3">{muteLine(m)}</span>
         </span>
         <Button tone="quiet" busy={busy === key} disabled={busy !== null && busy !== key} onClick={() => void unmute(m)}>
@@ -810,7 +833,7 @@ function MutesDialog({ onClose }: { onClose: () => void }) {
             shownGroups.map((g) => (
               <section key={g.manager.id} data-mutes-manager={g.manager.id} className="mb-2">
                 {g.error ? (
-                  <p className="px-1 py-1.5 text-[12px] break-words text-ink-3">{g.manager.online ? t("inbox-inboxlist.mutes_load_failed", { error: g.error }) : t("inbox-inboxlist.mutes_offline")}</p>
+                  <p className="px-1 py-1.5 text-label break-words text-ink-3">{g.manager.online ? t("inbox-inboxlist.mutes_load_failed", { error: g.error }) : t("inbox-inboxlist.mutes_offline")}</p>
                 ) : (
                   <ul className="-mx-1 flex flex-col">{g.mutes!.map(row)}</ul>
                 )}
@@ -895,7 +918,7 @@ function BulkConfirm({ confirm, onClose }: { confirm: { items: InboxItem[]; scop
         </>
       }
     >
-      <p className="text-[13px] leading-relaxed text-ink-2">{t("inbox-inboxlist.confirm_body", { count: n, scope: confirm?.scope ?? "" })}</p>
+      <p className="text-meta leading-relaxed text-ink-2">{t("inbox-inboxlist.confirm_body", { count: n, scope: confirm?.scope ?? "" })}</p>
     </Dialog>
   );
 }

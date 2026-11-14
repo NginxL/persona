@@ -156,12 +156,12 @@ struct MailDetailView: View {
                 translationBar
                 if let m = message {
                     if let t = translated {
-                        Text(t.text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled)
+                        Text(t.text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled).readingContent()
                         if t.clipped == true {
                             Text("This email is long, so only the beginning was translated. See the original for the full text.").font(Theme.Font.caption).foregroundStyle(.secondary)
                         }
                     } else if let text = m.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled)
+                        Text(text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled).readingContent()
                     } else if let html = m.html, !html.isEmpty {
                         HTMLView(html: html, height: $webHeight).frame(height: webHeight)
                     }

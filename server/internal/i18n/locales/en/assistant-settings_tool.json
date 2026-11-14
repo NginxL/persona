@@ -54,5 +54,7 @@
   "meeting_transcription_not_ready": "Meeting transcription: {before} → {after}, for meetings started from now on. In hub mode, the meeting’s audio is sent to the hub’s transcription service. The hub deletes the audio once the minutes are written. Hub transcription isn’t ready yet; the start sheet offers it only once it is ready.",
   "meeting_transcription_no_database": "This hub has no database. Connect a database before changing the meeting transcription default.",
   "meeting_transcription_unchanged": "The meeting transcription default is unchanged.",
-  "meeting_transcription_applied": "Meeting transcription is set to {mode} for meetings started from now on."
+  "meeting_transcription_applied": "Meeting transcription is set to {mode} for meetings started from now on.",
+  "title_admission": "Execution Agent admission gate",
+  "change_admission": "Execution Agent admission gate: {before} → {after}"
 }

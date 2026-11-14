@@ -10,16 +10,23 @@ vi.hoisted(() => {
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 
-// every render of an ItemRow reads its from line once, every AgentRow its agent title: counted per item / interaction
+// every render of an ItemRow reads its from line once (rowMeta, in lib/inbox-now), every AgentRow its agent title:
+// counted per item / interaction
 const renders = vi.hoisted(() => new Map<string, number>());
+vi.mock("../../lib/inbox-now", async (load) => {
+  const real = await load<typeof import("../../lib/inbox-now")>();
+  return {
+    ...real,
+    rowMeta: (...a: Parameters<typeof real.rowMeta>) => {
+      renders.set(a[0].id, (renders.get(a[0].id) ?? 0) + 1);
+      return real.rowMeta(...a);
+    },
+  };
+});
 vi.mock("../../lib/inbox", async (load) => {
   const real = await load<typeof import("../../lib/inbox")>();
   return {
     ...real,
-    fromLine: (...a: Parameters<typeof real.fromLine>) => {
-      renders.set(a[0].id, (renders.get(a[0].id) ?? 0) + 1);
-      return real.fromLine(...a);
-    },
     interactionAgentTitle: (...a: Parameters<typeof real.interactionAgentTitle>) => {
       renders.set(a[0].id, (renders.get(a[0].id) ?? 0) + 1);
       return real.interactionAgentTitle(...a);

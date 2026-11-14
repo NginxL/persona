@@ -331,7 +331,7 @@ struct LarkBlockPartView: View {
             if part.metaBool("system") {
                 LarkSystemText(part: part)
             } else {
-                Markdown(Links.markdown(part.text ?? "")).markdownTheme(.larkMessage).textSelection(.enabled)
+                Markdown(Links.markdown(part.text ?? "")).markdownTheme(.larkMessage).readingContent().textSelection(.enabled)
             }
         default:
             Text(part.text ?? "[\(part.kind)]").foregroundStyle(.secondary)

@@ -159,7 +159,8 @@ func TestCompletedTodoManualTurnPreservesReopeningRules(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, f := workService(t)
 			done := time.Now().Add(-time.Minute)
-			putTodo(s, Todo{ID: "todo_done", Title: "Run tests", Origin: "conversation", DoneAt: &done, DoneBy: doneBy,
+			// Its plan started the agent: an accepted one's agent with no plan reopens it only for its own work (#6726).
+			putTodo(s, Todo{ID: "todo_done", Title: "Run tests", Origin: "conversation", PlanID: "plan_1", DoneAt: &done, DoneBy: doneBy,
 				Agents: []TodoAgent{{MachineID: "box", SessionID: "s1"}}})
 			f.setSessions("box", stopped("s1", "Finished."))
 			if err := s.sendToSession(ctx, "box", "s1", "Check one more case."); err != nil {

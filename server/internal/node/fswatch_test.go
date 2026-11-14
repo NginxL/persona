@@ -326,17 +326,16 @@ func TestFsWatchGitStatusChanges(t *testing.T) {
 	n.fsw.set(n, fsWatchParams{Git: []string{dir}})
 	ev.none(t, 300*time.Millisecond)
 
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Each edit is written whole (writeWhole): a look between os.WriteFile's truncate and its write sees an empty
+	// file, a real change of its own (#2174). Staged outside the repository, or the staged file is an untracked change.
+	staging := t.TempDir()
+	writeWhole(t, staging, filepath.Join(dir, "a.txt"), []byte("two\n"))
 	if c := ev.next(t); len(c.Git) != 1 || c.Git[0] != dir || len(c.Dirs) != 0 {
 		t.Fatalf("modified: %+v", c)
 	}
 	// Editing a file that is already modified leaves the status text alone; its time and size still move.
 	time.Sleep(20 * time.Millisecond)
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("three lines\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeWhole(t, staging, filepath.Join(dir, "a.txt"), []byte("three lines\n"))
 	if c := ev.next(t); len(c.Git) != 1 {
 		t.Fatalf("modified again: %+v", c)
 	}

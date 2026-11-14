@@ -124,13 +124,7 @@ func TestScreenLoginObserveTee(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for !logins.signedIn("K") {
-		if time.Now().After(deadline) {
-			t.Fatalf("pair never became signed-in")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitWithin(t, 2*time.Second, "pair to become signed-in", func() bool { return logins.signedIn("K") })
 
 	wrapped.Close()
 	if !sc.closed {

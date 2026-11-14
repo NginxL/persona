@@ -282,3 +282,20 @@ A view that fetches once per id cannot recover when the store puts the same id b
   when the call was not read; it only takes a result that starts with those words and names a run.
 - Before blaming the line limit, measure the lines: in the same session the earlier runs' calls were 2–27 KB and listed
   fine; the 69–115 KB lines near them were request blobs and attachments.
+
+## A per-row lookup slower than its cache's life is never cached (2026-11-12)
+
+- Each row of the session list whose transcript path was found more than 30 seconds ago is looked up again
+  (`findTranscriptPath`), and each lookup globbed `<projects>/*/<id>.jsonl`: Go's `filepath.Glob` reads and sorts every
+  project directory to match one name, so a lookup costs a read of the whole tree (66 ms for 2,600 directories and
+  27,000 transcripts). A chat bridge kept 567 compatible-CLI threads listed; with 58 live Claude sessions that was 625
+  lookups, 41 s a rebuild, longer than the 30 s the found paths were trusted for, so every rebuild found them all expired
+  again and the cache never hit. Five rebuild sources overlapped, and the node used up to four cores, half of it in the
+  kernel reading directories.
+- Below the threshold (rows × lookup < trust window) the cost is near zero; above it it jumps to the full price. Check
+  per-row work against the list's real size, not a dozen test rows.
+- A rollout (Codex, the compatible CLI) has no copy in Claude's projects directories: once found it stays the thread's
+  file while it exists, and a live rollout agent is looked up in its rollouts only (`isClaudeTranscript`,
+  `rolloutAgent`). Claude rows still look again every half minute; a shared read per list pass would bound them, but it
+  must not hide a newer copy that appears in another config directory meanwhile
+  (`TestAssistantResumeKeepsARunningProcessProfile`).

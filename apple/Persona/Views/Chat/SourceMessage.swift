@@ -82,6 +82,7 @@ struct SourceMessage: View, Equatable {
                 Markdown(d.markdown)
                     .markdownSoftBreakMode(.lineBreak)
                     .markdownTheme(.persona)
+                    .readingContent()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     #if os(macOS)
                     .textSelection(.enabled)

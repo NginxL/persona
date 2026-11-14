@@ -567,3 +567,17 @@ connections return errors without retaining a next-turn speed override. `thread/
 provide the current speed. A native null means Standard. Missing speed stays unknown because `thread/read` does not
 currently report it. Refreshes preserve acknowledged state, and reconnects start with unknown state until native
 settings arrive. Terminal-only panes, subagents and models without advertised tiers have no speed control.
+
+A new Persona conversation can carry the same native tier in `POST /api/v1/assistant/conversations` while the default
+manager names `assistant_start_service_tier` in `manager.hello` and the hub lists that feature. Launcher model discovery
+preserves `serviceTiers` as `service_tiers`; the web offers Fast only for a row that advertises `priority`, never from a
+model name, and only while using the default manager. The node uses the same acknowledged `thread/settings/update`
+after `thread/start` (or warm-thread adoption) and before the first `turn/start`, so effort and speed stay independent.
+Omission sends no override and keeps the configured native default. A native refusal prevents the first turn, stops the
+cold or adopted process, and saves no conversation, mode or recovery state. Validation and native failures use coded,
+localized refusals (`assistant_service_tier_start_only`, `assistant_service_tier_unsupported` and
+`assistant_service_tier_refused`) without exposing the native diagnostic as person-facing detail. A manager without the
+capability gets 501 `assistant_service_tier_manager_outdated` before relaying; a node without `assistant_service_tier`
+returns 409 `node_outdated`. An older hub ignores the unknown field, so the web neither offers nor sends it there. The
+start choice is one-shot, not execution-fingerprint or recovery state; later changes still use `session.speed`.
+New Agent starts have no speed setting.

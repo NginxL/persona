@@ -100,6 +100,16 @@ keychain is open: from an ssh session codesign fails with `errSecInternalCompone
 The node of the hub's own Mac runs under the hub's or the manager's agent, and macOS holds it to that agent's program
 ([server.md](../server/server.md)); this setting does not sign those programs, nor the Persona Link app.
 
+**The live-screen video helper (Persona Screen) uses the same setting.** Its Screen Recording grant is its own, so
+signing the node alone wouldn't keep it. With this setting the node runs its own copy, `~/.persona/bin/Persona
+Screen.app`, signed with the same certificate under the helper's bundle id (`<link id>.screen`). It copies and signs
+again only when Persona Link installs a different helper, and checks the copy meets the requirement before it replaces
+the old one. It never re-signs the helper inside Persona Link.app, since that would break the app's own seal. When
+signing fails it runs the installed helper, as the node itself does. The first signed copy is a new program to macOS:
+allow **Persona Screen** under Screen & System Audio Recording once more. Without the setting the installed helper
+runs; Persona Link builds it the same way each time, so its grant lasts until the helper itself changes
+([computer-use.md](../extensions/computer-use.md) ("Live screen video (#3954)")).
+
 ## Builds
 
 `scripts/deploy/deploy.sh` and `scripts/release/publish.sh`, run on a Mac, sign their darwin builds ad hoc again as

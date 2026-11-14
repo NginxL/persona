@@ -569,7 +569,9 @@ func TestClosedTaskReopensWhenItsAgentWorksAgain(t *testing.T) {
 
 // Only a task the hub judged done or its supervisor accepted opens again, and only for an agent that still belongs to it: not
 // a cancelled task or one the user closed (done by hand while its agent still started, #2954), not one whose start failed (that goes
-// through Retry), not one the agent was released or dismissed from, and not when the agent works for an open todo now.
+// through Retry), not one the agent was released or dismissed from, and not when the agent works for an open todo now. An
+// accepted one whose agent its plan did not start only when its conversation or supervisor sent the agent more since:
+// any other turn of such an agent is other work (#6726).
 func TestWhichClosedTaskReopens(t *testing.T) {
 	done := time.Now().Add(-time.Hour)
 	released := done.Add(time.Minute)
@@ -583,27 +585,44 @@ func TestWhichClosedTaskReopens(t *testing.T) {
 	accepted.Supervision = &Supervision{State: reviewAccepted}
 	legacyCancelled := task(db.DoneByReview, s1)
 	legacyCancelled.Supervision = &Supervision{State: reviewCancelled}
+	handedOn := task(db.DoneByReview, s1) // its supervision moved to conv2
+	handedOn.Supervision = &Supervision{Supervisor: "conv2", State: reviewAccepted}
+	planned := task(db.DoneByReview, s1) // its plan started the agent
+	planned.PlanID, planned.Supervision = "plan_1", &Supervision{State: reviewAccepted}
+	since, before := done.Add(time.Minute), done.Add(-time.Minute)
 	for _, c := range []struct {
 		name    string
 		todos   []Todo
+		sent    *agentSent // the agent's last send for a conversation, if any
 		reopens bool
 	}{
-		{"judged done", []Todo{task(db.DoneByAuto, s1)}, true},
-		{"reviewed", []Todo{task(db.DoneByReview, s1)}, true},
-		{"accepted", []Todo{accepted}, true},
-		{"cancelled", []Todo{task(db.DoneByCancelled, s1)}, false},
-		{"legacy cancelled", []Todo{legacyCancelled}, false},
-		{"closed by the user", []Todo{task("", s1)}, false},
-		{"start failed", []Todo{failed}, false},
-		{"released", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", ReleasedAt: &released})}, false},
-		{"dismissed", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", DismissedAt: &released})}, false},
-		{"works for an open todo", []Todo{task(db.DoneByAuto, s1), {ID: "todo_h", Title: "自己记的事", CreatedAt: done, Agents: []TodoAgent{s1}}}, false},
-		{"another agent", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s2"})}, false},
+		{"judged done", []Todo{task(db.DoneByAuto, s1)}, nil, true},
+		{"accepted, its plan started the agent", []Todo{planned}, nil, true},
+		{"reviewed, other work", []Todo{task(db.DoneByReview, s1)}, nil, false},
+		{"accepted, other work", []Todo{accepted}, nil, false},
+		{"accepted, its conversation sent more", []Todo{accepted}, &agentSent{"conv1", since}, true},
+		{"reviewed, its conversation sent more", []Todo{task(db.DoneByReview, s1)}, &agentSent{"conv1", since}, true},
+		{"accepted, its supervisor sent more", []Todo{handedOn}, &agentSent{"conv2", since}, true},
+		{"accepted, another conversation sent", []Todo{accepted}, &agentSent{"conv9", since}, false},
+		{"accepted, sent before the acceptance", []Todo{accepted}, &agentSent{"conv1", before}, false},
+		{"cancelled", []Todo{task(db.DoneByCancelled, s1)}, nil, false},
+		{"legacy cancelled", []Todo{legacyCancelled}, nil, false},
+		{"closed by the user", []Todo{task("", s1)}, nil, false},
+		{"start failed", []Todo{failed}, nil, false},
+		{"released", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", ReleasedAt: &released})}, nil, false},
+		{"dismissed", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", DismissedAt: &released})}, nil, false},
+		{"works for an open todo", []Todo{task(db.DoneByAuto, s1), {ID: "todo_h", Title: "自己记的事", CreatedAt: done, Agents: []TodoAgent{s1}}}, nil, false},
+		{"another agent", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s2"})}, nil, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, f := newTaskService(t)
 			for _, td := range c.todos {
 				putTodo(s, td)
+			}
+			if c.sent != nil {
+				s.tasks.mu.Lock()
+				s.tasks.sentBy[[2]string{"box", "s1"}] = *c.sent
+				s.tasks.mu.Unlock()
 			}
 			agentTurn(s, f, proto.StatusWorking, "", 0)
 			got := todoNow(s, "todo_a")
@@ -611,6 +630,72 @@ func TestWhichClosedTaskReopens(t *testing.T) {
 				t.Fatalf("reopened = %v, want %v: %+v", reopened, c.reopens, got)
 			}
 		})
+	}
+}
+
+// An accepted task whose agent goes on with other work stays accepted (#6726): a turn nobody sent it, and one another
+// conversation's agent_send started, leave it closed; its own conversation's agent_send, or the owner's message on its
+// card (routeToTask), open it again.
+func TestAcceptedTaskReopensOnlyForItsOwnWork(t *testing.T) {
+	s, f := newQuietService(t)
+	ctx := context.Background()
+	const sid = "s1abcdef"
+	turn := func(state string) {
+		status := proto.StatusIdle
+		if state == proto.StateWorking {
+			status = proto.StatusWorking
+		}
+		f.setSessions("box", proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status,
+			State: state, UpdatedAt: time.Now()})
+		if state == proto.StateWorking {
+			s.taskWorking(ctx, "box", sid)
+		}
+	}
+	accept := func() {
+		done := time.Now()
+		putTodo(s, Todo{ID: "todo_a", Title: "写方案", Origin: "conv1", CreatedAt: done.Add(-time.Hour), DoneAt: &done,
+			DoneBy: db.DoneByReview, Supervision: &Supervision{Supervisor: "conv1", State: reviewAccepted},
+			Agents: []TodoAgent{{MachineID: "box", SessionID: sid}}})
+		s.todos.mu.Lock()
+		delete(s.todos.activeBySession, [2]string{"box", sid}) // closed again: as setTodoRow does
+		s.todos.mu.Unlock()
+		turn(proto.StateIdle)
+		time.Sleep(5 * time.Millisecond)
+	}
+	open := func() bool { return todoNow(s, "todo_a").DoneAt == nil }
+	send := func(from, text string) {
+		t.Helper()
+		if _, err := runJSON(t, s, from, "agent_send", map[string]any{"machine": "box", "session_id": sid, "text": text}); err != nil {
+			t.Fatalf("agent_send from %s: %v", from, err)
+		}
+	}
+
+	accept()
+	turn(proto.StateWorking) // its own timer, a message from another session, the owner in its own session
+	if open() {
+		t.Fatal("a turn nobody sent for the task reopened it")
+	}
+	turn(proto.StateIdle)
+	send("conv7", "顺便看下 520 的盯盘")
+	turn(proto.StateWorking)
+	if open() {
+		t.Fatal("another conversation's agent_send reopened it")
+	}
+	turn(proto.StateIdle)
+	send("conv1", "第三节再补一张表")
+	turn(proto.StateWorking)
+	if got := todoNow(s, "todo_a"); got.DoneAt != nil || got.ReopenedAt == nil {
+		t.Fatalf("its own conversation's agent_send did not reopen it: %+v", got)
+	}
+
+	accept()
+	turn(proto.StateIdle)
+	if _, err := s.routeToTask(ctx, "conv1", "todo_a", "结论那段再短一点"); err != nil {
+		t.Fatalf("the owner's message on the card: %v", err)
+	}
+	turn(proto.StateWorking)
+	if !open() {
+		t.Fatal("the owner's message on its card did not reopen it")
 	}
 }
 
@@ -790,7 +875,7 @@ func TestTaskPlanStartsWhatTheUserAskedFor(t *testing.T) {
 	if res, err := s2.toolTaskPlan(context.Background(), "conv1", plan(true)); err != nil || !strings.Contains(res, "nothing has started") {
 		t.Fatalf("with the setting off: %q %v", res, err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	waitFor(t, "the start reservation to settle", func() bool { return s2.taskStarting.Load() == 0 })
 	f2.mu.Lock()
 	defer f2.mu.Unlock()
 	if len(f2.starts) != 0 {
@@ -1245,6 +1330,99 @@ func TestSnapshotListsPlansWaitingToStart(t *testing.T) {
 	}
 	if plans, total := s.snapshotPlans(ctx, loc, time.Now()); total != 0 || len(plans) != 0 {
 		t.Fatalf("a started plan is not waiting: %+v", plans)
+	}
+}
+
+// The conversation that put up a plan card withdraws it while nothing of it has started (#6739): with a reason, kept as
+// a work event; the card no longer waits for Start, and the snapshot no longer lists it. Another conversation's plan, an
+// empty reason, an unknown plan, and one already started or withdrawn are refused, and nothing changes.
+func TestTaskPlanWithdraw(t *testing.T) {
+	s, _ := newTaskService(t)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	plan := func() string {
+		t.Helper()
+		if _, err := s.toolTaskPlan(ctx, "main1", planArgs(false)); err != nil { // edits code: waits for "Start"
+			t.Fatal(err)
+		}
+		items, _, _ := s.feed(ctx, "main1", time.Time{})
+		return items[len(items)-1].Ref
+	}
+	withdraw := func(self, id, reason string) (string, error) {
+		return runJSON(t, s, self, "task_plan_withdraw", map[string]any{"plan_id": id, "reason": reason})
+	}
+	state := func(id string) string {
+		p, err := s.loadPlan(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.State
+	}
+	id := plan()
+	loc := s.location(ctx)
+	if plans, _ := s.snapshotPlans(ctx, loc, time.Now()); len(plans) != 1 || plans[0].ID != id ||
+		!strings.Contains(prompts.RenderSnapshot(prompts.Snapshot{Now: time.Now().In(loc), Zone: loc.String(), Plans: plans,
+			PlansTotal: 1}), "（"+id+"）") {
+		t.Fatalf("the snapshot does not name plan %s: %+v", id, plans)
+	}
+	for _, c := range []struct{ name, self, id, reason string }{
+		{"another conversation's", "conv1", id, "别处做完了"},
+		{"no reason", "main1", id, "  "},
+		{"unknown plan", "main1", "plan_nope", "别处做完了"},
+	} {
+		if _, err := withdraw(c.self, c.id, c.reason); err == nil {
+			t.Fatalf("%s: withdrawn", c.name)
+		}
+		if got := state(id); got != planOpen {
+			t.Fatalf("%s: plan is %s", c.name, got)
+		}
+	}
+	if len(testEvents(s)) != 0 {
+		t.Fatalf("a refusal recorded: %+v", testEvents(s))
+	}
+	out, err := withdraw("main1", id, "三件都已由别的任务做完")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state(id); got != planDismissed || !strings.Contains(out, "修登录崩溃") {
+		t.Fatalf("withdrawn: plan %s, answer %q", got, out)
+	}
+	if ev := testEvents(s); len(ev) != 1 || ev[0].Kind != taskPlanWithdrawnEvent || ev[0].Detail["plan"] != id ||
+		ev[0].Detail["reason"] != "三件都已由别的任务做完" || ev[0].Detail["conversation"] != "main1" {
+		t.Fatalf("record: %+v", ev)
+	}
+	if plans, total := s.snapshotPlans(ctx, loc, time.Now()); total != 0 || len(plans) != 0 {
+		t.Fatalf("a withdrawn plan still waits: %+v", plans)
+	}
+	if _, err := withdraw("main1", id, "再撤一次"); err == nil {
+		t.Fatal("a withdrawn plan withdrawn again")
+	}
+	started := plan()
+	if _, err := s.startPlan(ctx, started, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := withdraw("main1", started, "不做了"); err == nil || state(started) != planStarted {
+		t.Fatalf("a started plan: %v, %s", err, state(started))
+	}
+	if len(testEvents(s)) != 1 {
+		t.Fatalf("records: %+v", testEvents(s))
+	}
+}
+
+// A plan its own conversation withdrew is no answer of the owner's (#6739): the owner's starts before and after it count
+// as a run, as if it had never been put up; one the owner dismissed starts the count again.
+func TestWithdrawnPlanIsNoOwnerAnswer(t *testing.T) {
+	task := PlanTask{Title: "改代码", Machine: "box", Cwd: "/code/app", OwnerStarted: true}
+	plan := func(id, state string) *TaskPlan { return &TaskPlan{ID: id, State: state, Tasks: []PlanTask{task}} }
+	plans := []*TaskPlan{plan("plan_a", planStarted), plan("plan_w", planDismissed), plan("plan_b", planStarted)}
+	k := trustKey(task)
+	if runs, _ := rulePlanRuns(plans); runs[k] != 1 {
+		t.Fatalf("dismissed by the owner: run %d, want 1", runs[k])
+	}
+	withdrawn := []db.WorkEvent{{Kind: taskPlanWithdrawnEvent, Detail: map[string]any{"plan": "plan_w"}},
+		{Kind: taskReviewedEvent, Detail: map[string]any{"plan": "plan_a"}}}
+	if runs, _ := rulePlanRuns(withoutWithdrawn(plans, withdrawn)); runs[k] != 2 {
+		t.Fatalf("withdrawn by its conversation: run %d, want 2", runs[k])
 	}
 }
 

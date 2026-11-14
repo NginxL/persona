@@ -534,6 +534,7 @@ private struct MarkdownFile: View {
                     ForEach(chunks) { c in
                         Markdown(c.content, imageBaseURL: page.baseURL)
                             .markdownTheme(.persona)
+                            .readingContent()
                             .markdownCodeSyntaxHighlighter(PersonaCodeHighlighter())
                             .markdownImageProvider(MachineImageProvider(load: loadImage))
                             .onAppear { if c.id == 0 { page.shown() } }

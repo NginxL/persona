@@ -100,8 +100,8 @@ type InboxAgent struct {
 	// to its count, and the ones queued since are the newest. Pending is trimmed to the latest 20, so its length
 	// cannot tell how many came since.
 	told int
-	// signaled is the handling chain's newest received batch an inbox signal to the linked task's supervisor counted
-	// (in memory only, supervise_inbox.go): the next one counts the messages after it.
+	// signaled is the item's message count when an inbox signal to the linked task's supervisor last counted it
+	// (in memory only, supervise_inbox.go): the next one counts the messages since that count.
 	signaled int
 	// signaledOf is the newest message considered for a supervisor signal in this process. URL routing also runs
 	// while the twin is off, so Of (what its handling conversation took) is independent of this cursor.
@@ -130,11 +130,12 @@ func (a *InboxAgent) startDue(now time.Time) bool {
 	return a.RetryAfter == nil || !a.RetryAfter.After(now)
 }
 
-// handInbox is one pass of the AI twin's work (docs/assistant/inbox.md"AI twin"): settle conversations that finished, hung or
-// were lost, escalate every newly triaged Needs you item to the manager (one processing conversation per event), deliver
-// what waits for the events' conversations (new messages, the user's answers), start conversations for the queued
-// ones. One pass at a time, in the background. A pass asked for while one runs is not dropped: the goroutine running
-// passes runs another after it (every caller is an event, and nothing else would come back for what it queued).
+// handInbox is one pass of the AI twin's work (docs/assistant/inbox.md"AI twin"): look again at waiting matters whose
+// time came, settle conversations that finished, hung or were lost, escalate every newly triaged Needs you item to the
+// manager (one processing conversation per event), deliver what waits for the events' conversations (new messages, the
+// user's answers), and start conversations for the queued ones. One pass at a time, in the background. A pass asked for
+// while one runs is not dropped: the goroutine running passes runs another after it (every caller is an event, and
+// nothing else would come back for what it queued).
 func (s *Service) handInbox(ctx context.Context) {
 	b := &s.inbox
 	b.handAgain.Store(true)
@@ -162,6 +163,7 @@ func (s *Service) handPass(ctx context.Context) {
 	cfg := s.inboxConfig(ctx).Agent
 	b := &s.inbox
 	s.linkInboxTaskURLs(ctx)
+	s.checkInboxFollowUps(ctx, cfg, time.Now())
 	if !cfg.Enabled {
 		s.releaseInboxAgents(ctx)
 		return
@@ -457,8 +459,9 @@ func (s *Service) requeueAgentStart(ctx context.Context, a *InboxAgent, err erro
 }
 
 // sweepInboxAgents settles the events' conversations: one looking that ended its turn without a suggestion (after its
-// first minute) or ran past the timeout fails, so does one whose sub-session ran past four timeouts; a start the
-// manager did not live to record goes back to the queue (the event's id finds its conversation).
+// first minute) or ran past the timeout fails, so does one whose sub-session ran past four timeouts. A turn woken from
+// waiting instead returns to waiting with its next check time. A start the manager did not live to record goes back to
+// the queue (the event's id finds its conversation).
 func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, now time.Time) {
 	b := &s.inbox
 	b.mu.Lock()
@@ -486,21 +489,44 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 		if it.Handling != nil {
 			state = it.Handling.State
 		}
+		var link *InboxChainLink
+		if state == HandlingAgent {
+			link = inboxLatestAgentLink(it)
+		}
 		b.mu.Unlock()
 		reason := ""
+		returnToWaiting := false
 		switch {
 		case s.isWorkMachine(a.MachineID):
 			reason = i18n.T(s.lang(ctx), "assistant-start.work_machine")
 		case state == HandlingAgent:
+			if link != nil {
+				sess, found, reachable := s.inboxAgentSession(ctx, link.MachineID, link.SessionID)
+				if reachable && found {
+					if !s.recordInboxAgentStops(ctx, sess) { // also repairs a stop report lost in a restart
+						continue // known unsettled work (or an undone stop): wait for the next pass, never time it out now
+					}
+					b.mu.Lock()
+					stillAgent := it.Agent != nil && it.Agent.SessionID == a.SessionID && it.Handling != nil && it.Handling.State == HandlingAgent
+					b.mu.Unlock()
+					if !stillAgent {
+						continue // the stop returned the item to its processing conversation
+					}
+				}
+			}
+			// Only a session known to be unsettled waits past this bound. A link evicted by the chain cap, a session the
+			// node definitively says is gone, or an unreachable node keeps the old four-timeout fallback instead of hanging.
 			if a.StartedAt != nil && now.Sub(*a.StartedAt) > 4*agentTimeout(cfg) {
 				reason = i18n.T(s.lang(ctx), "assistant-inbox_agent.timeout")
 			}
 		case state != HandlingLooking:
 		case a.StartedAt != nil && now.Sub(*a.StartedAt) > agentTimeout(cfg):
 			reason = i18n.T(s.lang(ctx), "assistant-inbox_agent.timeout")
+			returnToWaiting = a.Back == HandlingWaiting
 		case a.StartedAt != nil && now.Sub(*a.StartedAt) > time.Minute:
 			if sess, ok := s.session(ctx, a.MachineID, a.SessionID); ok && sess.Status != proto.StatusWorking {
 				reason = i18n.T(s.lang(ctx), "assistant-inbox_agent.no_draft")
+				returnToWaiting = a.Back == HandlingWaiting
 			}
 		}
 		if reason == "" {
@@ -511,6 +537,8 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 			w := beginWrite(it)
 			if it.Suggestion != nil { // new messages left its suggestion standing: it still holds
 				b.setHandling(it, HandlingDone, "", now)
+			} else if returnToWaiting && it.Agent.Back == HandlingWaiting {
+				b.resumeInboxWaiting(it, now)
 			} else {
 				b.failHandling(it, reason, now)
 			}
@@ -614,7 +642,8 @@ func (s *Service) inboxRepliedAt(ctx context.Context, ids []string) map[string]t
 	return out
 }
 
-// inboxFiledAt is when those of the inbox items ids that are filed (not open) were filed.
+// inboxFiledAt is when those of the inbox items ids that were filed were filed. An unfinished merged member has no
+// filing time of its own, although open is false for it.
 func (s *Service) inboxFiledAt(ctx context.Context, ids []string) map[string]time.Time {
 	b := &s.inbox
 	out := map[string]time.Time{}
@@ -624,7 +653,7 @@ func (s *Service) inboxFiledAt(ctx context.Context, ids []string) map[string]tim
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, id := range ids {
-		if it := b.items[id]; it != nil && !it.open() {
+		if it := b.items[id]; it != nil && it.DoneAt != nil {
 			out[id] = *it.DoneAt
 		}
 	}

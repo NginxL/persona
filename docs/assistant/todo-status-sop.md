@@ -147,7 +147,8 @@ to-do with priority `high`, still asks the owner with the card, as before.
 Just finished used to empty itself only by time: a to-do the owner had already looked at stayed there for 24 hours, on
 top of the list (#5707). Now the owner files it:
 
-- **Got it** on a Just finished row (a button under its words, and on iOS a leading swipe action) marks it seen. The row
+- **Got it** on a Just finished row (on the web a small button at the end of its status line, under the time, #6578; on
+  iOS a button under its words, moving to the web's place in #7148, and a leading swipe action) marks it seen. The row
   goes to Done at once, before the hub answers; a toast says so with **Undo**, which takes the mark off. A failed write
   puts the row back and says why.
 - **Opening it** counts too: the iPhone marks it seen when its page opens (the list behind has it in Done on the way
@@ -204,7 +205,10 @@ Relations chain (A shares a PR with B, B an issue with C: one row). A closed to-
 ## Accepted tasks
 
 When `task_review` accepts a task, the hub closes it. If its agent is then sent more work, the hub reopens it
-(`taskWorking` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says `accepted`. Earlier the
+(`taskWorking` → `closedTurnReopens` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says
+`accepted`. For a task with no plan (an adopted agent, often kept on for other work), only the task's conversation
+sending more (`agent_send`, or the owner's message on its card) reopens it; that agent's other turns leave it closed
+(#6726). Earlier the
 page treated every reopened task as not reviewed: it showed "Follow up", its badge "Supervising", and criteria added
 with the extra work (`agent_supervise` / `agent_send` replace `done_when`, so the list grew from 5 to 8) as open
 with a clock and counted them ("5/8").
@@ -226,7 +230,7 @@ Every client follows this document with its own copy of the rules, each with the
 | Client | Rules | Tests | Page |
 | :--- | :--- | :--- | :--- |
 | Web | `web/src/lib/todo-triage.ts` | `web/src/lib/todo-triage.test.ts` | `web/src/views/Todos.tsx` |
-| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift`, `apple/Mac/Todos/MacTodosPage.swift` |
+| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift` |
 | Android | `android/core/domain/src/main/kotlin/persona/core/domain/tasks/TodoTriage.kt` | `android/core/domain/src/test/kotlin/persona/core/domain/tasks/TodoTriageTest.kt` | `android/feature/agents/src/main/kotlin/persona/feature/agents/TodosScreen.kt` |
 | Hub | `server/internal/assistant/todo_triage.go` | `server/internal/assistant/todo_triage_test.go` | none: it tells when a leader's task is stuck (#3483) |
 

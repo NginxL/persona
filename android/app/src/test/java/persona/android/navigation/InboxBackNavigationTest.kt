@@ -8,7 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * A conversation opened from an inbox item (docs/android/android.md "Inbox: events, suggestions, and handling chains")
+ * A conversation opened from an inbox item (docs/android/android.md "Inbox: events, suggestions and handling chain")
  * stays a page above that item through late session metadata, a repeated tap and a hub-group migration; Back from it
  * returns to the item's page, and an Agent still opens under Agents and Back selects Persona with the item page on top.
  *

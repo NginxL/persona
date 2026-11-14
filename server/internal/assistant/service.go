@@ -617,6 +617,9 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	picks, ok := s.modelPicksSet()
 	snap.Partial = snap.Partial || !ok
 	for id, p := range picks {
+		if id != cfg.Main { // only the main conversation has a per-conversation pick (#6911); older side picks stay in the book, unpublished
+			continue
+		}
 		view(id, p.MachineID).ModelPick = p.wire()
 	}
 	directions, ok := s.directionViews(ctx)
@@ -718,6 +721,7 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 	if !meeting {
 		// An assistant turn that failed is logged; a conversation conversation_new opened tells its parent (spawned.go).
 		s.afterSettle(context.WithoutCancel(ctx), s.assistantTurnSettled, r.MachineID, r.SessionID)
+		s.afterSettle(context.WithoutCancel(ctx), s.inboxAgentTurnSettled, r.MachineID, r.SessionID)
 	}
 	if !meeting {
 		s.titleAfterTurn(ctx, r.MachineID, r.SessionID)

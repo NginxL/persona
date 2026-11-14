@@ -27,6 +27,7 @@ spec/
     provider-import-link/ provider import links: what the web builds and what the hub reads
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS
+    minutes-overview/ the minutes' summary card: bold places, cleaning, the fallback and its Markdown, checked by the hub, the mock, iOS and web
     tool-names/       tool names, subjects and arguments in words, checked by Android (iOS later)
     chat-search/      what search in chat and the assistant's chat index find of each item, checked by web (Go and Android later)
     tokens/           设计 token 的校验夹具（如该领域提供）
@@ -37,7 +38,7 @@ spec/
 
 | 领域 | 规则与用例索引 |
 | --- | --- |
-| continuity | [连续性 README](fixtures/continuity/README.md)：连续位置、丢批补洞、历史变化、分页三态、重连、fold 替换与展开 |
+| continuity | [连续性 README](fixtures/continuity/README.md)：连续位置、丢批补洞、历史变化、分页三态、重连、fold 替换与展开. Also replayed by the shared Rust core (`native/app-core`, `cargo test`) and through its Android binding (`:core:rustcore`), #6871 |
 | lines | 见各自 [README](fixtures/lines/README.md) |
 | sort | 见各自 [README](fixtures/sort/README.md) |
 | answer | 见各自 [README](fixtures/answer/README.md) |
@@ -55,6 +56,7 @@ spec/
 | provider-import-link | [README](fixtures/provider-import-link/README.md): provider import links (cindy v1), the payload and fragment the web builds for a provider and what the hub reads from a link, checked by Go, the mock hub and the web app (#5420) |
 | star-prompt | [README](fixtures/star-prompt/README.md): when the GitHub star prompts show, the empty Agents pill, the milestone card after enough Agents started and the onboarding toast, checked by the web app and Android (#5761; iOS with #5910) |
 | meeting-echo | [README](fixtures/meeting-echo/README.md): which transcript lines of a meeting are Persona's own answer heard by the microphone (they overlap a stretch it spoke in and their words match what it said; a stretch saved without text keeps the time rule), checked by the hub and the iOS app (#5905) |
+| minutes-overview | [README](fixtures/minutes-overview/README.md): the minutes' summary card (#6563), which places of a text are bold (each `strong` entry's first occurrence after the one before), how a client cleans a malformed overview and when it falls back to the minutes as before, and the hub's Markdown of the same minutes, checked by the hub, the mock hub, the iPhone and the web |
 | tokens | 见各自 [README](tokens/README.md)；校验夹具如放在 `fixtures/tokens/`，结构由该领域 README 说明 |
 
 ## 夹具约定

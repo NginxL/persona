@@ -3,11 +3,13 @@
 // narrow: the opened item takes the list's place, with a way back. "Select" (top right) picks several items to mark them
 // done at once (#2059).
 import { useEffect, useState } from "react";
+import { TodoDialogHost } from "./InboxTodoDialog";
 import { useInbox, refreshInbox, loadRoutedItem, type InboxItem } from "../../lib/inbox";
 import { useScope } from "../../lib/current-assistant";
 import { ItemManager, otherManager, sameManager } from "../../lib/manager-choice";
 import { newDraft, useMailAccounts } from "../../lib/mail";
 import { backToInboxList } from "../../lib/inbox-nav";
+import { InboxViewMemoryContext, useInboxViewMemory } from "../../lib/inbox-view-memory";
 import { t } from "../../i18n";
 import { Button, cx, IconButton, Spinner } from "../../ui/atoms";
 import { ComposeDialog } from "./ComposeDialog";
@@ -25,6 +27,7 @@ export function routedItem(items: InboxItem[], id: string | undefined, manager: 
 }
 
 export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?: string; onToggleSidebar: () => void }) {
+  const view = useInboxViewMemory(id, manager);
   // the list's copy, else Done's history's: the list carries only the newest done items (#5549)
   const item = useInbox((s) => routedItem(s.items, id, manager) ?? routedItem(s.history, id, manager));
   const loaded = useInbox((s) => s.loaded);
@@ -51,6 +54,7 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
     return () => window.removeEventListener("keydown", onKey);
   }, [picking]);
   return (
+    <InboxViewMemoryContext.Provider value={view}>
     <div className="@container flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("inbox-inbox.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
@@ -70,7 +74,7 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
       </header>
       <div className="flex min-h-0 flex-1">
         <section aria-label={t("inbox-inbox.list")} className={cx("min-h-0 w-full flex-col @3xl:flex @3xl:w-[380px] @3xl:shrink-0 @3xl:border-r @3xl:border-line", id ? "hidden" : "flex")}>
-          <InboxList selected={item ?? (id ? { id, manager } : undefined)} picked={picked} onPicked={setPicked} />
+          <InboxList key={view.revision} selected={item ?? (id ? { id, manager } : undefined)} picked={picked} onPicked={setPicked} />
         </section>
         <section aria-label={t("inbox-inbox.detail")} className={cx("min-h-0 min-w-0 flex-1 flex-col @3xl:flex", id ? "flex" : "hidden")}>
           {id ? <InboxDetail item={item} loaded={loaded && !routing} /> : <DetailPlaceholder />}
@@ -78,11 +82,13 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
       </div>
       <PolicyDialogHost />
       <FolderDialogHost />
+      <TodoDialogHost />
       {composing && (
         <ItemManager.Provider value={composer}>
           <ComposeDialog draftKey="new" initial={newDraft(accounts[0]?.id ?? "")} accounts={accounts} onClose={() => setComposing(false)} />
         </ItemManager.Provider>
       )}
     </div>
+    </InboxViewMemoryContext.Provider>
   );
 }

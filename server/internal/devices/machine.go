@@ -551,6 +551,17 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_assistant_config_dir")}
 		}
 	}
+	if method == "assistant.send" && !nodeHas(info, nodeproto.AssistantServiceTier) {
+		raw, _ := json.Marshal(params)
+		var fields struct {
+			ServiceTier string `json:"service_tier"`
+		}
+		_ = json.Unmarshal(raw, &fields)
+		if fields.ServiceTier != "" {
+			// An older node would start the conversation at Standard and drop an explicit, billable Fast choice.
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_assistant_service_tier")}
+		}
+	}
 	if method == "session.send" && !nodeHas(info, nodeproto.LauncherSwitchNow) {
 		raw, _ := json.Marshal(params)
 		var fields struct {

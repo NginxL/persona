@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Persona Screen: the iOS live-screen video helper (#3954), an app bundle inside Persona Link.app/Contents/Helpers/
      so its Screen Recording grant is its own, not the node's. mac-link.sh substitutes __SCREEN_BUNDLE_ID__ (the Link
-     bundle id + ".screen") and __BUILD__ when it embeds the bundle. LSUIElement keeps it off the Dock. -->
+     bundle id + ".screen") when it embeds the bundle. Nothing here changes from build to build (no timestamp): an
+     unchanged helper then keeps its ad-hoc signature, and with it its Screen Recording grant, across Persona Link
+     updates. LSUIElement keeps it off the Dock. -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
@@ -20,7 +22,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
-	<string>__BUILD__</string>
+	<string>1</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>
