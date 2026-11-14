@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/node/transcripttail"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
@@ -128,7 +130,7 @@ func reported(text, kind string, rollout turnFailure) turnFailure {
 
 // quickTail: how much of a transcript's end readQuickMeta reads for its title and last words. One line can fill it:
 // Claude Code writes its api-request-blob lines whole (300–500 KB each, 2026-11).
-const quickTail = 384 * 1024
+const quickTail = transcripttail.Window
 
 // metaMinInterval: how stale a growing transcript's title / last text / background tasks may get in the list.
 const metaMinInterval = 3 * time.Second
@@ -322,6 +324,8 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		m.surface = prev.surface // Claude writes it on every line, a rollout on its first: the head read above has it
 	}
 	m.wake, m.turnClosed, m.lastTextAt, m.lastPromptAt = tm.LastTurnWake, tm.TurnClosed, tm.LastTextAt, tm.LastPromptAt
+	succeeded := false
+	recovered := false
 	if m.lastText == "" && off > 0 {
 		// An agent that said a line and then ran tools for a while: their results and hook lines push its words out of
 		// the tail (a 1.5 MB transcript whose last text was 900 KB back, 2026-11-04) and its task card said "No activity yet".
@@ -330,8 +334,24 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 			// gone back over: the last read's words may be that turn's.
 			m.lastText, m.answer = prev.lastText, prev.answer
 		} else {
-			m.lastText = lastWordsBefore(f, off)
+			end := st.Size()
+			if rewound {
+				end = off // the hidden turn's words and outcome are not evidence; recover before the tail as before
+			}
+			m.lastText, succeeded = transcripttail.LastWordsBefore(f, end)
+			recovered = true
 		}
+	}
+	if off > 0 && !rewound && !recovered && tm.TurnError == "" && assistantwire.CutOff(m.lastText) && !tm.TurnSucceeded() {
+		// The tail can hold the closing record but not the reply that proves it succeeded. Recover both together before
+		// deciding whether an error-looking preview belongs to an older turn.
+		_, succeeded = transcripttail.LastWordsBefore(f, st.Size())
+	}
+	if (tm.TurnSucceeded() || succeeded) && assistantwire.CutOff(m.lastText) {
+		// The newest closed turn succeeded, but its visible reply was only botmux's sentinel (or tools and thinking):
+		// LastText still names an older failure. Do not let the manager's legacy preview fallback revive that failure.
+		// The old reply and its error remain untouched in the transcript.
+		m.lastText, m.answer = "", ""
 	}
 	if !m.lastPromptAt.After(m.lastTextAt) { // a message after the question answered it (#5096)
 		m.asks = closeout.AskOf(m.lastText)
@@ -387,40 +407,6 @@ func (n *Node) mergeNamingMetadata(path string, m *quickMeta) {
 	} else if m.titleSource == "" {
 		m.titleSource = "prompt"
 	}
-}
-
-// lastWordsReach: how far before the tail lastWordsBefore looks for an agent's last words.
-const lastWordsReach = 8 << 20
-
-// lastWordsBefore is the last assistant text in the transcript before end, read backwards a chunk at a time (each
-// twice the last) up to lastWordsReach; "" when there is none in that reach.
-func lastWordsBefore(f *os.File, end int64) string {
-	for chunk, read := int64(quickTail), int64(0); end > 0 && read < lastWordsReach; chunk *= 2 {
-		start := max(end-chunk, 0)
-		buf := make([]byte, end-start)
-		if n, err := f.ReadAt(buf, start); err != nil && n < len(buf) {
-			return ""
-		}
-		read += end - start
-		lines := bytes.Split(buf, []byte("\n"))
-		next := start
-		if start > 0 && len(lines) > 0 {
-			next += int64(len(lines[0])) // a partial line: whole in the next chunk
-			lines = lines[1:]
-		}
-		var tm transcript.Meta
-		for _, line := range lines {
-			if len(line) == 0 || bytes.Contains(line, []byte(`"type":"user"`)) && len(line) > 8<<10 {
-				continue
-			}
-			transcript.ParseLine(0, line, &tm)
-		}
-		if tm.LastText != "" {
-			return tm.LastText
-		}
-		end = next
-	}
-	return ""
 }
 
 // codexStaleWorking: how long herdr may say a Codex agent works while its rollout says the turn is over. Codex writes

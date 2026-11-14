@@ -208,6 +208,13 @@ Apply in order; on a match, do not call the model:
 
    Stopping with Esc (`turn_aborted`, `status: interrupted`) is not an error. The node rereads a changing rollout at most every 3 seconds. If the file is written again during throttling,
    omit the cached `turn_error` (the continued turn may already have completed normally; an old error would continue it again). Better to be a few seconds late.
+
+   **A newer confirmed success retires an obsolete model failure and its retry attention (#6221).** Confirmed success is a newer turn's `turn_duration` after at least one visible,
+   non-synthetic model reply, with no newer model error in the settled transcript. Starting a turn, receiving an unclosed reply, or finding that the process exited is not enough. On that
+   closing evidence the node drops an older error-only `last_text` preview (a silent BotMux turn, or one with only tools and thinking, may have no newer words), so the manager's legacy
+   preview fallback cannot recreate `turn_error`. A pending retry with no such success stays answerable, and a newer failure replaces the old one. The historical reply and error items stay
+   in the transcript unchanged. A later stopped row whose direct or preview-derived error is gone retires the transient retry state without waiting for model triage, including inside the timestamp tolerance
+   and when a manager restart restores a card the hub kept up. The old card and wake go; a silent turn may remain work-state `unsure` rather than inventing a textual conclusion.
 3. Background commands / sub-Agents still running (`background`, `subagents` contain running entries) → `external`, "N background tasks running"; do not register a wakeup (results wake it themselves).
 4. `/loop` running (`loop`) → `external`, "Scheduled loop, next at HH:MM"; do not register a wakeup.
 5. Otherwise: model.
