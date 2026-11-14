@@ -74,7 +74,36 @@ func (h *Hub) fsWatchSet(c *client, machineID string, req fsWatchReq) {
 		c.fsw[key] = req
 	}
 	c.mu.Unlock()
-	h.fsWatchSync(m)
+	h.queueFSWatchSync(m)
+}
+
+// queueFSWatchSync keeps one sync worker per machine. A change made while its node call is out marks one trailing
+// sync; every later change coalesces into that same sync, which reads the union when its turn comes. The connection's
+// read loop only records its own set and returns, and the hub's nodeWorkers join covers both the call and the tail.
+func (h *Hub) queueFSWatchSync(m *Machine) {
+	m.fswMu.Lock()
+	if m.fswRunning {
+		m.fswPending = true
+		m.fswMu.Unlock()
+		return
+	}
+	m.fswRunning = true
+	h.nodeWorkers.Add(1)
+	m.fswMu.Unlock()
+	go func() {
+		defer h.nodeWorkers.Done()
+		for {
+			h.fsWatchSync(m)
+			m.fswMu.Lock()
+			if !m.fswPending {
+				m.fswRunning = false
+				m.fswMu.Unlock()
+				return
+			}
+			m.fswPending = false
+			m.fswMu.Unlock()
+		}
+	}()
 }
 
 // fsWatchRelease drops everything a closing connection watched.
@@ -88,7 +117,7 @@ func (h *Hub) fsWatchRelease(c *client) {
 	c.mu.Unlock()
 	for id := range ids {
 		if m := h.localMachine(id); m != nil {
-			go h.fsWatchSync(m)
+			h.queueFSWatchSync(m)
 		}
 	}
 }
@@ -151,15 +180,19 @@ func (h *Hub) fsWatchClients() []*client {
 	return list
 }
 
-// fsWatchSync sends the machine's node the current union. Nothing is sent while there is nothing to watch and the
-// node was told nothing before; a node from before this (no fs.watch) answers with an error that is only logged,
+// fsWatchSync sends the machine's node the current union. Only queueFSWatchSync's worker calls it, so there is one
+// call in flight. Nothing is sent while there is nothing to watch and the node was told nothing before, unless a new
+// node connection forced a resend. A node from before this (no fs.watch) answers with an error that is only logged,
 // the panels then refresh by hand as they always did.
 func (h *Hub) fsWatchSync(m *Machine) {
 	m.fswMu.Lock()
-	defer m.fswMu.Unlock()
+	force := m.fswForce
+	m.fswForce = false
+	sent := m.fswSent
+	m.fswMu.Unlock()
 	p := h.fsWatchUnion(m.cfg.ID)
 	has := len(p.Dirs)+len(p.Git) > 0
-	if !has && !m.fswSent {
+	if !has && !sent && !force {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -167,7 +200,15 @@ func (h *Hub) fsWatchSync(m *Machine) {
 	if p.Dirs == nil {
 		p.Dirs = []fsWatchDirParam{}
 	}
-	if err := m.call(ctx, "fs.watch", p, nil); err != nil {
+	err := m.call(ctx, "fs.watch", p, nil)
+	m.fswMu.Lock()
+	defer m.fswMu.Unlock()
+	if err != nil {
+		// A reconnect used to leave fswSent set on this path, so the next empty set tried again. Consuming fswForce
+		// must not lose that recovery when the node may have kept the previous hub's watches.
+		if force {
+			m.fswSent = true
+		}
 		if !m.fswWarned {
 			m.fswWarned = true
 			h.logf("[%s] fs.watch: %v", m.cfg.ID, err)
@@ -179,12 +220,12 @@ func (h *Hub) fsWatchSync(m *Machine) {
 
 // fsWatchReconnected runs when a node's connection is new to the hub (a reconnect, or the hub just started): the
 // node knows only what an earlier hub told it, which may be a set nobody shows any more, so it is told the union
-// again, an empty one included.
+// again, an empty one included. The forced sync joins any call already out instead of overtaking it.
 func (h *Hub) fsWatchReconnected(m *Machine) {
 	m.fswMu.Lock()
-	m.fswSent = true
+	m.fswForce = true
 	m.fswMu.Unlock()
-	h.fsWatchSync(m)
+	h.queueFSWatchSync(m)
 }
 
 // fsChanged routes a node's fs.changed to the browsers that have the folders (or the Git directory) open.

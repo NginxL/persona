@@ -119,8 +119,21 @@ messages (terminal keys) is a one-way `notify` written in place, never a call.
 Test it by keeping the node's answer back, waiting until the call is at the node, and then checking that a message
 sent behind it is taken: the fix is told apart by whether the hub reads, not by how long something took. Run the
 scenario through the manager as well, where the wait is the manager's own
-(`server/internal/hub/subscribe_readloop_test.go`). As of this change `fs_watch` still calls the node from the read
-loop (`fsWatchSet`, up to 10 s).
+(`server/internal/hub/subscribe_readloop_test.go`).
+
+`fs_watch` needed the same treatment (#6786), with one addition: replacing a set is not the same as counting joins
+and leaves. Record the browser's set in its read loop, then use one worker per machine with one coalesced trailing
+request. The worker reads the union when its turn comes, so a burst makes at most the call in flight and one latest
+call. Disconnect cleanup and reconnect resends use that queue too. A reconnect sets a forced-resend flag rather than
+only `fswSent`: an earlier empty call can clear `fswSent` before the trailing reconnect runs, and the new node still
+needs that empty set. A failed forced resend leaves `fswSent` set, so the next empty set retries it as before
+(`server/internal/hub/fswatch_report_readloop_test.go`).
+
+A manager bus read loop has the same rule for its store. `extensions.report` keeps its in-memory report and broadcasts
+in bus order, but one worker persists only the latest pending report, with a bounded context for each write. A failed
+write is logged and left for the next report, never retried in a tight loop. Both kinds of worker join the hub's
+`nodeWorkers`, whose shutdown wait is bounded. Tests hold the node or `PutSetting`, prove a later message or bus event
+is still handled, then release the dependency and join the workers before checking the final value and call count.
 
 ## A Go file named after a platform builds only there (#5563)
 

@@ -376,7 +376,7 @@ func (h *Hub) applyDeviceStatesFrom(owner string, st devicewire.States) {
 			h.sessionsChanged(c.m)
 		}
 		if c.began {
-			go h.fsWatchReconnected(c.m) // the web panels' open folders (#2439)
+			h.fsWatchReconnected(c.m) // queues the web panels' open folders; never calls the node here (#2439)
 		}
 	}
 }

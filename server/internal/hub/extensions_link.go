@@ -48,6 +48,11 @@ import (
 // extLink is what the hub keeps of the manager's extensions.
 type extLink struct {
 	report atomic.Pointer[extwire.Report] // the assistant's
+	// savePending is the latest assistant report not written yet. One save worker runs at a time, with at most one
+	// trailing report coalesced behind its write; the manager bus loop only replaces savePending.
+	saveMu      sync.Mutex
+	savePending *extwire.Report
+	saveRunning bool
 	// reports are the other managers' (manager_state.go).
 	reportsMu sync.Mutex
 	reports   map[string]*extwire.Report
@@ -90,9 +95,7 @@ func init() {
 		}
 		h.looksReported(before.Looks, after.Looks)               // the extensions' looks (looks.go)
 		if h.store != nil && from == assistantwire.AssistantID { // kept across a restart: the assistant's
-			if err := h.store.PutSetting(context.Background(), extReportKey, r); err != nil {
-				h.logf("extensions: keep the report: %v", err)
-			}
+			h.queueExtReportSave(r)
 		}
 	})
 }
@@ -108,6 +111,48 @@ func init() {
 
 // extReportKey keeps the manager's last report across a hub restart (the hub's own key).
 const extReportKey = "hub.extensions_report"
+
+// extReportStoreTimeout bounds one report write; the settings pool has no statement_timeout of its own.
+const extReportStoreTimeout = deviceStoreTimeout
+
+// queueExtReportSave persists only the assistant's latest report, after its in-memory changes and broadcasts were
+// made in the bus loop. While a write is out, every report replaces the one pending behind it: N reports make at most
+// that write and one trailing write. A failure is logged and dropped, not retried in a loop; the next report tries.
+func (h *Hub) queueExtReportSave(r extwire.Report) {
+	h.ext.saveMu.Lock()
+	h.ext.savePending = &r
+	if h.ext.saveRunning {
+		h.ext.saveMu.Unlock()
+		return
+	}
+	h.ext.saveRunning = true
+	h.nodeWorkers.Add(1)
+	h.ext.saveMu.Unlock()
+	go h.saveExtReports()
+}
+
+func (h *Hub) saveExtReports() {
+	defer h.nodeWorkers.Done()
+	for {
+		h.ext.saveMu.Lock()
+		r := h.ext.savePending
+		h.ext.savePending = nil
+		h.ext.saveMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), extReportStoreTimeout)
+		err := h.store.PutSetting(ctx, extReportKey, *r)
+		cancel()
+		if err != nil {
+			h.logf("extensions: keep the report: %v", err)
+		}
+		h.ext.saveMu.Lock()
+		if h.ext.savePending == nil {
+			h.ext.saveRunning = false
+			h.ext.saveMu.Unlock()
+			return
+		}
+		h.ext.saveMu.Unlock()
+	}
+}
 
 // loadExtReport is the report kept before the hub restarted, until the manager reports again.
 func (h *Hub) loadExtReport(ctx context.Context) {
