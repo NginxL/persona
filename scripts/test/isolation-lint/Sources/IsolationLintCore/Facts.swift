@@ -982,7 +982,7 @@ private final class Collector: SyntaxVisitor {
         if let member = parent.as(MemberAccessExprSyntax.self) { return member.base?.id == node.id }
         if let call = parent.as(SubscriptCallExprSyntax.self) { return call.calledExpression.id == node.id }
         if parent.is(OptionalChainingExprSyntax.self) || parent.is(ForceUnwrapExprSyntax.self) { return readsValue(parent) }
-        if parent.is(ExpressionSegmentSyntax.self) || parent.is(ConditionElementSyntax.self) { return true }
+        if parent.is(ConditionElementSyntax.self) { return true }
         // `!x.name`, `-x.name`: a Bool or a number.
         if let prefix = parent.as(PrefixOperatorExprSyntax.self), ["!", "-", "~"].contains(prefix.operator.text) { return true }
         if let loop = parent.as(ForStmtSyntax.self) { return loop.sequence.id == node.id }
@@ -1005,7 +1005,11 @@ private final class Collector: SyntaxVisitor {
                 return element.as(BinaryOperatorExprSyntax.self)?.operator.text == "??"
             }
         }
-        if let labeled = parent.as(LabeledExprSyntax.self), labeled.parent?.parent?.is(StringLiteralExprSyntax.self) == true {
+        // `"\(x.name)"`: an interpolation describes the value, and a function there is printed, never called. The
+        // expression sits in a list inside the segment, not in the string literal itself. A labeled one
+        // (`"\(x, privacy: .public)"`) goes to an interpolation method that may take a closure.
+        if let labeled = parent.as(LabeledExprSyntax.self), labeled.label == nil,
+           let list = labeled.parent?.as(LabeledExprListSyntax.self), list.count == 1, list.parent?.is(ExpressionSegmentSyntax.self) == true {
             return true
         }
         return false

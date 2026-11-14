@@ -569,9 +569,9 @@ is off the main actor and nothing can call it unseen.
 | A closure literal that only its destination's type makes `@Sendable` | `main` when written in main-actor code (a false positive: write `{ @Sendable in` to say so) |
 | A closure kept in a local variable, or read out of a property and handed on | `unknown` outside main-actor code |
 | `map`, `filter` and the like on a lazy sequence, in a file that imports Combine, or in the sequence of a `for await` | `unknown` outside main-actor code |
-| A call on a value whose type no declaration states (`$0.load()`, a value out of an untyped closure) | may make the callee `unknown`, never `main` or `off` |
+| A call on a value whose type no declaration states (`$0.load()`, a value out of an untyped closure), or whose type has the name of a generic parameter or associated type anywhere in the sources | may make the callee `unknown`, never `main` or `off` |
 | `@objc` members, `#selector`, overrides of SDK classes, callbacks of SDK delegate protocols | `unknown`: the caller is outside the sources |
-| A function handed on as a value, or a property named in a key path | `unknown` |
+| A function handed on as a value, or a property named in a key path (a name only compared, used in arithmetic or interpolated into a string is read, not handed on) | `unknown` |
 | `nonisolated` code with no call in the sources | `unknown` |
 | A conformance other than `Error`, `LocalizedError` or `CodingKey` that makes the compiler infer `nonisolated` | read as MainActor |
 | `SWIFT_DEFAULT_ACTOR_ISOLATION` set per build configuration | the run stops with an error |

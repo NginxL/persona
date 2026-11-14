@@ -180,6 +180,35 @@ final class CallGraphTests: XCTestCase {
         """)
     }
 
+    func testANameInAStringInterpolationIsReadNotHandedOn() {
+        // `$0` has no declaration to read, so `$0.pending` may name `Queue.pending`; in an interpolation it is only
+        // described, never called (#7578). A labeled interpolation may still take a closure.
+        expect("""
+        nonisolated struct Checks { var pending = 0 }
+        nonisolated final class Queue: Sendable {
+            func pending() -> Data? { try? Data(contentsOf: url) } // off
+        }
+        func screen(_ all: [Checks]) -> [String] {
+            Task.detached { _ = Queue().pending() }
+            return all.map { "\\($0.pending) running" }
+        }
+        """)
+        let why = reason("""
+        nonisolated struct Checks { var pending = 0 }
+        nonisolated final class Queue: Sendable {
+            func pending() -> Data? { try? Data(contentsOf: url) }
+        }
+        extension DefaultStringInterpolation {
+            mutating func appendInterpolation(_ value: Any, as words: String) { appendLiteral(words) }
+        }
+        func screen(_ all: [Checks]) -> [String] {
+            Task.detached { _ = Queue().pending() }
+            return all.map { "\\($0.pending, as: "running")" }
+        }
+        """)
+        XCTAssertTrue(why.contains("may pass it on as a value"), why)
+    }
+
     func testWhatObjectiveCCanCallIsUnknown() {
         expect("""
         import UIKit
