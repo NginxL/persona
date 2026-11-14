@@ -32,6 +32,8 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
     val replyComposers: StateFlow<ReplyComposers?> get() = emptyReplyComposers
     suspend fun readingStore(): LarkReadingStore? = null
     val snapshot: StateFlow<InboxSnapshot>
+    /** The listed or paged-back record, else one read by id from the hub; null only when every lookup answers 404. */
+    suspend fun item(itemId: String): InboxRecord? = throw UnsupportedOperationException("Inbox item lookup unavailable")
     val mailTransport: StateFlow<MailTransport?> get() = disconnectedMail
     val personaOutbox: StateFlow<List<OutboxMessage>> get() = emptyPersonaOutbox
     val connectionState: Flow<ConnectionState> get() = flowOf(ConnectionState.Connecting)
@@ -61,6 +63,12 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
      */
     suspend fun actOnSuggestion(request: SuggestionRequest): SuggestionOutcome =
         error("建议尚未接入") // i18n-ignore: developer error for a repository without the hub
+
+    /** The item's ancestry and direct children; null from a hub without the tree route. */
+    suspend fun inboxLine(item: InboxRecord): InboxLineage? = error("Inbox tree unavailable")
+    /** Clears or sets an item's parent, then applies the returned item to the snapshot. Call [inboxLine] again for the new line. */
+    suspend fun setInboxParent(item: InboxRecord, parent: persona.core.contracts.api.InboxParentRef?): Unit =
+        error("Inbox parent route unavailable")
 
     /** "Hand to AI": the item as context with what to do, queued for Persona's main conversation or a running Agent. */
     suspend fun handOff(request: InboxHandOffRequest): SessionKey? = error("交给 AI 尚未接入") // i18n-ignore: developer error for a repository without the hub
@@ -235,6 +243,9 @@ object InboxItemKey {
     fun of(hubId: String, manager: String): String = "$hubId$SEPARATOR$manager"
 
     fun hubId(key: String): String = key.substringBefore(SEPARATOR)
+
+    /** The manager an app id carries, or null for a bare hub id and for the default manager. */
+    fun managerOf(key: String): String? = key.substringAfter(SEPARATOR, "").takeIf { it.isNotBlank() }
 
     /** The app's id of the item [hubId] of [manager] (null: unstamped). */
     fun appId(hubId: String, manager: String?): String =

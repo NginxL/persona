@@ -96,6 +96,7 @@ func copyCounts(c Counts) Counts {
 	c.Group = maps.Clone(c.Group)
 	c.State = maps.Clone(c.State)
 	c.PaneSource = maps.Clone(c.PaneSource)
+	c.Todo = maps.Clone(c.Todo)
 	return c
 }
 
@@ -104,6 +105,7 @@ func (f filters) matches(r *record) bool {
 		return false
 	}
 	v := r.item
+	todo := v.todo()
 	return (f.ID == "" || f.ID == v.ID) && (!f.NoPrivate || !v.Private) &&
 		(!f.Roots || v.root() == "") && (f.Under == "" || f.Under == v.root()) &&
 		(f.State == "" || f.State == stateOf(v, f.Roots)) &&
@@ -114,8 +116,11 @@ func (f filters) matches(r *record) bool {
 		(f.Group == "" || f.Group == v.Group) &&
 		(f.Source == "" || f.Source == v.Source) &&
 		(f.PaneSource == "" || f.PaneSource == v.PaneSource) &&
+		(f.ExcludePaneSource == "" || f.ExcludePaneSource != v.PaneSource) &&
+		(f.Waiting == "" || (f.Waiting == "1") == waitingOf(v, f.Roots)) &&
 		(f.Manager == "" || f.Manager == r.owner) &&
 		(f.Provider == "" || f.Provider == v.Provider) &&
+		(f.Todo == "" || f.Todo == todo || f.Todo == TodoNone && todo == "") &&
 		(f.Q == "" || strings.Contains(r.search, f.Q))
 }
 
@@ -155,7 +160,7 @@ func (i *Index) remember(key cacheKey, r *result) *result {
 }
 
 func emptyCounts(revision string) Counts {
-	return Counts{Machine: make(map[string]int), Project: make(map[string]int), Group: make(map[string]int), State: make(map[string]int), PaneSource: make(map[string]int), Revision: revision}
+	return Counts{Machine: make(map[string]int), Project: make(map[string]int), Group: make(map[string]int), State: make(map[string]int), PaneSource: make(map[string]int), Todo: make(map[string]int), Revision: revision}
 }
 
 // stateOf is the state v is filtered and counted by: its folded state for Options.Roots (Fold.State, its own state
@@ -167,6 +172,12 @@ func stateOf(v Item, roots bool) string {
 	return v.State
 }
 
+// waitingOf is whether v only waits in the background, as it is filtered and counted: by its folded state for
+// Options.Roots (Fold.BackgroundWaiting), its own when it folds none.
+func waitingOf(v Item, roots bool) bool {
+	return v.BackgroundWaiting && (!roots || v.Fold == nil || v.Fold.BackgroundWaiting)
+}
+
 func addCount(c *Counts, v Item, roots bool, delta int) {
 	c.Total += delta
 	if v.PaneSource != "" {
@@ -175,14 +186,14 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 			delete(c.PaneSource, v.PaneSource)
 		}
 	}
-	if v.BackgroundWaiting && (!roots || v.Fold == nil || v.Fold.BackgroundWaiting) {
+	if waitingOf(v, roots) {
 		c.BackgroundWaiting += delta
 	}
 	for _, pair := range []struct {
 		m   map[string]int
 		key string
 	}{
-		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, stateOf(v, roots)},
+		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, stateOf(v, roots)}, {c.Todo, v.todo()},
 	} {
 		pair.m[pair.key] += delta
 		if pair.m[pair.key] == 0 {

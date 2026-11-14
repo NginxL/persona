@@ -27,25 +27,48 @@ type Edit = { kind: "column" | "card"; id?: string; title: string };
 
 /** /workspace-board: the board only while it is turned on (#2475); off, nothing about it is loaded or polled. */
 export function WorkspaceBoard({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
-  const { enabled } = useWorkspaceBoardSetting();
+  const { enabled, error, retry: readAgain } = useWorkspaceBoardSetting();
+  const [retrying, setRetrying] = useState(false);
   if (enabled) return <Board onToggleSidebar={onToggleSidebar} />;
+  const retry = () => {
+    setRetrying(true);
+    void readAgain().finally(() => setRetrying(false));
+  };
+  return <BoardPage onToggleSidebar={onToggleSidebar}>
+    {enabled !== null ? <WorkspaceBoardOff />
+      // the switch could not be read: why, and Retry (the next hello reads it again too), not a loader that never ends
+      : error ? <BoardNotice alert title={t("workspaceboard.switch_failed")} body={errorText(error)} action={<Button tone="secondary" icon="retry" className="whitespace-nowrap" busy={retrying} onClick={retry}>{t("workspaceboard.retry")}</Button>} />
+        : <div className="p-6"><Loading label={t("workspace-board.loading")} /></div>}
+  </BoardPage>;
+}
+
+/** The page while there is no board to show: its title, and what stands in for the board. */
+function BoardPage({ onToggleSidebar, children }: { onToggleSidebar?: () => void; children: React.ReactNode }) {
   return <div className="flex h-full flex-col bg-page">
     <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-3">
       {onToggleSidebar && <IconButton icon="sidebar" label={t("workspace-board.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />}
       <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-ink">{t("workspace-board.title")}</h1>
     </header>
-    {enabled === null ? <div className="p-6"><Loading label={t("workspace-board.loading")} /></div> : <WorkspaceBoardOff />}
+    {children}
   </div>;
 }
 
+/** One message in place of the board, with the one thing to do about it. */
+function BoardNotice({ title, body, action, alert }: { title: string; body: string; action: React.ReactNode; alert?: boolean }) {
+  return <div role={alert ? "alert" : undefined} className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+    <Icon name="layers" size={28} className="text-ink-3" />
+    <h2 className="text-base font-semibold text-ink">{title}</h2>
+    <p className="max-w-sm text-sm text-ink-3">{body}</p>
+    {action}
+  </div>;
+}
+
+const openHubSettings = () => navigate("/settings?tab=hub");
+
 /** What /workspace-board says while the board is off: where to turn it on. */
 export function WorkspaceBoardOff() {
-  return <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-    <Icon name="layers" size={28} className="text-ink-3" />
-    <h2 className="text-base font-semibold text-ink">{t("workspace-board.off_title")}</h2>
-    <p className="max-w-sm text-sm text-ink-3">{t("workspace-board.off_body")}</p>
-    <Button tone="primary" icon="gear" className="whitespace-nowrap" onClick={() => navigate("/settings?tab=hub")}>{t("workspace-board.open_settings")}</Button>
-  </div>;
+  return <BoardNotice title={t("workspace-board.off_title")} body={t("workspace-board.off_body")}
+    action={<Button tone="primary" icon="gear" className="whitespace-nowrap" onClick={openHubSettings}>{t("workspace-board.open_settings")}</Button>} />;
 }
 
 function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
@@ -139,6 +162,13 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       { key: "delete", label: t("workspaceboard.delete_column_menu"), icon: "x", danger: true, disabled: board!.columns.length <= 1, onSelect: () => { setDeleting(c); setMoveTo(""); } },
     ];
   };
+  // This hub has no board (an older one, or one without board storage): one message and where to update it, none of
+  // the board's controls (they would change nothing) and no Retry (the page reads again by itself, so an update shows it).
+  // The title says what to do, so the body gives only why (state.error, the inline line's words, says to update again).
+  if (state.unsupported && !board) return <BoardPage onToggleSidebar={onToggleSidebar}>
+    <BoardNotice title={t("workspaceboard.unsupported_title")} body={t("workspaceboard.unsupported_body")}
+      action={<Button tone="primary" icon="gear" className="whitespace-nowrap" onClick={openHubSettings}>{t("workspaceboard.open_hub_settings")}</Button>} />
+  </BoardPage>;
   return <div className="@container flex h-full flex-col bg-page">
     <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-3">
       {onToggleSidebar && <IconButton icon="sidebar" label={t("agents-agentsview.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />}
@@ -159,7 +189,8 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
     {view === "manual" ? <button type="button" onClick={() => changeView("auto")} className="border-b border-line bg-accent-tint px-4 py-2 text-left text-xs text-accent">{t("workspaceboard.auto_promo")}</button>
       : <p className="border-b border-line bg-inset px-4 py-2 text-xs text-ink-2">{t("workspaceboard.auto_hint")}</p>}
     {state.readonly && <p className="border-b border-line bg-inset px-4 py-2 text-xs text-ink-2">{t("workspaceboard.readonly")}</p>}
-    {state.error && <p role="alert" className="border-b border-line bg-red-tint px-4 py-2 text-sm text-red">{state.error}</p>}
+    {/* with no board yet, the failure is said once, in its place with Retry, below */}
+    {state.error && board && <p role="alert" className="border-b border-line bg-red-tint px-4 py-2 text-sm text-red">{state.error}</p>}
     {(state.discoveryError || state.discovery.errors?.length) ? <div role="status" className="border-b border-line bg-orange-tint px-4 py-2 text-xs text-orange">{state.discoveryError && <p>{t("workspaceboard.discovery_failed", { error: state.discoveryError })}</p>}{state.discovery.errors?.map((e, index) => <p key={`${e.machine_id}:${index}`}>{t("workspaceboard.machine_error", { machine: names.get(e.machine_id) || e.machine_id, error: e.error })}</p>)}<p>{t("workspaceboard.discovery_kept")}</p></div> : null}
     {state.loading && !board ? <div className="p-6"><Loading label={t("workspaceboard.loading")} /></div> : board && view === "auto" ? <AutoBoard lanes={auto} activeLane={activeLane} machineOf={machineOf} workspaceOf={workspaceOf} sessionsOf={sessionsOf} disabled={disabled} onOpen={openCard} onMenu={openCardMenu} onArchive={(c, archived) => void mutate({ action: "update_card", id: c.id, archived })} /> : board ? <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto p-4" aria-label={archived ? t("workspaceboard.archived_label") : t("workspaceboard.columns_label")}>
       {board.columns.map((column) => { const cards = shown.get(column.id) ?? [];
@@ -173,7 +204,10 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           </div>{!archived && <div className="border-t border-line px-3 py-2"><Button tone="quiet" icon="plus" className="w-full" disabled={disabled} onClick={() => setAdding(column.id)}>{t("workspaceboard.bind_workspace")}</Button></div>}
         </section>;
       })}
-    </div> : <div className="p-6 text-sm text-ink-3">{t("workspaceboard.unavailable")}<Button onClick={() => void model.refresh()}>{t("workspaceboard.retry")}</Button></div>}
+    </div> : <div role="alert" className="flex flex-wrap items-center gap-3 p-6">
+      <div className="min-w-0 flex-1"><p className="text-sm text-ink-2">{t("workspaceboard.unavailable")}</p>{state.error && <p className="mt-0.5 text-xs text-ink-3">{state.error}</p>}</div>
+      <Button tone="secondary" icon="retry" className="whitespace-nowrap" disabled={state.busy} onClick={() => void model.refresh()}>{t("workspaceboard.retry")}</Button>
+    </div>}
     {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} align="right" items={(menu.card ? cardMenu(menu.card) : columnMenu(menu.column!)).map((item) => ({ ...item, disabled: disabled || item.disabled }))} />}
     <Dialog open={Boolean(edit)} onClose={() => setEdit(null)} title={edit?.kind === "card" ? t("workspaceboard.rename_card") : edit?.id ? t("workspaceboard.rename_column") : t("workspaceboard.add_column")}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!edit?.title.trim()) return; void mutate({ action: edit.kind === "card" ? "update_card" : edit.id ? "update_column" : "add_column", id: edit.id, title: edit.title.trim() }).then((ok) => { if (ok) setEdit(null); }); }}><input autoFocus aria-label={t("workspaceboard.name")} maxLength={120} className={field} value={edit?.title ?? ""} onChange={(e) => setEdit((v) => v && { ...v, title: e.target.value })} /><div className="flex justify-end gap-2"><Button onClick={() => setEdit(null)}>{t("common.cancel")}</Button><Button type="submit" tone="primary" disabled={disabled || !edit?.title.trim()} busy={state.busy}>{t("common.save")}</Button></div></form>

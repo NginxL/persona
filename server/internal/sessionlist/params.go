@@ -15,7 +15,7 @@ import (
 // machine_id filtering. Presence matters: malformed new parameters must be
 // parsed and rejected rather than silently falling back to the legacy API.
 func Enabled(v url.Values) bool {
-	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "parent_session_id", "place", "space", "catalog"} {
+	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "parent_session_id", "place", "space", "catalog", "todo", "waiting", "exclude_pane_source"} {
 		if _, exists := v[key]; exists {
 			return true
 		}
@@ -28,7 +28,7 @@ func Enabled(v url.Values) bool {
 // Options fields: adapters choose those answers, while Query ignores the selectors.
 func Parse(v url.Values) (Options, error) {
 	o := Options{Limit: defaultLimit}
-	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog"} {
+	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog", "todo", "waiting", "exclude_pane_source"} {
 		if values, exists := v[key]; exists && len(values) != 1 {
 			return Options{}, failure("invalid_query", key+" must have exactly one value")
 		}
@@ -82,6 +82,25 @@ func Parse(v url.Values) (Options, error) {
 			return Options{}, failure("invalid_query", "pane_source must not be empty")
 		}
 		o.PaneSource = values[0]
+	}
+	if values, exists := v["todo"]; exists {
+		if values[0] == "" {
+			return Options{}, failure("invalid_query", "todo must not be empty")
+		}
+		o.Todo = values[0]
+	}
+	if values, exists := v["waiting"]; exists {
+		b, err := boolean(values[0])
+		if err != nil {
+			return Options{}, err
+		}
+		o.Waiting = map[bool]string{true: "1", false: "0"}[b]
+	}
+	if values, exists := v["exclude_pane_source"]; exists {
+		if values[0] == "" {
+			return Options{}, failure("invalid_query", "exclude_pane_source must not be empty")
+		}
+		o.ExcludePaneSource = values[0]
 	}
 	var err error
 	if o.Places, err = parsePlaces(v, "place"); err != nil {
@@ -170,10 +189,17 @@ func validate(o Options) (Options, error) {
 	if err := validPlaces("space", o.Spaces); err != nil {
 		return Options{}, err
 	}
-	switch o.PaneSource {
-	case "", "terminal", "feishu", "desktop", "unknown":
+	for _, origin := range []string{o.PaneSource, o.ExcludePaneSource} {
+		switch origin {
+		case "", "terminal", "feishu", "desktop", "unknown":
+		default:
+			return Options{}, failure("invalid_query", "pane_source is not a supported pane origin")
+		}
+	}
+	switch o.Waiting {
+	case "", "0", "1":
 	default:
-		return Options{}, failure("invalid_query", "pane_source is not a supported pane origin")
+		return Options{}, failure("invalid_query", "waiting must be 0 or 1")
 	}
 	switch o.State {
 	case "", "needs_you", "working", "unread", "idle", "offline", "unknown":
@@ -201,7 +227,7 @@ func normalizeQ(s string) string { return strings.ToLower(s) }
 
 func (o Options) filters() filters {
 	return filters{ID: o.ID, State: o.State, Machine: o.Machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
-		Roots: o.Roots, Under: o.Under, NoPrivate: o.NoPrivate, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces)}
+		Roots: o.Roots, Under: o.Under, NoPrivate: o.NoPrivate, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource}
 }
 
 func (o Options) binding() binding {

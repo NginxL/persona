@@ -27,6 +27,10 @@ var RouteScopes = map[string]string{
 	"GET /api/v1/inbox/policies":                         ScopeInboxRead,
 	"POST /api/v1/inbox/done":                            ScopeInboxWrite,
 	"POST /api/v1/inbox/bulk":                            ScopeInboxWrite,
+	"POST /api/v1/inbox/merge":                           ScopeInboxWrite,
+	"POST /api/v1/inbox/merge/undo":                      ScopeInboxWrite,
+	"POST /api/v1/inbox/todo":                            ScopeInboxWrite,
+	"POST /api/v1/inbox/todo/undo":                       ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/done":                       ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/draft":                      ScopeInboxWrite,
 	"POST /api/v1/inbox/{id}/reply":                      ScopeInboxWrite,
@@ -80,6 +84,7 @@ var RouteScopes = map[string]string{
 	"GET /api/v1/machines/{id}/usage":                    ScopeMachinesRead,
 	"GET /api/v1/machines/{mid}/stat":                    ScopeMachinesRead,
 	"POST /api/v1/notify":                                ScopeNotify,
+	"GET /api/v1/push/intercepts":                        ScopeNotify, // read-only: pushes ln mode held back, including an extension's own
 	"GET /api/v1/assistant":                              ScopeAssistantAsk,
 	"GET /api/v1/assistant/capabilities":                 ScopeAssistantAsk,
 	"POST /api/v1/assistant/conversations":               ScopeAssistantAsk,

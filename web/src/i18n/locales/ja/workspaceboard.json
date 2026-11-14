@@ -90,5 +90,11 @@
   "auto_lane_planned": "予定",
   "auto_empty_planned": "予定はありません。",
   "work_todo": "To-do",
-  "work_open_todo": "To-doを開く"
+  "work_open_todo": "To-doを開く",
+  "switch_failed": "ワークフローボードの設定を確認できませんでした",
+  "unsupported_title": "ワークフローボードを使うにはハブの更新が必要です",
+  "unsupported_body": "このハブのバージョンが古いか、ボードの保存が有効になっていません。",
+  "open_hub_settings": "ハブの設定を開く",
+  "setting_failed": "ワークフローボードのスイッチを読み込めませんでした：{error}",
+  "setting_unsupported": "このハブのバージョンにはまだこのスイッチがありません。ハブを更新すると、ここでボードのオン・オフを切り替えられます。"
 }

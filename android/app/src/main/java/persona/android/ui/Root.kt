@@ -301,8 +301,16 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
         assistantPending = conversation
         return true
     }
-    fun openResolved(route: ResolvedRoute): AppTab =
-        if (openAssistant(route.key, true)) AppTab.Persona else route.open(stacks)
+    val navigator = remember { AppNavigator(stacks, { selected }, { selected = it }, chatTab = { route ->
+        currentKind(SessionKey(route.machineId, route.sessionId))?.let { if (it == ConversationKind.Assistant) AppTab.Persona else AppTab.Agents }
+    }, openAssistant = { chat, select -> openAssistant(chat, select) }, inboxReturns = saved.inboxReturns) }
+    fun openResolved(route: ResolvedRoute): AppTab {
+        // The restored ledger can hold the source even when the visible key does not. Check it before this direct open
+        // updates the ledger: a sourced assistant stays a secondary page instead of replacing the embedded home.
+        val hadInboxOrigin = navigator.hasInboxOrigin(route.key)
+        navigator.noteDirectOpen(route.key)
+        return if (!hadInboxOrigin && openAssistant(route.key, true)) AppTab.Persona else route.open(stacks)
+    }
     /** Opens [route]; a card outside any session (#4808) also has Agents open its sheet, as its notification does. */
     fun openWithCard(route: ResolvedRoute) {
         selected = openResolved(route)
@@ -310,6 +318,7 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
     }
     remember {
         initialRoute?.let { route ->
+            navigator.noteDirectOpen(route.key)
             // The first frame already shows the requested conversation, not the home's default one.
             assistantTarget(route.key)?.let { assistantRequest = it } ?: route.open(stacks)
             route.pairingLink?.let { MainActivity.pendingPairLink.value = it }
@@ -324,9 +333,6 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
         assistantRequest = conversation
         assistantPending = null
     }
-    val navigator = remember { AppNavigator(stacks, { selected }, { selected = it }, chatTab = { route ->
-        currentKind(SessionKey(route.machineId, route.sessionId))?.let { if (it == ConversationKind.Assistant) AppTab.Persona else AppTab.Agents }
-    }, openAssistant = { chat, select -> openAssistant(chat, select) }) }
     val router = remember { Router { m, s -> currentKind(SessionKey(m, s)) } }
     val agentsWiring by session.agentsWiring.state.collectAsStateWithLifecycle()
     val navigationWiring = remember { MutableStateFlow(agentsWiring) }
@@ -365,7 +371,7 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
         snapshotFlow { ShellPosition(selected, machine, stacks.mapNotNull { (tab, stack) ->
             stack.mapNotNull { when (it) { is ChatRoute -> it; is InteractionRoute -> it.chat; else -> null } }
                 .lastOrNull()?.let { tab to it }
-        }.toMap()) }.distinctUntilChanged().collect { position -> withContext(Dispatchers.IO) { store.save(position) } }
+        }.toMap(), navigator.inboxReturns()) }.distinctUntilChanged().collect { position -> withContext(Dispatchers.IO) { store.save(position) } }
     }
     val visible = stacks.getValue(selected).lastOrNull()
     val visibleChat = when (visible) { is ChatRoute -> visible; is InteractionRoute -> visible.chat; else -> null }
@@ -904,19 +910,20 @@ private fun ShellSettings(services: SettingsServices, navigator: Navigator, shel
         onBack = if (page == "settings") null else navigator::back, onNavigate = navigator::navigate, onClose = onClose)
 }
 
-/** Inbox deep links wait for the item list, then become the page the inbox list would open. */
+/** Inbox deep links wait for the item list, then read a historical item by id when the list no longer has it. */
 @Composable
 private fun InboxLink(route: NavKey, inbox: InboxRepository, navigator: Navigator, replace: (NavKey, NavKey) -> Unit) {
     val snapshot by inbox.snapshot.collectAsStateWithLifecycle()
-    var loaded by remember(route) { mutableStateOf(false) }
-    LaunchedEffect(route, inbox) {
+    var attempt by remember(route) { mutableIntStateOf(0) }
+    var destination by remember(route) { mutableStateOf<InboxDestination?>(null) }
+    val pages = LocalInboxItemPages.current
+    LaunchedEffect(route, inbox, attempt) {
+        destination = null
         try { inbox.refresh() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { /* Cached records still resolve the link; a miss is reported below. */ }
-        loaded = true
+        catch (_: Exception) { /* Cached records and the single-item lookup still resolve what they can. */ }
+        destination = inboxDestinationWithLookup(route, snapshot.records, true, pages, inbox)
     }
-    val pages = LocalInboxItemPages.current
-    val destination = inboxDestination(route, snapshot.records, loaded, pages)
     LaunchedEffect(destination) {
         (destination as? InboxDestination.Open)?.let {
             // An item link (not a chat link) opened before the hub's list was read may be the extension's to draw.
@@ -924,8 +931,14 @@ private fun InboxLink(route: NavKey, inbox: InboxRepository, navigator: Navigato
             replace(route, it.key)
         }
     }
-    if (destination == InboxDestination.Missing) UnavailablePage(stringResource(R.string.app_inbox_item_missing), navigator)
-    else Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+    when (destination) {
+        InboxDestination.Missing -> UnavailablePage(stringResource(R.string.app_inbox_item_missing), navigator)
+        InboxDestination.Failed -> Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
+            JNotice(stringResource(persona.feature.inbox.R.string.inbox_refresh_failed),
+                actionLabel = stringResource(persona.feature.inbox.R.string.inbox_retry), onAction = { attempt++ })
+        }
+        else -> Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+    }
 }
 
 /**

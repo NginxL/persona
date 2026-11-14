@@ -2,7 +2,8 @@
 // items, its providers → launchers, a permission request ↔ an interaction and its answer. No I/O: the bridge
 // (bridge.js) hands in what the daemon said; the tests feed recorded shapes.
 
-import { basename } from 'node:path'
+import { createHash } from 'node:crypto'
+import { basename, join } from 'node:path'
 import { appToolName, clipInput, interactionId, snippet, summaryOf } from '../../runtime-sdk/index.js'
 
 /** The runtime id: the engine's (proto.EnginePaseo), the space kind, the agent of sessions the apps do not know. */
@@ -13,6 +14,13 @@ export const SESSION_LABEL = 'persona.session'
 export const PARENT_LABEL = 'paseo.parent-agent-id'
 /** The label on the agent a launcher check runs (bridge.js check): never a session, deleted once it answered. */
 export const CHECK_LABEL = 'persona.check'
+/**
+ * The label beside SESSION_LABEL when the bridge kept the id itself on an agent Persona neither started nor took over
+ * (Paseo moved it to another Claude session: a fork, a rewind): the id is the session's, the agent is not Persona's own.
+ */
+export const KEPT_LABEL = 'persona.kept'
+/** Where the bridge's copy of an agent holds the id it keeps for it before Paseo's record has the label (bridge.js keptIdOf). */
+export const KEPT = Symbol('persona.kept')
 /** Persona's effort levels, weakest first (proto.EffortLevels). */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 /** Persona's permission modes (proto.PermissionModes): Claude Code's, which Paseo's Claude providers take as they are. */
@@ -124,14 +132,15 @@ export function defaultProvider(entries = [], roots = {}) {
 
 /**
  * The id a Paseo agent has in Persona, undefined while it has none: the label Persona left on it (it started or took
- * the session over); else, for Claude Code, its Claude session id — the id the same conversation has everywhere in
- * Persona ("Offline", herdr) — once Paseo has one; else paseo-<agent id>.
+ * the session over, or the bridge kept the id); else, for Claude Code, the id the bridge keeps for it (KEPT: the session
+ * it was listed under before Paseo moved it to a fork), else its Claude session id — the id the same conversation has
+ * everywhere in Persona ("Offline", herdr) — once Paseo has one; else paseo-<agent id>.
  */
 export function sessionIdOf(agent, roots = {}) {
   const l = agent?.labels?.[SESSION_LABEL]
   if (typeof l === 'string' && SESSION_ID.test(l)) return l
   if (agentRoot(agent, roots) === 'claude') {
-    const c = claudeId(agent)
+    const c = agent?.[KEPT] ?? claudeId(agent)
     return c && SESSION_ID.test(c) ? c : undefined
   }
   return typeof agent?.id === 'string' && agent.id ? `${RUNTIME}-${agent.id}` : undefined
@@ -280,7 +289,7 @@ export function slotNameOf(project, cwd) {
 }
 
 /** The repository a placement belongs to: the main checkout's directory for a worktree, else its own. */
-function repoRootOf(project) {
+export function repoRootOf(project) {
   const c = project?.checkout
   const root = linkedWorktree(project) ? c.mainRepoRoot : (c?.worktreeRoot ?? c?.cwd)
   return typeof root === 'string' && root ? root : undefined
@@ -370,6 +379,9 @@ export function agentRow(agent, o = {}) {
   // by its agent; one that stopped running "replaced" by another there). A workspace's agents are conversations of
   // their own, as in Paseo's own tabs (#4493).
   if (space && typeof agent.workspaceId === 'string' && agent.workspaceId) row.slot_name = slotNameOf(p, cwd)
+  // The workspace itself, by id: the node keeps it on the row of the engine's runtime, and the apps tie the session to
+  // that workspace's row in the catalog (runtime.workspaces, workspaceRow), agents in it or not.
+  if (typeof agent.workspaceId === 'string' && SESSION_ID.test(agent.workspaceId)) row.workspace_id = agent.workspaceId
   // Its repository, for "By repo" (#2840): Paseo keeps its worktrees under its own folder, where the path names none.
   // By its physical directory (#4492), as the node names the working tree: a repository whose sessions write its path
   // two ways (a home behind a symbolic link) is two projects in the apps.
@@ -412,6 +424,53 @@ export function backgroundOf(agent) {
     id: `${RUNTIME}-${agent.id}`, kind: 'agent', ...(title ? { description: snippet(title) } : {}),
     started_at: ts(agent.createdAt ?? agent.updatedAt),
   }
+}
+
+// ---- workspaces ----
+
+/** A Paseo workspace id (its workspace-registry-model generateWorkspaceId). */
+export const WORKSPACE_ID = /^wks_[0-9a-f]{16}$/
+
+/**
+ * A Paseo workspace (a WorkspaceDescriptorPayload) as a runtime.workspaces row (docs/protocol/protocol.md "Runtime ↔
+ * node"): its id, its name (its title, else its branch or folder), its folder and kind, its branch, the space its agents'
+ * rows name (o.spaceId: projectSpaces, which files a worktree's own project record under its repository's), its
+ * repository's main checkout, and whether Paseo made the checkout (owned: archiving the workspace removes it).
+ * Undefined for one being archived, or without a folder.
+ * @param {object} d
+ * @param {{ spaceId?: string, spaceName?: string, canon?: (path: string) => string }} [o]
+ */
+export function workspaceRow(d, o = {}) {
+  const p = d?.project
+  const cwd = (typeof d?.workspaceDirectory === 'string' && d.workspaceDirectory) || p?.checkout?.cwd || ''
+  if (typeof d?.id !== 'string' || !SESSION_ID.test(d.id) || !cwd || d.archivingAt) return undefined
+  const kind = d.workspaceKind === 'worktree' ? 'worktree' : d.workspaceKind === 'local_checkout' || d.workspaceKind === 'checkout' ? 'checkout' : 'folder'
+  const row = { workspace_id: d.id, title: (typeof d.name === 'string' && d.name.trim()) || basename(cwd), cwd, kind }
+  const branch = d.gitRuntime?.currentBranch ?? p?.checkout?.currentBranch
+  if (kind !== 'folder' && typeof branch === 'string' && branch && branch !== 'HEAD') row.branch = branch
+  const space = o.spaceId ?? spaceIdOf(p) ?? (typeof d.projectId === 'string' ? d.projectId : undefined)
+  if (space) row.space_id = space
+  const name = o.spaceName ?? p?.projectName ?? d.projectDisplayName
+  if (typeof name === 'string' && name) row.space_name = name
+  const repo = kind === 'folder' ? undefined : (repoRootOf(p) ?? d.projectRootPath)
+  if (typeof repo === 'string' && repo) row.repo_root = o.canon ? o.canon(repo) : repo
+  if (kind === 'worktree' && (Boolean(d.worktreeSlug) || d.gitRuntime?.isPaseoOwnedWorktree === true || p?.checkout?.isPaseoOwnedWorktree === true)) {
+    row.owned = true
+  }
+  return row
+}
+
+/**
+ * Where Paseo puts the worktrees of a repository (its utils/worktree.js getPaseoWorktreesRoot): <worktrees
+ * root>/<project hash>, the hash of the main checkout's physical path, eight base-36 characters.
+ * @param {string} base - the worktrees root (Paseo's worktrees.root, else <Paseo home>/worktrees)
+ * @param {string} repoRoot - the repository's main checkout, symbolic links resolved
+ */
+export function paseoCheckouts(base, repoRoot) {
+  const digest = createHash('sha256').update(repoRoot).digest()
+  let value = 0n
+  for (let i = 0; i < 8; i++) value = (value << 8n) | BigInt(digest[i])
+  return join(base, value.toString(36).padStart(13, '0').slice(0, 8))
 }
 
 // ---- the timeline ----

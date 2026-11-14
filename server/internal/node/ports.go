@@ -264,6 +264,9 @@ func dialTargets(port int, addr string) []string {
 	return []string{net.JoinHostPort(strings.Trim(addr, "[]"), p)}
 }
 
+// portDialer is how port.dial reaches a port here; a variable for tests, which stand in for Screen Sharing.
+var portDialer = dialPort
+
 func dialPort(ctx context.Context, port int, addr string) (net.Conn, error) {
 	var d net.Dialer
 	var err error
@@ -644,9 +647,18 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 		// Pair ties this 5900 stream to a later screen.dial for the video channel (#3954); the node follows Screen
 		// Sharing's login on it. Empty for every other port and for 5900 without the video channel.
 		Pair string `json:"pair"`
+		// Link: the phone asked for a screen session (#6398, screenlink): the stream carries the session's framing,
+		// not Screen Sharing's bytes, and the answer says {link: 1}. Attach: a relay rejoining the live session for
+		// pair, which sends the session's token first; nothing is dialed. Only for 5900 with a pair.
+		Link   bool `json:"link"`
+		Attach bool `json:"attach"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Port <= 0 || p.Port > 65535 {
 		return nil, errors.New("port.dial: need id and port")
+	}
+	link := p.Link && p.Port == screenPort && p.Pair != "" && n.links != nil
+	if link && p.Attach {
+		return n.reattachScreen(p.ID, p.Pair, false)
 	}
 	addr := ""
 	if l, ok := n.listedPort(p.Port); ok {
@@ -654,7 +666,7 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 	}
 	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, err := dialPort(dctx, p.Port, addr)
+	c, err := portDialer(dctx, p.Port, addr)
 	if err != nil {
 		n.kickPorts() // it may be gone: the list says so sooner
 		return nil, &rpc.Error{Code: "port_gone", Message: fmt.Sprintf("nothing is listening on port %d", p.Port)}
@@ -668,9 +680,37 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 	}
 	if p.Port == screenPort && p.Pair != "" {
 		c = n.screens.observe(p.Pair, c) // follow Screen Sharing's login so screen.dial can bind to it (#3954)
+		if n.screenStart != nil {
+			n.askScreenPermission(p.Pair, nil) // once it signs in: macOS asks for the helper's grant, once per version
+		}
+	}
+	if link {
+		_, relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here
+		n.streams.Start(p.ID, relay)
+		return map[string]any{"link": 1}, nil
 	}
 	n.streams.Start(p.ID, c)
 	return map[string]any{}, nil
+}
+
+// reattachScreen is a hub relay rejoining the live screen session for pair (#6398): its RFB channel, or with video
+// its current video channel. Nothing is dialed or started; the relay must send the session's token first. session_gone
+// when there is no such session (or no live video in it): the phone starts over.
+func (n *Node) reattachScreen(id, pair string, video bool) (any, error) {
+	s := n.links.Get(pair)
+	if s == nil || (video && !s.HasVideo()) {
+		return nil, &rpc.Error{Code: "session_gone", Message: "no live screen session for this pair"}
+	}
+	if err := n.streams.Open(id); err != nil {
+		return nil, err
+	}
+	relay, ok := s.Reattach(video)
+	if !ok {
+		n.streams.Abort(id, errors.New("the screen session ended"))
+		return nil, &rpc.Error{Code: "session_gone", Message: "the screen session ended"}
+	}
+	n.streams.Start(id, relay)
+	return map[string]any{"link": 1}, nil
 }
 
 // portProbeRPC is port.probe: whether anything answers on the port here, and its page's title.

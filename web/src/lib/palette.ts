@@ -37,6 +37,8 @@ function set(next: PaletteState) {
 export const getPalette = () => state;
 export const openPalette = (mode: PaletteMode = "jump") => set({ open: true, query: mode === "command" ? ">" : "" });
 export const closePalette = () => set({ open: false, query: "" });
+/** Opens on `query` to change it: the Agents list's query chip (#6589). */
+export const openPaletteWith = (query: string) => set({ open: true, query });
 export const setPaletteQuery = (query: string) => set({ open: state.open, query });
 
 /** The key of a mode: opens that mode; pressed again in it, closes (⌘K ⌘K, ⌘⇧P ⌘⇧P); the other mode's key switches. */
@@ -73,6 +75,8 @@ export interface PaletteCommand {
   detail?: string;
   /** The group it is listed under: a heading in the list, also searched. */
   section?: string;
+  /** The section holds a name (the pane's, the space's): its heading is drawn as written, not in a label's capitals. */
+  sectionAsWritten?: boolean;
   icon?: IconName;
   /** Its shortcut, in the chord spelling (shortcuts.ts); drawn as keycaps on its row. */
   chord?: string;

@@ -248,6 +248,53 @@ struct RFBClientTests {
         client.close()
         #expect(t.sent.filter { $0.first == 4 || $0.first == 5 || $0.first == 6 } == out)
     }
+
+    /// #3954: while the video channel shows the picture, an update that comes asks for no next one; released, the held
+    /// request goes out once (incremental: the Mac sends what changed since its last update).
+    @Test func heldUpdatesAskForNoMore() async throws {
+        func u16(_ v: Int) -> [UInt8] { [UInt8(v >> 8), UInt8(v & 0xff)] }
+        var s0: [UInt8] = u16(2) + u16(2); s0 += [UInt8](repeating: 0, count: 16); s0 += RFBAuth.be32(4); s0 += Array("Mock".utf8)
+        // In typed steps: as one sum Xcode 26.0 could not type-check it in time.
+        var raw: [UInt8] = [0, 0] + u16(1)
+        raw += u16(0) + u16(0)
+        raw += u16(1) + u16(1)
+        raw += RFBAuth.be32(0) + [1, 2, 3, 0]
+        let a1: [UInt8] = [1] + RFBAuth.be32(256)
+        let script: [[UInt8]] = [Array("RFB 003.889\n".utf8), [1, 19], [0, 2], [0], a1, RFBAuth.be32(0), s0, raw, raw]
+        let t = ScriptedTransport(script, holds: true)
+        let seen = Seen()
+        let client = RFBClient(transport: t) { .init(account: "me", password: "mock-pass") }
+        client.onFrame = { _, _ in Task { await seen.frame([], [], []) } }
+        client.holdUpdates(true)
+        client.start()
+        for _ in 0..<300 where await seen.snapshot.frames.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await seen.snapshot.frames.count == 2)
+        func requests() -> [UInt8] { t.sent.filter { $0.count == 10 && $0[0] == 3 }.map { $0[1] } }
+        #expect(requests() == [0], "only the first, whole one")
+        client.holdUpdates(false)
+        for _ in 0..<100 where requests().count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(requests() == [0, 1], "the held one, once")
+        client.holdUpdates(false)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(requests() == [0, 1], "nothing more was held")
+        client.close()
+    }
+
+    /// #3954: the screen-sharing stream carries a pair, which the video channel binds to. A WebSocket URL with it; none
+    /// without one (the URL as before); and a fresh, unguessable one each connection.
+    @Test func theConnectURLCarriesAPair() throws {
+        let http = try #require(URL(string: "https://hub.example.com/api/v1/machines/macbook/ports/5900/connect"))
+        let paired = RFBWebSocket.url(http, pair: "0123abcd")
+        #expect(paired.absoluteString == "wss://hub.example.com/api/v1/machines/macbook/ports/5900/connect?pair=0123abcd")
+        #expect(RFBWebSocket.url(http, pair: nil).absoluteString == "wss://hub.example.com/api/v1/machines/macbook/ports/5900/connect")
+        #expect(RFBWebSocket.url(http, pair: "").query == nil, "an empty pair is no pair")
+        let plain = try #require(URL(string: "http://192.0.2.1:8787/api/v1/machines/m/ports/5900/connect"))
+        #expect(RFBWebSocket.url(plain, pair: "p").scheme == "ws", "a hub over http is ws")
+
+        let a = RFBWebSocket.newPair(), b = RFBWebSocket.newPair()
+        #expect(a.count == 32 && a.allSatisfy(\.isHexDigit), "16 random bytes in hex: \(a)")
+        #expect(a != b, "a new pair each connection")
+    }
 }
 
 /// A server that says what it was given, in order, then closes; what the client sent is kept.
