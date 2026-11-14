@@ -72,6 +72,7 @@
     <string name="settings_ext_state_error">Something went wrong</string>
     <string name="settings_ext_state_unknown">Unknown state</string>
     <string name="settings_ext_run_pack">A pack runs no program itself; its members are turned on, set up and removed on their own.</string>
+    <string name="settings_ext_run_pack_members_follow">A pack runs no program itself; its members are set up and removed on their own.</string>
     <string name="settings_ext_run_running">Running</string>
     <string name="settings_ext_run_idle">Not running yet; starts when needed</string>
     <string name="settings_ext_source_builtin">Built-in</string>
@@ -168,6 +169,12 @@
     <string name="settings_ext_read_only">This extension is set in its assistant\'s manager.json. Turn it on or off and change its settings there, then restart the assistant.</string>
     <string name="settings_ext_enabled">Enabled</string>
     <string name="settings_ext_enabled_note">When turned off, it stops running and the connectors and other things it provides turn off too. Its settings and secrets are kept.</string>
+    <string name="settings_ext_enable_footer_pack">Turning the pack off turns off its members too, and they stop running. Turning it back on turns on the members it turned off; a member you turn on or off yourself stays as you set it.</string>
+    <string name="settings_ext_enable_footer_pack_off">Turning the pack back on turns on %1$s again. A member you turn on or off yourself stays as you set it.</string>
+    <string name="settings_ext_enable_footer_pack_alone">Turning the pack off turns off only the pack itself. Turn each member on or off on its own page.</string>
+    <string name="settings_ext_disable_pack_title">Turn off “%1$s” and its members?</string>
+    <string name="settings_ext_disable_pack_body">Its members are turned off too: %1$s. They\'re only turned off, not removed; settings and data are kept. Turning the pack back on turns them on again.</string>
+    <string name="settings_ext_disable_all">Turn off all</string>
     <string name="settings_ext_unavailable">Unavailable</string>
     <string name="settings_ext_still_needed">Still needed: %1$s</string>
     <string name="settings_ext_channel_link">This is a chat channel</string>
