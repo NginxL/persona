@@ -237,6 +237,8 @@ type Node struct {
 
 	// codexStarting: panes a Codex start is opening (codex_start.go): no thread is guessed for them meanwhile.
 	codexStarting map[string]bool
+	// codexClaims: public thread ids claimed by starting panes until bindPane and the initial state.put.
+	codexClaims map[string]string
 	// codexWaiting: Codex panes opened with no first message, by pane, until their thread is known (codex_waiting.go);
 	// codexAttached: such a row's id → the thread it became; codexWaitLooking: the look for their threads runs.
 	codexWaiting     map[string]*codexWait

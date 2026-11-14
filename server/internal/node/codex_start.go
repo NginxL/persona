@@ -276,6 +276,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	if waiting {
 		return n.openCodexWait(ctx, pane, cwd, launcher, mode, began), nil
 	}
+	defer n.unclaimCodexThread(id)
 	n.bindPane(pane, id)
 	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC()}
 	if mode == "plan" {
@@ -303,6 +304,32 @@ func codexOnRemote(argv []string) bool {
 		}
 	}
 	return false
+}
+
+// claimCodexThread reserves a matched public thread ID for pane. Another pane's binding or in-flight claim wins without
+// making this waiter stop: it keeps scanning for the next matching rollout instead.
+func (n *Node) claimCodexThread(pane, id string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for p, bound := range n.panes {
+		if bound == id && p != pane {
+			return false
+		}
+	}
+	if owner, ok := n.codexClaims[id]; ok && owner != pane {
+		return false
+	}
+	if n.codexClaims == nil {
+		n.codexClaims = map[string]string{}
+	}
+	n.codexClaims[id] = pane
+	return true
+}
+
+func (n *Node) unclaimCodexThread(id string) {
+	n.mu.Lock()
+	delete(n.codexClaims, id)
+	n.mu.Unlock()
 }
 
 // waitCodexThread waits for the thread a start made: a rollout in the directory (as given, or resolved: Codex records
@@ -335,7 +362,10 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 				}
 				// A thread begun by this launch (not one resumed in the same directory) whose first message is ours.
 				if at, first := codexThreadStart(r.path); !at.Before(began.Add(-2*time.Second)) && strings.TrimSpace(first) == strings.TrimSpace(prompt) {
-					return n.codexPublicID(home, r.id), nil
+					id := n.codexPublicID(home, r.id)
+					if n.claimCodexThread(pane, id) {
+						return id, nil
+					}
 				}
 			}
 		}

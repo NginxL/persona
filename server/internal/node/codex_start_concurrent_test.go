@@ -107,3 +107,94 @@ func TestCodexStartsInSameDirectoryRunConcurrently(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexSamePromptStartsClaimDistinctThreads(t *testing.T) {
+	n, f := stalledCodexNode(t)
+	codexStartWait = time.Minute
+	next := 0
+	f.handle("tab.create", func(map[string]any) any {
+		next++
+		return map[string]any{"tab": map[string]any{"tab_id": fmt.Sprintf("w1:t%d", next)}, "root_pane": map[string]any{"pane_id": fmt.Sprintf("w1:p%d", next)}}
+	})
+	waiting := make(chan string, 2)
+	seen := map[string]bool{}
+	f.after(func(c herdrCall) {
+		if c.Method == "pane.read" && c.Params["source"] == "visible" && c.Params["lines"] == float64(screen.DialogLines) {
+			pane := str(c.Params["pane_id"])
+			if !seen[pane] {
+				seen[pane] = true
+				waiting <- pane
+			}
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	results := make(chan error, 2)
+	ids := make(chan string, 2)
+	var wg sync.WaitGroup
+	defer func() { cancel(); wg.Wait() }()
+	cwd := filepath.Join(filepath.Dir(n.dir), "proj")
+	launch := n.defaultHost().(host.Launcher)
+	const prompt = "the same first message"
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := n.startCodex(ctx, launch, cwd, "codex", []string{"codex"}, prompt, "w1", "", "")
+			if err != nil {
+				results <- err
+				return
+			}
+			ids <- s.SessionID
+		}()
+		select {
+		case <-waiting:
+		case err := <-results:
+			t.Fatalf("start returned before both thread waits: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("one start blocked another from waiting for its own thread")
+		}
+	}
+
+	firstID := "aaaaaaaa-0000-4000-8000-000000000001"
+	writeThread(t, n.home, firstID, cwd, prompt)
+	var first string
+	select {
+	case first = <-ids:
+	case err := <-results:
+		t.Fatalf("the first start failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no start claimed the first rollout")
+	}
+	select {
+	case id := <-ids:
+		t.Fatalf("both starts adopted %q before a second rollout existed", id)
+	case err := <-results:
+		t.Fatalf("the other start ended instead of waiting for a distinct rollout: %v", err)
+	default:
+	}
+	secondID := "bbbbbbbb-0000-4000-8000-000000000002"
+	writeThread(t, n.home, secondID, cwd, prompt)
+	rolloutCaches.Lock()
+	cacheFor(n.codexHome()).at = time.Time{} // make the just-published second rollout visible to the next poll
+	rolloutCaches.Unlock()
+	var second string
+	select {
+	case second = <-ids:
+	case err := <-results:
+		t.Fatalf("the second start failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second start did not adopt the next rollout")
+	}
+	if first == second {
+		t.Fatalf("both starts returned the same rollout %q", first)
+	}
+	n.mu.Lock()
+	bound := map[string]bool{}
+	for _, id := range n.panes {
+		bound[id] = true
+	}
+	n.mu.Unlock()
+	if !bound[first] || !bound[second] {
+		t.Fatalf("starts did not bind their distinct rollouts: %q %q", first, second)
+	}
+}
