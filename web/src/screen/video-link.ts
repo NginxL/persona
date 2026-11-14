@@ -110,6 +110,14 @@ export class ScreenVideoLink {
     if (was !== (this.held.size === 0)) this.reconsider(); // the line said stays until a picture shows
   }
 
+  /** A new cap (the network or the data choice changed, ./data-use): the open stream gets an `update`, as the
+   *  iPhone's does; a new one starts with it. */
+  setBudget(b: { maxKbps: number; fps: number }): void {
+    if (b.maxKbps === this.opts.maxKbps && b.fps === this.opts.fps) return;
+    this.opts = { ...this.opts, maxKbps: b.maxKbps, fps: b.fps };
+    this.stream?.send({ fps: b.fps, max_kbps: b.maxKbps });
+  }
+
   /** Ends everything (the page went away). */
   close(): void {
     this.stopRetry();

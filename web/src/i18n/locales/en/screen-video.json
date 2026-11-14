@@ -29,5 +29,13 @@
   "stats_no_video_insecure": "Open this page at its https address to see the sharper video.",
   "stats_no_video_unsupported": "This browser can’t play the video; the picture is VNC.",
   "stats_no_video_failed": "Video couldn’t start in this browser; the picture is VNC.",
-  "stats_ms": "{ms} ms"
+  "stats_ms": "{ms} ms",
+  "mobile_data_title": "On mobile data",
+  "mobile_data_line": "The screen is saving data. Make it clearer?",
+  "mobile_data_clearer": "Clearer",
+  "mobile_data_saver": "Data Saver",
+  "mobile_data_clearer_usage": "About 0.6 GB an hour",
+  "mobile_data_saver_usage": "About 0.2–0.3 GB an hour",
+  "mobile_data_quality": "Quality on mobile data",
+  "mobile_data_close": "Close"
 }

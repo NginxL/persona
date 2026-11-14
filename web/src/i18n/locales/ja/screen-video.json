@@ -29,5 +29,13 @@
   "stats_no_video_insecure": "このページを https のアドレスで開くと、より鮮明なビデオで見られます。",
   "stats_no_video_unsupported": "このブラウザではビデオを再生できません。VNC で表示しています。",
   "stats_no_video_failed": "このブラウザではビデオを開始できませんでした。VNC で表示しています。",
-  "stats_ms": "{ms} ms"
+  "stats_ms": "{ms} ms",
+  "mobile_data_title": "モバイルデータ通信中",
+  "mobile_data_line": "画面はデータを節約しています。高画質にしますか？",
+  "mobile_data_clearer": "高画質",
+  "mobile_data_saver": "データ節約",
+  "mobile_data_clearer_usage": "1時間あたり約0.6 GB",
+  "mobile_data_saver_usage": "1時間あたり約0.2〜0.3 GB",
+  "mobile_data_quality": "モバイルデータ通信時の画質",
+  "mobile_data_close": "閉じる"
 }

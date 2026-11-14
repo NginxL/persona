@@ -14,6 +14,7 @@ import { accountOf, keepLabel, keysymsOf, screenSocket, toApp, type ScreenTarget
 import { newPair } from "./pair";
 import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, setStatsShown, statsShown, videoOffered, webTiers, type ScreenPicture, type ScreenQuality } from "./video";
 import type { Want } from "./video-link";
+import { budgetOf, chooseMobileData, currentMobileData, markMobileDataAsked, onMobileData, readNetwork, shouldAskMobileData, watchNetwork, type MobileData } from "./data-use";
 import type { Probe } from "./video-probe";
 
 type DisplayMenuView = typeof import("./DisplayMenu").default;
@@ -363,6 +364,31 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   // Why video isn't playing on this page although the Mac offers it: the stats panel says so, only then.
   const noVideo = !hasVideo ? null : probe?.why === "insecure" ? "insecure" : probe?.why === "unsupported" ? "unsupported" : video?.decoderFailed ? "failed" : null;
 
+  // How much data the video may use (./data-use, the iPhone's rules): the network as the browser tells it, and with
+  // tiers on both sides the choice for mobile data, asked on the card at most twice while nothing is chosen (once a
+  // page); the choice also sits in ⋯ while it applies.
+  const [net, setNet] = useState(readNetwork);
+  useEffect(() => watchNetwork(() => setNet(readNetwork())), []);
+  const tiersOn = webTiers.supported && !!video?.tiers;
+  const [mobileData, setMobileData] = useState<MobileData>(currentMobileData);
+  const budget = useMemo(() => budgetOf(net, tiersOn ? mobileData : null), [net, tiersOn, mobileData]);
+  const dataChoice = tiersOn && onMobileData(net);
+  const [askData, setAskData] = useState(false);
+  const askedHere = useRef(false);
+  useEffect(() => {
+    if (!dataChoice || askedHere.current) return;
+    askedHere.current = true;
+    if (shouldAskMobileData()) {
+      markMobileDataAsked();
+      setAskData(true);
+    }
+  }, [dataChoice]);
+  const chooseData = (m: MobileData) => {
+    chooseMobileData(m);
+    setMobileData(m);
+    setAskData(false);
+  };
+
   // In the app (#1343) the app draws the name, the state and "View only" / "Take control" around the page: it hears the phase, and
   // says "Take control" through window.personaScreen.
   useEffect(() => {
@@ -439,7 +465,15 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         </p>
         {offering && DisplayMenu && <DisplayMenu offered={offered} shown={shown?.id ?? null} onChoose={choose} onOpen={reask} />}
         {live && !target.embedded && playable && ScreenMenu && (
-          <ScreenMenu picture={picture} quality={quality} onPicture={choosePicture} onQuality={chooseQuality} qualityOffered={webTiers.supported && !!video?.tiers} />
+          <ScreenMenu
+            picture={picture}
+            quality={quality}
+            onPicture={choosePicture}
+            onQuality={chooseQuality}
+            qualityOffered={tiersOn}
+            mobileData={dataChoice ? mobileData : null}
+            onMobileData={chooseData}
+          />
         )}
         {live && Stats && <Stats.StatsToggle on={statsOn} onToggle={showStats} />}
         {live && (
@@ -468,11 +502,17 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
           <div ref={screen} className={cx("absolute", !frame && "inset-0")} style={frame ? place(frame.inner) : undefined} data-testid="screen" />
         </div>
         {!target.embedded && Video && playable && link && (
-          <Video.VideoChannel rfb={link.rfb} screen={screen.current} pair={livePair} want={want} codecs={probe!.codecs} mid={target.mid} token={target.token} onState={setVideo} />
+          <Video.VideoChannel rfb={link.rfb} screen={screen.current} pair={livePair} want={want} codecs={probe!.codecs} budget={budget} mid={target.mid} token={target.token} onState={setVideo} />
         )}
-        {!target.embedded && Video && fallback && (
-          <div className="absolute top-3 left-1/2 z-10 -translate-x-1/2">
-            <Video.FallbackLine fallback={fallback} asked={videoPermission.asked} />
+        {/* under the bar, centered: why VNC shows, and the mobile-data question; the strip between lets the picture take clicks */}
+        {!target.embedded && Video && (fallback || (askData && dataChoice && live && picture === "video")) && (
+          <div className="pointer-events-none absolute top-3 right-3 left-3 z-10 flex flex-col items-center gap-2">
+            {fallback && (
+              <div className="pointer-events-auto">
+                <Video.FallbackLine fallback={fallback} asked={videoPermission.asked} />
+              </div>
+            )}
+            {askData && dataChoice && live && picture === "video" && <Video.MobileDataCard onChoose={chooseData} onClose={() => setAskData(false)} />}
           </div>
         )}
         {live && !target.embedded && statsOn && Stats && link && (

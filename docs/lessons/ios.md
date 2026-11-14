@@ -2513,6 +2513,18 @@ synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTrans
   its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
   pure setter assignment.
 
+## A split view's columns keep out of a sheet's keyboard too (2026-11-14, #7629)
+
+- Every SwiftUI view in the window keeps out of the keyboard's safe area, whoever owns the keyboard. On an iPad the
+  sidebar column of `AssistantView`'s `NavigationSplitView` shrank under a form sheet's keyboard (New To-Do over the
+  to-dos calendar): its list kept a row or two, then laid itself out again as the keyboard went, behind the sheet's dim.
+- A column with a field of its own takes the keyboard only while that field is focused:
+  `.ignoresSafeArea(.keyboard, edges: drawer == nil && !searching ? Edge.Set.bottom : [])` on the sidebar (`AssistantSidebar`),
+  so its search still lists the chats found above the keyboard. The drawer on an iPhone keeps its own handling
+  (`DrawerSidebarHost`, `safeAreaRegions = .keyboard`).
+- The detail column (the calendar under the sheet) keeps out of the keyboard the same way, but behind the sheet and the
+  keyboard it is out of sight; it was left as it is.
+
 ## What `nonisolated` covers where MainActor is the default, and what it does not (2026-11-13, #4262)
 
 Twenty blocking calls carried `// perf-ok:` because their author believed they ran off the main thread. The isolation
