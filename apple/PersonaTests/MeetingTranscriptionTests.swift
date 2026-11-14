@@ -1,6 +1,8 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 // Hub transcription on the phone (#3862 phase 5; contract docs/assistant/meeting-minutes.md「Phase 5: hub transcription」,
 // the phone's side docs/apple/recording.md「Hub transcription (phase 5)」): the audio socket's frames, the 60 seconds kept
@@ -153,6 +155,32 @@ struct MeetingAudioRingTests {
         #expect(ring.lostGaps == [MeetingGap(from: 1, to: 2)])
     }
 
+    /// The iPhone's crash on the tap's thread (#7740): with the ring full, an `ack` inside the second it holds made what
+    /// falls out a reversed range, and `..<` trapped. What falls out acknowledged is no gap.
+    @Test func anAckInsideTheHeldAudioSurvivesTheRingFilling() {
+        var ring = MeetingAudioRing(seconds: 1)
+        ring.append(samples(16000), at: 0)
+        ring.ready(from: 0)
+        while ring.next() != nil {}
+        ring.ack(12000)
+        ring.append(samples(1600, from: 16000), at: 16000)
+        #expect(ring.start == 1600 && ring.end == 17600)
+        #expect(ring.lostGaps.isEmpty)
+        ring.append(samples(16000, from: 17600), at: 17600)
+        #expect(ring.lostGaps == [MeetingGap(from: 0.75, to: 1.1)], "only what fell out past the hub's ack")
+    }
+
+    /// The same trap through a reconnect: `ready.from` inside the audio held counts as acknowledged.
+    @Test func aReadyInsideTheHeldAudioSurvivesTheRingFilling() {
+        var ring = MeetingAudioRing(seconds: 1)
+        ring.append(samples(16000), at: 0)
+        ring.ready(from: 8000)
+        ring.append(samples(1600, from: 16000), at: 16000)
+        #expect(ring.start == 1600 && ring.end == 17600)
+        #expect(ring.lostGaps.isEmpty)
+        #expect(ring.next() == .audio(MeetingPCM.data(samples(1600, from: 8000)[...]), at: 8000))
+    }
+
     @Test func aSendThatFallsBehindSeeksToTheOldestHeld() {
         var ring = MeetingAudioRing(seconds: 1)
         ring.append(samples(1600), at: 0)
@@ -298,6 +326,32 @@ struct MeetingAudioRingTests {
         late.ready(from: 0, generation: late.currentGeneration)
         late.drain()
         #expect(decoded(other.audio.reduce(Data(), +)) == samples(1600))
+    }
+
+    /// The iPhone's crash (#7740): a hub-mode meeting past its first minute, the hub acknowledging every 5 seconds as it
+    /// does, on the tap's own path (converted buffers of 4096 frames at 48 kHz). It trapped at the minute.
+    @Test func aHubModeMeetingGoesOnPastTheRingsMinute() throws {
+        let uplink = MeetingAudioUplink(recording: UUID())
+        let socket = open(uplink)
+        uplink.ready(from: 0, generation: uplink.currentGeneration)
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false))
+        let frames: AVAudioFrameCount = 1365
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+        buffer.frameLength = frames
+        var fed: Int64 = 0, acked: Int64 = 0
+        while fed < 90 * 16000 {
+            uplink.feed(buffer, at: MeetingAudioClock.seconds(fed))
+            fed += Int64(frames)
+            if fed - acked >= 5 * 16000 {
+                uplink.drain()
+                acked = fed
+                uplink.ack(MeetingAudioClock.seconds(acked))
+            }
+        }
+        uplink.drain()
+        #expect(uplink.heldEnd == MeetingAudioClock.seconds(fed))
+        #expect(uplink.lost.isEmpty, "what fell out was acknowledged")
+        #expect(socket.audio.reduce(0) { $0 + $1.count } == Int(fed) * 2, "all of it went, once")
     }
 }
 
@@ -1683,6 +1737,17 @@ private actor SlowPut {
         #expect(focus.scroll == .line(2) && focus.lit == [.line(2), .line(3)], "the minute's hub lines lit")
     }
 
+    /// Build the fixture in steps: the one-line map times out in Xcode 26.6.
+    private func makeFiveMeetingGaps() -> [MeetingGap] {
+        var gaps: [MeetingGap] = []
+        for index in 0..<5 {
+            let start: Double = Double(index * 100)
+            let end: Double = Double(index * 100 + 10)
+            gaps.append(MeetingGap(from: start, to: end))
+        }
+        return gaps
+    }
+
     @Test func theRecordingPageSaysTheModeTheStateAndTheGaps() throws {
         #expect(Words.facts(nil, asked: .hub, gapUpload: .idle) == nil, "no mode decided: nothing")
         #expect(Words.facts(.init(mode: .device), asked: nil, gapUpload: .idle) == nil, "a meeting on the phone as always")
@@ -1702,7 +1767,7 @@ private actor SlowPut {
         let unknown = try #require(Words.facts(.init(mode: .hub, state: "someday"), asked: .hub, gapUpload: .idle))
         #expect(unknown.busy, "a state the app doesn't know reads as still being finished")
 
-        let many = (0..<5).map { MeetingGap(from: Double($0 * 100), to: Double($0 * 100 + 10)) }
+        let many: [MeetingGap] = makeFiveMeetingGaps()
         let spans = Words.spans(many)
         #expect(spans.contains("0:00") && spans.contains("3:30") && !spans.contains("6:40") && spans.contains("2"),
                 "the first three, then how many more")

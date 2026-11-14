@@ -190,8 +190,10 @@ class AppleRenameTests(unittest.TestCase):
         self.assertNotIn('path: "Sources/PersonaLink"', package)
         self.assertFalse((APPLE / 'PersonaLink/Info.plist').exists())
         script = (ROOT / 'scripts/app/mac-link.sh').read_text()
-        self.assertIn('-scheme PersonaScreen', script)
+        # Persona Screen is the package's one product, built by name (#7927: swift build, kept by its sources).
+        self.assertIn('PersonaScreen "$@"', script)
         self.assertNotIn('-scheme PersonaLink', script)
+        self.assertNotIn('--product PersonaLink', script)
         self.assertIn('persona-link" install --node-bin', script)
         self.assertNotIn('open "/Applications/Persona Link.app"', script)
 

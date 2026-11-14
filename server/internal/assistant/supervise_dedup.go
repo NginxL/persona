@@ -36,13 +36,24 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 	if len(e.Asks) > 0 { // the cards it lists are what is new about it
 		fields = append(fields, e.Asks)
 	}
-	// Each park's time, and each new Inbox message, is news of its own, whatever its agent said last.
-	if g.Kind == sigParkedDue || g.Kind == sigInbox {
+	if keyIsNews(g.Kind) {
 		fields = append(fields, g.Key)
 	}
 	payload, _ := json.Marshal(fields)
 	sum := sha256.Sum256(payload)
 	return string(key), hex.EncodeToString(sum[:])
+}
+
+// keyIsNews: a signal of kind whose key names one event that is not in its agent's words, so a new key is news
+// whatever the agent said last: each park's time, each new Inbox message, each answer the owner gives a decision's
+// round, each recheck or undecidable review of a decision, each start attempt's failure or start (#6027). The other
+// kinds' keys move with every turn or sweep, which is not news while the agent's words stay the same.
+func keyIsNews(kind string) bool {
+	switch kind {
+	case sigParkedDue, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted:
+		return true
+	}
+	return false
 }
 
 // reserveSupervision checkpoints deduplication before dispatch. A failed dispatch

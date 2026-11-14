@@ -56,10 +56,349 @@ class TodoTriageTest {
 
     private val lookup = lookupOf(
         session("ask", "needs_you"), session("run", "working"), session("unseen", "unread"),
+        session("starting", "idle").copy(starting = true),
         session("idle", "idle", 2), session("old", "idle", 100),
     )
 
     private fun at(td: Todo, restoredAt: Long = 0) = td.triage(lookup, now, restoredAt, zone)
+
+    private fun Todo.withKind(kind: String) = copy(kind = kind)
+
+    private fun sharedAgent(sid: String, linkedAt: String) = TodoAgent(machineId = "m", sessionId = sid, linkedAt = linkedAt)
+
+    private fun atShared(td: Todo, vararg sessions: Session) = td.triage(lookupOf(*sessions), now, zone = zone)
+
+    private fun sharedTodo(
+        id: String,
+        title: String,
+        createdAt: String,
+        updatedAt: String,
+        kind: String = "concern",
+        doneAt: String? = null,
+        doneBy: String? = null,
+        agents: List<TodoAgent> = emptyList(),
+        supervision: Supervision? = null,
+        delivery: TodoDelivery? = null,
+        prUrl: String? = null,
+        stage: String? = null,
+        seenAt: String? = null,
+        startError: String? = null,
+        planId: String? = null,
+    ) = Todo(
+        id = id, title = title, kind = kind, createdAt = createdAt, updatedAt = updatedAt, doneAt = doneAt, doneBy = doneBy,
+        agents = agents, origin = "main", supervision = supervision, delivery = delivery, prUrl = prUrl, stage = stage,
+        seenAt = seenAt, startError = startError, planId = planId,
+    )
+
+    @Test
+    fun r1ConcernKeepsFailedStartWaitingAndRunningRules() {
+        val failed = at(todo("failed", startError = "no launcher").withKind("concern"))
+        assertEquals(TriageSection.Waiting to TriageRule.FailedStart, failed.section to failed.rule)
+        val asking = at(todo("asking", agents = listOf(agent("ask"))).withKind("concern"))
+        assertEquals(TriageSection.Waiting to TriageRule.AgentAsks, asking.section to asking.rule)
+        val deciding = at(todo("deciding", supervision = Supervision(supervisor = "c", state = "needs_user")).withKind("concern"))
+        assertEquals(TriageSection.Waiting to TriageRule.OwnerDecides, deciding.section to deciding.rule)
+        val running = at(todo("running", updated = 400, agents = listOf(agent("run"))).withKind("concern"))
+        assertEquals(TriageSection.Working to TriageRule.AgentRunning, running.section to running.rule)
+        val starting = at(todo("starting", updated = 400, agents = listOf(agent("starting"))).withKind("concern"))
+        assertEquals(TriageSection.Working to TriageRule.AgentRunning, starting.section to starting.rule)
+    }
+
+    @Test
+    fun r2ConcernFailedStartAfter48HoursIsOtherOpenNotDone() {
+        val t = at(todo("failed", updated = 100, startError = "no launcher").withKind("concern"))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+        val ordinary = at(todo("ordinary", updated = 100, startError = "no launcher"))
+        assertEquals(TriageSection.Done to TriageRule.FailedStart, ordinary.section to ordinary.rule)
+    }
+
+    @Test
+    fun r3ConcernNeverUsesAcceptedOrDeployed() {
+        val accepted = at(todo("accepted", agents = listOf(agent("idle")), supervision = acceptedReopened()).withKind("concern"))
+        assertEquals(TriageSection.Other to TriageRule.Rest, accepted.section to accepted.rule)
+        val deployed = at(todo("deployed", delivery = TodoDelivery(state = "live", at = hoursAgo(2))).withKind("concern"))
+        assertEquals(TriageSection.Other to TriageRule.Rest, deployed.section to deployed.rule)
+    }
+
+    @Test
+    fun r4ConcernKeepsFinishedUnseenAndOpenPrRules() {
+        val unseen = at(todo("unseen", agents = listOf(agent("unseen"))).withKind("concern"))
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, unseen.section to unseen.rule)
+        val pr = at(todo("pr", updated = 300, agents = listOf(agent("old")), delivery = TodoDelivery(state = "pr")).withKind("concern"))
+        assertEquals(TriageSection.Pr to TriageRule.PrOpen, pr.section to pr.rule)
+    }
+
+    @Test
+    fun r5ConcernFinishedTurnSeenByTheOwnerStaysOtherOpen() {
+        val td = todo("seen", agents = listOf(agent("unseen"))).copy(seenAt = minutesAgo(30)).withKind("concern")
+        val t = at(td)
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+        assertTrue(td.countsAsOpen(t))
+    }
+
+    @Test
+    fun r6ConcernIsNeverShelvedHoweverLongItIsQuiet() {
+        val t = at(todo("quiet", updated = 100, agents = listOf(agent("old"))).withKind("concern"))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    @Test
+    fun r7ConcernWithNoEarlierSignalIsOtherOpen() {
+        val t = at(todo("open", origin = null).withKind("concern"))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    @Test
+    fun closedConcernIsJustFinishedForADayThenDone() {
+        val fresh = at(todo("fresh", doneAt = hoursAgo(3)).withKind("concern"))
+        assertEquals(TriageSection.JustDone to TriageRule.Closed, fresh.section to fresh.rule)
+        val old = at(todo("old", doneAt = hoursAgo(30), updated = 30).withKind("concern"))
+        assertEquals(TriageSection.Done to TriageRule.Closed, old.section to old.rule)
+    }
+
+    @Test
+    fun unknownTodoKindKeepsTheOrdinaryRules() {
+        val t = at(todo("unknown", updated = 100, agents = listOf(agent("old"))).withKind("future-kind"))
+        assertEquals(TriageSection.Shelved to TriageRule.Stale, t.section to t.rule)
+    }
+
+    @Test
+    fun rowsOpenConcernAndRelatedOpenTaskStaySeparate() {
+        val list = listOf(
+            todo("concern", title = "Morning answer", planId = "p1").withKind("concern"),
+            todo("task", title = "Morning work", planId = "p1"),
+        )
+        val r = triageTodos(list, groupLookup, now, zone = zone)
+        assertEquals(2, r.rows(TriageSection.Other).size)
+        assertEquals(listOf("concern", "task"), r.rows(TriageSection.Other).map { it.lead.id }.sorted())
+        assertTrue(r.rows(TriageSection.Other).all { it.members.size == 1 })
+    }
+
+    @Test
+    fun rowsTwoRelatedOpenConcernsStaySeparate() {
+        val list = listOf(
+            todo("concern-a", title = "Same concern", planId = "p1").withKind("concern"),
+            todo("concern-b", title = "Same concern", planId = "p1").withKind("concern"),
+        )
+        val r = triageTodos(list, groupLookup, now, zone = zone)
+        assertEquals(2, r.rows(TriageSection.Other).size)
+        assertTrue(r.rows(TriageSection.Other).all { it.members.size == 1 })
+    }
+
+    @Test
+    fun rowsClosedConcernGroupsAsToday() {
+        val list = listOf(
+            todo("concern", title = "Morning answer", doneAt = hoursAgo(2), planId = "p1").withKind("concern"),
+            todo("task", title = "Morning work", doneAt = hoursAgo(3), planId = "p1"),
+        )
+        val r = triageTodos(list, groupLookup, now, zone = zone)
+        assertEquals(listOf(listOf("concern", "task")), r.rows(TriageSection.JustDone).map { g -> g.members.map(Todo::id) })
+    }
+
+    // Shared case: concern_agent_running
+    @Test fun concernAgentRunningSharedCase() {
+        val t = atShared(
+            sharedTodo(
+                "concern-run", "Answer the backup question", "2026-10-01T00:00:00.000Z", "2026-10-20T00:00:00.000Z",
+                agents = listOf(sharedAgent("run", "2026-11-10T10:00:00.000Z")),
+            ),
+            Session("m", "run", state = "working", status = "working", updatedAt = "2026-11-10T11:00:00.000Z"),
+        )
+        assertEquals(TriageSection.Working to TriageRule.AgentRunning, t.section to t.rule)
+    }
+
+    // Shared case: concern_failed_start_old
+    @Test fun concernFailedStartOldSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-failed", "Answer the launch question", "2026-11-01T00:00:00.000Z", "2026-11-08T00:00:00.000Z",
+            startError = "no launcher",
+        ))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_closed_failed_start_old
+    @Test fun concernClosedFailedStartOldSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-closed-failed", "Answer the closed launch question", "2026-11-01T00:00:00.000Z", "2026-11-08T00:00:00.000Z",
+            doneAt = "2026-11-08T00:00:00.000Z", doneBy = "reported", startError = "no launcher",
+        ))
+        assertEquals(TriageSection.Done to TriageRule.FailedStart, t.section to t.rule)
+    }
+
+    // Shared case: concern_accepted
+    @Test fun concernAcceptedSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-accepted", "Answer the review question", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+            supervision = Supervision(
+                supervisor = "main", doneWhen = emptyList(), state = "accepted",
+                reviews = listOf(TaskReview(at = "2026-11-10T09:00:00.000Z", verdict = "accepted", checks = emptyList())),
+            ),
+        ))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_deployed
+    @Test fun concernDeployedSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-deployed", "Answer the deployment question", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+            delivery = TodoDelivery(state = "live", at = "2026-11-10T09:00:00.000Z"),
+        ))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_finished_unseen
+    @Test fun concernFinishedUnseenSharedCase() {
+        val t = atShared(
+            sharedTodo(
+                "concern-unseen", "Answer the report question", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+                agents = listOf(sharedAgent("unseen", "2026-11-10T09:00:00.000Z")),
+            ),
+            Session("m", "unseen", state = "unread", status = "idle", updatedAt = "2026-11-10T11:00:00.000Z"),
+        )
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, t.section to t.rule)
+    }
+
+    // Shared case: concern_pr_open
+    @Test fun concernPrOpenSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-pr", "Answer the merge question", "2026-11-01T00:00:00.000Z", "2026-11-04T10:00:00.000Z",
+            prUrl = "https://example.com/pull/7", stage = "review",
+        ))
+        assertEquals(TriageSection.Pr to TriageRule.PrOpen, t.section to t.rule)
+    }
+
+    // Shared case: concern_finished_seen
+    @Test fun concernFinishedSeenSharedCase() {
+        val t = atShared(
+            sharedTodo(
+                "concern-seen", "Answer the seen question", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+                agents = listOf(sharedAgent("unseen", "2026-11-10T09:00:00.000Z")), seenAt = "2026-11-10T11:30:00.000Z",
+            ),
+            Session("m", "unseen", state = "unread", status = "idle", updatedAt = "2026-11-10T11:00:00.000Z"),
+        )
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_stale
+    @Test fun concernStaleSharedCase() {
+        val t = atShared(
+            sharedTodo(
+                "concern-stale", "Answer the quiet question", "2026-10-01T00:00:00.000Z", "2026-10-20T12:00:00.000Z",
+                agents = listOf(sharedAgent("old", "2026-10-02T00:00:00.000Z")),
+            ),
+            Session("m", "old", state = "idle", status = "idle", updatedAt = "2026-10-20T12:00:00.000Z"),
+        )
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_stale_ordinary_task_control
+    @Test fun concernStaleOrdinaryTaskControlSharedCase() {
+        val t = atShared(
+            sharedTodo(
+                "task-stale-control", "Answer the quiet question", "2026-10-01T00:00:00.000Z", "2026-10-20T12:00:00.000Z",
+                kind = "", agents = listOf(sharedAgent("old", "2026-10-02T00:00:00.000Z")),
+            ),
+            Session("m", "old", state = "idle", status = "idle", updatedAt = "2026-10-20T12:00:00.000Z"),
+        )
+        assertEquals(TriageSection.Shelved to TriageRule.Stale, t.section to t.rule)
+    }
+
+    // Shared case: concern_rest
+    @Test fun concernRestSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-rest", "Answer the ordinary question", "2026-11-09T00:00:00.000Z", "2026-11-10T11:00:00.000Z",
+        ))
+        assertEquals(TriageSection.Other to TriageRule.Rest, t.section to t.rule)
+    }
+
+    // Shared case: concern_closed_fresh
+    @Test fun concernClosedFreshSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-closed-fresh", "Answer the fresh report question", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+            doneAt = "2026-11-10T10:00:00.000Z", doneBy = "reported",
+        ))
+        assertEquals(TriageSection.JustDone to TriageRule.Closed, t.section to t.rule)
+    }
+
+    // Shared case: concern_closed_old
+    @Test fun concernClosedOldSharedCase() {
+        val t = atShared(sharedTodo(
+            "concern-closed-old", "Answer the old report question", "2026-11-01T00:00:00.000Z", "2026-11-08T10:00:00.000Z",
+            doneAt = "2026-11-08T10:00:00.000Z", doneBy = "reported",
+        ))
+        assertEquals(TriageSection.Done to TriageRule.Closed, t.section to t.rule)
+    }
+
+    // Shared case: concern_open_related_task
+    @Test fun concernOpenRelatedTaskSharedCase() {
+        val r = triageTodos(listOf(
+            sharedTodo(
+                "concern-open", "Answer the launch concern", "2026-11-09T00:00:00.000Z", "2026-11-10T11:00:00.000Z",
+                planId = "plan-concern",
+            ),
+            sharedTodo(
+                "task-open", "Implement the launch task", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+                kind = "", planId = "plan-concern",
+            ),
+        ), lookupOf(), now, quiet = true, zone = zone)
+        assertEquals(listOf(listOf("concern-open"), listOf("task-open")), r.rows(TriageSection.Other).map { it.members.map(Todo::id) })
+        assertEquals(Triple(2, 0, 0), Triple(r.open, r.shelved, r.finished))
+    }
+
+    // Shared case: concern_open_related_concern
+    @Test fun concernOpenRelatedConcernSharedCase() {
+        val r = triageTodos(listOf(
+            sharedTodo(
+                "concern-first", "Answer the first concern", "2026-11-09T00:00:00.000Z", "2026-11-10T11:00:00.000Z",
+                planId = "plan-two-concerns",
+            ),
+            sharedTodo(
+                "concern-second", "Answer the second concern", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+                planId = "plan-two-concerns",
+            ),
+        ), lookupOf(), now, quiet = true, zone = zone)
+        assertEquals(listOf(listOf("concern-first"), listOf("concern-second")), r.rows(TriageSection.Other).map { it.members.map(Todo::id) })
+        assertEquals(Triple(2, 0, 0), Triple(r.open, r.shelved, r.finished))
+    }
+
+    // Shared case: concern_closed_related_todo
+    @Test fun concernClosedRelatedTodoSharedCase() {
+        val r = triageTodos(listOf(
+            sharedTodo(
+                "concern-closed", "Answer the reported concern", "2026-11-09T00:00:00.000Z", "2026-11-10T11:00:00.000Z",
+                doneAt = "2026-11-10T11:00:00.000Z", doneBy = "reported", planId = "plan-closed-concern",
+            ),
+            sharedTodo(
+                "task-closed", "Finish the reported task", "2026-11-09T00:00:00.000Z", "2026-11-10T10:00:00.000Z",
+                kind = "", doneAt = "2026-11-10T10:00:00.000Z", planId = "plan-closed-concern",
+            ),
+        ), lookupOf(), now, quiet = true, zone = zone)
+        assertEquals(listOf(listOf("concern-closed", "task-closed")), r.rows(TriageSection.JustDone).map { it.members.map(Todo::id) })
+        assertEquals(Triple(0, 0, 2), Triple(r.open, r.shelved, r.finished))
+    }
+
+    // Shared case: concern_stale_next_to_task
+    @Test fun concernStaleNextToTaskSharedCase() {
+        val r = triageTodos(listOf(
+            sharedTodo(
+                "stale-concern", "Answer the quiet concern", "2026-10-20T12:00:00.000Z", "2026-10-20T12:00:00.000Z",
+            ),
+            sharedTodo(
+                "stale-task", "Finish the quiet task", "2026-10-20T12:00:00.000Z", "2026-10-20T12:00:00.000Z", kind = "",
+            ),
+        ), lookupOf(), now, quiet = true, zone = zone)
+        assertEquals(listOf(listOf("stale-concern")), r.rows(TriageSection.Other).map { it.members.map(Todo::id) })
+        assertEquals(listOf(listOf("stale-task")), r.rows(TriageSection.Shelved).map { it.members.map(Todo::id) })
+        assertEquals(Triple(1, 1, 0), Triple(r.open, r.shelved, r.finished))
+    }
+
+    @Test fun acceptedConcernAtRestKeepsOpenState() {
+        val td = todo("accepted", agents = listOf(agent("idle")), supervision = acceptedReopened()).withKind("concern")
+        assertEquals(TriageStatus.FollowUp, td.triageStatus(lookup))
+        assertTrue(td.checksAsOpen(at(td)))
+        assertFalse(td.acceptedAtRest(lookup))
+        assertTrue("ordinary accepted task remains the control", td.copy(kind = "").acceptedAtRest(lookup))
+    }
 
     @Test
     fun anAgentAskingIsWaitingWhateverElseHolds() {

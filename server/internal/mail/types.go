@@ -106,6 +106,7 @@ type MailSummary struct {
 	Date      string    `json:"date"` // RFC3339, UTC
 	Snippet   string    `json:"snippet"`
 	Seen      bool      `json:"seen"`
+	Answered  bool      `json:"answered"`
 	Flagged   bool      `json:"flagged"`
 	HasAttach bool      `json:"has_attachments"`
 }

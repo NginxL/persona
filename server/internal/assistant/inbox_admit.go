@@ -146,7 +146,7 @@ func (s *Service) admit(ctx context.Context, batch *inboxBatch, todo []*InboxIte
 		}
 		it.Urgent = v.state == "" && v.urgent && it.Tier == TierAction
 		b.applyPolicyTier(it)
-		it.TriagedAt = it.Last
+		it.TriagedAt, it.TriageRev = it.Last, inboxTriageRev
 		b.noteTriaged(it)
 		b.items[it.ID] = it
 		w := newWrite(it)

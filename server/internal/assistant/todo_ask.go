@@ -131,8 +131,8 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	n := Notification{ID: "ntf_" + randomHex(8), Kind: assistantwire.NotifyDecide, Subtitle: "Persona", DeviceID: here, SessionID: t.Origin,
 		Title: i18n.T(l, "assistant-reports.verdict_title", i18n.Args{"task": clip(oneLine(t.Title), 30)}),
 		Body:  verdictText(l, &a) + "\n" + recommendText(l, &a),
-		// A decision the owner must take now: P0 interrupts even in the hub's low-distraction mode (the hub keys it by
-		// to-do and round, so one round rings at most once in 12 hours).
+		// A decision the owner must take now: P0 interrupts even with the hub's push tiering on, every time it is
+		// pushed (its reminders too); the hub keys it by to-do and round.
 		Level: assistantwire.LevelP0,
 		Todo:  &assistantwire.NotifyTodo{ID: id, AskedAt: a.AskedAt, Recommend: a.Recommend, Responses: ownerResponses}}
 	for _, o := range a.Options {
@@ -145,7 +145,7 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	if lines := decisionLines(l, s.location(ctx), &a); len(lines) > 0 {
 		n.Body += "\n" + strings.Join(lines, "\n")
 	}
-	if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
+	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("task %s: decision push: %v", id, err)
 		return false, err
 	}

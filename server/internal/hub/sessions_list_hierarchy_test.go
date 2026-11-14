@@ -25,7 +25,7 @@ func hierarchyHub(t *testing.T) (*Hub, *Machine) {
 	at := func(n int) time.Time { return time.Unix(int64(1000+n), 0) }
 	row := func(id, state string, n int, under string, kids *proto.SessionChildren) proto.Session {
 		s := proto.Session{MachineID: "demo", SessionID: id, Title: id, State: state, Cwd: "/demo/app", UpdatedAt: at(n)}
-		s.SetFold(under, "", kids)
+		s.SetFold(under, "", "", kids)
 		return s
 	}
 	m.sessions = []proto.Session{
@@ -109,6 +109,35 @@ func TestRuntimeListHierarchy(t *testing.T) {
 	}
 }
 
+func TestRuntimeListActiveAgentsByMachine(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	parent := proto.Session{MachineID: "demo", SessionID: "parent", State: proto.StateOffline}
+	parent.SetFold("", "", "", &proto.SessionChildren{Total: 1, Working: 1})
+	child := proto.Session{MachineID: "demo", SessionID: "child", State: proto.StateWorking}
+	child.SetFold("parent", proto.FoldedAsWorker, "", nil)
+	m.sessions = []proto.Session{
+		parent, child,
+		{MachineID: "demo", SessionID: "another", State: proto.StateIdle},
+		{MachineID: "demo", SessionID: "history", State: proto.StateOffline},
+		{MachineID: "demo", SessionID: "conversation", State: proto.StateWorking, Assistant: true},
+	}
+
+	w := httptest.NewRecorder()
+	h.listSessions(w, httptest.NewRequest("GET", "/api/v1/sessions?roots=1&limit=1&with_counts=1", nil))
+	var answer sessionlist.PageWithCounts
+	if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil || w.Code != 200 ||
+		!answer.HasMore || len(answer.Sessions) != 1 || answer.Total != 4 ||
+		len(answer.Counts.ActiveAgentsByMachine) != 1 || answer.Counts.ActiveAgentsByMachine["demo"] != 2 {
+		t.Fatalf("expected one page row and two active Agent roots: %d %s (%v)", w.Code, w.Body, err)
+	}
+	offline := hierarchyCounts(t, h, "roots=1&state=offline")
+	if offline.Total != 1 || offline.ActiveAgentsByMachine == nil || len(offline.ActiveAgentsByMachine) != 0 {
+		t.Fatalf("expected known zero active Agents: %+v", offline)
+	}
+}
+
 // A tab's workers come folded under its lead (folded_as worker, children.workers, #5180): roots=1 leaves them out of
 // the rows and every count and counts the lead by its folded state, parent_session_id=<lead> lists them, both kinds of
 // row carrying the keys; the tab's offline row and a tab of peers stay rows of their own.
@@ -119,7 +148,7 @@ func TestRuntimeListTabTeam(t *testing.T) {
 	row := func(id, state string, n int, under, as string, kids *proto.SessionChildren) proto.Session {
 		s := proto.Session{MachineID: "demo", SessionID: id, Title: id, State: state, Cwd: "/demo/app", UpdatedAt: time.Unix(int64(1000+n), 0),
 			SpaceKind: "herdr", SpaceID: "w1", SlotID: "t1"}
-		s.SetFold(under, as, kids)
+		s.SetFold(under, as, "", kids)
 		return s
 	}
 	m.sessions = []proto.Session{
@@ -237,8 +266,8 @@ func TestRuntimeListHierarchyValidationAndBinding(t *testing.T) {
 	under := runtimePage(t, h, "summary=1&machine_id=demo&parent_session_id=lead")
 	m.mu.Lock()
 	m.sessions = slices.Clone(m.sessions)
-	m.sessions[1].SetFold("", "", nil)
-	m.sessions[0].SetFold("", "", &proto.SessionChildren{Total: 2, NeedsYou: 1})
+	m.sessions[1].SetFold("", "", "", nil)
+	m.sessions[0].SetFold("", "", "", &proto.SessionChildren{Total: 2, NeedsYou: 1})
 	m.mu.Unlock()
 	h.sessionsChanged(m)
 	delta := runtimePage(t, h, "summary=1&roots=1&since="+neturl.QueryEscape(first.Revision))

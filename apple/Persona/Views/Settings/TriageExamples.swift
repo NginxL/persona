@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// Settings › Session Triage (#1413): what each switch changes, with made-up agents. Look only: drawn in an
 /// `ExampleFrame`, never tapped, never sent anywhere.
@@ -44,6 +45,13 @@ enum TriageExample {
                  verified: String(localized: "The sign-in test passes"))
     }
 
+    /// One status question after an unsupervised agent stops without a closeout, then its report (#3616).
+    static var closeoutAskSteps: [ExampleTimeline.Step] {
+        [.init(symbol: Theme.Icon.closeout, text: String(localized: "Stopped after work, no closeout")),
+         .init(symbol: Theme.Icon.send, text: String(localized: "Persona asks once for status")),
+         .init(symbol: Theme.Icon.reported, text: String(localized: "The agent reports back"), look: .tint(Theme.positive))]
+    }
+
     /// The reminder push, worded as the hub words it (`reply_title`; its body is what the agent asked).
     static var reminderTitle: String { String(localized: "\(String(localized: "Clean up old branches")) is still waiting for your answer") }
     static var reminderMessage: String { String(localized: "Delete these 12 merged branches?") }
@@ -60,7 +68,7 @@ enum TriageExample {
 
 /// Each switch's example under it on Settings › Session Triage.
 struct TriageExampleView: View {
-    enum Kind { case triage, decide, autoContinue, wake, replyReminder, closeout }
+    enum Kind { case triage, decide, autoContinue, wake, replyReminder, closeout, closeoutAsk }
     var kind: Kind
     var replyMinutes: Int
 
@@ -86,6 +94,8 @@ struct TriageExampleView: View {
                 ExampleTimeline(steps: TriageExample.wakeSteps)
             case .closeout:
                 CloseoutCard(closeout: TriageExample.closeout())
+            case .closeoutAsk:
+                ExampleTimeline(steps: TriageExample.closeoutAskSteps)
             case .replyReminder:
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Chip(text: String(localized: "Seen, no reply for \(replyMinutes) min"), symbol: Theme.Icon.replyReminder)

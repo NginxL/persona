@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 @testable import Persona
 
 /// The file page's navigation, finding and Info words (#5827): history like a browser, the path bar from the home or `/`,
@@ -110,6 +111,17 @@ struct FilesNavigationTests {
         #expect(info.mode == 0o755 && info.linkReal == "/Users/me/w" && info.items == 3 && info.detailed)
         let old = try JSONDecoder().decode(FileInfo.self, from: Data(#"{"path":"a","kind":"file","size":3}"#.utf8))
         #expect(!old.detailed)
+    }
+
+    @Test func theKindOfATSFileComesFromItsBytes() throws {
+        #expect(FileKind.type(name: "app.ts", mime: "text/typescript") == .sourceCode)
+        #expect(FileKind.type(name: "lib/esm.MTS", mime: "text/plain; charset=utf-8") == .sourceCode)
+        #expect(FileKind.type(name: "clip.ts", mime: "video/mp2t") == .mpeg2TransportStream)
+        #expect(FileKind.type(name: "cjs.cts", mime: nil) == nil) // an older node read nothing: just "File"
+        #expect(FileKind.type(name: "main.swift", mime: nil) == .swiftSource)
+        #expect(FileKind.type(name: "Makefile", mime: "text/plain") == nil)
+        let info = try JSONDecoder().decode(FileInfo.self, from: Data(#"{"path":"a.ts","kind":"file","size":3,"mime":"text/typescript"}"#.utf8))
+        #expect(info.mime == "text/typescript")
     }
 
     @Test func asksForDetailsAndFiles() async throws {

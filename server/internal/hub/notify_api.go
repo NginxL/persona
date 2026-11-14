@@ -254,7 +254,7 @@ func (h *Hub) deliverNotify(in notifyRequest, machine, extID, manager string) (m
 	if in.ID != "" { // the caller's own id, apart from every other manager's and extension's same id
 		policy.relatedKey = "notify:" + manager + "/" + extID + "/" + in.ID
 	}
-	pushSelected, pushReachable := h.push.sendFromPolicy(manager, policy, build, collapse, wants, quietNone, nil, nil)
+	pushSelected, pushReachable, _ := h.push.sendFromPolicy(manager, policy, build, collapse, wants, quietNone, nil, nil)
 	ws := build
 	if id != "" {
 		// The WebSocket event carries the id itself (not the push), so an Android phone replaces the earlier alert too.

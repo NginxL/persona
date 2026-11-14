@@ -1,5 +1,5 @@
 import Foundation
-import PersonaScreenKit
+import PersonaScreenCore
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif

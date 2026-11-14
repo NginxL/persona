@@ -19,6 +19,7 @@
   "token_rate": "{rate} tok/s",
   "token_count": "{tokens} tok",
   "background_workflow": "Background workflow",
+  "background_task": "Background task",
   "more_workflows_one": "{count} more",
   "more_workflows_other": "{count} more",
   "more_waits_one": "{count} more",

@@ -373,6 +373,7 @@
     <string name="agents_todos_done">完了</string>
     <string name="agents_todo_reopen_failed">ToDoを再開できませんでした：%1$s</string>
     <string name="agents_todo_auto_done">自動完了</string>
+    <string name="agents_todo_concern">関心事</string>
     <string name="agents_todo_state_needs_you">要対応</string>
     <string name="agents_todo_state_unread">確認待ち</string>
     <string name="agents_todo_state_working">進行中</string>

@@ -84,6 +84,7 @@ type fakeHub struct {
 	pushes        []Notification
 	failNotify    int              // notify.request fails this many more times as when the hub is away and nothing was kept
 	refuseNotify  error            // notify.request is the hub's refusal (answered) while set
+	notifyResult  NotifyResult     // the held/reason answer notify.request returns once it succeeds
 	events        []string         // the type of each event the apps were sent
 	liveEvents    []map[string]any // the meeting_live events as sent
 	snaps         []Snapshot
@@ -541,7 +542,7 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
 		}
 		if l, _ := a["launcher"].(string); a["config_dir"] != nil && launcherAgent(l) != "claude" { // node/assistant.go's preflight
-			return nil, errors.New("config_dir is only supported for Claude assistant conversations")
+			return nil, errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		if sid, _ := a["session_id"].(string); a["config_dir"] != nil && f.elsewhere[sid] {
 			return nil, errors.New("config_dir cannot move an existing conversation; start a new conversation instead")
@@ -629,23 +630,23 @@ func (f *fakeHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, erro
 	return nil, fmt.Errorf("unexpected %s %s", p.AppID, p.Method)
 }
 
-func (f *fakeHub) NotifyRequest(_ context.Context, p NotifyRequest) error {
+func (f *fakeHub) NotifyRequest(_ context.Context, p NotifyRequest) (NotifyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch p.Notification.Kind {
 	case NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyInput, assistantwire.NotifyReply, assistantwire.NotifyDecide:
 	default:
-		return fmt.Errorf("kind %q", p.Notification.Kind)
+		return NotifyResult{}, fmt.Errorf("kind %q", p.Notification.Kind)
 	}
 	if f.refuseNotify != nil {
-		return f.refuseNotify
+		return NotifyResult{}, f.refuseNotify
 	}
 	if f.failNotify > 0 {
 		f.failNotify--
-		return errors.New("the hub is away")
+		return NotifyResult{}, errors.New("the hub is away")
 	}
 	f.pushes = append(f.pushes, p.Notification)
-	return nil
+	return f.notifyResult, nil
 }
 
 func (f *fakeHub) Broadcast(_ context.Context, b Broadcast) {

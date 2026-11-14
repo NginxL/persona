@@ -13,8 +13,9 @@ import (
 
 // The file page's Info sheet (#5827, docs/protocol/protocol.md "File details and links"): fs.stat with detail adds what
 // Finder's Get Info shows: the permission bits, the owner and group, the times, a folder's number of items, and for a
-// symlink what it says, where it leads and whether that is there. Nothing is read that fs.stat would refuse: the path
-// passes the same guard, and a link is looked at as itself first (its folder resolved, the link not followed).
+// symlink what it says, where it leads and whether that is there, and for a file the type the file page opens it as (its
+// first bytes read where the name cannot tell, #7974). Nothing is read that fs.stat would refuse: the path passes the
+// same guard, and a link is looked at as itself first (its folder resolved, the link not followed).
 
 // maxInfoItems bounds the count of a folder's entries (a folder of millions is "more than 10 000").
 const maxInfoItems = 10000
@@ -81,6 +82,9 @@ func (n *Node) statDetail(asked, cwd string) PathStat {
 	default:
 		s.Kind = "file"
 		s.Size = info.Size()
+		if info.Mode().IsRegular() {
+			s.Mime = mimeAt(p, at)
+		}
 	}
 	mode := unixMode(info.Mode())
 	s.Mode = &mode

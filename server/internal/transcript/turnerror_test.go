@@ -156,6 +156,38 @@ func TestClaudeAPIErrorKinds(t *testing.T) {
 	}
 }
 
+func TestClaudeTurnSucceededEvidence(t *testing.T) {
+	syntheticSentinel := `{"type":"assistant","uuid":"s","timestamp":"2026-01-01T12:00:00Z","message":{"id":"ms","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"BOTMUX_NOTHING_TO_SEND"}]}}`
+	sentinelReply := `{"type":"assistant","uuid":"b","timestamp":"2026-01-01T12:00:01Z","message":{"id":"mb","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"BOTMUX_NOTHING_TO_SEND"}]}}`
+	failedAfterWork := []string{replyLine, apiErrorLine(t, "e", "API Error: 529 Overloaded", map[string]any{"error": "server_error"}), turnEndLine}
+	for _, c := range []struct {
+		name  string
+		lines []string
+		want  bool
+	}{
+		{"a visible reply and its close", []string{replyLine, turnEndLine}, true},
+		{"a close without a model reply", []string{turnEndLine}, false},
+		{"a synthetic-only reply", []string{syntheticSentinel, turnEndLine}, false},
+		{"a reply followed by a model failure", []string{replyLine, apiErrorLine(t, "e", "API Error: 529 Overloaded", map[string]any{"error": "server_error"}), turnEndLine}, false},
+		{"a model error after the close", []string{replyLine, turnEndLine, apiErrorLine(t, "e2", "API Error: 529 Overloaded", map[string]any{"error": "server_error"})}, false},
+		{"an unclosed continuation after a worked failure", append(append([]string{}, failedAfterWork...), sentinelReply), false},
+		{"a closed continuation after a worked failure", append(append([]string{}, failedAfterWork...), sentinelReply, turnEndLine), true},
+		{"the reply has not closed", []string{replyLine}, false},
+		{"a newer turn is running", []string{replyLine, turnEndLine, prompt("u2", "continue")}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var m Meta
+			ParseLine(0, []byte(prompt("u1", "go")), &m)
+			for i, line := range c.lines {
+				ParseLine(i+1, []byte(line), &m)
+			}
+			if got := m.TurnSucceeded(); got != c.want {
+				t.Fatalf("TurnSucceeded = %v, want %v; TurnError %q, open %v, closed %v", got, c.want, m.TurnError, m.TurnOpen, m.TurnClosed)
+			}
+		})
+	}
+}
+
 // Whether Claude Code still goes on by itself once the limit resets: its notices say it and take it back, a wake
 // leaves it, a message cancels it, a reply or another kind of failure ends it.
 func TestClaudeLimitResumes(t *testing.T) {

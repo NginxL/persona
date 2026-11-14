@@ -44,6 +44,10 @@ final class DemoModeTests: XCTestCase {
         return e
     }
 
+    @MainActor private func expandSource() {
+        see(app.buttons["inbox.detail.source"].firstMatch, "the original source control", timeout: 15).tapCenter()
+    }
+
     @MainActor private func text(_ s: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", s)).firstMatch
     }
@@ -173,6 +177,10 @@ final class DemoModeTests: XCTestCase {
         noErrors("claude chat")
         shot("claude")
         let field = see(app.descendants(matching: .any)["shell-composer-field"].firstMatch, "the message field")
+        // One element for the field (#8002): the placeholder drawn over it is not a second `shell-composer-field`. It was,
+        // listed first, so typing went to text that takes none.
+        let named = app.descendants(matching: .any).matching(identifier: "shell-composer-field").allElementsBoundByIndex
+        XCTAssertEqual(named.count, 1, "\(named.count) shell-composer-field elements: \(named.map { "\($0.elementType.rawValue) \($0.frame)" })")
         field.tap()
         field.typeText("看一下进度")
         see(app.buttons["发送"], "send").tap()
@@ -183,7 +191,8 @@ final class DemoModeTests: XCTestCase {
         app.swipeDown() // the keyboard away
         sleep(1)
         // The page's own bar: the compact copy that shows once the chat scrolled (the full one sits under the clock).
-        // The terminal is in the header's ··· menu; a folded header (the slim bar) has no ···: a tap on its place opens it.
+        // The terminal is in the header's ··· menu, which the slim bar has too (#7962); not hittable yet, a tap on the
+        // slim bar's title opens the header.
         let more = app.buttons["更多"].firstMatch
         let unfold = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "显示标题和标签")).firstMatch
         for _ in 0..<3 where !more.isHittable {
@@ -271,6 +280,7 @@ final class DemoModeTests: XCTestCase {
         noErrors("inbox")
         shot("inbox")
         text("周五的发布能赶上吗").tap()
+        expandSource()
         see(text("下午我要和客户确认时间"), "the Feishu chat")
         noErrors("feishu")
         shot("feishu")
@@ -278,17 +288,21 @@ final class DemoModeTests: XCTestCase {
         let mail = text("下周的分享能不能提前到周二")
         for _ in 0..<3 where !(mail.exists && mail.isHittable) { app.swipeUp() }
         mail.tap()
+        expandSource()
         see(text("周四我临时要出差"), "the mail")
         shot("mail")
         back()
 
-        // Settings says it is the demo; leaving it is the pairing page again, and stays so after a relaunch.
+        // Settings says it is the demo: its Hub section offers Connect My Hub and Exit Demo Mode. (The line under its
+        // title, 「体验模式 · 数据都是编造的」, went when Settings was organized by assistant, device and Hub, e479c5bda3.)
+        // Leaving it is the pairing page again, and stays so after a relaunch.
         tab("设置")
-        see(text("体验模式 · 数据都是编造的"), "体验模式 in 设置")
-        shot("settings")
         let leave = app.buttons["settings.leaveDemo"]
         for _ in 0..<3 where !(leave.exists && leave.isHittable) { app.swipeUp() }
-        see(leave, "退出体验模式").tap()
+        see(leave, "退出体验模式 in 设置")
+        see(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "连接我的")).firstMatch, "连接我的 hub in 设置")
+        shot("settings")
+        leave.tap()
         see(app.buttons["welcome.demo"], "the pairing page after leaving")
         app.terminate()
         app.launchArguments = ["-dev.openChat", "", "-probes", "YES"]

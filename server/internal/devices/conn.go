@@ -93,7 +93,9 @@ func (m *Machine) run(ctx context.Context) {
 			lasted.Round(time.Second), planned, conn.restarting.Load(), dropReason(err))
 		m.d.pathEnded(conn.path, true, err, lasted, planned || conn.restarting.Load())
 		conn.close()
+		m.eventRetire.Lock()
 		m.detach(err, planned)
+		m.eventRetire.Unlock()
 		dropped = lastDrop{at: time.Now(), reason: dropReason(err), via: conn.via}
 		if next != nil {
 			next.trigger = fmt.Sprintf("switch from %s", conn.via)
@@ -278,6 +280,19 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 			m.mu.Unlock()
 			return
 		}
+		// Close does not wait for an admitted callback: finish it before detach, or drop it when it arrives after.
+		select {
+		case <-peer.Done():
+			return
+		default:
+		}
+		m.eventRetire.Lock()
+		defer m.eventRetire.Unlock()
+		select {
+		case <-peer.Done():
+			return
+		default:
+		}
 		m.onEvent(event, params)
 	}
 	go func() { c.served <- peer.Serve(cctx, l.r) }()
@@ -323,7 +338,7 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	}
 	onlineAt := time.Now()
 	rewatch := map[string]int{}
-	updates := false // listed: a queued update and a build check follow (below)
+	updates := false // a queued update and a build check follow a list, or an incompatible node's update-only connection
 	for id := range m.watched {
 		rewatch[id] = m.lastSeq[id]
 	}
@@ -395,6 +410,7 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 		}
 	} else {
 		rewatch = nil
+		updates = true // node.update.* stays available so this node can become compatible again
 	}
 	m.firstTried() // configured and listed: the calls that waited for it go now
 	if updates {

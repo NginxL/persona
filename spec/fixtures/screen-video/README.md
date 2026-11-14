@@ -36,7 +36,7 @@ Persona Screen and its clients exchange. The iPhone (`PersonaScreenKit`) and the
 
 ## Making it again
 
-The cases are written from Swift values in `apple/Packages/PersonaScreenKit/Tests/PersonaScreenKitTests/ScreenVideoFixtureTests.swift`:
-`PERSONA_WRITE_VIDEO_FIXTURES=1 swift test --package-path apple/Packages/PersonaScreenKit --filter ScreenVideoFixtureTests`.
+The cases are written from Swift values in `apple/Packages/PersonaScreenCore/Tests/PersonaScreenCoreTests/ScreenVideoFixtureTests.swift`:
+`PERSONA_WRITE_VIDEO_FIXTURES=1 swift test --package-path apple/Packages/PersonaScreenCore --filter ScreenVideoFixtureTests`.
 Without the variable that test fails when the file is not what the Swift side writes now, so a wire change on either
 side shows up in both languages' tests. All values are made up.

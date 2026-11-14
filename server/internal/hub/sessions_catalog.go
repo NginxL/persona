@@ -258,7 +258,7 @@ func (h *Hub) repositoryOrigin(p sessionlist.Place) (string, originAnswer) {
 // (and takes slashes too), any other with slashes only. A path that is only a root is its own name.
 func folderName(path string) string {
 	separators := "/"
-	if windowsPath(path) {
+	if proto.WindowsPath(path) {
 		separators = `/\`
 	}
 	trimmed := strings.TrimRight(path, separators)
@@ -269,18 +269,6 @@ func folderName(path string) string {
 		return path
 	}
 	return trimmed
-}
-
-// windowsPath: a drive letter with a separator, or a UNC share.
-func windowsPath(path string) bool {
-	if strings.HasPrefix(path, `\\`) {
-		return true
-	}
-	if len(path) < 3 || path[1] != ':' || (path[2] != '\\' && path[2] != '/') {
-		return false
-	}
-	c := path[0] | 0x20
-	return c >= 'a' && c <= 'z'
 }
 
 // projectOf is the project a directory belongs to: its repository when its computer named a network origin, else

@@ -43,7 +43,8 @@ final class PreviewUITests: XCTestCase {
     }
 
     @MainActor private func openServers(_ app: XCUIApplication, shoot: Bool = false) {
-        // The header folds by itself at the newest message; its slim bar has no ⋯ (a tap there opens it again).
+        // The header folds by itself at the newest message; its slim bar has the same ⋯ (#7962). Not hittable yet (the
+        // fold still settling): a tap on the slim bar's title opens the header.
         let more = app.buttons.matching(NSPredicate(format: "label == %@", "更多")).firstMatch
         if !more.waitForExistence(timeout: 5) || !more.isHittable {
             let compact = app.buttons["chat.compactTitle"].firstMatch

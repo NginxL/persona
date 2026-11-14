@@ -17,6 +17,8 @@ import Observation
         var partitions: [Partition]
         var settings: AgentListProjection.Settings
         var workspaceRevision: UInt64 = 0
+        /// What waiting children ask, so a new card changes the parent row without waiting on a session revision.
+        var asks: [SessionKey: String] = [:]
     }
 
     static func partitions(_ model: AppModel) -> [Partition] {

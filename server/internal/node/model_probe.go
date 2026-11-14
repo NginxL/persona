@@ -94,6 +94,10 @@ func withoutModelArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" { // prompt words after the separator are not the launcher's model options
+			out = append(out, args[i:]...)
+			break
+		}
 		if arg == "--model" || arg == "-m" {
 			if i+1 < len(args) {
 				i++

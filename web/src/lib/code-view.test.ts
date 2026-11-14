@@ -62,6 +62,7 @@ describe("高亮", () => {
   it("picks a grammar from the language or the path", () => {
     expect(languageOf("Go")).toBe("go");
     expect(languageOf(undefined, "src/a.tsx")).toBe("typescript");
+    expect(languageOf(undefined, "src/app.ts")).toBe("typescript"); // a .ts the hub sent as text (#7974)
     expect(languageOf(undefined, "Makefile")).toBe("makefile");
     expect(languageOf(undefined, "x.unknown")).toBe("");
   });

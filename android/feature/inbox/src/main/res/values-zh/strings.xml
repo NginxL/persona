@@ -271,6 +271,7 @@
     <string name="inbox_event_view_source">看原文</string>
     <string name="inbox_done_by_manager">助手处理了</string>
     <string name="inbox_event_related">有关</string>
-    <!-- Source subscriptions (#2041): with the Inbox's other settings -->
+    <!-- Source subscriptions (#2041): with the Inbox's other settings. Inbox Sources (#5308) once the hub says so. -->
     <string name="inbox_subscriptions">订阅来源</string>
+    <string name="inbox_sources">收件箱来源</string>
 </resources>

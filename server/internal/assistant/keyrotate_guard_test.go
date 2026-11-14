@@ -97,6 +97,7 @@ func TestPlacesThatSealAreKnown(t *testing.T) {
 		"internal/webpush/webpush.go":       1, // RFC 8291 to a browser's subscription keys: a message, never stored
 		"internal/proto/secretenv.go":       1, // HPKE to a node's one-time stage key: a hand-off, never stored
 		"internal/relay/relay.go":           1, // the push relay's grants
+		"internal/screenlink/udp_wire.go":   1, // a live screen's UDP packets: keys from the direct route's TLS exporter, never stored
 	}
 	lineComment := regexp.MustCompile(`(?m)^\s*//.*$`) // comments may name them freely
 	seal := regexp.MustCompile(`\.Seal\(|sealKey\(|\.encrypt\(|SealWith\(|secretkey\.New`)

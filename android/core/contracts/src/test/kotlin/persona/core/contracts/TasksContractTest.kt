@@ -86,6 +86,12 @@ class TasksContractTest {
         assertEquals(item, JsonCodec.decodeFromString<FeedItem>(JsonCodec.encodeToString(FeedItem.serializer(), item)))
     }
 
+    @Test fun todoKindDecodesAndAnOlderHubDefaultsToOrdinary() {
+        assertEquals("concern", JsonCodec.decodeFromString<Todo>("""{"id":"c","kind":"concern"}""").kind)
+        assertEquals("", JsonCodec.decodeFromString<Todo>("""{"id":"t"}""").kind)
+        assertEquals("future-kind", JsonCodec.decodeFromString<Todo>("""{"id":"u","kind":"future-kind"}""").kind)
+    }
+
     @Test fun unknownKindsAndTodosDecode() {
         val res = JsonCodec.decodeFromString<FeedResponse>("""{"items":[{"id":"f","conversation":"c","at":"2026-11-03T10:00:00Z","kind":"new_kind"}],
             "plans":{"p":{"id":"p","state":"started","tasks":[]}}}""")

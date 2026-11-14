@@ -351,7 +351,7 @@ For every component: use the design-system one, not a lookalike. Counts are appr
 ### 3.1 Composer
 
 - Use: the one message input for Assistant and Agents chats on iPhone, iPad and Mac.
-- Anatomy: collapsed line `[+] field [mic] [voice/stop]`; expanded card with the field on top and a row `[+] ... [model/effort] [mic] [send]`. Both shapes share one text field so focus and IME text survive the change.
+- Anatomy: collapsed line `[+] field [mic] [voice/stop]`; expanded card with the field on top and a row `[+] ... [model/effort] [mic] [send]`. Both shapes share one text field so focus and IME text survive the change, and one +, mic, voice and stop (`ComposerBoxLayout`, #7278): they sit at the box's bottom corners and move with it between the shapes, in the box's own motion, rather than one copy leaving as another arrives. Only what the card alone has (Hide Keyboard, model, send) fades in and out where it stands.
 - Tokens: radius 32, min field height 44, iOS grows from one through six lines then scrolls (`Theme.Shell.composerPhoneMaximumLines`); Mac retains its eight-line cap. Fill and stroke come from `Shell`.
 - Draft scrolling (iOS, #5650): typing and cursor movement keep the caret visible; unrelated layout updates only correct an offset past the content end. A manual scroll wins over queued caret work and stays put until new input or cursor movement.
 - Full-page editor (iOS, #5650): a dedicated upper-right control row contains Hide Keyboard and Collapse, in the composer's neutral icon ink, with 44 pt touch targets. Quotes and editable text start below that row, never behind the controls. This serves anyone composing and reviewing a long message; it requires no new setting.
@@ -607,7 +607,7 @@ The brief box (web, #3822; `web/src/views/assistant/TaskBrief.tsx`) shows what a
 
 The status words are the task cards' (`taskStatusWord`), and the count on the top bar's button is the running background tasks and runs (`backgroundCount`), the same number the panel's Running section shows without the loop.
 
-**Hand-off cards** (web, #5096; the owner asked that this part of the main chat follow cindy's `SessionHandoffCard` exactly, which replaces the "Dispatched: <title> · Open" line). iOS draws the same shape (`DispatchHandoffCard`, #5569): a well with ↳, title and badge, "3 min. ago · state", ↗, one card per task (its lead Agent) rather than per Agent, the failure line in `Theme.danger`. Each Agent a dispatch started or a task took over is one full-width card in the chat (`views/assistant/Handoff.tsx`):
+**Hand-off cards** (web, #5096; the owner asked that this part of the main chat follow cindy's `SessionHandoffCard` exactly, which replaces the "Dispatched: <title> · Open" line). iOS draws the same shape (`DispatchHandoffCard`): a well with ↳, title and badge, "3 min. ago · state", ↗, the failure line in `Theme.danger`. Each Agent a dispatch started or a task took over is one full-width card in the chat (`views/assistant/Handoff.tsx`; iOS and Android, #5110):
 - **Frame:** a bordered `rounded-xl` surface, 16 px padding and 14 px gaps (12 / 12 at phone width), whose border turns `--ink` on hover.
 - **Mark:** a 36 px round `--field` well with the ↳ mark (`cornerDownRight`), which inverts on hover.
 - **Title line:** the title (14 px semibold, one line) and a 10 px uppercase pill badge: New and Resumed are filled `--ink`, Already active is outlined.
@@ -621,7 +621,7 @@ Two departures from cindy, both from Persona's rules:
 
 Set to Full page, the Agent's page opened from a card shows cindy's way-back strip above the chat (`views/chat/HandoffBack.tsx`): a 40 px `rounded-xl` bordered row at the chat column's width, ↰ (`cornerUpLeft`) and "Came from <conversation> · click to return", with ✕ to put it away. Returning goes back in the history, and the chat opens where it was left (`lib/handoff.ts`).
 
-No new token. The two icons are added to `ui/icons.tsx` in the existing stroke grammar. iOS and Android keep the dispatched line and task details for now (#5110).
+No new token. The two icons are added to `ui/icons.tsx` in the existing stroke grammar. iOS and Android draw these cards in the chat, one per Agent, and a card with an Agent opens that Agent's page (#5110).
 
 **Changed-files card** (web, #5157, `web/src/views/chat/TurnChanges.tsx`; cindy's `TurnChangesCard`, at the owner's request, 2026-11-12), Agents only (super rules 0 and 4): the last thing in a finished Agent exchange that edited files.
 - **Frame:** a `rounded-xl` `bg-surface` section with a 1 px `--line` border and 4 px above and below.
@@ -741,7 +741,7 @@ Android's `JMenu` takes a choice list in groups: an action can open a group with
 - Regular width: system tab view and split navigation; the same sidebar in a column. On iOS, selecting or reselecting Agents follows the same list-first rule, leaving the split's detail empty until an Agent is explicitly opened. Agent sidebar links use the bound detail path, not a separate implicit split selection, so clearing navigation also clears a row-opened detail without rebuilding the list. Cold-launch and width-change restoration remain separate from explicit tab selection.
 - Assistant switcher on Apple (sidebar header, `apple/Persona/Views/Assistant/AssistantSwitcher.swift`, once a roster is known (read in this run, or kept from the last launch) and the current assistant can be shown, including with one installed assistant; the rules every client shares are in the "Assistant switcher" bullet below): the persona face with a state dot at its foot, the current assistant's name with a down arrow and its state line; a tap opens a popover list of the hub's assistants on a solid panel (`Theme.card`: through glass the badges behind it showed beside the rows), each row the first letter on a solid disc in its color with a state dot at its foot (green online, gray offline, orange installing, ringed in the panel's color), name, Default chip (only beside another assistant), state line (up to three lines at the accessibility sizes) and a check on the current one or, on any other with something waiting, its count (`CountBadge`'s `.needs` look; VoiceOver says "n things waiting for you"); an offline row is dimmed as a whole (`Theme.Fade.offline`) and still pickable. While another assistant has something waiting the face carries a mark at its head (`AssistantWaitingDot`, the needs-you color, ringed like the state dot; beside the name where the face is not drawn), and the header's spoken name says so. A page of an offline assistant's merged things (the inbox, to-dos) shows `AssistantOfflineNotice` in place of its empty state: laid out as `EmptyStateView`, with the assistant's avatar and its offline mark (`AssistantMonogram`, faded as an offline row) where that has its symbol, then "<name> Is Offline" and when it last synced. Then New Assistant and Manage Assistants…, which stay whole and tappable at the largest text size while the rows scroll above them. Rows are at least 44 pt and one line each. Why a popover and not a `Menu`: a row carries a colored avatar, a status dot, a chip and a second line, which a system menu item cannot draw, and the same list is drawn on web and Android. The sidebar and Settings reuse this same popover/list; pages do not add another switcher implementation.
 - Page titles: `.pageTitle`, `.detailTitle` (`apple/Persona/DesignSystem/PageTitle.swift`).
-- An Agent chat's header folds into a slim bar (iOS `ChromeHeader` and `compactChrome` in `apple/Persona/Views/Chat/ChatView.swift`, `docs/apple/ios.md`; Android on Glass `JFoldingHeader` and `ChatSlimBar`, #4339 C4): it follows the list's own scrolling (toward the newest it folds, back into the history it opens), is never left half way when the finger lifts (folded at the newest end, else the nearer end), and folds by itself after 3 s without a touch while nothing is presented over the page. The slim bar is back and a centered capsule (the agent's mark, the state's dot, the title; Connecting… while the hub is out of reach) that opens the header again; nothing on its right. The open header's second line leads with the state's words (iOS `ChatView.stateWords`): "Working N min" while a turn runs ("N hr M min" past an hour; the work line has the seconds), the state's name otherwise, "Working (Background)" once the turn ended and a workflow keeps the agent going, "Waiting in the background" when all it runs only waits; that wait is drawn with the clock for its dot, in the lighter tone, in the slim bar's dot too. Android also opens it when a new request arrives, and never folds by itself while animations are off. The open header's title opens Session Info.
+- An Agent chat's header folds into a slim bar (iOS `ChromeHeader` and `compactChrome` in `apple/Persona/Views/Chat/ChatView.swift`, `docs/apple/ios.md`; Android on Glass `JFoldingHeader` and `ChatSlimBar`, #4339 C4): it follows the list's own scrolling (toward the newest it folds, back into the history it opens), is never left half way when the finger lifts (folded at the newest end, else the nearer end), and folds by itself after 3 s without a touch while nothing is presented over the page. The slim bar is back, a centered capsule (the agent's mark, the state's dot, the title; Connecting… while the hub is out of reach) that opens the header again, and the open header's ⋯ on its right (#7962): the same menu from one definition, drawn bare like the slim bar's back (no glass: the bar is `Size.slimBar` tall) in the open ⋯'s `Size.tapTarget` square, as wide as back so the capsule stays centered. The open header's second line leads with the state's words (iOS `ChatView.stateWords`): "Working N min" while a turn runs ("N hr M min" past an hour; the work line has the seconds), the state's name otherwise, "Working (Background)" once the turn ended and a workflow keeps the agent going, "Waiting in the background" when all it runs only waits; that wait is drawn with the clock for its dot, in the lighter tone, in the slim bar's dot too. Android also opens it when a new request arrives, and never folds by itself while animations are off. The open header's title opens Session Info.
 - Sidebar layout (Settings › Appearance › Navigation, #6332; the drawer on a phone, a column at regular width; on a
   phone a page it opens has the persona's face where a back would be): the web sidebar's structure in one column
   (`UnifiedSidebarColumn`): the assistant and Search, the main conversation held at the top, then one list (Pages and
@@ -916,7 +916,7 @@ reported yet is the plain permissions symbol, never a guessed Ask First. The wor
 then the mode list, current one checked, Allow Everything disabled with its reason where the agent cannot take it), its VoiceOver label
 and the pointer tooltip. Going into Allow Everything asks first; so does leaving it when the agent cannot come back
 (`SessionModes.confirmation`), on the header and the composer's model menu alike. An agent whose mode can be neither
-read nor changed shows none. The folded bar shows no marks on its right, so its capsule stays centered. Why a new
+read nor changed shows none. The folded bar shows no marks, only ⋯ on its right, as wide as back, so its capsule stays centered. Why a new
 pattern: Claude Code keeps the mode in its footer at all times; the composer's chips (`ModeChip`) are a level down on
 the phone. Android (#3957) does the same; its header is one row, so the button sits left of `⋯`, and it has no folded bar.
 The web's header has no mode button (#5421, cindy's top bar): the mode is the composer's permission picker (#5324, with
@@ -1269,6 +1269,34 @@ capsule, one per open item handed to it, at most two.
 
 Today there are seven mechanisms and the same action can use different ones (DS-24). Archive in the sidebar, to-do swipe delete and mail-account delete have no confirmation and no Undo. Only the Mac discards edits with a prompt.
 
+Saved Agent searches (#7753) reuse the command palette and one replacement `Dialog`, switching between its list and
+editor instead of stacking modals. Empty-query shortcuts follow recent chats; applying one fills the search field
+without executing an Agent action. A version conflict keeps the editor draft and shows the current saved values;
+replacing them requires explicit review. Delete is reversible through a revision-guarded Undo, while ordering uses
+visible up/down controls as a keyboard alternative. Returning restores the prior query and focus. These secondary
+controls and their code load on intent, not as another primary destination.
+
+The web command palette's runtime-Agent search (#7624) adds a status line and More/retry controls outside the
+listbox. Local results appear immediately; bounded server pages supply authoritative matches and evidence. New
+results preserve the selected identity rather than the previous numeric row position; a removed selection requires
+a new keyboard choice before Enter opens anything. Loading, failed, expired and loaded-only fallback scopes are
+stated explicitly. This reuses the existing palette, controls and localization without a new search destination.
+
+The optional web workflow board's manual view supports bulk metadata edits (#7583). **Select** reveals native
+checkboxes and a selection bar using the existing `Button` and `Menu` components. **Select all visible** counts only
+cards in the current filters and, on a narrow board, the displayed column; hidden cards are not silently included.
+The bar wraps whole controls without wrapping button text. Movement, pinning and archive/restore use the reversible
+rung: immediate feedback, one atomic write, and **Undo last change** while its acknowledged board revision is current.
+A conflict reloads without replaying the operation or its inverse. This pattern belongs to the optional Agents board,
+not Assistant's primary chat. Older managers and view-only connections retain the existing single-card experience.
+
+The optional workflow board's **Activity** view (#7599) is a read-only `Dialog`, with a matching expandable section
+inside workspace details. It fetches compact revision summaries only after opening and paged before/after changes
+only after expanding. A new-activity hint preserves the reading position until the user requests the latest page.
+Historical names remain as recorded; current workspace navigation appears only for an existing card. An update that
+involves several cards stays one group, including when reached through a card's history. This uses the same buttons,
+loading/retry states and timestamps as other secondary views, and adds no primary destination or rollback control.
+
 ### 4.5 Push, notifications and reminders
 
 - The system prompt appears right after pairing and at launch, with no in-app explanation first (`apple/Persona/App/PushRegistrar.swift:41-53`, the options at `:174`). Requested options include time-sensitive. When denied, Settings explains and deep-links; allowing it there registers when the app comes back (#1861).
@@ -1448,7 +1476,7 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   questions, and Needs you its rows (one for each task or Agent that asks, plus the conversation's own cards, plans and
   drafts). An open plan is also a card among the conversation's lines (iOS `FeedLine`, Android on Glass `GlassPlanCard`), at the
   end of the exchange it happened in: its tasks, where each would run, "Start these directly", then Start, Edit and Don't start;
-  once started the dispatched line takes its place, and a dismissed one reads "Not started · N tasks". A task's or an Agent's row in the tray opens that task's or Agent's detail, as iOS's rows do, where its page
+  once started the hand-off cards take its place, and a dismissed one reads "Not started · N tasks". A task's or an Agent's row in the tray opens that task's or Agent's detail, as iOS's rows do, where its page
   and its cards are; it never brings a card into the stack, which is the conversation's own. On Android the two places
   of cards share the room the footer leaves above the composer (iOS draws the question uncapped): each takes at most half
   the page, and with both on screen each has at least half of that room, a card that needs less leaving the rest to the

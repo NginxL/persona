@@ -53,13 +53,13 @@ struct MachineDetailView: View {
     /// nor a subtask, which the Agents list folds under the session that started it and does not count unless it needs
     /// the user (`Session.isNestedSubtask`, as Android's Machines card).
     static func agents(_ model: AppModel, _ ref: MachineRef) -> [Session] {
-        (model.sessionsByMachine[ref] ?? []).filter(isListed)
+        ChildSessions.fold(model.sessionsByMachine[ref] ?? []).filter(isListed)
     }
 
     /// Every machine's agents (`agents(_:_:)`), for a page that can be kept hidden behind another: watched only in front
     /// (`AppModel.allSessions(inFront:)`).
     static func agentsByMachine(_ model: AppModel, inFront: Bool) -> [MachineRef: [Session]] {
-        Dictionary(grouping: model.allSessions(inFront: inFront).filter(isListed), by: \.machineRef)
+        Dictionary(grouping: ChildSessions.fold(model.allSessions(inFront: inFront)).filter(isListed), by: \.machineRef)
     }
 
     private static func isListed(_ s: Session) -> Bool { s.status.isLive && !s.assistant && !s.isNestedSubtask }

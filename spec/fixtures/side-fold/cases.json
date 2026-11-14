@@ -1,0 +1,962 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "side_folds_under_its_parent",
+      "description": "A side session (parent_agent_id names a listed row) folds under that row as a side; the parent shows it working and counts it in its children and its sides.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Plan the photo sync",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Check the HEIC encoder",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1,
+              "working": 1,
+              "sides": 1,
+              "sides_working": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "working"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_side_that_needs_you_makes_its_parent_need_you",
+      "description": "A side waiting on a question: its parent's row needs you; the card's home is the parent's row and it is answered in the side's chat.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Release notes",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Which version number?",
+            "state": "needs_you",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-side",
+            "machine_id": "studio",
+            "session_id": "side",
+            "kind": "question",
+            "created_at": "2026-11-15T09:05:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1,
+              "needs_you": 1,
+              "sides": 1,
+              "sides_needs_you": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "needs_you"
+          }
+        ],
+        "cards": [
+          {
+            "id": "ix-side",
+            "home": "studio/parent",
+            "chat": "studio/side"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an_unseen_side_shows_on_its_parent",
+      "description": "A side that finished with a result not looked at yet makes its idle parent unread.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Weekly report",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Summarize the open issues",
+            "state": "unread",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1,
+              "sides": 1,
+              "sides_unread": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "unread"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_working_parent_stays_working_beside_an_unseen_side",
+      "description": "The parent's own work comes first: it shows working, not the side's unseen result.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Migrate the database",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "List the tables",
+            "state": "unread",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1,
+              "sides": 1,
+              "sides_unread": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "working"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_side_of_a_side_folds_under_the_topmost_row",
+      "description": "A side started from another side folds under the same topmost row, also as a side; the parent counts both.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Trip to Kyoto",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side1",
+            "title": "Hotels near the station",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side2",
+            "title": "Compare two hotels",
+            "state": "unread",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "side1"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/side1": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/side2": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 2,
+              "sides": 2,
+              "sides_unread": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "unread"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_side_child_belongs_to_the_side",
+      "description": "A side's own Codex child folds under the topmost row and names the side in folded_side: its card's home is the parent's row, and it is answered in the side's chat. The parent counts it as a child, not a side.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Refactor the parser",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Benchmark the tokenizer",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "kid",
+            "title": "Run the benchmarks",
+            "state": "needs_you",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "agent": "codex",
+            "source_kind": "codex_rollout",
+            "is_subagent": true,
+            "parent_session_id": "side",
+            "root_session_id": "side"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-kid",
+            "machine_id": "studio",
+            "session_id": "kid",
+            "kind": "permission",
+            "created_at": "2026-11-15T09:05:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/kid": {
+            "folded_under": "parent",
+            "folded_side": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 2,
+              "needs_you": 1,
+              "sides": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "needs_you"
+          }
+        ],
+        "cards": [
+          {
+            "id": "ix-kid",
+            "home": "studio/parent",
+            "chat": "studio/side"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_side_wins_over_a_tab_worker",
+      "description": "A row in a tab's second pane that is a side folds under the row it was started from, as a side, not under the tab's lead; the tab's other Agent stays the lead's worker.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "lead",
+            "title": "Tab lead",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "space_kind": "herdr",
+            "space_id": "w1",
+            "slot_id": "t1",
+            "pane_index": 0
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Side in the tab",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "space_kind": "herdr",
+            "space_id": "w1",
+            "slot_id": "t1",
+            "pane_index": 1,
+            "parent_agent_id": "origin"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "worker",
+            "title": "Tab worker",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "space_kind": "herdr",
+            "space_id": "w1",
+            "slot_id": "t1",
+            "pane_index": 2
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "origin",
+            "title": "Where the side began",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-worker",
+            "machine_id": "studio",
+            "session_id": "worker",
+            "kind": "question",
+            "created_at": "2026-11-15T09:05:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "origin",
+            "folded_as": "side"
+          },
+          "studio/worker": {
+            "folded_under": "lead",
+            "folded_as": "worker"
+          },
+          "studio/lead": {
+            "children": {
+              "total": 1,
+              "working": 1,
+              "workers": 1
+            }
+          },
+          "studio/origin": {
+            "children": {
+              "total": 1,
+              "working": 1,
+              "sides": 1,
+              "sides_working": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/lead",
+            "state": "working"
+          },
+          {
+            "id": "studio/origin",
+            "state": "working"
+          }
+        ],
+        "cards": [
+          {
+            "id": "ix-worker",
+            "home": "studio/lead",
+            "chat": "studio/lead"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an_offline_parent_still_holds_its_sides",
+      "description": "The parent need not run: a side folds under an offline parent, which shows the side's state.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Yesterday's chat",
+            "state": "offline",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "A follow-up question",
+            "state": "unread",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/side": {
+            "folded_under": "parent",
+            "folded_as": "side"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1,
+              "sides": 1,
+              "sides_unread": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "unread"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "an_archived_parent_leaves_its_sides_as_rows",
+      "description": "Archiving a parent does not archive its sides: while the parent is not listed, each side is a row of its own.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Archived chat",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "archived": true
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Still running",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-side",
+            "machine_id": "studio",
+            "session_id": "side",
+            "kind": "question",
+            "created_at": "2026-11-15T09:05:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "fold": {},
+        "rows": [
+          {
+            "id": "studio/side",
+            "state": "working"
+          }
+        ],
+        "cards": [
+          {
+            "id": "ix-side",
+            "home": "studio/side",
+            "chat": "studio/side"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_parent_gone_from_the_list_leaves_its_side_a_row",
+      "description": "A side whose parent is not in the computer's list, or is on another computer, is a row of its own.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Orphan side",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "nobody"
+          },
+          {
+            "machine_id": "laptop",
+            "session_id": "parent",
+            "title": "On the other computer",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "elsewhere",
+            "title": "Names the other computer's session",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {},
+        "rows": [
+          {
+            "id": "studio/side",
+            "state": "idle"
+          },
+          {
+            "id": "laptop/parent",
+            "state": "idle"
+          },
+          {
+            "id": "studio/elsewhere",
+            "state": "working"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "assistant_rows_are_on_neither_end",
+      "description": "An Assistant conversation is never a side's parent, and an Assistant row naming an Agent folds nowhere.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "chat",
+            "title": "Persona chat",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "assistant": true,
+            "started_by_persona": true
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "side",
+            "title": "Names the chat",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "chat"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "agent",
+            "title": "An Agent",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "chat2",
+            "title": "Another Persona chat",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "assistant": true,
+            "started_by_persona": true,
+            "parent_agent_id": "agent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {},
+        "rows": [
+          {
+            "id": "studio/chat",
+            "state": "idle"
+          },
+          {
+            "id": "studio/side",
+            "state": "working"
+          },
+          {
+            "id": "studio/agent",
+            "state": "idle"
+          },
+          {
+            "id": "studio/chat2",
+            "state": "working"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "sides_that_loop_fold_nothing",
+      "description": "Two rows that name each other in parent_agent_id fold under nothing, nor does a side of one of them.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "a",
+            "title": "A",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "b"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "b",
+            "title": "B",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "a"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "c",
+            "title": "C",
+            "state": "needs_you",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "parent_agent_id": "a"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {},
+        "rows": [
+          {
+            "id": "studio/a",
+            "state": "idle"
+          },
+          {
+            "id": "studio/b",
+            "state": "working"
+          },
+          {
+            "id": "studio/c",
+            "state": "needs_you"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_child_with_parent_agent_id_folds_as_a_child",
+      "description": "A child (a subagent naming its parent) keeps folding by its parent fields even with parent_agent_id: no folded_as, and it is not counted in the sides.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Parent",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "other",
+            "title": "Other",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "kid",
+            "title": "Child",
+            "state": "working",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "is_subagent": true,
+            "parent_session_id": "other",
+            "parent_agent_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/kid": {
+            "folded_under": "other"
+          },
+          "studio/other": {
+            "children": {
+              "total": 1,
+              "working": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "idle"
+          },
+          {
+            "id": "studio/other",
+            "state": "working"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_codex_child_result_does_not_make_its_parent_unread",
+      "description": "Only sides make a parent unread: a Codex child's unseen result is its parent's to report.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Parent",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "kid",
+            "title": "Child",
+            "state": "unread",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "agent": "codex",
+            "source_kind": "codex_rollout",
+            "is_subagent": true,
+            "parent_session_id": "parent"
+          }
+        ],
+        "interactions": []
+      },
+      "expected": {
+        "fold": {
+          "studio/kid": {
+            "folded_under": "parent"
+          },
+          "studio/parent": {
+            "children": {
+              "total": 1
+            }
+          }
+        },
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "idle"
+          }
+        ],
+        "cards": []
+      }
+    },
+    {
+      "name": "a_paged_row_with_only_the_rollup",
+      "description": "A row of a paged list whose sides are not on the page: its folded state comes from its children's sides keys.",
+      "source": [
+        "server/internal/assistant/fleet_fold.go: foldSessions",
+        "server/internal/proto/session_hierarchy.go: Session.FoldedState",
+        "docs/protocol/protocol.md: Session hierarchy",
+        "issue #7944"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "parent",
+            "title": "Paged parent",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "children": {
+              "total": 2,
+              "sides": 2,
+              "sides_unread": 1
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "busy",
+            "title": "Paged parent with a working side",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "children": {
+              "total": 1,
+              "working": 1,
+              "sides": 1,
+              "sides_working": 1
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "asks",
+            "title": "Paged parent with a waiting side",
+            "state": "idle",
+            "updated_at": "2026-11-15T09:00:00Z",
+            "children": {
+              "total": 2,
+              "needs_you": 1,
+              "sides": 1,
+              "sides_needs_you": 1,
+              "sides_unread": 1
+            }
+          }
+        ],
+        "interactions": [],
+        "paged": true
+      },
+      "expected": {
+        "fold": {},
+        "rows": [
+          {
+            "id": "studio/parent",
+            "state": "unread"
+          },
+          {
+            "id": "studio/busy",
+            "state": "working"
+          },
+          {
+            "id": "studio/asks",
+            "state": "needs_you"
+          }
+        ],
+        "cards": []
+      }
+    }
+  ]
+}

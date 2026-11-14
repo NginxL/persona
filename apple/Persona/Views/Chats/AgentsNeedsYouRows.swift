@@ -29,14 +29,20 @@ nonisolated extension AgentsNeedsYou {
     static func rows(cards: [Interaction], waiting: [Session]) -> [Row] {
         var rows: [Row] = []
         var at: [SessionKey: Int] = [:]
+        let waitingKeys = Set(waiting.map(\.key))
         for ix in cards {
             if ix.isSessionless {
                 rows.append(Row(key: ix.sessionKey, cards: [ix], since: ix.createdAt))
-            } else if let i = at[ix.sessionKey] {
+                continue
+            }
+            // A folded child's card counts under its parent, once, and only when that parent is a row here.
+            let home = SessionKey(group: ix.group, machineID: ix.machineID, sessionID: ix.requestHome)
+            let key = home != ix.sessionKey && waitingKeys.contains(home) ? home : ix.sessionKey
+            if let i = at[key] {
                 rows[i].cards.append(ix)
             } else {
-                at[ix.sessionKey] = rows.count
-                rows.append(Row(key: ix.sessionKey, cards: [ix], since: ix.createdAt))
+                at[key] = rows.count
+                rows.append(Row(key: key, cards: [ix], since: ix.createdAt))
             }
         }
         for s in waiting where at[s.key] == nil {
@@ -55,7 +61,7 @@ nonisolated extension AgentsNeedsYou {
     /// The sessions that wait for the user whether or not a card was read, as the Needs You filter matches them;
     /// never the Persona tab's own conversations.
     static func waiting(_ sessions: [Session]) -> [Session] {
-        sessions.filter { !$0.assistant && $0.countedState == .needsYou }
+        ChildSessions.fold(sessions).filter { !$0.assistant && $0.countedState == .needsYou }
     }
 
     /// The Agents tab's badge: its rows less the ones that are not the tab's to announce (`TabBadges.place`): the

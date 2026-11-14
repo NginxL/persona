@@ -280,6 +280,92 @@ func TestNodePackageLookupOrder(t *testing.T) {
 	})
 }
 
+// flatten moves release dir's builds beside latest.json and drops dl/<dir>/: a source with no per-version directories,
+// as a GitHub repository's releases/latest/download serves a release.
+func (r *fakeRelease) flatten(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for path, b := range r.files {
+		if name, ok := strings.CutPrefix(path, "/"+dir+"/"); ok {
+			delete(r.files, path)
+			if name != "manifest.json" {
+				r.files["/"+name] = b
+			}
+		}
+	}
+}
+
+// A source that keeps no dl/<version>/ (a GitHub release base) serves latest.json's builds beside it: a release of
+// the hub's own version found there is the hub's build (no fallback, so automatic node updates send it), and a newer
+// release is the fallback; both download from beside latest.json once dl/<version>/ answers 404. A source that has
+// dl/<version>/ is still asked there only.
+func TestNodePackagesFromAFlatReleaseSource(t *testing.T) {
+	plat := otherOS + "-" + otherArch
+	full := updatetest.Program(t, "personad", otherOS, otherArch)
+	ctx := context.Background()
+	fetch := func(t *testing.T, d *Devices, pkg nodePackage) {
+		t.Helper()
+		bin, err := d.fetchPackage(ctx, pkg)
+		if err != nil || update.ProgramOf(bin) != nodeproto.ProgramPersonad || !strings.HasPrefix(bin, identity.NodePackageCacheDir()) {
+			t.Fatalf("fetched %s %v", bin, err)
+		}
+	}
+
+	t.Run("the hub's own version", func(t *testing.T) {
+		site := newFakeRelease(t)
+		site.publish(t, "v2", overlapping("v2", 2), true, map[string]string{"personad-" + plat: full})
+		site.flatten("v2")
+		d, _, _ := packageDevices(t, "v2", site.srv.URL)
+		pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, "")
+		if err != nil || pkg.Fallback || pkg.Version != "v2" || pkg.path != "" {
+			t.Fatalf("%+v %v", pkg, err)
+		}
+		fetch(t, d, pkg)
+		// dl/v2/ first (under each name a release may give the build), then beside latest.json.
+		got := site.requests()
+		if len(got) < 4 || got[0] != "/v2/manifest.json" || got[1] != "/latest.json" || got[2] != "/v2/personad-"+plat+".gz" ||
+			got[len(got)-1] != "/personad-"+plat+".gz" {
+			t.Fatalf("asked %v", got)
+		}
+		// The cache serves it as the release of the hub's version while the site is away.
+		site.mu.Lock()
+		site.down = true
+		site.mu.Unlock()
+		d.packages.results = nil
+		if pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, ""); err != nil || pkg.Fallback || pkg.Version != "v2" || pkg.path == "" {
+			t.Fatalf("cached: %+v %v", pkg, err)
+		}
+	})
+
+	t.Run("a newer release", func(t *testing.T) {
+		site := newFakeRelease(t)
+		site.publish(t, "v9-1", overlapping("v9-1", 9), true, map[string]string{"personad-" + plat: full})
+		site.flatten("v9-1")
+		d, _, _ := packageDevices(t, "1.2.3", site.srv.URL)
+		pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, "")
+		if err != nil || !pkg.Fallback || pkg.Version != "v9-1" {
+			t.Fatalf("%+v %v", pkg, err)
+		}
+		fetch(t, d, pkg)
+	})
+
+	t.Run("a site with dl/<version>/", func(t *testing.T) {
+		site := newFakeRelease(t)
+		site.publish(t, "v9-1", overlapping("v9-1", 9), true, map[string]string{"personad-" + plat: full})
+		d, _, _ := packageDevices(t, "1.2.3", site.srv.URL)
+		pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, "")
+		if err != nil || !pkg.Fallback {
+			t.Fatalf("%+v %v", pkg, err)
+		}
+		fetch(t, d, pkg)
+		for _, path := range site.requests() {
+			if path == "/personad-"+plat+".gz" {
+				t.Fatalf("asked beside latest.json while dl/v9-1/ has it: %v", site.requests())
+			}
+		}
+	})
+}
+
 // A build from the release is used only once it matches the manifest and is a build of the right platform and kind;
 // it lands in the cache whole (nothing half-written or staged is left), and the cache serves it again without asking.
 func TestFetchedBuildIsChecked(t *testing.T) {

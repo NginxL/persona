@@ -253,7 +253,7 @@ fun ExtensionPage(
     val memberNames = rememberExtensionNames(api, detail?.extensionPack?.isNotEmpty() == true || state.partial != null)
     ExtensionSettingsPage(detail = detail, memberNames = memberNames, busy = state.busy || state.saving || state.loading || state.loadFailed,
         refreshing = state.loading && detail != null, onBack = onBack, onRefresh = { scope.launch { model.load() } }, updates = state.updates,
-        onEnabled = { on -> scope.launch { model.setEnabled(on) } },
+        onEnabled = { on -> scope.launch { model.requestEnabled(on) } },
         onAutoUpgrade = { on -> scope.launch {
             if (model.setAutoUpgrade(on)) feedback?.notice(res.getString(if (on) R.string.settings_ext_auto_upgrade_on else R.string.settings_ext_auto_upgrade_off))
         } }, onCheck = { scope.launch { model.checkForUpdates() } }, onUpgrade = onUpgrade, onUninstall = { removing = true },
@@ -322,6 +322,14 @@ fun ExtensionPage(
         }
     }
     state.partial?.let { PackPartialDialog(it, detail?.extension?.name?.ifBlank { null } ?: extensionId, memberNames) { model.dismissPartial() } }
+    // A new hub switches the pack's enabled members too: name them and change nothing until agreed (#1830).
+    if (state.packOff && state.cascade == null) detail?.let { pack ->
+        val name = pack.extension.name.ifBlank { pack.extension.id }
+        val names = pack.packOn.joinToString(res.getString(R.string.settings_ext_list_separator)) { it.label }
+        JDialog({ model.dismissPackOff() }, title = stringResource(R.string.settings_ext_disable_pack_title, name),
+            text = stringResource(R.string.settings_ext_disable_pack_body, names), destructive = true,
+            confirm = stringResource(R.string.settings_ext_disable_all) to { scope.launch { model.confirmPackOff() } })
+    }
     // Others depend on it (#5192): named, and switched off with it once agreed.
     state.cascade?.let { ask ->
         val name = detail?.extension?.name?.ifBlank { null } ?: extensionId
@@ -367,7 +375,7 @@ private fun LazyListScope.header(id: String, state: ExtensionState, res: Resourc
         }
     }
     extension?.description?.takeIf { it.isNotBlank() }?.let { item("description") { Note(it) } }
-    extension?.let { ExtensionText.runNote(res, it) }?.let { item("run-note") { Note(it) } }
+    extension?.let { ExtensionText.runNote(res, it, state.detail.packMembersFollow) }?.let { item("run-note") { Note(it) } }
     extension?.needsSetup?.takeIf { it.isNotEmpty() }?.let { needs ->
         item("needs") { JInlineStatus(stringResource(R.string.settings_ext_still_needed, needs.joinToString(res.getString(R.string.settings_ext_list_separator))), Modifier.padding(top = Tokens.Space.s), tone = InlineTone.Caution) }
     }

@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
@@ -268,5 +270,53 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 		}
 	}
 	s.superviseInbox(ctx, kept, linked)
+	s.fileTaskDone(ctx, kept)
 	s.followContinuations(ctx, done) // a handled item gets no signal, but its link follows the work as an open one's does
 }
+
+// fileTaskDone files the open items still linked, after superviseInbox followed any continuation, to a to-do that is
+// done (not cancelled): the work is finished, so the item needs nothing. An item its conversation handles or that has a
+// suggestion stays. Saved like any item write; a failed save undoes it.
+func (s *Service) fileTaskDone(ctx context.Context, items []*InboxItem) {
+	b := &s.inbox
+	var writes []*inboxWrite
+	for _, it := range items {
+		b.mu.Lock()
+		var id string
+		if taskDoneFileable(it) {
+			id = it.Agent.TodoID
+		}
+		b.mu.Unlock()
+		if id == "" {
+			continue
+		}
+		t, ok := s.todoNow(id) // not under b.mu: todos.mu is taken on its own
+		if !ok || t.DoneAt == nil || t.Cancelled() {
+			continue
+		}
+		b.mu.Lock()
+		if b.items[it.ID] == it && taskDoneFileable(it) && it.Agent.TodoID == id {
+			now := time.Now()
+			w := beginWrite(it)
+			it.done(now, doneByManager)
+			b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: now.UTC(), By: doneByManager, Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_task"),
+				Detail: clipRunesTo(t.Title, 60), Link: &InboxChainLink{Type: LinkTodo, ID: id}})
+			it.SettledOf = taskDoneEvidence(id)
+			b.settle(w)
+			writes = append(writes, w)
+		}
+		b.mu.Unlock()
+	}
+	s.saveWrites(ctx, writes, "its filing for a finished task")
+}
+
+// taskDoneFileable: an open item linked to a to-do that its finishing may file: no processing conversation of the AI
+// twin (that one decides, and its judge links the item to the task carrying the work on), nothing handling it, no
+// suggestion waiting, and not filed for this to-do before (reopened by hand, or by new messages, it stays). Under b.mu.
+func taskDoneFileable(it *InboxItem) bool {
+	return it.open() && it.Agent != nil && it.Agent.TodoID != "" && it.Agent.SessionID == "" && !it.handled() &&
+		currentSuggestion(it) == nil && it.SettledOf != taskDoneEvidence(it.Agent.TodoID)
+}
+
+// taskDoneEvidence is SettledOf for an item filed because its to-do finished.
+func taskDoneEvidence(todoID string) string { return "todo:" + todoID }

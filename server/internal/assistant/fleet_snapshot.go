@@ -184,7 +184,8 @@ func (s *Service) quietSession(mid, sid string) bool {
 }
 
 // withTask names, on an interaction sent to clients, the task its agent works for (the watch and the cards show it),
-// and the session its agent is folded under, whose chat shows the card, and why (a tab's worker; fleet_fold.go).
+// and the session its agent is folded under, whose chat shows the card, and why (a tab's worker, a side session), and
+// the side session it belongs to when it folds through one, whose chat the card is in (fleet_fold.go).
 func (s *Service) withTask(ix proto.Interaction) proto.Interaction {
 	r := &s.fleet.rep
 	r.mu.RLock()
@@ -193,7 +194,7 @@ func (s *Service) withTask(ix proto.Interaction) proto.Interaction {
 	if ok && l.Task {
 		ix.TaskTitle = l.Title
 	}
-	ix.FoldedUnder, ix.FoldedAs = s.foldedUnder(ix.MachineID, ix.SessionID)
+	ix.FoldedUnder, ix.FoldedAs, ix.FoldedSide = s.foldedUnder(ix.MachineID, ix.SessionID)
 	return ix
 }
 

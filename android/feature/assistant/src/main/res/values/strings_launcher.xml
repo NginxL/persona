@@ -4,7 +4,6 @@
     <string name="assistant_launcher_title">New chats use</string>
     <string name="assistant_launcher_default">Default</string>
     <string name="assistant_launcher_default_named">Default: %1$s</string>
-    <string name="assistant_launcher_once">%1$s · This time only</string>
     <string name="assistant_launcher_loading">Loading launchers…</string>
     <string name="assistant_launcher_failed">Couldn\'t load launchers</string>
     <string name="assistant_launcher_none">No launcher on this computer can run Persona</string>

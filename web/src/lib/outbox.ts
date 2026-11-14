@@ -231,14 +231,14 @@ export function inSendOrder<T>(key: string, post: () => Promise<T>): Promise<T> 
 
 const KEPT_PREFIX = "outbox-msg:";
 const keptKey = (key: string, id: string) => `${KEPT_PREFIX}${key}/${id}`;
-type Outgoing = Pick<OutboxEntry, "id" | "text" | "images" | "at" | "launcher" | "model"> & Partial<Pick<OutboxEntry, "newId" | "error" | "state" | "wordsOnly" | "acceptedAt">>;
+type Outgoing = Pick<OutboxEntry, "id" | "text" | "images" | "at" | "launcher" | "model"> & Partial<Pick<OutboxEntry, "newId" | "error" | "state" | "wordsOnly" | "acceptedAt" | "clearable">>;
 
 /** Keeps one message's words until its transcript copy arrives (pictures are not kept: they would fill the
  *  storage). Storage can be full or refused; the message then lasts only as long as the page. */
 export function keepOutgoing(key: string, e: Outgoing) {
   if (!e.text.trim()) return;
   try {
-    storeValue(keptKey(key, e.id), JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, error: e.error, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, images: e.images.length }));
+    storeValue(keptKey(key, e.id), JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, error: e.error, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, clearable: e.clearable, images: e.images.length }));
   } catch {
     // only this page's copy then
   }

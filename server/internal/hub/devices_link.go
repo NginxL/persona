@@ -91,6 +91,7 @@ type devicesState struct {
 	due           bool
 	nodeUpdateDue bool // an explicit policy write also requests a fresh package check
 	started       bool
+	fleetReady    bool // startDevices finished the initial fleet; late kept-list reads reconcile recovered machines
 	// reqs are the nodes' requests being answered (devices.request) by the manager's key; reqEnded the keys whose
 	// devices.request_end came before the request did (an event is read at once, a call in its own goroutine).
 	reqs     map[string]context.CancelFunc

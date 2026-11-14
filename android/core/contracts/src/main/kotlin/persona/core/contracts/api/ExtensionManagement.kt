@@ -35,6 +35,12 @@ interface ExtensionManagement : ExtensionUi, ExtensionMarkets {
      */
     val subscriptionsAvailable: Flow<Boolean> get() = kotlinx.coroutines.flow.flowOf(false)
 
+    /**
+     * Whether those pages are Inbox Sources (#5278, `inbox_sources`): the Settings row shows, and the Inbox menu
+     * uses that name, only then. An older hub keeps the Subscriptions entry.
+     */
+    val inboxSourcesAvailable: Flow<Boolean> get() = kotlinx.coroutines.flow.flowOf(false)
+
     /** `GET /api/v1/subscriptions/summary`: each connector's counts, for the entry rows. */
     suspend fun subscriptionSummary(): List<SubscriptionSummaryLine> = emptyList()
 
@@ -220,6 +226,12 @@ data class ExtensionDetail(
     val nodeMachines: String? = null,
     val depends: List<ExtensionDependency> = emptyList(),
     val extensionPack: List<ExtensionPackMember> = emptyList(),
+    /** New hubs switch a pack's installed members with it; absent means an older hub switches only the pack. */
+    val packMembersFollow: Boolean = false,
+    /** Installed enabled members that switching the pack off would switch off. */
+    val packOn: List<ExtensionDependent> = emptyList(),
+    /** Members the pack switched off, which switching it back on restores. */
+    val packOff: List<String> = emptyList(),
 ) {
     /** Installed from an extension market (`market:<market>/<extension>`): a phone may upgrade and remove it. */
     val fromMarket: Boolean get() = origin?.startsWith("market:") == true
@@ -240,6 +252,9 @@ data class ExtensionDetail(
         @SerialName("node_machines") val nodeMachines: String? = null,
         val depends: List<ExtensionDependency> = emptyList(),
         @SerialName("extension_pack") val extensionPack: List<ExtensionPackMember> = emptyList(),
+        @SerialName("pack_members_follow") val packMembersFollow: Boolean = false,
+        @SerialName("pack_on") val packOn: List<ExtensionDependent> = emptyList(),
+        @SerialName("pack_off") val packOff: List<String> = emptyList(),
     )
 
     @Serializable
@@ -255,7 +270,7 @@ data class ExtensionDetail(
                 extra.form?.fields.orEmpty(), extra.config ?: JsonObject(emptyMap()), extra.secrets, extra.permissions,
                 extra.ui.filter { it.placement.isEmpty() || it.placement == "extension_page" || it.placement == "plugin_page" || it.placement == "nav_page" },
                 extra.contributions, extra.nodeMachines?.takeIf { it.isNotBlank() },
-                extra.depends, extra.extensionPack,
+                extra.depends, extra.extensionPack, extra.packMembersFollow, extra.packOn, extra.packOff,
             )
         }
     }

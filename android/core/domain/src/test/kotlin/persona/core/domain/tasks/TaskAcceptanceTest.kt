@@ -1,6 +1,7 @@
 package persona.core.domain.tasks
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,10 +24,12 @@ class TaskAcceptanceTest {
         var delayed: CompletableDeferred<List<Todo>>? = null
         val accepted = mutableListOf<Pair<String, String>>()
         val patches = mutableListOf<Pair<String, Boolean?>>()
+        var patchManager: String? = "not called"
         var patchGate: CompletableDeferred<Unit>? = null
         var patchFailure: Throwable? = null
         var readFailure: Throwable? = null
         override suspend fun patchTodo(id: String, title: String?, notes: String?, done: Boolean?): Todo {
+            patchManager = currentCoroutineContext()[RequestManager]?.id
             patches += id to done
             patchGate?.await()
             patchFailure?.let { throw it }
@@ -78,6 +81,19 @@ class TaskAcceptanceTest {
         assertNull(store.todos.value.single().ask)
         assertTrue(store.busy.value.isEmpty())
         assertNull(store.routes.value["main"])
+    }
+
+    @Test fun finishNowKeepsTheRestoredTodosManager() = runTest {
+        val restored = decision.copy(manager = "m-other")
+        val api = Api(listOf(restored))
+        val cache = object : TodoCache {
+            override suspend fun read() = listOf(restored)
+            override suspend fun write(todos: List<Todo>) = Unit
+        }
+        val store = TasksStore(api, Connection(), backgroundScope, cache)
+        store.finishTaskNow(restored, { throw it }) { fail("unchanged") }
+        runCurrent()
+        assertEquals("m-other", api.patchManager)
     }
 
     @Test fun failedFinishRetainsCardAndUnrelatedTasksAndCanRetry() = runTest {

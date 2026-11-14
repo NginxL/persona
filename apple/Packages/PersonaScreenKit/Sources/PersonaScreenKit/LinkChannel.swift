@@ -30,6 +30,12 @@ public struct LinkReceiver: Equatable, Sendable {
     public mutating func reset(to offset: UInt64) {
         if offset > self.offset { self.offset = offset }
     }
+
+    /// Back to `offset`, a message boundary at most `offset` behind: the bytes of a partial message were dropped (the
+    /// video channel moving onto a UDP flow, #7873, which sends whole messages only) and will come again.
+    public mutating func rewind(to offset: UInt64) {
+        if offset < self.offset { self.offset = offset }
+    }
 }
 
 /// A channel's bytes going out: kept until the node acknowledges them, and sent again from where the node is after a
@@ -106,6 +112,9 @@ public struct VideoMessageAssembler {
 
     /// Drops a partial message.
     public mutating func reset() { parser = ScreenVideoParser() }
+
+    /// Bytes of a message not whole yet.
+    public var pendingBytes: Int { parser.pendingBytes }
 }
 
 /// One route's round trips as `LinkStats`: smoothed (EWMA 1/8) and minimum over 10 s, jitter (RFC 3550, 1/16), and

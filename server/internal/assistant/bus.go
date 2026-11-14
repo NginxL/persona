@@ -135,7 +135,7 @@ func NewBusHub(o BusOptions) *BusHub {
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
 					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
-					assistantwire.CapabilityMCPWait, devicewire.SharingCapability}}
+					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, devicewire.SharingCapability}}
 		},
 		OnHello: b.onHello,
 		// A node's tool call that its caller stopped waiting for ends at the hub too (fleet_tools.go).
@@ -395,7 +395,9 @@ func (b *BusHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, error
 	return out, busError(err)
 }
 
-func (b *BusHub) NotifyRequest(ctx context.Context, p NotifyRequest) error { return b.sendPush(ctx, p) }
+func (b *BusHub) NotifyRequest(ctx context.Context, p NotifyRequest) (NotifyResult, error) {
+	return b.sendPush(ctx, p)
+}
 
 func (b *BusHub) Tell(event string, params any) error { return b.client.Notify(event, params) }
 

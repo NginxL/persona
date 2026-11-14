@@ -109,7 +109,7 @@ func (s *Service) beginRemedy(ctx context.Context, planID string, i int, t PlanT
 		return false
 	}
 	s.logf("task %s: did not start (%s); its tab %s is kept until %s for the supervisor", t.TodoID, code, r.Pane, until.Format(time.RFC3339))
-	s.taskNotice(ctx, todo, t.Machine, "failed", "", reason)
+	s.taskStartFailed(ctx, todo, t.Machine, r, reason)
 	return true
 }
 

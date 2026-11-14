@@ -174,6 +174,11 @@ import UIKit
     @ObservationIgnored private var net: (expensive: Bool, constrained: Bool, cellular: Bool) = (false, false, false)
     /// ⋯ › Quality for this computer (#6396).
     @ObservationIgnored private var bias: TierLadder.Bias = .auto
+    /// The UDP flow's parity and resends per byte of video (#7873), in 5 % steps: on mobile data the cap leaves room
+    /// for them, so the bytes on the wire stay within it.
+    @ObservationIgnored private var udpOverhead = 0.0
+    /// The share of the cap the flow lets the video use while it loses packets to congestion (#7873), in 5 % steps.
+    @ObservationIgnored private var udpScale = 1.0
     /// The tier each computer last settled on, by computer and kind of route, for this app run: the next stream starts
     /// there (`TierPolicy`'s `remembered`).
     @ObservationIgnored private static var settled: [String: Int] = [:]
@@ -199,6 +204,17 @@ import UIKit
     func measured(_ stats: LinkStats?, unavailable: String?) {
         if stats != link { link = stats }
         if unavailable != directUnavailable { directUnavailable = unavailable }
+    }
+
+    /// The UDP flow carrying the video (#7873), about once a second; nil when none does.
+    func flowChanged(_ status: ScreenUDPStatus?) {
+        let o = ((status?.overhead ?? 0) * 20).rounded(.up) / 20
+        let sc = ((status?.scale ?? 1) * 20).rounded(.down) / 20
+        guard o != udpOverhead || sc != udpScale else { return }
+        let budgetMoves = sc != udpScale || net.expensive
+        udpOverhead = o
+        udpScale = sc
+        if budgetMoves { rebudget() }
     }
 
     func routeChanged(_ change: PathChange) {
@@ -451,7 +467,7 @@ import UIKit
             stream?.tierBudget(tieredBudget)
             return
         }
-        let b = Self.currentBudget(path: (net.expensive, net.constrained))
+        let b = onWire(Self.currentBudget(path: (net.expensive, net.constrained)))
         guard b != budget else { return }
         budget = b
         stream?.send(UpdateMessage(fps: b.fps, maxKbps: b.maxKbps))
@@ -459,7 +475,17 @@ import UIKit
 
     /// The caps with tiers (#6396): mobile data as the user chose (`ScreenMobileData`).
     private var tieredBudget: ScreenVideoBudget {
-        Self.currentBudget(path: (net.expensive, net.constrained), mobileData: ScreenMobileData.current)
+        onWire(Self.currentBudget(path: (net.expensive, net.constrained), mobileData: ScreenMobileData.current))
+    }
+
+    /// The cap with the UDP flow in mind (#7873): its congestion scale on any network, and on mobile data room for its
+    /// parity and resends, so video × (1 + overhead) stays within Data Saver's 1.5 Mbit/s and the card's figures hold.
+    private func onWire(_ b: ScreenVideoBudget) -> ScreenVideoBudget {
+        let divisor = net.expensive ? 1 + udpOverhead : 1
+        guard udpScale < 1 || divisor > 1 else { return b }
+        var out = b
+        out.maxKbps = max(300, Int(Double(b.maxKbps) * udpScale / divisor))
+        return out
     }
 
     private static func currentBudget(path: (expensive: Bool, constrained: Bool)?, mobileData: ScreenMobileData? = nil)
@@ -555,8 +581,11 @@ nonisolated struct ScreenVideoTally {
 /// The tier as Connection Stats shows it (#6396): the Quality choice, the scale and frame rate, and why it last changed
 /// in plain words with how long ago.
 enum ScreenTierText {
+    /// The scale is the picture's own (#7842): "1×" for every tier of a display at one pixel per point, "1.9×" for 2×
+    /// under the phone's long-edge cap.
     static func value(_ quality: ScreenQuality, _ tier: TierLadder.Tier) -> String {
-        let scale = tier.scale == tier.scale.rounded() ? String(Int(tier.scale)) : String(format: "%.1f", tier.scale)
+        let tenths = (tier.pixelsPerPoint * 10).rounded() / 10
+        let scale = tenths == tenths.rounded() ? String(Int(tenths)) : String(format: "%.1f", tenths)
         return "\(quality.label) · \(scale)× · \(tier.fps) fps"
     }
 

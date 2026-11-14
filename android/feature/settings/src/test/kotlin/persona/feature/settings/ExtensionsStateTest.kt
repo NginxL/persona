@@ -30,11 +30,13 @@ private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
     /** Enabled extensions that depend on it: refused (409 has_dependents) without cascade. */
     var dependents: List<ExtensionDependent> = emptyList()
     val cascades = mutableListOf<String>()
+    val enabledCalls = mutableListOf<Triple<String, Boolean, Boolean>>()
 
     private fun answer(): ExtensionDetail { fail?.let { throw it }; return detail }
     override suspend fun extensions() = fail?.let { throw it } ?: list
     override suspend fun extension(id: String) = answer()
     override suspend fun setEnabled(id: String, enabled: Boolean, cascade: Boolean): ExtensionDetail {
+        enabledCalls += Triple(id, enabled, cascade)
         if (!enabled) refuseDependents("off", cascade)
         detail = detail.copy(extension = detail.extension.copy(enabled = enabled, status = if (enabled) "running" else "disabled"))
         return answer()
@@ -92,6 +94,13 @@ class ExtensionsStateTest {
         secrets = listOf(ExtensionSecret("api_key", "API Key", required = true)),
     )
 
+    private val pack = ExtensionDetail(
+        HubExtension("example-pack", "Example Pack", "extension_pack", "running", source = "installed", enabled = true),
+        extensionPack = listOf(ExtensionPackMember("base"), ExtensionPackMember("addon"), ExtensionPackMember("gone")),
+        packMembersFollow = true,
+        packOn = listOf(ExtensionDependent("base", "Base"), ExtensionDependent("addon")),
+    )
+
     @Test fun wordsForStatesSourcesAndTheSettingsRow() {
         fun p(status: String) = HubExtension("x", "X", "connectors", status)
         assertEquals(listOf("启动", "启动", "停用"), listOf(p("running"), p("stopped"), p("disabled")).map { ExtensionText.state(res, it) })
@@ -137,6 +146,23 @@ class ExtensionsStateTest {
             ExtensionText.state(res, p("running", NodeStatusSummary(total = 3, running = 2, offline = 1))))
         // No summary: the hub process's own status wording stands.
         assertEquals("启动", ExtensionText.state(res, p("stopped", NodeStatusSummary())))
+    }
+
+    @Test fun packEnabledFooterMatchesHubCapabilityAndRecordedMembers() {
+        val names = mapOf("base" to "Base", "addon" to "Add-on")
+        val following = "停用合集会一起停用它的成员，成员随之停止运行。重新启用合集时，会重新启用当初由合集停用的成员；你自己单独启用或停用过的成员保持你的选择。"
+        assertEquals(following, ExtensionText.enabledFooter(res, pack, names))
+        assertEquals("重新启用合集会重新启用 Base、Add-on、gone。你自己单独启用或停用过的成员保持你的选择。",
+            ExtensionText.enabledFooter(res, pack.copy(extension = pack.extension.copy(enabled = false), packOff = listOf("base", "addon", "gone")), names))
+        // Off without a restore record, and enabled unknown, both keep the general members-follow explanation.
+        assertEquals(following, ExtensionText.enabledFooter(res, pack.copy(extension = pack.extension.copy(enabled = false)), names))
+        assertEquals(following, ExtensionText.enabledFooter(res, pack.copy(extension = pack.extension.copy(enabled = null)), names))
+        // An older hub keeps the pack-only explanation even if a client has member data from elsewhere.
+        val older = pack.copy(extension = pack.extension.copy(enabled = false), packMembersFollow = false, packOff = listOf("base"))
+        assertEquals("停用合集只会停用合集本身。请到每个成员自己的页面启用或停用它。", ExtensionText.enabledFooter(res, older, names))
+        assertEquals(res.getString(R.string.settings_extension_enabled_note), ExtensionText.enabledFooter(res, notes, names))
+        assertEquals("合集本身不运行程序；成员独立设置和卸载。", ExtensionText.runNote(res, pack.extension, packMembersFollow = true))
+        assertEquals("合集本身不运行程序；成员独立启用、设置和卸载。", ExtensionText.runNote(res, pack.extension))
     }
 
     @Test fun fieldTitlesPlaceholdersAndSecrets() {
@@ -434,6 +460,69 @@ class ExtensionsStateTest {
         api.fail = HubFailure(HubError.Server, "还有扩展依赖它", status = 409)
         assertFalse(model.uninstall(keepData = false))
         assertEquals("没有卸载：还有扩展依赖它", model.state.value.error)
+    }
+
+    @Test fun packSwitchOffWaitsForConfirmation() = runBlocking {
+        val api = FakeExtensions(pack)
+        val model = ExtensionModel(api, "example-pack", res)
+        model.load()
+        assertFalse(model.requestEnabled(false))
+        assertTrue(model.state.value.packOff)
+        assertTrue(api.enabledCalls.isEmpty())
+        assertEquals(true, model.state.value.detail?.extension?.enabled)
+        assertTrue(model.confirmPackOff())
+        assertFalse(model.state.value.packOff)
+        assertEquals(listOf(Triple("example-pack", false, false)), api.enabledCalls)
+        assertEquals(false, model.state.value.detail?.extension?.enabled)
+    }
+
+    @Test fun cancellingPackSwitchOffChangesNothing() = runBlocking {
+        val api = FakeExtensions(pack)
+        val model = ExtensionModel(api, "example-pack", res)
+        model.load()
+        assertFalse(model.requestEnabled(false))
+        model.dismissPackOff()
+        assertFalse(model.state.value.packOff)
+        assertFalse(model.confirmPackOff())
+        assertTrue(api.enabledCalls.isEmpty())
+        assertEquals(pack, model.state.value.detail)
+    }
+
+    @Test fun packSwitchOnEmptyMembersOlderHubsAndNonPacksDoNotAsk() = runBlocking {
+        suspend fun direct(detail: ExtensionDetail, on: Boolean) {
+            val api = FakeExtensions(detail)
+            val model = ExtensionModel(api, detail.extension.id, res)
+            model.load()
+            assertTrue(model.requestEnabled(on))
+            assertFalse(model.state.value.packOff)
+            assertEquals(listOf(Triple(detail.extension.id, on, false)), api.enabledCalls)
+        }
+        direct(pack.copy(extension = pack.extension.copy(enabled = false)), true) // ON never asks, even with pack_on present.
+        direct(pack.copy(packOn = emptyList()), false)
+        direct(pack.copy(packMembersFollow = false), false)
+        direct(notes, false)
+    }
+
+    @Test fun outsideDependentsFollowPackConfirmation() = runBlocking {
+        val api = FakeExtensions(pack).apply { dependents = listOf(ExtensionDependent("outside", "Outside")) }
+        val model = ExtensionModel(api, "example-pack", res)
+        model.load()
+        assertFalse(model.requestEnabled(false))
+        assertFalse(model.confirmPackOff())
+        assertFalse(model.state.value.packOff)
+        assertEquals(ExtensionCascade(listOf("Outside")), model.state.value.cascade)
+        assertEquals(true, model.state.value.detail?.extension?.enabled)
+        assertEquals(listOf(Triple("example-pack", false, false)), api.enabledCalls)
+        model.dismissCascade()
+        assertTrue(api.enabledCalls.size == 1)
+
+        assertFalse(model.requestEnabled(false))
+        assertFalse(model.confirmPackOff())
+        assertTrue(model.confirmCascade())
+        assertEquals(listOf(false, false, true), api.enabledCalls.map { it.third })
+        assertNull(model.state.value.cascade)
+        assertFalse(model.state.value.packOff)
+        assertEquals(false, model.state.value.detail?.extension?.enabled)
     }
 
     @Test fun dependentsAreAskedAboutThenSwitchedOffWithIt() = runBlocking {

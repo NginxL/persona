@@ -125,6 +125,8 @@ func TestAgentsSwitchEachByItsState(t *testing.T) {
 func TestAgentsSwitchFilterBusyAndMovedMeanwhile(t *testing.T) {
 	ft, _ := switchRig(t)
 	ft.sessions("mac", agentRow("s1dflt0001", "", proto.StatusIdle), agentRow("s2other001", "sub", proto.StatusIdle))
+	// Drain the initial list event so it cannot start a delayed queue run during the move below.
+	waitFleetOrder(t, ft.s)
 	ft.f.nodes = map[string]nodeAnswer{
 		DeviceSessionSwitch: func(string, json.RawMessage) (any, error) {
 			return nil, &rpc.Error{Code: proto.CodeSwitchBusy, Message: "a background command runs"}

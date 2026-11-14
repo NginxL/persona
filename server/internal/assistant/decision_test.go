@@ -784,6 +784,43 @@ func TestExplainFirstKeepsTheDecision(t *testing.T) {
 	}
 }
 
+// The owner answers a decision twice within half an hour: first "Tell me the background first", the supervisor
+// re-issues it, then "You decide", or the background again. The hub takes the second answer and ends the round, so
+// the supervisor has to hear it, though its stopped agent said nothing new in between (#6027).
+func TestTheOwnersSecondAnswerReachesTheSupervisor(t *testing.T) {
+	for response, says := range map[string]string{respondDecideYourself: "回的是「你来定」", respondExplainFirst: "回的是「先讲清背景」"} {
+		t.Run(response, func(t *testing.T) {
+			s, f, todo := newSupervisedService(t)
+			waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+			if _, err := reviewErr(s, todo.ID, rolloutDecision()); err != nil {
+				t.Fatal(err)
+			}
+			before := len(f.notices())
+			if rec := answerAsk(s, todo.ID, map[string]string{"response": respondExplainFirst}); rec.Code != http.StatusOK {
+				t.Fatalf("first answer: %d %s", rec.Code, rec.Body.String())
+			}
+			waitFor(t, "the first answer told", func() bool {
+				return slices.ContainsFunc(f.notices()[before:], func(n string) bool { return strings.Contains(n, "回的是「先讲清背景」") })
+			})
+			again := rolloutDecision()
+			again["reason"] = "登录页修复已合并；先灰度还是直接全量"
+			if _, err := reviewErr(s, todo.ID, again); err != nil {
+				t.Fatal(err)
+			}
+			before = len(f.notices())
+			if rec := answerAsk(s, todo.ID, map[string]string{"response": response}); rec.Code != http.StatusOK {
+				t.Fatalf("second answer: %d %s", rec.Code, rec.Body.String())
+			}
+			if v := todoNow(s, todo.ID).Supervision; v.Reviews[len(v.Reviews)-1].OwnerResponse != response {
+				t.Fatalf("the second answer was not recorded: %+v", v.Reviews[len(v.Reviews)-1])
+			}
+			waitFor(t, "the second answer told", func() bool {
+				return slices.ContainsFunc(f.notices()[before:], func(n string) bool { return strings.Contains(n, says) })
+			})
+		})
+	}
+}
+
 // The supervision message for the three decision signals, as the supervisor reads it.
 func TestGoldenSuperviseDecisions(t *testing.T) {
 	d := &prompts.SuperviseDecision{WhyOwner: "irreversible", Question: "Drop the old table?", Recommend: "Drop it", NeverDefault: true,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Session, Workflow, WorkflowAgent } from "./types";
 import {
+  backgroundCommandLine,
   backgroundWaitLine,
   agentDetail,
   agentElapsed,
@@ -282,7 +283,7 @@ describe("the run's card (#3434)", () => {
     const s = session({ workflows: [{ ...run, tool_use_id: "tu1" }, { ...run, task_id: "w2", tool_use_id: "tu2" }], background_working: true });
     expect(backgroundLine(s)).toMatchObject({ run: { task_id: run.task_id }, more: 1, since: run.started_at, guessed: false });
     expect(waitingOnWorkflow(s)).toBe(true);
-    // other background work (a command, a subagent) leaves the bar and the turn as they were
+    // a shell or subagent is not a workflow line; it has its own background kind
     const shell = session({ background_working: true, background: [{ id: "b1", kind: "shell", started_at: "2026-11-05T13:00:00Z" }], subagents: [{ id: "x", session_id: "s1@x", running: true }] });
     expect(backgroundLine(shell)).toBeNull();
     expect(waitingOnWorkflow(shell)).toBe(false);
@@ -305,6 +306,24 @@ describe("backgroundWaitLine (#6045)", () => {
     expect(backgroundWaitLine(s)).toEqual({ what: "until gh pr checks 7 --watch", more: 1, since: "2026-01-01T00:00:00Z" });
     expect(backgroundWaitLine({ ...s, background_waiting: false })).toBeNull();
     expect(backgroundWaitLine({ ...s, state: "idle" })).toBeNull();
+  });
+});
+
+describe("backgroundCommandLine (#7341)", () => {
+  const first = { id: "b1", kind: "shell", command: "make release\nmake sign", started_at: "2026-11-05T13:00:00Z" };
+  const s = session({ background_working: true, state_since: "2026-11-05T12:00:00Z",
+    background: [first, { id: "b2", kind: "monitor", description: "tail the log", started_at: "2026-11-05T13:02:00Z" }, { id: "b3", kind: "agent" }] });
+
+  it("uses the first shell or Monitor, one command line, N more and that command's own start", () => {
+    expect(backgroundCommandLine(s)).toEqual({ what: "make release", more: 1, since: first.started_at });
+    expect(backgroundCommandLine({ ...s, background: [{ ...first, description: "Package the release" }] })).toEqual({ what: "Package the release", more: 0, since: first.started_at });
+  });
+
+  it("has no clock without the command's start, keeps the label without a listed command, and needs the explicit flag", () => {
+    expect(backgroundCommandLine({ ...s, background: [{ ...first, started_at: undefined }] })).toEqual({ what: "make release", more: 0 });
+    expect(backgroundCommandLine({ ...s, background: [] })).toEqual({ what: "", more: 0 });
+    expect(backgroundCommandLine({ ...s, background_working: false })).toBeNull();
+    expect(backgroundCommandLine({ ...s, background_working: undefined })).toBeNull();
   });
 });
 

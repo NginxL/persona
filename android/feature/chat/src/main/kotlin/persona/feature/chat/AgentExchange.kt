@@ -31,6 +31,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import persona.core.contracts.FeedItem
+import persona.core.contracts.SessionKey
+import persona.core.contracts.Todo
 import persona.core.designsystem.AssistantAnswerFrame
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JTextButton
@@ -157,6 +159,29 @@ internal fun UserRoutedExchange(item: FeedItem, title: String) {
             }
         }
     }
+}
+
+/** A successor belongs to the routed message, even before it appears in a paged Agent list. */
+internal fun newAgentKey(item: FeedItem, todo: Todo?): SessionKey? {
+    val id = item.field("new_agent")?.takeIf(String::isNotBlank) ?: return null
+    val machine = item.field("new_agent_machine")?.takeIf(String::isNotBlank)
+        ?: todo?.agents?.firstOrNull { it.sessionId == id }?.machineId ?: return null
+    return SessionKey(machine, id)
+}
+
+/** The same New hand-off as the web when messaging a task starts a successor Agent (#5110): one card, opening that Agent. */
+@Composable
+internal fun NewAgentHandoff(item: FeedItem, title: String, todo: Todo?, host: AssistantTaskHost) {
+    val key = newAgentKey(item, todo)
+    val handoff = persona.core.domain.tasks.AgentHandoff(
+        key = key?.let { "${it.machineId}/${it.sessionId}" } ?: item.id,
+        title = title,
+        wake = persona.core.domain.tasks.HandoffWake.Created,
+        machineId = key?.machineId,
+        sessionId = key?.sessionId,
+        todoId = todo?.id,
+    )
+    AgentHandoffCards(listOf(handoff), host, Modifier.padding(top = Tokens.Space.s), cardTag = "new-agent-handoff")
 }
 
 /** A task's agent to Persona (`report`, iOS `ReportExchange`): a question, a block, done, or how far it got. */

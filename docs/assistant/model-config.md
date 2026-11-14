@@ -3,16 +3,16 @@
 ## What the three entry points control
 
 - **Settings › Model Providers**: connection method, API protocol, gateway, encrypted credentials, default model, and existing launchers on your computers. The old “Models” page lives here; existing synchronization, hiding, details, and quota features remain.
-- **Settings › Model Settings**: configures five default-model categories: main chat, Agents, information processing, information screening, and question delegation. Each selects a provider, specific model, and supported thinking effort. Their purposes follow them, with two opt-in exceptions: the Inbox's **AI twin** and **Lark /agent** can each override Agents and can be reset to follow it. Named [model profiles](model-profiles.md) switch the category bindings and launcher model fields together; `agent_start` and `task_plan` can select a profile tier or explicit model override. The assistant's default launcher / model is selected only under “Main Chat” here; a chat switched to another model in the chat keeps that until it is reset (“A conversation's own model”).
+- **Settings › Model Settings**: configures five default-model categories: main chat, Agents, information processing, information screening, and question delegation. Each selects a provider, specific model, and supported thinking effort. Their purposes follow them, with opt-in exceptions: the Inbox's **AI twin** and **Lark /agent** can each override Agents and can be reset to follow it, and **Meeting minutes** and the **In-meeting conversation** can each override their category (Information processing, Main chat) the same way (#7980, "Meeting minutes and the in-meeting conversation (#7980)" below). Named [model profiles](model-profiles.md) switch the category bindings and launcher model fields together; `agent_start` and `task_plan` can select a profile tier or explicit model override. The assistant's default launcher / model is selected only under “Main Chat” here; a chat switched to another model in the chat keeps that until it is reset (“A conversation's own model”).
 - **Settings › Assistant**: Persona itself: proactive work (scheduled tasks, run history), understanding you (about me, memory), Skills, the machine it runs on, and its working directory. It neither displays nor configures models (#1291): the “Assistant” row on the settings home page has no launcher name, and the page has no “Chat model” entry. This is consistent across iOS, Mac, web, and Android. Switching one chat's model from the chat itself is not configuration either: the pick stays with that chat (“A conversation's own model”).
 
-The home page has five category rows and separate **AI twin runs** and **Lark /agent** rows, each showing whether it is separately configured or follows Agents. “Applies To” remains read-only and collapsed by default; those two rows open their own editors rather than the Agents category. The manager supplies the catalog and descriptions (forwarded by hub; see “Who owns models” below). Model names take priority; provider details live in the editor. “Unverified” is not repeated across the home page, but real errors and rate limits still appear.
+The home page has five category rows and separate **AI twin runs** and **Lark /agent** rows, each showing whether it is separately configured or follows Agents, and the **Meeting minutes** and **In-meeting conversation** rows, each showing whether it is separately configured or follows its category. “Applies To” remains read-only and collapsed by default; those two rows open their own editors rather than the Agents category. The manager supplies the catalog and descriptions (forwarded by hub; see “Who owns models” below). Model names take priority; provider details live in the editor. “Unverified” is not repeated across the home page, but real errors and rate limits still appear.
 
 | Category | Preserved configuration ID | Scope |
 | --- | --- | --- |
-| Main chat | `assistant` | Direct chats with the current persona, scheduled tasks |
+| Main chat | `assistant` | Direct chats with the current persona, scheduled tasks, a meeting's room conversation unless the In-meeting conversation is separately configured (`meeting.room`, #7980) |
 | Agents | `agent.new` | New Agents, AI twin execution and Lark `/agent`, each unless separately configured |
-| Information processing | `kb` | Translation, reply drafting, knowledge organization and session compaction, project organization and action-item extraction, chat titles and Agent label names, answers in an attended meeting (`meeting.answer`), next-message suggestions (`suggest.next`, `docs/assistant/assistant.md` "Next-message suggestions"), drafting source subscription recipes (`subscription.recipe`, called by the manager through `models.purpose_complete`, `docs/extensions/subscriptions.md` "Drafting with a model") |
+| Information processing | `kb` | Translation, reply drafting, knowledge organization and session compaction, project organization and action-item extraction, chat titles and Agent label names, meeting minutes unless Meeting minutes is separately configured (`meeting.minutes`, #7980), answers in an attended meeting when no room conversation answers them (`meeting.answer`), next-message suggestions (`suggest.next`, `docs/assistant/assistant.md` "Next-message suggestions"), drafting source subscription recipes (`subscription.recipe`, called by the manager through `models.purpose_complete`, `docs/extensions/subscriptions.md` "Drafting with a model") |
 | Information screening | `inbox.triage` | Inbox triage and summaries, importance assessment, deciding whether a reply or Agent handoff is needed, automatic Agent session-name corrections and periodic refreshes (#4812, `docs/assistant/agent-work.md` "Automatic session names (#4812)") |
 | Question delegation | `agent.delegate` | First assesses whether to answer an Agent's question on the user's behalf (#3029, `docs/assistant/assistant.md`, “Assistant answers questions first”). Added as the fifth category on 2026-11-05: this assessment must be more accurate than triage and must not follow information screening's cheap model. If never selected, it uses information screening's connection with the model changed to Opus 5.5 (`claude-opus-5-5`; if that connection is not for Claude models, it keeps its own model). Change the provider or model here. “Inherited From” shows the actual connection name and model (`inheritedLabel`; before 2026-11-06 it always said “Model uses Opus 5.5,” which was wrong for non-Claude connections or a manually changed model). Explicitly selecting a connection hides the inheritance source |
 
@@ -51,9 +51,9 @@ It is returned by the model-configuration list and detail endpoints, never store
 
 | Purpose | `kind` | `launch` | Execution |
 | --- | --- | --- | --- |
-| `assistant`, `schedule`, `task.*`, `assistant.supervise`, `inbox.agent`, `lark.agent` | `launcher` | `headless` | Background process, without a terminal panel |
+| `assistant`, `schedule`, `task.*`, `assistant.supervise`, `meeting.room`, `inbox.agent`, `lark.agent` | `launcher` | `headless` | Background process, without a terminal panel (`meeting.room`: always Claude Code's CLI, #7980) |
 | `agent.new` | `launcher` | `engine` | Interactive Agent in the target computer's terminal host |
-| `kb`, `inbox.triage`, `agent.delegate`, other API purposes, `extension.*` | `api` | omitted | HTTP requests sent directly by the assistant; with a Claude Code launcher that has no Messages gateway picked, one `claude -p` run per request on the main chat's computer (#5823) |
+| `kb`, `inbox.triage`, `agent.delegate`, `meeting.minutes`, other API purposes, `extension.*` | `api` | omitted | HTTP requests sent directly by the assistant; with a Claude Code launcher that has no Messages gateway picked, one `claude -p` run per request on the main chat's computer (#5823) |
 | `plugin.*` | `plugin` | omitted | The plugin's own model service |
 
 Non-launcher purposes always have an empty launch value, even if their parent is a launcher.
@@ -66,6 +66,10 @@ The web page groups purposes by `(kind, launch)`: **Persona chats · Background 
 These groups describe execution, not inheritance levels. The AI twin and Lark /agent sit alongside the main chat in the
 background-process group, each with **Inherits the Agents model · Runs as a background process** when following Agents, or
 **Separately configured** when overridden. Their reset action still says **Follow Agents**. Only **New agent** sits in the interactive group.
+The In-meeting conversation sits in the same background-process group right after Main chat and the background supervisor,
+and Meeting minutes in the direct-API group right after Information processing (#7980): each says **Follows Main chat** or
+**Follows Information processing** while it follows, **Separately configured** when overridden, and its reset action
+**Follow Main chat** or **Follow Information processing**.
 Scheduled tasks follow the main chat's category; this presentation does not add independent task settings.
 
 Each row's neutral execution chip has a fixed form and a backend that follows the effective provider and runtime:
@@ -188,6 +192,69 @@ The web catalog includes the separate row and a reset-to-follow action. Android 
 
 Clients find these rows by data, not by ID: a purpose with `parent: "agent.new"` and writable `fields` is an Agents override (web `agentsOverride`, Android `agentsOverride`, Apple `ModelConfigurationModel.followsAgents`), shown with "Separately configured" / "Follow Agents". An older hub that still sends `inbox.agent` with `fields: []` keeps it a read-only use of Agents.
 
+## Meeting minutes and the in-meeting conversation (#7980)
+
+A recorded meeting uses two models: one writes its minutes afterwards, the other is Persona in the meeting, the room
+conversation that answers the questions asked there ([meeting-minutes.md](meeting-minutes.md) "The room conversation").
+Before #7980 the minutes ran as `kb.compress`, together with translation, titles and knowledge organization, and the room on
+the main chat's launcher and model, so moving either one meant moving the rest with it. Each is now a purpose set apart
+from its category like Lark /agent and the AI twin: a record and revision of its own, sparse `provider`, `model` and
+`effort`, empty = follow the category (including later changes there), and one step back to following it.
+
+| | Meeting minutes | In-meeting conversation |
+| --- | --- | --- |
+| ID | `meeting.minutes` | `meeting.room` |
+| `kind`, `launch` | `api`, none | `launcher`, `headless` |
+| `parent`, `category_id` | `kb` (Information processing) | `assistant` (Main chat) |
+| `group` | Information processing's other uses (`group_processing`) | Main chat's other uses (`group_assistant`) |
+| What it runs | Every model call of a meeting's minutes: the whole transcript in one call, or each part's notes and the merge of a long one, with the summary card in the same answers ("How the hub generates them", "Summary card (#6563)") | The room conversation of every meeting that starts after a save: the questions asked in it, its topics, highlights and photo notes |
+| `fields` | `provider`, `model`, `effort` (effort only on a connection that takes one, as for its category) | `provider`, `model`, `effort`; never `runtime` |
+| Providers | Those of Information processing: direct API connections and the launchers an API purpose may run on ("Running API purposes on a launcher (#5823)") | Claude Code only: a launcher whose CLI is Claude Code on the assistant's computer, or a Messages API connection (Claude Code started with its address and key, as for the main chat). Codex and every other runtime are refused with a localized `err_meeting_room_claude_only` |
+| `machine_id` | None of its own: like every API purpose, the main chat's computer, where a Claude Code launcher picked for it runs ("Running API purposes on a launcher (#5823)") | The assistant's computer, where rooms start; launcher and model checks run there |
+| Record | `model_config.meeting.minutes` | `model_config.meeting.room` |
+| Takes effect | At the next call (a minutes job already running finishes its calls on what it resolved when each call started) | When the next room starts; a room keeps the launcher and model it started with until it is deleted, as every guest conversation does |
+
+- **Unset follows the category.** With nothing saved, or after a reset, each resolves exactly as before #7980: the minutes
+  on Information processing's binding (its automatic choice of a connection included), the room on Main chat's launcher,
+  model and effort. Nobody who never opens the two rows sees a change. `inherited_from` names the category while the
+  override is empty; `uses` is absent (they are uses themselves).
+- **The room is always Claude Code's CLI.** Its removal of built-in tools and of the owner's own setup is defined on the CLI
+  ([meeting-minutes.md](meeting-minutes.md) "The room conversation"), so the purpose never takes `runtime`, its `effective`
+  never carries one (a main chat on the Agent SDK gives the room the same launcher on the CLI, as before #4648 settled), and
+  a save naming a provider that is not Claude Code is refused before anything is stored. While it follows a main chat that
+  runs on Codex or another runtime, its `status` says rooms cannot start until a Claude Code launcher is picked here, and a
+  meeting's room is `unavailable` with `runtime_unsupported` as before; picking one here lets rooms run while the main chat
+  stays on Codex.
+- **`meeting.answer` stays a use of Information processing.** It answers a question from meeting material with no tools
+  for a #2981 meeting and for a room that is `unavailable` ([meeting-minutes.md](meeting-minutes.md) "What the hub gives the
+  answering model"): it is the fallback for when the room cannot run (its computer offline, a launcher that is not Claude
+  Code, a sign-in or model error). Following the In-meeting conversation would make it fail in exactly those cases, and a
+  direct call with no tools cannot run on a purpose that takes only Claude Code launchers. It follows `kb` as before.
+- **What the categories list.** Information processing's `uses` name **Meeting minutes** (`use_meeting_minutes`) and
+  **Meeting answers when the room can't answer** (`use_meeting_answer`), and Main chat's **In-meeting conversation**
+  (`use_meeting_room`): wording only, as Agents' list names the AI twin and Lark /agent.
+- **Unchanged elsewhere.** Saving changes neither category, neither the recording summaries and the daily recap (they stay
+  `kb.compress`) nor running rooms. Category-default assignment and [model profiles](model-profiles.md) never write the two
+  records (profiles switch the five categories only). Deleting a provider either one uses is refused ("Deleting a provider
+  in use"), with the room counting Main chat's provider while it follows it, and the minutes Information processing's
+  explicit provider while they follow it; an automatic selection is not a use when another provider would be selected
+  without this one, as for the category itself.
+
+**In the catalog.** `GET /api/v1/model-config` lists `meeting.room` and then `meeting.minutes` right after the background
+supervisor and before the extensions' purposes: the last built-in rows, so the rows installed apps already draw keep their
+order (the reason the background supervisor went last, "The background supervisor in the catalog"). `GET`, `PUT` and the
+compatible `PATCH` of `/api/v1/model-config/purposes/{id}` work for both as for Lark /agent: own revision, missing fields
+unchanged, explicit `null` clears, `409` on a stale revision. A hub before #7980 lists neither and answers `404` for both
+IDs; no client asks for them by ID.
+
+**Clients draw them by data** (no client asks for them by ID or needs an update to show and edit them):
+
+| Client | What it shows against a hub with #7980 |
+| --- | --- |
+| Web | Since #7980's web part: the room row after Main chat and the background supervisor, the minutes row after Information processing, the description, **Follows …** / **Separately configured**, a reset to follow, and for the room a line that it runs on Claude Code only. Builds from before list both by their `kind` and `launch` in catalog order (the room last in the background-process group, the minutes last in the direct-API group), with the description, **Follows** and the parent's name from `inherited_from`, and a generic reset |
+| Apple | Lists both after the categories and the other set-apart uses (`independentPurposes`: no `uses`, a `category_id` other than the ID, writable `fields`), with the description and the model in effect; the editor saves and resets them through the purpose's own revision. Builds without an Apple part draw no "Follow …" line under them and use the categories' explanatory sentence in the editor |
+| Android | Groups both by `group` in the hub's order, with the description, "Follows <parent>" from `inherited_from`, and the editor's "Use default" to reset; nothing to change |
+
 ## Extensions' own purposes (#6102)
 
 An extension granted the `models` scope (docs/extensions/extensions.md "Model calls") gets an API purpose `extension.<extension id>`, named after the extension, in the group "Extensions":
@@ -202,7 +269,7 @@ Deleting a Persona-managed provider used by a current extension purpose returns 
 
 ### Deleting a provider in use
 
-`DELETE /api/v1/launchers/{name}` of a Persona-managed provider reads `providerModelUses`: every purpose of the catalog (the five categories, the AI twin, Lark /agent, the background supervisor since #5806) and every current extension purpose whose effective provider is that one. Any use answers 409 with the localized “still used” error (`assistant-models_launchers.err_in_use`) naming the purposes in the request's language, and nothing is changed. The background supervisor counts with its own provider, and with Main chat's while it follows it (the error then names both). Before #5806 it was not counted, so a provider only it ran on could be deleted underneath it. To delete such a provider, give the background supervisor another one or clear its override so it follows Main chat. An automatic selection by an API category is not a use when another provider would be selected without this one. The same list decides `in_use` when an import offers to hide an alias.
+`DELETE /api/v1/launchers/{name}` of a Persona-managed provider reads `providerModelUses`: every purpose of the catalog (the five categories, the AI twin, Lark /agent, the background supervisor since #5806, Meeting minutes and the In-meeting conversation since #7980) and every current extension purpose whose effective provider is that one. Any use answers 409 with the localized “still used” error (`assistant-models_launchers.err_in_use`) naming the purposes in the request's language, and nothing is changed. The background supervisor counts with its own provider, and with Main chat's while it follows it (the error then names both). Before #5806 it was not counted, so a provider only it ran on could be deleted underneath it. To delete such a provider, give the background supervisor another one or clear its override so it follows Main chat. An automatic selection by an API category is not a use when another provider would be selected without this one. The same list decides `in_use` when an import offers to hide an alias.
 
 ## Legacy configuration compatibility and unified application (#697)
 
@@ -418,9 +485,9 @@ What each purpose is for, in one sentence, comes with the purpose from the manag
 
 ## API
 
-`purposes` in `GET /api/v1/model-config` returns the five ordered category configurations followed by the editable AI twin (`inbox.agent`) and Lark /agent purposes and the extensions' own purposes (`extension.<id>`, see "Extensions' own purposes"), plus `providers`; `GET /api/v1/model-config/purposes/{id}` returns one `purpose` and available `providers`, supporting legacy-purpose queries.
+`purposes` in `GET /api/v1/model-config` returns the five ordered category configurations followed by the editable AI twin (`inbox.agent`) and Lark /agent purposes, the background supervisor (`assistant.supervise`), the In-meeting conversation (`meeting.room`) and Meeting minutes (`meeting.minutes`, #7980) and the extensions' own purposes (`extension.<id>`, see "Extensions' own purposes"), plus `providers`; `GET /api/v1/model-config/purposes/{id}` returns one `purpose` and available `providers`, supporting legacy-purpose queries.
 
-`Purpose` includes `id/name/group/kind`, `description` (#5086: what the purpose is for, one sentence in the request's language; every built-in purpose has one, including `assistant.supervise` and the read-only purposes under a category; a task's own, an extension's and a voice plugin's have none, and a hub before #5086 sends none. Android draws it under the purpose's name since #5802 (`docs/android/android.md`) and the Apple apps do in Model Settings (#5806, `docs/apple/ios.md`); the web shows it under each purpose's name in Settings › Models (#5806), with its own sentence for the background supervisor only on a hub that sends none; the catalog's row for `assistant.supervise` carries it since #5806), `category_id`, `override`, `effective`, `revision`, `inherited_from/status`, `limit` when the connection is paused (see “Upstream rate limits”), and `fields/provider_ids` to constrain the form. The categories' `category_id` equals their own ID, with `uses: [{"name":"Read-only purpose description"}]`. The AI twin and Lark /agent point `category_id` to Agents but have their own `override`, `revision`, and nonempty `fields`; clients determine editability from `fields`, not solely `category_id`. The background supervisor's purpose (in the catalog since #5806) points `category_id` and `parent` to Main chat the same way, with its own `override`, `revision` and nonempty `fields`. Other legacy purposes point `category_id` to their owning category; `override` is empty, `fields` is `[]`, and revision and effective model come from the category. A task purpose (`task.<task id>`, requested by its own `GET`) points `category_id` and `parent` to Main chat but has its own `revision` and `override` and nonempty `fields` (provider, model, effort); with an empty override it follows Main chat, including later changes there. Real task names do not appear on the configuration home page. The `plugin.<plugin id>` model protocol remains independent and is not added to the four-category catalog. Responses contain no secrets.
+`Purpose` includes `id/name/group/kind`, `description` (#5086: what the purpose is for, one sentence in the request's language; every built-in purpose has one, including `assistant.supervise` and the read-only purposes under a category; a task's own, an extension's and a voice plugin's have none, and a hub before #5086 sends none. Android draws it under the purpose's name since #5802 (`docs/android/android.md`) and the Apple apps do in Model Settings (#5806, `docs/apple/ios.md`); the web shows it under each purpose's name in Settings › Models (#5806), with its own sentence for the background supervisor only on a hub that sends none; the catalog's row for `assistant.supervise` carries it since #5806), `category_id`, `override`, `effective`, `revision`, `inherited_from/status`, `limit` when the connection is paused (see “Upstream rate limits”), and `fields/provider_ids` to constrain the form. The categories' `category_id` equals their own ID, with `uses: [{"name":"Read-only purpose description"}]`. The AI twin and Lark /agent point `category_id` to Agents but have their own `override`, `revision`, and nonempty `fields`; clients determine editability from `fields`, not solely `category_id`. The background supervisor's purpose (in the catalog since #5806) points `category_id` and `parent` to Main chat the same way, with its own `override`, `revision` and nonempty `fields`; so does the In-meeting conversation's (`meeting.room`), and Meeting minutes (`meeting.minutes`) points them to Information processing (#7980). Other legacy purposes point `category_id` to their owning category; `override` is empty, `fields` is `[]`, and revision and effective model come from the category. A task purpose (`task.<task id>`, requested by its own `GET`) points `category_id` and `parent` to Main chat but has its own `revision` and `override` and nonempty `fields` (provider, model, effort); with an empty override it follows Main chat, including later changes there. Real task names do not appear on the configuration home page. The `plugin.<plugin id>` model protocol remains independent and is not added to the four-category catalog. Responses contain no secrets.
 
 Saving one item:
 
@@ -439,11 +506,11 @@ Only `assistant` may write `runtime` (see “Main-chat runtime”).
 “Information screening” (`inbox.triage`) also governs plugins: plugins using the Inbox without their own fallback require it to be callable before they can be enabled. With such plugins enabled, a change making it unusable returns 422 `triage_model_in_use`,
 listing plugin names (clearing a selection still saves normally if fallback to `manager.json`'s `ai` / `inbox.triage_ai` or automatic selection remains callable; `docs/extensions/extensions.md`, “General rules for the Inbox”).
 
-Send to `PUT /api/v1/model-config/purposes/{id}` or the compatible `PATCH` endpoint. The five category configurations, the AI twin, Lark /agent, the extensions' own purposes, and independent plugins are writable; other legacy purposes or task IDs return 400 (purpose models are read-only; edit the owning category). Missing fields are unchanged, `null` clears a selection, and nonempty values override. Success returns the same structure as a single-item GET. Only supported fields may be selected; a revision mismatch returns 409, and unknown purposes are not created ad hoc.
+Send to `PUT /api/v1/model-config/purposes/{id}` or the compatible `PATCH` endpoint. The five category configurations, the AI twin, Lark /agent, the background supervisor, Meeting minutes, the In-meeting conversation, the extensions' own purposes, and independent plugins are writable; other legacy purposes or task IDs return 400 (purpose models are read-only; edit the owning category). Missing fields are unchanged, `null` clears a selection, and nonempty values override. Success returns the same structure as a single-item GET. Only supported fields may be selected; a revision mismatch returns 409, and unknown purposes are not created ad hoc.
 
 ## Validation
 
 - Server tests use real Postgres to verify persistence, concurrent category updates, the four-category catalog, unified resolution for all purposes, old overrides excluded but not deleted, three task execution paths (returning to a source chat does not change its launcher), unchanged permissions, caches, and executor parameters.
 - Apple uses `FakeHub` to test category and read-only-scope decoding, old-purpose navigation to the owning category, old-hub update prompts, PATCH null semantics, and drafts/conflicts. UI `ModelConfigurationTests` verifies only the four category rows and the background supervisor's use (#5083, the mock hub answers for `assistant.supervise` by its ID and leaves it out of its catalog, as a hub before #5806 does), no search, scope collapsed by default and read-only, and real category saves. DEBUG uses `-openModelConfiguration YES [-openModelPurpose <category or legacy purpose id>]`.
 - Web and Android have pure-logic tests for the same protocol; the manager consolidates the catalog into four categories.
-- `python3 -I scripts/mock/test_model_config_mock.py` starts an independent mock covering the four-category catalog, read-only purpose inheritance and write rejection, saving, conflicts, restoring defaults, and unknown purposes; no real model is called.
+- `python3 -I scripts/mock/test_model_config_mock.py` starts an independent mock covering the four-category catalog, the two meeting purposes with `MOCK_MEETING_MODELS=1` (listed, edited, reset and refused with a stale revision; without the flag the mock is a hub before #7980), read-only purpose inheritance and write rejection, saving, conflicts, restoring defaults, and unknown purposes; no real model is called.

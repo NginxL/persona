@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import type { Session, Subagent, Workflow } from "./types";
 import type { SessionLookup, Todo } from "./todos";
-import { waitingOnWorkflow, workflowCounts } from "./workflows";
+import { backgroundCommandLine, backgroundWaitLine, waitingOnWorkflow, workflowCounts, type WaitLine } from "./workflows";
 import { runningChildren } from "./child-sessions";
 
 /** Live work, not a waiting label: summary counts win over omitted detail arrays. */
@@ -38,6 +38,30 @@ export function backgroundWork(session: Session | undefined): BackgroundWork | u
  *  backgroundLine). */
 export function waitingOnSubagents(s: Session | undefined, subagents: Subagent[] | undefined = s?.subagents): boolean {
   return Boolean(s?.background_working) && !waitingOnWorkflow(s) && (subagents ?? []).some((a) => a.running && a.background);
+}
+
+export type BackgroundTurnKind = "workflow" | "subtasks" | "waiting" | "command";
+
+export interface BackgroundActivity {
+  streaming: boolean;
+  outgoing: boolean;
+  awaiting: boolean;
+}
+
+/** The one background kind that represents an ended turn, in display priority order. Null leaves the turn live. A
+ *  command requires the hub's explicit background_working flag: a foreground turn, and an older hub without the flag,
+ *  keep their old rendering even when background tasks are listed. */
+export function backgroundTurn(s: Session | undefined, subagents: Subagent[] | undefined, activity: BackgroundActivity): { kind: BackgroundTurnKind; line?: WaitLine } | null {
+  if (!s || activity.streaming || activity.outgoing || activity.awaiting) return null;
+  if (waitingOnWorkflow(s)) return { kind: "workflow" };
+  if (waitingOnSubagents(s, subagents)) return { kind: "subtasks" };
+  const wait = backgroundWaitLine(s);
+  if (wait) return { kind: "waiting", line: wait };
+  // Some runtimes list delegated work only as background agents / workflows, without the detail arrays above. Those
+  // are not a shell-command fallback, and a runtime that sends only background_working still gets the label alone.
+  if (s.background?.some((b) => b.kind === "agent" || b.kind === "workflow")) return null;
+  const command = backgroundCommandLine(s);
+  return command ? { kind: "command", line: command } : null;
 }
 
 /** One task can have several active agents: do not mistake a quiet lead for an idle task. */

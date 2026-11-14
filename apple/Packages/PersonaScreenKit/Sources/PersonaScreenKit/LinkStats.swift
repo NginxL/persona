@@ -17,6 +17,12 @@ public struct LinkStats: Equatable, Sendable {
         case wifi, cellular, wired, other
     }
 
+    /// What carries the video on the route: its TLS connection (or the relay's WebSocket), or a UDP flow beside a
+    /// direct route's connection (#7873).
+    public enum Transport: String, Codable, CaseIterable, Sendable {
+        case tcp, udp
+    }
+
     public var kind: Kind
     public var via: Via
     /// Smoothed round trip in ms (EWMA with gain 1/8, as TCP's SRTT); through the hub on the relay.
@@ -33,9 +39,11 @@ public struct LinkStats: Equatable, Sendable {
     public var samples: Int
     /// Enough recent round trips, low loss and low jitter (the route choice's rule); a route that isn't is never moved to.
     public var healthy: Bool
+    /// What carries the video on the route (#7873).
+    public var transport: Transport
 
     public init(kind: Kind, via: Via, srttMs: Double? = nil, minRttMs: Double? = nil, jitterMs: Double? = nil,
-                packetLoss: Double? = nil, samples: Int = 0, healthy: Bool = false) {
+                packetLoss: Double? = nil, samples: Int = 0, healthy: Bool = false, transport: Transport = .tcp) {
         self.kind = kind
         self.via = via
         self.srttMs = srttMs
@@ -44,6 +52,7 @@ public struct LinkStats: Equatable, Sendable {
         self.packetLoss = packetLoss
         self.samples = samples
         self.healthy = healthy
+        self.transport = transport
     }
 }
 
@@ -76,4 +85,17 @@ public struct PathChange: Equatable, Sendable {
         self.to = to
         self.reason = reason
     }
+}
+
+/// `update.path` (PersonaScreenCore's wire) from and to the route as measured here: kept with `LinkStats`, so the helper's
+/// module, which never measures a route, doesn't carry it (#7927).
+public extension UpdateMessage.Path {
+    /// The route `link` measures, as `update` carries it.
+    init(_ link: LinkStats) {
+        self.init(kind: link.kind.rawValue, via: link.via.rawValue, minRttMs: link.minRttMs)
+    }
+
+    /// The kind as `LinkStats` names it; nil for one this side doesn't know.
+    var linkKind: LinkStats.Kind? { LinkStats.Kind(rawValue: kind) }
+    var linkVia: LinkStats.Via? { LinkStats.Via(rawValue: via) }
 }

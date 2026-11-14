@@ -603,9 +603,8 @@ struct AssistantTopBar: View {
                                 }
                             } label: {
                                 let title = [l.name, Fmt.model(l.model)].compactMap { $0 }.joined(separator: " · ")
-                                if l.name == launcher, model.assistantLaunchers[key] != nil {
-                                    Label { Text(title); Text("Just Once") } icon: { ThemedIcon(Theme.Icon.done) }
-                                } else if l.name == launcher { Label(title, systemImage: Theme.Icon.done) } else { Text(title) }
+                                // No "Just Once": the pick stays with this chat, from the next message on (#7513).
+                                if l.name == launcher { Label(title, systemImage: Theme.Icon.done) } else { Text(title) }
                             }
                             // A nested menu keeps the items it was first built with: the list read after the bar
                             // came up, an ID typed or forgotten since, or another pick builds it again.

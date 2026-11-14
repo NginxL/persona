@@ -43,9 +43,35 @@ type InboxGroup struct {
 
 func RenderInboxGroup(g InboxGroup) string { return render("inbox/group", g) }
 
+// InboxSettled is the system prompt that says whether an open "Needs you" event is over, given what came after it in
+// its conversation (inbox/settled; assistant/inbox_settle.go).
+type InboxSettled struct {
+	Owner string // "" is the Chinese "you"
+}
+
+func RenderInboxSettled(s InboxSettled) string { return render("inbox/settled", s) }
+
+// InboxSettledInput is the event and the messages after it (inbox/settled_input), oldest first.
+type InboxSettledInput struct {
+	Title, Summary, Context string
+	Later                   []InboxSettledLine
+}
+
+// InboxSettledLine is one message after the event: At as "01-02 15:04" ("" unknown), Mine the owner's own; ReplyTo the
+// message it quotes and Thread the topic it is in (ids as the event's context names its messages), "" none.
+type InboxSettledLine struct {
+	At, Sender, Text, ReplyTo, Thread string
+	Mine                              bool
+}
+
+func RenderInboxSettledInput(in InboxSettledInput) string { return render("inbox/settled_input", in) }
+
 // InboxGroupInput is one batch as the model reads it, with the tool calls made so far (inbox/group_input).
 type InboxGroupInput struct {
-	Thread  string
+	Thread string
+	// Kind is who the other side of a direct chat is, in the connector's words (its kind_descriptions: a person, a bot
+	// or an app); "" for a group, whose messages carry their own mention markers.
+	Kind    string
 	New     []string // the new messages' ids
 	Context string   // their text, as the connector wrote it
 	Events  string   // the events tool's answer without a query (JSON)

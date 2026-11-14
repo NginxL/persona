@@ -110,9 +110,6 @@ export function defaultLabel(d: LauncherDefault | null | undefined, fallback = "
   return parts.length ? t("lib-launcher-models.default_named", { name: parts.join(" · ") }) : t("lib-launcher-models.default");
 }
 
-/** What a launcher picked over the default is marked with: it applies to this start / conversation only. */
-export const oneOff = () => t("lib-launcher-models.one_off");
-
 // The hub gives a model list 70 s (assistant/models_launchers.go): the node may have to start the CLI to ask its /model.
 const MODELS_HUB_MS = 70_000;
 

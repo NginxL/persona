@@ -39,6 +39,8 @@
   "done_read": "Read elsewhere, done",
   "done_muted": "Muted, done",
   "done_manager": "Assistant checked: nothing to do",
+  "done_over": "Looks settled in the conversation, marked done",
+  "done_task": "Its task is done, marked done",
   "failed_timeout": "Handling timed out",
   "failed_stopped": "The handling conversation stopped without a suggestion",
   "failed_send": "Sending didn’t go through",

@@ -154,6 +154,74 @@ func TestHubCall(t *testing.T) {
 	}
 }
 
+// A frame without a result or a non-null error is not an answer; its ID stays pending for the real answer.
+func TestHubCallIgnoresIncompleteReplies(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields string
+	}{
+		{"id_only", ""},
+		{"null_error", `,"error":null`},
+		{"params_only", `,"params":{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, hub := startWithHub(t, Program{ID: "example", Version: "1.0.0"})
+			var got struct {
+				Value string `json:"value"`
+			}
+			errs := make(chan error, 1)
+			go func() { errs <- hub.Call(context.Background(), "fixture.read", nil, &got) }()
+			f := h.next()
+			h.send(`{"id":"` + f.ID + `"` + tc.fields + `}`)
+			select {
+			case err := <-errs:
+				t.Fatalf("incomplete reply completed Call: err=%v, zero-value result=%+v", err, got)
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			h.send(`{"id":"` + f.ID + `","result":{"value":"ok"}}`)
+			select {
+			case err := <-errs:
+				if err != nil || got.Value != "ok" {
+					t.Fatalf("valid reply after incomplete reply: err=%v, result=%+v", err, got)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("valid reply after incomplete reply left Call pending")
+			}
+		})
+	}
+}
+
+func TestHubCallAcceptsNullAndErrorReplies(t *testing.T) {
+	h, hub := startWithHub(t, Program{ID: "example", Version: "1.0.0"})
+	errs := make(chan error, 1)
+	var got any = "sentinel"
+	go func() { errs <- hub.Call(context.Background(), "fixture.read", nil, &got) }()
+	f := h.next()
+	h.send(`{"id":"` + f.ID + `","result":null}`)
+	select {
+	case err := <-errs:
+		if err != nil || got != nil {
+			t.Fatalf("explicit null result: err=%v, result=%#v", err, got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("explicit null result left Call pending")
+	}
+
+	go func() { errs <- hub.Call(context.Background(), "fixture.read", nil, nil) }()
+	f = h.next()
+	h.send(`{"id":"` + f.ID + `","error":{"message":"denied","code":"conflict"}}`)
+	var e *Error
+	select {
+	case err := <-errs:
+		if !errors.As(err, &e) || e.Message != "denied" || e.Code != "conflict" {
+			t.Fatalf("valid error reply: %#v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("valid error reply left Call pending")
+	}
+}
+
 func TestHubEvents(t *testing.T) {
 	h, hub := startWithHub(t, Program{ID: "example", Version: "1.0.0"})
 	for _, c := range []struct {

@@ -106,7 +106,10 @@ func (h *Hub) machineList() []proto.Machine {
 			s.Route = &proto.MachineRoute{Via: kindOf(m.cfg)}
 		}
 		h.withTrust(&s, m.cfg.Kind) // trust, error_code (machine_trust.go)
-		s.Manager = m.ownerOrCarrier()
+		// The unavailable-owner sentinel is internal, not a manager ID.
+		if owner := m.ownerOrCarrier(); owner != unknownMachineOwner {
+			s.Manager = owner
+		}
 		out = append(out, s)
 	}
 	return out

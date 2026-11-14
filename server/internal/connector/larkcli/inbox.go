@@ -48,11 +48,12 @@ type StateStore interface {
 const inboxStateKey = "connector.larkcli.inbox"
 
 type persistedInboxState struct {
-	Cursor       string   `json:"cursor,omitempty"`
-	PageToken    string   `json:"page_token,omitempty"`
-	Topics       []string `json:"topics,omitempty"`
-	Seen         []string `json:"seen,omitempty"`
-	TopicsSeeded bool     `json:"topics_seeded,omitempty"`
+	Cursor       string                          `json:"cursor,omitempty"`
+	PageToken    string                          `json:"page_token,omitempty"`
+	Topics       []string                        `json:"topics,omitempty"`
+	Seen         []string                        `json:"seen,omitempty"`
+	TopicsSeeded bool                            `json:"topics_seeded,omitempty"`
+	Things       map[string]connector.InboxThing `json:"things,omitempty"`
 }
 
 type inboxGroup struct {
@@ -487,6 +488,11 @@ func (c *Connector) loadInboxStateLocked(ctx context.Context) error {
 		return nil
 	}
 	c.inboxState = saved
+	for thread, thing := range saved.Things {
+		if thread != "" {
+			c.inboxThings[thread] = thing
+		}
+	}
 	for _, id := range saved.Seen {
 		if id != "" {
 			c.inboxSeen[id] = struct{}{}
@@ -504,7 +510,11 @@ func (c *Connector) saveInboxStateLocked(ctx context.Context) error {
 	if c.inboxStore == nil {
 		return nil
 	}
-	state := persistedInboxState{Cursor: c.inboxState.Cursor, PageToken: c.inboxState.PageToken, TopicsSeeded: c.inboxState.TopicsSeeded}
+	state := persistedInboxState{Cursor: c.inboxState.Cursor, PageToken: c.inboxState.PageToken, TopicsSeeded: c.inboxState.TopicsSeeded,
+		Things: make(map[string]connector.InboxThing, len(c.inboxThings))}
+	for thread, thing := range c.inboxThings {
+		state.Things[thread] = thing
+	}
 	for topic := range c.inboxTopics {
 		state.Topics = append(state.Topics, topic)
 	}

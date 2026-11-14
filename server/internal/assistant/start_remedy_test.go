@@ -281,6 +281,37 @@ func TestARetryThatFailsWithoutATabFailsForGood(t *testing.T) {
 	waitFor(t, "the supervisor told", func() bool { return len(f.notices()) == 2 })
 }
 
+// A retry that ends the way the first start did is still news: task_retry promised the supervisor how it ends (#6027).
+// In the kept tab it stops on the same question again; in a new tab, after a start that failed for good, it fails
+// with the same error.
+func TestARetryThatFailsTheSameWayIsTold(t *testing.T) {
+	for name, c := range map[string]struct {
+		failure error
+		state   string
+	}{
+		"the same question in the kept tab": {keptRefusal(proto.CodeShellWaiting), remedying},
+		"the same error in a new tab":       {&rpc.Error{Code: proto.CodeStartLineRejected, Message: "the new tab's shell did not take the start line, twice"}, remedyFailed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			todo, p := remedyingTask(t, s, f, c.failure)
+			waitFor(t, "the first failure told", func() bool { return len(f.notices()) == 1 })
+			raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "reason": "再试一次"})
+			if _, err := s.runTool(context.Background(), "server", "conv1", "task_retry", raw); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "the retry to end", func() bool {
+				s.tasks.mu.Lock()
+				busy := s.tasks.retrying[todo.ID]
+				s.tasks.mu.Unlock()
+				r := remedyState(t, s, p.ID)
+				return !busy && len(f.started()) >= 2 && r != nil && r.State == c.state && r.Attempt == 1
+			})
+			waitFor(t, "the retry's failure told", func() bool { return len(f.notices()) == 2 })
+		})
+	}
+}
+
 // Another held conversation's turn ends (a leader's, or the background supervisor's, which is held on every
 // supervision message, #4927): it never saw the failed start, so the start the main conversation is still remedying
 // is not given up under it. The main conversation's own turn end then ends it as ever.

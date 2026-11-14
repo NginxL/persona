@@ -19,6 +19,7 @@ func TestModelPurposeLaunch(t *testing.T) {
 		{"agent.new", "", "engine"},
 		{"inbox.agent", "agent.new", "headless"},
 		{"lark.agent", "agent.new", "headless"},
+		{purposeMeetingRoom, "assistant", "headless"},
 		{"child", "assistant", "headless"},
 		{"child", "agent.new", "engine"},
 		{"unknown", "", ""},
@@ -27,6 +28,7 @@ func TestModelPurposeLaunch(t *testing.T) {
 		{"agent.delegate", "", ""},
 		{"plugin.voice", "", ""},
 		{"extension.example", "kb", ""},
+		{purposeMeetingMinutes, "kb", ""},
 	} {
 		for _, kind := range []string{"launcher", "api", "plugin", ""} {
 			p := ModelPurpose{ID: tc.id, Parent: tc.parent, Kind: kind}
@@ -57,7 +59,7 @@ func TestModelLaunchJSONIsDerivedAndReadOnly(t *testing.T) {
 			item["launch"] = launch
 		}
 		sample = append(sample, item)
-		want := map[string]string{"assistant": "headless", "agent.new": "engine", "inbox.agent": "headless", "lark.agent": "headless", purposeSupervise: "headless"}[p["id"].(string)]
+		want := map[string]string{"assistant": "headless", "agent.new": "engine", "inbox.agent": "headless", "lark.agent": "headless", purposeSupervise: "headless", purposeMeetingRoom: "headless"}[p["id"].(string)]
 		if want == "" {
 			if _, ok := p["launch"]; ok {
 				t.Fatalf("non-launcher serialized launch: %v", p)

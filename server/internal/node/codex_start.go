@@ -148,16 +148,30 @@ func (n *Node) codexBypassArgv(launcher string, argv []string) []string {
 	return codexBypassArgs(argv)
 }
 
+// insertBeforeDashDash puts extra in the option region of args, leaving the separator and prompt suffix in place.
+func insertBeforeDashDash(args, extra []string) []string {
+	end := slices.Index(args, "--")
+	if end < 0 {
+		end = len(args)
+	}
+	out := make([]string, 0, len(args)+len(extra))
+	out = append(out, args[:end]...)
+	out = append(out, extra...)
+	return append(out, args[end:]...)
+}
+
 // codexExecutionArgs is a Codex launcher's words argv running model execution e: its model in place of any the words
 // name, and its effort, which as the purpose's explicit choice takes precedence over the launcher's defaults.
 func codexExecutionArgs(argv []string, e modelExecution) []string {
+	var extra []string
 	if e.Model != "" {
-		argv = append(withoutModelArgs(argv), "--model", e.Model)
+		argv = withoutModelArgs(argv)
+		extra = append(extra, "--model", e.Model)
 	}
 	if e.Effort != "" {
-		argv = append(argv, "-c", "model_reasoning_effort="+e.Effort)
+		extra = append(extra, "-c", "model_reasoning_effort="+e.Effort)
 	}
-	return argv
+	return insertBeforeDashDash(argv, extra)
 }
 
 // startCodex starts a Codex launcher in a new tab with the first message and returns its session once the thread is
@@ -276,6 +290,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	if waiting {
 		return n.openCodexWait(ctx, pane, cwd, launcher, mode, began), nil
 	}
+	defer n.unclaimCodexThread(id)
 	n.bindPane(pane, id)
 	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC()}
 	if mode == "plan" {
@@ -303,6 +318,32 @@ func codexOnRemote(argv []string) bool {
 		}
 	}
 	return false
+}
+
+// claimCodexThread reserves a matched public thread ID for pane. Another pane's binding or in-flight claim wins without
+// making this waiter stop: it keeps scanning for the next matching rollout instead.
+func (n *Node) claimCodexThread(pane, id string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for p, bound := range n.panes {
+		if bound == id && p != pane {
+			return false
+		}
+	}
+	if owner, ok := n.codexClaims[id]; ok && owner != pane {
+		return false
+	}
+	if n.codexClaims == nil {
+		n.codexClaims = map[string]string{}
+	}
+	n.codexClaims[id] = pane
+	return true
+}
+
+func (n *Node) unclaimCodexThread(id string) {
+	n.mu.Lock()
+	delete(n.codexClaims, id)
+	n.mu.Unlock()
 }
 
 // waitCodexThread waits for the thread a start made: a rollout in the directory (as given, or resolved: Codex records
@@ -335,7 +376,10 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 				}
 				// A thread begun by this launch (not one resumed in the same directory) whose first message is ours.
 				if at, first := codexThreadStart(r.path); !at.Before(began.Add(-2*time.Second)) && strings.TrimSpace(first) == strings.TrimSpace(prompt) {
-					return n.codexPublicID(home, r.id), nil
+					id := n.codexPublicID(home, r.id)
+					if n.claimCodexThread(pane, id) {
+						return id, nil
+					}
 				}
 			}
 		}
