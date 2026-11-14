@@ -464,7 +464,8 @@ func TestModelPurposesDescribeThemselves(t *testing.T) {
 			if p.ID == purposeSupervise && !strings.Contains(d, c.supervise) {
 				t.Errorf("%q: the background supervisor's: %q", c.lang, d)
 			}
-			lower := strings.ToLower(d)
+			// Claude Code is a launcher, not a model: the In-meeting conversation says it runs only there (#7980).
+			lower := strings.ReplaceAll(strings.ToLower(d), "claude code", "")
 			for _, name := range []string{"claude", "opus", "sonnet", "haiku", "fable", "gpt"} {
 				if strings.Contains(lower, name) {
 					t.Errorf("%s %q names a model: %q", p.ID, c.lang, d)

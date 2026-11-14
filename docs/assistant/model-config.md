@@ -210,7 +210,7 @@ from its category like Lark /agent and the AI twin: a record and revision of its
 | What it runs | Every model call of a meeting's minutes: the whole transcript in one call, or each part's notes and the merge of a long one, with the summary card in the same answers ("How the hub generates them", "Summary card (#6563)") | The room conversation of every meeting that starts after a save: the questions asked in it, its topics, highlights and photo notes |
 | `fields` | `provider`, `model`, `effort` (effort only on a connection that takes one, as for its category) | `provider`, `model`, `effort`; never `runtime` |
 | Providers | Those of Information processing: direct API connections and the launchers an API purpose may run on ("Running API purposes on a launcher (#5823)") | Claude Code only: a launcher whose CLI is Claude Code on the assistant's computer, or a Messages API connection (Claude Code started with its address and key, as for the main chat). Codex and every other runtime are refused with a localized `err_meeting_room_claude_only` |
-| `machine_id` | none | The assistant's computer, where rooms start; launcher and model checks run there |
+| `machine_id` | None of its own: like every API purpose, the main chat's computer, where a Claude Code launcher picked for it runs ("Running API purposes on a launcher (#5823)") | The assistant's computer, where rooms start; launcher and model checks run there |
 | Record | `model_config.meeting.minutes` | `model_config.meeting.room` |
 | Takes effect | At the next call (a minutes job already running finishes its calls on what it resolved when each call started) | When the next room starts; a room keeps the launcher and model it started with until it is deleted, as every guest conversation does |
 

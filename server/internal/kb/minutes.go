@@ -83,6 +83,12 @@ type MinutesAction struct {
 	TodoID  string  `json:"todo_id,omitempty"`
 }
 
+// PurposeMeetingMinutes is the model purpose every call of a minutes job asks for (#7980): the whole transcript, or each
+// part's notes and their merge, with the summary card in the same answers. It follows Information processing until it
+// is set apart in Model settings (docs/assistant/model-config.md "Meeting minutes and the in-meeting conversation
+// (#7980)"); the recordings' summaries and the day recap stay on kb.compress.
+const PurposeMeetingMinutes = "meeting.minutes"
+
 var (
 	// ErrMinutesStale: the minutes were written again since the version a request names.
 	ErrMinutesStale = errors.New("the minutes changed since; read them again")
@@ -578,7 +584,7 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 		return nil
 	}
 	in := e.minutesInput(&r, zone)
-	model := e.modelFor("kb.compress")
+	model := e.modelFor(PurposeMeetingMinutes)
 	callTime := minutesCallTime(r.minutesTimeouts())
 	call := func(system, user string, out *minutesAnswer) error {
 		cctx, cancel := context.WithTimeout(ctx, callTime)

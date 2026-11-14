@@ -45,7 +45,7 @@ func TestModelConfigSpeaksTheRequestLanguage(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := out.Purposes[0]
-		if p.ID != "assistant" || p.Name != c.name || p.Group != c.group || len(p.Uses) != 2 || p.Uses[1].Name != c.use {
+		if p.ID != "assistant" || p.Name != c.name || p.Group != c.group || len(p.Uses) != 3 || p.Uses[1].Name != c.use {
 			t.Fatalf("%q: %+v", c.lang, p)
 		}
 		var detail struct {

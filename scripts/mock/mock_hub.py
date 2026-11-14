@@ -13600,6 +13600,42 @@ SUPERVISE_PURPOSE = "assistant.supervise"
 # lists the background supervisor's use in the catalog, as its last built-in purpose, and sends each built-in purpose's
 # one-sentence `description` (#5086). Without it the catalog is a hub's from before: the use is answered by its id only.
 SUPERVISE_LISTED = os.environ.get("MOCK_SUPERVISE_LISTED") == "1"
+# MOCK_MEETING_MODELS=1: the two editable meeting uses (#7980); without it both ids are unknown, as on an older hub.
+MEETING_MODELS = os.environ.get("MOCK_MEETING_MODELS") == "1"
+MEETING_PURPOSES = {"meeting.room": "assistant", "meeting.minutes": "kb"}
+# The hub's group of each (group_assistant, group_processing), and the uses the categories gain: in the mock's Chinese,
+# like the rest of the categories' rows, so the flag adds the uses without changing those rows' language.
+MEETING_GROUPS = {"meeting.room": "group_assistant", "meeting.minutes": "group_processing"}
+MEETING_USES = {"assistant": ["会中对话"], "kb": ["会议纪要", "会中对话不可用时的会议问答"]}
+MEETING_MODEL_TEXT = {
+    "en": {
+        "assistant": "Main chat", "kb": "Processing", "group_assistant": "Main chat", "group_processing": "Processing",
+        "meeting.room": "In-meeting conversation", "meeting.minutes": "Meeting minutes",
+        "desc_room": "Persona in a recorded meeting: answers the questions asked there, keeps the topics and highlights, and describes photos. Runs only on Claude Code.",
+        "desc_minutes": "Writes a recorded meeting's minutes: a short meeting in one pass, a long one part by part and then merged into the minutes and summary card.",
+        "claude_only": "The in-meeting conversation runs only on Claude Code. Choose a Claude Code launcher or a Messages API connection.",
+        "not_claude": "{launcher} isn't Claude Code, so Persona can't join meetings. Choose a Claude Code launcher here.",
+        "no_runtime": "This purpose does not support runtime.",
+    },
+    "zh-Hans": {
+        "assistant": "主对话", "kb": "信息处理", "group_assistant": "主对话", "group_processing": "信息处理",
+        "meeting.room": "会中对话", "meeting.minutes": "会议纪要",
+        "desc_room": "录音会议里的 Persona：回答会上的提问，整理议题和要点，描述照片。只能用 Claude Code。",
+        "desc_minutes": "生成录音会议的纪要：短会一次写完，长会先分段整理，再合并成纪要和摘要卡片。",
+        "claude_only": "会中对话只能用 Claude Code。请选择 Claude Code 启动器或 Messages API 连接。",
+        "not_claude": "{launcher} 不是 Claude Code，Persona 无法参加会议。请在这里选择 Claude Code 启动器。",
+        "no_runtime": "此用途不支持 runtime。",
+    },
+    "ja": {
+        "assistant": "メインチャット", "kb": "情報処理", "group_assistant": "メインチャット", "group_processing": "情報処理",
+        "meeting.room": "会議中の会話", "meeting.minutes": "議事録",
+        "desc_room": "録音中の会議での Persona：会議での質問に答え、議題と要点をまとめ、写真を説明します。Claude Code でのみ動きます。",
+        "desc_minutes": "録音した会議の議事録を作ります。短い会議は一度に、長い会議は部分ごとにまとめてから議事録とサマリーカードに統合します。",
+        "claude_only": "会議中の会話は Claude Code でのみ動きます。Claude Code のランチャーか Messages API の接続を選んでください。",
+        "not_claude": "{launcher} は Claude Code ではないため、Persona は会議に参加できません。ここで Claude Code のランチャーを選んでください。",
+        "no_runtime": "この用途は runtime に対応していません。",
+    },
+}
 MODEL_DESCRIPTIONS = {
     "assistant": "Talks with you, splits work and hands it out.",
     "agent.new": "The Agents Persona starts on your computers.",
@@ -13633,13 +13669,68 @@ def supervise_model_purpose():
     return {"purpose": purpose, "providers": catalog["providers"]}
 
 
-def listed_model_configuration():
-    """GET /api/v1/model-config. MOCK_SUPERVISE_LISTED: with the background supervisor's use, the row the hub answers
-    by its id, as the last built-in purpose (before an extension's)."""
+def meeting_room_provider(provider):
+    """The room runs a Claude Code CLI, including one started on a Messages API connection. A launcher with no agent
+    is Claude Code, as the hub reads it (claudeCodeProvider)."""
+    if provider.get("kind") == "api":
+        return provider.get("api") == "messages"
+    return provider.get("kind") == "launcher" and provider.get("agent", "") in ("", "claude")
+
+
+def meeting_model_purpose(pid, lang="zh-Hans", catalog=None):
+    if not MEETING_MODELS or pid not in MEETING_PURPOSES:
+        return None
+    if catalog is None:
+        catalog = model_configuration()
+    category = MEETING_PURPOSES[pid]
+    parent = next(x for x in catalog["purposes"] if x["id"] == category)
+    text = MEETING_MODEL_TEXT[lang]
+    with MODEL_CONFIG_LOCK:
+        stored = MODEL_BINDINGS.get(pid, {"revision": 0, "override": {}})
+        binding = dict(stored["override"])
+    effective = {k: v for k, v in parent["effective"].items() if k != "runtime"}
+    if binding.get("provider"):
+        provider = next((x for x in catalog["providers"] if x["id"] == binding["provider"]), {})
+        effective = {"provider": binding["provider"], "model": provider.get("model", "")}
+    effective.update(binding)
+    room = pid == "meeting.room"
+    provider = next((x for x in catalog["providers"] if x["id"] == effective["provider"]), {})
+    fields = ["provider", "model"]
+    if room or (provider and provider.get("api", "") in ("messages", "responses", "")):  # as the hub's API purposes
+        fields.append("effort")
+    # Like every API purpose, the minutes name the main chat's computer, where a launcher picked for them runs.
+    purpose = dict(id=pid, category_id=category, parent=category, name=text[pid], group=text[MEETING_GROUPS[pid]],
+                   description=text["desc_room" if room else "desc_minutes"], kind="launcher" if room else "api",
+                   machine_id=ASSISTANT_CONFIG["machine_id"], override=binding, effective=effective, revision=stored["revision"],
+                   fields=fields, provider_ids=parent["provider_ids"], status="未验证")
+    if not binding.get("provider"):  # the hub's inheritedLabel: none once a provider of its own is set
+        purpose["inherited_from"] = text[category]
+    if effective["provider"] == parent["effective"]["provider"]:
+        purpose["status"] = parent["status"]
+        if "limit" in parent:
+            purpose["limit"] = dict(parent["limit"])
+    if os.environ.get("MOCK_MODEL_LIMIT") and effective["provider"] == "legacy.ai":
+        purpose["limit"] = {"reason": "quota", "until": later(minutes=23)}
+        purpose["status"] = "额度用完，23 分钟后重试"
+    if room:
+        purpose.update(launch="headless",
+                       provider_ids=[p["id"] for p in catalog["providers"] if meeting_room_provider(p)
+                                     and (not p.get("machines") or ASSISTANT_CONFIG["machine_id"] in p["machines"])])
+        if not meeting_room_provider(provider) and "limit" not in purpose:
+            purpose["status"] = text["not_claude"].format(launcher=provider.get("name") or effective["provider"])
+    return {"purpose": purpose, "providers": catalog["providers"]}
+
+
+def listed_model_configuration(lang="zh-Hans"):
+    """GET /api/v1/model-config: opt-in built-in uses follow the categories, before extensions and plugins."""
     catalog = model_configuration()
-    if SUPERVISE_LISTED and (own := supervise_model_purpose()):
-        at = next((n for n, x in enumerate(catalog["purposes"]) if x["id"].startswith("plugin.")), len(catalog["purposes"]))
-        catalog["purposes"].insert(at, own["purpose"])
+    own = []
+    if SUPERVISE_LISTED and (supervise := supervise_model_purpose()):
+        own.append(supervise["purpose"])
+    if MEETING_MODELS:
+        own += [meeting_model_purpose(pid, lang, catalog)["purpose"] for pid in MEETING_PURPOSES]
+    at = next((n for n, x in enumerate(catalog["purposes"]) if x["id"].startswith(("extension.", "plugin."))), len(catalog["purposes"]))
+    catalog["purposes"][at:at] = own
     return catalog
 
 
@@ -13648,6 +13739,16 @@ def model_configuration(include_uses=False):
                       model=l.get("model"), hidden=l.get("hidden", False)) for l in LAUNCHERS if l["source"] != "builtin"]
     providers += [{"id": "launcher.claude", "name": "claude", "kind": "launcher", "model": "model-chat"},
                   {"id": "legacy.ai", "name": "轻量 API", "kind": "api", "api": "messages", "model": "model-fast"}]
+    if MEETING_MODELS:
+        for provider in providers:
+            launcher = next((l for l in LAUNCHERS if provider["id"] == "launcher." + l["name"]), None)
+            if launcher:
+                provider.update({k: launcher[k] for k in ("api", "machines") if k in launcher})
+            if provider["kind"] == "launcher":  # the hub's viewAgent; its plain claude says claude
+                name = provider["id"][len("launcher."):]
+                agent = (launcher or {}).get("agent") or (name if name in ("codex", "traex", "agy", "omp", "claude") else "")
+                if agent:
+                    provider["agent"] = agent
     definitions = list(MODEL_DEFINITIONS if include_uses else MODEL_DEFINITIONS[:4])
     if include_uses:
         definitions += [("task." + t["id"], t.get("title") or "跟进任务", "主对话", "launcher") for t in SCHEDULE]
@@ -13668,7 +13769,7 @@ def model_configuration(include_uses=False):
                            fields=(["provider", "model"] if kind == "api" else ["provider", "model", "effort"]) if pid == category else [],
                            provider_ids=[p["id"] for p in providers if p["kind"] == kind], status="未验证")
             if pid in MODEL_SCOPES:
-                purpose["uses"] = [{"name": use} for use in MODEL_SCOPES[pid]]
+                purpose["uses"] = [{"name": use} for use in MODEL_SCOPES[pid] + (MEETING_USES.get(pid, []) if MEETING_MODELS else [])]
             if SUPERVISE_LISTED and pid in MODEL_DESCRIPTIONS:
                 purpose["description"] = MODEL_DESCRIPTIONS[pid]
             # MOCK_MODEL_LIMIT=1: the default API connection is out of quota for 23 more minutes (docs/assistant/model-config.md "Upstream rate limits").
@@ -24748,12 +24849,15 @@ class H(BaseHTTPRequestHandler):
             q = parse_qs(urlparse(self.path).query)
             return self.send_json(assistant_state(q.get("space", [""])[0], q.get("archived", [""])[0] == "1"))
         if rule_suggestions_area(self, "GET", p): return  # the standing authorizations Always granted
-        if p == "/api/v1/model-config": return self.send_json(listed_model_configuration())
+        if p == "/api/v1/model-config": return self.send_json(listed_model_configuration(cron_lang(self.headers.get("Accept-Language"))))
         if p == "/api/v1/model-config/purposes/" + SUPERVISE_PURPOSE and (own := supervise_model_purpose()):
             return self.send_json(own)
         if p.startswith("/api/v1/model-config/purposes/"):
+            pid, lang = unquote(p.rsplit("/", 1)[1]), cron_lang(self.headers.get("Accept-Language"))
+            if own := meeting_model_purpose(pid, lang):
+                return self.send_json(own)
             catalog = model_configuration(include_uses=True)
-            purpose = next((x for x in catalog["purposes"] if x["id"] == unquote(p.rsplit("/", 1)[1])), None)
+            purpose = next((x for x in catalog["purposes"] if x["id"] == pid), None)
             if not purpose: return self.send_json({"error": "模型用途不存在"}, 404)
             return self.send_json({"purpose": purpose, "providers": catalog["providers"]})
         if p == "/api/v1/assistant/tasks":
@@ -25788,6 +25892,34 @@ class H(BaseHTTPRequestHandler):
                 return self.send_json({"ok": True})
         if self.command == "POST" and p.startswith("/api/v1/inbox/") and p.endswith("/draft"):
             return self.send_json(*inbox_draft(unquote(p[len("/api/v1/inbox/"):-len("/draft")]), json.loads(self.last_body or b"{}")))
+        if (p.startswith("/api/v1/model-config/purposes/") and unquote(p.rsplit("/", 1)[1]) in MEETING_PURPOSES
+                and self.command in ("PATCH", "PUT")):
+            pid, body = unquote(p.rsplit("/", 1)[1]), json.loads(self.last_body or b"{}")
+            lang = cron_lang(self.headers.get("Accept-Language"))
+            with MODEL_CONFIG_LOCK:
+                own = meeting_model_purpose(pid, lang)
+                if own is None: return self.send_json({"error": "模型用途不存在"}, 404)
+                purpose = own["purpose"]
+                if os.environ.get("MOCK_MODEL_CONFLICT") or body.get("revision") != purpose["revision"]:
+                    return self.send_json({"error": "配置已在别处修改"}, 409)
+                if "runtime" in body:
+                    return self.send_json({"error": MEETING_MODEL_TEXT[lang]["no_runtime"]}, 400)
+                binding = dict(purpose["override"])
+                if "provider" in body and body["provider"] != binding.get("provider"):
+                    binding.pop("model", None)
+                    binding.pop("effort", None)
+                for field in ("provider", "model", "effort"):
+                    if field not in body: continue
+                    if body[field] is None: binding.pop(field, None)
+                    else: binding[field] = body[field]
+                if binding.get("provider"):
+                    provider = next((x for x in own["providers"] if x["id"] == binding["provider"]), {})
+                    if pid == "meeting.room" and not meeting_room_provider(provider):
+                        return self.send_json({"error": MEETING_MODEL_TEXT[lang]["claude_only"]}, 400)
+                    if binding["provider"] not in purpose["provider_ids"]:
+                        return self.send_json({"error": "此用途无法使用这个提供方"}, 400)
+                MODEL_BINDINGS[pid] = {"revision": purpose["revision"] + 1, "override": binding}
+                return self.send_json(meeting_model_purpose(pid, lang))
         if p == "/api/v1/model-config/purposes/" + SUPERVISE_PURPOSE and self.command == "PATCH" and (own := supervise_model_purpose()):
             body, purpose = json.loads(self.last_body or b"{}"), own["purpose"]
             with MODEL_CONFIG_LOCK:
@@ -27692,6 +27824,7 @@ MOCK_HELP.append("MOCK_STANDING_AUTHORIZATIONS=1  Two synthetic standing authori
 MOCK_HELP.append("MOCK_ASK_HELD=1  With MOCK_TODO_ASKS=1: the PR check's decision is held for the next briefing (for_briefing, #5803)")
 MOCK_HELP.append("MOCK_BRIEF_SETUP=1  With MOCK_TASKS=1: the morning briefing carries the week's recommended setup lines (#5804)")
 MOCK_HELP.append("MOCK_SUPERVISE_LISTED=1  The model catalog lists assistant.supervise itself and every built-in purpose has a description (#5806)")
+MOCK_HELP.append("MOCK_MEETING_MODELS=1  The model catalog lists editable meeting.room and meeting.minutes after the supervisor (or categories), with Claude Code-only room providers (#7980)")
 MOCK_HELP.append("MOCK_BACKGROUND_SUPERVISOR=1  The hub's built-in background supervisor conversation exists (#4927): origin task with no origin_ref, "
                  "named by GET /api/v1/assistant as background_supervisor, and archiving it is refused. Without it the setting "
                  "main_supervises_own_tasks and the model use assistant.supervise (answered by its own id, not in the catalog) are still there; MOCK_LEGACY_HUB has none of them")

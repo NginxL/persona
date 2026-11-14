@@ -170,10 +170,14 @@ func mergeModel(base, over ModelBinding) ModelBinding {
 }
 
 // effectiveModel applies purpose defaults after merging, so choosing another provider cannot clear triage's default.
+// The In-meeting conversation takes no runtime from the main chat it follows: a room runs on Claude Code's CLI only.
 func effectiveModel(p ModelPurpose, base, over ModelBinding) ModelBinding {
 	b := mergeModel(base, over)
 	if p.ID == "inbox.triage" && b.Effort == "" {
 		b.Effort = "off"
+	}
+	if p.ID == purposeMeetingRoom {
+		b.Runtime = ""
 	}
 	return b
 }

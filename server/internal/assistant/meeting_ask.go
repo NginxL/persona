@@ -31,6 +31,10 @@ import (
 
 const purposeMeetingAnswer = "meeting.answer"
 
+// purposeMeetingMinutes is the model purpose a meeting's minutes are written on (#7980): Information processing's
+// until it is set apart. meeting.answer stays a use of Information processing: it answers when the room cannot.
+const purposeMeetingMinutes = kb.PurposeMeetingMinutes
+
 // A question's states, how it was asked, and why it failed (the contract's; the errors are an open set).
 const (
 	askPending  = "pending"
