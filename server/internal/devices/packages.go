@@ -62,10 +62,13 @@ type nodePackage struct {
 	Fallback   bool
 	goos, arch string
 	path       string // a file on this machine; "" until fetched
-	// A fetched one: <base>/<dir>/<file.Name>, of release build.
+	// A fetched one: <base>/<dir>/<file.Name>, of release build; dir also names its cache directory.
 	base, dir string
-	file      update.File
-	build     int64
+	// flat: listed in <base>/latest.json, so also served at <base>/<file.Name>, where hub self-update fetches it. A
+	// source without per-version directories has it only there: a GitHub repository's releases/latest/download.
+	flat  bool
+	file  update.File
+	build int64
 	// The release's node protocol range and capabilities (a fetched one), kept with it in the cache so a cached
 	// fallback is judged again before it is used.
 	nodeProtocol, nodeProtocolMin int
@@ -372,6 +375,13 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.package_unreachable", i18n.Args{"os": k.goos, "arch": k.arch, "err": err.Error()})
 	}
 	f, ok := latest.NodeFile(k.program, plat)
+	if ok && fileFor(f, plat) && latest.Version == k.hub {
+		// The newest release is the hub's own version, from a source that keeps no dl/<version>/ (a GitHub
+		// repository's releases/latest/download): the release of the hub's version, not a fallback.
+		pkg := remotePackage(k, latest, k.hub, f, false)
+		pkg.flat = true
+		return pkg, nil
+	}
 	why := releaseNodeIncompatible(latest)
 	if why == "" && (!ok || !fileFor(f, plat) || !safeVersion.MatchString(latest.Version)) {
 		why = "no build for " + plat
@@ -381,7 +391,9 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.no_package", i18n.Args{"os": k.goos, "arch": k.arch, "version": latest.Version,
 			"name": "personad-" + plat})
 	}
-	return remotePackage(k, latest, latest.Version, f, true), nil
+	pkg := remotePackage(k, latest, latest.Version, f, true)
+	pkg.flat = true
+	return pkg, nil
 }
 
 // releaseNodeIncompatible is why this manager would not drive the node of release m ("" when it would): its node
@@ -688,6 +700,10 @@ func (d *Devices) downloadPackage(ctx context.Context, p nodePackage, bin, entry
 	ctx, cancel := context.WithTimeout(ctx, packageDownload)
 	defer cancel()
 	got, err := update.Download(ctx, client, p.base+"/"+url.PathEscape(p.dir), p.file, stage) // size, sha256, binary_sha256
+	if p.flat && update.IsNotFound(err) {
+		// No dl/<version>/ there (a GitHub release base): the file beside latest.json, checked against the same manifest.
+		got, err = update.Download(ctx, client, p.base, p.file, stage)
+	}
 	if err != nil {
 		var local *fs.PathError
 		if update.IsMismatch(err) || errors.As(err, &local) {
