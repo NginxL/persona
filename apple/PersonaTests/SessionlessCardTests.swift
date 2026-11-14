@@ -16,10 +16,10 @@ struct SessionlessCardTests {
         )
     }
 
-    private func session(_ id: String, source: String? = nil, approve: Bool? = nil) -> Session {
+    private func session(_ id: String, source: String? = nil, approve: Bool? = nil, attach: Bool = false) -> Session {
         var extra = ""
         if let source { extra += #","source_kind":"\#(source)""# }
-        if let approve { extra += #","capabilities":{"approve":\#(approve)}"# }
+        if let approve { extra += #","capabilities":{"approve":\#(approve),"attach":\#(attach)}"# }
         let json = #"{"machine_id":"m","session_id":"\#(id)","title":"\#(id)","cwd":"/tmp/p","status":"idle","state":"needs_you"\#(extra)}"#
         do { return try JSON.decoder.decode(Session.self, from: Data(json.utf8)) } catch { fatalError("bad fixture: \(error)") }
     }
@@ -35,6 +35,18 @@ struct SessionlessCardTests {
         #expect(card("p", kind: .permission, session: "s").canAnswer(session: session("s", source: "codex", approve: true)))
         #expect(!card("p", kind: .permission, session: "s").canAnswer(session: session("s", source: "codex", approve: false)))
         #expect(!card("p", kind: .permission, session: "s").canAnswer(session: nil), "its session not known yet")
+    }
+
+    /// A card the app can't answer says why under it (#6868): attaching live answers it here where the session offers
+    /// that, else only the computer can; one it can answer says nothing.
+    @Test func aCardTheAppCantAnswerSaysWhy() {
+        let q = card("q", kind: .question, session: "s")
+        #expect(q.answerBlock(session: session("s")) == nil)
+        #expect(q.answerBlock(session: session("s", source: "codex_app_server", approve: true)) == nil)
+        #expect(q.answerBlock(session: session("s", source: "codex_app_server", approve: false, attach: true)) == .attach)
+        #expect(q.answerBlock(session: session("s", source: "codex_app_server", approve: false)) == .computer)
+        #expect(q.answerBlock(session: nil) == .computer, "its session not known yet: as Android says")
+        #expect(card("q", kind: .question).answerBlock(session: nil) == nil, "a sessionless card")
     }
 
     @Test(arguments: [InteractionKind.question, .permission])

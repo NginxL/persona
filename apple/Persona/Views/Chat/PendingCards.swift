@@ -45,6 +45,9 @@ struct PendingCards: View {
         var interaction: Interaction
         /// Answerable from here (the session lets the phone approve); debug samples always are.
         var enabled: Bool
+        /// Why its session doesn't let the app answer it, said under the greyed card (#6868). Nil on one it can answer,
+        /// and on a terminal dialog's step answered already (greyed until the next one comes, #2970).
+        var blocked: AnswerBlock? = nil
         var id: String { interaction.id }
     }
 
@@ -62,6 +65,9 @@ struct PendingCards: View {
     /// noise of the subtraction never reaches the cap and redraws the page every frame (#1580).
     @State private var footerRest: CGFloat = 0
     @State private var position = ScrollPosition(edge: .top)
+    /// The tallest line under a card the app can't answer (`CardBlockedLine`, #6868) and the gap over it; 0 without one.
+    /// A card fits itself to the area less it, so the line stays in the area too (a lone question fits the area, #6277).
+    @State private var lineRoom: CGFloat = 0
 
     /// The share of the page the cards may take before they scroll.
     private static let share: CGFloat = 0.5
@@ -91,11 +97,20 @@ struct PendingCards: View {
             ScrollView {
                 VStack(spacing: Theme.Space.m) {
                     ForEach(over ? Self.urgentFirst(cards) : cards) { card in
-                        InteractionPanel(interaction: card.interaction).disabled(!card.enabled)
-                            .chatMark("chat.card." + card.interaction.id)
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            InteractionPanel(interaction: card.interaction).disabled(!card.enabled)
+                                .chatMark("chat.card." + card.interaction.id)
+                            if let blocked = card.blocked {
+                                CardBlockedLine(block: blocked, key: card.interaction.sessionKey)
+                            }
+                        }
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                .onPreferenceChange(CardBlockedLine.Height.self) { h in
+                    let room = h > 0 ? h + Theme.Space.s : 0
+                    if abs(room - lineRoom) >= 1 { lineRoom = room }
+                }
             }
             .scrollPosition($position)
             .accessibilityIdentifier("pending-cards")
@@ -118,8 +133,8 @@ struct PendingCards: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
         }
         .environment(\.cardRoom, containerLength)
-        .environment(\.cardFits, keyboard ? cap - Theme.Space.l - Theme.Space.s : 0)
-        .environment(\.cardArea, cap)
+        .environment(\.cardFits, keyboard ? cap - Theme.Space.l - Theme.Space.s - lineRoom : 0)
+        .environment(\.cardArea, cap - lineRoom)
         .environment(\.cardTakesArea, growsAlone)
         // The container's length, read out here where the container is still the page's, not the scroll area.
         .background {
@@ -217,5 +232,58 @@ struct PendingCards: View {
             let (ta, tb) = (a.element.interaction.createdAt ?? .distantPast, b.element.interaction.createdAt ?? .distantPast)
             return ta != tb ? ta > tb : a.offset > b.offset
         }.map(\.element)
+    }
+}
+
+/// Under a card the app can't answer (`PendingCards.Card.blocked`, #6868): why it is greyed, and where its session can be
+/// attached live, the ⋯ menu's Attach Live (joined, the app answers it). Before, the card only greyed out and said
+/// nothing. Worded like Android's `approvalBlockedReason` and the watch's `blockedReason`.
+private struct CardBlockedLine: View {
+    @Environment(AppModel.self) private var model
+    var block: AnswerBlock
+    var key: SessionKey
+    /// The attach is on its way: a second tap doesn't send another.
+    @State private var attaching = false
+
+    /// The line's height, for the cards' area to leave it room (`PendingCards.lineRoom`): the tallest one.
+    struct Height: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    }
+
+    var body: some View {
+        // The interface stops at xxxLarge (RootView): there the words wrap beside the button.
+        HStack(spacing: Theme.Space.s) {
+            Text(text)
+                .font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if block == .attach {
+                Button {
+                    attaching = true
+                    Task {
+                        await model.attach(key)
+                        attaching = false
+                    }
+                } label: {
+                    Label("Attach Live", systemImage: Theme.Icon.link).lineLimit(1).tapTargetHeight()
+                }
+                .font(Theme.Font.captionStrong)
+                .themedButton()
+                .disabled(attaching)
+                .accessibilityIdentifier("chat.card.attach")
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .background { GeometryReader { Color.clear.preference(key: Height.self, value: $0.size.height) } }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.card.blocked")
+    }
+
+    private var text: String {
+        switch block {
+        case .attach: String(localized: "Attach live to answer it here, or answer it on the computer.")
+        case .computer: String(localized: "This session can't be answered from here. Answer it on the computer.")
+        }
     }
 }

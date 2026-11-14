@@ -9712,6 +9712,43 @@ if os.environ.get("MOCK_SOURCES"):
          "created_at": ago(minutes=2), "expires_at": later(minutes=28), "tool_name": "read_file",
          "summary": "读取 finance/2026-Q3.xlsx", "tool_input": {"path": "finance/2026-Q3.xlsx"}})
 
+# MOCK_CANT_ANSWER=1 (#6868): question cards the phone can't answer. A live Codex thread on a shared app-server not joined
+# yet (send and attach, no approve, like MOCK_SOURCES' CODEX_LIVE) asks one, as in the report: its chat says why under the
+# card and offers Attach Live, which flips approve (POST …/attach) and lets the card be answered. A subagent of it (send,
+# attach and approve off, as the node lists one its parent drives, codex_registry.go) asks another: only the computer can.
+# /mock/reset unjoins the thread again (CantAnswerCardTests).
+CODEX_ASKS = "c0de6868-1111-4000-8000-000000000001"
+CODEX_ASKS_SUB = "c0de6868-2222-4000-8000-000000000002"
+CANT_ANSWER_START = {}
+if os.environ.get("MOCK_CANT_ANSWER") == "1":
+    _thread = "019a6868-7d2e-7b10-9a55-3e8c1f2d4a6%d"
+    SESSIONS += [
+        sess("server", CODEX_ASKS, "整理部署脚本", "/home/me/code/deploy", "blocked", "needs_you", "", 0, "", 0, 1,
+             "变量合好了，部署前问你一个问题。", agent="codex", agent_name="codex-desk", pending=1,
+             source_kind="codex_app_server", source_thread_id=_thread % 0, source_instance_id="desk", attached=False,
+             capabilities={"read": True, "send": True, "interrupt": True, "approve": False, "terminal": False, "attach": True},
+             **NO_SPACE),
+        sess("server", CODEX_ASKS_SUB, "核对 staging 变量", "/home/me/code/deploy", "blocked", "needs_you", "", 0, "", 0, 1,
+             "staging 有两个变量和生产不一样。", agent="codex", agent_name="codex-desk", pending=1,
+             source_kind="codex_app_server", source_thread_id=_thread % 1, source_instance_id="desk",
+             parent_thread_id=_thread % 0, is_subagent=True, parent_session_id=CODEX_ASKS, root_session_id=CODEX_ASKS,
+             read_only_reason="仅查看：这个子 Agent 由父 Agent 驱动",
+             capabilities={"read": True, "send": False, "interrupt": False, "approve": False, "terminal": False, "attach": False},
+             **NO_SPACE),
+    ]
+    CANT_ANSWER_START = {x["session_id"]: copy.deepcopy(x) for x in SESSIONS[-2:]}
+    for _sid, _title, _id, _q, _opts in (
+            (CODEX_ASKS, "整理部署脚本", "cxq_deploy_target", "先部署到哪个环境？",
+             [("staging", "先在预发环境验证变量和迁移。"), ("production", "直接上线，跳过预发。")]),
+            (CODEX_ASKS_SUB, "核对 staging 变量", "cxq_staging_vars", "这两个变量按哪边的值？",
+             [("按生产的值", "和线上保持一致。"), ("保留 staging 的值", "只在预发环境不同。")])):
+        INTERACTIONS.append(
+            {"id": _id, "machine_id": "server", "session_id": _sid, "session_title": _title, "cwd": "/home/me/code/deploy",
+             "kind": "question", "agent": "codex", "created_at": ago(minutes=1), "expires_at": later(hours=24),
+             "tool_name": "request_user_input", "tool_use_id": "call_" + _id,
+             "questions": [{"question": _q, "header": "部署", "multi_select": False,
+                            "options": [{"label": l, "description": d} for l, d in _opts]}]})
+
 if os.environ.get("MOCK_OPENCODE"):
     INTERACTIONS.append(
         {"id": "opencode_rm_build", "machine_id": "server", "session_id": OC_ASK, "session_title": "迁移数据库脚本",
@@ -24514,6 +24551,9 @@ class H(BaseHTTPRequestHandler):
             SESSIONS[:] = [x for x in SESSIONS if not x["session_id"].startswith("d4e6f8a0-")]
             # MOCK_RESUME_TERMINAL: the stopped Agents a test resumed are stopped again (#5521).
             SESSIONS[:] = [copy.deepcopy(RT_START[x["session_id"]]) if x["session_id"] in RT_START else x for x in SESSIONS]
+            # MOCK_CANT_ANSWER: the Codex thread a test attached is not joined again (#6868).
+            SESSIONS[:] = [copy.deepcopy(CANT_ANSWER_START[x["session_id"]]) if x["session_id"] in CANT_ANSWER_START else x
+                           for x in SESSIONS]
             del RECONNECTS[:], STARTED[:], SEEN[:]
             INTERACTIONS.extend(SESSION_CLOSE["interactions"])
             SESSION_CLOSE.update(fail=False, attempts=[], closed=[], interactions=[])
@@ -26822,13 +26862,15 @@ class H(BaseHTTPRequestHandler):
             KEYS.append(json.loads(self.last_body or b"{}"))
             return self.send_json({"ok": True})
         if p.startswith("/api/v1/sessions/") and p.endswith("/attach"):  # Attach live to a Codex app-server thread
-            for s in all_sessions():
+            for s in SESSIONS + ASSISTANT:  # the rows themselves: all_sessions() hands out copies, which lost the join
                 if s["session_id"] == unquote(p.split("/")[5]):
                     caps = s.get("capabilities") or {}
                     if not s.get("source_kind") or not caps.get("attach"):
                         return self.send_json({"error": "这个会话不能实时接入", "code": "codex_read_only", "delivered": "none"}, 403)
                     s["attached"] = True
                     s["capabilities"] = dict(caps, approve=True)  # joining lets the phone answer its approvals
+                    s["rev"] = (s.get("rev") or 0) + 1
+                    push_machine(s["machine_id"])  # as the hub pushes the node's new row: a delta hub's app keeps pushed rows
                     return self.send_json({"ok": True})
             return self.send_json({"error": "session not found"}, 404)
         if p.startswith("/api/v1/sessions/") and p.endswith("/queue/send-now"):  # node session.queue.send_now (#6088)

@@ -2392,6 +2392,9 @@ final class AppModel {
     /// session's source allows. Every place that answers or greys a card asks this.
     func canAnswer(_ ix: Interaction) -> Bool { ix.canAnswer(session: session(ix.sessionKey)) }
 
+    /// Why the app can't answer the card, said under it (#6868); nil where it can.
+    func answerBlock(_ ix: Interaction) -> AnswerBlock? { ix.answerBlock(session: session(ix.sessionKey)) }
+
     /// This device's answer to the card is on its way (the card is hidden meanwhile).
     func isAnswering(_ uid: String) -> Bool { answering.contains(uid) }
 

@@ -2593,7 +2593,11 @@ struct ChatView: View {
 
     /// The agent's pending cards, and in DEBUG the sample ones the screenshot switches add (`-showSampleQuestion YES`…).
     private var pendingCards: [PendingCards.Card] {
-        var cards = model.interactions(for: key).map { PendingCards.Card(interaction: $0, enabled: model.canAnswer($0)) }
+        // Answerable exactly when nothing blocks it (`canAnswer`); what does is said under the card (#6868).
+        var cards = model.interactions(for: key).map { ix in
+            let blocked = model.answerBlock(ix)
+            return PendingCards.Card(interaction: ix, enabled: blocked == nil, blocked: blocked)
+        }
         // A card answered in a terminal dialog of several questions stays, greyed, until the next one comes (#2970).
         if let move = model.screenMoves[key], !cards.contains(where: { $0.interaction.kind == .screen }) {
             cards.append(PendingCards.Card(interaction: move.card, enabled: false))

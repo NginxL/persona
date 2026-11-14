@@ -25460,6 +25460,29 @@
         }
       }
     },
+    "Attach live to answer it here, or answer it on the computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach live to answer it here, or answer it on the computer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リアルタイム接続すると、ここで回答できます。コンピュータで回答することもできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时接入后就能在这里作答，也可以到电脑上处理。"
+          }
+        }
+      }
+    },
     "Attached" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -163640,6 +163663,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This session can't be answered from here. Answer it on the computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This session can't be answered from here. Answer it on the computer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このセッションはここでは回答できません。コンピュータで回答してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个会话不允许在这里作答，请到电脑上处理。"
+          }
+        }
+      }
     },
     "This session can't be approved from here. Open the app to check it." : {
       "localizations" : {
