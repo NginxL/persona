@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,7 +21,7 @@ import persona.core.rustcore.wire.WireBatch
 
 /** A release-test-APK diagnostic, not a physical-device or production-screen performance acceptance result. */
 class RustCoreDeviceBenchmark {
-    private class Host : CoreHost {
+    internal class Host : CoreHost {
         val versions = CopyOnWriteArrayList<Long>()
         override fun changed(version: Long) { versions.add(version) }
         override fun run(effect: persona.core.rustcore.wire.Effect) = Unit
@@ -45,7 +46,8 @@ class RustCoreDeviceBenchmark {
                 if (index >= WARM_UP) dispatch[index - WARM_UP] = dispatchNanos
             }
             // Each frame has a real patch, not an empty drain after the first duplicate item. The fresh snapshot
-            // replaces one bounded item; flush and snapshot encoding are deliberately outside the frame span.
+            // replaces one bounded item; flush and OpenChat's snapshot encoding are deliberately outside the frame
+            // span. core.drain still includes Rust patch bincode encoding and JNI byte-array creation.
             val snapshot = ChatSnapshot(
                 """[{"id":"benchmark-item","kind":"text","text":"benchmark","seq":1}]""",
                 "history", 1, null, true,
@@ -73,34 +75,62 @@ class RustCoreDeviceBenchmark {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val nonce = InstrumentationRegistry.getArguments().getString("rustCoreBenchmarkNonce")
                 ?: error("missing per-run benchmark nonce")
+            val dispatchStatistics = statistics(dispatch, DISPATCH_BUDGET_MICROS)
+            val frameStatistics = statistics(frame, FRAME_BUDGET_MICROS)
             val metadata = JSONObject()
+                .put("reportVersion", 1)
                 .put("nonce", nonce)
                 .put("scope", "optimized instrumentation APK; emulator diagnostics, not physical-device acceptance")
                 .put("samples", SAMPLES).put("warmUp", WARM_UP)
                 .put("model", Build.MODEL).put("device", Build.DEVICE)
                 .put("abi", Build.SUPPORTED_ABIS.firstOrNull()).put("api", Build.VERSION.SDK_INT)
                 .put("build", Build.DISPLAY).put("kernelPageBytes", pageSize())
-                .put("dispatchMicros", statistics(dispatch))
-                .put("drainDecodeApplyMicros", statistics(frame))
+                .put("dispatchMicros", dispatchStatistics)
+                .put("drainDecodeApplyMicros", frameStatistics)
+                .put("rawSamples", JSONObject()
+                    .put("unit", "ns")
+                    .put("dispatch", JSONArray(dispatch.toList()))
+                    .put("drainDecodeApply", JSONArray(frame.toList())))
             val report = File(context.getExternalFilesDir(null), "rust-core-benchmark.json")
-            report.writeText(metadata.toString(2) + "\n")
+            val reportError = runCatching { report.writeText(metadata.toString(2) + "\n") }.exceptionOrNull()
+            if (reportError != null) {
+                metadata.put("reportFileError", reportError.javaClass.name + ": " + reportError.message)
+            }
+            // Code 2 is evidence only. AndroidJUnitRunner still emits its own status 0 after a real PASS;
+            // the runner ignores this report-only code and keeps the assertions below as the budget verdict.
+            InstrumentationRegistry.getInstrumentation().sendStatus(2, android.os.Bundle().apply {
+                putString("rustCoreBenchmarkReport", metadata.toString())
+            })
             Log.i("RustCoreBenchmark", metadata.toString())
             println("RustCoreBenchmark: $metadata")
+            assertTrue(
+                "dispatch p99 must be <= $DISPATCH_BUDGET_MICROS us: $dispatchStatistics",
+                dispatchStatistics.getDouble("p99") <= DISPATCH_BUDGET_MICROS,
+            )
+            assertTrue(
+                "drain+decode+apply p99 must be <= $FRAME_BUDGET_MICROS us: $frameStatistics",
+                frameStatistics.getDouble("p99") <= FRAME_BUDGET_MICROS,
+            )
+            check(reportError == null) { "benchmark report could not be written: $reportError" }
         }
     }
 
     private fun pageSize(): Long = try { Os.sysconf(OsConstants._SC_PAGESIZE) } catch (_: Exception) { -1 }
 
-    private fun statistics(values: LongArray): JSONObject {
+    private fun statistics(values: LongArray, budgetMicros: Double): JSONObject {
         val sorted = values.sorted()
         fun percentile(percent: Double): Double = sorted[((sorted.size - 1) * percent).toInt()] / 1_000.0
         return JSONObject()
             .put("p50", percentile(.50)).put("p99", percentile(.99))
             .put("max", sorted.last() / 1_000.0)
+            .put("budgetMicros", budgetMicros)
+            .put("passesBudget", sorted[((sorted.size - 1) * .99).toInt()] <= budgetMicros * 1_000)
     }
 
     companion object {
         private const val SAMPLES = 1_000
         private const val WARM_UP = 100
+        private const val DISPATCH_BUDGET_MICROS = 50.0
+        private const val FRAME_BUDGET_MICROS = 1_000.0
     }
 }

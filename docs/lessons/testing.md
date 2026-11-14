@@ -152,6 +152,8 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 - `-race` reports reads/writes without a happens-before relationship; a test's own lock can hide a race (2026-11-05, #2955). `startAsync` reads the launch record's session after `go func()`; a fast background failure changes it in `finish` under a lock. Existing tests read, then wait through the `startLog` lock; `finish` acquires that lock next, so the detector sees the read before the write. It reports only if the caller is preempted just after `go` (one occasional full-suite `-race` failure). Regression `TestStartAsyncAnswersBeforeAFastFailure` waits only on the record's `done` channel and reports every time before the fix. Race-test result waiting must not share a lock with the code under test.
 
+- Taking a sleep out of a race test can leave the detector with nothing to see: a channel orders two goroutines as a lock does (2026-11-14, #1273). `TestSearchesWhileTheIndexIsUpdatedAndRemoved` (`server/internal/kb`) is there for a data race between a search that reads the index again and an update under way. Its first version without sleeps stopped the update at a hook, removed the directory, waited for a search to run and only then let the update go on: every wait was a channel between the two sides, so the update's read came after the search's write for the detector too. With the race put back in a scratch copy, that moment reported nothing in 30 runs of 4 removals each; the test with the sleeps reported it in 20 of 20. Keep the two sides unordered at the moment under test: let the stopped side go on before the other starts, and make whatever comes next wait instead (here the following update), which reported 40 of 40 runs with one removal each. A test whose assertion is the `-race` run is checked by putting the race back and counting runs, per moment, not by passing.
+
 - A fixture goroutine that reads a shared field when it runs races a test that swaps the field, and a socket orders nothing for the race detector (2026-11-11, #3918). `withFakeHub` started `go func() { _ = n.peer.Serve(…) }()`, which reads `n.peer` whenever the goroutine gets to it; `TestCodexRemoteTurnBegunBeforeJoining` then put its own hub in front with `n.peer = …`. `TestOutsideClaudeSendNotTaken` set the fake inbox's `mode` without its lock after the accept loop had started; the node connecting over the Unix socket afterwards gave the connection's goroutine no happens-before edge to that write. Both failed only under `-race`, which the CI node shard does not use. Have a goroutine serve the value the fixture created (a local variable), and change state a running fake reads through a setter under the fake's own lock (`fakeInbox.setMode`).
 
 - When testing fixed interactive-shell scripts, isolate `HOME`, `USERPROFILE`, and `ZDOTDIR` first (2026-11-05, #3120). Replacing only the update command still reads the user's shell startup files, mixing toolchain notices into `CombinedOutput` and failing exact-output assertions. Point all three directories at a test temp directory; retain success, failure, and unknown-action rejection assertions without changing production shell behavior or user configuration.
@@ -1080,10 +1082,9 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - Under Xcode 26.0 (Swift 6.2), `xcrun swift test` copies `Localizable.xcstrings` into `Bundle.module` as-is
   (`Copying Localizable.xcstrings`) without generating `.lproj` directories, whereas newer toolchains and `xcodebuild`
   (`scripts/app/mac-link.sh`) compile it at build time.
-- SwiftPM tests that point a bundle override at `<language>.lproj`
-  (`apple/PersonaLink/Tests/PersonaLinkTests/LinkTextTests.swift`) fall back to compiling `Localizable.xcstrings` on
-  demand with `/usr/bin/xcrun xcstringstool compile`, and cover that path with a synthetic uncompiled `.bundle` test so
-  newer local Xcode versions still exercise it.
+- SwiftPM tests that point a bundle override at `<language>.lproj` may need to compile `Localizable.xcstrings` on
+  demand with `/usr/bin/xcrun xcstringstool compile`. The retired menu bar's `LinkTextTests.swift` demonstrated this
+  fallback and its synthetic uncompiled-bundle case; its source is preserved in the history of the removed target.
 
 ## A throw-away HOME also hides the login keychain from codesign (2026-11-13, #6368)
 

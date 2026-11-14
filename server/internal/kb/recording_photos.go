@@ -592,6 +592,9 @@ func (e *Engine) photoDelete(id string, n int) (bool, error) {
 	case st.ReadOnly():
 		return false, ErrReadOnly
 	}
+	// The photo's words (its line of photos.md, the minutes' items citing it) leave the search index at its next
+	// update, as any text deleted on purpose.
+	defer st.SearchIndexPurge()
 	// The minutes first, then the entry (photos.json, photos.md), then the file: a repeat (its answer lost, or a crash
 	// or a failure part of the way) finds the photo deleted and finishes what is left before it answers false.
 	if err := e.photoUncite(r, n, i >= 0); err != nil {

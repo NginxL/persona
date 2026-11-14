@@ -90,6 +90,72 @@ final class ButtonContrastUITests: XCTestCase {
 
     /// A comma-separated list from the environment; unset or empty (a script passing an unset variable) is nil, so every
     /// style or color runs rather than none.
+    /// #7214: a Menu, a Link and a ShareLink styled with `.themedButton()` draw the style's background as a Button does
+    /// (after #7129 a Menu drew none in the glass styles and Lark): each one's fill is nearer the Button's than the page
+    /// beside them, in every style, light and dark. PERSONA_PHASE=before only measures and keeps the screenshots.
+    @MainActor func testEveryKindOfControlDrawsTheButtonsBackground() throws {
+        guard let hub = env["PERSONA_MOCK_HUB"] else { throw XCTSkip("needs scripts/mock/mock_hub.py (PERSONA_MOCK_HUB)") }
+        let url = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        let styles = list("PERSONA_CONTRAST_STYLES") ?? ["glass", "beautiful", "lark", "clay", "island"]
+        var rows = ["look\tstyle\tkind\tfill\tpage"], bare: [String] = []
+        var first = true, lastLook = ""
+        for look in ["light", "dark"] {
+            for style in styles {
+                let app = XCUIApplication()
+                app.launchArguments = ["-pairURL", url, "-showButtonContrast", "YES", "-ui.style", style, "-ui.scheme", look]
+                app.launchPinned()
+                let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                for label in ["允许", "Allow"] where first ? board.buttons[label].waitForExistence(timeout: 3) : board.buttons[label].exists {
+                    board.buttons[label].tap()
+                }
+                first = false
+                if look != lastLook ? board.alerts.firstMatch.waitForExistence(timeout: 3) : board.alerts.firstMatch.exists {
+                    for label in ["OK", "好"] where board.alerts.buttons[label].exists { // i18n-ignore: the system's own button
+                        board.alerts.buttons[label].tap(); sleep(1); break
+                    }
+                }
+                lastLook = look
+                let kinds = ["button", "menu", "link", "share"]
+                let control = { (kind: String) in app.descendants(matching: .any)["contrast.kinds.\(kind)"].firstMatch }
+                XCTAssertTrue(control("button").waitForExistence(timeout: 20), "\(look) \(style): no lab:\n\(app.debugDescription)")
+                sleep(2) // the page settles
+                let screenshot = app.screenshot()
+                let window = app.windows.firstMatch.frame
+                guard let pixels = Pixels(screenshot.pngRepresentation, pointWidth: window.width) else {
+                    XCTFail("\(look) \(style): the screenshot did not decode"); continue
+                }
+                if let dir = env["PERSONA_SHOTS"] {
+                    try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/kinds-\(look)-\(style).png"))
+                }
+                let row = app.descendants(matching: .any)["contrast.kinds"].firstMatch.frame
+                let last = control("share").frame
+                // The page: the row's free end, right of the last control.
+                let page = pixels.contrast(in: CGRect(x: last.maxX + 12, y: last.minY, width: max(8, row.maxX - last.maxX - 24), height: last.height)).fill
+                let button = pixels.contrast(in: control("button").frame).fill
+                for kind in kinds {
+                    let frame = control(kind).frame
+                    guard control(kind).exists, window.contains(frame) else { XCTFail("\(look) \(style): \(kind) is not on the screen"); continue }
+                    let fill = pixels.contrast(in: frame).fill
+                    rows.append([look, style, kind, fill, page].joined(separator: "\t"))
+                    // A style whose button background is as the page (none to lose) proves nothing either way.
+                    if kind != "button", Pixels.distance(button, page) > 6, Pixels.distance(fill, button) >= Pixels.distance(fill, page) {
+                        bare.append("\(look) \(style) \(kind): \(fill), the page \(page), a button \(button)")
+                    }
+                }
+                app.terminate()
+            }
+        }
+        let table = rows.joined(separator: "\n") + "\n"
+        let attachment = XCTAttachment(string: table)
+        attachment.name = "control-kinds.tsv"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if let dir = env["PERSONA_SHOTS"] { try? table.write(toFile: "\(dir)/control-kinds.tsv", atomically: true, encoding: .utf8) }
+        if env["PERSONA_PHASE"] != "before" {
+            XCTAssertTrue(bare.isEmpty, "controls drawn without the style's background:\n" + bare.joined(separator: "\n"))
+        }
+    }
+
     private func list(_ key: String) -> [String]? {
         guard let value = env[key], !value.isEmpty else { return nil }
         return value.split(separator: ",").map(String.init)

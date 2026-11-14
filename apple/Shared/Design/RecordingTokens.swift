@@ -99,6 +99,15 @@ nonisolated extension Theme {
         /// stamped as its sentence begins. Few enough that the card stays a summary.
         static let contextBefore = 1
         static let contextAfter = 2
+        /// A topic card of the summary card (#6563) shows this many bullets, then Show N More opens the rest in place: a
+        /// card stays a glance, and the hub's topics have two to four lines.
+        static let topicBulletsShown = 4
+        /// A summary-card item keeps its time and disclosure beside its words while the words have at least this many
+        /// times their line's height of width (about eight Chinese characters a line), else they go on the line under
+        /// the words (`MinutesItemLayout`): by the room the words have, which keep growing past the interface's cap.
+        static let itemWordsColumn: CGFloat = 7
+        /// How many tints the summary card's groups take in turn (`Theme.Hue.minutesGroups`).
+        static let topicTints = Theme.Hue.minutesGroups.count
         /// How much the meeting page's Talk grows while it is held (#3862 phase 4): the finger covers it, so the change
         /// that says "Persona hears you" is its color and the words over the field; the size only confirms the touch.
         /// None under Reduce Motion.

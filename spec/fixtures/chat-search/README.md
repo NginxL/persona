@@ -6,7 +6,7 @@ nothing it never shows.
 
 | File | Covers |
 | --- | --- |
-| `cases.json` | the user's words, a quoted context, a card's answer (both forms of its hidden tag), view errors, photos, a file card, pasted text, injected messages, the assistant's reply, its Markdown (indexed without the markup, #7072) and card, a thought, a tool call and its output, a notice |
+| `cases.json` | the user's words, a quoted context, a card's answer (both forms of its hidden tag), view errors, photos, a file card, pasted text, injected messages, the assistant's reply, its Markdown (indexed without the markup, #7072; bold around code, across lines or without a partner, #7195) and card, a thought, a tool call and its output, a notice |
 
 - Shape: `{"version": 1, "cases": [...]}`. `item` is an item as the hub sends it to the apps (an injected message carries
   the hub's `injected`, line included, since a client's own fallback reads the line in its UI language). `fields` is

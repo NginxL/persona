@@ -12,6 +12,7 @@ SCAN = ["Persona", "Shared", "PersonaWatch", "Vision"]
 ALLOWED = {
     "Persona/Recording/MeetingThreadView.swift": "stacks a transcript row's stamp and words at the reading size",
     "Persona/Recording/RecordingMinutesSummary.swift": "the same for minutes' points and transcript lines",
+    "Persona/Recording/RecordingMinutesOverview.swift": "puts a topic's icon tile above its title at the reading size (#6563)",
     "Persona/Recording/RecordingMinutesView.swift": "the same for the minutes' points",
     "Persona/Views/Chat/BubbleFold.swift": "the user bubble folds by the reading size it is given",
     "Shared/Design/RecordingTokens.swift": "the recording timer's own cap",

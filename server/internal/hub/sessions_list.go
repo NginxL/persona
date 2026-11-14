@@ -177,9 +177,9 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 		todo = row.Todo.ID
 	}
 	item := sessionlist.Item{
-		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane, Todo: todo,
+		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
-		Fold: indexedFold(row, root, indexed.Fold), Private: healthSession(row),
+		Fold: indexedFold(row, root, todo, indexed.Fold), Private: healthSession(row),
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
 	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
@@ -204,12 +204,12 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	return item
 }
 
-// indexedFold is row's sessionlist.Fold folded under root: nil when it folds under none and shows its own state and
-// background wait (a row without children), else was when that is the same fold, else a new one. Folds are shared
-// between copies of an item and never written in place.
-func indexedFold(row *proto.Session, root string, was *sessionlist.Fold) *sessionlist.Fold {
+// indexedFold is row's optional sessionlist.Fold: its fold under root and open to-do, nil when it has neither and shows
+// its own state and background wait (a row without children or a to-do), else was when that is the same metadata, else a
+// new one. Folds are shared between copies of an item and never written in place.
+func indexedFold(row *proto.Session, root, todo string, was *sessionlist.Fold) *sessionlist.Fold {
 	kids := row.Children()
-	fold := sessionlist.Fold{Root: root, State: row.FoldedState(), BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
+	fold := sessionlist.Fold{Root: root, State: row.FoldedState(), Todo: todo, BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
 	switch {
 	case fold == sessionlist.Fold{State: row.State, BackgroundWaiting: row.BackgroundWaiting}:
 		return nil

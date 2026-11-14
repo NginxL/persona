@@ -159,12 +159,16 @@ extension View {
             if prominent {
                 buttonStyle(.glassProminent).modifier(DimWhenDisabled())
             } else {
-                buttonStyle(RedWhenDestructive()).buttonStyle(.glass).modifier(LabelOffItsFill())
+                buttonStyle(RedWhenDestructive()).buttonStyle(.glass).menuStyle(SystemStyleMenu()).modifier(LabelOffItsFill())
             }
             #endif
         case .bordered:
             #if os(iOS)
-            if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(RedWhenDestructive()).buttonStyle(.bordered).modifier(LabelOffItsFill()) }
+            if prominent {
+                buttonStyle(.borderedProminent)
+            } else {
+                buttonStyle(RedWhenDestructive()).buttonStyle(.bordered).menuStyle(SystemStyleMenu(bordered: true)).modifier(LabelOffItsFill())
+            }
             #else
             if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered).modifier(LabelOffItsFill()) }
             #endif
@@ -211,6 +215,24 @@ private struct RedWhenDestructive: PrimitiveButtonStyle {
         }
     }
 }
+
+#if os(iOS)
+/// A `Menu` styled as a secondary button, drawn with the system's glass or bordered style itself (#7214). Drawn through
+/// `RedWhenDestructive` like a button, its label lost the style's background: the ⋯ and clipboard menus of the live
+/// screen floated on the page beside capsule buttons. A menu has no destructive role to color, so it skips that style.
+/// `Menu(configuration)` draws the menu style below this one, as Apple documents for styles that adjust the current one.
+private struct SystemStyleMenu: MenuStyle {
+    var bordered = false
+
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if bordered {
+            Menu(configuration).buttonStyle(.bordered)
+        } else {
+            Menu(configuration).buttonStyle(.glass)
+        }
+    }
+}
+#endif
 
 /// Fades a control whose style does not show "disabled" by itself.
 private struct DimWhenDisabled: ViewModifier {

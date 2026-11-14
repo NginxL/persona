@@ -7,7 +7,7 @@ import {
   BULK_CONFIRM_AT, bulkScope, bulkScopeName, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, mailShort, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS,
   useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup,
 } from "../../lib/inbox";
-import { rowMeta } from "../../lib/inbox-now";
+import { nowText, rowMeta } from "../../lib/inbox-now";
 import { dayGroupCounts, doneGroups, groupBySource, groupByTime, openAtFirst, sortTimeKeys, timeRange, timeTitle, type Grouping, type InboxGroup } from "../../lib/inbox-groups";
 import { useMailAccounts } from "../../lib/mail";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
@@ -647,7 +647,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   // a suggestion takes the AI twin's draft's place, and the event's handling the AI twin's "working on it"
   const draft = !done && !it.suggestion && agentDraft(it);
   const working = !done && !it.handling && agentWorking(it);
-  const mark = done ? (it.done_by === "manager" ? <EventMark it={it} /> : null) : it.suggestion || it.handling ? <EventMark it={it} /> : null;
+  const mark = nowText(it) !== undefined || (done ? it.done_by === "manager" : Boolean(it.suggestion || it.handling)) ? <EventMark it={it} /> : null;
   const rows = !done ? it.doc?.rows ?? [] : [];
   const first = rows[0];
   const translated = hubTranslation(it, useTranslatePrefs());

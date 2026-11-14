@@ -887,8 +887,7 @@ Like Moshi (full herdr client sends mouse to herdr first, which decides whether 
 
 ### Mac (#3336)
 
-Same routes/messages as web: `apple/Mac/Terminal/MacTerminalMouse.swift` (pure button/routing/modifier/cell-throttle/edge-clamping logic); `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release in
-`TerminalView+Mac.swift` first call `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
+Same routes/messages as web: the retired native Mac terminal used a pure button/routing/modifier/cell-throttle/edge-clamping helper; its `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release handlers first called `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
 
 - Forward only under control with hub `terminal_mouse`; old hub/View Only retains drag selection, context menu, single `terminal_input.click`.
 - Terminal Settings › Mouse (`terminalMouseMode`, Mac only): To Program default / Select Locally; Shift routes, not modifier; ⌘ always local (⌘-click links). Ctrl/Option modifiers 2/4.

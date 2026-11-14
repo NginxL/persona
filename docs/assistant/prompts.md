@@ -59,6 +59,7 @@ MCP tool descriptions and parameter explanations shown to models are also prompt
 | `inbox/triage.md` | System prompt for Inbox triage (Needs you / FYI / noise) | `assistant/inbox_triage.go` |
 | `inbox/tiers.md` | Criteria for the three tiers, shared by triage and event grouping | Same as above |
 | `inbox/group.md`, `group_input.md` | Event grouping: assign a batch of new messages from one chat to events, write titles, summaries, and tiers for affected events; input includes existing events in that chat and tools already called (`docs/assistant/inbox.md`, "Event grouping") | `assistant/inbox_group.go` |
+| `inbox/merge_title.md`, `merge_title_input.md` | One title for rows the user merged by hand, written from every row's title, summary and text (`{"title"}`) | `assistant/inbox_merge_title.go` |
 | `inbox/item.md` | Model-facing representation of one item (type line + content), shared by triage, drafting, judging, and AI twin | Same as above |
 | `inbox/kinds/subscription.md` | What each kind of a source subscription's Inbox items is (`sub_mail` … `sub_digest`, `sub_failing`), with the subscription's label; handed in with the round as the source's kinds, so it reaches `inbox/item.md` as its type line ([subscriptions.md](../extensions/subscriptions.md) "Destinations") | `subscriptions/deliver.go` |
 | `inbox/draft.md`, `draft_input.md` | Draft replies; `Rewrite` asks again after a draft repeated a never-quote sentence | Same as above |

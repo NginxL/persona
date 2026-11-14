@@ -134,6 +134,18 @@ class HttpAgentCreationService(
             kind?.let { put("kind", it) }
         }))
 
+    // The catalog covers every computer of the hub: only [machineId]'s rows. An older hub (404), an offline catalog or
+    // any other failure shows no workspace choice, never an error.
+    override suspend fun workspaces(machineId: String): List<AgentWorkspace> = try {
+        val body = read(request("api", "v1", "workspaces").build())
+        // Every computer's workspaces: decoded off the caller's (the form's main) thread.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            JsonCodec.decodeFromJsonElement<List<AgentWorkspace>>(body["workspaces"] ?: JsonArray(emptyList()))
+                .filter { it.machineId == machineId }
+        }
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { emptyList() }
+
     // git can take a while on a big repository: the start's budget, not the list's.
     private suspend fun worktree(machineId: String, action: String, body: JsonObject) = read(
         request("api", "v1", "machines", machineId, "worktree", action).post(body.toString().toRequestBody("application/json".toMediaType())).build(),

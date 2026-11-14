@@ -115,7 +115,8 @@ struct InboxNowEdgeTests {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!
         let time = InboxNow.time(checkAt, lang: "zh-Hans", now: clock, calendar: utc)
-        #expect(InboxNow.text(detail, lang: "zh-Hans", time: time) == "等张三确认新报价 · \(time) 再看：问更正后的报价行不行")
+        #expect(time == "明天 09:00")
+        #expect(InboxNow.text(detail, lang: "zh-Hans", time: time) == "等张三确认新报价 · 明天 09:00 再看：问更正后的报价行不行")
         #expect(InboxNow.meta(detail, lang: "zh-Hans") == "订单群 · 张三：好的，我看一下新的")
         // Its follow_up_ask sibling reads its counters without a word for them.
         let ask = try #require(showcase.items.first { $0.now == "follow_up_ask" })

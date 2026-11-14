@@ -356,6 +356,7 @@ name = "persona-core-ffi"
 version = "0.1.0"
 dependencies = [
  "jni",
+ "persona-core-ffi",
  "persona-core-runtime",
 ]
 

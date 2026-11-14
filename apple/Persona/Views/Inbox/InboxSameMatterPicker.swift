@@ -43,18 +43,37 @@ extension Notification.Name {
             return false
         } catch {
             guard !Task.isCancelled else { return false }
-            model.show(error)
+            if let conflict = conflictMessage(for: error) {
+                model.toast = Toast(conflict, style: .error)
+                Haptics.error()
+            } else {
+                model.show(error)
+            }
             return false
         }
     }
+
+    /// A parent conflict can mean a newly formed cycle or too many levels; neither exposes the hub's English wording.
+    nonisolated static func conflictMessage(for error: Error) -> String? {
+        guard let error = error as? APIError, error.status == 409 else { return nil }
+        return String(localized: "This link isn't possible. Choose something else.")
+    }
 }
 
-/// The Same matter as… choices: open items from one manager, leaving out the item and its known direct children.
+/// The Same matter as… choices: open items from one manager, leaving out the item and everything known beneath it.
 nonisolated enum InboxSameMatter {
+    private static let maxParentDepth = 50
+
     static func candidates(items: [InboxItem], item: InboxItem, children: [InboxItem], query: String) -> [InboxItem] {
         let excluded = Set([item.id] + children.map(\.id))
+        // Parent ids are local to a manager; another manager may reuse the same id for an unrelated item.
+        var itemsByID: [String: InboxItem] = [:]
+        for candidate in items where candidate.manager == item.manager {
+            itemsByID[candidate.id] = candidate
+        }
         let open = items.filter { candidate in
             !candidate.isDone && candidate.manager == item.manager && !excluded.contains(candidate.id)
+                && !hasInboxAncestor(candidate, ancestorID: item.id, itemsByID: itemsByID)
         }
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let matching = query.isEmpty ? open : open.filter { candidate in
@@ -66,6 +85,20 @@ nonisolated enum InboxSameMatter {
             let bb = b.updatedAt ?? b.startedAt ?? .distantPast
             return aa == bb ? a.id < b.id : aa > bb
         }
+    }
+
+    /// Follow only loaded inbox parents, stopping at corrupt cycles and bounding incomplete or malicious chains.
+    private static func hasInboxAncestor(_ candidate: InboxItem, ancestorID: String,
+                                         itemsByID: [String: InboxItem]) -> Bool {
+        var seen: Set<String> = []
+        var parent = candidate.parent
+        for _ in 0..<maxParentDepth {
+            guard let current = parent, current.kind == "inbox" else { return false }
+            if current.id == ancestorID { return true }
+            guard seen.insert(current.id).inserted else { return false }
+            parent = itemsByID[current.id]?.parent
+        }
+        return false
     }
 
     /// Where and who, without repeating a direct message's name or borrowing the item's latest text.

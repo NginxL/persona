@@ -185,8 +185,8 @@
 /* Phones under 340 px wide (iPhone SE first generation, small Android phones): `max-xs:` is below 340 px, where the composer's mode chips turn into
    an icon and a short word (#4316). */
 @theme { --breakpoint-xs: 340px; }
-/* The task cards' type scale by role (docs/design/task-cards.md §4.1): the card and row title, the meta line, the chip / label. The sizes the cards already used, now named; iOS Theme.Font bodyStrong / caption / label. */
-@theme { --text-card-title: 14.5px; --text-meta: 13px; --text-label: 12px; }
+/* The task cards' type scale by role (docs/design/task-cards.md §4.1): the card and row title, the meta line, the chip / label, and secondary meta. The sizes the cards already used, now named; iOS Theme.Font bodyStrong / caption / label. */
+@theme { --text-card-title: 14.5px; --text-meta: 13px; --text-label: 12px; --text-submeta: 11.5px; }
 @theme inline {
   --color-page: var(--page);
   --color-canvas: var(--canvas);

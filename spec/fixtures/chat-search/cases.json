@@ -239,6 +239,24 @@
    "index": "今天的安排\n照片同步脚本（Mac Studio）的计划写好了，等你批准。\n补齐 NetworkClient 的测试，见 PR 页面 和 https://example.com/notes\n引用：重要 的事\n\n项目 状态\n发布 周四 周五\n\nlet x = 1 // **不动**\n2 * 3 * 4 = 24，snake_case_name 和 *星号* 保持原样，代码里的 ` 反引号。"
   },
   {
+   "name": "assistant_markdown_strong",
+   "description": "A reply's bold as the chat shows it (#7195): `**` goes when the bold holds code, wraps a numbered title, spans two lines or has no partner; `2 ** 3` and `a**b` read as expressions and stay, as does code. Search in chat matches the reply as it is.",
+   "item": {
+    "id": "a10#0",
+    "seq": 10,
+    "role": "assistant",
+    "kind": "text",
+    "text": "结论：**先跑 `go vet` 再提交**，然后合并。\n**`--dry-run`** 只打印，**1. 准备 `config.json`**\n**这一句\n跨了两行**，只有开头的 **没有结尾\n2 ** 3 = 8，a**b 保持原样，用 `**kwargs`。"
+   },
+   "fields": [
+    [
+     "text",
+     "结论：**先跑 `go vet` 再提交**，然后合并。\n**`--dry-run`** 只打印，**1. 准备 `config.json`**\n**这一句\n跨了两行**，只有开头的 **没有结尾\n2 ** 3 = 8，a**b 保持原样，用 `**kwargs`。"
+    ]
+   ],
+   "index": "结论：先跑 go vet 再提交，然后合并。\n--dry-run 只打印，1. 准备 config.json\n这一句\n跨了两行，只有开头的 没有结尾\n2 ** 3 = 8，a**b 保持原样，用 **kwargs。"
+  },
+  {
    "name": "assistant_card",
    "description": "A reply with a card: the card counts as its fallback text (sdk/go/wire AssistantCardText), never its JSON.",
    "item": {

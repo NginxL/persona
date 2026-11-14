@@ -249,6 +249,8 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   modification time of `~/.persona/plugin-skills/<name>/.persona-plugin` on the assistant's machine with the upgrade's.
 
 - Inbox fixtures must wait for the first asynchronous roster count before writing directly to their items (#3459). `inboxReady` returns after scheduling `tellInboxNeedsYou`, whose goroutine holds the Inbox mutex while reading the map and status fields. Legacy fixture seeding bypassed that mutex and could crash the whole test process, even without the race detector. Use `waitNeedsYouIdle` at the fixture readiness boundary; later concurrent mutations must still use the Inbox mutex. Keep the real teller enabled and verify the complete Inbox test group under `-race`.
+  Observing a fake send is not the end of `tellSoon` (#7035). Before restoring a swapped `Service.store`, hold the fixture's handling pass and call `deliverNotes` synchronously for the item: its per-item lock waits through the background save, while `toldConv` returns as soon as the send is recorded.
+  Scheduling is not completion for transcription readiness either (#7232): after a fixture calls `transcriptionReadinessChanged`, `hubTr.wg.Wait` must precede a direct `Service.store` replacement because `transcriptionJobsCheck` reads settings through that store.
 - **An optional object in a tool's schema can come filled with zero values** (#3386): runtimes that fill in every field
   of a tool's schema send `agent_send`'s `task` as `{"title":"","done_when":[],"expect_minutes":0}` instead of leaving it
   out, and the server took any `task` as a hand-off: a reply to another conversation's agent was refused, and one to an

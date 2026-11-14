@@ -105,6 +105,7 @@ func (f filters) matches(r *record) bool {
 		return false
 	}
 	v := r.item
+	todo := v.todo()
 	return (f.ID == "" || f.ID == v.ID) && (!f.NoPrivate || !v.Private) &&
 		(!f.Roots || v.root() == "") && (f.Under == "" || f.Under == v.root()) &&
 		(f.State == "" || f.State == stateOf(v, f.Roots)) &&
@@ -119,7 +120,7 @@ func (f filters) matches(r *record) bool {
 		(f.Waiting == "" || (f.Waiting == "1") == waitingOf(v, f.Roots)) &&
 		(f.Manager == "" || f.Manager == r.owner) &&
 		(f.Provider == "" || f.Provider == v.Provider) &&
-		(f.Todo == "" || f.Todo == v.Todo || f.Todo == TodoNone && v.Todo == "") &&
+		(f.Todo == "" || f.Todo == todo || f.Todo == TodoNone && todo == "") &&
 		(f.Q == "" || strings.Contains(r.search, f.Q))
 }
 
@@ -192,7 +193,7 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 		m   map[string]int
 		key string
 	}{
-		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, stateOf(v, roots)}, {c.Todo, v.Todo},
+		{c.Machine, v.Machine}, {c.Project, v.Project}, {c.Group, v.Group}, {c.State, stateOf(v, roots)}, {c.Todo, v.todo()},
 	} {
 		pair.m[pair.key] += delta
 		if pair.m[pair.key] == 0 {

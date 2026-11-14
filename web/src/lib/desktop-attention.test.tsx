@@ -7,6 +7,7 @@ const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
 vi.mock("./router", () => ({ navigate: navigateMock }));
 
 import { useAttentionSignals } from "./attention-signals";
+import type { DesktopBridge, DesktopPresence } from "../../../spec/desktop-bridge";
 import type { Interaction } from "./types";
 
 const { sendMock, connectMock, disconnectMock } = vi.hoisted(() => ({ sendMock: vi.fn(), connectMock: vi.fn(), disconnectMock: vi.fn() }));
@@ -33,6 +34,23 @@ let active: boolean | undefined;
 let changePresence: ((value: boolean) => void) | undefined;
 let changeNotifications: (() => void) | undefined;
 
+function desktopMock(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
+  return {
+    version: 1, platform: "linux", deviceName: "Desktop",
+    notificationPermission: () => "granted",
+    setBadge: vi.fn(), notify: () => true, closeNotification: vi.fn(), clearNotifications: vi.fn(),
+    desktopPresence: () => ({ active: active ?? false, notifies: active ?? false }),
+    onOpenNotification: () => () => {},
+    onPresenceChange: (callback: (presence: DesktopPresence) => void) => {
+      changePresence = (value) => { active = value; callback({ active: value, notifies: value }); };
+      return () => { changePresence = undefined; };
+    },
+    setLaunchAtLogin: async () => ({ enabled: false }),
+    getLaunchAtLogin: async () => ({ enabled: false }),
+    ...overrides,
+  };
+}
+
 function Probe() {
   useAttentionSignals("Persona", undefined);
   return null;
@@ -45,16 +63,7 @@ describe("desktop attention lifecycle", () => {
     features = ["desktop_unregister"];
     notifyOn = true;
     active = true;
-    vi.stubGlobal("window", Object.assign(window, { personaDesktop: {
-      version: 1, platform: "linux", deviceName: "Desktop",
-      notificationPermission: () => "granted", desktopPresence: () => ({ active, notifies: active }),
-      notify: () => true, closeNotification: vi.fn(), clearNotifications: vi.fn(), setBadge: vi.fn(),
-      onOpenNotification: () => () => {},
-      onPresenceChange: (callback: (presence: { active: boolean; notifies: boolean }) => void) => {
-        changePresence = (value) => { active = value; callback({ active: value, notifies: value }); };
-        return () => { changePresence = undefined; };
-      },
-    } }));
+    vi.stubGlobal("window", Object.assign(window, { personaDesktop: desktopMock() }));
     hello = undefined;
     changePresence = undefined;
     changeNotifications = undefined;
@@ -108,5 +117,17 @@ describe("desktop attention lifecycle", () => {
     await act(async () => root.unmount());
     expect(unsubscribe).toBe(1);
     expect(click).toBeUndefined();
+  });
+  it("keeps the browser lifecycle when an older desktop lacks additive capabilities", async () => {
+    const legacy: Partial<DesktopBridge> = desktopMock();
+    delete legacy.desktopPresence;
+    delete legacy.onPresenceChange;
+    delete legacy.onOpenNotification;
+    vi.stubGlobal("window", Object.assign(window, { personaDesktop: legacy }));
+    await act(async () => root.render(<Probe />));
+    await act(async () => hello?.());
+    expect(sendMock).toHaveBeenCalledWith({ type: "register_desktop", device_name: "Desktop" });
+    await act(async () => root.unmount());
+    expect(changePresence).toBeUndefined();
   });
 });

@@ -1,8 +1,8 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// The shared Rust core's Apple binding. Only the iOS app and its tests link this package; watch, widgets, Vision,
-// Persona Link and the frozen Mac app do not. Run native/app-core/scripts/build-apple.sh before `swift test` or
+// The shared Rust core's Apple binding. Only the iOS app and its tests link this package; watch, widgets, Vision and
+// Persona Link do not. Run native/app-core/scripts/build-apple.sh before `swift test` or
 // xcodebuild: the XCFramework is an ignored build product, never a committed binary.
 let package = Package(
     name: "PersonaCore",

@@ -117,10 +117,10 @@ struct HomeCalendarWidgetTests {
         let dir = FileManager.default.temporaryDirectory.appending(path: "home-calendar-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = HomeCalendarStore(root: dir)
-        #expect(store.read() == HomeCalendarState())
+        #expect(store.savedState() == HomeCalendarState())
         store.update { $0.show(.week, in: "large.today") }
-        #expect(store.read().slots["large.today"]?.view == .week)
-        #expect(HomeCalendarStore(root: nil).read() == HomeCalendarState())
+        #expect(store.savedState().slots["large.today"]?.view == .week)
+        #expect(HomeCalendarStore(root: nil).savedState() == HomeCalendarState())
     }
 
     /// The rest of today: on today, not over yet, all-day ones first; yesterday's never.

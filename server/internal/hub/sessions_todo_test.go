@@ -65,6 +65,22 @@ func TestRuntimeSessionsByTodo(t *testing.T) {
 	}
 }
 
+// A to-do-only row shares the optional fold allocation without changing the row's own state or background wait under
+// roots=1. Its Fold carries the same State and BackgroundWaiting that a nil Fold would mean.
+func TestRuntimeSessionsTodoKeepsOwnFoldState(t *testing.T) {
+	h := newTestHub(t)
+	catalogMachine(h, "mac", nil,
+		proto.Session{SessionID: "waiting", State: "working", BackgroundWaiting: true, Todo: &proto.TodoRef{ID: "todo_a"}},
+		proto.Session{SessionID: "active", State: "working", Todo: &proto.TodoRef{ID: "todo_a"}},
+	)
+	for query, want := range map[string]string{"waiting=0": "active", "waiting=1": "waiting"} {
+		page := runtimePage(t, h, "summary=1&roots=1&todo=todo_a&"+query)
+		if len(page.Sessions) != 1 || page.Sessions[0].SessionID != want {
+			t.Errorf("%s: %+v, want only %s", query, page.Sessions, want)
+		}
+	}
+}
+
 // The sidebar's quick filters on the paged list (#6662): state=working with waiting=1 the sessions only waiting in the
 // background, waiting=0 the others; exclude_pane_source leaves one origin out (the hidden botmux sessions).
 func TestRuntimeSessionsQuickFilters(t *testing.T) {

@@ -204,6 +204,7 @@ func TestBriefFollowingFormatsTextWithoutChangingInput(t *testing.T) {
 func TestBriefFactsIncludeInboxFollowUps(t *testing.T) {
 	e := newBriefEnv(t)
 	setSettings(t, e.s, func(v *Settings) { v.Timezone = "UTC" })
+	waitNeedsYouIdle(t, e.s)
 	e.setFeatures(FeishuFeatures{Main: true, Board: true, Pushes: true})
 	e.s.inbox.init()
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
@@ -213,7 +214,9 @@ func TestBriefFactsIncludeInboxFollowUps(t *testing.T) {
 		Follow: &InboxFollow{Who: "Reviewer", Next: "Ask for a reply", CheckAt: &checkAt, Checks: 2},
 	}
 	before := briefFollowingTestCopy([]InboxItem{*item})[0]
+	e.s.inbox.mu.Lock()
 	e.s.inbox.items[item.ID] = item
+	e.s.inbox.mu.Unlock()
 
 	facts := e.s.briefFactsAt(context.Background(), now, "")
 	want := []prompts.BriefFollow{{Title: "Inbox reply", Who: "Reviewer", Next: "Ask for a reply"}}

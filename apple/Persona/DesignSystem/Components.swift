@@ -928,6 +928,36 @@ struct FirstFitting: Layout {
     private static let away: CGFloat = 100_000
 }
 
+/// One view, measured once for each size it is offered: the answers are kept in the layout's cache, which SwiftUI makes
+/// again when the view changes. For a candidate of a `ViewThatFits` in a list row: a row is hosted by its own view graph,
+/// which works its size out again on every frame the row moves on screen (the shell's strip sliding the page), and
+/// `ViewThatFits` then measures each candidate anew, every chip's text with it. On the Agents list's filters that was
+/// about 2 ms a frame of a switch between Assistant and Agents (#5438, docs/apple/performance.md P7). Unlike
+/// `FirstFitting` only the shown candidate exists, so buttons can go in it.
+struct MeasuredOnce: Layout {
+    struct Offer: Hashable { var width: CGFloat?, height: CGFloat? }
+    struct Cache { var sizes: [Offer: CGSize] = [:] }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard let view = subviews.first else { return .zero }
+        let offer = Offer(width: proposal.width, height: proposal.height)
+        if let known = cache.sizes[offer] { return known }
+        let size = view.sizeThatFits(proposal)
+        // A handful of offers at most (ideal, the row's width); a resize that walks through widths starts over.
+        if cache.sizes.count >= Self.kept { cache.sizes.removeAll(keepingCapacity: true) }
+        cache.sizes[offer] = size
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+
+    private static let kept = 8
+}
+
 extension View {
     /// A `FirstFitting`'s candidates as one static text that says `text`, where the shown one is drawn.
     func firstFittingText(_ text: String) -> some View {

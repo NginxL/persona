@@ -208,7 +208,7 @@ class PersonaOnlyTests(unittest.TestCase):
     def test_project_uses_only_persona_targets_and_schemes(self):
         project = yaml.safe_load(source("project.yml"))
         self.assertEqual(project["name"], "Persona")
-        self.assertEqual(set(project["schemes"]), {"Persona", "PersonaMac", "PersonaWatch", "PersonaVision", "PersonaMacExtensionUI"})
+        self.assertEqual(set(project["schemes"]), {"Persona", "PersonaWatch", "PersonaVision"})
         targets = project["targets"]
         for name, target in targets.items():
             with self.subTest(target=name):
@@ -221,8 +221,8 @@ class PersonaOnlyTests(unittest.TestCase):
         for scheme in project["schemes"].values():
             self.assertTrue(set(scheme["build"]["targets"]).issubset(targets))
         modules = {
-            "Persona": "Persona", "PersonaMac": "Persona", "PersonaVision": "Persona", "PersonaWatch": "Persona",
-            "PersonaWidgets": "PersonaWidgets", "PersonaNotify": "PersonaNotify", "PersonaMacNotify": "PersonaNotify", "PersonaVisionNotify": "PersonaNotify",
+            "Persona": "Persona", "PersonaVision": "Persona", "PersonaWatch": "Persona",
+            "PersonaWidgets": "PersonaWidgets", "PersonaNotify": "PersonaNotify", "PersonaVisionNotify": "PersonaNotify",
             "PersonaShare": "PersonaShare", "PersonaVisionShare": "PersonaShare",
             "PersonaWatchWidgets": "PersonaWatchWidgets", "PersonaVisionWidgets": "PersonaWidgets",
         }
@@ -237,8 +237,7 @@ class PersonaOnlyTests(unittest.TestCase):
 
     def test_plists_have_unique_keys_and_exact_compatible_url_schemes(self):
         registered = set()
-        expected = {"Persona/Resources/Info.plist", "Mac/Resources/Info.plist",
-                    "Vision/Resources/Info.plist", "PersonaLink/Info.plist", "PersonaWatch/Info.plist"}
+        expected = {"Persona/Resources/Info.plist", "Vision/Resources/Info.plist", "PersonaWatch/Info.plist"}
         for path in apple_files():
             if path.suffix not in {".plist", ".entitlements"}:
                 continue
@@ -257,7 +256,7 @@ class PersonaOnlyTests(unittest.TestCase):
                     registered.add(relative)
         self.assertEqual(registered, expected)
         project = yaml.safe_load(source("project.yml"))
-        for target in ["Persona", "PersonaMac", "PersonaVision"]:
+        for target in ["Persona", "PersonaVision"]:
             settings = project["targets"][target]
             properties = settings["info"]["properties"]
             self.assertEqual(len(properties["CFBundleURLTypes"]), 1)
@@ -392,31 +391,24 @@ class PersonaOnlyTests(unittest.TestCase):
         for path in ["Shared/WatchText.swift", "Persona/Views/Chat/VideoAttach.swift"]:
             self.assertIn("HubNaming.filePattern", source(path))
 
-    def test_link_paths_and_helpers_share_compatible_names_without_duplicates(self):
-        paths = source("PersonaLink/Sources/PersonaLink/LinkStatePaths.swift")
-        self.assertIn('environment["PERSONA_HOME"] ?? environment[previousHomeKey] ?? ""', paths)
-        self.assertIn('LegacyNames.product.uppercased() + "_HOME"', paths)
-        self.assertIn('home.appendingPathComponent(".persona", isDirectory: true)', paths)
-        self.assertIn('home.appendingPathComponent("." + LegacyNames.product, isDirectory: true)', paths)
-        self.assertIn("lstat(previous.path, &old)", paths)
-        self.assertIn("a.st_dev == b.st_dev, a.st_ino == b.st_ino", paths)
-        self.assertNotIn("moveItem(", paths)
-        self.assertNotIn("removeItem(", paths)
-        helper = source("PersonaLink/Sources/PersonaLink/LinkModel.swift")
-        self.assertEqual(helper.count('environment["PERSONA_HOME"] = stateURL.path'), 1)
-        self.assertIn('LegacyNames.product.uppercased() + "_HOME"', helper)
+    def test_link_package_and_clients_share_compatible_names_without_duplicates(self):
+        # The retired menu bar's data-directory and pairing code is archived with its UI (#6770). The independent
+        # launchd service and fixed Electron command bridge keep the connector in the shared PERSONA_HOME.
+        package = source("PersonaLink/Package.swift")
+        self.assertIn('name: "PersonaScreen"', package)
+        self.assertIn('path: "Sources/PersonaScreen"', package)
+        self.assertNotIn('path: "Sources/PersonaLink"', package)
+        service = APPLE.parent / "server/cmd/persona-link/service_mac.go"
+        self.assertIn('<key>PERSONA_HOME</key>', service.read_text())
         route = source("Shared/HubPageLink.swift")
         self.assertIn('case "persona", LegacyNames.conversationPath:', route)
-        for path in ["Shared/APIClient.swift", "Shared/ExtensionSystemLink.swift", "Mac/App/MacOpenURL.swift"]:
+        for path in ["Shared/APIClient.swift", "Shared/ExtensionSystemLink.swift"]:
             self.assertIn("HubNaming.accepts(scheme:", source(path))
         self.assertIn('["persona", LegacyNames.urlScheme].contains(url.scheme?.lowercased() ?? "")',
                       source("LiveActivity/PersonaActivityAttributes.swift"))
-        self.assertIn('static let schemes: Set<String> = ["persona", LegacyNames.product]',
-                      source("PersonaLink/Sources/PersonaLink/PairLink.swift"))
         self.assertIn('case "persona", LegacyNames.urlScheme:', source("Persona/Views/Chat/AssistantHTMLCard.swift"))
-        compatibility = APPLE / "PersonaLink/Sources/PersonaLink/NativeCompatibility.swift"
-        self.assertTrue(compatibility.is_symlink())
-        self.assertEqual(compatibility.resolve(), (APPLE / "Shared/NativeStateMigration.swift").resolve())
+        self.assertFalse((APPLE / "PersonaLink/Sources/PersonaLink").exists())
+        self.assertFalse((APPLE / "PersonaLink/Tests/PersonaLinkTests").exists())
         for path in (path for path in apple_files() if path.suffix == ".swift"):
             with self.subTest(path=path.relative_to(APPLE)):
                 text = path.read_text(encoding="utf-8")

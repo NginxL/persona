@@ -41,6 +41,25 @@ class AssistantSearchRuleTests(unittest.TestCase):
                 self.assertEqual(mock["search_plain"](md), want)
         self.assertEqual(mock["search_index_text"]({"role": "user", "kind": "text", "text": "**不是** Markdown"}), "**不是** Markdown")
 
+    def test_a_reply_keeps_no_strong_markers(self):
+        # the manager's TestSearchPlainLeavesNoStrongMarkers (#7195), the same answers
+        mock = runpy.run_path(str(HERE / "mock_hub.py"))
+        for md, want in [
+            ("计划写好了。\n**步骤一 - `make test`**", "计划写好了。\n步骤一 - make test"),
+            ("结论：**先跑 `go vet` 再提交**，然后合并", "结论：先跑 go vet 再提交，然后合并"),
+            ("上一段\n\n**1. 准备 `config.json`**\n内容", "上一段\n\n1. 准备 config.json\n内容"),
+            ("**`--dry-run`** 只打印", "--dry-run 只打印"),
+            ("**第一行\n第二行**", "第一行\n第二行"),
+            ("只有开头的 **没有结尾", "只有开头的 没有结尾"),
+            ("**a **b** c**，***粗斜***，***没收", "a b c，粗斜，没收"),
+            ("见 [`config.json`](https://example.com/c) 和 *用 `x` 时*", "见 config.json 和 用 x 时"),
+            ("2 ** 3 = 8，a**b\nx**2 和 **注意**", "2 ** 3 = 8，a**b\nx**2 和 注意"),
+            ("用 `**kwargs` 和 `a\\*b`", "用 **kwargs 和 a*b"),
+            ("`\U000F0000` 在代码里", "\U000F0000 在代码里"),
+        ]:
+            with self.subTest(md):
+                self.assertEqual(mock["search_plain"](md), want)
+
     def test_a_cut_snippet_keeps_its_ranges(self):
         # NFKC makes the leading "…" three dots: the ranges still point at the match in the snippet as sent (#7045)
         mock = runpy.run_path(str(HERE / "mock_hub.py"))

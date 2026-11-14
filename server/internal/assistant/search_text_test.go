@@ -131,3 +131,30 @@ func TestSearchPlainKeepsAReplysWordsWithoutTheMarkup(t *testing.T) {
 		t.Fatalf("snippet %q ranges %v", snippet, ranges)
 	}
 }
+
+// No `**` of a reply is left in its index (#7195): bold that holds code, wraps a numbered title, nests, spans two
+// lines or has no partner loses its stars; `2 ** 3` and `a**b` read as expressions and stay, as does code.
+func TestSearchPlainLeavesNoStrongMarkers(t *testing.T) {
+	for _, c := range []struct{ md, want string }{
+		{"计划写好了。\n**步骤一 - `make test`**", "计划写好了。\n步骤一 - make test"},
+		{"结论：**先跑 `go vet` 再提交**，然后合并", "结论：先跑 go vet 再提交，然后合并"},
+		{"上一段\n\n**1. 准备 `config.json`**\n内容", "上一段\n\n1. 准备 config.json\n内容"},
+		{"**`--dry-run`** 只打印", "--dry-run 只打印"},
+		{"**第一行\n第二行**", "第一行\n第二行"},
+		{"只有开头的 **没有结尾", "只有开头的 没有结尾"},
+		{"**a **b** c**，***粗斜***，***没收", "a b c，粗斜，没收"},
+		{"见 [`config.json`](https://example.com/c) 和 *用 `x` 时*", "见 config.json 和 用 x 时"},
+		{"2 ** 3 = 8，a**b\nx**2 和 **注意**", "2 ** 3 = 8，a**b\nx**2 和 注意"},
+		{"用 `**kwargs` 和 `a\\*b`", "用 **kwargs 和 a*b"},
+		{"`\U000F0000` 在代码里", "\U000F0000 在代码里"},
+	} {
+		if got := searchPlain(c.md); got != c.want {
+			t.Errorf("searchPlain(%q) = %q, want %q", c.md, got, c.want)
+		}
+	}
+	// a match's range is counted on the text without the stars
+	reply, _ := searchIndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "结论：**先跑 `go vet` 再提交**"})
+	if snippet, ranges := searchSnippet(reply, searchWords("go vet 再提交")); snippet != "结论：先跑 go vet 再提交" || !reflect.DeepEqual(ranges, [][2]int{{6, 8}, {9, 12}, {13, 16}}) {
+		t.Fatalf("snippet %q ranges %v", snippet, ranges)
+	}
+}

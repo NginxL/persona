@@ -353,10 +353,14 @@ struct RecordingMinutesSections: View {
 
 /// The minutes' Copy and Share: Markdown rendered on the phone (`RecordingMinutes.text`), headed by the minutes' title or
 /// else the recording's name. In the minutes' sections, and on iPhone under the Summary | Transcript switch, where they
-/// stay whichever view shows (#5026).
+/// stay whichever view shows (#5026). With the summary card's layout (`summaryCard`, #6563) they send the hub's own
+/// Markdown, which follows that layout (`RecordingMinutes.shareText`).
 struct RecordingMinutesActions: View {
     var entry: RecordingEntry
     var minutes: RecordingMinutes
+    /// The Summary shows the summary card (`RecordingMinutesCards.Summary.overview`).
+    var summaryCard = false
+
     var body: some View {
         HStack(spacing: Theme.Space.m) {
             Button { copy() } label: { Label("Copy", systemImage: Theme.Icon.copy).lineLimit(1) }
@@ -371,7 +375,12 @@ struct RecordingMinutesActions: View {
     }
 
     private var text: String {
-        minutes.text(title: entry.displayTitle)
+        Self.text(minutes, title: entry.displayTitle, summaryCard: summaryCard)
+    }
+
+    /// What Copy and Share send: the hub's Markdown with the summary card, else the phone's own.
+    static func text(_ minutes: RecordingMinutes, title: String, summaryCard: Bool) -> String {
+        summaryCard ? minutes.shareText(title: title) : minutes.text(title: title)
     }
 
     private func copy() {

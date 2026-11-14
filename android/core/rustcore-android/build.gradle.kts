@@ -183,6 +183,17 @@ androidComponents {
 
 dependencies {
     api(project(":core:rustcore"))
+    // Instrumentation verifies the same private JNI boundary as RustCore. Compile the tests as a friend of
+    // :core:rustcore rather than making NativeBridge public or adding a production diagnostic API.
+    val rustCoreJar = layout.buildDirectory.file("../../rustcore/build/libs/rustcore.jar")
+    tasks.matching { it.name == "compileReleaseAndroidTestKotlin" }.configureEach {
+        val compile = this as org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+        compile.dependsOn(":core:rustcore:jar")
+        compile.inputs.file(rustCoreJar).withPropertyName("rustCoreFriendJar")
+        compile.compilerOptions.freeCompilerArgs.add(
+            rustCoreJar.map { "-Xfriend-paths=${it.asFile.absolutePath}" },
+        )
+    }
     androidTestImplementation(testFixtures(project(":core:domain")))
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

@@ -124,4 +124,9 @@ describe("signing out without the revoke", () => {
     expect(clearNotifications).toHaveBeenCalledOnce();
     expect(location.href).toBe("/");
   });
+  it("signs out when an older desktop lacks notification cleanup", () => {
+    vi.stubGlobal("window", { personaDesktop: {} });
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(location.href).toBe("/");
+  });
 });

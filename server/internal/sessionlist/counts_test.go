@@ -93,7 +93,12 @@ func TestTodoFilterAndCounts(t *testing.T) {
 	for n := range items {
 		items[n] = testItem(fmt.Sprintf("row-%d", n), n)
 	}
-	items[0].Todo, items[1].Todo, items[2].Todo = "todo_a", "todo_a", "todo_b"
+	setTodo := func(row int, todo string) {
+		items[row].Fold = &Fold{State: items[row].State, BackgroundWaiting: items[row].BackgroundWaiting, Todo: todo}
+	}
+	setTodo(0, "todo_a")
+	setTodo(1, "todo_a")
+	setTodo(2, "todo_b")
 	index.Replace("demo", items)
 	counts, err := index.Counts(Options{})
 	if err != nil || counts.Todo["todo_a"] != 2 || counts.Todo["todo_b"] != 1 || counts.Todo[""] != 2 {
@@ -116,7 +121,7 @@ func TestTodoFilterAndCounts(t *testing.T) {
 		t.Fatalf("filtered counts: %+v", counts)
 	}
 	baseline := index.Revision()
-	items[3].Todo = "todo_b"
+	setTodo(3, "todo_b")
 	items[3].Full = testPayload{ID: items[3].ID, Title: "Linked to b"}
 	index.Replace("demo", items)
 	if got := ids(mustQuery(t, &index, Options{Todo: "todo_b", Since: baseline})); fmt.Sprint(got) != "[row-3]" {

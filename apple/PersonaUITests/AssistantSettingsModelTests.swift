@@ -73,14 +73,20 @@ final class AssistantSettingsModelTests: XCTestCase {
         try setQuiet(true)
     }
 
-    /// Settings › Assistant › Main Chat Supervises Its Own Tasks (#5083): off on a hub with the background supervisor, and
-    /// turning it on is sent to the hub.
+    /// Assistant Profile › Agent Follow-Up › Main Chat Supervises Its Own Tasks (#5083; on that page since #7005): off on a
+    /// hub with the background supervisor, and turning it on is sent to the hub.
     @MainActor func testMainSupervisesOwnTasksSwitch() throws {
         let key = "main_supervises_own_tasks"
         try setFlag(key, false)
+        // Settings › Assistant Profile › Agent Follow-Up, as a person goes there: `-openAssistantPage agentFollowUp`
+        // would open the page under the Persona tab as well, and the query could find that copy.
         let app = launch(["-openAssistantPage", "assistant"])
-        let toggle = app.switches["assistant-main-supervises-own-tasks"].firstMatch
+        let row = app.descendants(matching: .any)["assistant-agent-follow-up"].firstMatch
         XCTAssertTrue(app.staticTexts["定时任务"].firstMatch.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(row.exists && row.isHittable) { app.swipeUp() }
+        row.tap()
+        let toggle = app.switches["assistant-main-supervises-own-tasks"].firstMatch
+        XCTAssertTrue(app.switches["followup-start-requested"].firstMatch.waitForExistence(timeout: 10))
         let viewport = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 100)
         for _ in 0..<12 where !(toggle.exists && viewport.contains(toggle.frame)) {
             let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))

@@ -254,7 +254,11 @@ struct RFBClientTests {
     @Test func heldUpdatesAskForNoMore() async throws {
         func u16(_ v: Int) -> [UInt8] { [UInt8(v >> 8), UInt8(v & 0xff)] }
         var s0: [UInt8] = u16(2) + u16(2); s0 += [UInt8](repeating: 0, count: 16); s0 += RFBAuth.be32(4); s0 += Array("Mock".utf8)
-        let raw: [UInt8] = [0, 0] + u16(1) + u16(0) + u16(0) + u16(1) + u16(1) + RFBAuth.be32(0) + [1, 2, 3, 0]
+        // In typed steps: as one sum Xcode 26.0 could not type-check it in time.
+        var raw: [UInt8] = [0, 0] + u16(1)
+        raw += u16(0) + u16(0)
+        raw += u16(1) + u16(1)
+        raw += RFBAuth.be32(0) + [1, 2, 3, 0]
         let a1: [UInt8] = [1] + RFBAuth.be32(256)
         let script: [[UInt8]] = [Array("RFB 003.889\n".utf8), [1, 19], [0, 2], [0], a1, RFBAuth.be32(0), s0, raw, raw]
         let t = ScriptedTransport(script, holds: true)

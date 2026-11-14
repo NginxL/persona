@@ -105,6 +105,7 @@ func (s *Service) triage(ctx context.Context, it *InboxItem) *inboxWrite {
 		it.Tier, it.Reason = fallback, b.byRules()
 	}
 	b.applyPolicyTier(it) // the user's policy has the last word on the tier (inbox_policies.go)
+	b.liftMerged(it)      // a merged row stays at its rows' highest tier (inbox_merge.go, #7230)
 	it.TriagedAt = last
 	b.noteTriaged(it)
 	// Triage can settle an item read elsewhere while it was still untriaged (not one filed while the model thought).

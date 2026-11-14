@@ -1,7 +1,7 @@
 # PersonaCore for iOS
 
 The Apple binding of the shared Rust continuity core (#6871, #6793). The iOS app and `PersonaTests` link it; watch,
-widgets, Vision, Persona Link and the frozen Mac app do not. It does not replace the production `ChatStore` in phase 1
+widgets, Vision and Persona Link do not. It does not replace the production `ChatStore` in phase 1
 and has no user-facing text or screen changes.
 
 ## Build and verify

@@ -801,10 +801,14 @@ struct RecordingsPage: View {
                 // Once per launch: back from it, the page appears again.
                 guard !Self.sampleOpened else { return }
                 let defaults = UserDefaults.standard
-                // `-showMeetingSample minutes|pending`: the made-up finished meeting's page.
+                // `-showMeetingSample minutes|pending`: the made-up finished meeting's page; `overview`: the longer one's,
+                // for the summary card (#6563).
                 if ["minutes", "pending"].contains(defaults.string(forKey: "showMeetingSample")) {
                     Self.sampleOpened = true
                     debugPage = .recording(RecordingSamples.pastMeeting)
+                } else if defaults.string(forKey: "showMeetingSample") == "overview" {
+                    Self.sampleOpened = true
+                    debugPage = .recording(RecordingSamples.overviewMeeting)
                 }
                 #if os(iOS)
                 // `-openDayRecap YES` with `-showDaySample …`: the made-up past day's page, once it is in place.
@@ -1064,7 +1068,7 @@ struct RecordingDetailView: View {
             .labelsHidden()
             .accessibilityIdentifier("recording-view-switch")
             .minutesCanvasRow()
-            RecordingMinutesActions(entry: entry, minutes: ready)
+            RecordingMinutesActions(entry: entry, minutes: ready, summaryCard: summary?.overview != nil)
                 .minutesCanvasRow()
         }
     }
@@ -1081,7 +1085,8 @@ struct RecordingDetailView: View {
             if summary != nil { summary = nil }
             return
         }
-        let next = RecordingMinutesCards.summary(ready, sentences: entry.sentences)
+        // The summary card (#6563) leaves out what the page's header already says of the meeting.
+        let next = RecordingMinutesCards.summary(ready, sentences: entry.sentences, shown: .init(entry.meeting))
         guard next != summary else { return }
         // The first cards come a moment after the minutes (this runs after the update that brought them): they unfold
         // as the minutes do (Reduce Motion: at once); later changes of the transcript just redraw them.

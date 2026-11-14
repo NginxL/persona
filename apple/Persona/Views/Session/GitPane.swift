@@ -25,7 +25,8 @@ struct GitPane: View {
     @State private var revision = 0
     /// The tab's writes (#7013): staging, the commit, the push.
     @State private var writer = GitWriteModel()
-    @State private var committing = false
+    /// The sheet over the tab: the commit, Branches or Stashes (#7015).
+    @State private var sheet: WriteSheet?
     /// The commit message, kept while the sheet is closed or the commit refused.
     @State private var commitMessage = ""
     /// A push waiting for its yes.
@@ -59,7 +60,10 @@ struct GitPane: View {
                 }
             }
             if let s = status, s.isRepo {
-                Section { header(s) }
+                Section {
+                    header(s)
+                    if canWrite { sheetRows(s) }
+                }
                 changes(s)
                 history(s)
             } else if let error {
@@ -318,7 +322,7 @@ struct GitPane: View {
                 }
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
-                Button { committing = true } label: { Text("Commit…").lineLimit(1) }
+                Button { sheet = .commit } label: { Text("Commit…").lineLimit(1) }
                     .themedButton(prominent: true)
                     .disabled(staged == 0 || s.branch == nil || writer.busy != nil)
                     .accessibilityIdentifier("git.commit")
@@ -340,12 +344,47 @@ struct GitPane: View {
         }
     }
 
-    /// The commit sheet, Push's question and a refusal's alert (#7013), on the tab.
+    enum WriteSheet: String, Identifiable {
+        case commit, branches, stashes
+        var id: String { rawValue }
+    }
+
+    /// Branches and Stashes under the branch card (#7015): each opens its sheet; Stashes says how many there are.
+    @ViewBuilder private func sheetRows(_ s: GitStatus) -> some View {
+        sheetRow(String(localized: "Branches"), symbol: Theme.Icon.gitBranch, value: nil, open: .branches)
+        sheetRow(String(localized: "Stashes"), symbol: Theme.Icon.gitStash, value: s.stashes > 0 ? "\(s.stashes)" : nil, open: .stashes)
+    }
+
+    private func sheetRow(_ title: String, symbol: String, value: String?, open: WriteSheet) -> some View {
+        Button { sheet = open } label: {
+            HStack(spacing: Theme.Space.m) {
+                ThemedIcon(symbol).foregroundStyle(Theme.accent)
+                Text(title).foregroundStyle(Color.primary).lineLimit(1)
+                Spacer(minLength: Theme.Space.s)
+                if let value { Text(value).foregroundStyle(.secondary).monospacedDigit() }
+                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.label).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(writer.busy != nil)
+        .accessibilityIdentifier("git.open." + open.rawValue)
+    }
+
+    /// The commit, Branches and Stashes sheets, Push's question and a refusal's alert (#7013, #7015), on the tab.
     private func writeSheets(_ content: some View) -> some View {
         content
-            .sheet(isPresented: $committing) {
-                if let s = status {
-                    GitNewCommitSheet(status: s, message: $commitMessage, writer: writer) { await commit() }
+            .sheet(item: $sheet) { which in
+                if let s = status, let deps = writeDeps {
+                    switch which {
+                    case .commit:
+                        GitNewCommitSheet(status: s, message: $commitMessage, writer: writer) { await commit() }
+                    case .branches:
+                        GitBranchesSheet(machineID: machineID, cwd: cwd, status: s, writer: writer, deps: deps,
+                                         applied: { applied($0) }, openStashes: { sheet = .stashes })
+                    case .stashes:
+                        GitStashesSheet(machineID: machineID, cwd: cwd, status: s, writer: writer, deps: deps, applied: { applied($0) })
+                    }
                 }
             }
             .confirmationDialog(Text("Push to the Remote?"), isPresented: Binding(get: { askingPush != nil }, set: { if !$0 { askingPush = nil } }),
@@ -355,7 +394,7 @@ struct GitPane: View {
             } message: { kind in
                 Text(pushQuestion(kind))
             }
-            .gitRefusalAlert(Binding(get: { committing ? nil : writer.refusal }, set: { writer.refusal = $0 }))
+            .gitRefusalAlert(Binding(get: { sheet != nil ? nil : writer.refusal }, set: { writer.refusal = $0 }))
     }
 
     /// What Push says it does, as the web's question: never forced.
@@ -389,7 +428,7 @@ struct GitPane: View {
         applied(r)
         if let c = r?.commit {
             commitMessage = ""
-            committing = false
+            sheet = nil
             Haptics.success()
             model.toast = Toast(String(localized: "Committed \(c.short)"), style: .success)
         }

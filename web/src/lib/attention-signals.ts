@@ -246,7 +246,9 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
     if (!desktop) return;
     const reconcile = () => {
       if (!appSocketReady()) return;
-      if (desktop.desktopPresence().active && systemNotifyActive()) {
+      // A newer web app can run in an older desktop: missing additive capabilities retain the browser behavior.
+      const active = desktop.desktopPresence?.().active ?? true;
+      if (active && systemNotifyActive()) {
         send({ type: "register_desktop", device_name: desktop.deviceName });
         return;
       }
@@ -256,14 +258,14 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
     const offHello = onHello(reconcile);
     // Recovery must also work after an old hub's socket-close withdrawal: there is no new hello without reconnecting.
     const restore = () => {
-      if (desktop.desktopPresence().active && systemNotifyActive()) connect();
+      if ((desktop.desktopPresence?.().active ?? true) && systemNotifyActive()) connect();
       reconcile();
     };
-    const offPresence = desktop.onPresenceChange(restore);
+    const offPresence = desktop.onPresenceChange?.(restore) ?? (() => {});
     const offNotifications = onSystemNotifyChange(restore);
-    const offNotification = desktop.onOpenNotification((route) => {
+    const offNotification = desktop.onOpenNotification?.((route) => {
       if (route.startsWith("/") && !route.startsWith("//") && !route.includes("\\")) navigate(stripBase(route));
-    });
+    }) ?? (() => {});
     return () => { offHello(); offPresence(); offNotifications(); offNotification(); };
   }, []);
 

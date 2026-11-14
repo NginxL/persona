@@ -1,5 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DesktopBridge } from "../../../spec/desktop-bridge";
+
+function bridgeMock(overrides: Partial<DesktopBridge>): DesktopBridge {
+  return {
+    version: 1, platform: "darwin", deviceName: "Desktop",
+    notificationPermission: () => "granted", setBadge: vi.fn(), notify: () => true,
+    closeNotification: vi.fn(), clearNotifications: vi.fn(), onOpenNotification: vi.fn(),
+    desktopPresence: () => ({ active: true, notifies: true }), onPresenceChange: () => () => {},
+    setLaunchAtLogin: async () => ({ enabled: false }), getLaunchAtLogin: async () => ({ enabled: false }),
+    ...overrides,
+  };
+}
 
 describe("Electron desktop bridge", () => {
   afterEach(() => {
@@ -9,12 +21,7 @@ describe("Electron desktop bridge", () => {
   it("uses the existing notification text, tag and quiet flag without a browser duplicate", async () => {
     const notify = vi.fn(() => true);
     const closeNotification = vi.fn();
-    vi.stubGlobal("window", Object.assign(window, { personaDesktop: {
-      version: 1, platform: "darwin", deviceName: "Desktop",
-      notificationPermission: () => "granted", notify, closeNotification,
-      desktopPresence: () => ({ active: true, notifies: true }),
-      setBadge: vi.fn(), onOpenNotification: vi.fn(),
-    } }));
+    vi.stubGlobal("window", Object.assign(window, { personaDesktop: bridgeMock({ notify, closeNotification }) }));
     vi.stubGlobal("localStorage", { getItem: (key: string) => key === "persona.systemNotify" ? "1" : null, setItem: vi.fn(), removeItem: vi.fn() });
     vi.stubGlobal("navigator", {});
     const { postNotification, closeNotification: close } = await import("./notify");
@@ -27,10 +34,7 @@ describe("Electron desktop bridge", () => {
   it("retains the browser fallback if native display is rejected", async () => {
     const note = { close: vi.fn() };
     const BrowserNotification = vi.fn(function () { return note; });
-    vi.stubGlobal("window", Object.assign(window, { personaDesktop: {
-      notificationPermission: () => "granted", notify: () => false,
-      desktopPresence: () => ({ active: true, notifies: true }), closeNotification: vi.fn(),
-    } }));
+    vi.stubGlobal("window", Object.assign(window, { personaDesktop: bridgeMock({ notify: () => false }) }));
     vi.stubGlobal("localStorage", { getItem: (key: string) => key === "persona.systemNotify" ? "1" : null, setItem: vi.fn(), removeItem: vi.fn() });
     vi.stubGlobal("navigator", {});
     vi.stubGlobal("Notification", Object.assign(BrowserNotification, { permission: "granted" }));

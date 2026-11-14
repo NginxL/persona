@@ -72,6 +72,21 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     /// The conversations it was handed to with Hand to AI's main chat (#1194), oldest first: they may write back to
     /// it, and the main conversation offers "Wrap up" for it (#5932). Older hubs leave it out.
     var handoffs: [Handoff]?
+    /// The rows merged into this one by hand (#6480); the hub hides them from every list.
+    var mergedFrom: [MergeRef]?
+
+    /// One row merged into another: where it came from.
+    nonisolated struct MergeRef: Codable, Hashable, Sendable {
+        var id: String
+        var source: String
+        var accountName: String?
+        var title: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, source, title
+            case accountName = "account_name"
+        }
+    }
 
     /// The follow-up facts a client reads (spec/fixtures/inbox/now.json); the manager keeps the counters and due flag.
     nonisolated struct Follow: Codable, Hashable, Sendable {
@@ -308,6 +323,7 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, source, kind, account, title, `where`, sender, avatar, preview, count, tier, summary, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
         case status, urgent, recap, handling, suggestion, follow, now, chain, related, manager, handoffs
+        case mergedFrom = "merged_from"
         case accountName = "account_name", startedAt = "started_at", updatedAt = "updated_at", doneAt = "done_at", doneBy = "done_by"
         case chainCount = "chain_count"
     }

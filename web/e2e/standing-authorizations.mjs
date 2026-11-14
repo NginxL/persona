@@ -84,6 +84,9 @@ try {
       await page.screenshot({ path: join(output, `standing-authorizations-${suffix}.png`) });
       await group.getByRole("button", { name: s.revoke, exact: true }).first().click();
       const dialog = page.getByRole("dialog"); await dialog.waitFor();
+      // Measure the dialog once it has opened: during its slide-up the panel is scaled to 0.985, and its 44 px buttons
+      // measure 43.3 px (#7189). Under reduced motion the animation is 1 ms, but its first frame is still drawn.
+      await dialog.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished)));
       assert.equal(writes.length, 0);
       assert((await dialog.textContent()).includes("/code/example"));
       assert(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), "Dialog has no horizontal overflow");

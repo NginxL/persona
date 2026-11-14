@@ -112,7 +112,7 @@ install a resident node plus the connector persona-link, with one command or one
 - Linux: `curl -fsSL <site>/install.sh | sh -s -- --node --pair '<link from personad hub pair --machine <id>>'` (this computer connects to the hub; in `machines` it is
   `{"id":"laptop","name":"Laptop","kind":"link","icon":"laptop"}`, and the hub needs `public.tls_listen`), or `… --node --listen` (the hub connects to it;
   paste the printed link into the hub admin UI under **Computers › Add computer › Hub connects**, and in `machines` it is kind `service`).
-- Mac: install the menu bar App "Persona Link" (`./scripts/app/mac-link.sh install`); it bundles persona-node, the device's own program, and installs the resident node on first run; pairing is in its menu.
+- Mac: install the independent Persona Link helpers (`./scripts/app/mac-link.sh install`); the connector and resident node run as launchd agents. Pair with the optional desktop setup window or `persona-link pair`.
 
 No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above still works, and is kept only for compatibility from now on.
 
@@ -169,7 +169,7 @@ No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above s
 | `android.application_id` | The Android App's application id (`scripts/app/android.sh`, `docs/android/android.md`); defaults to `app.bundle_id` |
 | `android.release_keystore` | Optional: the keystore `scripts/app/android.sh release` signs the release APK with (`~` is expanded). Needs `android.release_key_alias` and `android.release_keystore_password_command`, a shell command that prints the keystore's password; `android.release_key_password_command` prints the key's own password when it differs. Without `android.release_keystore` the command signs with the SDK's local debug keystore, for your own phone only (`docs/android/android.md`, "Build and install") |
 | `android.google_oauth_scheme` | The scheme the Android App uses for the Google sign-in callback for Gmail: the reversed client ID of the hub's `google.client_id` (`docs/extensions/mail.md` ("Android")); without it Gmail can only be added with an app-specific password |
-| `mac.link_bundle_id` | Bundle id of the Mac menu bar App "Persona Link" (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to the placeholder `com.example.persona.link` |
+| `mac.link_bundle_id` | Bundle-id prefix of the independent Mac Persona Screen helper (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to the placeholder `com.example.persona.link` |
 
 `python3 scripts/persona_config.py env` prints shell variables (scripts `eval` it at the top), and `xcconfig` generates `apple/Config.xcconfig`;
 `sim.sh` / `release.sh` generate it automatically. Before running `xcodegen` directly or opening Xcode, run `python3 scripts/persona_config.py xcconfig` once.
@@ -224,7 +224,7 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
 - `security.proxy_protocol` (optional, omitted by default): with same-machine port forwarding, a reverse tunnel, or nginx `stream` passthrough in front of the hub, public connections all look like loopback to the hub.
   Set `{"from": ["127.0.0.1/32"]}`: connections from these upstreams must carry a PROXY header (v1 / v2), and the hub checks the real source in the header; `listeners` defaults to only `tls`.
   Syntax, rules, and self-checks in [network.md](network.md#proxy-protocol).
-- `name` (optional): the hub's display name (e.g. "Home"), shown by persona-link on computers (Mac menu bar) and by future linked-hub and multi-hub clients.
+- `name` (optional): the hub's display name (e.g. "Home"), reported by persona-link and shown by clients.
   Defaults to the short host name of the hub machine; if the host name is a Docker container id or `PERSONA_LOCAL_NODE=0`, it uses `hub-<first 6 chars of hub_id>`. Manual file edits require a hub restart;
   edits in the admin UI's "Overview" take effect immediately ([admin.md](admin.md)).
 - `initial_locale` (optional, `en` / `zh-Hans` / `ja`): the user language until a device reports one ([i18n.md](../protocol/i18n.md), "User language").
@@ -378,8 +378,8 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   since an attachment goes with its line: with `text_days` 365, a source set to 3650 keeps 365 days of attachments,
   `history` (importing chats' older history, **off unless `enabled` is `true`**; `docs/assistant/knowledge.md` "History import"):
   `{"enabled": true, "sources": {"<connector id>": {"profile": "careful", "needs_search_index": true}}}`. Sources run one at a time in the order written, and only after
-  the owner approves each source's plan in the assistant chat. Per source: `profile` (`careful`, the default, or `standard`), `needs_search_index` (default `true`: wait for
-  the knowledge base's search index, #1273; `false` runs before it), `page_limit` (page size asked for, a hint, 50) and pace overrides, each `[least, most]` or one number:
+  the owner approves each source's plan in the assistant chat. Per source: `profile` (`careful`, the default, or `standard`), `needs_search_index` (default `true`: wait until
+  the knowledge base has built its search index, which the manager does by itself within its first minutes on an existing archive, #1273; `false` does not wait), `page_limit` (page size asked for, a hint, 50) and pace overrides, each `[least, most]` or one number:
   `interval_seconds`, `batch_calls`, `rest_minutes`, `long_rest_every_hours` and `long_rest_minutes` (`[0, 0]`: none), `quiet_periods_per_day` and `quiet_hours`,
   `switch_chat_pages`, `image_interval_seconds`, and `slow_factor` (≥ 1: every interval and rest multiplied by it, e.g. `2` after a stop the import caused). A range that
   does not read (most below least, a negative number or bound) or a negative `slow_factor` is an error in `manager.json` like any other (a running manager keeps what it last read). Changing `kb.history`

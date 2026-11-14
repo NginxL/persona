@@ -13,6 +13,7 @@ const (
 	TitleByRules     = "rules"     // the connector's fallback grouping
 	TitleByAssistant = "assistant" // the processing conversation
 	TitleByUser      = "user"      // the user
+	TitleByMerged    = "merged"    // the model, for rows the user merged (inbox_merge_title.go): grouping leaves it alone
 )
 
 // InboxFollow is what a matter waits on: who or what (Who, in the user's words), the next step (Next), when to look

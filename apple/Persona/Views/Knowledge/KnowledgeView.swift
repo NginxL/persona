@@ -22,8 +22,13 @@ struct KnowledgeView: View {
     @State private var resultsFor = ""
     @State private var searchError: String?
     @State private var showIgnored = false
+    /// The project the user asked to delete, while the question is up.
+    @State private var deletingProject: KBEntry?
+    /// Projects taken off the list while their deletion is sent.
+    @State private var hiddenProjects: Set<String> = []
     #if DEBUG
     @State private var debugEntry: KBEntry?
+    @State private var debugAsked = false
     #if os(iOS) || os(visionOS)
     @State private var debugRecording: UUID?
     #endif
@@ -215,9 +220,71 @@ struct KnowledgeView: View {
     }
 
     private func rows(_ items: [KBEntry]) -> some View {
-        ForEach(items) { e in
-            KBEntryLink(entry: e) { KBRow(entry: e) }
+        ForEach(items.filter { !hiddenProjects.contains($0.id) || $0.kind != KBKind.projects.rawValue }) { e in
+            if e.kind == KBKind.projects.rawValue {
+                projectRow(e)
+            } else {
+                KBEntryLink(entry: e) { KBRow(entry: e) }
+            }
         }
+    }
+
+    /// A project row: Delete in its swipe actions and context menu, asked first as on the web (#4412), then undoable.
+    private func projectRow(_ e: KBEntry) -> some View {
+        KBEntryLink(entry: e) { KBRow(entry: e) }
+            .swipeActions(edge: .trailing) {
+                Button { deletingProject = e } label: { Label("Delete", systemImage: Theme.Icon.delete) }.tint(Theme.danger)
+            }
+            .contextMenu {
+                Button(role: .destructive) { deletingProject = e } label: { Label("Delete", systemImage: Theme.Icon.delete) }
+            }
+            .confirmationDialog(String(localized: "Delete This Project?"),
+                                isPresented: Binding(get: { deletingProject?.id == e.id },
+                                                     set: { if !$0, deletingProject?.id == e.id { deletingProject = nil } }),
+                                titleVisibility: .visible) {
+                Button(String(localized: "Delete"), role: .destructive) { Task { await deleteProject(e) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("“\(e.name)” leaves the lists, search and the assistant's context. Its chats, people and documents stay; they just stop naming it. You can undo this right after.")
+            }
+    }
+
+    /// Deletes a project at once (it goes to the hub's trash); Undo brings it back from there. The undo asks the assistant
+    /// the project was deleted from, even if another one is current by then.
+    private func deleteProject(_ e: KBEntry) async {
+        guard let api = scopedAPI() else { return }
+        hiddenProjects.insert(e.id)
+        if opener?.isOpen(e) == true { opener?.open = nil }
+        let trash: KBTrashEntry
+        do {
+            trash = try await api.kbDeleteProject(e.id)
+        } catch {
+            hiddenProjects.remove(e.id)
+            Haptics.error()
+            model.toast = Toast(String(localized: "Couldn't delete: \(error.shown ?? error.localizedDescription)"), style: .error)
+            return
+        }
+        lists[.projects]?.items.removeAll { $0.id == e.id }
+        hiddenProjects.remove(e.id)
+        Haptics.success()
+        model.toast = Toast(String(localized: "Deleted “\(e.name)”"), style: .success,
+                            action: Toast.Action(title: String(localized: "Undo")) { Task { await restoreProject(trash, name: e.name, api: api) } })
+        await load()
+    }
+
+    private func restoreProject(_ trash: KBTrashEntry, name: String, api: APIClient) async {
+        do {
+            try await api.kbRestore(trash.id)
+            Haptics.success()
+            model.toast = Toast(String(localized: "Restored “\(name)”"), style: .success)
+        } catch let e as APIError where e.status == 409 {
+            Haptics.error()
+            model.toast = Toast(String(localized: "Couldn't restore “\(name)”: a newer project has the same name."), style: .error)
+        } catch {
+            Haptics.error()
+            model.toast = Toast(String(localized: "Couldn't restore: \(error.shown ?? error.localizedDescription)"), style: .error)
+        }
+        await load()
     }
 
     private func header(_ title: String, _ count: Int) -> some View {
@@ -320,6 +387,13 @@ struct KnowledgeView: View {
             guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             lists[kind] = l
             error = nil
+            #if DEBUG
+            // `-showKnowledgeDelete <slug>`: the question for deleting that project, up once the list loads (screenshots).
+            if kind == .projects, !debugAsked, let slug = UserDefaults.standard.string(forKey: "showKnowledgeDelete") {
+                debugAsked = true
+                deletingProject = l.items.first { $0.id == slug }
+            }
+            #endif
         } catch {
             guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             self.error = error.shown

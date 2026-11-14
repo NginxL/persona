@@ -5,14 +5,15 @@ enum TodosViewMode: String, CaseIterable {
     case list, calendar
 }
 
-/// How the to-dos list is grouped (#4352): by status section (the default), or by Pinned direction from the hub's
-/// direction tree, offered only by a hub that has one.
+/// How the to-dos list is grouped (#4352): by status section (the default), by knowledge-base project (#7077, the web's
+/// grouping by project), or by Pinned direction from the hub's direction tree, offered only by a hub that has one.
 enum TodosGrouping: String, CaseIterable {
-    case status, direction
+    case status, project, direction
 
     var title: String {
         switch self {
         case .status: String(localized: "Status")
+        case .project: String(localized: "Project")
         case .direction: String(localized: "Directions")
         }
     }
@@ -21,13 +22,19 @@ enum TodosGrouping: String, CaseIterable {
     var symbol: String {
         switch self {
         case .status: Theme.Icon.byState
+        case .project: Theme.Icon.space
         case .direction: Theme.Icon.pin
         }
     }
 
-    /// The grouping the list shows: the stored choice, but by status from a hub without the tree (an older hub, or
-    /// before it is read), whatever was chosen against another hub.
-    static func resolved(_ stored: TodosGrouping, hasTree: Bool) -> TodosGrouping { hasTree ? stored : .status }
+    /// The grouping the list shows: the stored choice, but by status for Directions from a hub without the tree (an
+    /// older hub, or before it is read), whatever was chosen against another hub.
+    static func resolved(_ stored: TodosGrouping, hasTree: Bool) -> TodosGrouping {
+        stored == .direction && !hasTree ? .status : stored
+    }
+
+    /// What the Group By menu offers: Directions only with the hub's tree.
+    static func offered(hasTree: Bool) -> [TodosGrouping] { hasTree ? allCases : [.status, .project] }
 }
 
 /// The top of the to-dos page: List | Calendar, and in the calendar Day | Week | Month; in the list, its grouping when
@@ -36,6 +43,8 @@ struct TodosModeBar<ListControls: View>: View {
     @Binding var view: TodosViewMode
     @Binding var mode: TodoCalendarMode
     var grouping: Binding<TodosGrouping>? = nil
+    /// The groupings the menu offers (the Mac's list keeps status and directions).
+    var groupings: [TodosGrouping] = [.status, .direction]
     /// The list view's own controls at the trailing end, where the calendar has its day / week / month (the phone's
     /// filter and sort, #3740).
     @ViewBuilder var listControls: ListControls
@@ -92,7 +101,7 @@ struct TodosModeBar<ListControls: View>: View {
                 // A grouping control, not a filter chip (docs/design/DESIGN_SYSTEM.md "List controls").
                 Menu {
                     Picker("Group By", selection: grouping) {
-                        ForEach(TodosGrouping.allCases, id: \.self) { g in Text(g.title).tag(g) }
+                        ForEach(groupings, id: \.self) { g in Text(g.title).tag(g) }
                     }
                 } label: {
                     // A button's text is never cut: when the word does not fit, the mark alone stands for it.

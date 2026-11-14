@@ -122,6 +122,7 @@ func TestInboxFiledAtSkipsMergedMember(t *testing.T) {
 	h, _ := admitHub(t, nil)
 	h.collectInbox(context.Background(), roundPoll)
 	doneAt := time.Now().Add(-time.Hour)
+	h.inbox.mu.Lock()
 	for _, item := range []*InboxItem{
 		{ID: "survivor"},
 		{ID: "member", MergedInto: "survivor"},
@@ -130,6 +131,7 @@ func TestInboxFiledAtSkipsMergedMember(t *testing.T) {
 	} {
 		h.inbox.items[item.ID] = item
 	}
+	h.inbox.mu.Unlock()
 
 	got := h.inboxFiledAt(context.Background(), []string{"member", "done", "open", "missing"})
 	if len(got) != 1 || !got["done"].Equal(doneAt) {

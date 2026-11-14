@@ -1860,9 +1860,13 @@ func TestInboxGroupReopenWakesTheTwin(t *testing.T) {
 	h.collectInbox(context.Background(), roundPoll)
 	h.waitGrouping()
 
-	if !it.open() || it.Handling.State != HandlingLooking || it.Agent.SessionID != "s1" {
-		t.Fatalf("reopened event %+v, handling %+v", it, it.Handling)
-	}
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if !it.open() || it.Handling.State != HandlingLooking || it.Agent.SessionID != "s1" {
+			t.Fatalf("reopened event %+v, handling %+v", it, it.Handling)
+		}
+	}()
 	waitFor(t, "the new messages told to the conversation", func() bool {
 		return strings.Contains(strings.Join(notesOf(h.f, "s1"), "\n"), "有了新消息")
 	})

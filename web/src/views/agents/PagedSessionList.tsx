@@ -376,6 +376,16 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const source: GroupedSource<T> = useMemo(() => ({ path, identity, compare, removeIdentity, event, summary: summaryMode, roots: rootsMode, parentOf }),
     [path, identity, compare, removeIdentity, event, summaryMode, rootsMode, parentOf]);
   const openRow = sections && isOpen && placeOf ? rootPage.rows.find(isOpen) : undefined;
+  const autoMore = useRef(0);
+  useEffect(() => {
+    // Load to the open row's group, stopping on a repeated page (#7327).
+    if (!sections || !isOpen || !placeOf || openRow || !rootPage.hasMore || rootPage.loading || rootPage.error) return;
+    const rows = rootPage.rows.length;
+    if (autoMore.current > rows) autoMore.current = 0;
+    if (autoMore.current === rows) return;
+    autoMore.current = rows;
+    void root.more().catch(() => {});
+  }, [sections, isOpen, placeOf, openRow, root, rootPage]);
   const openPlace = useMemo(() => openRow && placeOf ? placeOf(openRow) : undefined, [openRow, placeOf]);
   const shownTotal = sections ? grouped.total : page.total;
   const states = personal ? ["unread", "idle"] : ["needs_you", "working", "unread", "idle", "offline", "unknown"];

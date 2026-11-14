@@ -89,22 +89,27 @@ var (
 	searchQuoteRe    = lazyre.New(`^[ \t]{0,3}>[ \t]?`)
 	searchListRe     = lazyre.New(`^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?`)
 	searchEscapeRe   = lazyre.New("\\\\([\\\\`*_{}\\[\\]()#+\\-.!|>~<])")
-	// in order: images and links keep their text, autolinks their address, then emphasis keeps its words
-	searchInlineRes = []struct {
-		re   *lazyre.Regexp
-		with string
-	}{
+	// images and links keep their text, autolinks their address
+	searchLinkRes = []searchSub{
 		{lazyre.New(`!\[([^\]\n]*)\]\([^)\n]*\)`), "$1"},
 		{lazyre.New(`\[([^\]\n]+)\]\([^)\n]*\)`), "$1"},
 		{lazyre.New(`\[([^\]\n]+)\]\[[^\]\n]*\]`), "$1"},
 		{lazyre.New(`<((?:https?|mailto):[^> \t\n]+)>`), "$1"},
-		{lazyre.New(`\*\*([^ \t\n*]|[^ \t\n*][^\n]*?[^ \t\n*])\*\*`), "$1"},
+	}
+	// after `**` (searchStrong), the rest of emphasis keeps its words
+	searchEmphasisRes = []searchSub{
 		{lazyre.New(`(^|[^0-9A-Za-z_])__([^ \t\n_]|[^ \t\n_][^\n]*?[^ \t\n_])__($|[^0-9A-Za-z_])`), "$1$2$3"},
 		{lazyre.New(`~~([^~\n]+?)~~`), "$1"},
 		{lazyre.New(`\*([^ \t\n*]|[^ \t\n*][^*\n]*?[^ \t\n*])\*`), "$1"},
 		{lazyre.New(`(^|[^0-9A-Za-z_])_([^ \t\n_]|[^ \t\n_][^_\n]*?[^ \t\n_])_($|[^0-9A-Za-z_])`), "$1$2$3"},
 	}
 )
+
+// searchSub is a pattern of markup and what it leaves.
+type searchSub struct {
+	re   *lazyre.Regexp
+	with string
+}
 
 // searchPlain is a reply's Markdown as the chat shows it: code fence lines, rules and table separators dropped (the
 // code kept), heading, quote, list and task-box markers taken off each line, a table row's cells joined with spaces,
@@ -152,31 +157,46 @@ func searchPlain(md string) string {
 // searchEscaped stands for a backslash-escaped character while the markup is taken off, so `\*` stays a star.
 const searchEscaped = 0xE000
 
+// searchCode stands for a line's i-th code span (searchCode+i) while the markup around it is taken off (#7195): bold or
+// a link that holds code pairs across it, and nothing inside the code reads as markup.
+const searchCode = 0xF0000
+
 // searchInline is a line without its inline markup: a code span keeps what is inside it, as it is; the text around
 // it loses link, image and emphasis syntax; an escaped character is itself.
 func searchInline(line string) string {
 	line = searchEscapeRe.Regexp().ReplaceAllStringFunc(line, func(m string) string { return string(rune(searchEscaped + int(m[1]))) })
+	var code []string
 	var b strings.Builder
 	for line != "" {
 		at, n, end, ok := searchCodeSpan(line)
 		if !ok {
-			b.WriteString(searchMarks(line))
+			b.WriteString(line)
 			break
 		}
-		b.WriteString(searchMarks(line[:at]))
-		code := line[at+n : end]
-		if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.Trim(code, " ") != "" {
-			code = code[1 : len(code)-1]
+		b.WriteString(line[:at])
+		c := line[at+n : end]
+		if len(c) >= 2 && c[0] == ' ' && c[len(c)-1] == ' ' && strings.Trim(c, " ") != "" {
+			c = c[1 : len(c)-1]
 		}
-		b.WriteString(code)
+		b.WriteRune(rune(searchCode + len(code)))
+		code = append(code, c)
 		line = line[end+n:]
 	}
-	return strings.Map(func(r rune) rune {
+	unescape := func(r rune) rune {
 		if r >= searchEscaped && r < searchEscaped+128 {
 			return r - searchEscaped
 		}
 		return r
-	}, b.String())
+	}
+	var out strings.Builder
+	for _, r := range searchMarks(b.String()) {
+		if i := int(r - searchCode); r >= searchCode && i < len(code) {
+			out.WriteString(strings.Map(unescape, code[i]))
+			continue
+		}
+		out.WriteRune(unescape(r))
+	}
+	return out.String()
 }
 
 // searchCodeSpan finds the first code span in s: where its opening backticks start, how many there are, and where its
@@ -212,15 +232,81 @@ func searchCodeSpan(s string) (at, n, end int, ok bool) {
 	}
 }
 
-// searchMarks is text outside code spans without link, image and emphasis syntax.
+// searchMarks is a line, its code spans standing in for themselves, without link, image and emphasis syntax.
 func searchMarks(s string) string {
-	for _, r := range searchInlineRes {
+	for _, r := range searchLinkRes {
+		s = r.re.Regexp().ReplaceAllString(s, r.with)
+	}
+	s = searchStrong(s)
+	for _, r := range searchEmphasisRes {
 		s = r.re.Regexp().ReplaceAllString(s, r.with)
 		if strings.HasSuffix(r.with, "$3") {
 			s = r.re.Regexp().ReplaceAllString(s, r.with) // a match takes the character between two: again for the next
 		}
 	}
 	return s
+}
+
+// searchStrong is a line without `**` (#7195). A run of two or more stars not after a space closes the nearest open
+// run before it, and one not before a space opens; a pair loses two stars on its inner side each (`***a***` leaves
+// `*a*` for the emphasis after it). A run left without a partner goes too (bold cut off, or across lines: each line
+// is read alone), unless it reads as an expression: `2 ** 3`, a space on each side, or `a**b`, a letter or digit
+// (two of those on one line pair, as the chat pairs them).
+func searchStrong(s string) string {
+	if !strings.Contains(s, "**") {
+		return s
+	}
+	type run struct{ at, end, cutFrom, cutTo int }
+	var runs []run
+	for i := 0; i < len(s); {
+		if s[i] != '*' {
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] == '*' {
+			j++
+		}
+		if j-i >= 2 {
+			runs = append(runs, run{at: i, end: j, cutFrom: i, cutTo: j}) // all of it, unless it pairs or stays
+		}
+		i = j
+	}
+	var open []int // runs that may open, the nearest last
+	paired := make([]bool, len(runs))
+	for k, r := range runs {
+		before := r.at > 0 && !searchSpace(s[r.at-1])
+		after := r.end < len(s) && !searchSpace(s[r.end])
+		if before && len(open) > 0 {
+			o := open[len(open)-1]
+			open = open[:len(open)-1]
+			paired[o], paired[k] = true, true
+			runs[o].cutFrom, runs[o].cutTo = runs[o].end-2, runs[o].end
+			runs[k].cutFrom, runs[k].cutTo = r.at, r.at+2
+			continue
+		}
+		if after {
+			open = append(open, k)
+		}
+	}
+	var b strings.Builder
+	from := 0
+	for k, r := range runs {
+		if !paired[k] && r.at > 0 && r.end < len(s) &&
+			(searchSpace(s[r.at-1]) && searchSpace(s[r.end]) || searchOperand(s[r.at-1]) && searchOperand(s[r.end])) {
+			continue // an expression: it stays
+		}
+		b.WriteString(s[from:r.cutFrom])
+		from = r.cutTo
+	}
+	b.WriteString(s[from:])
+	return b.String()
+}
+
+func searchSpace(c byte) bool { return c == ' ' || c == '\t' }
+
+func searchOperand(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
 // searchFold is what a search matches: NFKC (full and half width alike) and lower case.

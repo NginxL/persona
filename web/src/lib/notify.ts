@@ -369,7 +369,7 @@ export async function setSystemNotify(on: boolean): Promise<Permission> {
 
 /** Notifications go out: the switch is on and the browser allows them. */
 export function systemNotifyActive(): boolean {
-  if (typeof window !== "undefined" && window.personaDesktop?.desktopPresence().notifies === false) return false;
+  if (typeof window !== "undefined" && window.personaDesktop?.desktopPresence?.().notifies === false) return false;
   return systemNotifyOn() && permission() === "granted";
 }
 

@@ -32,12 +32,64 @@ fn registry() -> Registry {
     tracer.registry().expect("every wire type is traced")
 }
 
+fn kotlin_string_golden() -> String {
+    // An independent Rust/bincode fixture shared by the Kotlin codec tests, not Kotlin-generated expectations.
+    let snapshot = ChatSnapshot {
+        items_json: "[\"ASCII\", \"中文\", \"emoji: 🦀\", \"\"]".into(),
+        history: Some("a".repeat(257)),
+        covered: 1,
+        has_more: None,
+        loaded_once: true,
+    };
+    let bytes = persona_core_runtime::wire::encode(&snapshot);
+    let mut json = format!(
+        "{{\n  \"itemsJson\": {:?},\n  \"history\": {:?},\n  \"nulText\": \"nul: \u{0}\",\n  \"encodedBase64\": \"",
+        snapshot.items_json,
+        snapshot.history.as_deref().expect("history fixture"),
+    );
+    const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for chunk in bytes.chunks(3) {
+        let value = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for index in 0..4 {
+            json.push(if index > chunk.len() {
+                '='
+            } else {
+                BASE64[((value >> (18 - index * 6)) & 63) as usize] as char
+            });
+        }
+    }
+    json.push_str("\"\n}\n");
+    json.replace('\u{0}', "\\u0000")
+}
+
 fn write_kotlin(root: &Path, registry: &Registry) {
     let config = CodeGeneratorConfig::new(KOTLIN_PACKAGE.to_owned()).with_encodings([Encoding::Bincode]);
     let installer = kotlin::Installer::new(root.to_path_buf());
     installer.install_module(&config, registry).expect("Kotlin codecs");
     installer.install_serde_runtime().expect("Kotlin serde runtime");
     installer.install_bincode_runtime().expect("Kotlin bincode runtime");
+    let path = root.join("com/novi/serde/BinaryDeserializer.kt");
+    let mut source = std::fs::read_to_string(&path).expect("generated Kotlin string decoder");
+    let old = r#"        val content = readBytes(len.toInt())
+        return try {
+            content.decodeToString(throwOnInvalidSequence = true)
+"#;
+    let new = r#"        // Decode the already-checked range without a temporary array; retain strict UTF-8 validation.
+        val start = position
+        requireAvailable(len.toInt())
+        position = start + len.toInt()
+        return try {
+            input.decodeToString(start, position, throwOnInvalidSequence = true)
+"#;
+    assert_eq!(
+        source.matches(old).count(),
+        1,
+        "upstream Kotlin string decoder changed; update its range-copy optimization"
+    );
+    source = source.replace(old, new);
+    std::fs::write(path, source).expect("write allocation-reduced Kotlin string decoder");
 }
 
 fn write_swift(root: &Path, registry: &Registry) {
@@ -147,7 +199,12 @@ fn main() {
     let arkts_root = repository.join("harmony/entry/src/main/ets/core/rustcore");
     let swift_root = repository.join("apple/Packages/PersonaCore");
     let registry = registry();
+    let golden = repository.join("android/core/rustcore/src/test/resources/wire-golden.json");
     if std::env::args().any(|a| a == "--check") {
+        if std::fs::read_to_string(&golden).ok().as_deref() != Some(kotlin_string_golden().as_str()) {
+            eprintln!("persona-core-typegen: Rust wire golden is out of date");
+            std::process::exit(1);
+        }
         let scratch = std::env::temp_dir().join(format!("persona-core-typegen-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scratch);
         write_kotlin(&scratch.join("kotlin"), &registry);
@@ -176,6 +233,8 @@ fn main() {
     write_kotlin(&kotlin_root, &registry);
     write_swift(&swift_root, &registry);
     arkts::write(&arkts_root, &registry).expect("ArkTS codecs");
+    std::fs::create_dir_all(golden.parent().expect("golden parent")).expect("golden directory");
+    std::fs::write(golden, kotlin_string_golden()).expect("write independent Rust wire golden");
     println!(
         "persona-core-typegen: wrote {}, {} and {}",
         kotlin_root.display(),

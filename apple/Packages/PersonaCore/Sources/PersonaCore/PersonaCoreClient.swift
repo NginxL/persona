@@ -31,8 +31,9 @@ private final class CallbackBox: @unchecked Sendable {
     init(_ callbacks: PersonaCoreCallbacks) { self.callbacks = callbacks }
 }
 
-/// An owned C core handle. Value codecs are Sendable; this class serializes only handle lifetime and calls, never
-/// the worker's state. Call `close` on a thread other than a host callback when an orderly stop is required.
+/// An owned C core handle. Value codecs are Sendable. The native lease registry accepts calls racing close and never
+/// joins the worker on an ordinary call's last lease. Close clears the ID and owns worker shutdown outside the lock.
+/// `flush` remains test-only and must not run synchronously in a host callback; `close` also belongs outside it.
 private struct NativeHandle: @unchecked Sendable {
     let raw: OpaquePointer
 }

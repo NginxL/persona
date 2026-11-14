@@ -6,8 +6,9 @@ import { foldedState } from "../lib/child-sessions";
 import { sessionCard } from "../lib/folded-rows";
 import { byTime } from "../lib/times";
 import { launchAgent } from "../lib/new-agent";
+import { currentHosts } from "../lib/engines";
 import { initialLauncher, launcherBlock, usableFirst } from "../lib/launcher-health";
-import { defaultLabel, machineLaunchers, type LauncherDefault } from "../lib/launcher-models";
+import { defaultLabel, inlineTextStart, machineLaunchers, type LauncherDefault } from "../lib/launcher-models";
 import { providerLabel } from "../lib/provider-names";
 import { navigate } from "../lib/router";
 import { settingsHref } from "./settings/nav";
@@ -2798,6 +2799,7 @@ export function HandoverDialog({
   const [mid, setMid] = useState(() => onlineMachines[0]?.id ?? "");
   const [cwd, setCwd] = useState("");
   const [launchers, setLaunchers] = useState<Launcher[]>([]);
+  const [launchersOf, setLaunchersOf] = useState("");
   // What Model settings › Agents runs on this computer, as the hub says (null: no launcher default); undefined until the list
   // is in, and from an older hub, which has no default to follow.
   const [hubDefault, setHubDefault] = useState<LauncherDefault | null | undefined>(undefined);
@@ -2836,12 +2838,16 @@ export function HandoverDialog({
   useEffect(() => {
     if (!open || !mid) return;
     const controller = new AbortController();
+    const owner = credentialOwner();
     // another computer's list is not this one's
     setLaunchers([]);
+    setLaunchersOf("");
     setHubDefault(undefined);
     setLauncher("");
     machineLaunchers(mid, { signal: controller.signal })
       .then((r) => {
+        if (controller.signal.aborted || owner !== credentialOwner()) return;
+        setLaunchersOf(JSON.stringify([mid, owner]));
         const ls = r.launchers ?? [];
         setLaunchers(ls);
         setHubDefault(r.default);
@@ -2867,6 +2873,10 @@ export function HandoverDialog({
       const fullText = [previewCard, prompt.trim()].filter(Boolean).join("\n\n");
       // It only queues the start and opens the new agent's page, which says how it went: no success toast before the hub
       // has answered (#1856).
+      const machine = onlineMachines.find((m) => m.id === mid);
+      const inline = machine && launchersOf === JSON.stringify([mid, credentialOwner()])
+        ? inlineTextStart(launchers.find((l) => l.name === (launcher || hubDefault?.provider)), currentHosts(machine).default, fullText, 0)
+        : undefined;
       launchAgent({
         machineId: mid,
         cwd: cwd.trim(),
@@ -2874,6 +2884,7 @@ export function HandoverDialog({
         text: fullText,
         attachments: [],
         todoId: todo.id,
+        ...inline,
       });
       onClose();
     } catch (e) {

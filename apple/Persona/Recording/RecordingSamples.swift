@@ -36,6 +36,9 @@ enum RecordingSamples {
     static let liveMeeting = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
     /// A finished meeting, transcribed (`-showMeetingSample minutes|pending` opens it).
     static let pastMeeting = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+    /// A longer finished meeting for the summary card (#6563, `-showMeetingSample overview` opens it): five minutes with
+    /// lines in each, so a hub that makes a topic of each minute has five, in two groups.
+    static let overviewMeeting = UUID(uuidString: "00000000-0000-0000-0000-000000006563")!
 
     #if os(iOS)
     /// The lines the `flow` sample hears, one segment of one sentence each, a few seconds apart.
@@ -87,6 +90,40 @@ enum RecordingSamples {
     }
     #endif
 
+    /// `-showMeetingSample overview`: a finished sprint review of five minutes (`overviewMeeting`) whose minutes the hub
+    /// writes with a summary card (#6563; the mock hub with `shape: overview`): the first minute holds two points and
+    /// three decisions, so its topic folds after four, and every later minute a point or a decision with a figure, an
+    /// action item or the open question. The `minutes` sample stays as it was, the four cards' baseline.
+    private static func installOverviewMeeting() {
+        let start = Date(timeIntervalSince1970: 1_800_090_000)
+        let meeting = RecordingMeeting(eventID: "sample-sprint", title: "迭代评审", start: start, end: start.addingTimeInterval(1800),
+                                       location: "3 楼会议室", attendees: ["张三", "李四", "王五"])
+        RecordingLibrary.shared.restore(overviewMeeting)
+        var entry = RecordingEntry(id: overviewMeeting, createdAt: start, source: .phone, title: "迭代评审", active: false,
+                                   expectedSegments: 5)
+        entry.meeting = meeting
+        // Each minute opens on its subject and a colon, which names its topic at a hub that titles a topic by its first
+        // line.
+        let minutes: [[(Double, String)]] = [
+            [(2, "导出与发版：导出保留 4 MB 上限，发版日期取决于缓存修复。"), (14, "导出现在会丢掉超过 4 MB 的条目。"),
+             (27, "决定：导出保留 4 MB 上限，跳过条目时给出提示。"), (39, "决定：超限的条目在列表里标灰。"),
+             (51, "决定：提示文案控制在 2 行以内。")],
+            [(63, "发版日期：20 号发版现在有风险。"), (78, "决定：缓存问题周三前修不好，发版就推迟 1 周。")],
+            [(125, "压测：目标从 2 万 QPS 提到 4 万 QPS。"), (140, "决定：压测目标定为 4 万 QPS。"),
+             (160, "王五负责周五前分享压测报告。")],
+            [(185, "缓存问题：弱网下复现了 1 次。"), (200, "决定：缓存修复优先于新功能。"),
+             (215, "张三负责周五前补上提示文案和回归测试。")],
+            [(241, "下次评审：下周同一时间再对 1 次进展。"), (250, "还没定的是上限按条目算还是按录音算。"),
+             (262, "决定：下次评审前发出版本说明。"), (280, "李四负责周三前确认缓存修复。")],
+        ]
+        entry.segments = minutes.enumerated().map { index, lines in
+            RecordingSegment(index: index, start: Double(index * 60), duration: 60, sentences: lines.map { at, text in
+                RecordingSentence(start: at, end: at + 10, text: text)
+            })
+        }
+        try? RecordingLibrary.shared.save(entry)
+    }
+
     /// `-showMeetingSample recording|paused|interrupted`: a meeting 12:34 into its recording, as the recording page and its
     /// Live Activity show it (no microphone); `listening|taking-part|answered`: the same with Persona attending (#2981);
     /// `room-listening|room-taking-part`: the same as a room meeting (#3862) started with the live view (phase 2), whose
@@ -98,16 +135,23 @@ enum RecordingSamples {
     /// test checks the uplink against the mock hub's hub mode with no microphone; `room-hub-highlights`: `room-hub`
     /// started with the highlights too, as a hub with both starts it (the Highlights card, the hub's lines on the Full
     /// Transcript page); `minutes` / `pending`: a finished meeting whose page opens (its minutes from the hub, or still
-    /// being written); `room-highlights`: `room-taking-part` started with the highlights too (phase 2b), 24:20 in, with a
-    /// line in each of fourteen minutes (`highlightsLines`), so the hub's highlights and the transcript at their minutes
-    /// have real lines. Both recordings are made up.
+    /// being written); `overview`: a longer finished meeting whose page opens, for the summary card (#6563,
+    /// `installOverviewMeeting`); `room-highlights`: `room-taking-part` started with the highlights too (phase 2b),
+    /// 24:20 in, with a line in each of fourteen minutes (`highlightsLines`), so the hub's highlights and the transcript
+    /// at their minutes have real lines. The recordings are made up.
     static func showMeetingIfAsked() {
         #if os(iOS)
         guard let mode = UserDefaults.standard.string(forKey: "showMeetingSample") else {
             // A run without them: an earlier run's made-up meetings go, so other tests see only their own recordings.
-            for id in [liveMeeting, pastMeeting] where RecordingLibrary.shared.entry(id) != nil { try? RecordingLibrary.shared.remove(id) }
+            for id in [liveMeeting, pastMeeting, overviewMeeting] where RecordingLibrary.shared.entry(id) != nil {
+                try? RecordingLibrary.shared.remove(id)
+            }
             return
         }
+        // The summary card's meeting alone, or the others alone: a run syncs only the made-up meetings it shows.
+        let others = mode == "overview" ? [liveMeeting, pastMeeting] : [overviewMeeting]
+        for id in others where RecordingLibrary.shared.entry(id) != nil { try? RecordingLibrary.shared.remove(id) }
+        if mode == "overview" { installOverviewMeeting(); return }
         let start = Date(timeIntervalSince1970: 1_800_003_600)
         let meeting = RecordingMeeting(eventID: "sample-weekly", title: "产品周会", start: start, end: start.addingTimeInterval(3600),
                                        location: "3 楼会议室", attendees: ["张三", "李四", "王五"])

@@ -259,6 +259,24 @@ type InboxFolderItem struct {
 
 func RenderInboxFoldersInput(in InboxFoldersInput) string { return render("inbox/folders_input", in) }
 
+// InboxMergeTitle is the system prompt that writes one title for rows the user merged (inbox/merge_title, #7229).
+type InboxMergeTitle struct {
+	Owner string // "" is the Chinese "you"
+	// Language is the title's language by its own name; "" leaves it to the language of the titles.
+	Language string
+}
+
+func RenderInboxMergeTitle(m InboxMergeTitle) string { return render("inbox/merge_title", m) }
+
+// InboxMergeTitleInput is the rows that were merged, newest first (inbox/merge_title_input).
+type InboxMergeTitleInput struct {
+	Items []InboxFolderItem
+}
+
+func RenderInboxMergeTitleInput(in InboxMergeTitleInput) string {
+	return render("inbox/merge_title_input", in)
+}
+
 // SubscriptionKind is a source subscription's kind of Inbox item (#2039, inbox/kinds/subscription): what its items'
 // type line says (InboxItem.Described, through the round's kinds).
 type SubscriptionKind struct {

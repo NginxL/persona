@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import struct
@@ -53,6 +54,22 @@ class AndroidPackageReportTests(unittest.TestCase):
 
 
 class DeviceBenchmarkGateTests(unittest.TestCase):
+    def test_instrumentation_nonzero_is_captured_before_the_budget_failure(self):
+        calls = []
+        failure = subprocess.CalledProcessError(1, ['am', 'instrument'], output='INSTRUMENTATION_CODE: -1\n',
+                                                stderr='FAILURES!!!\n')
+        def captures_nonzero(command, **kwargs):
+            calls.append(command)
+            raise failure
+        original = runner.run
+        runner.run = captures_nonzero
+        try:
+            self.assertEqual(runner.instrumentation_output(['am', 'instrument'], 30),
+                             'INSTRUMENTATION_CODE: -1\nFAILURES!!!\n')
+        finally:
+            runner.run = original
+        self.assertEqual(calls, [['am', 'instrument']])
+
     def test_debug_benchmark_apk_is_rejected_before_adb(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -76,17 +93,102 @@ class DeviceBenchmarkGateTests(unittest.TestCase):
 
     def test_interrupted_junit_is_rejected(self):
         expected = [('persona.core.rustcore.RustCoreDeviceBenchmark', 'dispatchAndFrameCosts')]
-        incomplete = '''INSTRUMENTATION_STATUS: class=persona.core.rustcore.RustCoreDeviceBenchmark
-INSTRUMENTATION_STATUS: test=dispatchAndFrameCosts
-INSTRUMENTATION_STATUS_CODE: 1
-INSTRUMENTATION_CODE: -1
-'''
+        incomplete = ('INSTRUMENTATION_STATUS: class=persona.core.rustcore.RustCoreDeviceBenchmark\n'
+                      'INSTRUMENTATION_STATUS: test=dispatchAndFrameCosts\n'
+                      'INSTRUMENTATION_STATUS_CODE: 1\n'
+                      'INSTRUMENTATION_CODE: -1\n')
         with self.assertRaisesRegex(ValueError, 'incomplete or unexpected'):
             runner.parse_junit(incomplete, expected)
-        complete = incomplete + 'INSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_CODE: -1\n'
+        complete = incomplete.replace('INSTRUMENTATION_CODE: -1\n', '') + 'INSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_CODE: -1\n'
         runner.parse_junit(complete, expected)
         with self.assertRaisesRegex(ValueError, 'duplicate JUnit completion'):
-            runner.parse_junit(complete + 'INSTRUMENTATION_STATUS_CODE: 0\n', expected)
+            runner.parse_junit(incomplete.replace('INSTRUMENTATION_CODE: -1\n', '')
+                               + 'INSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS_CODE: 0\n', expected)
+        evidence = incomplete.replace('INSTRUMENTATION_CODE: -1\n', '') + '''INSTRUMENTATION_STATUS_CODE: 2
+INSTRUMENTATION_STATUS: rustCoreBenchmarkReport={"raw":true}
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_CODE: -1
+'''
+        runner.parse_junit(evidence, expected)
+        with self.assertRaisesRegex(ValueError, 'incomplete or unexpected'):
+            runner.parse_junit(evidence + 'INSTRUMENTATION_STATUS_CODE: 0\n', expected)
+
+    def test_failed_benchmark_keeps_numeric_raw_samples_and_original_budgets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            nonce = 'synthetic-nonce'
+            dispatch = [1_000] * 1000
+            dispatch[-1] = 51_000
+            frame = [2_000] * 1000
+            report = {
+                'nonce': nonce, 'samples': 1000, 'warmUp': 100,
+                'model': 'example-emulator', 'abi': 'x86_64', 'api': 35,
+                'build': 'example-build', 'kernelPageBytes': 4096,
+                'dispatchMicros': {'p50': 1.0, 'p99': 1.0, 'max': 51.0,
+                                   'budgetMicros': 50.0, 'passesBudget': True},
+                'drainDecodeApplyMicros': {'p50': 2.0, 'p99': 2.0, 'max': 2.0,
+                                           'budgetMicros': 1000.0, 'passesBudget': True},
+                'rawSamples': {'unit': 'ns', 'dispatch': dispatch, 'drainDecodeApply': frame},
+            }
+            instrumentation = 'INSTRUMENTATION_STATUS: rustCoreBenchmarkReport=' + json.dumps(report, separators=(',', ':')) + '\r\n'
+            class Args:
+                suite = 'benchmark'
+            Args.output = output
+            runner.benchmark_report(instrumentation, nonce, Args, ['adb'], {
+                'ro.product.model': 'example-emulator', 'ro.product.cpu.abi': 'x86_64',
+                'ro.build.version.sdk': '35', 'ro.build.display.id': 'example-build', 'kernelPageBytes': '4096',
+            })
+            saved = json.loads((output / 'benchmark.json').read_text())
+            self.assertEqual(saved['rawSamples']['dispatch'][-1], 51_000)
+            self.assertIsInstance(saved['rawSamples']['dispatch'][-1], int)
+            self.assertEqual(saved['dispatchMicros']['budgetMicros'], 50.0)
+            report['dispatchMicros']['p99'] = 999.0
+            with self.assertRaisesRegex(ValueError, 'aggregates do not match'):
+                runner.benchmark_report('INSTRUMENTATION_STATUS: rustCoreBenchmarkReport=' + json.dumps(report) + '\r\n',
+                                        nonce, Args, ['adb'], {
+                    'ro.product.model': 'example-emulator', 'ro.product.cpu.abi': 'x86_64',
+                    'ro.build.version.sdk': '35', 'ro.build.display.id': 'example-build', 'kernelPageBytes': '4096',
+                })
+            report['dispatchMicros']['p99'] = 1.0
+            report['dispatchMicros']['budgetMicros'] = 100.0
+            with self.assertRaisesRegex(ValueError, 'original budget'):
+                runner.benchmark_report('INSTRUMENTATION_STATUS: rustCoreBenchmarkReport=' + json.dumps(report) + '\r\n',
+                                        nonce, Args, ['adb'], {
+                    'ro.product.model': 'example-emulator', 'ro.product.cpu.abi': 'x86_64',
+                    'ro.build.version.sdk': '35', 'ro.build.display.id': 'example-build', 'kernelPageBytes': '4096',
+                })
+
+    def test_control_requires_complete_raw_arrays_and_matching_aggregates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            samples = [1_000] * 1000
+            report = {
+                'nonce': 'synthetic-control', 'samples': 1000, 'warmUp': 100,
+                'model': 'example-emulator', 'abi': 'x86_64', 'api': 35,
+                'build': 'example-build', 'kernelPageBytes': 4096,
+                'cpuLoopMicros': {'p50': 1.0, 'p99': 1.0, 'max': 1.0},
+                'encodingMicros': {'p50': 1.0, 'p99': 1.0, 'max': 1.0},
+                'dispatchMicros': {'p50': 1.0, 'p99': 1.0, 'max': 1.0},
+                'drainDecodeApplyMicros': {'p50': 1.0, 'p99': 1.0, 'max': 1.0},
+                'rawSamples': {'unit': 'ns', 'cpu': samples, 'encoding': samples,
+                               'dispatch': samples, 'drainDecodeApply': samples},
+            }
+            class Args:
+                suite = 'control'
+            Args.output = output
+            props = {'ro.product.model': 'example-emulator', 'ro.product.cpu.abi': 'x86_64',
+                     'ro.build.version.sdk': '35', 'ro.build.display.id': 'example-build', 'kernelPageBytes': '4096'}
+            runner.benchmark_report('INSTRUMENTATION_STATUS: rustCoreControlReport=' + json.dumps(report) + '\r\n',
+                                    'synthetic-control', Args, ['adb'], props)
+            report['cpuLoopMicros']['p99'] = 0.0
+            with self.assertRaisesRegex(ValueError, 'control aggregates do not match'):
+                runner.benchmark_report('INSTRUMENTATION_STATUS: rustCoreControlReport=' + json.dumps(report) + '\r\n',
+                                        'synthetic-control', Args, ['adb'], props)
+            report['cpuLoopMicros']['p99'] = 1.0
+            report['rawSamples']['cpu'] = samples[:999]
+            with self.assertRaisesRegex(ValueError, '1000 raw nanosecond'):
+                runner.benchmark_report('INSTRUMENTATION_STATUS: rustCoreControlReport=' + json.dumps(report) + '\r\n',
+                                        'synthetic-control', Args, ['adb'], props)
 
     def test_fixture_names_are_validated_like_the_device_reader(self):
         with tempfile.TemporaryDirectory() as directory:

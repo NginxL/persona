@@ -4,15 +4,30 @@ import Testing
 
 /// Same matter as… offers only eligible open matters, ordered and searched without touching view layout.
 struct InboxSameMatterPickerTests {
-    private func item(_ id: String, manager: String? = "manager-a", title: String? = nil) -> InboxItem {
+    private func item(_ id: String, manager: String? = "manager-a", title: String? = nil,
+                      parent: InboxParent? = nil) -> InboxItem {
         var item = InboxItem(id: id, source: "example", kind: "group", account: "example", accountName: "Example",
                              title: title ?? id, preview: "", count: 1)
         item.manager = manager
+        item.parent = parent
         return item
+    }
+
+    private func parent(_ id: String) -> InboxParent {
+        InboxParent(kind: "inbox", id: id)
     }
 
     private func candidates(_ items: [InboxItem], current: InboxItem, children: [InboxItem] = [], query: String = "") -> [String] {
         InboxSameMatter.candidates(items: items, item: current, children: children, query: query).map(\.id)
+    }
+
+    private func parentChain(_ prefix: String, links: Int, to current: InboxItem) -> [InboxItem] {
+        precondition(links > 0)
+        var rows = (0..<links).map { item("\(prefix)-\($0)") }
+        for index in rows.indices {
+            rows[index].parent = parent(index + 1 == links ? current.id : "\(prefix)-\(index + 1)")
+        }
+        return rows
     }
 
     @Test func candidatesKeepOnlyOpenItems() {
@@ -28,6 +43,53 @@ struct InboxSameMatterPickerTests {
         let child = item("child")
         let other = item("other")
         #expect(candidates([other, child, current], current: current, children: [child]) == ["other"])
+    }
+
+    @Test func candidatesExcludeGrandchildrenAndGreatGrandchildren() {
+        let current = item("current")
+        let child = item("child", parent: parent("current"))
+        let grandchild = item("grandchild", parent: parent("child"))
+        let greatGrandchild = item("great-grandchild", parent: parent("grandchild"))
+        let other = item("other")
+        #expect(candidates([greatGrandchild, other, grandchild, child, current], current: current) == ["other"],
+                "Every loaded descendant must be left out, not only the tree's direct children")
+    }
+
+    @Test func candidatesFollowParentsThroughDoneItems() {
+        let current = item("current")
+        var doneChild = item("done-child", parent: parent("current"))
+        doneChild.doneAt = Date(timeIntervalSince1970: 10)
+        let grandchild = item("grandchild", parent: parent("done-child"))
+        let other = item("other")
+        #expect(candidates([grandchild, other, doneChild, current], current: current) == ["other"],
+                "A done item in the middle of a parent chain must not hide its descendants")
+    }
+
+    @Test func candidatesStopAtParentCycles() {
+        let current = item("current")
+        let first = item("first", parent: parent("second"))
+        let second = item("second", parent: parent("first"))
+        let selfParent = item("self-parent", parent: parent("self-parent"))
+        #expect(candidates([selfParent, second, first, current], current: current) == ["first", "second", "self-parent"],
+                "Corrupt cycles must terminate without excluding unrelated items")
+    }
+
+    @Test func candidatesStopAtTheParentDepthLimit() {
+        let current = item("current")
+        let atLimit = parentChain("at-limit", links: 50, to: current)
+        let beyondLimit = parentChain("beyond-limit", links: 51, to: current)
+        let ids = candidates(atLimit + beyondLimit + [current], current: current)
+        #expect(!ids.contains("at-limit-0"), "A descendant exactly 50 parent links away must be excluded")
+        #expect(ids.contains("beyond-limit-0"), "A chain deeper than 50 links must stop being followed")
+    }
+
+    @Test func parentLookupNeverBorrowsAnotherManagersItemWithTheSameID() {
+        let current = item("current", manager: "manager-a")
+        let candidate = item("candidate", manager: "manager-a", parent: parent("shared"))
+        let localParent = item("shared", manager: "manager-a")
+        let foreignParent = item("shared", manager: "manager-b", parent: parent("current"))
+        #expect(candidates([foreignParent, localParent, candidate, current], current: current) == ["candidate", "shared"],
+                "A same-id item in another manager must not change this manager's parent chain")
     }
 
     @Test func candidatesStayWithinTheCurrentManager() {
@@ -91,6 +153,30 @@ struct InboxSameMatterPickerTests {
         var preview = item("preview")
         preview.preview = "Needle"
         #expect(candidates([sender, preview], current: current, query: "needle").isEmpty)
+    }
+
+    @Test func everyParentConflictUsesTheSameLocalizedMessage() {
+        let expected = String(localized: "This link isn't possible. Choose something else.")
+        let conflicts = [
+            APIError(status: 409, message: "parent would create a cycle", fields: ["code": "conflict"]),
+            APIError(status: 409, message: "parent depth exceeds the limit", fields: ["code": "conflict"]),
+            APIError(status: 409, message: "another refusal", fields: ["code": "something_else"]),
+            APIError(status: 409, message: "no structured code")
+        ]
+        for conflict in conflicts {
+            let message = InboxParentChange.conflictMessage(for: conflict)
+            #expect(message == expected, "Every 409 must use the generic localized message without inspecting its code or text")
+            #expect(message != conflict.message, "The hub's English error must not be shown")
+        }
+    }
+
+    @Test func otherParentFailuresKeepTheExistingErrorPresentation() {
+        let notFound = APIError(status: 404, message: "missing")
+        #expect(InboxParentChange.conflictMessage(for: notFound) == nil,
+                "Non-conflict API errors must continue through model.show")
+        let other = NSError(domain: "example", code: 409)
+        #expect(InboxParentChange.conflictMessage(for: other) == nil,
+                "Only an APIError's HTTP status identifies a parent conflict")
     }
 
     @Test func locationLineJoinsDifferentPlaceAndSender() {

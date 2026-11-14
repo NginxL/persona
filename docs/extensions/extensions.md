@@ -2517,7 +2517,7 @@ The component showcase's version 6 pages are `web/src/showcase/v6` (with their p
 **iOS** (#827) draws all of it, with the rest of UI version 5, and sends 6: whole pages and the native stream (`ExtensionUIContext.pageVersion`,
 `ExtensionPageStream.uiVersion`) and the app's own cards and sections (`ExtensionUIContext.cardVersion`; version 4–5's code components there read-only, `ExtensionCodeSummary`),
 every `ExtensionViewModel` saying what the app's renderer draws (`drawnByApp`). Widgets, the watch and the system extensions keep the Shared version, 3: they draw none of it.
-The frozen Mac app compiles the same code but keeps what it reported before (pages 4, the stream 5, cards 3), so the hub goes on downgrading for it (`docs/apple/mac.md`: new features skip it).
+The retired native Mac app compiled the same code but kept what it reported before (pages 4, the stream 5, cards 3), so the hub downgraded for it (`docs/archive/apple/mac.md`: new features skipped it).
 See "App: Settings › Extensions" below for each part. One difference from the web and Android: a switch that asks first has already moved when the alert shows (a system switch cannot be held where it was), and Cancel puts it back.
 
 ## System-level placements (#1858)
@@ -3051,7 +3051,7 @@ Views, components, actions, responses, placements and context all use schema-gen
   two marketplaces and their catalogs; `-tab settings -openExtensions YES` (`-openExtension <id>` opens details directly, add `-openExtensionPage <ui>` for its page and `-openExtensionManager <id>` for another manager's copy; old `-openPlugin…` forms still work),
   `-openExtensionMarket YES` (catalog), `-openExtensionMarkets YES` (marketplace management), `-openMarketExtension <marketplace id>/<extension id>`, `-openLauncherPage <launcher>`.
   UI slots: `-tab settings` shows cards and entries; `-openExtension example-gateway -openExtensionPage usage` opens usage; `-openMachines YES -openMachineDetail macbook`
-  shows the machine section. Mac uses `scripts/app/mac_shot.sh` (`DEMO=0` plus `-pairURL`); `-openMacExtensionPage example-gateway/usage` opens that sidebar page.
+  shows the machine section. Desktop uses the Electron smoke's captured web pages; iOS uses `scripts/app/sim.sh` (`DEMO=0` plus `-pairURL`); `-openMacExtensionPage example-gateway/usage` opens that sidebar page.
   UI tests `ExtensionSettingsTests`, `ExtensionMarketTests` (marketplace installation, upgrade preview, marketplace management, saving extension pages, launcher section; `TEST_RUNNER_PERSONA_EXTENSIONS_HUB`),
   `ExtensionSlotsTests` (cards, entries/badges, usage-page segmented controls and chart, opening cards, machine sections),
   unit tests `ExtensionsModelTests`, `ExtensionMarketModelTests`, `ExtensionViewModelTests`, `ExtensionSlotsModelTests`.

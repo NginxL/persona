@@ -411,10 +411,10 @@ struct MachineCard: View {
         }
     }
 
-    /// Side by side.
+    /// Four columns while every value fits its share whole, two by two when one does not.
     private func metricsRow(_ s: MetricSample?) -> some View {
-        HStack(alignment: .top, spacing: Theme.Space.m) { metricCells(s) }
-        .accessibilityElement(children: .combine)
+        EqualColumns { metricCells(s) }
+            .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func metricCells(_ s: MetricSample?) -> some View {
@@ -474,7 +474,7 @@ struct TodayTokensCard: View {
         let ranked = shares.filter { $0.usage.today.total > 0 }.sorted { $0.usage.today.total > $1.usage.today.total }
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text("Today's Tokens").font(Theme.Font.heading)
-            HStack(alignment: .top, spacing: Theme.Space.m) {
+            EqualColumns {
                 cell(String(localized: "Total [Token Usage]"), TokenFormat.count(today.total))
                 cell(String(localized: "Now [Token Usage]"), TokenFormat.perMinute(perMinute))
                 cell(String(localized: "Cache Hit Rate"), today.hitRate.map { $0.formatted(.percent.precision(.fractionLength(0))) } ?? "—")
@@ -528,15 +528,11 @@ struct AgentCounts: View {
     var tally: AgentTally
 
     var body: some View {
-        // Side by side; one under another when the three words do not fit the card's width.
-        let items = Group {
+        // Side by side in equal shares; one under another when a word does not fit its share.
+        EqualColumns(spacing: Theme.Space.s, rowSpacing: Theme.Space.xs, fallbackColumns: 1) {
             item(tally.needsYou, StateName.needsYou.text, tone: StatusPalette.needsYou, ink: StatusPalette.needsYou.text)
             item(tally.working, StateName.working.text, tone: StatusPalette.working, ink: StatusPalette.working.text)
             item(tally.idle, String(localized: "Idle"), tone: StatusPalette.idle, ink: Color.primary)
-        }
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.s) { items }
-            VStack(alignment: .leading, spacing: Theme.Space.xs) { items }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -577,6 +573,7 @@ struct MetricCell<Chart: View>: View {
             chart.scaledFrame(height: Theme.Size.wellS).padding(.top, Theme.Space.xxs)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .equalColumnShrink(0.7)
     }
 }
 

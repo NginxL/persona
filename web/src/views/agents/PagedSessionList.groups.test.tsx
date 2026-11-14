@@ -243,6 +243,30 @@ describe("the list by computer", () => {
     expect(sections().map((s) => heading(s).getAttribute("aria-expanded"))).toEqual(["true", "true", "true", "true"]);
     expect(rowsIn(sections()[3])).toEqual(["c1"]);
   });
+
+  it("opens the section of an open conversation on a later page", async () => {
+    const filler = Array.from({ length: 50 }, (_, i) => row(`f${i}`, "mac", "/bulk"));
+    const all = [...filler, ...ROWS];
+    const selected = (q: URLSearchParams) => {
+      const places = q.getAll("place"), spaces = q.getAll("space");
+      return all.filter((r) => (!q.get("state") || q.get("state") === r.state) && (!q.get("machine_id") || q.get("machine_id") === r.machine) &&
+        (!q.get("project") || q.get("project") === r.project) && (!q.get("group") || q.get("group") === r.group) && (!q.get("q") || r.id.includes(q.get("q")!)) &&
+        (!places.length || places.includes(listPair(r.machine, r.project))) && (!spaces.length || spaces.includes(listPair(r.machine, r.group))));
+    };
+    vi.mocked(api).mockImplementation((path) => {
+      const q = params(path as string);
+      const rows = selected(q);
+      const answer = q.has("catalog") ? catalogOf(rows) : q.has("counts") ? countsOf(rows)
+        : q.has("cursor") ? { sessions: rows, remove: [], has_more: false, total: rows.length, revision: "r" }
+          : { sessions: rows.slice(0, 50), remove: [], has_more: true, next_cursor: "second", total: rows.length, revision: "r" };
+      return Promise.resolve(answer) as ReturnType<typeof api>;
+    });
+    await show({ open: "c1" });
+    await browseBy("machine");
+    expect(sections().map((s) => heading(s).getAttribute("aria-expanded"))).toEqual(["true", "true", "true", "true"]);
+    expect(rowsIn(sections()[3])).toEqual(["c1"]);
+    expect(reads("page").filter((path) => params(path).get("cursor") === "second")).toHaveLength(1);
+  });
 });
 
 describe("the list by project, on a hub with the catalog", () => {

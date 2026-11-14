@@ -21,6 +21,7 @@ FILTERS = {
     "apple": ["apple/**", "native/app-core/**", "schema/**", "spec/**", "scripts/app/sim-boot.sh", "scripts/i18n/**", "scripts/ci/apple*", "scripts/test/isolation-lint*", "scripts/test/isolation-lint/**", "scripts/test/apple_isolation_baseline.json", ".github/workflows/apple-test.yml"],
     "core": ["native/app-core/**", "spec/fixtures/continuity/**", "android/core/rustcore/src/main/kotlin/**", "apple/Packages/PersonaCore/**", "scripts/ci/core.sh", ".github/workflows/core-test.yml"],
     "runtimes": ["integrations/**", "sdk/ts/**", "schema/**", "spec/**", "scripts/ci/runtimes.sh", ".github/workflows/runtimes-test.yml"],
+    "desktop": ["desktop/**", "scripts/ci/desktop*.sh", ".github/workflows/desktop-test.yml"],
     "scripts": ["**"],
     "image": ["Dockerfile", ".dockerignore", "deploy/docker/**", "server/**", "sdk/go/**", "web/**", "integrations/**", "schema/extension/**", "spec/fixtures/**", "scripts/ci/hub-image.sh", ".github/workflows/release.yml", ".github/workflows/hub-image.yml"],
 }

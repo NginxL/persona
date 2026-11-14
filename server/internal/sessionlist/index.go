@@ -38,12 +38,10 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
-	// Todo is the id of the open to-do the row is on ("" for none): what Options.Todo selects and Counts.Todo counts
-	// (#6662). The adapter knows which to-dos are open; the index only compares ids.
-	Todo string
-	// Fold is the item's place in the session hierarchy (#5120); nil for an item folded under none that shows its own
-	// State and BackgroundWaiting, as every item without children does. It sits behind a pointer to keep Item in its
-	// allocation size class: an adapter builds a whole batch as one []Item, as the hub does on every pass.
+	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
+	// (#6662). Nil for an item with neither, which shows its own State and BackgroundWaiting. It sits behind a pointer
+	// to keep Item in its allocation size class: an adapter builds a whole batch as one []Item, as the hub does on every
+	// pass.
 	Fold       *Fold
 	UpdatedAt  time.Time
 	SearchText string
@@ -51,15 +49,16 @@ type Item struct {
 	Full       any
 }
 
-// Fold is how an Item folds. Root is the session id (as parent_session_id names it, not the composite ID) of the item
-// on the same Machine this one is folded under (a child session under its topmost listed ancestor), only when that
-// item is in the same batch; State is the state the item shows with the items folded under it ("" for its own);
-// BackgroundWaiting is Item.BackgroundWaiting for Options.Roots: none of the items folded under it works or needs the
-// user either. Options.Roots leaves out the items with a Root and filters and counts the others by their folded state;
-// Options.Under selects the items folded under one. Like the rest of an Item it is immutable once handed to Replace:
-// copies of the item share it.
+// Fold is how an Item folds and the open to-do it is on. Root is the session id (as parent_session_id names it, not the
+// composite ID) of the item on the same Machine this one is folded under (a child session under its topmost listed
+// ancestor), only when that item is in the same batch; State is the state the item shows with the items folded under it
+// ("" for its own); BackgroundWaiting is Item.BackgroundWaiting for Options.Roots: none of the items folded under it
+// works or needs the user either. Todo is the id of the open to-do the row is on ("" for none): what Options.Todo
+// selects and Counts.Todo counts. The adapter knows which to-dos are open; the index only compares ids. Options.Roots
+// leaves out the items with a Root and filters and counts the others by their folded state; Options.Under selects the
+// items folded under one. Like the rest of an Item it is immutable once handed to Replace: copies of the item share it.
 type Fold struct {
-	Root, State       string
+	Root, State, Todo string
 	BackgroundWaiting bool
 }
 
@@ -69,6 +68,14 @@ func (v *Item) root() string {
 		return ""
 	}
 	return v.Fold.Root
+}
+
+// todo is the open to-do v is on ("" for none).
+func (v *Item) todo() string {
+	if v.Fold == nil {
+		return ""
+	}
+	return v.Fold.Todo
 }
 
 // Options selects a filtered full list or an incremental change list. Limit zero
@@ -135,7 +142,7 @@ type Counts struct {
 	Group      map[string]int `json:"group"`
 	State      map[string]int `json:"state"`
 	PaneSource map[string]int `json:"pane_source,omitempty"`
-	// Todo counts the items by Item.Todo, "" for the items on no to-do (#6662).
+	// Todo counts the items by Fold.Todo, "" for the items on no to-do (#6662).
 	Todo map[string]int `json:"todo"`
 	// BackgroundWaiting: how many of State["working"] only wait in the background (#6045): a client that shows them
 	// apart takes them out of its Working count.

@@ -257,7 +257,12 @@ func (e *Engine) AttachmentDaysFor(source string) int {
 // textCutoff and line stop writing. With a selection, each line's days are its deciding rule's (PruneSelected), and
 // documents past the days the user set for them go too (pruneDocs); a selection that cannot be read now
 // (Selection.Stopgap) prunes nothing: the next round tries again. The count is of day files, attachment days and documents.
-func (e *Engine) Prune(now time.Time) int {
+func (e *Engine) Prune(now time.Time) (removed int) {
+	defer func() {
+		if removed > 0 {
+			e.Store.SearchIndexPurge() // what retention removed leaves the search index at its next update
+		}
+	}()
 	if sel := e.selection(); sel != nil {
 		if sel.Stopgap() {
 			return 0

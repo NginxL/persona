@@ -59,4 +59,15 @@ describe("收件箱详情在手机宽度", () => {
     const time = [...host.querySelectorAll("p span")].find((s) => /· \d\d:\d\d$/.test(s.textContent ?? ""));
     expect(time?.className).toContain("shrink-0");
   });
+
+  it("truncates the where line and keeps Original on one line", () => {
+    act(() => root.render(<InboxDetail item={item({ lark: undefined, where: "一个很长的会话名称", now: "needs_you" })} loaded />));
+    const meta = host.querySelector("[data-detail-meta]")!;
+    expect(meta.querySelector("span")?.className).toContain("truncate");
+    expect(meta.querySelector("span")?.className).toContain("min-w-0");
+    const original = meta.querySelector("button")!;
+    expect(original.textContent).toBe("看原文");
+    expect(original.className).toContain("whitespace-nowrap");
+    expect(original.className).toContain("shrink-0");
+  });
 });

@@ -270,7 +270,7 @@ struct AssistantView: View {
 
     /// The root with its top bar, the lift layer and the pages it pushes: split from `stack` for Xcode 26.0 (#5333).
     private var dressedRoot: some View {
-        root
+        AnyView(root)
         // No system bar: the top bar floats over the conversation with a fog under it (it scrolls beneath).
         .toolbarVisibility(.hidden, for: .navigationBar)
         #if os(iOS) || os(visionOS)
@@ -342,7 +342,9 @@ struct AssistantView: View {
     /// The root as the stack's (or, in the Sidebar layout, the split's page's) first page: what it does there (its routes,
     /// the requests from the shell or the sidebar, the debug pages).
     private var routed: some View {
-            dressedRoot
+            // Erased here and in `dressedRoot` (#6735): unoptimized, this getter reserved a stack slot for every
+            // modifier below, each holding the whole page (375 KB of an iPhone's 1 MB main-thread stack).
+            AnyView(dressedRoot)
             // Full Screen in an agent's sheet (TasksStore.expand): its page pushed here, as from the Agents tab.
             .onChange(of: TasksStore.shared.fullAgent, initial: true) { _, key in
                 guard let key else { return }

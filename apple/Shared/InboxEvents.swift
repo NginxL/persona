@@ -49,6 +49,8 @@ extension InboxItem {
         var kind: String
         var text: String
         var note: String?
+        /// A to-do suggestion's due: a day (2006-01-02, all day) or a moment (RFC 3339); nil: no due date.
+        var due: String?
         /// Needs judgment: confirming hands it back to the processing conversation instead of running it.
         var handback: Bool?
         var machineID: String?
@@ -58,7 +60,7 @@ extension InboxItem {
         var conversation: Handoff?
 
         enum CodingKeys: String, CodingKey {
-            case version, kind, text, note, handback, changes, at, conversation
+            case version, kind, text, note, due, handback, changes, at, conversation
             case machineID = "machine_id"
         }
 
@@ -125,7 +127,7 @@ extension InboxItem {
     /// Where tapping a chain entry goes: the item's source (at a Feishu position, a mail uid, a URL, or just the source
     /// page), a conversation, or another inbox item.
     nonisolated struct Link: Codable, Hashable, Sendable {
-        /// source | session | item
+        /// source | session | item | todo
         var type: String
         var position: String?
         var uid: UInt32?
@@ -234,6 +236,7 @@ nonisolated enum InboxEventText {
         case "reply": String(localized: "Suggested reply")
         case "agent": String(localized: "Suggested Agent task")
         case "conclusion": String(localized: "Conclusion")
+        case "todo": String(localized: "Suggested To-Do")
         default: String(localized: "Suggestion")
         }
     }
@@ -244,6 +247,7 @@ nonisolated enum InboxEventText {
         case "reply": Theme.Icon.reply
         case "agent": Theme.Icon.agents
         case "conclusion": Theme.Icon.concluded
+        case "todo": Theme.Icon.todo
         default: Theme.Icon.ai
         }
     }
@@ -346,6 +350,7 @@ nonisolated enum InboxEventText {
         case "reply": return [.confirm(String(localized: "Send")), .edit, .reject]
         case "agent": return [.confirm(String(localized: "Start")), .edit, .reject]
         case "conclusion": return [.confirm(String(localized: "OK [Recordings Section de32e2]")), .reject]
+        case "todo": return [.confirm(String(localized: "Add to To-Dos")), .reject]
         default: return [.confirm(String(localized: "Confirm")), .reject]
         }
     }
@@ -357,10 +362,12 @@ nonisolated struct InboxSuggestionBody: Encodable, Sendable, Equatable {
     /// confirm | reject | instruct
     var action: String
     var text: String?
+    /// A to-do suggestion confirmed: its due as the card shows it (a day, or an RFC 3339 moment).
+    var due: String? = nil
     var clientID: String
 
     enum CodingKeys: String, CodingKey {
-        case version, action, text
+        case version, action, text, due
         case clientID = "client_id"
     }
 }
@@ -409,6 +416,8 @@ nonisolated enum InboxChainTarget: Equatable, Sendable {
     case session(SessionKey, manager: Bool)
     /// Another inbox item.
     case item(String)
+    /// The to-do the row was turned into (#6480).
+    case todo(String)
     /// No link: the entry's detail / messages open in place.
     case inline
     /// Nothing to open.
@@ -431,6 +440,9 @@ nonisolated enum InboxChainTarget: Equatable, Sendable {
         case "item":
             guard let id = l.id, !id.isEmpty else { return here }
             return .item(id)
+        case "todo":
+            guard let id = l.id, !id.isEmpty else { return here }
+            return .todo(id)
         default:
             return here
         }

@@ -311,8 +311,7 @@ struct LinkSheet: View {
 /// page. All share the default (on-disk) website data store, so assets and logins carry over.
 /// On iPhone, iPad and Vision Pro a view serves one opening of its link: once a sheet has shown it, the pool lets it go
 /// (`release`, from `PooledWebView`), so a later tap on the link starts on the link's own page with no back/forward
-/// history, not where the last opening was left (#4074). The Mac's panel (frozen, apple/Mac/Link) still reuses its views:
-/// its Open in Separate Window moves the view on screen, page and history, into the window.
+/// history, not where the last opening was left (#4074).
 @MainActor
 final class WebViewPool {
     static let shared = WebViewPool()

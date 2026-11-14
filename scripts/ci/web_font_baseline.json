@@ -191,7 +191,7 @@
  "web/src/views/inbox/InboxBodies.tsx": 25,
  "web/src/views/inbox/InboxDetail.tsx": 7,
  "web/src/views/inbox/InboxDialogs.tsx": 18,
- "web/src/views/inbox/InboxEvent.tsx": 26,
+ "web/src/views/inbox/InboxEvent.tsx": 12,
  "web/src/views/inbox/InboxExtensionBody.tsx": 1,
  "web/src/views/inbox/InboxFolders.tsx": 12,
  "web/src/views/inbox/InboxLine.tsx": 2,
