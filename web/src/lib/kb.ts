@@ -125,7 +125,11 @@ export interface RecordingMinutes {
   decisions?: MinutesPoint[];
   actions?: MinutesAction[];
   open?: MinutesPoint[];
+  /** The summary card (#6563): the headline, the core conclusions and the points and decisions grouped by topic. Read
+   *  defensively on its own (lib/minutes-overview.ts `minutesOverview`), so a broken one never costs the fields above. */
+  overview?: unknown;
   partial?: boolean;
+  /** The same minutes as Markdown, what Copy sends; it follows the summary card when there is one. */
   markdown: string;
 }
 

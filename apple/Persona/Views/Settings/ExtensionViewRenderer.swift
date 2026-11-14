@@ -339,8 +339,10 @@ struct ExtensionItemRow: View {
         // UI version 6's picture (`ExtensionMedia.swift`).
         case .image(let i): ExtensionImageItem(item: i, model: model)
         case .divider, .unknown: EmptyView()
-        // UI version 4's code-hosting components: a View with them is drawn by the code page (`ExtensionCodePage`, #2961).
-        case .header, .breadcrumb, .fileTree, .code, .diff, .commentThread, .composer: EmptyView()
+        // UI version 4–5's code-hosting components: a whole page with them is drawn by the code page (`ExtensionCodePage`,
+        // #2961); a card or a section says what they say (`ExtensionCodeSummary`).
+        case .header, .breadcrumb, .fileTree, .code, .diff, .commentThread, .composer:
+            ExtensionCodeSummary(item: item, model: model, link: $link)
         }
     }
 

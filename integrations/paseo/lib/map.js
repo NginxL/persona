@@ -14,6 +14,13 @@ export const SESSION_LABEL = 'persona.session'
 export const PARENT_LABEL = 'paseo.parent-agent-id'
 /** The label on the agent a launcher check runs (bridge.js check): never a session, deleted once it answered. */
 export const CHECK_LABEL = 'persona.check'
+/**
+ * The label beside SESSION_LABEL when the bridge kept the id itself on an agent Persona neither started nor took over
+ * (Paseo moved it to another Claude session: a fork, a rewind): the id is the session's, the agent is not Persona's own.
+ */
+export const KEPT_LABEL = 'persona.kept'
+/** Where the bridge's copy of an agent holds the id it keeps for it before Paseo's record has the label (bridge.js keptIdOf). */
+export const KEPT = Symbol('persona.kept')
 /** Persona's effort levels, weakest first (proto.EffortLevels). */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 /** Persona's permission modes (proto.PermissionModes): Claude Code's, which Paseo's Claude providers take as they are. */
@@ -125,14 +132,15 @@ export function defaultProvider(entries = [], roots = {}) {
 
 /**
  * The id a Paseo agent has in Persona, undefined while it has none: the label Persona left on it (it started or took
- * the session over); else, for Claude Code, its Claude session id — the id the same conversation has everywhere in
- * Persona ("Offline", herdr) — once Paseo has one; else paseo-<agent id>.
+ * the session over, or the bridge kept the id); else, for Claude Code, the id the bridge keeps for it (KEPT: the session
+ * it was listed under before Paseo moved it to a fork), else its Claude session id — the id the same conversation has
+ * everywhere in Persona ("Offline", herdr) — once Paseo has one; else paseo-<agent id>.
  */
 export function sessionIdOf(agent, roots = {}) {
   const l = agent?.labels?.[SESSION_LABEL]
   if (typeof l === 'string' && SESSION_ID.test(l)) return l
   if (agentRoot(agent, roots) === 'claude') {
-    const c = claudeId(agent)
+    const c = agent?.[KEPT] ?? claudeId(agent)
     return c && SESSION_ID.test(c) ? c : undefined
   }
   return typeof agent?.id === 'string' && agent.id ? `${RUNTIME}-${agent.id}` : undefined

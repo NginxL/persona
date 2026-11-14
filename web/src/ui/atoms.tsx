@@ -160,6 +160,7 @@ export function Button({
   expanded,
   testId,
   size,
+  ...aria
 }: {
   children: React.ReactNode;
   tone?: BtnTone;
@@ -174,6 +175,10 @@ export function Button({
   href?: string;
   /** A button that shows or hides something: whether it is shown (aria-expanded). */
   expanded?: boolean;
+  /** The id of what it shows or hides. */
+  "aria-controls"?: string;
+  /** A fuller name for screen readers, starting with the visible words, as "Show 2 more in Export". */
+  "aria-label"?: string;
   /** `data-testid`, for the tests and screenshot scripts that press it. */
   testId?: string;
   /** "sm": 28 px tall (a row of actions inside a card, as the error notice's). A height in `className` does not win
@@ -207,6 +212,7 @@ export function Button({
   };
   return (
     <button
+      {...aria}
       type={type}
       title={title}
       disabled={disabled || busy}

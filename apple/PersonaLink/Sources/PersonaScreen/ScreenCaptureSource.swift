@@ -44,6 +44,8 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
     /// The phone asked to pause (`update.paused`): no capture, and no `paused` message, since it knows.
     private var userPaused = false
     private var timer: DispatchSourceTimer?
+    /// Capture, encode and round-trip times of the frames sent this second, for `timing` (#3954).
+    private var timing = TimingWindow()
 
     // MARK: ScreenSource
 
@@ -103,6 +105,7 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
 
     func receive(report: ReceiverReport) {
         queue.async { [self] in
+            timing.reported(frame: report.lastFrame, at: Self.nowMicros)
             let decision = rate.receive(report, now: Self.nowMicros)
             if let kbps = decision.kbps { setBitrate(kbps) }
             if decision.keyframe { wantKeyframe = true }
@@ -202,6 +205,7 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
     /// Stops the stream and the encoder, if any. Bumps `generation`, so their late completions do nothing.
     private func stopCapture() {
         generation += 1
+        timing = TimingWindow()
         if let stream {
             self.stream = nil
             stream.stopCapture { _ in }
@@ -274,7 +278,10 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
               let image = sample.imageBuffer else { return }
         let shown = (info[.displayTime] as? UInt64) ?? (info[.displayTime] as? NSNumber)?.uint64Value ?? mach_absolute_time()
         let captured = Self.micros(shown)
-        guard rate.admit(now: Self.nowMicros) else { return }
+        let now = Self.nowMicros
+        // Display time to here: about 0, or below it (ScreenCaptureKit hands frames over before their display time).
+        let captureMicros = Int64(bitPattern: now &- captured)
+        guard rate.admit(now: now) else { return }
 
         var options: CFDictionary?
         if wantKeyframe {
@@ -282,18 +289,20 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
             wantKeyframe = false
         }
         let gen = generation
+        let encoding = Self.nowMicros
         VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: sample.presentationTimeStamp,
                                         duration: .invalid, frameProperties: options, infoFlagsOut: nil) { [weak self] status, _, out in
+            let encodeMicros = Int64(bitPattern: Self.nowMicros &- encoding)
             guard let self, status == noErr, let out else { return }
             self.queue.async {
                 guard gen == self.generation else { return }
-                self.emit(out, captured: captured)
+                self.emit(out, captured: captured, captureMicros: captureMicros, encodeMicros: encodeMicros)
             }
         }
     }
 
     /// One encoded sample: `format` first when the parameter sets changed, then the `frame`.
-    private func emit(_ sample: CMSampleBuffer, captured: UInt64) {
+    private func emit(_ sample: CMSampleBuffer, captured: UInt64, captureMicros: Int64, encodeMicros: Int64) {
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
         let keyframe = !((attachments?.first?[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
         if let description = sample.formatDescription {
@@ -307,6 +316,7 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
         number &+= 1
         send(.frame(VideoFrame(number: number, captureMicros: captured, flags: keyframe ? .keyframe : [], sample: bytes)))
         lastSent = Self.nowMicros
+        timing.sent(number: number, at: lastSent, captureMicros: captureMicros, encodeMicros: encodeMicros, bytes: bytes.count)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -332,6 +342,8 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
 
     private func tick() {
         guard request != nil, !userPaused else { return }
+        // The second's capture, encode and network medians for the phone's overlay; nothing when no frame went out.
+        if pausedReason == nil, let t = timing.take(now: Self.nowMicros) { send(.timing(t)) }
         let action = CaptureTick.decide(session: Self.consoleReason(), paused: pausedReason, capturing: stream != nil,
                                         sinceLastSent: Self.nowMicros &- lastSent)
         switch action {

@@ -239,7 +239,7 @@ private struct AgentsFoldingField: View {
 
 /// The bar across the page, its field on the page's edges whatever the row's own insets are (an inset grouped list's
 /// row starts `Theme.Space.page` in, a plain one at the screen's edge).
-private struct AgentsFieldPlace: ViewModifier {
+struct AgentsFieldPlace: ViewModifier {
     @State private var minX: CGFloat = 0
     @State private var screen: CGFloat = 0
 

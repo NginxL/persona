@@ -29,16 +29,20 @@ import (
 // reads meta) and the hub stores what comes back with the model's words, triaged_by "model". When the model can't (not
 // set up, held, failing, too slow, or an answer that does not hold up) the connector groups the batch by structure
 // itself (group.fallback). Its title, rule tier, "By rule" and triaged_by "rules" describe only events it opens; an
-// existing event takes the new messages but keeps its title, summary, tier, reason, urgency and triager. That version is final.
+// existing event takes the new messages but keeps its title, summary, tier, reason, urgency and triager. The one exception is
+// a rewritten direct-chat join: its tier may rise to the rewritten entries' rule floor, but never out of noise or while a
+// processing conversation is handling the event. That version is final.
 
 const (
 	groupCalls        = 4                  // call allowances per batch (tools and a possible correction)
 	groupNewMax       = 3                  // new events the prompt suggests for one batch; also sizes the output budget
-	groupEventsMax    = 10                 // events the events tool lists
-	groupDoneFor      = 3 * 24 * time.Hour // how long a done event is still listed
+	groupOpenMax      = 10                 // open events the events tool lists, independently of done events
+	groupDoneMax      = 6                  // recent done events the events tool lists, independently of open events
+	groupDoneFor      = 3 * 24 * time.Hour // how long a done event is still listed; keep whole days so DoneDays matches
 	groupDoneCountMax = 50                 // 50 is a starting value with no supporting measurements; done events at this count are not candidates
 	groupConcurrency  = 4                  // batches related at once (the others wait for the next round)
 	groupAttempts     = 3                  // tries of one event's append
+	groupDMJoinWithin = 2 * time.Hour      // 2 hours is a starting value with no supporting measurements
 )
 
 // Bounds, variables for tests.
@@ -132,8 +136,9 @@ type groupEvent struct {
 
 // groupPlan is which messages go to which event, and what each event is: the model's, or the connector's fallback.
 type groupPlan struct {
-	model  bool
-	events []plannedEvent
+	model              bool
+	fallbackCandidates []string // the exact candidate ids supplied to group.fallback; empty on a model plan
+	events             []plannedEvent
 }
 
 // plannedEvent is one event a batch touches: an existing one or a new one (which may continue a done one).
@@ -143,6 +148,11 @@ type plannedEvent struct {
 	continues    string
 	reopen       *bool // nil means true for a done event; ignored for open and new events
 	twinDisabled bool  // writeGroup snapshots the AI-twin switch before taking b.mu
+	dmJoined     bool  // at least one fallback-new entry was rewritten into this existing event
+	// The highest explicit rule tier among those rewritten entries. ruleFloorDefault records that at least one had no
+	// explicit tier and still needs putEvent's fallback-new default; dmJoined distinguishes them from an ordinary append.
+	ruleFloor        string
+	ruleFloorDefault bool
 	// The model's words for it; under the fallback only a new one's title and rule tier (the connector's).
 	title, summary, tier, reason string
 	urgent                       bool
@@ -200,37 +210,48 @@ func (s *Service) noteGroupWhy(id, why string) {
 	}
 }
 
-// groupEvents are the events of a conversation as the events tool answers: the open ones, then done ones within
-// groupDoneFor that are not noise and have fewer than groupDoneCountMax messages, newest first, at most groupEventsMax;
-// query keeps those whose title, summary or meta has it.
+// groupEvents are the events of a conversation as the events tool answers: at most groupOpenMax open ones, then at
+// most groupDoneMax done ones within groupDoneFor that are not noise and have fewer than groupDoneCountMax messages.
+// Each group is newest first and has its own quota; query keeps those whose title, summary or meta has it before either
+// cap. Hidden members of merged rows are never candidates.
 func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	cutoff := time.Now().Add(-groupDoneFor)
 	q := strings.ToLower(strings.TrimSpace(query))
-	var list []*InboxItem
+	var open, done []*InboxItem
 	for _, it := range b.items {
-		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) ||
-			!it.open() && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
+		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) || it.MergedInto != "" {
+			continue
+		}
+		isOpen := it.DoneAt == nil // merged members, the other way open() is false, are skipped above
+		if !isOpen && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(it.Title+"\n"+it.Summary+"\n"+string(it.Meta)), q) {
 			continue
 		}
-		list = append(list, it)
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].open() != list[j].open() {
-			return list[i].open()
+		if isOpen {
+			open = append(open, it)
+		} else {
+			done = append(done, it)
 		}
-		return list[i].UpdatedAt.After(list[j].UpdatedAt)
-	})
-	out := make([]groupEvent, 0, min(len(list), groupEventsMax))
-	for _, it := range list[:min(len(list), groupEventsMax)] {
-		out = append(out, groupEvent{ID: it.ID, Title: it.Title, Summary: it.Summary, Tier: it.Tier, Version: inboxVersion(it),
-			Done: !it.open(), Meta: it.Meta})
 	}
+	newestFirst := func(list []*InboxItem) {
+		sort.Slice(list, func(i, j int) bool { return newerItem(list[i], list[j]) })
+	}
+	newestFirst(open)
+	newestFirst(done)
+	out := make([]groupEvent, 0, min(len(open), groupOpenMax)+min(len(done), groupDoneMax))
+	appendEvents := func(list []*InboxItem, limit int) {
+		for _, it := range list[:min(len(list), limit)] {
+			out = append(out, groupEvent{ID: it.ID, Title: it.Title, Summary: it.Summary, Tier: it.Tier, Version: inboxVersion(it),
+				Done: it.DoneAt != nil, Meta: it.Meta})
+		}
+	}
+	appendEvents(open, groupOpenMax)
+	appendEvents(done, groupDoneMax)
 	return out
 }
 
@@ -279,7 +300,8 @@ func (s *Service) askGroup(ctx context.Context, c assistantwire.InboxSource, t c
 	}
 	hello := s.hello(ctx)
 	system := prompts.RenderInboxGroup(prompts.InboxGroup{Owner: hello.Owner, MetaDescription: strings.TrimSpace(c.MetaDescription),
-		Rules: rules, MaxCalls: groupCalls, NewMax: groupNewMax, Language: answerLanguage(hello.Locale)})
+		Rules: rules, MaxCalls: groupCalls, NewMax: groupNewMax, OpenMax: groupOpenMax, DoneMax: groupDoneMax,
+		DoneDays: int(groupDoneFor / (24 * time.Hour)), Language: answerLanguage(hello.Locale)})
 	seen := map[string]groupEvent{} // every event the model was shown: the only ones its answer may name
 	for _, e := range events {
 		seen[e.ID] = e
@@ -472,12 +494,14 @@ func isNewEvent(ev string) bool {
 }
 
 // fallbackGroup has the connector group the batch by structure, with the same events the model would have seen,
-// and holds its answer to the same rules (each new message once; an existing event a listed one, not done).
+// and holds its answer to the same rules (each new message once; an existing event a listed one, open or done).
 func (s *Service) fallbackGroup(ctx context.Context, c assistantwire.InboxSource, t connector.InboxThing, events []groupEvent) (*groupPlan, error) {
 	listed := map[string]bool{}
+	candidateIDs := make([]string, 0, len(events))
 	in := connector.GroupFallback{Thread: t.Thread, Batch: t.Group.Batch, Events: []connector.GroupEvent{}}
 	for _, e := range events {
-		listed[e.ID] = !e.Done
+		listed[e.ID] = true
+		candidateIDs = append(candidateIDs, e.ID)
 		in.Events = append(in.Events, connector.GroupEvent{ID: e.ID, Meta: e.Meta, Done: e.Done})
 	}
 	cctx, cancel := context.WithTimeout(ctx, groupCallTimeout)
@@ -501,11 +525,11 @@ func (s *Service) fallbackGroup(ctx context.Context, c assistantwire.InboxSource
 		delete(want, m)
 		return nil
 	}
-	plan := &groupPlan{}
+	plan := &groupPlan{fallbackCandidates: candidateIDs}
 	at := map[string]int{}
 	for _, a := range res.Assign {
-		if open, ok := listed[a.Event]; !ok || !open {
-			return nil, fmt.Errorf("event %q is not an open one of those it was given", a.Event)
+		if !listed[a.Event] {
+			return nil, fmt.Errorf("event %q is not one of those it was given", a.Event)
 		}
 		if err := take(a.Message); err != nil {
 			return nil, err
@@ -549,6 +573,7 @@ func (s *Service) writeGroup(ctx context.Context, c assistantwire.InboxSource, t
 	twinDisabled := !s.inboxConfig(ctx).Agent.Enabled // read before taking b.mu below
 	b := &s.inbox
 	b.mu.Lock()
+	b.joinDMFallback(c.ID, t, plan)
 	b.foldNoise(c.ID, t.Thread, plan)
 	b.mu.Unlock()
 	var saved []*InboxItem
@@ -583,6 +608,9 @@ func (s *Service) writeGroup(ctx context.Context, c assistantwire.InboxSource, t
 	// No rollback here (#4366): the batch is spent once its events are written (a connector with meta stops sending
 	// what group.append took, and a repeated batch is related once), so an undone event would never come back and an
 	// existing one would hand the connector stale meta. Memory keeps the events; the row catches up at their next save.
+	b.mu.Lock()
+	saved = b.followMerged(saved, time.Now())
+	b.mu.Unlock()
 	for id := range s.saveInbox(ctx, saved) {
 		s.logf("inbox: %s: event %s could not be saved; it stays in memory until its next save", c.ID, id)
 	}
@@ -635,12 +663,30 @@ func (s *Service) appendEvent(ctx context.Context, source string, a connector.Gr
 // keepsWords reports whether the handling conversation or the user owns the item's title and summary. Grouping still
 // advances the tier, reason and urgency, but leaves those words and their provenance alone.
 func keepsWords(it *InboxItem) bool {
-	return it.TitleBy == TitleByAssistant || it.TitleBy == TitleByUser
+	return it.TitleBy == TitleByAssistant || it.TitleBy == TitleByUser || it.TitleBy == TitleByMerged
+}
+
+// fallbackEventTitle removes a redundant conversation-name prefix only when a real title remains.
+func fallbackEventTitle(title, where string) string {
+	title = strings.TrimSpace(title)
+	if where == "" {
+		return title
+	}
+	rest, ok := strings.CutPrefix(title, where+"：") // i18n-ignore: the connector's fallback title separator, matched as written
+	if !ok {
+		return title
+	}
+	if rest = strings.TrimSpace(rest); rest != "" {
+		return rest
+	}
+	return title
 }
 
 // putEvent keeps an event the connector wrote (or the hub composed), under the item's id: the model's title, summary
-// and tier, or under the fallback a new event's title and rule tier with "By rule". Fallback messages joining an
-// existing event leave its title, summary, tier, reason, urgency and triager unchanged; only its messages advance.
+// and tier, or under the fallback a new event's title and rule tier with "By rule". Ordinary fallback messages joining an
+// existing event leave its title, summary, tier, reason, urgency and triager unchanged; a rewritten direct-chat join may
+// only raise the tier, except that noise stays noise and a processing conversation keeps deciding its event's tier.
+// Titles, summaries, urgency and triager still stay unchanged.
 // A done existing event reopens by default; reopen:false or a matching mute keeps it done while its messages advance.
 // It is triaged at this version either way. Its count is the hub's (the messages it put in it; extra.count is not read
 // for an event) and its start is set when it is made. An answer at the version the item has already is a repeat:
@@ -653,7 +699,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 	if it != nil && it.Last == thing.Last {
 		return nil
 	}
-	wasDone := it != nil && !it.open()
+	wasDone := it != nil && it.DoneAt != nil
 	var prev inboxSeen
 	if it != nil {
 		prev = seenOf(it)
@@ -696,16 +742,31 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 			Text: i18n.T(b.userLang(), "assistant-inbox_chain.reopened")})
 	}
 	tierBefore := it.Tier
+	raiseDMFloor := func() {
+		if !e.dmJoined || tier == TierNoise {
+			return
+		}
+		floor := e.ruleFloor
+		if e.ruleFloorDefault || floor == "" {
+			floor = higherTier(floor, b.fallbackEventTier(thing, it))
+		}
+		if higherTier(tier, floor) != tier {
+			// Only the rewrite may raise the tier; the existing triager and urgency deliberately stay unchanged.
+			it.Tier, it.Reason = floor, b.byRules()
+		}
+	}
 	switch {
 	case keepDone:
-		// A wrap-up-only update advances the messages without retriaging or reopening the event.
+		// A wrap-up-only update advances the messages without retriaging or reopening the event. A rewritten direct-chat
+		// join still takes its rule floor, including when a mute keeps the target done.
 		it.Title, it.Summary, it.Tier, it.Reason, it.TriagedBy = title, summary, tier, reason, triagedBy
 		it.Urgent = urgent
 		it.DoneAt, it.DoneBy = doneAt, doneBy
 		tierBefore = tier
+		raiseDMFloor()
 	case prev.last != "" && it.handled() && !reopened:
-		// Messages that join an event being handled follow it: its tier, words and urgency stay; its processing
-		// conversation is told (inbox_handle.go).
+		// Messages that join an event being handled follow it: its tier, words and urgency stay, even for a rewritten
+		// direct-chat join; its processing conversation decides (inbox_handle.go).
 		it.Title, it.Summary, it.Tier, it.Reason = title, summary, tier, reason
 		it.TriagedBy = cmp.Or(it.TriagedBy, "model")
 		it.Urgent = urgent
@@ -723,18 +784,13 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 		it.Title, it.Summary, it.Tier, it.Reason, it.TriagedBy = title, summary, tier, reason, triagedBy
 		it.Urgent = urgent
 		tierBefore = tier // The fill's provisional rule tier is not a triage change.
+		raiseDMFloor()
 	default:
 		tier := e.tier
 		if tier == "" {
-			tier = eventRuleTier(thing)
+			tier = b.fallbackEventTier(thing, it)
 		}
-		if tier == "" {
-			tier = b.ruleTier(it)
-		}
-		if tier == "" { // nothing says: the user looks (when unsure, pick action)
-			tier = TierAction
-		}
-		if t := strings.TrimSpace(e.title); t != "" {
+		if t := fallbackEventTitle(e.title, it.Where); t != "" {
 			it.Title = t
 		}
 		it.Summary, it.Tier, it.Reason, it.TriagedBy, it.TitleBy = "", tier, b.byRules(), "rules", TitleByRules
@@ -767,10 +823,82 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 	return it
 }
 
+// joinDMFallback rewrites fallback-new entries in a direct chat into the most recently active supplied candidate.
+// UpdatedAt is the latest message activity, never the handling clock. Under b.mu, before foldNoise.
+func (b *inboxBook) joinDMFallback(connectorID string, t connector.InboxThing, plan *groupPlan) {
+	if plan.model || len(plan.fallbackCandidates) == 0 {
+		return
+	}
+	hasNew := false
+	for _, e := range plan.events {
+		if e.existing == "" {
+			hasNew = true
+			break
+		}
+	}
+	if !hasNew {
+		return
+	}
+	direct := t.Kind == KindDM
+	cutoff := time.Now().Add(-groupDMJoinWithin)
+	var target *InboxItem
+	for _, id := range plan.fallbackCandidates {
+		it := b.items[id]
+		if it == nil || it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, t.Thread) {
+			continue
+		}
+		if it.Kind == KindDM {
+			direct = true
+		}
+		if it.UpdatedAt.Before(cutoff) {
+			continue
+		}
+		if target == nil || newerItem(it, target) {
+			target = it
+		}
+	}
+	if !direct || target == nil {
+		return
+	}
+
+	// Keep the first participating entry's place in the plan and append later messages in plan order. A direct
+	// assignment to the target joins the same append but contributes no rule floor of its own.
+	out := plan.events[:0]
+	joined := -1
+	for _, e := range plan.events {
+		fresh := e.existing == ""
+		if !fresh && e.existing != target.ID {
+			out = append(out, e)
+			continue
+		}
+		if joined < 0 {
+			e.existing = target.ID
+			joined = len(out)
+			out = append(out, e)
+		} else {
+			out[joined].messages = append(out[joined].messages, e.messages...)
+		}
+		if fresh {
+			if e.tier == "" {
+				out[joined].ruleFloorDefault = true
+			} else {
+				out[joined].ruleFloor = higherTier(out[joined].ruleFloor, e.tier)
+			}
+		}
+	}
+	joinedEvent := &out[joined]
+	joinedEvent.continues = ""
+	joinedEvent.reopen = nil // a done target follows putEvent's default reopen path
+	joinedEvent.title, joinedEvent.summary, joinedEvent.tier, joinedEvent.reason = "", "", "", ""
+	joinedEvent.urgent = false
+	joinedEvent.dmJoined = true
+	plan.events = out
+}
+
 // foldNoise keeps noise one event per atom (docs/assistant/inbox.md "Events and handling chain"): the noise a plan opens goes into the
 // conversation's open noise event, or into one new event for all of it; an existing noise event never takes what
-// the model sorts higher (that opens its own event instead). A planned existing done event passes through unchanged.
-// Under b.mu.
+// the model sorts higher (that opens its own event instead). A rewritten direct-chat join and a planned existing done
+// event pass through unchanged. Under b.mu.
 func (b *inboxBook) foldNoise(connectorID, thread string, plan *groupPlan) {
 	var open *InboxItem // the conversation's open noise event
 	for _, it := range b.items {
@@ -785,7 +913,7 @@ func (b *inboxBook) foldNoise(connectorID, thread string, plan *groupPlan) {
 		cur := ""
 		if e.existing != "" {
 			if it := b.items[e.existing]; it != nil {
-				if !it.open() {
+				if e.dmJoined || !it.open() {
 					out = append(out, e)
 					continue
 				}
@@ -820,6 +948,38 @@ func eventRuleTier(t connector.InboxThing) string {
 		return string(t.Tier)
 	}
 	return ""
+}
+
+// fallbackEventTier resolves the same tier a fallback-new event takes when its connector supplied no explicit rule tier.
+func (b *inboxBook) fallbackEventTier(thing connector.InboxThing, it *InboxItem) string {
+	tier := eventRuleTier(thing)
+	if tier == "" {
+		tier = b.ruleTier(it)
+	}
+	if tier == "" { // nothing says: the user looks (when unsure, pick action)
+		tier = TierAction
+	}
+	return tier
+}
+
+// higherTier compares rule floors as noise < fyi < action, keeping a on an equal or unknown rank.
+func higherTier(a, b string) string {
+	rank := func(tier string) int {
+		switch tier {
+		case TierNoise:
+			return 1
+		case TierFYI:
+			return 2
+		case TierAction:
+			return 3
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
 }
 
 // jsonText is v as compact JSON for a prompt.

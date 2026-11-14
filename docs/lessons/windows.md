@@ -64,9 +64,9 @@ Measured 2026-11-07 with Claude Code 2.1.308 / 2.1.291; see [claude-integration.
 - **An interactive claude under a pseudo console needs its std handles to be the console's**: a `CreatePseudoConsole` child that inherits the parent's redirected stdout decides it is not on a terminal and runs as `--print` ("Input must be provided … when using --print"). Set `STARTF_USESTDHANDLES` with null handles.
 - **Testing on a dev machine**: start a throwaway `claude` with its own `CLAUDE_CONFIG_DIR` (copy `settings.json`, write a `.claude.json` with `hasCompletedOnboarding` and the test directory trusted) and an empty working directory; never send into a session the user has open. The first failed start renamed the test `.claude.json` into `backups/`: write it again before the next try.
 
-## Tray (WebView2, notification area)
+## Historical tray (WebView2, notification area)
 
-`internal/linktray`; see [windows.md](../operations/windows.md) ("Tray"). Found on a physical Windows 11 machine on 2026-11-07:
+Retired with the independent Link service (#6770); the implementation notes are in [windows-records.md](../archive/operations/windows-records.md) and [link-menu-tray.md](../archive/operations/link-menu-tray.md). These findings are historical, not a reason to restore a tray UI. Found on a physical Windows 11 machine on 2026-11-07:
 
 - **WebView2 holds back its callbacks while one of them runs**: creating a WebView inside a `WebMessageReceived` handler gets the environment back, but the controller's completion waits until the handler returns.
   go-webview2's `Embed` spins a nested message loop until then, so it never returned: the pairing window stayed hidden, and the tray's thread stayed inside that loop (which also swallowed the quit message). Handle page messages after the event has returned (`app.fromPage` queues them).

@@ -539,8 +539,8 @@ A pane terminal is a full shell on that computer, stricter than an Agent-session
 
 ### Not implemented
 
-- iOS: **Agents › ⋯ (list menu) › Terminals**, and **Terminals** on a computer's page (#4754, `apple/Persona/Views/Chats/TerminalsView.swift`): every pane of each computer, the Agents' under their titles, plain ones labelled Terminal with their `foreground` program and folder, a stopped Agent's left behind as "Finished: <title>". A plain pane opens in the existing terminal cover by its `pane:` address (watch and type); an Agent's, and a stopped Agent's, by its session, whose terminal page offers Resume (#4328). Each computer's header menu has New Terminal per workspace and Close Finished Terminals (preview, then confirm); a plain pane closes by swipe or long press, after a confirmation. Android has it too (#2972): Terminal in Agents List Settings, see `docs/android/android.md` ("App shell and direct page entry").
-- Close panes/tabs, rename, split: outside this version, do it on the computer when needed.
+- iOS: **Agents › ⋯ (list menu) › Terminals**, and **Terminals** on a computer's page (#4754, `apple/Persona/Views/Chats/TerminalsView.swift`): every pane of each computer, the Agents' under their titles, plain ones labelled Terminal with their `foreground` program and folder, a stopped Agent's left behind as "Finished: <title>". A plain pane opens in the existing terminal cover by its `pane:` address (watch and type); an Agent's, and a stopped Agent's, by its session, whose terminal page offers Resume (#4328). Each computer's header menu has New Terminal per workspace and Close Finished Terminals (preview, then confirm); a plain pane closes by swipe or long press, after a confirmation. A plain pane on herdr or Tern renames its tab from its long press and its terminal page's ⋯ (#6996, `tabs/rename`, as the web's node menu; `docs/apple/ios.md`, "Information architecture"), and the page reads the panes again every 8 seconds while it is in front. Android has it too (#2972): Terminal in Agents List Settings, see `docs/android/android.md` ("App shell and direct page entry").
+- Close tabs and split on iOS: outside this version, do it on the computer when needed (iOS closes a pane and renames a plain pane's tab, above).
 - Hosts without sessions or herdr (Paseo, botmux): no panes, empty list.
 - ⌘K palette now searches panes too (#2330, `docs/web/web.md`, "Pages"): reads each online computer's `panes.list` once on opening, lists ordinary shells and sessionless panes (Agent panes with sessions already appear as session results); terminal page Jump To unchanged.
 
@@ -692,6 +692,10 @@ its branch by default. The optional merged-branch cleanup uses Git's safe branch
 the workspace, pane membership, available native socket identity and, for deletion, the checkout and reviewed file contents.
 An uncertain response is reconciled through the live catalog and filesystem. Reconciliation preserves one-use dispatch. A herdr parent with linked workspaces requires closing those child workspaces first.
 
+Paseo's rows (#6297) offer **Rename**, which sets the workspace's title in Paseo, and **Delete worktree** on a worktree Paseo made: the same
+preview and confirmation, also bound to the Agents in the workspace, then Paseo archives the workspace, removing the folder and keeping the
+branch (`docs/integrations/paseo.md` ("Spaces and workspaces")). Paseo has no Close: archiving while keeping the folder stays in its own app.
+
 ### A new agent in a worktree (#6115)
 
 A new agent can start in a Git worktree of its own, so agents on the same repository don't step on each other (after Claude Desktop, which gives each session a worktree under the repository and asks to keep or discard it on archive).
@@ -710,8 +714,10 @@ A new agent can start in a Git worktree of its own, so agents on the same reposi
   ran in (the session's `host`); without one, the computer's default engine. The web, iOS and Android send it where they know it.
 - **Paseo** (#6295): where the engine is Paseo, Paseo makes the worktree (same branch and folder name, as Paseo names folders, in Paseo's worktrees
   folder; a name whose folder exists, an empty one too, is taken) as a workspace of its own, which the agent's start then uses; `worktree/add` answers its
-  `workspace_id`. `worktree/status` gives Paseo's folder as `checkouts` and never calls Paseo's worktrees Persona's own (`ours: false`), so
-  `worktree/remove` leaves them to Paseo.
+  `workspace_id`. `worktree/status` gives Paseo's folder as `checkouts`, and calls a worktree Persona's (`ours`) only when it is the folder of a
+  worktree workspace Paseo made (#6297); `worktree/remove` then archives that workspace through Paseo, which removes the folder, with Delete
+  worktree's guards (below): refused while a session in the workspace still runs (the closed agent has stopped by then; the clients try again for
+  a few seconds) or an agent of another engine runs in the folder, and for uncommitted changes or an unmerged branch unless `force`; the branch goes after the folder only with `delete_branch`.
 - All three are full-device routes like section 23's, and extension tokens never reach them. The body is read field by field, plus the two switches (`flags`, booleans only).
 
 ## 24. Full herdr UI: a PTY client, switchable beside Single pane (#2357)
@@ -881,8 +887,7 @@ Like Moshi (full herdr client sends mouse to herdr first, which decides whether 
 
 ### Mac (#3336)
 
-Same routes/messages as web: `apple/Mac/Terminal/MacTerminalMouse.swift` (pure button/routing/modifier/cell-throttle/edge-clamping logic); `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release in
-`TerminalView+Mac.swift` first call `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
+Same routes/messages as web: the retired native Mac terminal used a pure button/routing/modifier/cell-throttle/edge-clamping helper; its `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release handlers first called `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
 
 - Forward only under control with hub `terminal_mouse`; old hub/View Only retains drag selection, context menu, single `terminal_input.click`.
 - Terminal Settings › Mouse (`terminalMouseMode`, Mac only): To Program default / Select Locally; Shift routes, not modifier; ⌘ always local (⌘-click links). Ctrl/Option modifiers 2/4.

@@ -126,11 +126,11 @@ class InboxEventsTest {
         assertEquals(persona.core.designsystem.icons.PhIcons.Info, chainIcon("from_the_future", chat))
     }
 
-    @Test fun theChainFoldsToItsNewestEntry() {
+    @Test fun theChainFoldsToItsThreeNewestEntries() {
         val chain = record("lark:oc_demo3:300").event.chain
-        assertEquals(listOf("c6"), shownChain(chain, expanded = false).map { it.id })
+        assertEquals(listOf("c4", "c5", "c6"), shownChain(chain, expanded = false).map { it.id })
         assertEquals(chain, shownChain(chain, expanded = true))
-        assertEquals(chain.take(1), shownChain(chain.take(1), expanded = false))
+        assertEquals(chain.take(2), shownChain(chain.take(2), expanded = false))
     }
 
     @Test fun chainTimesAreTheClockTodayAndTheDateBefore() {

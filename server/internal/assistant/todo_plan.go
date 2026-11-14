@@ -32,6 +32,7 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.Project = row.Project
 	t.Kind = row.Kind
 	t.SeenAt = row.SeenAt
+	t.InboxItem = row.InboxItem
 }
 
 // keepPlan writes t's plan, project and seen mark into row: a row made in memory for a change that is not to them keeps
@@ -45,6 +46,7 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.Project = t.Project
 	row.Kind = t.Kind
 	row.SeenAt = t.SeenAt
+	row.InboxItem = t.InboxItem
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).
@@ -169,8 +171,13 @@ func todoPriority(p string) (string, error) {
 // createPlainTodo makes a todo of the user's (no conversation, no plan of tasks) with plan's due date, reminder and
 // priority, and tells the apps.
 func (s *Service) createPlainTodo(ctx context.Context, title, notes string, plan db.TodoEdit) (Todo, error) {
+	return s.createTodoFrom(ctx, title, notes, "", plan)
+}
+
+// createTodoFrom is createPlainTodo for a to-do made from an Inbox row (#6480): inboxItem is that row's id, "" for none.
+func (s *Service) createTodoFrom(ctx context.Context, title, notes, inboxItem string, plan db.TodoEdit) (Todo, error) {
 	now := time.Now().UTC()
-	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now}
+	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now, InboxItem: inboxItem}
 	plan.Title, plan.Notes, plan.Done = nil, nil, nil
 	plan.Apply(&row, now)
 	return s.insertTodo(ctx, row)

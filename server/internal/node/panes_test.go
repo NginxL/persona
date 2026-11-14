@@ -299,8 +299,9 @@ func TestNewShellForARuntimeWorkspaceOpensWhereTheFolderIs(t *testing.T) {
 	if _, err := request(t, n, "panes.new", map[string]any{"workspace_id": "wks_1", "cwd": cwd}); err != nil {
 		t.Fatal(err)
 	}
+	realCwd, _ := filepath.EvalSymlinks(cwd) // the node asks herdr for the resolved folder
 	assertTrace(t, f.trace("workspace.create", "tab.create"), []string{
-		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": cwd, "label": "shell", "focus": false}),
+		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": realCwd, "label": "shell", "focus": false}),
 	})
 
 	f.reset()
@@ -312,7 +313,7 @@ func TestNewShellForARuntimeWorkspaceOpensWhereTheFolderIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertTrace(t, f.trace("workspace.create", "tab.create", "tab.rename"), []string{
-		call("workspace.create", map[string]any{"cwd": cwd, "label": "proj", "focus": false}),
+		call("workspace.create", map[string]any{"cwd": realCwd, "label": "proj", "focus": false}),
 		call("tab.rename", map[string]any{"tab_id": "w3:t1", "label": "shell"}),
 	})
 }

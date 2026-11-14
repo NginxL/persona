@@ -241,6 +241,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/file/convert
 -                    GET /api/v1/machines/{mid}/file/download
 -                    GET /api/v1/machines/{mid}/file/thumb
+-                    GET /api/v1/machines/{mid}/files/operations/{oid}
 -                    GET /api/v1/machines/{mid}/fs
 -                    GET /api/v1/machines/{mid}/fs/find
 -                    GET /api/v1/machines/{mid}/git/blob
@@ -431,9 +432,13 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/hub/update/check
 inbox.write          POST /api/v1/inbox/bulk
 inbox.write          POST /api/v1/inbox/done
+inbox.write          POST /api/v1/inbox/merge
+inbox.write          POST /api/v1/inbox/merge/undo
 inbox.write          POST /api/v1/inbox/mutes
 inbox.write          POST /api/v1/inbox/policies
 inbox.write          POST /api/v1/inbox/refresh
+inbox.write          POST /api/v1/inbox/todo
+inbox.write          POST /api/v1/inbox/todo/undo
 inbox.write          POST /api/v1/inbox/{id}/doc/status
 inbox.write          POST /api/v1/inbox/{id}/done
 inbox.write          POST /api/v1/inbox/{id}/draft

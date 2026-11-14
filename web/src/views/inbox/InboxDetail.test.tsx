@@ -32,11 +32,13 @@ describe("收件箱：扩展画的详情（inbox_item）", () => {
     // a chat's Pin works on the chat the own body draws: not there under the extension's page
     expect(renderToStaticMarkup(<InboxDetail item={item({ lark: { feed_id: "f1", is_group: false } })} loaded />)).not.toContain("Pin 消息");
   });
-  it("embeds a chat under its event even when the extension offers a page, with chat pins available", () => {
+  it("keeps a chat original collapsed and unmounted even when the extension offers a page", () => {
     const html = renderToStaticMarkup(<InboxDetail item={item({ lark: { feed_id: "f1", is_group: false }, chain: [{ id: "c1", kind: "received", text: "New message" }] })} loaded />);
-    expect(html).toContain('data-event-body="embedded"');
-    expect(html).toContain("data-chat-body");
-    expect(html).toContain("Pin 消息");
+    expect(html).not.toContain('data-event-body="embedded"');
+    expect(html).not.toContain("data-chat-body");
+    expect(html).not.toContain("Pin 消息");
+    expect(html).toContain('data-testid="inbox-original-toggle"');
+    expect(html).toContain('data-testid="inbox-original-row-toggle"');
     expect(html).not.toContain("data-extension-inbox");
   });
   it("keeps the own detail for a source without one", () => {

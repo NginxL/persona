@@ -10,12 +10,11 @@ sealed class Request {
         fun deserialize(deserializer: com.novi.serde.Deserializer): Request {
             val index = deserializer.deserialize_variant_index()
             return when (index) {
-                0 -> ScheduleFill.load(deserializer)
-                1 -> FetchAfter.load(deserializer)
-                2 -> FetchLatest.load(deserializer)
-                3 -> Subscribe.load(deserializer)
-                4 -> FetchOlder.load(deserializer)
-                5 -> FetchRange.load(deserializer)
+                0 -> FetchAfter.load(deserializer)
+                1 -> FetchLatest.load(deserializer)
+                2 -> Subscribe.load(deserializer)
+                3 -> FetchOlder.load(deserializer)
+                4 -> FetchRange.load(deserializer)
                 else -> throw com.novi.serde.DeserializationError("Unknown variant index for Request: " + index)
             }
         }
@@ -38,29 +37,6 @@ sealed class Request {
         return serializer.get_bytes()
     }
 
-    data class ScheduleFill(
-        val delay_ms: UInt
-    ) : Request() {
-
-        @Throws(com.novi.serde.SerializationError::class)
-        override fun serialize(serializer: com.novi.serde.Serializer) {
-            serializer.increase_container_depth()
-            serializer.serialize_variant_index(0)
-            serializer.serialize_u32(this.delay_ms)
-            serializer.decrease_container_depth()
-        }
-
-        companion object {
-            @Throws(com.novi.serde.DeserializationError::class)
-            fun load(deserializer: com.novi.serde.Deserializer): ScheduleFill {
-                deserializer.increase_container_depth()
-                val delay_ms = deserializer.deserialize_u32()
-                deserializer.decrease_container_depth()
-                return ScheduleFill(delay_ms)
-            }
-        }
-    }
-
     data class FetchAfter(
         val after_seq: Long
     ) : Request() {
@@ -68,7 +44,7 @@ sealed class Request {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(1)
+            serializer.serialize_variant_index(0)
             serializer.serialize_i64(this.after_seq)
             serializer.decrease_container_depth()
         }
@@ -91,7 +67,7 @@ sealed class Request {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(2)
+            serializer.serialize_variant_index(1)
             serializer.serialize_bool(this.fold_work)
             serializer.decrease_container_depth()
         }
@@ -115,7 +91,7 @@ sealed class Request {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(3)
+            serializer.serialize_variant_index(2)
             TraitHelpers.serialize_option_i64(this.since_seq, serializer)
             serializer.serialize_bool(this.fold_work)
             serializer.decrease_container_depth()
@@ -141,7 +117,7 @@ sealed class Request {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(4)
+            serializer.serialize_variant_index(3)
             serializer.serialize_i64(this.before_seq)
             serializer.serialize_bool(this.fold_work)
             serializer.decrease_container_depth()
@@ -167,7 +143,7 @@ sealed class Request {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(5)
+            serializer.serialize_variant_index(4)
             serializer.serialize_i64(this.from_seq)
             serializer.serialize_i64(this.through_seq)
             serializer.decrease_container_depth()

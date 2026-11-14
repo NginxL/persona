@@ -411,6 +411,7 @@ struct TodoCalendarTimeline: View {
                 .font(Theme.Font.label)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .padding(.trailing, Theme.Space.sm)
                 .frame(width: gutter, alignment: .trailing)
                 .padding(.top, Theme.Space.xs)
@@ -492,6 +493,7 @@ struct TodoCalendarTimeline: View {
             .font(Theme.Font.labelHeavy)
             .foregroundStyle(color)
             .lineLimit(1)
+            .minimumScaleFactor(0.6)
             .padding(.trailing, Theme.Space.xs)
             .frame(width: gutter, alignment: .trailing)
             .alignmentGuide(.top) { d in d[VerticalAlignment.center] }
@@ -514,6 +516,7 @@ struct TodoCalendarTimeline: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .padding(.trailing, Theme.Space.sm)
                         .frame(width: gutter, alignment: .trailing)
                         .alignmentGuide(.top) { d in d[VerticalAlignment.center] }

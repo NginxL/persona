@@ -940,8 +940,10 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var pendingInteractions: Int
     /// Changes whenever the transcript does: the app pulls sessions whose rev it has not synced (`AgentSync`).
     var rev: Int64?
-    /// The next message Claude Code proposes after a turn (grey in its input box on the computer), until it works again.
+    /// The next message Claude Code or the hub proposes after a turn, until it works again. A risky one is fill-in only.
     var suggestion: String?
+    /// Whether the suggestion needs review before sending. Missing, null or malformed values are safe (not risky).
+    var suggestionRisky: Bool = false
     /// Persona is still opening its tab and starting claude: messages sent now go in once it is ready.
     var starting: Bool? = nil
     /// A Codex opened with no first message: it runs in its terminal with no thread yet, so this row's id is the
@@ -1199,7 +1201,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
              assistantSpace = "space",
              spaceKind = "space_kind", spaceID = "space_id", spaceName = "space_name", spaceIndex = "space_index", parentSpaceID = "parent_space_id",
              slotID = "slot_id", slotName = "slot_name", slotIndex = "slot_index", paneIndex = "pane_index", seenAt = "seen_at", stateSince = "state_since", queued, background, loop, goal, subagents, workflows, ports,
-             updatedAt = "updated_at", lastText = "last_text", asks, awaitsReply = "awaits_reply", backgroundWaiting = "background_waiting", backgroundWorking = "background_working", activity, activityAt = "activity_at", pendingInteractions = "pending_interactions", rev, suggestion,
+             updatedAt = "updated_at", lastText = "last_text", asks, awaitsReply = "awaits_reply", backgroundWaiting = "background_waiting", backgroundWorking = "background_working", activity, activityAt = "activity_at", pendingInteractions = "pending_interactions", rev, suggestion, suggestionRisky = "suggestion_risky",
              starting, awaitingFirstMessage = "awaiting_first_message", startError = "start_error", startErrorCode = "start_error_code", startErrorArgs = "start_error_args", todo, quiet, hubGroup = "app_hub_group",
              attentionReason = "attention_reason", failureReason = "failure_reason",
              turnError = "turn_error", turnErrorKind = "turn_error_kind", turnErrorCode = "turn_error_code", turnErrorResetsAt = "turn_error_resets_at", turnErrorResumes = "turn_error_resumes", externalURL = "external_url", channels, origin, openedBy = "opened_by", compaction, work,
@@ -1298,6 +1300,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         pendingInteractions = try c.decodeIfPresent(Int.self, forKey: .pendingInteractions) ?? 0
         rev = try c.decodeIfPresent(Int64.self, forKey: .rev)
         suggestion = try c.decodeIfPresent(String.self, forKey: .suggestion)
+        suggestionRisky = (try? c.decodeIfPresent(Bool.self, forKey: .suggestionRisky)).flatMap { $0 } ?? false
         starting = try c.decodeIfPresent(Bool.self, forKey: .starting)
         awaitingFirstMessage = try c.decodeIfPresent(Bool.self, forKey: .awaitingFirstMessage)
         startError = try c.decodeIfPresent(String.self, forKey: .startError)
@@ -2144,10 +2147,10 @@ nonisolated struct Item: Codable, Identifiable, Hashable, Sendable {
     var modelRefusal: ModelRefusal? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, supervisionUser, source, outcome
+        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, source, outcome
         case modelRefusal = "model_refusal"
         case toolUseID = "tool_use_id", toolName = "tool_name", toolInput = "tool_input", isError = "is_error", fullSize = "full_size",
-             clientMsgID = "client_msg_id"
+             clientMsgID = "client_msg_id", supervisionUser = "supervision_user"
     }
 
     /// The text without the line the hub adds where it cut it (the app offers the whole text itself).

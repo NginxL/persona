@@ -77,7 +77,6 @@
   "show_child_workspaces_other": "Show {count} child workspaces",
   "hide_child_workspaces_one": "Hide {count} child workspace",
   "hide_child_workspaces_other": "Hide {count} child workspaces",
-  "paged_list": "Recently updated (all sessions)",
   "children_title": "Child spaces: {list}",
   "list_separator": ", ",
   "child_sr_needs_you": "child spaces need you",

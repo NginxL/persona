@@ -2,8 +2,9 @@
 
 Move the client logic that has no UI (sync and continuity, list state, counts, protocol decoding, and later storage)
 out of Swift, Kotlin and ArkTS into one Rust library, and keep each client's UI native: SwiftUI, Jetpack Compose and
-ArkUI. The maintainer made the open decisions on 2026-11-13 ("Decisions" at the end). Nothing here is built yet; the
-first code is a vertical slice whose measurements decide whether the migration goes on.
+ArkUI. The maintainer made the open decisions on 2026-11-13 and added the iOS-reference decision later that day
+("Decisions" at the end). The first code is a vertical slice whose measurements decide whether the migration goes on;
+its workspace and Android host replay have landed, and the three-platform binding work remains.
 
 **Who it serves**: everyone who uses the phone apps, indirectly. Nothing the user sees changes. They get the same
 counts and the same chat on every phone, fixes that reach every client at once, and less per-chunk work while a
@@ -50,8 +51,28 @@ fixtures first, then each implementation.
   possible later and needs its own issue.
 - **The Go hub** keeps its implementations (`attention`, `triage`, `fold-changes`, the continuity corpus) and keeps
   replaying the fixtures.
-- **The frozen Mac app** links the core only where shared Swift code requires it, to keep building (`docs/apple/mac.md`).
+- **The retired native Mac app** is removed with its target; it does not acquire a new core binding. The Electron desktop keeps its existing web implementation and is not a new Rust binding target (#6770).
 - **Persona Link and the watch.**
+
+### The iOS reference
+
+**Behavior, state machines and data flow follow iOS.** The shared core does not establish a new client behavior, and
+another client's existing implementation is not the reference. `continuity` was initially ported from Android, so its
+Rust implementation and the shared fixtures must be checked against the current iOS `ChatStore` before the iOS binding
+can be accepted. Where they differ, add a fixture from the observed iOS behavior and change the core to match; do not
+change iOS to accommodate the port. If the audit finds an actual iOS bug, file that separately rather than silently
+changing the contract here.
+
+**Android and HarmonyOS match iOS's interaction and visual result.** The existing native-style and theme choices are
+not deleted: within the corresponding iOS style, they follow its hierarchy, states and motion while staying native to
+each OS. Whole-screen alignment and paired screenshots use the existing #4194 work. Phase 1 adds bindings and replay
+only; it does not change any existing screen.
+
+**Performance targets come from measured iOS.** Record the current iOS first-frame, streaming, scrolling and memory
+numbers on the same named device, build and workload used for the binding comparison. The fixed dispatch/drain ceilings
+below remain additional limits, not substitutes for the iOS baseline. Android and HarmonyOS are compared with that
+baseline using equivalent workloads; simulator and host timings are labelled and never presented as physical-device
+results. Until an iOS measurement exists, the corresponding comparative cell stays "not measured", never "passed".
 
 ## Architecture
 
@@ -138,8 +159,8 @@ pub trait PlatformHost: Send + Sync {
 Why it is shaped this way:
 
 - **Fixtures replay with no fakes.** A fixture's events are actions, and its expected requests are effects. The
-  continuity fixtures' `delay_ms: 1500` becomes a `Schedule` effect followed by a `TimerFired` action carrying the
-  time, so no test waits on a clock.
+  continuity fixtures issue `FetchAfter` immediately and use an explicit `continue_fill` step for a duplicate
+  gap signal while a fetch is in flight, so no test waits on a clock.
 - **Effects map onto `PlatformHost`.** Each host effect kind is one capability. Adding a capability is an API change
   that is visible in review.
 - **Pull, not push, for view state.** `changed` only wakes the client. The UI pulls patches on its next frame through
@@ -167,7 +188,7 @@ What never crosses the boundary:
 
 | Capability | Phase | Notes |
 | --- | --- | --- |
-| Timers | 1 | Run by persona-core-runtime, not the host: `Schedule { id, delay_ms }` / `TimerFired { id, now_ms }` |
+| Timers | later, if a domain needs one | The continuity slice has no settling timer: iOS fills a gap immediately. Any later timer has an independently justified behavior and a fixture |
 | Transport (HTTP and WebSocket) | 2 | Stays native (decision 2). The host sends requests the core asks for, and passes response bodies and WebSocket frames to `dispatch` as raw bytes. JSON is decoded once, in Rust, off the main thread |
 | Storage | 4 | Run by persona-core-runtime, not the host (decision 4). The host passes the per-hub scope directories (D6) when it creates the core |
 | Secure storage | 3 | Host: Keychain, Keystore + Tink, HarmonyOS Asset Store (what the SSH core uses). The core sees opaque references, never key bytes, unless a domain needs them |
@@ -238,7 +259,9 @@ What never crosses the boundary:
   reference implementation is the core. `spec/README.md` currently says "behavior follows the current iOS
   implementation"; its domain table gains a column naming the reference, and moved domains name the core.
 - **Each client** replays the moved domain's fixtures through its real binding during the slice, to prove the
-  binding. After that, a smoke subset per client is enough, since the logic is one implementation.
+  binding. iOS also replays the full suite while its native `ChatStore` is still the behavioral reference, so a fixture
+  gap cannot be hidden by agreeing with the Rust port. After that, a smoke subset per client is enough, since the logic
+  is one implementation.
 - **The web app and Go** keep replaying the fixtures of their own implementations, so all implementations of a rule
   are still checked against one source.
 - **A new core lane in `scripts/ci/`** (core.sh) runs `cargo fmt --check`, `clippy -D warnings`, `cargo test --locked`, the
@@ -253,7 +276,7 @@ What never crosses the boundary:
 | --- | --- | --- |
 | 0 | This plan; the decisions below | Decisions recorded here |
 | 1 | Workspace, toolchain, runtime thread, codec generator, the three bindings, CI lane, and `continuity` (decision 3) end to end on all three clients | Every client replays the continuity fixtures through its binding; the go / no-go table is filled in |
-| 2 | The chat's item list driven by `continuity` patches, raw transport bytes decoded in Rust, then `sync` | Patches drive the real chat list on each client within the performance budgets |
+| 2 | The chat's item list driven by `continuity` patches, raw transport bytes decoded in Rust, then `sync`; iOS's native adapter and shadow run come first | Patches drive the real chat list on each client within the performance budgets, with the same iOS behavior and measured reference on each |
 | 3 | The domains with the most drift, one issue each: `needs-you` / `attention` / `entries` once #5974 settles the definition, `lines` and `answer` (turn folding, the answer across wakes), `sort` / `recents`, `wire` (tolerant decoding, D5), streaming assembly (#4044) | Each domain: shadow run, then old code deleted |
 | 4 | Storage in the core: the per-hub caches and the snapshot that launch draws from (D6), files first (decision 4) | Cold launch draws from the snapshot before any sync |
 
@@ -266,25 +289,71 @@ Phase 1 (#6871) lands in several PRs.
 
 - **First PR.**
   - `native/app-core` with `persona-core`'s `continuity`, the runtime, the C and JNI entry points and the Kotlin codecs.
-  - `cargo test` replays all 29 continuity cases (70 steps), directly and through the runtime.
+  - `cargo test` replays all 38 continuity cases (94 steps), directly and through the runtime.
+  - The iOS-alignment follow-up corrects the initial port's repeated-item, immediate-fill, opened-fold and promotion
+    behavior, including the previously missing adjacency cases. iOS's own XCTest replay remains required; passing
+    these shared fixtures is not a substitute for it.
   - Android's `:core:rustcore` replays them through the real JNI binding on a host build.
   - The new `core` CI lane runs these checks.
   - Size, for orientation only: the stripped x86_64 release library is 678 KB (322 KB gzipped). The go / no-go numbers
     come from the device ABIs.
+- **Apple binding and iOS-reference replay.**
+  - `apple/Packages/PersonaCore` holds the generated Swift codecs, the C adapter and the XCFramework builder. Only the
+    iOS app and `PersonaTests` link it; no binary is committed. The iOS production `ChatStore` is unchanged apart from
+    restoring the existing `supervision_user` Codable key, and no screen changes.
+  - The shared continuity corpus now has 38 cases (94 steps), including immediate fill, a complete repeated-item
+    `ListOp.Update`, the `from_seq == covered + 1` boundary, opened-fold retention and supervision promotion.
+    Real-C XCTest and a native-Store XCTest replay the same JSON and effects/patches; macOS `swift test` exercises the
+    same C binding under Swift 6 strict concurrency. Local verification used Xcode 27.2, so Xcode 26.0 is not verified.
+- **Android ABI packaging and real packaged-JNI replay.**
+  - `:core:rustcore-android` packages stripped arm64-v8a and x86_64 libraries with separate symbols, exact Cargo
+    notices, R8 keeps and uncompressed 16 KiB-aligned APK entries. The JVM/JNI and actual x86_64 emulator replays each
+    pass all 38 cases / 94 steps. arm64 hardware and a 16 KiB-kernel device remain unmeasured.
+  - Per-ABI stripped/package increments are 651,600 B (arm64-v8a) and 713,952 B (x86_64), with stripped gzip sizes
+    323,071 B and 343,371 B. These are not store download deltas. Emulator performance exceeded the p99 budgets:
+    dispatch 13,100.597 µs and drain+decode+apply 17,271.624 µs over 1,000 samples, so performance is not accepted.
+  - **Android boundary profiling, no production optimization yet.** The original optimized span and 100 warm-up +
+    1,000-sample protocol now retain raw nanosecond samples and explicit 50 µs / 1 ms assertions. On the same owned,
+    software-accelerated x86_64 API 35 / 4 KiB-kernel emulator, the final repeat run measured dispatch p99 883.312 µs
+    and drain+decode+apply p99 3,414.419 µs (p50 126.169 / 761.306 µs): both still fail. Earlier raw runs reached
+    16,400.210 / 8,534.626 µs, illustrating the environment's large variation rather than an improvement to accept.
+    Separate opt-in attribution and low-overhead controls are not substitute benchmark results. The final attribution
+    (nonce `9198f0c2c237463caedafa69c014f4c6`) uses a named tail of 11 samples: the p99 sample at sorted index 989
+    and the 10 samples slower than it. This is not the 10 samples above p99; the report never calls that set "top 1%".
+    It found no actual `try_lock` contention and no overlapping GC events in those 11 samples. Caller scheduler
+    switches occurred in 11 / 11 dispatch and 9 / 11 frame samples; worker TID was measured independently. Real patch
+    lock acquisition without `/proc` reads totaled 30,274 ns across those 11 frame samples, versus 53,047,659 ns
+    including those reads; work while holding that lock was separately 3,321,555 ns, Kotlin decode 75,033,476 ns and
+    apply 10,582,298 ns. Thus these measurements do not isolate a production lock or codec defect.
+    A low-overhead control with the original two-loop order still failed both budgets (dispatch 2,112.881 µs,
+    frame 3,989.433 µs); its lock/JNI-free CPU loop had a 1,012.698 µs maximum despite 0.662 µs p50 (an earlier control
+    reached 10,099.827 µs). This supports instrumentation and software-emulator scheduling as important contributors,
+    not a claim that the original failure is waived or that physical arm64 meets a budget. There is no evidence-backed
+    production codec/allocation/synchronization correction from these emulator runs; those implementations and
+    continuity behavior remain unchanged. Physical arm64 / 16 KiB measurements remain required.
+- **HarmonyOS binding, with device acceptance pending.**
+  - `persona-core-ohos` provides one ohos-rs NAPI library with a close-safe runtime registry and thread-safe callbacks.
+    The generated ArkTS codec has actual Node 24 round-trip tests; the adapter's fake-NAPI tests are not device proof.
+    Its host registry replays all 38 cases / 94 steps, and the runtime emits one Update rather than remove/reinsert
+    for a changed full item. The `coreReplay` ohosTest is ready to replay that same corpus through the real NAPI handle.
+  - The API 26 native SDK, HAP link, installed HAP and physical-device replay were not available in this environment;
+    no device or performance claim is made. Its exact 38-package / 71-notice runtime closure is checked on the host.
 - **Still to come.**
-  - iOS: the `PersonaCore` package and its XCTest replay.
-  - HarmonyOS: the NAPI module and the on-device replay.
-  - Android: device libraries.
-  - The go / no-go measurements.
-  - License notices, with the first build that ships the library in an app.
+  - iOS: physical-device performance, launch, memory and download-size evidence remains open; Xcode 26.0 is not verified.
+  - HarmonyOS: the API 26 `.so`, HAP build and on-device replay.
+  - Android: physical arm64, 16 KiB-kernel evidence and an iOS-referenced performance comparison.
+  - Continuity: both Apple bindings and Android's host/emulator replay pass the same corpus. HarmonyOS's native replay
+    must still run before calling the slice three-platform consistent.
+  - The go / no-go measurements, with the iOS baseline named for every comparative measurement.
 
 ### Migration rules (each domain)
 
-1. **Fixtures first.** The domain's fixtures cover the rules each client implements today. Gaps found while porting
-   become new cases, checked against the current implementations. Expectations are never generated from the code under
-   test.
+1. **Fixtures first.** The domain's fixtures cover the rules the current iOS implementation follows today. Compare
+   Android and HarmonyOS with that reference; gaps found while porting become new cases checked against iOS.
+   Expectations are never generated from the code under test, including the initial Android-derived continuity port.
 2. **Core next.** The core passes them in `cargo test`.
-3. **Adapter.** Each client puts its current implementation and the core behind one protocol or interface.
+3. **Adapter.** iOS puts its current implementation and the core behind one protocol first, with the native path kept
+   as the shadow-run reference. Android and HarmonyOS follow the same adapter contract.
 4. **Shadow run.** For one TestFlight and internal-testing cycle, DEBUG and test builds run both implementations and
    report mismatches to diagnostics. A report holds the domain, the rule and the shape of the input, never content.
    Release builds use the core only after the shadow run is clean.
@@ -343,4 +412,16 @@ negligible, the option that is better in the long term.**
      on a nightly toolchain, which tier-3 targets need.
    - **Revisit** both when their Rust targets reach tier 2.
 6. **Go / no-go limits: tightened** to the table above. Download size added ≤ 1 MB, a main-thread `dispatch` p99
-   ≤ 50 µs, a frame's `drain` p99 ≤ 1 ms, no later frames on screen than today, and memory checked.
+   ≤ 50 µs, a frame's `drain` p99 ≤ 1 ms, no later frames on screen than today, and memory checked. Comparative
+   targets come from measured iOS under the same workload; missing iOS evidence leaves the comparison open.
+7. **iOS is the unified clients' reference.** Added by the maintainer on 2026-11-13, and applies to every earlier
+   decision and phase here.
+   - **Behavior.** Shared behavior, state machines and data flow match iOS. Audit the initial Android-derived
+     `continuity` port, add fixtures for differences and fix the port before iOS binding acceptance; iOS is not changed
+     to match an existing port or fixture.
+   - **UI and interaction.** Android and HarmonyOS follow iOS's interaction and visual result in their native UI
+     toolkits and existing styles. Phase 1 changes no screen; cross-client UI differences are separate scoped PRs with
+     paired screenshots, not incidental binding changes.
+   - **Performance.** First frame, streaming, scrolling and memory targets use measured iOS numbers with the device,
+     build and workload recorded. Fixed FFI budgets still apply. Do not infer a device result from a host or simulator
+     measurement.

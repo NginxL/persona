@@ -5,9 +5,11 @@
 
 mod jni;
 
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use persona_core_runtime::wire::{self, Config};
@@ -48,9 +50,34 @@ impl Drop for CHost {
     }
 }
 
-/// An opaque handle to a running core.
+/// An opaque handle ID, never dereferenced. A call leases its runtime before releasing the registry lock.
 pub struct PersonaCore {
-    runtime: Runtime,
+    _private: (),
+}
+
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+static CORES: Mutex<Option<HashMap<u64, Arc<Runtime>>>> = Mutex::new(None);
+
+fn cores() -> std::sync::MutexGuard<'static, Option<HashMap<u64, Arc<Runtime>>>> {
+    CORES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn runtime(core: *const PersonaCore) -> Option<Arc<Runtime>> {
+    if core.is_null() {
+        return None;
+    }
+    cores().as_ref()?.get(&(core.expose_provenance() as u64)).cloned()
+}
+
+fn close(core: *mut PersonaCore) {
+    if core.is_null() {
+        return;
+    }
+    let removed = cores()
+        .as_mut()
+        .and_then(|cores| cores.remove(&(core.expose_provenance() as u64)));
+    // The last lease joins the worker and releases its host. Neither can run under the registry lock.
+    drop(removed);
 }
 
 #[repr(C)]
@@ -88,11 +115,17 @@ unsafe fn slice<'a>(pointer: *const u8, length: usize) -> &'a [u8] {
     }
 }
 
-pub(crate) fn start(config: &[u8], host: Arc<dyn Host>) -> Option<Box<PersonaCore>> {
-    let config: Config = wire::decode(config).ok()?;
-    Some(Box::new(PersonaCore {
-        runtime: Runtime::new(config, host),
-    }))
+pub(crate) fn create(config: &[u8], host: Arc<dyn Host>) -> Option<*mut PersonaCore> {
+    let _: Config = wire::decode(config).ok()?;
+    let runtime = Arc::new(Runtime::new(host));
+    let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+    if handle == u64::MAX {
+        // Reserve zero for null and never wrap an ID while a client may still hold it.
+        NEXT_HANDLE.store(u64::MAX, Ordering::Relaxed);
+        return None;
+    }
+    cores().get_or_insert_with(HashMap::new).insert(handle, runtime);
+    Some(handle as *mut PersonaCore)
 }
 
 /// # Safety
@@ -101,38 +134,42 @@ pub(crate) fn start(config: &[u8], host: Arc<dyn Host>) -> Option<Box<PersonaCor
 pub unsafe extern "C" fn persona_core_new(host: PersonaCoreHost, config: *const u8, length: usize) -> *mut PersonaCore {
     let host = CHost(host);
     let config = unsafe { slice(config, length) };
-    catch_unwind(AssertUnwindSafe(|| start(config, Arc::new(host))))
+    catch_unwind(AssertUnwindSafe(|| create(config, Arc::new(host))))
         .ok()
         .flatten()
-        .map_or(std::ptr::null_mut(), Box::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// # Safety
-/// `core` came from `persona_core_new` and was not freed; `action` is valid for `length` bytes.
+/// `core` is a live ID returned by `persona_core_new`, or null. Calls racing `persona_core_free` either lease the
+/// runtime before closure or fail; an ID is never dereferenced and is not reused while this process runs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn persona_core_dispatch(core: *mut PersonaCore, action: *const u8, length: usize) -> bool {
-    let Some(core) = (unsafe { core.as_ref() }) else {
-        return false;
-    };
     let action = unsafe { slice(action, length) };
-    catch_unwind(AssertUnwindSafe(|| core.runtime.dispatch(action))).unwrap_or(false)
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(runtime) = runtime(core) else { return false };
+        runtime.dispatch(action)
+    }))
+    .unwrap_or(false)
 }
 
 /// # Safety
-/// `core` came from `persona_core_new` and was not freed; `chat` is valid UTF-8 for `length` bytes.
+/// `core` is a live ID returned by `persona_core_new`, or null. Calls racing `persona_core_free` either lease the
+/// runtime before closure or fail; an ID is never dereferenced and is not reused while this process runs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn persona_core_drain(
     core: *mut PersonaCore,
     chat: *const u8,
     length: usize,
 ) -> PersonaCoreBytes {
-    let Some(core) = (unsafe { core.as_ref() }) else {
+    let Some(runtime) = runtime(core) else {
+        // Android treats a closed handle as no patch. Preserve an empty encoded patch for a live, unchanged chat.
         return PersonaCoreBytes::empty();
     };
     let Ok(chat) = std::str::from_utf8(unsafe { slice(chat, length) }) else {
         return PersonaCoreBytes::empty();
     };
-    catch_unwind(AssertUnwindSafe(|| core.runtime.drain(chat)))
+    catch_unwind(AssertUnwindSafe(|| runtime.drain(chat)))
         .map_or_else(|_| PersonaCoreBytes::empty(), PersonaCoreBytes::from_vec)
 }
 
@@ -146,14 +183,13 @@ pub unsafe extern "C" fn persona_core_bytes_free(bytes: PersonaCoreBytes) {
 }
 
 /// # Safety
-/// `core` came from `persona_core_new` and was not freed.
+/// `core` is a live ID returned by `persona_core_new`, or null. Calls racing `persona_core_free` either lease the
+/// runtime before closure or fail; an ID is never dereferenced and is not reused while this process runs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn persona_core_flush(core: *mut PersonaCore, timeout_ms: u32) -> bool {
-    let Some(core) = (unsafe { core.as_ref() }) else {
-        return false;
-    };
     catch_unwind(AssertUnwindSafe(|| {
-        core.runtime.flush(Duration::from_millis(timeout_ms.into()))
+        let Some(runtime) = runtime(core) else { return false };
+        runtime.flush(Duration::from_millis(timeout_ms.into()))
     }))
     .unwrap_or(false)
 }
@@ -163,7 +199,6 @@ pub unsafe extern "C" fn persona_core_flush(core: *mut PersonaCore, timeout_ms: 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn persona_core_free(core: *mut PersonaCore) {
     if !core.is_null() {
-        let core = unsafe { Box::from_raw(core) };
-        let _ = catch_unwind(AssertUnwindSafe(move || drop(core)));
+        let _ = catch_unwind(AssertUnwindSafe(|| close(core)));
     }
 }

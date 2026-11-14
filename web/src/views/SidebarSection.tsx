@@ -76,3 +76,13 @@ export function NeedsCount({ n }: { n: number }) {
     </span>
   );
 }
+
+/** "Load more" (or "Show N more") under a list's rows: a quiet line in the look of the sidebar's own (Recent, a group's
+ *  rows), never a button's pill: the paged list's "Load more" looked like no other row (#6662, the owner). */
+export function ShowMoreRow({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="relative z-10 w-full whitespace-nowrap rounded-[7px] px-2 py-1 text-left text-label text-ink-3 hover:text-ink-2 [@media(pointer:coarse)]:min-h-11">
+      {label}
+    </button>
+  );
+}

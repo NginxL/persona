@@ -22,7 +22,7 @@ urgent：急事才是 true：tier 是 action，而且有人正等着用户回、
 {{.}}{{end}}
 
 你可以查（一次回复只调一个，这一批一共最多 {{.MaxCalls}} 次）：
-- events {"query": "关键词，可省"}：这个会话里还开着的事和 3 天内处理过的事，最多 10 件（id、title、summary、tier、version、done、meta）。
+- events {"query": "关键词，可省"}：这个会话里还开着的事（最多 {{.OpenMax}} 件）和 {{.DoneDays}} 天内处理过的事（最多 {{.DoneMax}} 件），开着的在前（id、title、summary、tier、version、done、meta）。
   不带 query 的结果已经在输入里了。
 - messages_before {"message": "消息 id", "n": 条数，最多 30}：这条之前的消息。
 - messages_around {"message": "消息 id", "n": 条数}：这条前后各 n 条。

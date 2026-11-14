@@ -967,6 +967,14 @@ final class AppModel {
     /// Whether this Mac's node advertises the live-screen hardware video channel (#3954), from whichever extension shows
     /// its screen. The Picture / Quality switcher appears only then, so no Mac shows a control it cannot use.
     func screenVideoAdvertised(_ ref: MachineRef) -> Bool { machine(ref).map(Self.advertisesVideo) ?? false }
+    /// The video channel as the extension showing this Mac's screen reports it (#3954): its version, codecs and whether
+    /// Screen Recording is granted for it; nil when no shown extension advertises it.
+    func screenVideo(_ ref: MachineRef) -> MachineScreenVideo? {
+        guard let m = machine(ref) else { return nil }
+        if let c = m.computer, c.enabled, c.screenSharing, let v = c.screenVideo, v.advertised { return v }
+        if let b = m.browser, b.enabled, b.screenSharing, let v = b.screenVideo, v.advertised { return v }
+        return nil
+    }
     nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
         (m.computer.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
             || (m.browser.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
@@ -1256,6 +1264,10 @@ final class AppModel {
             show(error)
         }
     }
+
+    /// Assistant Profile › Agent Follow-Up saved one of its settings (#7005): the hub's answer is the assistant's settings
+    /// from now on, so the rest of the app (the background supervisor's rows, the profile's rows) reads what was saved.
+    func assistantSettingsSaved(_ st: APIClient.AssistantState) { assistantConfig = st }
 
     /// Whether the main conversation folds its background rounds (docs/apple/ios.md "Background rounds"): on until the
     /// hub says off, an older hub and settings not read yet included.

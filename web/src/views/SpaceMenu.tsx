@@ -14,7 +14,7 @@ import { NodeMenu } from "./NodeMenu";
 import { t } from "../i18n";
 import { markAllSeenLabel } from "../lib/state-labels";
 import { refreshWorkspaceCatalog, useWorkspaceCatalog } from "../lib/workspace-catalog";
-import { spaceWorktreeSources, worktreeActionKey } from "../lib/worktree-actions-context";
+import { renamesRuntimeSpace, spaceWorktreeSources, worktreeActionKey } from "../lib/worktree-actions-context";
 import type { WorkspaceTarget } from "../lib/workspace-target";
 
 export function SpaceMenu({
@@ -69,7 +69,7 @@ export function SpaceMenu({
   const items: MenuItem[] = [
     ...(openPage && first?.space_id ? [{ key: "open", label: t("agentmenus.open_space"), icon: "layers" as const, onSelect: () => navigate(page) }] : []),
     ...(unread.length ? [{ key: "seen", label: markAllSeenLabel(unread.length), icon: "check" as const, onSelect: () => onMarkSeen(unread) }] : []),
-    ...(first?.space_id && !first.source_kind ? [{ key: "rename", label: t("agentmenus.rename_space"), icon: "pencil" as const, onSelect: () => onRename(first) }] : []),
+    ...(first?.space_id && (!first.source_kind || renamesRuntimeSpace(first, catalog)) ? [{ key: "rename", label: t("agentmenus.rename_space"), icon: "pencil" as const, onSelect: () => onRename(first) }] : []),
     ...(supportSpaces
       ? linkedTodo
         ? [

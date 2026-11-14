@@ -19,6 +19,11 @@ enum HealthTool {
         "steps": .stepCount,
         "distance": .distanceWalkingRunning,
         "active_energy": .activeEnergyBurned,
+        "resting_energy": .basalEnergyBurned,
+        "dietary_energy": .dietaryEnergyConsumed,
+        "protein": .dietaryProtein,
+        "carbs": .dietaryCarbohydrates,
+        "fat": .dietaryFatTotal,
         "heart_rate": .heartRate,
         "resting_heart_rate": .restingHeartRate,
         "weight": .bodyMass,
@@ -36,7 +41,8 @@ enum HealthTool {
                     name: "phone_health_summary",
                     description: """
                     Summarize the user's health data per day. Metrics: steps, distance (meters), \
-                    active_energy (kcal), heart_rate (bpm, average/min/max over the day), \
+                    active_energy, resting_energy, dietary_energy (kcal, daily totals), \
+                    protein, carbs, fat (grams, daily totals), heart_rate (bpm, average/min/max over the day), \
                     resting_heart_rate (bpm), sleep (hours asleep), weight (kg). Defaults to steps \
                     over the last 7 days. Only the requested metrics are read. Days run from local \
                     midnight to midnight; today's numbers are partial. Returns one row per day with \
@@ -129,11 +135,7 @@ enum HealthTool {
             }
         }
         if requested.isEmpty { requested = ["steps"] }
-        if requested.contains("weight") {
-            // Body mass needs read access too; asking again is harmless and
-            // covers people who authorized the app before weight was supported.
-            _ = try? await HKHealthStore().requestAuthorization(toShare: Set<HKSampleType>(), read: readTypes)
-        }
+        await requestAdditionalReadAccess(for: requested)
 
         let calendar = Calendar.current
         let end = Date()
@@ -181,10 +183,7 @@ enum HealthTool {
         guard metricNames.contains(metric), metric != "heart_rate" else {
             throw ToolFailure(.invalidArgument, "no daily trend for \"\(metric)\"")
         }
-        if metric == "weight" {
-            // As in the summary: covers people who authorized the app before weight was read.
-            _ = try? await HKHealthStore().requestAuthorization(toShare: Set<HKSampleType>(), read: readTypes)
-        }
+        await requestAdditionalReadAccess(for: [metric])
         let calendar = Calendar.current
         let end = Date()
         let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: end) ?? end)
@@ -196,6 +195,25 @@ enum HealthTool {
     }
 
     // MARK: - Queries
+
+    private static func requestAdditionalReadAccess(for metrics: [String]) async {
+        // Covers people who allowed Health before weight, nutrition or resting energy were supported.
+        // Existing steps/sleep trends and widgets must not prompt just because new types were added.
+        let addedMetrics: Set<String> = ["weight", "resting_energy", "dietary_energy", "protein", "carbs", "fat"]
+        guard metrics.contains(where: addedMetrics.contains) else { return }
+        _ = try? await HKHealthStore().requestAuthorization(toShare: Set<HKSampleType>(), read: readTypes)
+    }
+
+    static func quantityUnit(for metric: String) -> HKUnit {
+        switch metric {
+        case "steps": .count()
+        case "distance": .meter()
+        case "active_energy", "resting_energy", "dietary_energy": .kilocalorie()
+        case "protein", "carbs", "fat": .gram()
+        case "weight": .gramUnit(with: .kilo)
+        default: HKUnit.count().unitDivided(by: .minute())
+        }
+    }
 
     private static func quantityByDay(
         _ store: HKHealthStore,
@@ -209,13 +227,7 @@ enum HealthTool {
             throw ToolFailure(.invalidArgument, "this iPhone does not support the metric \"\(metric)\"")
         }
         let options = statisticsOptions(for: type, metric: metric)
-        let units: HKUnit = switch metric {
-        case "steps": .count()
-        case "distance": .meter()
-        case "active_energy": .kilocalorie()
-        case "weight": .gramUnit(with: .kilo)
-        default: HKUnit.count().unitDivided(by: .minute())
-        }
+        let units = quantityUnit(for: metric)
 
         let query = HKStatisticsCollectionQuery(
             quantityType: type,
@@ -260,7 +272,7 @@ enum HealthTool {
         return out
     }
 
-    /// What a day's statistics hold: the sum of a cumulative type (steps, distance, energy), the average of a discrete one
+    /// What a day's statistics hold: the sum of a cumulative type (steps, distance, energy, nutrients), the average of a discrete one
     /// (weight, resting heart rate), heart rate's range too. An option the type cannot answer (summing weight) raises an
     /// exception inside HealthKit when the query runs, which takes the app down.
     static func statisticsOptions(for type: HKQuantityType, metric: String) -> HKStatisticsOptions {

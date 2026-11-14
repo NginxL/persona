@@ -68,6 +68,18 @@ nonisolated struct GitStatus: Codable, Hashable, Sendable {
         case root, branch, head, upstream, ahead, behind, files, stashes, commits, gone
         case isRepo = "is_repo"
     }
+
+    /// The upstream branch, nil when there is none (a node leaves it out; the mock hub sends it empty).
+    var upstreamName: String? { upstream?.isEmpty == false ? upstream : nil }
+}
+
+/// What a write of the Git tab answers (#7013, docs/protocol/protocol.md `git/stage` · `git/commit` · `git/push`):
+/// the repository as it is after it, and the commit a commit made.
+nonisolated struct GitWriteResult: Decodable, Sendable {
+    var status: GitStatus
+    var commit: GitCommit?
+    /// What git said (a push's summary).
+    var output: String?
 }
 
 nonisolated struct GitPullResult: Codable, Hashable, Sendable {
@@ -158,6 +170,27 @@ extension APIClient {
     func gitPull(machine: String, cwd: String) async throws -> GitPullResult {
         try await post(mp(machine) + "/git/pull", body: GitPullRequest(cwd: cwd), timeout: 100)
     }
+    // The Git tab's writes (#7013, hub feature `git_write`): each a tap the app confirmed when it leaves the computer;
+    // the node never forces. A refusal is a 409 with `code` (and `files`), as the web's Git panel reads it.
+    private struct GitStageRequest: Encodable { var cwd: String; var paths: [String]; var unstage: Bool }
+    /// `git add` (or `git restore --staged` with unstage) of paths.
+    func gitStage(machine: String, cwd: String, paths: [String], unstage: Bool) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/stage", body: GitStageRequest(cwd: cwd, paths: paths, unstage: unstage), timeout: 100)
+    }
+    private struct GitCommitRequest: Encodable { var cwd, message: String }
+    /// Commits what is staged; hooks run, and the hub waits up to five minutes for them.
+    func gitCommit(machine: String, cwd: String, message: String) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/commit", body: GitCommitRequest(cwd: cwd, message: message), timeout: 330)
+    }
+    private struct GitPushRequest: Encodable {
+        var cwd: String
+        var setUpstream: Bool
+        enum CodingKeys: String, CodingKey { case cwd, setUpstream = "set_upstream" }
+    }
+    /// Pushes the branch to its upstream, never forced; setUpstream makes one on origin for a branch without one.
+    func gitPush(machine: String, cwd: String, setUpstream: Bool) async throws -> GitWriteResult {
+        try await post(mp(machine) + "/git/push", body: GitPushRequest(cwd: cwd, setUpstream: setUpstream), timeout: 100)
+    }
     func gitDiff(machine: String, cwd: String, path: String, staged: Bool) async throws -> GitDiff {
         try await get(mp(machine) + "/git/diff", query: ["cwd": cwd, "path": path, "staged": staged ? "1" : "0"])
     }
@@ -189,7 +222,13 @@ extension APIClient {
     func renameFile(machine: String, path: String, cwd: String, name: String) async throws -> String {
         try await post(mp(machine) + "/files/rename", body: RenameRequest(path: path, cwd: cwd, name: name), as: RenameResponse.self).path
     }
-    private struct MoveRequest: Encodable { var paths: [String]; var cwd, dir: String; var conflict: String? }
+    private struct MoveRequest: Encodable {
+        var paths: [String]
+        var cwd, dir: String
+        var conflict: String?
+        var operationID: String? = nil
+        enum CodingKeys: String, CodingKey { case paths, cwd, dir, conflict, operationID = "operation_id" }
+    }
     struct MovedFile: Decodable, Sendable { var from, to: String }
     private struct MoveResponse: Decodable { var moved: [MovedFile]? }
     /// Moves paths into folder dir; conflict "replace" / "keep" answers a 409 `exists`.
@@ -241,6 +280,8 @@ extension APIClient {
         var cwd: String
         var dir: String?
         var name: String
+        var operationID: String? = nil
+        enum CodingKeys: String, CodingKey { case paths, cwd, dir, name, operationID = "operation_id" }
     }
     struct ZippedFile: Decodable, Sendable {
         var path: String
@@ -249,15 +290,37 @@ extension APIClient {
         var files: Int
     }
     /// Zips paths into dir as name, or with no dir into a temporary file on the computer for a download.
-    func zipFiles(machine: String, paths: [String], cwd: String, dir: String?, name: String) async throws -> ZippedFile {
-        try await post(mp(machine) + "/files/zip", body: ZipRequest(paths: paths, cwd: cwd, dir: dir, name: name), timeout: 610, as: ZippedFile.self)
+    func zipFiles(machine: String, paths: [String], cwd: String, dir: String?, name: String, operationID: String? = nil) async throws -> ZippedFile {
+        try await post(mp(machine) + "/files/zip", body: ZipRequest(paths: paths, cwd: cwd, dir: dir, name: name, operationID: operationID), timeout: 610, as: ZippedFile.self)
     }
     /// Copies paths into folder dir (#5830); conflict "replace" / "keep" answers a 409 `exists` ("keep" into their own
     /// folder: Duplicate).
-    func copyFiles(machine: String, paths: [String], cwd: String, dir: String, conflict: String? = nil) async throws -> [MovedFile] {
+    func copyFiles(machine: String, paths: [String], cwd: String, dir: String, conflict: String? = nil, operationID: String? = nil) async throws -> [MovedFile] {
         struct CopyResponse: Decodable { var copied: [MovedFile]? }
-        return try await post(mp(machine) + "/files/copy", body: MoveRequest(paths: paths, cwd: cwd, dir: dir, conflict: conflict),
+        return try await post(mp(machine) + "/files/copy", body: MoveRequest(paths: paths, cwd: cwd, dir: dir, conflict: conflict, operationID: operationID),
                               timeout: 610, as: CopyResponse.self).copied ?? []
+    }
+
+    nonisolated struct RemoteFileOperation: Decodable, Sendable {
+        var id: String
+        var kind: String
+        var state: String
+        var filesDone: Int
+        var filesTotal: Int
+        var bytesDone: Int64
+        var bytesTotal: Int64
+        enum CodingKeys: String, CodingKey {
+            case id, kind, state
+            case filesDone = "files_done"
+            case filesTotal = "files_total"
+            case bytesDone = "bytes_done"
+            case bytesTotal = "bytes_total"
+        }
+    }
+
+    /// A copy / zip still running on the computer. Its terminal state never replaces the original POST's answer.
+    func fileOperation(machine: String, id: String) async throws -> RemoteFileOperation {
+        try await getDecodedOffMain(mp(machine) + "/files/operations/\(id)", as: RemoteFileOperation.self)
     }
     private struct RestoreRequest: Encodable {
         var trashIDs: [String]

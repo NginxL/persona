@@ -12,7 +12,7 @@ on:
       lane:
         description: Apple platform lane
         type: choice
-        options: [ios, macos]
+        options: [ios]
         default: ios
         required: true
 permissions:
@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   apple:
-    name: ${{ inputs.lane == 'macos' && 'macOS builds and unit tests (Xcode 26.0)' || 'iOS, Watch and HTML tests (Xcode 26.0)' }}
+    name: iOS, Watch and HTML tests (Xcode 26.0)
     runs-on: macos-26
     timeout-minutes: 75
     env:

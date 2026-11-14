@@ -440,6 +440,7 @@ export const LARK_FEATURE = "lark";
 export const SESSION_LIVE_FEATURE = "session_live";
 /** The hub answers a client's {"type":"ping","id"} with a pong carrying the id (docs/protocol/protocol.md). */
 export const APP_PING_FEATURE = "app_ping";
+export const DESKTOP_UNREGISTER_FEATURE = "desktop_unregister";
 
 export function larkOn(s: Pick<State, "features"> = state): boolean {
   return hubHas(s.features, LARK_FEATURE, true);

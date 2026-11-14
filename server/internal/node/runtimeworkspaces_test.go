@@ -145,6 +145,10 @@ func TestRuntimeWorkspacesAreTheCatalog(t *testing.T) {
 	if tree.Title != "feat" || tree.IsMain == nil || *tree.IsMain || tree.WorkspaceKind != "git" || tree.Cwd != "/w/trees/feat" {
 		t.Fatalf("the worktree, named by its branch: %+v", tree)
 	}
+	// Only a worktree the runtime made says so (owned, #6297): the one Delete worktree is offered for.
+	if !tree.Owned || main.Owned || notes.Owned {
+		t.Fatalf("owned: worktree %v, main checkout %v, folder %v", tree.Owned, main.Owned, notes.Owned)
+	}
 	if notes.IsMain != nil || notes.WorkspaceKind != "folder" || notes.ProjectID != "prj_2" {
 		t.Fatalf("a folder: %+v", notes)
 	}
@@ -338,7 +342,8 @@ func TestRuntimeWorktreePrepareAndCreate(t *testing.T) {
 }
 
 // A new agent's own worktree (#6115) on a runtime engine is the runtime's, named as on a terminal host; worktree.status
-// says where the runtime's go, and does not offer it for removal as a bare checkout (the runtime's workspace is in it).
+// says where the runtime's go, and calls it Persona's to remove, which worktree.remove does through the runtime
+// (TestRuntimeAgentWorktreeRemove).
 func TestRuntimeAgentWorktree(t *testing.T) {
 	r := runtimeRepoNode(t)
 	res, err := request(t, r.n, "worktree.add", map[string]any{"cwd": r.repo, "name_hint": "Fix the login"})
@@ -356,8 +361,12 @@ func TestRuntimeAgentWorktree(t *testing.T) {
 		t.Fatalf("again: %v %v", res, err)
 	}
 	st, err := request(t, r.n, "worktree.status", map[string]any{"cwd": want})
-	if err != nil || st["worktree"] != true || st["ours"] == true || st["checkouts"] != r.trees || st["branch"] != "persona/fix-the-login" {
+	if err != nil || st["worktree"] != true || st["ours"] != true || st["checkouts"] != r.trees || st["branch"] != "persona/fix-the-login" {
 		t.Fatalf("status: %v %v", st, err)
+	}
+	// The repository's main checkout is no worktree of Paseo's to remove.
+	if st, err := request(t, r.n, "worktree.status", map[string]any{"cwd": r.repo}); err != nil || st["ours"] == true {
+		t.Fatalf("status of the main checkout: %v %v", st, err)
 	}
 
 	// A folder already there, even an empty one, takes its name: Paseo would put the worktree beside it.

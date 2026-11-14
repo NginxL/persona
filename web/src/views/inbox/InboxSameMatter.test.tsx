@@ -32,6 +32,36 @@ describe("收件箱：是同一件事…", () => {
     expect(sameMatterCandidates(items, current, [child], "小甲")).toEqual([]);
   });
 
+  it("excludes every descendant, not only the direct child in the tree", () => {
+    const a = item("a", "A", { manager: "m-1" });
+    const b = item("b", "B", { manager: "m-1", parent: { kind: "inbox", id: "a" } });
+    const c = item("c", "C", { manager: "m-1", parent: { kind: "inbox", id: "b" } });
+    const d = item("d", "D", { manager: "m-1", parent: { kind: "inbox", id: "c" } });
+    const chain = [a, b, c, d];
+
+    expect(sameMatterCandidates(chain, a, [b])).toEqual([]);
+    expect(sameMatterCandidates(chain, b, [c]).map((candidate) => candidate.id)).toEqual(["a"]);
+  });
+
+  it("stops walking cyclic parent data", () => {
+    const a = item("cycle-a", "Cycle A", { manager: "m-1", parent: { kind: "inbox", id: "cycle-b" } });
+    const b = item("cycle-b", "Cycle B", { manager: "m-1", parent: { kind: "inbox", id: "cycle-a" } });
+
+    expect(sameMatterCandidates([current, a, b], current, []).map((candidate) => candidate.id).sort()).toEqual(["cycle-a", "cycle-b"]);
+  });
+
+  it("keeps parent lookup within this manager when another manager reuses an id", () => {
+    const shared = item("shared", "Shared", { manager: "m-1" });
+    const candidate = item("candidate", "Candidate", { manager: "m-1", parent: { kind: "inbox", id: "shared" } });
+    const otherManagerShared = item("shared", "Other manager shared", {
+      manager: "m-2",
+      parent: { kind: "inbox", id: current.id },
+    });
+
+    expect(sameMatterCandidates([current, shared, candidate, otherManagerShared], current, []).map((choice) => choice.id).sort())
+      .toEqual(["candidate", "shared"]);
+  });
+
   it("draws the title with rowMeta underneath and keeps each choice a one-line-title button", () => {
     const html = renderToStaticMarkup(<SameMatterList items={[older]} busy={false} onPick={() => {}} />);
     const meta = rowMeta(older);
