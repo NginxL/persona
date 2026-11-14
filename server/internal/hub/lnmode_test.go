@@ -123,9 +123,9 @@ func TestLnModeOffPushesEverything(t *testing.T) {
 	}
 }
 
-// P0 must interrupt even in ln mode, and its related key then stays quiet for 12 hours: three cards about the same PR
-// produce exactly one push, and the other two are recorded as dedup intercepts.
-func TestLnModeP0AlwaysPushesAndSameKeyOnce(t *testing.T) {
+// P0 always interrupts: the 12-hour check runs after the level, so no earlier push with the same key swallows what the
+// owner must do or decide themself. Its key then keeps a lower-level push about the same thing quiet.
+func TestQuietP0IsNeverSwallowedByTheSameKey(t *testing.T) {
 	h, f := lnHub(t)
 	if err := h.push.setLnMode(context.Background(), true); err != nil {
 		t.Fatal(err)
@@ -133,24 +133,25 @@ func TestLnModeP0AlwaysPushesAndSameKeyOnce(t *testing.T) {
 	attempts := lnAttempts(h)
 	const pr = "https://example.test/pulls/12"
 	for i := range 3 {
-		if err := h.deliverPush(lnNotification(assistantwire.LevelP0, pr, "conclusion card "+string(rune('1'+i)))); err != nil {
+		if err := h.deliverPush(lnNotification(assistantwire.LevelP0, pr, "decision "+string(rune('1'+i)))); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if *attempts != 1 {
-		t.Fatalf("got %d pushes for one PR's three cards, want 1", *attempts)
+	if *attempts != 3 {
+		t.Fatalf("got %d pushes for three P0 pushes with one key, want 3", *attempts)
 	}
-	if calls := len(f.calls(t, 1)); calls != 1 {
-		t.Fatalf("APNs got %d calls, want 1", calls)
+	if calls := len(f.calls(t, 3)); calls != 3 {
+		t.Fatalf("APNs got %d calls, want 3", calls)
+	}
+	if view := h.push.lnInterceptsView("", 0); len(view) != 0 {
+		t.Fatalf("P0 pushes were held: %+v", view)
+	}
+	if err := h.deliverPush(lnNotification(assistantwire.LevelP2, pr, "background about the PR")); err != nil {
+		t.Fatal(err)
 	}
 	view := h.push.lnInterceptsView("", 0)
-	if len(view) != 2 {
-		t.Fatalf("got %d intercepts, want 2 dedup entries", len(view))
-	}
-	for _, e := range view {
-		if e.Reason != interceptReasonDedup || e.RelatedKey != pr {
-			t.Fatalf("intercept = %+v, want a dedup entry for the PR key", e)
-		}
+	if *attempts != 3 || len(view) != 1 || view[0].Reason != interceptReasonDedup || view[0].RelatedKey != pr {
+		t.Fatalf("after the P0: %d pushes, intercepts %+v; want the P2 held as a repeat", *attempts, view)
 	}
 }
 
@@ -395,7 +396,7 @@ func TestLnSamePRP1IsOneEntry(t *testing.T) {
 	}
 }
 
-// Review fix: a decision rings once per round. The same round again is held; a new round (asked again) rings.
+// A decision is P0: it rings every time it is pushed, the same round's reminder too, and a new round (asked again).
 func TestLnDecisionRoundsRingAgain(t *testing.T) {
 	h, f := lnHub(t)
 	if err := h.push.setLnMode(context.Background(), true); err != nil {
@@ -407,32 +408,38 @@ func TestLnDecisionRoundsRingAgain(t *testing.T) {
 	h.notifyDecide("", "", "", "", "decide", "body", todo)
 	todo.AskedAt = todo.AskedAt.Add(time.Hour)
 	h.notifyDecide("", "", "", "", "decide again", "body", todo)
-	if *attempts != 2 {
-		t.Fatalf("got %d decision pushes, want 2 (one per round)", *attempts)
+	if *attempts != 3 {
+		t.Fatalf("got %d decision pushes, want 3 (P0 is never held as a repeat)", *attempts)
 	}
 	f.calls(t, 2) // both decisions' APNs goroutines must finish before the fake server closes
 }
 
-// Review fix: two P0 pushes with one key at the same moment never both pass.
+// Concurrent pushes with one key: every P0 passes, and every lower-level one racing them is held, never alerted.
 func TestLnDedupIsAtomic(t *testing.T) {
 	h, _ := lnHub(t)
 	if err := h.push.setLnMode(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	var allowed atomic.Int32
-	for range 32 {
+	var p0, low atomic.Int32
+	for i := range 32 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if ok, _ := h.push.applyLn(pushPolicy{level: assistantwire.LevelP0, relatedKey: "same"}); ok {
-				allowed.Add(1)
+			level := assistantwire.LevelP0
+			if i%2 == 1 {
+				level = assistantwire.LevelP2
+			}
+			if ok, _ := h.push.applyLn(pushPolicy{level: level, relatedKey: "same"}); ok && level == assistantwire.LevelP0 {
+				p0.Add(1)
+			} else if ok {
+				low.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
-	if allowed.Load() != 1 {
-		t.Fatalf("%d concurrent pushes passed, want 1", allowed.Load())
+	if p0.Load() != 16 || low.Load() != 0 {
+		t.Fatalf("%d P0 and %d P2 passed, want 16 and 0", p0.Load(), low.Load())
 	}
 }
 
