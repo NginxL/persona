@@ -1,8 +1,8 @@
 import XCTest
 
-/// The BeautifulUI style (Settings › Interface Style): its prompt bar sends what was typed (it once cleared the draft before the send
-/// read it, and nothing went out), and the chat shows its components only there. Against scripts/mock/mock_hub.py
-/// (PERSONA_MOCK_HUB), which records sends at /mock/sent.
+/// The BeautifulUI style (Settings › Interface Style). On iOS its chats draw the shell's composer, as every style does since
+/// #1696 (its prompt bar, `PromptComposer`, is the Mac's and visionOS's): what is typed there reaches the hub, and a "/"
+/// menu row takes its tap. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB), which records sends at /mock/sent.
 final class BeautifulStyleTests: XCTestCase {
     private var hub: String!
 
@@ -41,11 +41,15 @@ final class BeautifulStyleTests: XCTestCase {
         XCTAssertTrue(sent().contains(words), "「\(words)」 did not reach the hub; sent: \(sent())")
     }
 
-    @MainActor func testPromptBarSends() {
+    @MainActor func testComposerSends() {
         let app = launch(style: "beautiful")
-        // The prompt bar's toolbar: @ is there only in this style.
-        XCTAssertTrue(app.buttons["提及文件或会话"].waitForExistence(timeout: 20), "not the prompt bar:\n\(app.debugDescription)")
+        XCTAssertTrue(composer(app).waitForExistence(timeout: 20), "not the shell's composer:\n\(app.debugDescription)")
         sendWorks(app, "BeautifulUI 发送 \(Int.random(in: 1000...9999))")
+    }
+
+    /// The shell's composer, in every style on iOS (#7716).
+    @MainActor private func composer(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["shell-composer-field"].firstMatch
     }
 
     /// The "/" menu hangs above the composer, outside the composer's own frame. A tap on a row picks it; it once fell
@@ -53,7 +57,7 @@ final class BeautifulStyleTests: XCTestCase {
     /// its bounds). Another chat than the send tests': the draft it leaves stays with its chat.
     @MainActor func testCommandMenuTakesTaps() {
         let app = launch(style: "beautiful", session: "studio/a1f3c2d4-0000-4000-8000-000000000003")
-        XCTAssertTrue(app.buttons["提及文件或会话"].waitForExistence(timeout: 20), "not the prompt bar:\n\(app.debugDescription)")
+        XCTAssertTrue(composer(app).waitForExistence(timeout: 20), "not the shell's composer:\n\(app.debugDescription)")
         let field = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
         clear(field) // drafts are kept across runs: a "/" after old text opens no menu
         field.typeText("/")
