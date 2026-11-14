@@ -466,6 +466,24 @@ describe("messages kept across a reload", () => {
     expect(store.size).toBe(0);
   });
 
+  it("keeps Clear and send available after a reload", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ code: "input_draft", error: "draft", clearable: "old terminal draft" }, 409))
+      .mockResolvedValueOnce(response({ ok: true }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await sendToSession("m", "s", { text: "message from the web" })).toBe(false);
+    const failed = outbox()["m/s"][0];
+    expect(failed).toMatchObject({ state: "failed", clearable: "old terminal draft", newId: true });
+    reload();
+    restoreOutbox("m", "s");
+    const restored = outbox()["m/s"][0];
+    expect(await retryOutbox("m", "s", restored.id, restored.clearable)).toBe(true);
+    const again = JSON.parse(fetcher.mock.calls[1][1].body);
+    expect(again).toMatchObject({ text: "message from the web", clear_draft: "old terminal draft" });
+    expect(again.client_msg_id).not.toBe(failed.id);
+    expect(restored.clearable).toBe("old terminal draft");
+  });
+
   it("forgets a deleted message", () => {
     keepFailed("m", "s", { id: "a5", text: "别发了", images: [], at: 1000 }, new TypeError("network"));
     discardOutbox("m", "s", "a5");
