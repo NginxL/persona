@@ -638,7 +638,9 @@ Pitfalls:
 - iOS 27.1 runtime lacks device types like iPhone 17 Pro; `simctl create` reports Incompatible device. sim-boot.sh picks latest compatible runtime; override with `--runtime`.
 
 Chat composer (#2200): confirm port free, then `PORT=<dedicated port> python3 scripts/mock/composer_hub.py`.
-This separate entry reuses fictional data, only changes main/Agent chat models to short/long GPT IDs, never other lanes' fixtures.
+This separate entry reuses fictional data, only changes main/Agent chat models to short/long GPT IDs, never other lanes' fixtures,
+and echoes each send into its chat's transcript (`MOCK_ECHO_SENT`): without that copy the app keeps a message sent to the working Agent
+chat queued for up to 16 minutes, across launches, and on an iPhone its queue strip left the next test no chat to drag (#7683).
 `TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<dedicated port> xcodebuild test … -only-testing:PersonaUITests/ComposerKeyboardTests`
 checks no App keyboard-dismiss button in compact and regular-width iOS navigation, input/newlines, gesture dismissal retaining draft, sending, sidebar-header collapse, model-label/menu consistency.
 Style `TEST_RUNNER_PERSONA_UI_STYLE=beautiful`; actual `simctl ui <udid> appearance light|dark`,
