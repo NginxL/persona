@@ -3,7 +3,7 @@ import { useAssistantTitle, useManagerOffline } from "../ManagerParts";
 import { LinkManager, useShownManager } from "../../lib/manager-choice";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
+import { api, ApiError, errorText, fullItem, pastHub, sessionPath } from "../../lib/api";
 import { attentionReason, backgroundWaiting, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
 import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type SessionView } from "../../lib/router";
@@ -41,7 +41,7 @@ import { t as tr } from "../../i18n";
 import { lastEditablePrompt, promptsOf, rewindBlock, rewindDone, rewindSession, rewindTarget, type RewindRestore } from "../../lib/rewind";
 import { EDIT_SEND_SETTLE_MS } from "../../lib/edit-last-key";
 import { sendDraft } from "../../lib/drafts";
-import { chatLines, freshWords, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
+import { chatLines, freshWords, insideFold, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
 import { foldsBackgroundRounds } from "../../lib/background-fold";
 import type { Interaction, Item, Session, Subagent } from "../../lib/types";
 import { anchoredScroll, followsAgain, isScrollbarPress, jumpLabel, leavesOnKey, leavesOnScrollbarDrag, leavesOnTouch, leavesOnWheel, followsAfterUnfold, UNFOLD_PAUSE, type ScrollAnchor } from "../../lib/disclosure";
@@ -1580,7 +1580,20 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     const run = ++msgLanding.current;
     const holds = () => trNow.current.items.some((i) => i.id === item);
     if (holds()) return void requestAnimationFrame(() => seekItem(item, true));
-    if (!trNow.current.hasMore) return;
+    if (!trNow.current.hasMore) {
+      void (async () => {
+        // A folded assistant reply is not a raw item: resolve it, then open only the fold that holds it.
+        const whole = await fullItem(mid, sid, item);
+        if (run !== msgLanding.current) return;
+        const fold = trNow.current.items.find((f) => insideFold(whole, f));
+        if (!fold) return;
+        openFoldRange(ctx.scope, fold.seq, fold.fold!.through_seq);
+        await trNow.current.expandFold(fold);
+        if (run !== msgLanding.current) return;
+        requestAnimationFrame(() => seekItem(item));
+      })().catch(() => {});
+      return;
+    }
     void (async () => {
       // the chat may still be filling the screen with older pages: wait for that, then page back (again if it was busy)
       for (let go = 0, until = performance.now() + LANDING_WAIT_MS; go < 3 && run === msgLanding.current && !holds(); go++) {

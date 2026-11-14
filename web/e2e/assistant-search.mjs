@@ -66,6 +66,19 @@ try {
       await page.waitForURL(/[?&]at=/, { timeout: 10_000 });
       await page.locator("[data-search-hit]", { hasText: "GlacierPost" }).waitFor({ timeout: 30_000 });
       await page.screenshot({ path: join(shots, `${scheme}-${tag}-history-landed.png`) });
+
+      // A completed turn's narration is folded on the newest page: the global hit opens only that fold (#7965).
+      await page.goto(`${root}/overview`);
+      await page.waitForTimeout(1200);
+      await page.keyboard.press("ControlOrMeta+k");
+      const foldedBox = page.getByPlaceholder("Search sessions, inbox");
+      await foldedBox.fill("FoldedNeedle");
+      const folded = page.locator("[data-said]", { hasText: "FoldedNeedle" }).first();
+      await folded.waitFor({ timeout: 10_000 });
+      await folded.click();
+      await page.waitForURL(/[?&]at=narration-target/, { timeout: 10_000 });
+      await page.locator("[data-search-hit]", { hasText: "FoldedNeedle" }).waitFor({ timeout: 15_000 });
+      await page.screenshot({ path: join(shots, `${scheme}-${tag}-folded-narration-landed.png`) });
       await page.close();
     }
   }
