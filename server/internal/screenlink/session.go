@@ -137,12 +137,13 @@ type transport struct {
 	tls     *tls.Conn                     // a direct route's connection: UDP flows take their keys from it
 
 	// A UDP flow (#7873): it carries the video channel only, and goes with parent, the direct route it was opened on.
-	flow   *udpFlow
-	parent *transport
-	resend []udpResend
-	sentAt time.Time // when the flow last sent video (fresh or again)
-	probes int       // tail probes since then
-	armed  bool      // a timer will wake the flow's sender for its next probe
+	flow       *udpFlow
+	parent     *transport
+	resend     []udpResend
+	sentAt     time.Time // when the flow last sent video (fresh or again)
+	probes     int       // tail probes since then
+	probeTimer *time.Timer
+	armedDue   time.Time // when probeTimer wakes the flow's sender
 }
 
 // Registry is the node's sessions by pair.

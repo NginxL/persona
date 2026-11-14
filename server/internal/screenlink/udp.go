@@ -571,16 +571,23 @@ func (s *Session) probeDue(t *transport, ch *channel) (time.Time, bool) {
 // armProbeLocked wakes t's sender when its next tail probe is due.
 func (s *Session) armProbeLocked(t *transport) {
 	due, ok := s.probeDue(t, s.chans[s.video])
-	if !ok || t.armed {
+	if !ok || (t.probeTimer != nil && !due.Before(t.armedDue)) {
 		return
 	}
-	t.armed = true
-	time.AfterFunc(max(time.Until(due), time.Millisecond), func() {
+	if t.probeTimer != nil {
+		t.probeTimer.Stop()
+	}
+	t.armedDue = due
+	var timer *time.Timer
+	timer = time.AfterFunc(max(time.Until(due), time.Millisecond), func() {
 		s.mu.Lock()
-		t.armed = false
-		s.cond.Broadcast()
+		if t.probeTimer == timer {
+			t.probeTimer = nil
+			s.cond.Broadcast()
+		}
 		s.mu.Unlock()
 	})
+	t.probeTimer = timer
 }
 
 // messageLocked is the message of ch starting at off, from the buffer; nil when it is no longer there.

@@ -137,6 +137,97 @@ func TestATailLostWholeIsProbed(t *testing.T) {
 	})
 }
 
+// Fresh video starts the probe clock again even when the previous message's fourth probe already armed an 800 ms
+// timer. Acknowledging that message does not let its timer postpone the fresh tail's first probe.
+func TestFreshTailDoesNotInheritAnOldProbeTimer(t *testing.T) {
+	l := openUDPLink(t, udpLimits())
+	l.up.prove()
+	l.up.use(l.id, 0)
+	isTail := func(h udpFragmentHead) bool {
+		blocks := udpBlocks(int(h.Length))
+		last := blocks[len(blocks)-1]
+		return h.Block == uint16(len(blocks)-1) && h.Index == uint16(last.Data-1)
+	}
+
+	// Drop the original's last shard and its first three tail probes, with retransmission requests paused so their
+	// copies are not mistaken for probes. The fourth probe completes the message, so the phone acknowledges it itself
+	// after the probe has armed the sender's 800 ms timer.
+	previous := videoFrameMsg(1, false, 3000)
+	previousTails := make(chan time.Time, 16)
+	previousTailAppearances := 0 // the fake phone calls drop under its lock
+	l.up.mu.Lock()
+	l.up.autoAsk = false
+	l.up.drop = func(h udpFragmentHead) bool {
+		if h.Offset != 0 || !isTail(h) {
+			return false
+		}
+		previousTailAppearances++
+		previousTails <- time.Now()
+		return previousTailAppearances <= 4
+	}
+	l.up.mu.Unlock()
+	writeAll(l.helper, [][]byte{previous})
+	for i := 0; i < 5; i++ {
+		select {
+		case <-previousTails:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d tail appearances before the fourth probe", i)
+		}
+	}
+	waitFor(t, "the previous message acknowledged", func() bool {
+		l.s.mu.Lock()
+		defer l.s.mu.Unlock()
+		return l.s.chans[l.id].base == uint64(len(previous))
+	})
+
+	// The fresh message is lost whole on its first trip. Its first repeated last shard is therefore the tail probe,
+	// which must come within 300 ms (the required 50 ms plus generous scheduling room), not inherit the old 800 ms.
+	fresh := videoFrameMsg(2, false, 3000)
+	freshAt := uint64(len(previous))
+	freshTails := make(chan time.Time, 16)
+	seen := map[[2]uint16]bool{} // the fake phone calls drop under its lock
+	l.up.mu.Lock()
+	l.up.expected = freshAt
+	l.up.got = nil // only the fresh message's delivery is checked below
+	l.up.autoAsk = true
+	l.up.drop = func(h udpFragmentHead) bool {
+		if h.Offset != freshAt {
+			return false
+		}
+		if isTail(h) {
+			freshTails <- time.Now()
+		}
+		key := [2]uint16{h.Block, h.Index}
+		if !seen[key] {
+			seen[key] = true
+			return true
+		}
+		return false
+	}
+	l.up.mu.Unlock()
+	started := time.Now()
+	writeAll(l.helper, [][]byte{fresh})
+	select {
+	case <-freshTails: // the original's last shard
+	case <-time.After(2 * time.Second):
+		t.Fatal("the fresh message was not sent")
+	}
+	timer := time.NewTimer(300 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case at := <-freshTails:
+		if elapsed := at.Sub(started); elapsed > 300*time.Millisecond {
+			t.Fatalf("the fresh tail's first probe came after %v, want within 300ms", elapsed)
+		}
+	case <-timer.C:
+		t.Fatal("no probe within 300ms after fresh video followed an acknowledged fourth probe")
+	}
+	waitFor(t, "the fresh tail", func() bool { return len(l.up.delivered()) == len(fresh) })
+	if !bytes.Equal(l.up.delivered(), fresh) {
+		t.Fatal("the fresh tail differs")
+	}
+}
+
 // A frame the phone gives up is not sent again: the node drops the backlog's frames, says where the stream goes on,
 // asks the helper for a keyframe and drops frames until it comes. The backlog's other messages still arrive, after the
 // reset and before the keyframe, so it decodes.
