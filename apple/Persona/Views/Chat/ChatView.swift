@@ -10,6 +10,7 @@ import UIKit
 #if DEBUG
 import notify
 #endif
+import PersonaWire
 
 enum ChatStyle {
     /// Develop: every step visible, tab bar hidden.

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 struct DispatchedTasksTests {
     private func task(_ title: String, id: String? = nil, error: String? = nil) -> PlanTask {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Arbitrary JSON (tool inputs, schemas) that round-trips without key rewriting.
-nonisolated enum JSONValue: Codable, Hashable, Sendable {
+public nonisolated enum JSONValue: Codable, Hashable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
@@ -9,7 +9,7 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
     case array([JSONValue])
     case object([String: JSONValue])
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
         else if let b = try? c.decode(Bool.self) { self = .bool(b) }
@@ -19,7 +19,7 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
         else { self = .object(try c.decode([String: JSONValue].self)) }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
         case .null: try c.encodeNil()
@@ -31,12 +31,12 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 
-    subscript(key: String) -> JSONValue? {
+    public subscript(key: String) -> JSONValue? {
         if case .object(let o) = self { return o[key] }
         return nil
     }
 
-    var string: String? {
+    public var string: String? {
         switch self {
         case .string(let s): s
         // A whole number in Int's range without a decimal point; anything else (1e20, which `Int(_:)` traps on) as Double prints it.
@@ -46,7 +46,7 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 
-    var double: Double? {
+    public var double: Double? {
         switch self {
         case .number(let n): n
         case .string(let s): Double(s)
@@ -55,20 +55,20 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
     }
 
     /// Toward zero, as `Int(_:)`; nil past Int's range or for "nan" and "inf", where `Int(_:)` traps.
-    var int: Int? { double.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
-    var bool: Bool? { if case .bool(let b) = self { b } else { nil } }
-    var array: [JSONValue]? { if case .array(let a) = self { a } else { nil } }
-    var object: [String: JSONValue]? { if case .object(let o) = self { o } else { nil } }
+    public var int: Int? { double.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
+    public var bool: Bool? { if case .bool(let b) = self { b } else { nil } }
+    public var array: [JSONValue]? { if case .array(let a) = self { a } else { nil } }
+    public var object: [String: JSONValue]? { if case .object(let o) = self { o } else { nil } }
 
     /// Pretty JSON for display.
-    var pretty: String {
+    public var pretty: String {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? enc.encode(self) else { return "" }
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func from(_ any: Any?) -> JSONValue {
+    public static func from(_ any: Any?) -> JSONValue {
         switch any {
         case nil, is NSNull: return .null
         case let b as Bool: return .bool(b)
@@ -82,8 +82,8 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated enum JSON {
-    static let decoder: JSONDecoder = {
+public nonisolated enum JSON {
+    public static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
             let c = try decoder.singleValueContainer()
@@ -93,7 +93,7 @@ nonisolated enum JSON {
         return d
     }()
 
-    static let encoder: JSONEncoder = {
+    public static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         return e
@@ -111,7 +111,7 @@ nonisolated enum JSON {
         return f
     }()
 
-    static func parseDate(_ s: String) -> Date? {
+    public static func parseDate(_ s: String) -> Date? {
         guard !s.isEmpty else { return nil }
         // Nearly every date the hub sends has one shape: read it straight from the bytes. ISO8601DateFormatter goes
         // through ICU, and on a busy hub it was 10–21% of the app's CPU at rest (#4681). Anything else goes on below.
@@ -128,7 +128,7 @@ nonisolated enum JSON {
     /// `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)` (RFC 3339, as Go writes it), the same `Date` the formatters give: the
     /// fraction cut to milliseconds. nil for any other shape, an impossible field (Feb 30, a leap second) or a year
     /// before 1900 (the formatters use the Julian calendar before 1582): those go to the formatters as before.
-    static func internetDate(_ s: String) -> Date? {
+    public static func internetDate(_ s: String) -> Date? {
         var s = s
         return s.withUTF8 { internetDate(bytes: $0) }
     }
@@ -203,5 +203,5 @@ nonisolated enum JSON {
 
 extension Date {
     /// Go's zero time and other placeholders.
-    nonisolated var isMeaningful: Bool { timeIntervalSince1970 > 946_684_800 }
+    public nonisolated var isMeaningful: Bool { timeIntervalSince1970 > 946_684_800 }
 }

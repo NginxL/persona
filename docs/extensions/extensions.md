@@ -2914,7 +2914,7 @@ all paths through `APIClient.extensionPath`); otherwise (old hub) `/api/v1/plugi
 UI placements `extension` / `extension_name` and `plugin` / `plugin_name`, marketplace counts `extensions` / `plugins`; marketplace-preview request bodies use `extension` on new hubs and `plugin` on old ones.
 Features accept new and old names (`hasExtensionFeature("ui_slots")` means `extension_ui_slots` or `plugin_ui_slots`, likewise `"manager"`); both `extension_ui` and `plugin_ui` events
 are accepted (new hubs send both; badges are set values, so receiving twice is harmless); channel `settings_url` accepts `settings/extensions/<id>` and `settings/plugins/<id>`.
-Views, components, actions, responses, placements and context all use schema-generated types (`apple/Shared/Generated/ExtensionWire.swift`, #1860); the app only adds decoding helpers alongside them
+Views, components, actions, responses, placements and context all use schema-generated types (`apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift`, #1860); the app only adds decoding helpers alongside them
 (`ExtensionUIModel.swift`: `ExtensionUIPlace.owner` accepts both key forms, `ExtensionUIContext.here(…)` includes time zone, language, platform and `ui_version: 3`, the Shared version widgets and the watch send; every page or card the app draws sends 6, #827).
 
 - List: each extension's name and status (**On** / **Starting** / **Needs Setup** / **Off** / **Not available on this hub** / **Something Went Wrong**; both `running` and `stopped` are **On**), opening details on tap; footer explains installation via the hub's admin UI (`/admin`) or on the hub machine (`personad extension`).
@@ -3187,7 +3187,7 @@ and the node follows (`node/plugins.go`). Reconciliation runs on computer connec
 
 Manifests, process protocol, Views and components have one definition: JSON Schema in `schema/extension/` (#1849). Generate types from it, never hand-write them:
 Go `sdk/go/wire` (used directly by the hub, `server/go.mod` uses `replace` to `../sdk/go`), TypeScript `sdk/ts/src/wire.ts` and web `web/src/lib/extension-wire.ts`,
-Swift `apple/Shared/Generated/ExtensionWire.swift`, Kotlin `android/core/contracts/.../generated/ExtensionWire.kt`.
+Swift `apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift`, Kotlin `android/core/contracts/.../generated/ExtensionWire.kt`.
 
 - After schema changes, regenerate with `python3 scripts/gen/extension_schema.py`; `--check` compares only (`scripts/test/test_extension_schema.py` runs it and checks examples/counterexamples under `examples/`).
 - Hub validation of extension Views and conformance checks of `initialize` responses first use the schema (`wire.Validate`), then checks the schema cannot express (`extension.CheckView`).

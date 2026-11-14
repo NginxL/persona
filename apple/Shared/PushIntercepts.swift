@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Low-distraction mode's held pushes. Wire records stay separate from the rows so an invalid timestamp
 // cannot hide valid siblings, and an appended `also` title does not change a row's identity.

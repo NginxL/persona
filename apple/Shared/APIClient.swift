@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 nonisolated struct ServerConfig: Codable, Hashable, Sendable {
     var url: URL

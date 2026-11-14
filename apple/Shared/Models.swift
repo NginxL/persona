@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Wire types mirroring docs/protocol/protocol.md. Explicit CodingKeys everywhere: key strategies would also rewrite
 // arbitrary JSON keys inside tool inputs and answer dictionaries.

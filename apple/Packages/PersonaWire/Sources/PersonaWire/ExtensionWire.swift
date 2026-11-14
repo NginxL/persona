@@ -16,61 +16,61 @@ private nonisolated enum ExtensionWireJSON {
 }
 
 /// Values of ActivationEvent.
-nonisolated enum ExtensionActivationEvent {
-    static let onStartup = "on_startup"
-    static let onCall = "on_call"
-    static let onHttp = "on_http"
-    static let all = ["on_startup", "on_call", "on_http"]
+public nonisolated enum ExtensionActivationEvent {
+    public static let onStartup = "on_startup"
+    public static let onCall = "on_call"
+    public static let onHttp = "on_http"
+    public static let all = ["on_startup", "on_call", "on_http"]
 }
 
-nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
-    var manifestVersion: Int
-    var id: String
-    var name: String
-    var version: String
-    var description: String?
-    var publisher: String?
-    var homepage: String?
+public nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
+    public var manifestVersion: Int
+    public var id: String
+    public var name: String
+    public var version: String
+    public var description: String?
+    public var publisher: String?
+    public var homepage: String?
     /// Source-only square PNG artwork: 256–4096 pixels, at most 2 MiB. Catalog entry icon carries this path; strip it
     /// from packaged and runtime manifests for compatibility.
-    var icon: String?
+    public var icon: String?
     /// What the market shows and searches (docs "Extension market"): at most 16, each 1 to 24 characters. Packages
     /// and indexes carry the manifest without them (hubs before tags refuse an unknown field); the index entry
     /// carries them instead.
-    var tags: [String]?
-    var engines: ExtensionEngines?
-    var runtime: ExtensionRuntime?
-    var node: ExtensionNodeRuntime?
-    var activationEvents: [String]?
-    var contributes: ExtensionContributes?
+    public var tags: [String]?
+    public var engines: ExtensionEngines?
+    public var runtime: ExtensionRuntime?
+    public var node: ExtensionNodeRuntime?
+    public var activationEvents: [String]?
+    public var contributes: ExtensionContributes?
     /// Contributions ("<point>/<id>") that start switched off: at install, and at an upgrade the ones the version
     /// before did not have (docs "Contribution switches"). Not a connector or a channel bound to one (their switch is
     /// the connector's). Hubs before it refuse the manifest.
-    var offByDefault: [String]?
+    public var offByDefault: [String]?
     /// Extensions it needs installed and on (docs "Dependencies"): while one is missing, off or too old it waits in
     /// needs_setup.
-    var depends: [ExtensionDependency]?
-    var exports: ExtensionExports?
+    public var depends: [ExtensionDependency]?
+    public var exports: ExtensionExports?
     /// An extension pack (docs "Extension packs"): installing it installs these. A pack has no runtime and no
     /// contributes of its own.
-    var extensionPack: [ExtensionPackMember]?
+    public var extensionPack: [ExtensionPackMember]?
     /// The configuration's JSON Schema, in the subset every app draws as a form (docs "Configuration: the form
     /// subset").
-    var configuration: JSONValue?
-    var secrets: [ExtensionSecretSpec]?
+    public var configuration: JSONValue?
+    public var secrets: [ExtensionSecretSpec]?
     /// The program checks a change of its settings or secrets before the hub saves it (settings.check).
-    var settingsCheck: Bool?
-    var permissions: ExtensionPermissions?
+    public var settingsCheck: Bool?
+    public var permissions: ExtensionPermissions?
     /// Command-line programs the hub installs into the extension's own directory and puts first on its PATH (docs
     /// "Command-line programs (tools)", #4507). Installing them is a permission. Hubs before them refuse the
     /// manifest.
-    var tools: [ExtensionToolSpec]?
-    var auth: ExtensionAuthSpec?
+    public var tools: [ExtensionToolSpec]?
+    public var auth: ExtensionAuthSpec?
     /// Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
     /// executable; writes and arbitrary command lines are not part of this contract.
-    var hostIntegrations: [ExtensionHostIntegrationSpec]?
+    public var hostIntegrations: [ExtensionHostIntegrationSpec]?
 
-    init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, icon: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil, hostIntegrations: [ExtensionHostIntegrationSpec]? = nil) {
+    public init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, icon: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil, hostIntegrations: [ExtensionHostIntegrationSpec]? = nil) {
         self.manifestVersion = manifestVersion
         self.id = id
         self.name = name
@@ -126,7 +126,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         case hostIntegrations = "host_integrations"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.manifestVersion = (try? c.decodeIfPresent(Int.self, forKey: .manifestVersion)) ?? 0
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -157,11 +157,11 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
 }
 
 /// A configured CLI integration, selected by a closed ID rather than by an extension-provided executable.
-nonisolated struct ExtensionHostIntegrationSpec: Codable, Hashable, Sendable {
-    var id: String
-    var version: String
+public nonisolated struct ExtensionHostIntegrationSpec: Codable, Hashable, Sendable {
+    public var id: String
+    public var version: String
 
-    init(id: String = "", version: String = "") {
+    public init(id: String = "", version: String = "") {
         self.id = id
         self.version = version
     }
@@ -171,7 +171,7 @@ nonisolated struct ExtensionHostIntegrationSpec: Codable, Hashable, Sendable {
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.version = (try? c.decodeIfPresent(String.self, forKey: .version)) ?? ""
@@ -179,20 +179,20 @@ nonisolated struct ExtensionHostIntegrationSpec: Codable, Hashable, Sendable {
 }
 
 /// One command-line program. Exactly one of archive and npm.
-nonisolated struct ExtensionToolSpec: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionToolSpec: Codable, Hashable, Sendable {
     /// The command put on PATH.
-    var name: String
-    var title: String?
+    public var name: String
+    public var title: String?
     /// What is installed, for people.
-    var version: String
+    public var version: String
     /// Other tools of the manifest installed (and on PATH) first.
-    var requires: [String]?
-    var check: ExtensionToolCheck?
+    public var requires: [String]?
+    public var check: ExtensionToolCheck?
     /// By <GOOS>-<GOARCH>.
-    var archive: [String: ExtensionToolArchive]?
-    var npm: ExtensionToolNPM?
+    public var archive: [String: ExtensionToolArchive]?
+    public var npm: ExtensionToolNPM?
 
-    init(name: String = "", title: String? = nil, version: String = "", requires: [String]? = nil, check: ExtensionToolCheck? = nil, archive: [String: ExtensionToolArchive]? = nil, npm: ExtensionToolNPM? = nil) {
+    public init(name: String = "", title: String? = nil, version: String = "", requires: [String]? = nil, check: ExtensionToolCheck? = nil, archive: [String: ExtensionToolArchive]? = nil, npm: ExtensionToolNPM? = nil) {
         self.name = name
         self.title = title
         self.version = version
@@ -212,7 +212,7 @@ nonisolated struct ExtensionToolSpec: Codable, Hashable, Sendable {
         case npm
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -226,12 +226,12 @@ nonisolated struct ExtensionToolSpec: Codable, Hashable, Sendable {
 
 /// A copy on the hub's PATH (outside the home directory) is used instead of installing one when <name> <args> prints
 /// a version (the first x.y.z) of at least min_version.
-nonisolated struct ExtensionToolCheck: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionToolCheck: Codable, Hashable, Sendable {
     /// Default --version.
-    var args: [String]?
-    var minVersion: String?
+    public var args: [String]?
+    public var minVersion: String?
 
-    init(args: [String]? = nil, minVersion: String? = nil) {
+    public init(args: [String]? = nil, minVersion: String? = nil) {
         self.args = args
         self.minVersion = minVersion
     }
@@ -241,7 +241,7 @@ nonisolated struct ExtensionToolCheck: Codable, Hashable, Sendable {
         case minVersion = "min_version"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.args = try? c.decodeIfPresent([String].self, forKey: .args)
         self.minVersion = try? c.decodeIfPresent(String.self, forKey: .minVersion)
@@ -249,13 +249,13 @@ nonisolated struct ExtensionToolCheck: Codable, Hashable, Sendable {
 }
 
 /// A download: a .tar.gz, .tgz or .zip with the program at path, or the program itself.
-nonisolated struct ExtensionToolArchive: Codable, Hashable, Sendable {
-    var url: String
-    var sha256: String
-    var path: String?
-    var mirrors: [String]?
+public nonisolated struct ExtensionToolArchive: Codable, Hashable, Sendable {
+    public var url: String
+    public var sha256: String
+    public var path: String?
+    public var mirrors: [String]?
 
-    init(url: String = "", sha256: String = "", path: String? = nil, mirrors: [String]? = nil) {
+    public init(url: String = "", sha256: String = "", path: String? = nil, mirrors: [String]? = nil) {
         self.url = url
         self.sha256 = sha256
         self.path = path
@@ -269,7 +269,7 @@ nonisolated struct ExtensionToolArchive: Codable, Hashable, Sendable {
         case mirrors
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
         self.sha256 = (try? c.decodeIfPresent(String.self, forKey: .sha256)) ?? ""
@@ -279,16 +279,16 @@ nonisolated struct ExtensionToolArchive: Codable, Hashable, Sendable {
 }
 
 /// An npm package unpacked as published: no install scripts, no dependencies (a bundled package).
-nonisolated struct ExtensionToolNPM: Codable, Hashable, Sendable {
-    var package: String
-    var version: String
-    var integrity: String
+public nonisolated struct ExtensionToolNPM: Codable, Hashable, Sendable {
+    public var package: String
+    public var version: String
+    public var integrity: String
     /// Default https://registry.npmjs.org.
-    var registry: String?
+    public var registry: String?
     /// The key of package.json's bin; default the tool's name.
-    var bin: String?
+    public var bin: String?
 
-    init(package: String = "", version: String = "", integrity: String = "", registry: String? = nil, bin: String? = nil) {
+    public init(package: String = "", version: String = "", integrity: String = "", registry: String? = nil, bin: String? = nil) {
         self.package = package
         self.version = version
         self.integrity = integrity
@@ -304,7 +304,7 @@ nonisolated struct ExtensionToolNPM: Codable, Hashable, Sendable {
         case bin
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.package = (try? c.decodeIfPresent(String.self, forKey: .package)) ?? ""
         self.version = (try? c.decodeIfPresent(String.self, forKey: .version)) ?? ""
@@ -315,14 +315,14 @@ nonisolated struct ExtensionToolNPM: Codable, Hashable, Sendable {
 }
 
 /// The extension signs in: its program answers auth.status, auth.step and auth.logout (docs "Sign-in (auth)").
-nonisolated struct ExtensionAuthSpec: Codable, Hashable, Sendable {
-    var title: String
-    var description: String?
+public nonisolated struct ExtensionAuthSpec: Codable, Hashable, Sendable {
+    public var title: String
+    public var description: String?
     /// An extension_page (plugin_page) ui contribution: its own sign-in page for apps that do not know auth; apps
     /// that do leave it out of its pages.
-    var page: String?
+    public var page: String?
 
-    init(title: String = "", description: String? = nil, page: String? = nil) {
+    public init(title: String = "", description: String? = nil, page: String? = nil) {
         self.title = title
         self.description = description
         self.page = page
@@ -334,7 +334,7 @@ nonisolated struct ExtensionAuthSpec: Codable, Hashable, Sendable {
         case page
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.description = try? c.decodeIfPresent(String.self, forKey: .description)
@@ -342,12 +342,12 @@ nonisolated struct ExtensionAuthSpec: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionDependency: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionDependency: Codable, Hashable, Sendable {
+    public var id: String
     /// A range of its versions: >=1.2.0, <2.0.0, or both with a space between.
-    var version: String?
+    public var version: String?
 
-    init(id: String = "", version: String? = nil) {
+    public init(id: String = "", version: String? = nil) {
         self.id = id
         self.version = version
     }
@@ -357,7 +357,7 @@ nonisolated struct ExtensionDependency: Codable, Hashable, Sendable {
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.version = try? c.decodeIfPresent(String.self, forKey: .version)
@@ -366,10 +366,10 @@ nonisolated struct ExtensionDependency: Codable, Hashable, Sendable {
 
 /// Extension points it opens to other extensions: they contribute under contributes["<this id>.<point id>"] and
 /// depend on it.
-nonisolated struct ExtensionExports: Codable, Hashable, Sendable {
-    var extensionPoints: [ExtensionExportedPoint]
+public nonisolated struct ExtensionExports: Codable, Hashable, Sendable {
+    public var extensionPoints: [ExtensionExportedPoint]
 
-    init(extensionPoints: [ExtensionExportedPoint] = []) {
+    public init(extensionPoints: [ExtensionExportedPoint] = []) {
         self.extensionPoints = extensionPoints
     }
 
@@ -377,21 +377,21 @@ nonisolated struct ExtensionExports: Codable, Hashable, Sendable {
         case extensionPoints = "extension_points"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extensionPoints = (try? c.decodeIfPresent([ExtensionExportedPoint].self, forKey: .extensionPoints)) ?? []
     }
 }
 
-nonisolated struct ExtensionExportedPoint: Codable, Hashable, Sendable {
-    var id: String
-    var version: Int
-    var description: String?
+public nonisolated struct ExtensionExportedPoint: Codable, Hashable, Sendable {
+    public var id: String
+    public var version: Int
+    public var description: String?
     /// Each contribution's JSON Schema, in the configuration's subset (docs "Configuration: the form subset"); id is
     /// always there and required.
-    var schema: JSONValue?
+    public var schema: JSONValue?
 
-    init(id: String = "", version: Int = 0, description: String? = nil, schema: JSONValue? = nil) {
+    public init(id: String = "", version: Int = 0, description: String? = nil, schema: JSONValue? = nil) {
         self.id = id
         self.version = version
         self.description = description
@@ -405,7 +405,7 @@ nonisolated struct ExtensionExportedPoint: Codable, Hashable, Sendable {
         case schema
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.version = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 0
@@ -414,15 +414,15 @@ nonisolated struct ExtensionExportedPoint: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionPackMember: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionPackMember: Codable, Hashable, Sendable {
+    public var id: String
     /// The address of the market it comes from (github:owner/repo, https://…), as the hub registered it; empty: the
     /// pack's own market, else the first registered market that has it.
-    var market: String?
+    public var market: String?
     /// A range of its versions, as in depends.
-    var version: String?
+    public var version: String?
 
-    init(id: String = "", market: String? = nil, version: String? = nil) {
+    public init(id: String = "", market: String? = nil, version: String? = nil) {
         self.id = id
         self.market = market
         self.version = version
@@ -434,7 +434,7 @@ nonisolated struct ExtensionPackMember: Codable, Hashable, Sendable {
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.market = try? c.decodeIfPresent(String.self, forKey: .market)
@@ -443,13 +443,13 @@ nonisolated struct ExtensionPackMember: Codable, Hashable, Sendable {
 }
 
 /// What the extension runs on. extension_protocol is plugin_protocol's new name; a hub reads either.
-nonisolated struct ExtensionEngines: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionEngines: Codable, Hashable, Sendable {
     /// A range of hub build numbers (">=202611050000 <202701010000").
-    var persona: String?
-    var extensionProtocol: Int?
-    var pluginProtocol: Int?
+    public var persona: String?
+    public var extensionProtocol: Int?
+    public var pluginProtocol: Int?
 
-    init(persona: String? = nil, extensionProtocol: Int? = nil, pluginProtocol: Int? = nil) {
+    public init(persona: String? = nil, extensionProtocol: Int? = nil, pluginProtocol: Int? = nil) {
         self.persona = persona
         self.extensionProtocol = extensionProtocol
         self.pluginProtocol = pluginProtocol
@@ -461,7 +461,7 @@ nonisolated struct ExtensionEngines: Codable, Hashable, Sendable {
         case pluginProtocol = "plugin_protocol"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.persona = try? c.decodeIfPresent(String.self, forKey: .persona)
         self.extensionProtocol = try? c.decodeIfPresent(Int.self, forKey: .extensionProtocol)
@@ -469,19 +469,19 @@ nonisolated struct ExtensionEngines: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionRuntime: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionRuntime: Codable, Hashable, Sendable {
     /// Default process preserves executable packages. deno requires a self-contained source bundle and verified
     /// independent Linux isolation.
-    var mode: String?
-    var source: ExtensionSourceRuntime?
-    var command: JSONValue?
-    var args: [String]?
-    var env: [String: String]?
-    var rpc: String?
-    var http: Bool?
-    var resources: ExtensionResources?
+    public var mode: String?
+    public var source: ExtensionSourceRuntime?
+    public var command: JSONValue?
+    public var args: [String]?
+    public var env: [String: String]?
+    public var rpc: String?
+    public var http: Bool?
+    public var resources: ExtensionResources?
 
-    init(mode: String? = nil, source: ExtensionSourceRuntime? = nil, command: JSONValue? = nil, args: [String]? = nil, env: [String: String]? = nil, rpc: String? = nil, http: Bool? = nil, resources: ExtensionResources? = nil) {
+    public init(mode: String? = nil, source: ExtensionSourceRuntime? = nil, command: JSONValue? = nil, args: [String]? = nil, env: [String: String]? = nil, rpc: String? = nil, http: Bool? = nil, resources: ExtensionResources? = nil) {
         self.mode = mode
         self.source = source
         self.command = command
@@ -503,7 +503,7 @@ nonisolated struct ExtensionRuntime: Codable, Hashable, Sendable {
         case resources
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.mode = try? c.decodeIfPresent(String.self, forKey: .mode)
         self.source = try? c.decodeIfPresent(ExtensionSourceRuntime.self, forKey: .source)
@@ -518,12 +518,12 @@ nonisolated struct ExtensionRuntime: Codable, Hashable, Sendable {
 
 /// entry is offline build input only; bundle is the signed self-contained artifact, verified again on each start. No
 /// runtime dependency resolution.
-nonisolated struct ExtensionSourceRuntime: Codable, Hashable, Sendable {
-    var entry: String
-    var bundle: String
-    var sha256: String
+public nonisolated struct ExtensionSourceRuntime: Codable, Hashable, Sendable {
+    public var entry: String
+    public var bundle: String
+    public var sha256: String
 
-    init(entry: String = "", bundle: String = "", sha256: String = "") {
+    public init(entry: String = "", bundle: String = "", sha256: String = "") {
         self.entry = entry
         self.bundle = bundle
         self.sha256 = sha256
@@ -535,7 +535,7 @@ nonisolated struct ExtensionSourceRuntime: Codable, Hashable, Sendable {
         case sha256
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.entry = (try? c.decodeIfPresent(String.self, forKey: .entry)) ?? ""
         self.bundle = (try? c.decodeIfPresent(String.self, forKey: .bundle)) ?? ""
@@ -545,11 +545,11 @@ nonisolated struct ExtensionSourceRuntime: Codable, Hashable, Sendable {
 
 /// The most a program may use when the hub runs it in a sandbox (docs/extensions/extensions.md "Sandbox"): memory in
 /// MB, CPU in percent of one core. Unset: 1024 MB, 100%.
-nonisolated struct ExtensionResources: Codable, Hashable, Sendable {
-    var memoryMb: Int?
-    var cpuPercent: Int?
+public nonisolated struct ExtensionResources: Codable, Hashable, Sendable {
+    public var memoryMb: Int?
+    public var cpuPercent: Int?
 
-    init(memoryMb: Int? = nil, cpuPercent: Int? = nil) {
+    public init(memoryMb: Int? = nil, cpuPercent: Int? = nil) {
         self.memoryMb = memoryMb
         self.cpuPercent = cpuPercent
     }
@@ -559,7 +559,7 @@ nonisolated struct ExtensionResources: Codable, Hashable, Sendable {
         case cpuPercent = "cpu_percent"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.memoryMb = try? c.decodeIfPresent(Int.self, forKey: .memoryMb)
         self.cpuPercent = try? c.decodeIfPresent(Int.self, forKey: .cpuPercent)
@@ -567,23 +567,23 @@ nonisolated struct ExtensionResources: Codable, Hashable, Sendable {
 }
 
 /// A path in the package, or one per platform ({"linux-amd64": "bin/x"}).
-typealias ExtensionCommand = JSONValue
+public typealias ExtensionCommand = JSONValue
 
 /// The extension's program on computers (docs/extensions/extensions.md "Programs running on computers"): one per
 /// platform (darwin-* / linux-*), on the machines picked in the configuration field `machines` (an array of format
 /// machine, x-os the programs' systems).
-nonisolated struct ExtensionNodeRuntime: Codable, Hashable, Sendable {
-    var command: JSONValue
-    var args: [String]?
-    var env: [String: String]?
-    var machines: String
-    var rpc: String?
-    var http: Bool?
-    var keepRunning: String?
-    var secrets: [String]?
-    var permissions: ExtensionNodePermissions?
+public nonisolated struct ExtensionNodeRuntime: Codable, Hashable, Sendable {
+    public var command: JSONValue
+    public var args: [String]?
+    public var env: [String: String]?
+    public var machines: String
+    public var rpc: String?
+    public var http: Bool?
+    public var keepRunning: String?
+    public var secrets: [String]?
+    public var permissions: ExtensionNodePermissions?
 
-    init(command: JSONValue = .null, args: [String]? = nil, env: [String: String]? = nil, machines: String = "", rpc: String? = nil, http: Bool? = nil, keepRunning: String? = nil, secrets: [String]? = nil, permissions: ExtensionNodePermissions? = nil) {
+    public init(command: JSONValue = .null, args: [String]? = nil, env: [String: String]? = nil, machines: String = "", rpc: String? = nil, http: Bool? = nil, keepRunning: String? = nil, secrets: [String]? = nil, permissions: ExtensionNodePermissions? = nil) {
         self.command = command
         self.args = args
         self.env = env
@@ -607,7 +607,7 @@ nonisolated struct ExtensionNodeRuntime: Codable, Hashable, Sendable {
         case permissions
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.command = (try? c.decodeIfPresent(JSONValue.self, forKey: .command)) ?? .null
         self.args = try? c.decodeIfPresent([String].self, forKey: .args)
@@ -623,12 +623,12 @@ nonisolated struct ExtensionNodeRuntime: Codable, Hashable, Sendable {
 
 /// What the program on computers asks for there: hosts it reaches, files outside its data directory, macOS's privacy
 /// permissions.
-nonisolated struct ExtensionNodePermissions: Codable, Hashable, Sendable {
-    var network: [String]?
-    var files: Bool?
-    var macosPrivacy: Bool?
+public nonisolated struct ExtensionNodePermissions: Codable, Hashable, Sendable {
+    public var network: [String]?
+    public var files: Bool?
+    public var macosPrivacy: Bool?
 
-    init(network: [String]? = nil, files: Bool? = nil, macosPrivacy: Bool? = nil) {
+    public init(network: [String]? = nil, files: Bool? = nil, macosPrivacy: Bool? = nil) {
         self.network = network
         self.files = files
         self.macosPrivacy = macosPrivacy
@@ -640,7 +640,7 @@ nonisolated struct ExtensionNodePermissions: Codable, Hashable, Sendable {
         case macosPrivacy = "macos_privacy"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.network = try? c.decodeIfPresent([String].self, forKey: .network)
         self.files = try? c.decodeIfPresent(Bool.self, forKey: .files)
@@ -648,15 +648,15 @@ nonisolated struct ExtensionNodePermissions: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionSecretSpec: Codable, Hashable, Sendable {
-    var name: String
-    var title: String
-    var description: String?
-    var required: Bool?
+public nonisolated struct ExtensionSecretSpec: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var description: String?
+    public var required: Bool?
     /// last4: once set, the settings show its last four characters.
-    var hint: JSONValue?
+    public var hint: JSONValue?
 
-    init(name: String = "", title: String = "", description: String? = nil, required: Bool? = nil, hint: JSONValue? = nil) {
+    public init(name: String = "", title: String = "", description: String? = nil, required: Bool? = nil, hint: JSONValue? = nil) {
         self.name = name
         self.title = title
         self.description = description
@@ -672,7 +672,7 @@ nonisolated struct ExtensionSecretSpec: Codable, Hashable, Sendable {
         case hint
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -683,32 +683,32 @@ nonisolated struct ExtensionSecretSpec: Codable, Hashable, Sendable {
 }
 
 /// A closed vocabulary: a permission the hub does not know fails the install.
-nonisolated struct ExtensionPermissions: Codable, Hashable, Sendable {
-    var network: [String]?
+public nonisolated struct ExtensionPermissions: Codable, Hashable, Sendable {
+    public var network: [String]?
     /// The old way: the hub's full token. With hub scopes, the scopes win.
-    var hubApi: Bool?
+    public var hubApi: Bool?
     /// The scopes of the hub's API it calls: its token opens their routes only.
-    var hub: [String]?
-    var launcherKeys: Bool?
+    public var hub: [String]?
+    public var launcherKeys: Bool?
     /// It asks the hub for the GitHub token of a computer's gh login (the one the user picks for the GitHub
     /// connector), held in its memory only.
-    var ghLogin: Bool?
+    public var ghLogin: Bool?
     /// It reads the account list of the account-pool gateways in the hub's usage sources (usage.gateway_accounts):
     /// accounts, status and quota windows, never a key.
-    var usageGateways: Bool?
+    public var usageGateways: Bool?
     /// Its program is an agent runtime that connects to this machine's node; in a sandbox it gets a socket in its run
     /// directory (PERSONA_RUNTIME_SOCKET) that leads to the node's runtime.sock only. Needs runtime.
-    var agentRuntimes: Bool?
+    public var agentRuntimes: Bool?
     /// It receives the error and crash reports of the hub and the user's devices, scrubbed (no message text, tokens,
     /// user names, machine names or IP addresses). Needed by contributes.error_reports.
-    var errorReports: Bool?
-    var storage: ExtensionStoragePermission?
+    public var errorReports: Bool?
+    public var storage: ExtensionStoragePermission?
     /// It is handed the authorization links the user's Agents stop at (only links its contributes.auth_relay names,
     /// printed by the Agent's own command) to complete them with the account it is signed in with. Needed by
     /// contributes.auth_relay.
-    var authRelay: Bool?
+    public var authRelay: Bool?
 
-    init(network: [String]? = nil, hubApi: Bool? = nil, hub: [String]? = nil, launcherKeys: Bool? = nil, ghLogin: Bool? = nil, usageGateways: Bool? = nil, agentRuntimes: Bool? = nil, errorReports: Bool? = nil, storage: ExtensionStoragePermission? = nil, authRelay: Bool? = nil) {
+    public init(network: [String]? = nil, hubApi: Bool? = nil, hub: [String]? = nil, launcherKeys: Bool? = nil, ghLogin: Bool? = nil, usageGateways: Bool? = nil, agentRuntimes: Bool? = nil, errorReports: Bool? = nil, storage: ExtensionStoragePermission? = nil, authRelay: Bool? = nil) {
         self.network = network
         self.hubApi = hubApi
         self.hub = hub
@@ -734,7 +734,7 @@ nonisolated struct ExtensionPermissions: Codable, Hashable, Sendable {
         case authRelay = "auth_relay"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.network = try? c.decodeIfPresent([String].self, forKey: .network)
         self.hubApi = try? c.decodeIfPresent(Bool.self, forKey: .hubApi)
@@ -752,13 +752,13 @@ nonisolated struct ExtensionPermissions: Codable, Hashable, Sendable {
 /// Default-deny installation-scoped business data, separate from credentials. Only declared logical keys or literal
 /// prefixes ending in *; no filesystem, SQL, hub or network access. CAS and transactions use existing RPC limits and
 /// host quotas. Queue and blob methods additionally require their flags.
-nonisolated struct ExtensionStoragePermission: Codable, Hashable, Sendable {
-    var keys: [String]?
-    var patterns: [String]?
-    var queues: Bool?
-    var blobs: Bool?
+public nonisolated struct ExtensionStoragePermission: Codable, Hashable, Sendable {
+    public var keys: [String]?
+    public var patterns: [String]?
+    public var queues: Bool?
+    public var blobs: Bool?
 
-    init(keys: [String]? = nil, patterns: [String]? = nil, queues: Bool? = nil, blobs: Bool? = nil) {
+    public init(keys: [String]? = nil, patterns: [String]? = nil, queues: Bool? = nil, blobs: Bool? = nil) {
         self.keys = keys
         self.patterns = patterns
         self.queues = queues
@@ -772,7 +772,7 @@ nonisolated struct ExtensionStoragePermission: Codable, Hashable, Sendable {
         case blobs
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.keys = try? c.decodeIfPresent([String].self, forKey: .keys)
         self.patterns = try? c.decodeIfPresent([String].self, forKey: .patterns)
@@ -782,38 +782,38 @@ nonisolated struct ExtensionStoragePermission: Codable, Hashable, Sendable {
 }
 
 /// Contributions by extension point. A point this hub does not know installs with a warning, not taking effect.
-nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
-    var connectors: [ExtensionConnectorItem]?
-    var voice: [ExtensionNamedItem]?
-    var transcription: [ExtensionNamedItem]?
-    var computer: [ExtensionNamedItem]?
-    var browser: [ExtensionNamedItem]?
-    var iphone: [ExtensionNamedItem]?
-    var quota: [ExtensionQuotaItem]?
-    var providers: [ExtensionProviderItem]?
-    var api: [ExtensionAPIItem]?
-    var assistant: [ExtensionAssistantItem]?
-    var mcpServers: [ExtensionMCPServerItem]?
-    var ui: [ExtensionUIItem]?
-    var agentSources: [ExtensionAgentSourceItem]?
-    var channel: [ExtensionChannelItem]?
-    var events: [ExtensionEventsItem]?
-    var shortcuts: [ExtensionShortcutItem]?
-    var skills: [ExtensionSkillItem]?
-    var prompts: [ExtensionPromptItem]?
-    var themes: [ExtensionThemeItem]?
-    var looks: [ExtensionLookItem]?
-    var triageTemplates: [ExtensionTriageTemplateItem]?
-    var agentFilters: [ExtensionAgentFilterItem]?
-    var tunnels: [ExtensionTunnelItem]?
-    var errorReports: [ExtensionErrorReportsItem]?
-    var authRelay: [ExtensionAuthRelayItem]?
-    var secretProviders: [ExtensionSecretProviderItem]?
-    var messaging: [ExtensionMessagingItem]?
+public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
+    public var connectors: [ExtensionConnectorItem]?
+    public var voice: [ExtensionNamedItem]?
+    public var transcription: [ExtensionNamedItem]?
+    public var computer: [ExtensionNamedItem]?
+    public var browser: [ExtensionNamedItem]?
+    public var iphone: [ExtensionNamedItem]?
+    public var quota: [ExtensionQuotaItem]?
+    public var providers: [ExtensionProviderItem]?
+    public var api: [ExtensionAPIItem]?
+    public var assistant: [ExtensionAssistantItem]?
+    public var mcpServers: [ExtensionMCPServerItem]?
+    public var ui: [ExtensionUIItem]?
+    public var agentSources: [ExtensionAgentSourceItem]?
+    public var channel: [ExtensionChannelItem]?
+    public var events: [ExtensionEventsItem]?
+    public var shortcuts: [ExtensionShortcutItem]?
+    public var skills: [ExtensionSkillItem]?
+    public var prompts: [ExtensionPromptItem]?
+    public var themes: [ExtensionThemeItem]?
+    public var looks: [ExtensionLookItem]?
+    public var triageTemplates: [ExtensionTriageTemplateItem]?
+    public var agentFilters: [ExtensionAgentFilterItem]?
+    public var tunnels: [ExtensionTunnelItem]?
+    public var errorReports: [ExtensionErrorReportsItem]?
+    public var authRelay: [ExtensionAuthRelayItem]?
+    public var secretProviders: [ExtensionSecretProviderItem]?
+    public var messaging: [ExtensionMessagingItem]?
     /// Extra keys stay at this object's level on the wire; declared fields always win.
-    var additionalProperties: [String: JSONValue]
+    public var additionalProperties: [String: JSONValue]
 
-    init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
+    public init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
         self.connectors = connectors
         self.voice = voice
         self.transcription = transcription
@@ -874,7 +874,7 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         case messaging
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode([String: JSONValue].self)
         self.connectors = ExtensionWireJSON.decode([ExtensionConnectorItem].self, from: raw["connectors"])
         self.voice = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["voice"])
@@ -907,7 +907,7 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         additionalProperties = raw.filter { !known.contains($0.key) }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         let known: Set<String> = ["connectors", "voice", "transcription", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
         var fields = additionalProperties.filter { !known.contains($0.key) }
         if let value = connectors { fields["connectors"] = try ExtensionWireJSON.encode(value) }
@@ -946,13 +946,13 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
 /// skills. With source data (docs "Assistant content from the data directory"): a directory of the extension's data
 /// directory whose subdirectories with a SKILL.md are skills its program writes (Markdown files only, 256 KB and 32
 /// skills per extension).
-nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
+    public var id: String
     /// The directory, relative to the package (or to the data directory with source data).
-    var dir: String
-    var source: String?
+    public var dir: String
+    public var source: String?
 
-    init(id: String = "", dir: String = "", source: String? = nil) {
+    public init(id: String = "", dir: String = "", source: String? = nil) {
         self.id = id
         self.dir = dir
         self.source = source
@@ -964,7 +964,7 @@ nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
         case source
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.dir = (try? c.decodeIfPresent(String.self, forKey: .dir)) ?? ""
@@ -974,43 +974,43 @@ nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
 
 /// Where a skill's or a prompt's files are: package (the default) or data, the extension's data directory, which its
 /// program writes and upgrades keep.
-nonisolated enum ExtensionContentSource {
-    static let package = "package"
-    static let data = "data"
-    static let all = ["package", "data"]
+public nonisolated enum ExtensionContentSource {
+    public static let package = "package"
+    public static let data = "data"
+    public static let all = ["package", "data"]
 }
 
 /// Values of PromptKind.
-nonisolated enum ExtensionPromptKind {
-    static let instructions = "instructions"
-    static let quick = "quick"
-    static let projectContext = "project_context"
-    static let inboxContext = "inbox_context"
-    static let all = ["instructions", "quick", "project_context", "inbox_context"]
+public nonisolated enum ExtensionPromptKind {
+    public static let instructions = "instructions"
+    public static let quick = "quick"
+    public static let projectContext = "project_context"
+    public static let inboxContext = "inbox_context"
+    public static let all = ["instructions", "quick", "project_context", "inbox_context"]
 }
 
 /// A prompt: instructions (a .md of the package, or with source data of the data directory, added to the assistant's
 /// CLAUDE.md), quick (a template the apps offer in the message box), project_context (a directory of the data
 /// directory whose <project slug>.md files go into a new Agent's project background) or inbox_context (a .md of the
 /// data directory added to the Inbox's triage and draft prompts).
-nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
-    var id: String
-    var kind: String
-    var source: String?
+public nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var kind: String
+    public var source: String?
     /// instructions: the .md file (with source data: at most 6 KB, adopted at most once a day); inbox_context: the
     /// .md file (1 KB used).
-    var file: String?
+    public var file: String?
     /// project_context: the directory of <project slug>.md files (1.5 KB of each used).
-    var dir: String?
+    public var dir: String?
     /// inbox_context: a text file of sentences, one a line, a draft must not repeat word for word (64 KB used); only
     /// checked, never in a prompt.
-    var neverQuote: String?
+    public var neverQuote: String?
     /// quick: what the apps show.
-    var title: String?
+    public var title: String?
     /// quick: what goes into the message box.
-    var text: String?
+    public var text: String?
 
-    init(id: String = "", kind: String = "", source: String? = nil, file: String? = nil, dir: String? = nil, neverQuote: String? = nil, title: String? = nil, text: String? = nil) {
+    public init(id: String = "", kind: String = "", source: String? = nil, file: String? = nil, dir: String? = nil, neverQuote: String? = nil, title: String? = nil, text: String? = nil) {
         self.id = id
         self.kind = kind
         self.source = source
@@ -1032,7 +1032,7 @@ nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
@@ -1046,14 +1046,14 @@ nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
 }
 
 /// A scheme's role colors, #RRGGBB: accent (required), positive, caution, danger, ai.
-nonisolated struct ExtensionThemeColors: Codable, Hashable, Sendable {
-    var accent: String
-    var positive: String?
-    var caution: String?
-    var danger: String?
-    var ai: String?
+public nonisolated struct ExtensionThemeColors: Codable, Hashable, Sendable {
+    public var accent: String
+    public var positive: String?
+    public var caution: String?
+    public var danger: String?
+    public var ai: String?
 
-    init(accent: String = "", positive: String? = nil, caution: String? = nil, danger: String? = nil, ai: String? = nil) {
+    public init(accent: String = "", positive: String? = nil, caution: String? = nil, danger: String? = nil, ai: String? = nil) {
         self.accent = accent
         self.positive = positive
         self.caution = caution
@@ -1069,7 +1069,7 @@ nonisolated struct ExtensionThemeColors: Codable, Hashable, Sendable {
         case ai
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.accent = (try? c.decodeIfPresent(String.self, forKey: .accent)) ?? ""
         self.positive = try? c.decodeIfPresent(String.self, forKey: .positive)
@@ -1081,13 +1081,13 @@ nonisolated struct ExtensionThemeColors: Codable, Hashable, Sendable {
 
 /// A theme (Theme Color): the design system's role colors for light and dark; the apps check the contrast and do not
 /// offer one that fails.
-nonisolated struct ExtensionThemeItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var light: ExtensionThemeColors
-    var dark: ExtensionThemeColors
+public nonisolated struct ExtensionThemeItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var light: ExtensionThemeColors
+    public var dark: ExtensionThemeColors
 
-    init(id: String = "", name: String = "", light: ExtensionThemeColors = ExtensionThemeColors(), dark: ExtensionThemeColors = ExtensionThemeColors()) {
+    public init(id: String = "", name: String = "", light: ExtensionThemeColors = ExtensionThemeColors(), dark: ExtensionThemeColors = ExtensionThemeColors()) {
         self.id = id
         self.name = name
         self.light = light
@@ -1101,7 +1101,7 @@ nonisolated struct ExtensionThemeItem: Codable, Hashable, Sendable {
         case dark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1111,39 +1111,39 @@ nonisolated struct ExtensionThemeItem: Codable, Hashable, Sendable {
 }
 
 /// The look every app draws itself: Mochi (the default).
-nonisolated enum ExtensionBuiltinLook {
-    static let persona = "persona"
-    static let all = ["persona"]
+public nonisolated enum ExtensionBuiltinLook {
+    public static let persona = "persona"
+    public static let all = ["persona"]
 }
 
 /// A text in the other languages, by code (docs/protocol/i18n.md): only zh-Hans, en and ja, each 1 to 40 characters
 /// (the hub checks).
-nonisolated struct ExtensionLookTexts: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionLookTexts: Codable, Hashable, Sendable {
     /// Extra keys stay at this object's level on the wire; declared fields always win.
-    var additionalProperties: [String: JSONValue]
+    public var additionalProperties: [String: JSONValue]
 
-    init(additionalProperties: [String: JSONValue] = [:]) {
+    public init(additionalProperties: [String: JSONValue] = [:]) {
         self.additionalProperties = additionalProperties
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         additionalProperties = try decoder.singleValueContainer().decode([String: JSONValue].self)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(additionalProperties)
     }
 }
 
 /// The face on dark backgrounds; what it leaves out is the light one's.
-nonisolated struct ExtensionLookAvatarDark: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionLookAvatarDark: Codable, Hashable, Sendable {
     /// Side in pixels → a square PNG of the package.
-    var sizes: [String: String]?
+    public var sizes: [String: String]?
     /// An SVG of the package (the hub cleans it).
-    var svg: String?
+    public var svg: String?
 
-    init(sizes: [String: String]? = nil, svg: String? = nil) {
+    public init(sizes: [String: String]? = nil, svg: String? = nil) {
         self.sizes = sizes
         self.svg = svg
     }
@@ -1153,7 +1153,7 @@ nonisolated struct ExtensionLookAvatarDark: Codable, Hashable, Sendable {
         case svg
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.sizes = try? c.decodeIfPresent([String: String].self, forKey: .sizes)
         self.svg = try? c.decodeIfPresent(String.self, forKey: .svg)
@@ -1161,16 +1161,16 @@ nonisolated struct ExtensionLookAvatarDark: Codable, Hashable, Sendable {
 }
 
 /// The face: square PNGs by their side in pixels (16 to 1024, at least one), an SVG, and the same for dark mode.
-nonisolated struct ExtensionLookAvatar: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionLookAvatar: Codable, Hashable, Sendable {
     /// Side in pixels → a square PNG of the package.
-    var sizes: [String: String]
+    public var sizes: [String: String]
     /// An SVG of the package (the hub cleans it: no scripts, nothing from outside it).
-    var svg: String?
+    public var svg: String?
     /// The share of the circle what matters stays inside.
-    var safe: Double?
-    var dark: ExtensionLookAvatarDark?
+    public var safe: Double?
+    public var dark: ExtensionLookAvatarDark?
 
-    init(sizes: [String: String] = [:], svg: String? = nil, safe: Double? = nil, dark: ExtensionLookAvatarDark? = nil) {
+    public init(sizes: [String: String] = [:], svg: String? = nil, safe: Double? = nil, dark: ExtensionLookAvatarDark? = nil) {
         self.sizes = sizes
         self.svg = svg
         self.safe = safe
@@ -1184,7 +1184,7 @@ nonisolated struct ExtensionLookAvatar: Codable, Hashable, Sendable {
         case dark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.sizes = (try? c.decodeIfPresent([String: String].self, forKey: .sizes)) ?? [:]
         self.svg = try? c.decodeIfPresent(String.self, forKey: .svg)
@@ -1194,14 +1194,14 @@ nonisolated struct ExtensionLookAvatar: Codable, Hashable, Sendable {
 }
 
 /// An appearance's colors, #RRGGBB (docs/apple/persona.md "Color scheme", the apps' PersonaPalette).
-nonisolated struct ExtensionLookPalette: Codable, Hashable, Sendable {
-    var primary: String?
-    var secondary: String?
-    var accent: String?
-    var bubble: String?
-    var bubbleText: String?
+public nonisolated struct ExtensionLookPalette: Codable, Hashable, Sendable {
+    public var primary: String?
+    public var secondary: String?
+    public var accent: String?
+    public var bubble: String?
+    public var bubbleText: String?
 
-    init(primary: String? = nil, secondary: String? = nil, accent: String? = nil, bubble: String? = nil, bubbleText: String? = nil) {
+    public init(primary: String? = nil, secondary: String? = nil, accent: String? = nil, bubble: String? = nil, bubbleText: String? = nil) {
         self.primary = primary
         self.secondary = secondary
         self.accent = accent
@@ -1217,7 +1217,7 @@ nonisolated struct ExtensionLookPalette: Codable, Hashable, Sendable {
         case bubbleText = "bubble_text"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.primary = try? c.decodeIfPresent(String.self, forKey: .primary)
         self.secondary = try? c.decodeIfPresent(String.self, forKey: .secondary)
@@ -1227,11 +1227,11 @@ nonisolated struct ExtensionLookPalette: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionLookColors: Codable, Hashable, Sendable {
-    var light: ExtensionLookPalette?
-    var dark: ExtensionLookPalette?
+public nonisolated struct ExtensionLookColors: Codable, Hashable, Sendable {
+    public var light: ExtensionLookPalette?
+    public var dark: ExtensionLookPalette?
 
-    init(light: ExtensionLookPalette? = nil, dark: ExtensionLookPalette? = nil) {
+    public init(light: ExtensionLookPalette? = nil, dark: ExtensionLookPalette? = nil) {
         self.light = light
         self.dark = dark
     }
@@ -1241,19 +1241,19 @@ nonisolated struct ExtensionLookColors: Codable, Hashable, Sendable {
         case dark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.light = try? c.decodeIfPresent(ExtensionLookPalette.self, forKey: .light)
         self.dark = try? c.decodeIfPresent(ExtensionLookPalette.self, forKey: .dark)
     }
 }
 
-nonisolated struct ExtensionLookDotState: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionLookDotState: Codable, Hashable, Sendable {
     /// An APNG (or a still PNG) of the package.
-    var file: String
-    var fps: Double?
+    public var file: String
+    public var fps: Double?
 
-    init(file: String = "", fps: Double? = nil) {
+    public init(file: String = "", fps: Double? = nil) {
         self.file = file
         self.fps = fps
     }
@@ -1263,7 +1263,7 @@ nonisolated struct ExtensionLookDotState: Codable, Hashable, Sendable {
         case fps
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.file = (try? c.decodeIfPresent(String.self, forKey: .file)) ?? ""
         self.fps = try? c.decodeIfPresent(Double.self, forKey: .fps)
@@ -1271,14 +1271,14 @@ nonisolated struct ExtensionLookDotState: Codable, Hashable, Sendable {
 }
 
 /// The dot's states; idle is required.
-nonisolated struct ExtensionLookDotStates: Codable, Hashable, Sendable {
-    var idle: ExtensionLookDotState
-    var thinking: ExtensionLookDotState?
-    var working: ExtensionLookDotState?
-    var needsYou: ExtensionLookDotState?
-    var offline: ExtensionLookDotState?
+public nonisolated struct ExtensionLookDotStates: Codable, Hashable, Sendable {
+    public var idle: ExtensionLookDotState
+    public var thinking: ExtensionLookDotState?
+    public var working: ExtensionLookDotState?
+    public var needsYou: ExtensionLookDotState?
+    public var offline: ExtensionLookDotState?
 
-    init(idle: ExtensionLookDotState = ExtensionLookDotState(), thinking: ExtensionLookDotState? = nil, working: ExtensionLookDotState? = nil, needsYou: ExtensionLookDotState? = nil, offline: ExtensionLookDotState? = nil) {
+    public init(idle: ExtensionLookDotState = ExtensionLookDotState(), thinking: ExtensionLookDotState? = nil, working: ExtensionLookDotState? = nil, needsYou: ExtensionLookDotState? = nil, offline: ExtensionLookDotState? = nil) {
         self.idle = idle
         self.thinking = thinking
         self.working = working
@@ -1294,7 +1294,7 @@ nonisolated struct ExtensionLookDotStates: Codable, Hashable, Sendable {
         case offline
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.idle = (try? c.decodeIfPresent(ExtensionLookDotState.self, forKey: .idle)) ?? ExtensionLookDotState()
         self.thinking = try? c.decodeIfPresent(ExtensionLookDotState.self, forKey: .thinking)
@@ -1305,12 +1305,12 @@ nonisolated struct ExtensionLookDotStates: Codable, Hashable, Sendable {
 }
 
 /// The animated dot in the Persona tab's top bar; without it the hub takes the largest avatar PNG as idle.
-nonisolated struct ExtensionLookDot: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionLookDot: Codable, Hashable, Sendable {
     /// The frames' side in pixels.
-    var size: Int?
-    var states: ExtensionLookDotStates
+    public var size: Int?
+    public var states: ExtensionLookDotStates
 
-    init(size: Int? = nil, states: ExtensionLookDotStates = ExtensionLookDotStates()) {
+    public init(size: Int? = nil, states: ExtensionLookDotStates = ExtensionLookDotStates()) {
         self.size = size
         self.states = states
     }
@@ -1320,7 +1320,7 @@ nonisolated struct ExtensionLookDot: Codable, Hashable, Sendable {
         case states
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.size = try? c.decodeIfPresent(Int.self, forKey: .size)
         self.states = (try? c.decodeIfPresent(ExtensionLookDotStates.self, forKey: .states)) ?? ExtensionLookDotStates()
@@ -1329,18 +1329,18 @@ nonisolated struct ExtensionLookDot: Codable, Hashable, Sendable {
 
 /// A look (docs/extensions/extensions.md "Avatars"): Persona's name, face, colors and dot, served as a persona
 /// package. app_icon_fallback is the built-in icon used where only the app's own icons can be shown.
-nonisolated struct ExtensionLookItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var names: ExtensionLookTexts?
-    var subtitle: String?
-    var subtitles: ExtensionLookTexts?
-    var avatar: ExtensionLookAvatar
-    var colors: ExtensionLookColors?
-    var dot: ExtensionLookDot?
-    var appIconFallback: String
+public nonisolated struct ExtensionLookItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var names: ExtensionLookTexts?
+    public var subtitle: String?
+    public var subtitles: ExtensionLookTexts?
+    public var avatar: ExtensionLookAvatar
+    public var colors: ExtensionLookColors?
+    public var dot: ExtensionLookDot?
+    public var appIconFallback: String
 
-    init(id: String = "", name: String = "", names: ExtensionLookTexts? = nil, subtitle: String? = nil, subtitles: ExtensionLookTexts? = nil, avatar: ExtensionLookAvatar = ExtensionLookAvatar(), colors: ExtensionLookColors? = nil, dot: ExtensionLookDot? = nil, appIconFallback: String = "") {
+    public init(id: String = "", name: String = "", names: ExtensionLookTexts? = nil, subtitle: String? = nil, subtitles: ExtensionLookTexts? = nil, avatar: ExtensionLookAvatar = ExtensionLookAvatar(), colors: ExtensionLookColors? = nil, dot: ExtensionLookDot? = nil, appIconFallback: String = "") {
         self.id = id
         self.name = name
         self.names = names
@@ -1364,7 +1364,7 @@ nonisolated struct ExtensionLookItem: Codable, Hashable, Sendable {
         case appIconFallback = "app_icon_fallback"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1379,12 +1379,12 @@ nonisolated struct ExtensionLookItem: Codable, Hashable, Sendable {
 }
 
 /// A template of an inbox source's triage rules (triage_rules): settings offer it.
-nonisolated struct ExtensionTriageTemplateItem: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var text: String
+public nonisolated struct ExtensionTriageTemplateItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var text: String
 
-    init(id: String = "", title: String = "", text: String = "") {
+    public init(id: String = "", title: String = "", text: String = "") {
         self.id = id
         self.title = title
         self.text = text
@@ -1396,7 +1396,7 @@ nonisolated struct ExtensionTriageTemplateItem: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -1406,16 +1406,16 @@ nonisolated struct ExtensionTriageTemplateItem: Codable, Hashable, Sendable {
 
 /// Authorization links it completes for the user's Agents (auth_relay.complete): links on these hosts and paths,
 /// https only. Needs the program to speak the protocol and permissions.auth_relay.
-nonisolated struct ExtensionAuthRelayItem: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionAuthRelayItem: Codable, Hashable, Sendable {
+    public var id: String
     /// What it completes, in a few words (shown in the extension's details).
-    var name: String?
+    public var name: String?
     /// The pages' exact host names.
-    var hosts: [String]
+    public var hosts: [String]
     /// The pages' exact paths (a trailing / is ignored).
-    var paths: [String]
+    public var paths: [String]
 
-    init(id: String = "", name: String? = nil, hosts: [String] = [], paths: [String] = []) {
+    public init(id: String = "", name: String? = nil, hosts: [String] = [], paths: [String] = []) {
         self.id = id
         self.name = name
         self.hosts = hosts
@@ -1429,7 +1429,7 @@ nonisolated struct ExtensionAuthRelayItem: Codable, Hashable, Sendable {
         case paths
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
@@ -1441,14 +1441,14 @@ nonisolated struct ExtensionAuthRelayItem: Codable, Hashable, Sendable {
 /// Secret values it supplies for references of its schemes (op://vault/item/field): the manager calls
 /// secrets.describe and secrets.resolve when a setting holds such a reference or the user approves handing one to an
 /// Agent run. Needs the program to speak the protocol. A scheme another installed extension claims fails the install.
-nonisolated struct ExtensionSecretProviderItem: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionSecretProviderItem: Codable, Hashable, Sendable {
+    public var id: String
     /// Whose secrets these are, in a few words (1Password): the settings say From <name>.
-    var name: String
+    public var name: String
     /// The reference schemes it resolves, without :// (op).
-    var schemes: [String]
+    public var schemes: [String]
 
-    init(id: String = "", name: String = "", schemes: [String] = []) {
+    public init(id: String = "", name: String = "", schemes: [String] = []) {
         self.id = id
         self.name = name
         self.schemes = schemes
@@ -1460,7 +1460,7 @@ nonisolated struct ExtensionSecretProviderItem: Codable, Hashable, Sendable {
         case schemes
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1470,12 +1470,12 @@ nonisolated struct ExtensionSecretProviderItem: Codable, Hashable, Sendable {
 
 /// It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the
 /// program to speak the protocol, on_startup and permissions.error_reports.
-nonisolated struct ExtensionErrorReportsItem: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionErrorReportsItem: Codable, Hashable, Sendable {
+    public var id: String
     /// Only reports from these; omitted: all.
-    var sources: [String]?
+    public var sources: [String]?
 
-    init(id: String = "", sources: [String]? = nil) {
+    public init(id: String = "", sources: [String]? = nil) {
         self.id = id
         self.sources = sources
     }
@@ -1485,7 +1485,7 @@ nonisolated struct ExtensionErrorReportsItem: Codable, Hashable, Sendable {
         case sources
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.sources = try? c.decodeIfPresent([String].self, forKey: .sources)
@@ -1495,11 +1495,11 @@ nonisolated struct ExtensionErrorReportsItem: Codable, Hashable, Sendable {
 /// A tunnel the apps can reach this hub through when its own addresses do not answer (docs "In-app tunnels"): an
 /// in-app tunnel core built into the app, going to the configuration's target_host and target_port; an optional
 /// integer ssh_port is the hub machine's SSH port, for an SSH tunnel the app dials through this tunnel.
-nonisolated struct ExtensionTunnelItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
+public nonisolated struct ExtensionTunnelItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
 
-    init(id: String = "", name: String = "") {
+    public init(id: String = "", name: String = "") {
         self.id = id
         self.name = name
     }
@@ -1509,7 +1509,7 @@ nonisolated struct ExtensionTunnelItem: Codable, Hashable, Sendable {
         case name
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1518,25 +1518,25 @@ nonisolated struct ExtensionTunnelItem: Codable, Hashable, Sendable {
 
 /// Agent sessions kept out of Agents (docs "Agent filters"): a session goes when it is one of agents and any of the
 /// matchers fits it.
-nonisolated struct ExtensionAgentFilterItem: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionAgentFilterItem: Codable, Hashable, Sendable {
+    public var id: String
     /// What the extension's contributions list calls it.
-    var title: String?
+    public var title: String?
     /// A boolean field of the configuration: the filter holds only while it is true, and that field is its only
     /// switch. Without it the filter holds while the extension is on.
-    var when: String?
+    public var when: String?
     /// Whose sessions: Claude Code, Codex; none: both.
-    var agents: [String]?
+    public var agents: [String]?
     /// Codex: session_meta.originator of the rollout, exactly.
-    var originators: [String]?
+    public var originators: [String]?
     /// Claude Code: a directory the session was given besides its own (additionalWorkingDirectories), this or under
     /// it; ~/ is the home directory.
-    var addedDirs: [String]?
+    public var addedDirs: [String]?
     /// The first user message starts with one of these (leading blanks ignored): a fallback for sessions without a
     /// marker.
-    var firstMessagePrefixes: [String]?
+    public var firstMessagePrefixes: [String]?
 
-    init(id: String = "", title: String? = nil, when: String? = nil, agents: [String]? = nil, originators: [String]? = nil, addedDirs: [String]? = nil, firstMessagePrefixes: [String]? = nil) {
+    public init(id: String = "", title: String? = nil, when: String? = nil, agents: [String]? = nil, originators: [String]? = nil, addedDirs: [String]? = nil, firstMessagePrefixes: [String]? = nil) {
         self.id = id
         self.title = title
         self.when = when
@@ -1556,7 +1556,7 @@ nonisolated struct ExtensionAgentFilterItem: Codable, Hashable, Sendable {
         case firstMessagePrefixes = "first_message_prefixes"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -1569,26 +1569,26 @@ nonisolated struct ExtensionAgentFilterItem: Codable, Hashable, Sendable {
 }
 
 /// The connector protocol's manifest (docs/protocol/connector-protocol.md).
-nonisolated struct ExtensionConnectorItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var capabilities: [String]
-    var hosts: [String]?
-    var agentTools: [String]?
-    var unlisted: [String]?
-    var confirmAlways: [String]?
-    var pollSeconds: Int?
-    var kinds: [String]?
-    var kindDescriptions: [String: String]?
-    var archiveSources: [String]?
-    var metaDescription: String?
-    var cli: String?
+public nonisolated struct ExtensionConnectorItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var capabilities: [String]
+    public var hosts: [String]?
+    public var agentTools: [String]?
+    public var unlisted: [String]?
+    public var confirmAlways: [String]?
+    public var pollSeconds: Int?
+    public var kinds: [String]?
+    public var kindDescriptions: [String: String]?
+    public var archiveSources: [String]?
+    public var metaDescription: String?
+    public var cli: String?
     /// The connector sends messages in the user's name by itself, not through the hub's write gate (a read tool that
     /// also replies, say). Its program may then record each one in the sent-as-user ledger with sent.record, and the
     /// install preview says so.
-    var sendsAsUser: Bool?
+    public var sendsAsUser: Bool?
 
-    init(id: String = "", name: String = "", capabilities: [String] = [], hosts: [String]? = nil, agentTools: [String]? = nil, unlisted: [String]? = nil, confirmAlways: [String]? = nil, pollSeconds: Int? = nil, kinds: [String]? = nil, kindDescriptions: [String: String]? = nil, archiveSources: [String]? = nil, metaDescription: String? = nil, cli: String? = nil, sendsAsUser: Bool? = nil) {
+    public init(id: String = "", name: String = "", capabilities: [String] = [], hosts: [String]? = nil, agentTools: [String]? = nil, unlisted: [String]? = nil, confirmAlways: [String]? = nil, pollSeconds: Int? = nil, kinds: [String]? = nil, kindDescriptions: [String: String]? = nil, archiveSources: [String]? = nil, metaDescription: String? = nil, cli: String? = nil, sendsAsUser: Bool? = nil) {
         self.id = id
         self.name = name
         self.capabilities = capabilities
@@ -1622,7 +1622,7 @@ nonisolated struct ExtensionConnectorItem: Codable, Hashable, Sendable {
         case sendsAsUser = "sends_as_user"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1642,11 +1642,11 @@ nonisolated struct ExtensionConnectorItem: Codable, Hashable, Sendable {
 }
 
 /// A contribution with only an id and a name: voice, transcription, computer, browser.
-nonisolated struct ExtensionNamedItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String?
+public nonisolated struct ExtensionNamedItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String?
 
-    init(id: String = "", name: String? = nil) {
+    public init(id: String = "", name: String? = nil) {
         self.id = id
         self.name = name
     }
@@ -1656,19 +1656,19 @@ nonisolated struct ExtensionNamedItem: Codable, Hashable, Sendable {
         case name
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
     }
 }
 
-nonisolated struct ExtensionQuotaItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var hosts: [String]?
+public nonisolated struct ExtensionQuotaItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var hosts: [String]?
 
-    init(id: String = "", name: String = "", hosts: [String]? = nil) {
+    public init(id: String = "", name: String = "", hosts: [String]? = nil) {
         self.id = id
         self.name = name
         self.hosts = hosts
@@ -1680,7 +1680,7 @@ nonisolated struct ExtensionQuotaItem: Codable, Hashable, Sendable {
         case hosts
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1688,20 +1688,20 @@ nonisolated struct ExtensionQuotaItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionProviderItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var description: String?
-    var kind: String?
-    var api: String?
-    var baseUrl: String
-    var model: String?
-    var smallModel: String?
-    var models: [ExtensionProviderModel]?
-    var dynamicModels: Bool?
-    var keyHint: String?
+public nonisolated struct ExtensionProviderItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var description: String?
+    public var kind: String?
+    public var api: String?
+    public var baseUrl: String
+    public var model: String?
+    public var smallModel: String?
+    public var models: [ExtensionProviderModel]?
+    public var dynamicModels: Bool?
+    public var keyHint: String?
 
-    init(id: String = "", name: String = "", description: String? = nil, kind: String? = nil, api: String? = nil, baseUrl: String = "", model: String? = nil, smallModel: String? = nil, models: [ExtensionProviderModel]? = nil, dynamicModels: Bool? = nil, keyHint: String? = nil) {
+    public init(id: String = "", name: String = "", description: String? = nil, kind: String? = nil, api: String? = nil, baseUrl: String = "", model: String? = nil, smallModel: String? = nil, models: [ExtensionProviderModel]? = nil, dynamicModels: Bool? = nil, keyHint: String? = nil) {
         self.id = id
         self.name = name
         self.description = description
@@ -1729,7 +1729,7 @@ nonisolated struct ExtensionProviderItem: Codable, Hashable, Sendable {
         case keyHint = "key_hint"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1745,11 +1745,11 @@ nonisolated struct ExtensionProviderItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionProviderModel: Codable, Hashable, Sendable {
-    var id: String
-    var name: String?
+public nonisolated struct ExtensionProviderModel: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String?
 
-    init(id: String = "", name: String? = nil) {
+    public init(id: String = "", name: String? = nil) {
         self.id = id
         self.name = name
     }
@@ -1759,21 +1759,21 @@ nonisolated struct ExtensionProviderModel: Codable, Hashable, Sendable {
         case name
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
     }
 }
 
-nonisolated struct ExtensionAPIItem: Codable, Hashable, Sendable {
-    var id: String
-    var prefix: String
-    var features: [String]?
-    var events: [String]?
-    var receipts: [ExtensionAPIReceipt]?
+public nonisolated struct ExtensionAPIItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var prefix: String
+    public var features: [String]?
+    public var events: [String]?
+    public var receipts: [ExtensionAPIReceipt]?
 
-    init(id: String = "", prefix: String = "", features: [String]? = nil, events: [String]? = nil, receipts: [ExtensionAPIReceipt]? = nil) {
+    public init(id: String = "", prefix: String = "", features: [String]? = nil, events: [String]? = nil, receipts: [ExtensionAPIReceipt]? = nil) {
         self.id = id
         self.prefix = prefix
         self.features = features
@@ -1789,7 +1789,7 @@ nonisolated struct ExtensionAPIItem: Codable, Hashable, Sendable {
         case receipts
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.prefix = (try? c.decodeIfPresent(String.self, forKey: .prefix)) ?? ""
@@ -1799,12 +1799,12 @@ nonisolated struct ExtensionAPIItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionAPIReceipt: Codable, Hashable, Sendable {
-    var method: String
-    var path: String
-    var kind: String
+public nonisolated struct ExtensionAPIReceipt: Codable, Hashable, Sendable {
+    public var method: String
+    public var path: String
+    public var kind: String
 
-    init(method: String = "", path: String = "", kind: String = "") {
+    public init(method: String = "", path: String = "", kind: String = "") {
         self.method = method
         self.path = path
         self.kind = kind
@@ -1816,7 +1816,7 @@ nonisolated struct ExtensionAPIReceipt: Codable, Hashable, Sendable {
         case kind
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.method = (try? c.decodeIfPresent(String.self, forKey: .method)) ?? ""
         self.path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
@@ -1824,13 +1824,13 @@ nonisolated struct ExtensionAPIReceipt: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
-    var id: String
-    var skills: [String]?
-    var instructions: String?
-    var gate: String?
+public nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var skills: [String]?
+    public var instructions: String?
+    public var gate: String?
 
-    init(id: String = "", skills: [String]? = nil, instructions: String? = nil, gate: String? = nil) {
+    public init(id: String = "", skills: [String]? = nil, instructions: String? = nil, gate: String? = nil) {
         self.id = id
         self.skills = skills
         self.instructions = instructions
@@ -1844,7 +1844,7 @@ nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
         case gate
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.skills = try? c.decodeIfPresent([String].self, forKey: .skills)
@@ -1856,23 +1856,23 @@ nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
 /// An MCP server for the Claude assistant (docs "MCP servers"): a command line on the assistant's machine, its tools
 /// as mcp__<id>__<tool>. The command reads its own configuration; Persona adds nothing to its environment. Not a
 /// shell or an interpreter.
-nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
     /// The server's name for the assistant; not persona or persona.
-    var id: String
+    public var id: String
     /// Looked up on PATH, then in ~/bin.
-    var command: String
+    public var command: String
     /// A PERSONA_ variable (PERSONA_ read too) that, when set, replaces the lookup: a path, or "" / 0 / off / false
     /// to leave the server out.
-    var env: String?
-    var args: [String]?
+    public var env: String?
+    public var args: [String]?
     /// Words `<command> --help` must print; otherwise the server is left out.
-    var requires: [String]?
+    public var requires: [String]?
     /// Tools that run without asking.
-    var allow: [String]?
+    public var allow: [String]?
     /// Tools never callable. Any other tool goes by the conversation's permission mode.
-    var deny: [String]?
+    public var deny: [String]?
 
-    init(id: String = "", command: String = "", env: String? = nil, args: [String]? = nil, requires: [String]? = nil, allow: [String]? = nil, deny: [String]? = nil) {
+    public init(id: String = "", command: String = "", env: String? = nil, args: [String]? = nil, requires: [String]? = nil, allow: [String]? = nil, deny: [String]? = nil) {
         self.id = id
         self.command = command
         self.env = env
@@ -1892,7 +1892,7 @@ nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
         case deny
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.command = (try? c.decodeIfPresent(String.self, forKey: .command)) ?? ""
@@ -1905,24 +1905,24 @@ nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
 }
 
 /// A place in the apps the extension draws (docs "UI slots").
-nonisolated struct ExtensionUIItem: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var placement: String
+public nonisolated struct ExtensionUIItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var placement: String
     /// launcher_section only.
-    var hosts: [String]?
+    public var hosts: [String]?
     /// nav_page only.
-    var icon: String?
+    public var icon: String?
     /// overview_card, capsule_card and widget only: a nav_page or extension_page of the same extension.
-    var opens: String?
+    public var opens: String?
     /// inbox_item only: one of the extension's own connectors.
-    var connector: String?
+    public var connector: String?
     /// widget only (and needed there): the sizes it can be drawn at.
-    var families: [String]?
+    public var families: [String]?
     /// widget only: how often the widget is drawn again on its own (30 when not said).
-    var refreshMinutes: Int?
+    public var refreshMinutes: Int?
 
-    init(id: String = "", title: String = "", placement: String = "", hosts: [String]? = nil, icon: String? = nil, opens: String? = nil, connector: String? = nil, families: [String]? = nil, refreshMinutes: Int? = nil) {
+    public init(id: String = "", title: String = "", placement: String = "", hosts: [String]? = nil, icon: String? = nil, opens: String? = nil, connector: String? = nil, families: [String]? = nil, refreshMinutes: Int? = nil) {
         self.id = id
         self.title = title
         self.placement = placement
@@ -1946,7 +1946,7 @@ nonisolated struct ExtensionUIItem: Codable, Hashable, Sendable {
         case refreshMinutes = "refresh_minutes"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -1960,12 +1960,12 @@ nonisolated struct ExtensionUIItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionAgentSourceItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var providers: [String]?
+public nonisolated struct ExtensionAgentSourceItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var providers: [String]?
 
-    init(id: String = "", name: String = "", providers: [String]? = nil) {
+    public init(id: String = "", name: String = "", providers: [String]? = nil) {
         self.id = id
         self.name = name
         self.providers = providers
@@ -1977,7 +1977,7 @@ nonisolated struct ExtensionAgentSourceItem: Codable, Hashable, Sendable {
         case providers
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -1985,16 +1985,16 @@ nonisolated struct ExtensionAgentSourceItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionChannelItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var kind: String
-    var connector: String?
-    var bind: String?
-    var description: String?
-    var capabilities: ExtensionChannelCapabilities
+public nonisolated struct ExtensionChannelItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var kind: String
+    public var connector: String?
+    public var bind: String?
+    public var description: String?
+    public var capabilities: ExtensionChannelCapabilities
 
-    init(id: String = "", name: String = "", kind: String = "", connector: String? = nil, bind: String? = nil, description: String? = nil, capabilities: ExtensionChannelCapabilities = ExtensionChannelCapabilities()) {
+    public init(id: String = "", name: String = "", kind: String = "", connector: String? = nil, bind: String? = nil, description: String? = nil, capabilities: ExtensionChannelCapabilities = ExtensionChannelCapabilities()) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -2014,7 +2014,7 @@ nonisolated struct ExtensionChannelItem: Codable, Hashable, Sendable {
         case capabilities
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -2026,19 +2026,19 @@ nonisolated struct ExtensionChannelItem: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionChannelCapabilities: Codable, Hashable, Sendable {
-    var imagesIn: Bool?
-    var filesIn: Bool?
-    var voiceIn: Bool?
-    var format: String?
-    var maxText: Int?
-    var asks: String?
-    var push: Bool?
-    var typing: Bool?
-    var progress: Bool?
-    var threads: Bool?
+public nonisolated struct ExtensionChannelCapabilities: Codable, Hashable, Sendable {
+    public var imagesIn: Bool?
+    public var filesIn: Bool?
+    public var voiceIn: Bool?
+    public var format: String?
+    public var maxText: Int?
+    public var asks: String?
+    public var push: Bool?
+    public var typing: Bool?
+    public var progress: Bool?
+    public var threads: Bool?
 
-    init(imagesIn: Bool? = nil, filesIn: Bool? = nil, voiceIn: Bool? = nil, format: String? = nil, maxText: Int? = nil, asks: String? = nil, push: Bool? = nil, typing: Bool? = nil, progress: Bool? = nil, threads: Bool? = nil) {
+    public init(imagesIn: Bool? = nil, filesIn: Bool? = nil, voiceIn: Bool? = nil, format: String? = nil, maxText: Int? = nil, asks: String? = nil, push: Bool? = nil, typing: Bool? = nil, progress: Bool? = nil, threads: Bool? = nil) {
         self.imagesIn = imagesIn
         self.filesIn = filesIn
         self.voiceIn = voiceIn
@@ -2064,7 +2064,7 @@ nonisolated struct ExtensionChannelCapabilities: Codable, Hashable, Sendable {
         case threads
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.imagesIn = try? c.decodeIfPresent(Bool.self, forKey: .imagesIn)
         self.filesIn = try? c.decodeIfPresent(Bool.self, forKey: .filesIn)
@@ -2079,11 +2079,11 @@ nonisolated struct ExtensionChannelCapabilities: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionEventsItem: Codable, Hashable, Sendable {
-    var id: String
-    var subscribe: [String]
+public nonisolated struct ExtensionEventsItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var subscribe: [String]
 
-    init(id: String = "", subscribe: [String] = []) {
+    public init(id: String = "", subscribe: [String] = []) {
         self.id = id
         self.subscribe = subscribe
     }
@@ -2093,7 +2093,7 @@ nonisolated struct ExtensionEventsItem: Codable, Hashable, Sendable {
         case subscribe
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.subscribe = (try? c.decodeIfPresent([String].self, forKey: .subscribe)) ?? []
@@ -2102,15 +2102,15 @@ nonisolated struct ExtensionEventsItem: Codable, Hashable, Sendable {
 
 /// An action of the extension the system runs (docs "System placements"): Shortcuts and Siri on iPhone, Mac and Apple
 /// Watch. The hub asks the extension shortcut.run with the values.
-nonisolated struct ExtensionShortcutItem: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var description: String?
-    var params: [ExtensionShortcutParam]?
+public nonisolated struct ExtensionShortcutItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var description: String?
+    public var params: [ExtensionShortcutParam]?
     /// A whole page of the same extension (nav_page or extension_page) the app opens to show more of the result.
-    var ui: String?
+    public var ui: String?
 
-    init(id: String = "", title: String = "", description: String? = nil, params: [ExtensionShortcutParam]? = nil, ui: String? = nil) {
+    public init(id: String = "", title: String = "", description: String? = nil, params: [ExtensionShortcutParam]? = nil, ui: String? = nil) {
         self.id = id
         self.title = title
         self.description = description
@@ -2126,7 +2126,7 @@ nonisolated struct ExtensionShortcutItem: Codable, Hashable, Sendable {
         case ui
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -2137,15 +2137,15 @@ nonisolated struct ExtensionShortcutItem: Codable, Hashable, Sendable {
 }
 
 /// A value the shortcut asks for; it reaches the extension as a string (a toggle's "true" / "false").
-nonisolated struct ExtensionShortcutParam: Codable, Hashable, Sendable {
-    var name: String
-    var title: String
-    var kind: String
+public nonisolated struct ExtensionShortcutParam: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var kind: String
     /// choice only.
-    var choices: [ExtensionChoice]?
-    var required: Bool?
+    public var choices: [ExtensionChoice]?
+    public var required: Bool?
 
-    init(name: String = "", title: String = "", kind: String = "", choices: [ExtensionChoice]? = nil, required: Bool? = nil) {
+    public init(name: String = "", title: String = "", kind: String = "", choices: [ExtensionChoice]? = nil, required: Bool? = nil) {
         self.name = name
         self.title = title
         self.kind = kind
@@ -2161,7 +2161,7 @@ nonisolated struct ExtensionShortcutParam: Codable, Hashable, Sendable {
         case required
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -2172,24 +2172,24 @@ nonisolated struct ExtensionShortcutParam: Codable, Hashable, Sendable {
 }
 
 /// Values of ShortcutParamKind.
-nonisolated enum ExtensionShortcutParamKind {
-    static let text = "text"
-    static let number = "number"
-    static let toggle = "toggle"
-    static let choice = "choice"
-    static let all = ["text", "number", "toggle", "choice"]
+public nonisolated enum ExtensionShortcutParamKind {
+    public static let text = "text"
+    public static let number = "number"
+    public static let toggle = "toggle"
+    public static let choice = "choice"
+    public static let all = ["text", "number", "toggle", "choice"]
 }
 
 /// One line: a request {id, method, params}, an answer {id, result} or {id, error}, or an event {event, params}.
-nonisolated struct ExtensionFrame: Codable, Hashable, Sendable {
-    var id: String?
-    var method: String?
-    var event: String?
-    var params: JSONValue?
-    var result: JSONValue?
-    var error: ExtensionRPCError?
+public nonisolated struct ExtensionFrame: Codable, Hashable, Sendable {
+    public var id: String?
+    public var method: String?
+    public var event: String?
+    public var params: JSONValue?
+    public var result: JSONValue?
+    public var error: ExtensionRPCError?
 
-    init(id: String? = nil, method: String? = nil, event: String? = nil, params: JSONValue? = nil, result: JSONValue? = nil, error: ExtensionRPCError? = nil) {
+    public init(id: String? = nil, method: String? = nil, event: String? = nil, params: JSONValue? = nil, result: JSONValue? = nil, error: ExtensionRPCError? = nil) {
         self.id = id
         self.method = method
         self.event = event
@@ -2207,7 +2207,7 @@ nonisolated struct ExtensionFrame: Codable, Hashable, Sendable {
         case error
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.method = try? c.decodeIfPresent(String.self, forKey: .method)
@@ -2218,14 +2218,14 @@ nonisolated struct ExtensionFrame: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionRPCError: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionRPCError: Codable, Hashable, Sendable {
     /// For people; never a secret or a message's body.
-    var message: String
+    public var message: String
     /// One of ErrorCode, or an extension point's own (not_found, invalid, conflict…).
-    var code: String?
-    var data: JSONValue?
+    public var code: String?
+    public var data: JSONValue?
 
-    init(message: String = "", code: String? = nil, data: JSONValue? = nil) {
+    public init(message: String = "", code: String? = nil, data: JSONValue? = nil) {
         self.message = message
         self.code = code
         self.data = data
@@ -2237,7 +2237,7 @@ nonisolated struct ExtensionRPCError: Codable, Hashable, Sendable {
         case data
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.message = (try? c.decodeIfPresent(String.self, forKey: .message)) ?? ""
         self.code = try? c.decodeIfPresent(String.self, forKey: .code)
@@ -2246,45 +2246,45 @@ nonisolated struct ExtensionRPCError: Codable, Hashable, Sendable {
 }
 
 /// Values of ErrorCode.
-nonisolated enum ExtensionErrorCode {
-    static let notInitialized = "not_initialized"
-    static let unknownMethod = "unknown_method"
-    static let wrongProtocol = "wrong_protocol"
-    static let noCapability = "no_capability"
-    static let noContribution = "no_contribution"
-    static let permissionDenied = "permission_denied"
-    static let timeout = "timeout"
-    static let unsupported = "unsupported"
-    static let all = ["not_initialized", "unknown_method", "wrong_protocol", "no_capability", "no_contribution", "permission_denied", "timeout", "unsupported"]
+public nonisolated enum ExtensionErrorCode {
+    public static let notInitialized = "not_initialized"
+    public static let unknownMethod = "unknown_method"
+    public static let wrongProtocol = "wrong_protocol"
+    public static let noCapability = "no_capability"
+    public static let noContribution = "no_contribution"
+    public static let permissionDenied = "permission_denied"
+    public static let timeout = "timeout"
+    public static let unsupported = "unsupported"
+    public static let all = ["not_initialized", "unknown_method", "wrong_protocol", "no_capability", "no_contribution", "permission_denied", "timeout", "unsupported"]
 }
 
 /// Methods of the base; every other method is <namespace>.<method>, the namespace an extension point's.
-nonisolated enum ExtensionMethod {
-    static let initialize = "initialize"
-    static let ping = "ping"
-    static let manifest = "manifest"
-    static let all = ["initialize", "ping", "manifest"]
+public nonisolated enum ExtensionMethod {
+    public static let initialize = "initialize"
+    public static let ping = "ping"
+    public static let manifest = "manifest"
+    public static let all = ["initialize", "ping", "manifest"]
 }
 
 /// Values of AuthState.
-nonisolated enum ExtensionAuthState {
-    static let signedOut = "signed_out"
-    static let pending = "pending"
-    static let signedIn = "signed_in"
-    static let expired = "expired"
-    static let error = "error"
-    static let all = ["signed_out", "pending", "signed_in", "expired", "error"]
+public nonisolated enum ExtensionAuthState {
+    public static let signedOut = "signed_out"
+    public static let pending = "pending"
+    public static let signedIn = "signed_in"
+    public static let expired = "expired"
+    public static let error = "error"
+    public static let all = ["signed_out", "pending", "signed_in", "expired", "error"]
 }
 
 /// auth.status and auth.logout: the extension's sign-in now (manifest.auth).
-nonisolated struct ExtensionAuthStatus: Codable, Hashable, Sendable {
-    var state: String
-    var account: String?
+public nonisolated struct ExtensionAuthStatus: Codable, Hashable, Sendable {
+    public var state: String
+    public var account: String?
     /// For people: why it is in error, what is signed in.
-    var message: String?
-    var expiresAt: String?
+    public var message: String?
+    public var expiresAt: String?
 
-    init(state: String = "", account: String? = nil, message: String? = nil, expiresAt: String? = nil) {
+    public init(state: String = "", account: String? = nil, message: String? = nil, expiresAt: String? = nil) {
         self.state = state
         self.account = account
         self.message = message
@@ -2298,7 +2298,7 @@ nonisolated struct ExtensionAuthStatus: Codable, Hashable, Sendable {
         case expiresAt = "expires_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? ""
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
@@ -2308,11 +2308,11 @@ nonisolated struct ExtensionAuthStatus: Codable, Hashable, Sendable {
 }
 
 /// auth.step: step "" starts over; values are the fields of the step before.
-nonisolated struct ExtensionAuthStepParams: Codable, Hashable, Sendable {
-    var step: String
-    var values: [String: String]?
+public nonisolated struct ExtensionAuthStepParams: Codable, Hashable, Sendable {
+    public var step: String
+    public var values: [String: String]?
 
-    init(step: String = "", values: [String: String]? = nil) {
+    public init(step: String = "", values: [String: String]? = nil) {
         self.step = step
         self.values = values
     }
@@ -2322,20 +2322,20 @@ nonisolated struct ExtensionAuthStepParams: Codable, Hashable, Sendable {
         case values
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.step = (try? c.decodeIfPresent(String.self, forKey: .step)) ?? ""
         self.values = try? c.decodeIfPresent([String: String].self, forKey: .values)
     }
 }
 
-nonisolated struct ExtensionAuthField: Codable, Hashable, Sendable {
-    var name: String
-    var label: String
-    var secret: Bool?
-    var placeholder: String?
+public nonisolated struct ExtensionAuthField: Codable, Hashable, Sendable {
+    public var name: String
+    public var label: String
+    public var secret: Bool?
+    public var placeholder: String?
 
-    init(name: String = "", label: String = "", secret: Bool? = nil, placeholder: String? = nil) {
+    public init(name: String = "", label: String = "", secret: Bool? = nil, placeholder: String? = nil) {
         self.name = name
         self.label = label
         self.secret = secret
@@ -2349,7 +2349,7 @@ nonisolated struct ExtensionAuthField: Codable, Hashable, Sendable {
         case placeholder
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
@@ -2361,21 +2361,21 @@ nonisolated struct ExtensionAuthField: Codable, Hashable, Sendable {
 /// auth.step's answer, the connectors' Prompt: fields to fill, a device code (url to open, user_code to enter) or a
 /// QR code (url, scanned with another app), or done. For device_code and qr the app asks the same step again (no
 /// values) every interval seconds.
-nonisolated struct ExtensionAuthPrompt: Codable, Hashable, Sendable {
-    var step: String?
-    var fields: [ExtensionAuthField]?
+public nonisolated struct ExtensionAuthPrompt: Codable, Hashable, Sendable {
+    public var step: String?
+    public var fields: [ExtensionAuthField]?
     /// Empty: fields to fill; device_code; qr.
-    var kind: String?
-    var url: String?
-    var userCode: String?
-    var interval: Int?
-    var hint: String?
-    var error: String?
-    var done: Bool?
-    var account: String?
-    var expiresAt: String?
+    public var kind: String?
+    public var url: String?
+    public var userCode: String?
+    public var interval: Int?
+    public var hint: String?
+    public var error: String?
+    public var done: Bool?
+    public var account: String?
+    public var expiresAt: String?
 
-    init(step: String? = nil, fields: [ExtensionAuthField]? = nil, kind: String? = nil, url: String? = nil, userCode: String? = nil, interval: Int? = nil, hint: String? = nil, error: String? = nil, done: Bool? = nil, account: String? = nil, expiresAt: String? = nil) {
+    public init(step: String? = nil, fields: [ExtensionAuthField]? = nil, kind: String? = nil, url: String? = nil, userCode: String? = nil, interval: Int? = nil, hint: String? = nil, error: String? = nil, done: Bool? = nil, account: String? = nil, expiresAt: String? = nil) {
         self.step = step
         self.fields = fields
         self.kind = kind
@@ -2403,7 +2403,7 @@ nonisolated struct ExtensionAuthPrompt: Codable, Hashable, Sendable {
         case expiresAt = "expires_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.step = try? c.decodeIfPresent(String.self, forKey: .step)
         self.fields = try? c.decodeIfPresent([ExtensionAuthField].self, forKey: .fields)
@@ -2420,37 +2420,37 @@ nonisolated struct ExtensionAuthPrompt: Codable, Hashable, Sendable {
 }
 
 /// Values of HubRole.
-nonisolated enum ExtensionHubRole {
-    static let center = "center"
-    static let member = "member"
-    static let all = ["center", "member"]
+public nonisolated enum ExtensionHubRole {
+    public static let center = "center"
+    public static let member = "member"
+    public static let all = ["center", "member"]
 }
 
 /// Values of HubCapability.
-nonisolated enum ExtensionHubCapability {
-    static let inboxGroup = "inbox_group"
-    static let inboxGroupState = "inbox_group_state"
-    static let all = ["inbox_group", "inbox_group_state"]
+public nonisolated enum ExtensionHubCapability {
+    public static let inboxGroup = "inbox_group"
+    public static let inboxGroupState = "inbox_group_state"
+    public static let all = ["inbox_group", "inbox_group_state"]
 }
 
 /// What the hub sends first. The extension is under extension; hubs before the rename (#1844) send it as plugin,
 /// newer hubs send both.
-nonisolated struct ExtensionInitializeParams: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var hub: ExtensionHubInfo
-    var `extension`: ExtensionInfo?
-    var plugin: ExtensionInfo?
+public nonisolated struct ExtensionInitializeParams: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var hub: ExtensionHubInfo
+    public var `extension`: ExtensionInfo?
+    public var plugin: ExtensionInfo?
     /// The configuration with the schema's defaults filled in.
-    var config: JSONValue?
-    var secrets: [String: String]?
-    var granted: ExtensionPermissions
+    public var config: JSONValue?
+    public var secrets: [String: String]?
+    public var granted: ExtensionPermissions
     /// The contributions this run is for, by extension point.
-    var active: [String: [String]]?
+    public var active: [String: [String]]?
     /// The contributions of the other extensions that are on to the points it exports, by its point id (event
     /// extension.contributions_changed says them again when they change).
-    var contributionsToMe: [String: [ExtensionExportedContribution]]?
+    public var contributionsToMe: [String: [ExtensionExportedContribution]]?
 
-    init(`protocol`: Int = 0, hub: ExtensionHubInfo = ExtensionHubInfo(), `extension`: ExtensionInfo? = nil, plugin: ExtensionInfo? = nil, config: JSONValue? = nil, secrets: [String: String]? = nil, granted: ExtensionPermissions = ExtensionPermissions(), active: [String: [String]]? = nil, contributionsToMe: [String: [ExtensionExportedContribution]]? = nil) {
+    public init(`protocol`: Int = 0, hub: ExtensionHubInfo = ExtensionHubInfo(), `extension`: ExtensionInfo? = nil, plugin: ExtensionInfo? = nil, config: JSONValue? = nil, secrets: [String: String]? = nil, granted: ExtensionPermissions = ExtensionPermissions(), active: [String: [String]]? = nil, contributionsToMe: [String: [ExtensionExportedContribution]]? = nil) {
         self.protocol = `protocol`
         self.hub = hub
         self.extension = `extension`
@@ -2474,7 +2474,7 @@ nonisolated struct ExtensionInitializeParams: Codable, Hashable, Sendable {
         case contributionsToMe = "contributions_to_me"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = (try? c.decodeIfPresent(Int.self, forKey: .`protocol`)) ?? 0
         self.hub = (try? c.decodeIfPresent(ExtensionHubInfo.self, forKey: .hub)) ?? ExtensionHubInfo()
@@ -2488,13 +2488,13 @@ nonisolated struct ExtensionInitializeParams: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionExportedContribution: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionExportedContribution: Codable, Hashable, Sendable {
     /// The extension it comes from.
-    var `extension`: String
+    public var `extension`: String
     /// The contribution, as that extension's manifest wrote it.
-    var item: JSONValue
+    public var item: JSONValue
 
-    init(`extension`: String = "", item: JSONValue = .null) {
+    public init(`extension`: String = "", item: JSONValue = .null) {
         self.extension = `extension`
         self.item = item
     }
@@ -2504,28 +2504,28 @@ nonisolated struct ExtensionExportedContribution: Codable, Hashable, Sendable {
         case item
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.item = (try? c.decodeIfPresent(JSONValue.self, forKey: .item)) ?? .null
     }
 }
 
-nonisolated struct ExtensionHubInfo: Codable, Hashable, Sendable {
-    var build: Int64
-    var extensionPoints: [String: Int]
-    var role: String?
-    var timezone: String?
+public nonisolated struct ExtensionHubInfo: Codable, Hashable, Sendable {
+    public var build: Int64
+    public var extensionPoints: [String: Int]
+    public var role: String?
+    public var timezone: String?
     /// The user's language (zh-Hans, en, ja; see docs/protocol/i18n.md); empty means zh-Hans.
-    var locale: String?
-    var capabilities: [String]?
+    public var locale: String?
+    public var capabilities: [String]?
     /// The hub's API on this machine, for the token below.
-    var url: String?
+    public var url: String?
     /// A token of the scopes it was granted (permissions.hub): new each start.
-    var token: String?
-    var scopes: [String]?
+    public var token: String?
+    public var scopes: [String]?
 
-    init(build: Int64 = 0, extensionPoints: [String: Int] = [:], role: String? = nil, timezone: String? = nil, locale: String? = nil, capabilities: [String]? = nil, url: String? = nil, token: String? = nil, scopes: [String]? = nil) {
+    public init(build: Int64 = 0, extensionPoints: [String: Int] = [:], role: String? = nil, timezone: String? = nil, locale: String? = nil, capabilities: [String]? = nil, url: String? = nil, token: String? = nil, scopes: [String]? = nil) {
         self.build = build
         self.extensionPoints = extensionPoints
         self.role = role
@@ -2549,7 +2549,7 @@ nonisolated struct ExtensionHubInfo: Codable, Hashable, Sendable {
         case scopes
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.build = (try? c.decodeIfPresent(Int64.self, forKey: .build)) ?? 0
         self.extensionPoints = (try? c.decodeIfPresent([String: Int].self, forKey: .extensionPoints)) ?? [:]
@@ -2563,13 +2563,13 @@ nonisolated struct ExtensionHubInfo: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionInfo: Codable, Hashable, Sendable {
-    var id: String
-    var version: String
-    var dir: String?
-    var dataDir: String?
+public nonisolated struct ExtensionInfo: Codable, Hashable, Sendable {
+    public var id: String
+    public var version: String
+    public var dir: String?
+    public var dataDir: String?
 
-    init(id: String = "", version: String = "", dir: String? = nil, dataDir: String? = nil) {
+    public init(id: String = "", version: String = "", dir: String? = nil, dataDir: String? = nil) {
         self.id = id
         self.version = version
         self.dir = dir
@@ -2583,7 +2583,7 @@ nonisolated struct ExtensionInfo: Codable, Hashable, Sendable {
         case dataDir = "data_dir"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.version = (try? c.decodeIfPresent(String.self, forKey: .version)) ?? ""
@@ -2592,16 +2592,16 @@ nonisolated struct ExtensionInfo: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionInitializeResult: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var id: String
-    var version: String
+public nonisolated struct ExtensionInitializeResult: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var id: String
+    public var version: String
     /// A subset of the manifest's.
-    var contributes: [String: JSONValue]?
+    public var contributes: [String: JSONValue]?
     /// Request-ID scoped rpc.cancel for mounted page lifecycle calls only.
-    var uiPageCancellation: Int?
+    public var uiPageCancellation: Int?
 
-    init(`protocol`: Int = 0, id: String = "", version: String = "", contributes: [String: JSONValue]? = nil, uiPageCancellation: Int? = nil) {
+    public init(`protocol`: Int = 0, id: String = "", version: String = "", contributes: [String: JSONValue]? = nil, uiPageCancellation: Int? = nil) {
         self.protocol = `protocol`
         self.id = id
         self.version = version
@@ -2617,7 +2617,7 @@ nonisolated struct ExtensionInitializeResult: Codable, Hashable, Sendable {
         case uiPageCancellation = "ui_page_cancellation"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = (try? c.decodeIfPresent(Int.self, forKey: .`protocol`)) ?? 0
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -2628,22 +2628,22 @@ nonisolated struct ExtensionInitializeResult: Codable, Hashable, Sendable {
 }
 
 /// ui.render's and ui.action's parameters: what to draw, where, for whom.
-nonisolated struct ExtensionUIParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var state: String
-    var action: String?
-    var values: [String: String]?
-    var placement: String
-    var size: String
-    var uiVersion: Int
-    var tz: String?
-    var locale: String?
-    var platform: String?
-    var machine: ExtensionUIMachine?
-    var launcher: ExtensionUILauncher?
-    var item: ExtensionUIInboxItem?
+public nonisolated struct ExtensionUIParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var state: String
+    public var action: String?
+    public var values: [String: String]?
+    public var placement: String
+    public var size: String
+    public var uiVersion: Int
+    public var tz: String?
+    public var locale: String?
+    public var platform: String?
+    public var machine: ExtensionUIMachine?
+    public var launcher: ExtensionUILauncher?
+    public var item: ExtensionUIInboxItem?
 
-    init(contribution: String = "", state: String = "", action: String? = nil, values: [String: String]? = nil, placement: String = "", size: String = "", uiVersion: Int = 0, tz: String? = nil, locale: String? = nil, platform: String? = nil, machine: ExtensionUIMachine? = nil, launcher: ExtensionUILauncher? = nil, item: ExtensionUIInboxItem? = nil) {
+    public init(contribution: String = "", state: String = "", action: String? = nil, values: [String: String]? = nil, placement: String = "", size: String = "", uiVersion: Int = 0, tz: String? = nil, locale: String? = nil, platform: String? = nil, machine: ExtensionUIMachine? = nil, launcher: ExtensionUILauncher? = nil, item: ExtensionUIInboxItem? = nil) {
         self.contribution = contribution
         self.state = state
         self.action = action
@@ -2675,7 +2675,7 @@ nonisolated struct ExtensionUIParams: Codable, Hashable, Sendable {
         case item
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? ""
@@ -2696,13 +2696,13 @@ nonisolated struct ExtensionUIParams: Codable, Hashable, Sendable {
 /// ui.image's parameters (UI version 6): the hub asks the extension for a picture it drew as a ref, for the ui
 /// contribution that drew it. width is the pixel width the app wants (320, 640, 1280 or 2048; 0 when it says
 /// nothing); the extension may ignore it.
-nonisolated struct ExtensionUIImageParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var ref: String
-    var width: Int?
-    var placement: String?
+public nonisolated struct ExtensionUIImageParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var ref: String
+    public var width: Int?
+    public var placement: String?
 
-    init(contribution: String = "", ref: String = "", width: Int? = nil, placement: String? = nil) {
+    public init(contribution: String = "", ref: String = "", width: Int? = nil, placement: String? = nil) {
         self.contribution = contribution
         self.ref = ref
         self.width = width
@@ -2716,7 +2716,7 @@ nonisolated struct ExtensionUIImageParams: Codable, Hashable, Sendable {
         case placement
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.ref = (try? c.decodeIfPresent(String.self, forKey: .ref)) ?? ""
@@ -2728,12 +2728,12 @@ nonisolated struct ExtensionUIImageParams: Codable, Hashable, Sendable {
 /// What ui.image answers: the picture's bytes in base64 (png, jpeg, webp or gif, at most 4 MB decoded and 8192 pixels
 /// a side; the hub reads the type from the bytes, not from mime) and how long the hub may keep it (seconds, 60 when
 /// absent; a camera 5 to 10, a still 86400).
-nonisolated struct ExtensionUIImage: Codable, Hashable, Sendable {
-    var mime: String
-    var data: String
-    var maxAge: Int?
+public nonisolated struct ExtensionUIImage: Codable, Hashable, Sendable {
+    public var mime: String
+    public var data: String
+    public var maxAge: Int?
 
-    init(mime: String = "", data: String = "", maxAge: Int? = nil) {
+    public init(mime: String = "", data: String = "", maxAge: Int? = nil) {
         self.mime = mime
         self.data = data
         self.maxAge = maxAge
@@ -2745,7 +2745,7 @@ nonisolated struct ExtensionUIImage: Codable, Hashable, Sendable {
         case maxAge = "max_age"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.mime = (try? c.decodeIfPresent(String.self, forKey: .mime)) ?? ""
         self.data = (try? c.decodeIfPresent(String.self, forKey: .data)) ?? ""
@@ -2753,13 +2753,13 @@ nonisolated struct ExtensionUIImage: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIMachine: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var os: String?
-    var online: Bool
+public nonisolated struct ExtensionUIMachine: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var os: String?
+    public var online: Bool
 
-    init(id: String = "", name: String = "", os: String? = nil, online: Bool = false) {
+    public init(id: String = "", name: String = "", os: String? = nil, online: Bool = false) {
         self.id = id
         self.name = name
         self.os = os
@@ -2773,7 +2773,7 @@ nonisolated struct ExtensionUIMachine: Codable, Hashable, Sendable {
         case online
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -2782,12 +2782,12 @@ nonisolated struct ExtensionUIMachine: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUILauncher: Codable, Hashable, Sendable {
-    var name: String
-    var baseUrl: String
-    var queryId: String
+public nonisolated struct ExtensionUILauncher: Codable, Hashable, Sendable {
+    public var name: String
+    public var baseUrl: String
+    public var queryId: String
 
-    init(name: String = "", baseUrl: String = "", queryId: String = "") {
+    public init(name: String = "", baseUrl: String = "", queryId: String = "") {
         self.name = name
         self.baseUrl = baseUrl
         self.queryId = queryId
@@ -2799,7 +2799,7 @@ nonisolated struct ExtensionUILauncher: Codable, Hashable, Sendable {
         case queryId = "query_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.baseUrl = (try? c.decodeIfPresent(String.self, forKey: .baseUrl)) ?? ""
@@ -2807,20 +2807,20 @@ nonisolated struct ExtensionUILauncher: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIInboxItem: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var summary: String?
-    var tier: String?
-    var reason: String?
-    var done: Bool
+public nonisolated struct ExtensionUIInboxItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var summary: String?
+    public var tier: String?
+    public var reason: String?
+    public var done: Bool
     /// The connector's own record of what the item gathers, as stored; null when it has none.
-    var meta: JSONValue
-    var extra: [String: JSONValue]?
-    var count: Int?
-    var startedAt: String?
+    public var meta: JSONValue
+    public var extra: [String: JSONValue]?
+    public var count: Int?
+    public var startedAt: String?
 
-    init(id: String = "", title: String = "", summary: String? = nil, tier: String? = nil, reason: String? = nil, done: Bool = false, meta: JSONValue = .null, extra: [String: JSONValue]? = nil, count: Int? = nil, startedAt: String? = nil) {
+    public init(id: String = "", title: String = "", summary: String? = nil, tier: String? = nil, reason: String? = nil, done: Bool = false, meta: JSONValue = .null, extra: [String: JSONValue]? = nil, count: Int? = nil, startedAt: String? = nil) {
         self.id = id
         self.title = title
         self.summary = summary
@@ -2846,7 +2846,7 @@ nonisolated struct ExtensionUIInboxItem: Codable, Hashable, Sendable {
         case startedAt = "started_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -2862,12 +2862,12 @@ nonisolated struct ExtensionUIInboxItem: Codable, Hashable, Sendable {
 }
 
 /// ui.badge, sent by an extension: the badge on its nav_page's entry (no text clears it).
-nonisolated struct ExtensionBadgeEvent: Codable, Hashable, Sendable {
-    var contribution: String
-    var text: String?
-    var tone: String?
+public nonisolated struct ExtensionBadgeEvent: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var text: String?
+    public var tone: String?
 
-    init(contribution: String = "", text: String? = nil, tone: String? = nil) {
+    public init(contribution: String = "", text: String? = nil, tone: String? = nil) {
         self.contribution = contribution
         self.text = text
         self.tone = tone
@@ -2879,7 +2879,7 @@ nonisolated struct ExtensionBadgeEvent: Codable, Hashable, Sendable {
         case tone
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
@@ -2889,10 +2889,10 @@ nonisolated struct ExtensionBadgeEvent: Codable, Hashable, Sendable {
 
 /// ui.invalidate, sent by an extension (UI version 3): what it draws changed; the apps on screen draw it again
 /// (contribution: one ui; empty: all of the extension's).
-nonisolated struct ExtensionInvalidateEvent: Codable, Hashable, Sendable {
-    var contribution: String?
+public nonisolated struct ExtensionInvalidateEvent: Codable, Hashable, Sendable {
+    public var contribution: String?
 
-    init(contribution: String? = nil) {
+    public init(contribution: String? = nil) {
         self.contribution = contribution
     }
 
@@ -2900,27 +2900,27 @@ nonisolated struct ExtensionInvalidateEvent: Codable, Hashable, Sendable {
         case contribution
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = try? c.decodeIfPresent(String.self, forKey: .contribution)
     }
 }
 
 /// What an app says when it draws a slot: for whom and where (the hub checks it and hands the extension UIParams).
-nonisolated struct ExtensionUIContext: Codable, Hashable, Sendable {
-    var launcher: String?
-    var machine: String?
-    var item: String?
-    var size: String?
-    var tz: String?
-    var locale: String?
-    var platform: String?
-    var uiVersion: Int?
+public nonisolated struct ExtensionUIContext: Codable, Hashable, Sendable {
+    public var launcher: String?
+    public var machine: String?
+    public var item: String?
+    public var size: String?
+    public var tz: String?
+    public var locale: String?
+    public var platform: String?
+    public var uiVersion: Int?
     /// Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current
     /// client or hub advertises it.
-    var stream: ExtensionUIStreamCapability?
+    public var stream: ExtensionUIStreamCapability?
 
-    init(launcher: String? = nil, machine: String? = nil, item: String? = nil, size: String? = nil, tz: String? = nil, locale: String? = nil, platform: String? = nil, uiVersion: Int? = nil, stream: ExtensionUIStreamCapability? = nil) {
+    public init(launcher: String? = nil, machine: String? = nil, item: String? = nil, size: String? = nil, tz: String? = nil, locale: String? = nil, platform: String? = nil, uiVersion: Int? = nil, stream: ExtensionUIStreamCapability? = nil) {
         self.launcher = launcher
         self.machine = machine
         self.item = item
@@ -2944,7 +2944,7 @@ nonisolated struct ExtensionUIContext: Codable, Hashable, Sendable {
         case stream
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.launcher = try? c.decodeIfPresent(String.self, forKey: .launcher)
         self.machine = try? c.decodeIfPresent(String.self, forKey: .machine)
@@ -2959,13 +2959,13 @@ nonisolated struct ExtensionUIContext: Codable, Hashable, Sendable {
 }
 
 /// An app's POST …/-/ui/{ui}: without action it draws, with one a control was used.
-nonisolated struct ExtensionUIRequest: Codable, Hashable, Sendable {
-    var context: ExtensionUIContext?
-    var state: String?
-    var action: String?
-    var values: [String: String]?
+public nonisolated struct ExtensionUIRequest: Codable, Hashable, Sendable {
+    public var context: ExtensionUIContext?
+    public var state: String?
+    public var action: String?
+    public var values: [String: String]?
 
-    init(context: ExtensionUIContext? = nil, state: String? = nil, action: String? = nil, values: [String: String]? = nil) {
+    public init(context: ExtensionUIContext? = nil, state: String? = nil, action: String? = nil, values: [String: String]? = nil) {
         self.context = context
         self.state = state
         self.action = action
@@ -2979,7 +2979,7 @@ nonisolated struct ExtensionUIRequest: Codable, Hashable, Sendable {
         case values
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.context = try? c.decodeIfPresent(ExtensionUIContext.self, forKey: .context)
         self.state = try? c.decodeIfPresent(String.self, forKey: .state)
@@ -2990,21 +2990,21 @@ nonisolated struct ExtensionUIRequest: Codable, Hashable, Sendable {
 
 /// Where an extension draws something, as the hub lists it (GET …/-/ui). The new API names the extension extension /
 /// extension_name; the old one plugin / plugin_name.
-nonisolated struct ExtensionUIPlace: Codable, Hashable, Sendable {
-    var `extension`: String?
-    var extensionName: String?
-    var plugin: String?
-    var pluginName: String?
-    var id: String
-    var title: String
-    var placement: String
-    var size: String?
-    var icon: String?
-    var opens: String?
-    var badge: ExtensionBadge?
-    var connector: String?
+public nonisolated struct ExtensionUIPlace: Codable, Hashable, Sendable {
+    public var `extension`: String?
+    public var extensionName: String?
+    public var plugin: String?
+    public var pluginName: String?
+    public var id: String
+    public var title: String
+    public var placement: String
+    public var size: String?
+    public var icon: String?
+    public var opens: String?
+    public var badge: ExtensionBadge?
+    public var connector: String?
 
-    init(`extension`: String? = nil, extensionName: String? = nil, plugin: String? = nil, pluginName: String? = nil, id: String = "", title: String = "", placement: String = "", size: String? = nil, icon: String? = nil, opens: String? = nil, badge: ExtensionBadge? = nil, connector: String? = nil) {
+    public init(`extension`: String? = nil, extensionName: String? = nil, plugin: String? = nil, pluginName: String? = nil, id: String = "", title: String = "", placement: String = "", size: String? = nil, icon: String? = nil, opens: String? = nil, badge: ExtensionBadge? = nil, connector: String? = nil) {
         self.extension = `extension`
         self.extensionName = extensionName
         self.plugin = plugin
@@ -3034,7 +3034,7 @@ nonisolated struct ExtensionUIPlace: Codable, Hashable, Sendable {
         case connector
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = try? c.decodeIfPresent(String.self, forKey: .`extension`)
         self.extensionName = try? c.decodeIfPresent(String.self, forKey: .extensionName)
@@ -3051,10 +3051,10 @@ nonisolated struct ExtensionUIPlace: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIPlaces: Codable, Hashable, Sendable {
-    var ui: [ExtensionUIPlace]
+public nonisolated struct ExtensionUIPlaces: Codable, Hashable, Sendable {
+    public var ui: [ExtensionUIPlace]
 
-    init(ui: [ExtensionUIPlace] = []) {
+    public init(ui: [ExtensionUIPlace] = []) {
         self.ui = ui
     }
 
@@ -3062,23 +3062,23 @@ nonisolated struct ExtensionUIPlaces: Codable, Hashable, Sendable {
         case ui
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.ui = (try? c.decodeIfPresent([ExtensionUIPlace].self, forKey: .ui)) ?? []
     }
 }
 
 /// A widget an extension draws outside the app (GET …/extensions/-/widgets; docs "System placements").
-nonisolated struct ExtensionWidgetPlace: Codable, Hashable, Sendable {
-    var `extension`: String
-    var extensionName: String?
-    var id: String
-    var title: String
-    var families: [String]
-    var refreshMinutes: Int
-    var opens: String?
+public nonisolated struct ExtensionWidgetPlace: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var extensionName: String?
+    public var id: String
+    public var title: String
+    public var families: [String]
+    public var refreshMinutes: Int
+    public var opens: String?
 
-    init(`extension`: String = "", extensionName: String? = nil, id: String = "", title: String = "", families: [String] = [], refreshMinutes: Int = 0, opens: String? = nil) {
+    public init(`extension`: String = "", extensionName: String? = nil, id: String = "", title: String = "", families: [String] = [], refreshMinutes: Int = 0, opens: String? = nil) {
         self.extension = `extension`
         self.extensionName = extensionName
         self.id = id
@@ -3098,7 +3098,7 @@ nonisolated struct ExtensionWidgetPlace: Codable, Hashable, Sendable {
         case opens
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.extensionName = try? c.decodeIfPresent(String.self, forKey: .extensionName)
@@ -3110,10 +3110,10 @@ nonisolated struct ExtensionWidgetPlace: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionWidgetPlaces: Codable, Hashable, Sendable {
-    var widgets: [ExtensionWidgetPlace]
+public nonisolated struct ExtensionWidgetPlaces: Codable, Hashable, Sendable {
+    public var widgets: [ExtensionWidgetPlace]
 
-    init(widgets: [ExtensionWidgetPlace] = []) {
+    public init(widgets: [ExtensionWidgetPlace] = []) {
         self.widgets = widgets
     }
 
@@ -3121,17 +3121,17 @@ nonisolated struct ExtensionWidgetPlaces: Codable, Hashable, Sendable {
         case widgets
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.widgets = (try? c.decodeIfPresent([ExtensionWidgetPlace].self, forKey: .widgets)) ?? []
     }
 }
 
 /// An app's POST …/extensions/{id}/-/widget/{ui}: context.size is the family it draws (WidgetFamily).
-nonisolated struct ExtensionWidgetRequest: Codable, Hashable, Sendable {
-    var context: ExtensionUIContext?
+public nonisolated struct ExtensionWidgetRequest: Codable, Hashable, Sendable {
+    public var context: ExtensionUIContext?
 
-    init(context: ExtensionUIContext? = nil) {
+    public init(context: ExtensionUIContext? = nil) {
         self.context = context
     }
 
@@ -3139,18 +3139,18 @@ nonisolated struct ExtensionWidgetRequest: Codable, Hashable, Sendable {
         case context
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.context = try? c.decodeIfPresent(ExtensionUIContext.self, forKey: .context)
     }
 }
 
 /// A widget's view, held to what the family draws, and until when the hub keeps it (the app's timeline's next entry).
-nonisolated struct ExtensionWidgetAnswer: Codable, Hashable, Sendable {
-    var view: ExtensionView
-    var expiresAt: String
+public nonisolated struct ExtensionWidgetAnswer: Codable, Hashable, Sendable {
+    public var view: ExtensionView
+    public var expiresAt: String
 
-    init(view: ExtensionView = ExtensionView(), expiresAt: String = "") {
+    public init(view: ExtensionView = ExtensionView(), expiresAt: String = "") {
         self.view = view
         self.expiresAt = expiresAt
     }
@@ -3160,7 +3160,7 @@ nonisolated struct ExtensionWidgetAnswer: Codable, Hashable, Sendable {
         case expiresAt = "expires_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.view = (try? c.decodeIfPresent(ExtensionView.self, forKey: .view)) ?? ExtensionView()
         self.expiresAt = (try? c.decodeIfPresent(String.self, forKey: .expiresAt)) ?? ""
@@ -3168,12 +3168,12 @@ nonisolated struct ExtensionWidgetAnswer: Codable, Hashable, Sendable {
 }
 
 /// A widget a device has on a screen (PUT /api/v1/devices/{id}/widgets): the hub wakes that device when it changes.
-nonisolated struct ExtensionDeviceWidget: Codable, Hashable, Sendable {
-    var `extension`: String
-    var id: String
-    var family: String
+public nonisolated struct ExtensionDeviceWidget: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var id: String
+    public var family: String
 
-    init(`extension`: String = "", id: String = "", family: String = "") {
+    public init(`extension`: String = "", id: String = "", family: String = "") {
         self.extension = `extension`
         self.id = id
         self.family = family
@@ -3185,7 +3185,7 @@ nonisolated struct ExtensionDeviceWidget: Codable, Hashable, Sendable {
         case family
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -3193,10 +3193,10 @@ nonisolated struct ExtensionDeviceWidget: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionDeviceWidgets: Codable, Hashable, Sendable {
-    var widgets: [ExtensionDeviceWidget]
+public nonisolated struct ExtensionDeviceWidgets: Codable, Hashable, Sendable {
+    public var widgets: [ExtensionDeviceWidget]
 
-    init(widgets: [ExtensionDeviceWidget] = []) {
+    public init(widgets: [ExtensionDeviceWidget] = []) {
         self.widgets = widgets
     }
 
@@ -3204,7 +3204,7 @@ nonisolated struct ExtensionDeviceWidgets: Codable, Hashable, Sendable {
         case widgets
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.widgets = (try? c.decodeIfPresent([ExtensionDeviceWidget].self, forKey: .widgets)) ?? []
     }
@@ -3212,11 +3212,11 @@ nonisolated struct ExtensionDeviceWidgets: Codable, Hashable, Sendable {
 
 /// extension_widget in a background push (content-available): a widget the device has changed; the app reloads its
 /// timelines.
-nonisolated struct ExtensionWidgetPush: Codable, Hashable, Sendable {
-    var `extension`: String
-    var id: String
+public nonisolated struct ExtensionWidgetPush: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var id: String
 
-    init(`extension`: String = "", id: String = "") {
+    public init(`extension`: String = "", id: String = "") {
         self.extension = `extension`
         self.id = id
     }
@@ -3226,7 +3226,7 @@ nonisolated struct ExtensionWidgetPush: Codable, Hashable, Sendable {
         case id
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -3234,16 +3234,16 @@ nonisolated struct ExtensionWidgetPush: Codable, Hashable, Sendable {
 }
 
 /// An extension's action the system runs (GET …/extensions/-/shortcuts).
-nonisolated struct ExtensionShortcutPlace: Codable, Hashable, Sendable {
-    var `extension`: String
-    var extensionName: String?
-    var id: String
-    var title: String
-    var description: String?
-    var params: [ExtensionShortcutParam]?
-    var ui: String?
+public nonisolated struct ExtensionShortcutPlace: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var extensionName: String?
+    public var id: String
+    public var title: String
+    public var description: String?
+    public var params: [ExtensionShortcutParam]?
+    public var ui: String?
 
-    init(`extension`: String = "", extensionName: String? = nil, id: String = "", title: String = "", description: String? = nil, params: [ExtensionShortcutParam]? = nil, ui: String? = nil) {
+    public init(`extension`: String = "", extensionName: String? = nil, id: String = "", title: String = "", description: String? = nil, params: [ExtensionShortcutParam]? = nil, ui: String? = nil) {
         self.extension = `extension`
         self.extensionName = extensionName
         self.id = id
@@ -3263,7 +3263,7 @@ nonisolated struct ExtensionShortcutPlace: Codable, Hashable, Sendable {
         case ui
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.extensionName = try? c.decodeIfPresent(String.self, forKey: .extensionName)
@@ -3275,10 +3275,10 @@ nonisolated struct ExtensionShortcutPlace: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionShortcutPlaces: Codable, Hashable, Sendable {
-    var shortcuts: [ExtensionShortcutPlace]
+public nonisolated struct ExtensionShortcutPlaces: Codable, Hashable, Sendable {
+    public var shortcuts: [ExtensionShortcutPlace]
 
-    init(shortcuts: [ExtensionShortcutPlace] = []) {
+    public init(shortcuts: [ExtensionShortcutPlace] = []) {
         self.shortcuts = shortcuts
     }
 
@@ -3286,7 +3286,7 @@ nonisolated struct ExtensionShortcutPlaces: Codable, Hashable, Sendable {
         case shortcuts
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.shortcuts = (try? c.decodeIfPresent([ExtensionShortcutPlace].self, forKey: .shortcuts)) ?? []
     }
@@ -3294,11 +3294,11 @@ nonisolated struct ExtensionShortcutPlaces: Codable, Hashable, Sendable {
 
 /// An app's POST …/extensions/{id}/-/shortcut/{sid}: the params' values (strings) and the context (tz, locale,
 /// platform, ui_version).
-nonisolated struct ExtensionShortcutRequest: Codable, Hashable, Sendable {
-    var values: [String: String]?
-    var context: ExtensionUIContext?
+public nonisolated struct ExtensionShortcutRequest: Codable, Hashable, Sendable {
+    public var values: [String: String]?
+    public var context: ExtensionUIContext?
 
-    init(values: [String: String]? = nil, context: ExtensionUIContext? = nil) {
+    public init(values: [String: String]? = nil, context: ExtensionUIContext? = nil) {
         self.values = values
         self.context = context
     }
@@ -3308,7 +3308,7 @@ nonisolated struct ExtensionShortcutRequest: Codable, Hashable, Sendable {
         case context
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.values = try? c.decodeIfPresent([String: String].self, forKey: .values)
         self.context = try? c.decodeIfPresent(ExtensionUIContext.self, forKey: .context)
@@ -3316,15 +3316,15 @@ nonisolated struct ExtensionShortcutRequest: Codable, Hashable, Sendable {
 }
 
 /// shortcut.run's parameters: which shortcut, its values, for whom.
-nonisolated struct ExtensionShortcutRunParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var values: [String: String]
-    var uiVersion: Int
-    var tz: String?
-    var locale: String?
-    var platform: String?
+public nonisolated struct ExtensionShortcutRunParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var values: [String: String]
+    public var uiVersion: Int
+    public var tz: String?
+    public var locale: String?
+    public var platform: String?
 
-    init(contribution: String = "", values: [String: String] = [:], uiVersion: Int = 0, tz: String? = nil, locale: String? = nil, platform: String? = nil) {
+    public init(contribution: String = "", values: [String: String] = [:], uiVersion: Int = 0, tz: String? = nil, locale: String? = nil, platform: String? = nil) {
         self.contribution = contribution
         self.values = values
         self.uiVersion = uiVersion
@@ -3342,7 +3342,7 @@ nonisolated struct ExtensionShortcutRunParams: Codable, Hashable, Sendable {
         case platform
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.values = (try? c.decodeIfPresent([String: String].self, forKey: .values)) ?? [:]
@@ -3355,11 +3355,11 @@ nonisolated struct ExtensionShortcutRunParams: Codable, Hashable, Sendable {
 
 /// What shortcut.run answers (and the app gets): a sentence Siri says or shows, and a view held to the large widget's
 /// subset (the result card).
-nonisolated struct ExtensionShortcutResult: Codable, Hashable, Sendable {
-    var text: String?
-    var view: ExtensionView?
+public nonisolated struct ExtensionShortcutResult: Codable, Hashable, Sendable {
+    public var text: String?
+    public var view: ExtensionView?
 
-    init(text: String? = nil, view: ExtensionView? = nil) {
+    public init(text: String? = nil, view: ExtensionView? = nil) {
         self.text = text
         self.view = view
     }
@@ -3369,7 +3369,7 @@ nonisolated struct ExtensionShortcutResult: Codable, Hashable, Sendable {
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
         self.view = try? c.decodeIfPresent(ExtensionView.self, forKey: .view)
@@ -3378,15 +3378,15 @@ nonisolated struct ExtensionShortcutResult: Codable, Hashable, Sendable {
 
 /// A button on an extension's notification (POST /api/v1/notify actions, at most 3). A tap runs ui.action on the
 /// notification's ui with this id; input asks for a line of text first (values.text).
-nonisolated struct ExtensionNotifyAction: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var role: String?
+public nonisolated struct ExtensionNotifyAction: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var role: String?
     /// Open the app to run it; otherwise it runs in the background and its toast is shown as a notification.
-    var foreground: Bool?
-    var input: ExtensionNotifyActionInput?
+    public var foreground: Bool?
+    public var input: ExtensionNotifyActionInput?
 
-    init(id: String = "", title: String = "", role: String? = nil, foreground: Bool? = nil, input: ExtensionNotifyActionInput? = nil) {
+    public init(id: String = "", title: String = "", role: String? = nil, foreground: Bool? = nil, input: ExtensionNotifyActionInput? = nil) {
         self.id = id
         self.title = title
         self.role = role
@@ -3402,7 +3402,7 @@ nonisolated struct ExtensionNotifyAction: Codable, Hashable, Sendable {
         case input
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -3412,10 +3412,10 @@ nonisolated struct ExtensionNotifyAction: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionNotifyActionInput: Codable, Hashable, Sendable {
-    var placeholder: String?
+public nonisolated struct ExtensionNotifyActionInput: Codable, Hashable, Sendable {
+    public var placeholder: String?
 
-    init(placeholder: String? = nil) {
+    public init(placeholder: String? = nil) {
         self.placeholder = placeholder
     }
 
@@ -3423,55 +3423,55 @@ nonisolated struct ExtensionNotifyActionInput: Codable, Hashable, Sendable {
         case placeholder
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.placeholder = try? c.decodeIfPresent(String.self, forKey: .placeholder)
     }
 }
 
 /// Which part of Persona an error report comes from.
-nonisolated enum ExtensionErrorSource {
-    static let hub = "hub"
-    static let manager = "manager"
-    static let web = "web"
-    static let android = "android"
-    static let ios = "ios"
-    static let mac = "mac"
-    static let watch = "watch"
-    static let vision = "vision"
-    static let all = ["hub", "manager", "web", "android", "ios", "mac", "watch", "vision"]
+public nonisolated enum ExtensionErrorSource {
+    public static let hub = "hub"
+    public static let manager = "manager"
+    public static let web = "web"
+    public static let android = "android"
+    public static let ios = "ios"
+    public static let mac = "mac"
+    public static let watch = "watch"
+    public static let vision = "vision"
+    public static let all = ["hub", "manager", "web", "android", "ios", "mac", "watch", "vision"]
 }
 
 /// What an error report is: a caught exception, a crash (the app died), an ANR (it hung), a Go panic, an error line
 /// of a log.
-nonisolated enum ExtensionErrorKind {
-    static let exception = "exception"
-    static let crash = "crash"
-    static let anr = "anr"
-    static let panic = "panic"
-    static let log = "log"
-    static let all = ["exception", "crash", "anr", "panic", "log"]
+public nonisolated enum ExtensionErrorKind {
+    public static let exception = "exception"
+    public static let crash = "crash"
+    public static let anr = "anr"
+    public static let panic = "panic"
+    public static let log = "log"
+    public static let all = ["exception", "crash", "anr", "panic", "log"]
 }
 
 /// Values of ErrorLevel.
-nonisolated enum ExtensionErrorLevel {
-    static let fatal = "fatal"
-    static let error = "error"
-    static let warning = "warning"
-    static let all = ["fatal", "error", "warning"]
+public nonisolated enum ExtensionErrorLevel {
+    public static let fatal = "fatal"
+    public static let error = "error"
+    public static let warning = "warning"
+    public static let all = ["fatal", "error", "warning"]
 }
 
 /// One frame of a stack trace.
-nonisolated struct ExtensionErrorFrame: Codable, Hashable, Sendable {
-    var function: String?
-    var module: String?
-    var file: String?
-    var line: Int?
-    var column: Int?
+public nonisolated struct ExtensionErrorFrame: Codable, Hashable, Sendable {
+    public var function: String?
+    public var module: String?
+    public var file: String?
+    public var line: Int?
+    public var column: Int?
     /// Persona's own code, not a library's or the system's.
-    var inApp: Bool?
+    public var inApp: Bool?
 
-    init(function: String? = nil, module: String? = nil, file: String? = nil, line: Int? = nil, column: Int? = nil, inApp: Bool? = nil) {
+    public init(function: String? = nil, module: String? = nil, file: String? = nil, line: Int? = nil, column: Int? = nil, inApp: Bool? = nil) {
         self.function = function
         self.module = module
         self.file = file
@@ -3489,7 +3489,7 @@ nonisolated struct ExtensionErrorFrame: Codable, Hashable, Sendable {
         case inApp = "in_app"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.function = try? c.decodeIfPresent(String.self, forKey: .function)
         self.module = try? c.decodeIfPresent(String.self, forKey: .module)
@@ -3501,12 +3501,12 @@ nonisolated struct ExtensionErrorFrame: Codable, Hashable, Sendable {
 }
 
 /// One exception of a report; frames innermost last (the order Sentry uses).
-nonisolated struct ExtensionErrorException: Codable, Hashable, Sendable {
-    var type: String
-    var value: String?
-    var frames: [ExtensionErrorFrame]?
+public nonisolated struct ExtensionErrorException: Codable, Hashable, Sendable {
+    public var type: String
+    public var value: String?
+    public var frames: [ExtensionErrorFrame]?
 
-    init(type: String = "", value: String? = nil, frames: [ExtensionErrorFrame]? = nil) {
+    public init(type: String = "", value: String? = nil, frames: [ExtensionErrorFrame]? = nil) {
         self.type = type
         self.value = value
         self.frames = frames
@@ -3518,7 +3518,7 @@ nonisolated struct ExtensionErrorException: Codable, Hashable, Sendable {
         case frames
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
         self.value = try? c.decodeIfPresent(String.self, forKey: .value)
@@ -3528,13 +3528,13 @@ nonisolated struct ExtensionErrorException: Codable, Hashable, Sendable {
 
 /// Something that happened before the error: a screen opened, a request failed. Code-chosen short text, no user
 /// content.
-nonisolated struct ExtensionErrorBreadcrumb: Codable, Hashable, Sendable {
-    var time: String?
-    var category: String
-    var message: String?
-    var level: String?
+public nonisolated struct ExtensionErrorBreadcrumb: Codable, Hashable, Sendable {
+    public var time: String?
+    public var category: String
+    public var message: String?
+    public var level: String?
 
-    init(time: String? = nil, category: String = "", message: String? = nil, level: String? = nil) {
+    public init(time: String? = nil, category: String = "", message: String? = nil, level: String? = nil) {
         self.time = time
         self.category = category
         self.message = message
@@ -3548,7 +3548,7 @@ nonisolated struct ExtensionErrorBreadcrumb: Codable, Hashable, Sendable {
         case level
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.time = try? c.decodeIfPresent(String.self, forKey: .time)
         self.category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? ""
@@ -3560,35 +3560,35 @@ nonisolated struct ExtensionErrorBreadcrumb: Codable, Hashable, Sendable {
 /// An error or crash of the hub or a device (docs/extensions/extensions.md "Error reports"). Clients send it to POST
 /// /api/v1/error-reports; the manager scrubs it and adds fingerprint, count and received_at before an extension gets
 /// it.
-nonisolated struct ExtensionErrorReport: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionErrorReport: Codable, Hashable, Sendable {
     /// Made by the sender; the same id again (a retry) is dropped.
-    var id: String
-    var source: String
-    var kind: String
-    var level: String
+    public var id: String
+    public var source: String
+    public var kind: String
+    public var level: String
     /// When it happened, RFC 3339.
-    var time: String
-    var release: String?
-    var build: String?
-    var commit: String?
-    var os: String?
-    var osVersion: String?
+    public var time: String
+    public var release: String?
+    public var build: String?
+    public var commit: String?
+    public var os: String?
+    public var osVersion: String?
     /// The model only, never an id of the device.
-    var deviceModel: String?
-    var message: String?
-    var exceptions: [ExtensionErrorException]?
-    var breadcrumbs: [ExtensionErrorBreadcrumb]?
-    var tags: [String: String]?
+    public var deviceModel: String?
+    public var message: String?
+    public var exceptions: [ExtensionErrorException]?
+    public var breadcrumbs: [ExtensionErrorBreadcrumb]?
+    public var tags: [String: String]?
     /// It happened in an earlier run of the app and is sent now.
-    var previousLaunch: Bool?
+    public var previousLaunch: Bool?
     /// Set by the manager: reports with the same one are the same problem.
-    var fingerprint: String?
+    public var fingerprint: String?
     /// Set by the manager: how many of this fingerprint it folded into this one (1 or more).
-    var count: Int?
+    public var count: Int?
     /// Set by the manager, RFC 3339.
-    var receivedAt: String?
+    public var receivedAt: String?
 
-    init(id: String = "", source: String = "", kind: String = "", level: String = "", time: String = "", release: String? = nil, build: String? = nil, commit: String? = nil, os: String? = nil, osVersion: String? = nil, deviceModel: String? = nil, message: String? = nil, exceptions: [ExtensionErrorException]? = nil, breadcrumbs: [ExtensionErrorBreadcrumb]? = nil, tags: [String: String]? = nil, previousLaunch: Bool? = nil, fingerprint: String? = nil, count: Int? = nil, receivedAt: String? = nil) {
+    public init(id: String = "", source: String = "", kind: String = "", level: String = "", time: String = "", release: String? = nil, build: String? = nil, commit: String? = nil, os: String? = nil, osVersion: String? = nil, deviceModel: String? = nil, message: String? = nil, exceptions: [ExtensionErrorException]? = nil, breadcrumbs: [ExtensionErrorBreadcrumb]? = nil, tags: [String: String]? = nil, previousLaunch: Bool? = nil, fingerprint: String? = nil, count: Int? = nil, receivedAt: String? = nil) {
         self.id = id
         self.source = source
         self.kind = kind
@@ -3632,7 +3632,7 @@ nonisolated struct ExtensionErrorReport: Codable, Hashable, Sendable {
         case receivedAt = "received_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? ""
@@ -3658,11 +3658,11 @@ nonisolated struct ExtensionErrorReport: Codable, Hashable, Sendable {
 
 /// error_reports.deliver, sent to an extension with an error_reports contribution: reports, already scrubbed,
 /// deduplicated and rate limited. A notification: no answer, not sent again.
-nonisolated struct ExtensionErrorReportsDeliver: Codable, Hashable, Sendable {
-    var contribution: String
-    var reports: [ExtensionErrorReport]
+public nonisolated struct ExtensionErrorReportsDeliver: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var reports: [ExtensionErrorReport]
 
-    init(contribution: String = "", reports: [ExtensionErrorReport] = []) {
+    public init(contribution: String = "", reports: [ExtensionErrorReport] = []) {
         self.contribution = contribution
         self.reports = reports
     }
@@ -3672,7 +3672,7 @@ nonisolated struct ExtensionErrorReportsDeliver: Codable, Hashable, Sendable {
         case reports
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.reports = (try? c.decodeIfPresent([ExtensionErrorReport].self, forKey: .reports)) ?? []
@@ -3682,11 +3682,11 @@ nonisolated struct ExtensionErrorReportsDeliver: Codable, Hashable, Sendable {
 /// auth_relay.complete's parameters: an authorization link one of the user's Agents stopped at, on a host and path
 /// the contribution names. The manager has checked that the Agent's own command printed it on one of the user's
 /// computers. The link is a secret while it lives: never log it.
-nonisolated struct ExtensionAuthRelayCompleteParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var url: String
+public nonisolated struct ExtensionAuthRelayCompleteParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var url: String
 
-    init(contribution: String = "", url: String = "") {
+    public init(contribution: String = "", url: String = "") {
         self.contribution = contribution
         self.url = url
     }
@@ -3696,7 +3696,7 @@ nonisolated struct ExtensionAuthRelayCompleteParams: Codable, Hashable, Sendable
         case url
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
@@ -3705,11 +3705,11 @@ nonisolated struct ExtensionAuthRelayCompleteParams: Codable, Hashable, Sendable
 
 /// How auth_relay.complete ended: done (authorized, the Agent can go on), manual (not one it completes: the user's),
 /// failed (one it completes, but it did not go through).
-nonisolated enum ExtensionAuthRelayStatus {
-    static let done = "done"
-    static let manual = "manual"
-    static let failed = "failed"
-    static let all = ["done", "manual", "failed"]
+public nonisolated enum ExtensionAuthRelayStatus {
+    public static let done = "done"
+    public static let manual = "manual"
+    public static let failed = "failed"
+    public static let all = ["done", "manual", "failed"]
 }
 
 /// Why it was not done: not_handled (not a link it completes), not_signed_in (its account is not signed in for the
@@ -3717,26 +3717,26 @@ nonisolated enum ExtensionAuthRelayStatus {
 /// settings leave this app to the user), unknown_page (not the page it knows), unavailable (what it completes them
 /// with can't be reached), not_confirmed (it clicked, the page never said it was done), expired (the link is no
 /// longer valid).
-nonisolated enum ExtensionAuthRelayReason {
-    static let notHandled = "not_handled"
-    static let notSignedIn = "not_signed_in"
-    static let newPermissions = "new_permissions"
-    static let appNotAllowed = "app_not_allowed"
-    static let unknownPage = "unknown_page"
-    static let unavailable = "unavailable"
-    static let notConfirmed = "not_confirmed"
-    static let expired = "expired"
-    static let all = ["not_handled", "not_signed_in", "new_permissions", "app_not_allowed", "unknown_page", "unavailable", "not_confirmed", "expired"]
+public nonisolated enum ExtensionAuthRelayReason {
+    public static let notHandled = "not_handled"
+    public static let notSignedIn = "not_signed_in"
+    public static let newPermissions = "new_permissions"
+    public static let appNotAllowed = "app_not_allowed"
+    public static let unknownPage = "unknown_page"
+    public static let unavailable = "unavailable"
+    public static let notConfirmed = "not_confirmed"
+    public static let expired = "expired"
+    public static let all = ["not_handled", "not_signed_in", "new_permissions", "app_not_allowed", "unknown_page", "unavailable", "not_confirmed", "expired"]
 }
 
 /// What auth_relay.complete answers. Never the link, a token or a page's text.
-nonisolated struct ExtensionAuthRelayResult: Codable, Hashable, Sendable {
-    var status: String
+public nonisolated struct ExtensionAuthRelayResult: Codable, Hashable, Sendable {
+    public var status: String
     /// The app the page authorized (or asked to), as the page names it.
-    var app: String?
-    var reason: String?
+    public var app: String?
+    public var reason: String?
 
-    init(status: String = "", app: String? = nil, reason: String? = nil) {
+    public init(status: String = "", app: String? = nil, reason: String? = nil) {
         self.status = status
         self.app = app
         self.reason = reason
@@ -3748,7 +3748,7 @@ nonisolated struct ExtensionAuthRelayResult: Codable, Hashable, Sendable {
         case reason
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? ""
         self.app = try? c.decodeIfPresent(String.self, forKey: .app)
@@ -3759,13 +3759,13 @@ nonisolated struct ExtensionAuthRelayResult: Codable, Hashable, Sendable {
 /// What a secret value is resolved for: kind extension (an extension's secret, id its id), launcher (a launcher's or
 /// model provider's key, id its name, machine the computer it goes to) or agent_run (handed to one Agent run after
 /// the user approved it on the phone, id the variable's name, machine and session the Agent's).
-nonisolated struct ExtensionSecretPurpose: Codable, Hashable, Sendable {
-    var kind: String
-    var id: String
-    var machine: String?
-    var session: String?
+public nonisolated struct ExtensionSecretPurpose: Codable, Hashable, Sendable {
+    public var kind: String
+    public var id: String
+    public var machine: String?
+    public var session: String?
 
-    init(kind: String = "", id: String = "", machine: String? = nil, session: String? = nil) {
+    public init(kind: String = "", id: String = "", machine: String? = nil, session: String? = nil) {
         self.kind = kind
         self.id = id
         self.machine = machine
@@ -3779,7 +3779,7 @@ nonisolated struct ExtensionSecretPurpose: Codable, Hashable, Sendable {
         case session
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -3789,11 +3789,11 @@ nonisolated struct ExtensionSecretPurpose: Codable, Hashable, Sendable {
 }
 
 /// secrets.describe's parameters: a reference of one of the contribution's schemes.
-nonisolated struct ExtensionSecretsDescribeParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var reference: String
+public nonisolated struct ExtensionSecretsDescribeParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var reference: String
 
-    init(contribution: String = "", reference: String = "") {
+    public init(contribution: String = "", reference: String = "") {
         self.contribution = contribution
         self.reference = reference
     }
@@ -3803,7 +3803,7 @@ nonisolated struct ExtensionSecretsDescribeParams: Codable, Hashable, Sendable {
         case reference
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.reference = (try? c.decodeIfPresent(String.self, forKey: .reference)) ?? ""
@@ -3811,11 +3811,11 @@ nonisolated struct ExtensionSecretsDescribeParams: Codable, Hashable, Sendable {
 }
 
 /// What secrets.describe answers: words for people (the item and field), never a value.
-nonisolated struct ExtensionSecretsDescribeResult: Codable, Hashable, Sendable {
-    var title: String
-    var detail: String?
+public nonisolated struct ExtensionSecretsDescribeResult: Codable, Hashable, Sendable {
+    public var title: String
+    public var detail: String?
 
-    init(title: String = "", detail: String? = nil) {
+    public init(title: String = "", detail: String? = nil) {
         self.title = title
         self.detail = detail
     }
@@ -3825,7 +3825,7 @@ nonisolated struct ExtensionSecretsDescribeResult: Codable, Hashable, Sendable {
         case detail
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.detail = try? c.decodeIfPresent(String.self, forKey: .detail)
@@ -3833,12 +3833,12 @@ nonisolated struct ExtensionSecretsDescribeResult: Codable, Hashable, Sendable {
 }
 
 /// secrets.resolve's parameters: the reference and what it is resolved for. Only the manager calls it.
-nonisolated struct ExtensionSecretsResolveParams: Codable, Hashable, Sendable {
-    var contribution: String
-    var reference: String
-    var purpose: ExtensionSecretPurpose
+public nonisolated struct ExtensionSecretsResolveParams: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var reference: String
+    public var purpose: ExtensionSecretPurpose
 
-    init(contribution: String = "", reference: String = "", purpose: ExtensionSecretPurpose = ExtensionSecretPurpose()) {
+    public init(contribution: String = "", reference: String = "", purpose: ExtensionSecretPurpose = ExtensionSecretPurpose()) {
         self.contribution = contribution
         self.reference = reference
         self.purpose = purpose
@@ -3850,7 +3850,7 @@ nonisolated struct ExtensionSecretsResolveParams: Codable, Hashable, Sendable {
         case purpose
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.reference = (try? c.decodeIfPresent(String.self, forKey: .reference)) ?? ""
@@ -3860,10 +3860,10 @@ nonisolated struct ExtensionSecretsResolveParams: Codable, Hashable, Sendable {
 
 /// What secrets.resolve answers: the value, at most 16 KB. Errors: not_found, not_signed_in, rate_limited
 /// (data.retry_after), refused.
-nonisolated struct ExtensionSecretsResolveResult: Codable, Hashable, Sendable {
-    var value: String
+public nonisolated struct ExtensionSecretsResolveResult: Codable, Hashable, Sendable {
+    public var value: String
 
-    init(value: String = "") {
+    public init(value: String = "") {
         self.value = value
     }
 
@@ -3871,7 +3871,7 @@ nonisolated struct ExtensionSecretsResolveResult: Codable, Hashable, Sendable {
         case value
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
     }
@@ -3879,15 +3879,15 @@ nonisolated struct ExtensionSecretsResolveResult: Codable, Hashable, Sendable {
 
 /// secrets.used (an event to the provider, no answer): a reference it resolved was used, for the usage record its own
 /// page shows. Never the value.
-nonisolated struct ExtensionSecretsUsedEvent: Codable, Hashable, Sendable {
-    var contribution: String
-    var reference: String
-    var purpose: ExtensionSecretPurpose
-    var at: String
+public nonisolated struct ExtensionSecretsUsedEvent: Codable, Hashable, Sendable {
+    public var contribution: String
+    public var reference: String
+    public var purpose: ExtensionSecretPurpose
+    public var at: String
     /// settings (a reference saved in Settings), rule (an Always rule) or the approving device's id.
-    var approvedBy: String?
+    public var approvedBy: String?
 
-    init(contribution: String = "", reference: String = "", purpose: ExtensionSecretPurpose = ExtensionSecretPurpose(), at: String = "", approvedBy: String? = nil) {
+    public init(contribution: String = "", reference: String = "", purpose: ExtensionSecretPurpose = ExtensionSecretPurpose(), at: String = "", approvedBy: String? = nil) {
         self.contribution = contribution
         self.reference = reference
         self.purpose = purpose
@@ -3903,7 +3903,7 @@ nonisolated struct ExtensionSecretsUsedEvent: Codable, Hashable, Sendable {
         case approvedBy = "approved_by"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.contribution = (try? c.decodeIfPresent(String.self, forKey: .contribution)) ?? ""
         self.reference = (try? c.decodeIfPresent(String.self, forKey: .reference)) ?? ""
@@ -3915,13 +3915,13 @@ nonisolated struct ExtensionSecretsUsedEvent: Codable, Hashable, Sendable {
 
 /// extension_notification in an extension's alert push: whose it is, the page a tap opens (ui with state) and its
 /// buttons (category ext.<extension>.<hash of the action ids>, registered by the app as it meets it).
-nonisolated struct ExtensionNotification: Codable, Hashable, Sendable {
-    var `extension`: String
-    var ui: String?
-    var state: String?
-    var actions: [ExtensionNotifyAction]?
+public nonisolated struct ExtensionNotification: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var ui: String?
+    public var state: String?
+    public var actions: [ExtensionNotifyAction]?
 
-    init(`extension`: String = "", ui: String? = nil, state: String? = nil, actions: [ExtensionNotifyAction]? = nil) {
+    public init(`extension`: String = "", ui: String? = nil, state: String? = nil, actions: [ExtensionNotifyAction]? = nil) {
         self.extension = `extension`
         self.ui = ui
         self.state = state
@@ -3935,7 +3935,7 @@ nonisolated struct ExtensionNotification: Codable, Hashable, Sendable {
         case actions
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.ui = try? c.decodeIfPresent(String.self, forKey: .ui)
@@ -3945,235 +3945,235 @@ nonisolated struct ExtensionNotification: Codable, Hashable, Sendable {
 }
 
 /// A role color the app picks, never one of the extension's own. An unknown tone draws as neutral.
-nonisolated enum ExtensionTone {
-    static let neutral = "neutral"
-    static let positive = "positive"
-    static let caution = "caution"
-    static let danger = "danger"
-    static let all = ["neutral", "positive", "caution", "danger"]
+public nonisolated enum ExtensionTone {
+    public static let neutral = "neutral"
+    public static let positive = "positive"
+    public static let caution = "caution"
+    public static let danger = "danger"
+    public static let all = ["neutral", "positive", "caution", "danger"]
 }
 
 /// title and headline (UI version 6) are a section's big title and a small heading; an older app draws them as body.
-nonisolated enum ExtensionTextStyle {
-    static let body = "body"
-    static let secondary = "secondary"
-    static let caption = "caption"
-    static let code = "code"
-    static let title = "title"
-    static let headline = "headline"
-    static let all = ["body", "secondary", "caption", "code", "title", "headline"]
+public nonisolated enum ExtensionTextStyle {
+    public static let body = "body"
+    public static let secondary = "secondary"
+    public static let caption = "caption"
+    public static let code = "code"
+    public static let title = "title"
+    public static let headline = "headline"
+    public static let all = ["body", "secondary", "caption", "code", "title", "headline"]
 }
 
 /// date, time, datetime, multichoice and multiline are UI version 6. Values stay strings: date YYYY-MM-DD, time HH:MM
 /// (24 hours), datetime YYYY-MM-DDTHH:MM local to context.tz, multichoice a JSON array of the chosen values,
 /// multiline the text with \n.
-nonisolated enum ExtensionFieldKind {
-    static let text = "text"
-    static let secret = "secret"
-    static let number = "number"
-    static let toggle = "toggle"
-    static let choice = "choice"
-    static let date = "date"
-    static let time = "time"
-    static let datetime = "datetime"
-    static let multichoice = "multichoice"
-    static let multiline = "multiline"
-    static let all = ["text", "secret", "number", "toggle", "choice", "date", "time", "datetime", "multichoice", "multiline"]
+public nonisolated enum ExtensionFieldKind {
+    public static let text = "text"
+    public static let secret = "secret"
+    public static let number = "number"
+    public static let toggle = "toggle"
+    public static let choice = "choice"
+    public static let date = "date"
+    public static let time = "time"
+    public static let datetime = "datetime"
+    public static let multichoice = "multichoice"
+    public static let multiline = "multiline"
+    public static let all = ["text", "secret", "number", "toggle", "choice", "date", "time", "datetime", "multichoice", "multiline"]
 }
 
 /// area, candlestick, donut and pie are UI version 6: an older app gets a line (an area, a candlestick's closes) or
 /// bars (a donut, a pie).
-nonisolated enum ExtensionChartKind {
-    static let bar = "bar"
-    static let line = "line"
-    static let area = "area"
-    static let candlestick = "candlestick"
-    static let donut = "donut"
-    static let pie = "pie"
-    static let all = ["bar", "line", "area", "candlestick", "donut", "pie"]
+public nonisolated enum ExtensionChartKind {
+    public static let bar = "bar"
+    public static let line = "line"
+    public static let area = "area"
+    public static let candlestick = "candlestick"
+    public static let donut = "donut"
+    public static let pie = "pie"
+    public static let all = ["bar", "line", "area", "candlestick", "donut", "pie"]
 }
 
 /// A candlestick's rising candle: green (the default) or red, as the market writes it; the falling one is the other.
-nonisolated enum ExtensionCandleRising {
-    static let green = "green"
-    static let red = "red"
-    static let all = ["green", "red"]
+public nonisolated enum ExtensionCandleRising {
+    public static let green = "green"
+    public static let red = "red"
+    public static let all = ["green", "red"]
 }
 
 /// A named color (UI version 6): each app has its own of each, right in light and dark and in every style. Not a hex;
 /// an unknown one draws as the app's quiet ink. Only on badges, icons, tiles, chart series and sparks, never on text;
 /// never with a tone on the same object.
-nonisolated enum ExtensionColor {
-    static let red = "red"
-    static let orange = "orange"
-    static let amber = "amber"
-    static let yellow = "yellow"
-    static let green = "green"
-    static let teal = "teal"
-    static let blue = "blue"
-    static let indigo = "indigo"
-    static let purple = "purple"
-    static let pink = "pink"
-    static let gray = "gray"
-    static let all = ["red", "orange", "amber", "yellow", "green", "teal", "blue", "indigo", "purple", "pink", "gray"]
+public nonisolated enum ExtensionColor {
+    public static let red = "red"
+    public static let orange = "orange"
+    public static let amber = "amber"
+    public static let yellow = "yellow"
+    public static let green = "green"
+    public static let teal = "teal"
+    public static let blue = "blue"
+    public static let indigo = "indigo"
+    public static let purple = "purple"
+    public static let pink = "pink"
+    public static let gray = "gray"
+    public static let all = ["red", "orange", "amber", "yellow", "green", "teal", "blue", "indigo", "purple", "pink", "gray"]
 }
 
 /// Values of ButtonRole.
-nonisolated enum ExtensionButtonRole {
-    static let normal = "normal"
-    static let destructive = "destructive"
-    static let all = ["normal", "destructive"]
+public nonisolated enum ExtensionButtonRole {
+    public static let normal = "normal"
+    public static let destructive = "destructive"
+    public static let all = ["normal", "destructive"]
 }
 
 /// A slot in the apps an extension draws at (docs "UI slots"). extension_page is plugin_page's new name (UI version
 /// 3): the hub takes both and answers the new API with extension_page, the old one with plugin_page.
-nonisolated enum ExtensionPlacement {
-    static let pluginPage = "plugin_page"
-    static let launcherSection = "launcher_section"
-    static let navPage = "nav_page"
-    static let overviewCard = "overview_card"
-    static let machineSection = "machine_section"
-    static let inboxItem = "inbox_item"
-    static let extensionPage = "extension_page"
-    static let widget = "widget"
-    static let capsuleCard = "capsule_card"
-    static let all = ["plugin_page", "launcher_section", "nav_page", "overview_card", "machine_section", "inbox_item", "extension_page", "widget", "capsule_card"]
+public nonisolated enum ExtensionPlacement {
+    public static let pluginPage = "plugin_page"
+    public static let launcherSection = "launcher_section"
+    public static let navPage = "nav_page"
+    public static let overviewCard = "overview_card"
+    public static let machineSection = "machine_section"
+    public static let inboxItem = "inbox_item"
+    public static let extensionPage = "extension_page"
+    public static let widget = "widget"
+    public static let capsuleCard = "capsule_card"
+    public static let all = ["plugin_page", "launcher_section", "nav_page", "overview_card", "machine_section", "inbox_item", "extension_page", "widget", "capsule_card"]
 }
 
 /// How much room a view has: compact (a card), full (a page, a section), or for a widget the family it is drawn for
 /// (WidgetFamily).
-nonisolated enum ExtensionSize {
-    static let compact = "compact"
-    static let full = "full"
-    static let small = "small"
-    static let medium = "medium"
-    static let large = "large"
-    static let accessoryCircular = "accessory_circular"
-    static let accessoryRectangular = "accessory_rectangular"
-    static let accessoryInline = "accessory_inline"
-    static let all = ["compact", "full", "small", "medium", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"]
+public nonisolated enum ExtensionSize {
+    public static let compact = "compact"
+    public static let full = "full"
+    public static let small = "small"
+    public static let medium = "medium"
+    public static let large = "large"
+    public static let accessoryCircular = "accessory_circular"
+    public static let accessoryRectangular = "accessory_rectangular"
+    public static let accessoryInline = "accessory_inline"
+    public static let all = ["compact", "full", "small", "medium", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"]
 }
 
 /// A widget's size outside the app (docs "System placements"): a home screen widget's small / medium / large, a Lock
 /// Screen or watch face complication's accessory_*.
-nonisolated enum ExtensionWidgetFamily {
-    static let small = "small"
-    static let medium = "medium"
-    static let large = "large"
-    static let accessoryCircular = "accessory_circular"
-    static let accessoryRectangular = "accessory_rectangular"
-    static let accessoryInline = "accessory_inline"
-    static let all = ["small", "medium", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"]
+public nonisolated enum ExtensionWidgetFamily {
+    public static let small = "small"
+    public static let medium = "medium"
+    public static let large = "large"
+    public static let accessoryCircular = "accessory_circular"
+    public static let accessoryRectangular = "accessory_rectangular"
+    public static let accessoryInline = "accessory_inline"
+    public static let all = ["small", "medium", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"]
 }
 
 /// Values of Platform.
-nonisolated enum ExtensionPlatform {
-    static let ios = "ios"
-    static let mac = "mac"
-    static let android = "android"
-    static let web = "web"
-    static let all = ["ios", "mac", "android", "web"]
+public nonisolated enum ExtensionPlatform {
+    public static let ios = "ios"
+    public static let mac = "mac"
+    public static let android = "android"
+    public static let web = "web"
+    public static let all = ["ios", "mac", "android", "web"]
 }
 
 /// The fixed icon set: a nav_page's icon, a row's, an empty state's (UI version 3 for the last two and the icons
 /// after money; 4 for those after settings; 6 for those after file, and a metric's, a tile's, a row action's). Each
 /// app draws its own icon for the meaning; an unknown one draws as the default (extension; plugin is its old name).
-nonisolated enum ExtensionNavIcon {
-    static let plugin = "plugin"
-    static let chart = "chart"
-    static let gauge = "gauge"
-    static let list = "list"
-    static let bell = "bell"
-    static let doc = "doc"
-    static let calendar = "calendar"
-    static let money = "money"
-    static let `extension` = "extension"
-    static let person = "person"
-    static let chat = "chat"
-    static let mail = "mail"
-    static let link = "link"
-    static let folder = "folder"
-    static let star = "star"
-    static let check = "check"
-    static let warning = "warning"
-    static let clock = "clock"
-    static let tag = "tag"
-    static let search = "search"
-    static let settings = "settings"
-    static let branch = "branch"
-    static let commit = "commit"
-    static let code = "code"
-    static let pullRequest = "pull_request"
-    static let merge = "merge"
-    static let file = "file"
-    static let home = "home"
-    static let sofa = "sofa"
-    static let light = "light"
-    static let power = "power"
-    static let fan = "fan"
-    static let thermometer = "thermometer"
-    static let droplet = "droplet"
-    static let lock = "lock"
-    static let unlock = "unlock"
-    static let door = "door"
-    static let window = "window"
-    static let camera = "camera"
-    static let video = "video"
-    static let play = "play"
-    static let pause = "pause"
-    static let stop = "stop"
-    static let speaker = "speaker"
-    static let music = "music"
-    static let tv = "tv"
-    static let plug = "plug"
-    static let battery = "battery"
-    static let bolt = "bolt"
-    static let sun = "sun"
-    static let moon = "moon"
-    static let cloud = "cloud"
-    static let rain = "rain"
-    static let snow = "snow"
-    static let wind = "wind"
-    static let leaf = "leaf"
-    static let car = "car"
-    static let location = "location"
-    static let robot = "robot"
-    static let wifi = "wifi"
-    static let shield = "shield"
-    static let trendUp = "trend_up"
-    static let trendDown = "trend_down"
-    static let wallet = "wallet"
-    static let bank = "bank"
-    static let heart = "heart"
-    static let plus = "plus"
-    static let minus = "minus"
-    static let trash = "trash"
-    static let edit = "edit"
-    static let refresh = "refresh"
-    static let share = "share"
-    static let info = "info"
-    static let all = ["plugin", "chart", "gauge", "list", "bell", "doc", "calendar", "money", "extension", "person", "chat", "mail", "link", "folder", "star", "check", "warning", "clock", "tag", "search", "settings", "branch", "commit", "code", "pull_request", "merge", "file", "home", "sofa", "light", "power", "fan", "thermometer", "droplet", "lock", "unlock", "door", "window", "camera", "video", "play", "pause", "stop", "speaker", "music", "tv", "plug", "battery", "bolt", "sun", "moon", "cloud", "rain", "snow", "wind", "leaf", "car", "location", "robot", "wifi", "shield", "trend_up", "trend_down", "wallet", "bank", "heart", "plus", "minus", "trash", "edit", "refresh", "share", "info"]
+public nonisolated enum ExtensionNavIcon {
+    public static let plugin = "plugin"
+    public static let chart = "chart"
+    public static let gauge = "gauge"
+    public static let list = "list"
+    public static let bell = "bell"
+    public static let doc = "doc"
+    public static let calendar = "calendar"
+    public static let money = "money"
+    public static let `extension` = "extension"
+    public static let person = "person"
+    public static let chat = "chat"
+    public static let mail = "mail"
+    public static let link = "link"
+    public static let folder = "folder"
+    public static let star = "star"
+    public static let check = "check"
+    public static let warning = "warning"
+    public static let clock = "clock"
+    public static let tag = "tag"
+    public static let search = "search"
+    public static let settings = "settings"
+    public static let branch = "branch"
+    public static let commit = "commit"
+    public static let code = "code"
+    public static let pullRequest = "pull_request"
+    public static let merge = "merge"
+    public static let file = "file"
+    public static let home = "home"
+    public static let sofa = "sofa"
+    public static let light = "light"
+    public static let power = "power"
+    public static let fan = "fan"
+    public static let thermometer = "thermometer"
+    public static let droplet = "droplet"
+    public static let lock = "lock"
+    public static let unlock = "unlock"
+    public static let door = "door"
+    public static let window = "window"
+    public static let camera = "camera"
+    public static let video = "video"
+    public static let play = "play"
+    public static let pause = "pause"
+    public static let stop = "stop"
+    public static let speaker = "speaker"
+    public static let music = "music"
+    public static let tv = "tv"
+    public static let plug = "plug"
+    public static let battery = "battery"
+    public static let bolt = "bolt"
+    public static let sun = "sun"
+    public static let moon = "moon"
+    public static let cloud = "cloud"
+    public static let rain = "rain"
+    public static let snow = "snow"
+    public static let wind = "wind"
+    public static let leaf = "leaf"
+    public static let car = "car"
+    public static let location = "location"
+    public static let robot = "robot"
+    public static let wifi = "wifi"
+    public static let shield = "shield"
+    public static let trendUp = "trend_up"
+    public static let trendDown = "trend_down"
+    public static let wallet = "wallet"
+    public static let bank = "bank"
+    public static let heart = "heart"
+    public static let plus = "plus"
+    public static let minus = "minus"
+    public static let trash = "trash"
+    public static let edit = "edit"
+    public static let refresh = "refresh"
+    public static let share = "share"
+    public static let info = "info"
+    public static let all = ["plugin", "chart", "gauge", "list", "bell", "doc", "calendar", "money", "extension", "person", "chat", "mail", "link", "folder", "star", "check", "warning", "clock", "tag", "search", "settings", "branch", "commit", "code", "pull_request", "merge", "file", "home", "sofa", "light", "power", "fan", "thermometer", "droplet", "lock", "unlock", "door", "window", "camera", "video", "play", "pause", "stop", "speaker", "music", "tv", "plug", "battery", "bolt", "sun", "moon", "cloud", "rain", "snow", "wind", "leaf", "car", "location", "robot", "wifi", "shield", "trend_up", "trend_down", "wallet", "bank", "heart", "plus", "minus", "trash", "edit", "refresh", "share", "info"]
 }
 
-nonisolated struct ExtensionView: Codable, Hashable, Sendable {
-    var title: String?
-    var sections: [ExtensionSection]
+public nonisolated struct ExtensionView: Codable, Hashable, Sendable {
+    public var title: String?
+    public var sections: [ExtensionSection]
     /// The extension's own, sent back with the next render or action; at most 16 KB.
-    var state: String?
+    public var state: String?
     /// Draw again after this many seconds while on screen (30 at least; 0 never).
-    var refreshAfter: Int?
-    var search: ExtensionSearch?
-    var filter: ExtensionFilter?
-    var tabs: ExtensionTabs?
-    var layout: String?
-    var review: ExtensionReview?
+    public var refreshAfter: Int?
+    public var search: ExtensionSearch?
+    public var filter: ExtensionFilter?
+    public var tabs: ExtensionTabs?
+    public var layout: String?
+    public var review: ExtensionReview?
     /// Plain text for an assistant card: required by CheckAssistantView; not required for extension views.
-    var fallback: String?
+    public var fallback: String?
     /// Assistant card details keyed by page name; at most 8. A detail page cannot contain pages itself. Push.page
     /// refers to this root map.
-    var pages: [String: ExtensionView]?
+    public var pages: [String: ExtensionView]?
 
-    init(title: String? = nil, sections: [ExtensionSection] = [], state: String? = nil, refreshAfter: Int? = nil, search: ExtensionSearch? = nil, filter: ExtensionFilter? = nil, tabs: ExtensionTabs? = nil, layout: String? = nil, review: ExtensionReview? = nil, fallback: String? = nil, pages: [String: ExtensionView]? = nil) {
+    public init(title: String? = nil, sections: [ExtensionSection] = [], state: String? = nil, refreshAfter: Int? = nil, search: ExtensionSearch? = nil, filter: ExtensionFilter? = nil, tabs: ExtensionTabs? = nil, layout: String? = nil, review: ExtensionReview? = nil, fallback: String? = nil, pages: [String: ExtensionView]? = nil) {
         self.title = title
         self.sections = sections
         self.state = state
@@ -4201,7 +4201,7 @@ nonisolated struct ExtensionView: Codable, Hashable, Sendable {
         case pages
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.sections = (try? c.decodeIfPresent([ExtensionSection].self, forKey: .sections)) ?? []
@@ -4217,16 +4217,16 @@ nonisolated struct ExtensionView: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionSection: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionSection: Codable, Hashable, Sendable {
     /// Stable section identity in stream protocol 1 (UI version 7); optional for legacy snapshots.
-    var key: String?
-    var title: String?
-    var footer: String?
-    var items: [ExtensionComponent]
-    var more: ExtensionMore?
-    var pane: String?
+    public var key: String?
+    public var title: String?
+    public var footer: String?
+    public var items: [ExtensionComponent]
+    public var more: ExtensionMore?
+    public var pane: String?
 
-    init(key: String? = nil, title: String? = nil, footer: String? = nil, items: [ExtensionComponent] = [], more: ExtensionMore? = nil, pane: String? = nil) {
+    public init(key: String? = nil, title: String? = nil, footer: String? = nil, items: [ExtensionComponent] = [], more: ExtensionMore? = nil, pane: String? = nil) {
         self.key = key
         self.title = title
         self.footer = footer
@@ -4244,7 +4244,7 @@ nonisolated struct ExtensionSection: Codable, Hashable, Sendable {
         case pane
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -4256,7 +4256,7 @@ nonisolated struct ExtensionSection: Codable, Hashable, Sendable {
 }
 
 /// One component of a view, told apart by type. A type an app does not know is skipped and the rest drawn.
-nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
+public nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
     case text(ExtensionTextComponent)
     case metric(ExtensionMetricComponent)
     case progress(ExtensionProgressComponent)
@@ -4286,16 +4286,16 @@ nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
     /// A type this app does not know, or a variant it could not read: skipped when drawn.
     case unknown(type: String)
 
-    static let types = ["text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel"]
+    public static let types = ["text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel"]
 
     /// The UI version that brought each type.
-    static let since: [String: Int] = ["text": 1, "metric": 1, "progress": 1, "row": 1, "button": 1, "link": 1, "field": 1, "divider": 1, "chart": 2, "stat_grid": 2, "segmented": 2, "markdown": 3, "table": 3, "empty": 3, "loading": 3, "html": 4, "header": 4, "breadcrumb": 4, "file_tree": 4, "code": 4, "diff": 4, "comment_thread": 4, "composer": 4, "image": 6, "grid": 6, "carousel": 6]
+    public static let since: [String: Int] = ["text": 1, "metric": 1, "progress": 1, "row": 1, "button": 1, "link": 1, "field": 1, "divider": 1, "chart": 2, "stat_grid": 2, "segmented": 2, "markdown": 3, "table": 3, "empty": 3, "loading": 3, "html": 4, "header": 4, "breadcrumb": 4, "file_tree": 4, "code": 4, "diff": 4, "comment_thread": 4, "composer": 4, "image": 6, "grid": 6, "carousel": 6]
 
     private enum TagKey: String, CodingKey {
         case tag = "type"
     }
 
-    var type: String {
+    public var type: String {
         switch self {
         case .text: "text"
         case .metric: "metric"
@@ -4327,7 +4327,7 @@ nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let t = (try? decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)) ?? ""
         switch t {
         case "text": self = (try? ExtensionTextComponent(from: decoder)).map { .text($0) } ?? .unknown(type: t)
@@ -4360,7 +4360,7 @@ nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .text(let v): try v.encode(to: encoder)
         case .metric(let v): try v.encode(to: encoder)
@@ -4396,12 +4396,12 @@ nonisolated enum ExtensionComponent: Codable, Hashable, Sendable {
 }
 
 /// A paragraph.
-nonisolated struct ExtensionTextComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var text: String
-    var style: String?
+public nonisolated struct ExtensionTextComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var text: String
+    public var style: String?
 
-    init(key: String? = nil, text: String = "", style: String? = nil) {
+    public init(key: String? = nil, text: String = "", style: String? = nil) {
         self.key = key
         self.text = text
         self.style = style
@@ -4413,7 +4413,7 @@ nonisolated struct ExtensionTextComponent: Codable, Hashable, Sendable {
         case style
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -4422,17 +4422,17 @@ nonisolated struct ExtensionTextComponent: Codable, Hashable, Sendable {
 }
 
 /// A number with its label.
-nonisolated struct ExtensionMetricComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var label: String
-    var value: String
-    var detail: String?
-    var tone: String?
-    var icon: String?
-    var iconColor: String?
-    var spark: ExtensionSpark?
+public nonisolated struct ExtensionMetricComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var label: String
+    public var value: String
+    public var detail: String?
+    public var tone: String?
+    public var icon: String?
+    public var iconColor: String?
+    public var spark: ExtensionSpark?
 
-    init(key: String? = nil, label: String = "", value: String = "", detail: String? = nil, tone: String? = nil, icon: String? = nil, iconColor: String? = nil, spark: ExtensionSpark? = nil) {
+    public init(key: String? = nil, label: String = "", value: String = "", detail: String? = nil, tone: String? = nil, icon: String? = nil, iconColor: String? = nil, spark: ExtensionSpark? = nil) {
         self.key = key
         self.label = label
         self.value = value
@@ -4454,7 +4454,7 @@ nonisolated struct ExtensionMetricComponent: Codable, Hashable, Sendable {
         case spark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
@@ -4468,14 +4468,14 @@ nonisolated struct ExtensionMetricComponent: Codable, Hashable, Sendable {
 }
 
 /// A bar filled to ratio (0 to 1).
-nonisolated struct ExtensionProgressComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var label: String
-    var ratio: Double
-    var detail: String?
-    var tone: String?
+public nonisolated struct ExtensionProgressComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var label: String
+    public var ratio: Double
+    public var detail: String?
+    public var tone: String?
 
-    init(key: String? = nil, label: String = "", ratio: Double = 0, detail: String? = nil, tone: String? = nil) {
+    public init(key: String? = nil, label: String = "", ratio: Double = 0, detail: String? = nil, tone: String? = nil) {
         self.key = key
         self.label = label
         self.ratio = ratio
@@ -4491,7 +4491,7 @@ nonisolated struct ExtensionProgressComponent: Codable, Hashable, Sendable {
         case tone
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
@@ -4502,26 +4502,26 @@ nonisolated struct ExtensionProgressComponent: Codable, Hashable, Sendable {
 }
 
 /// A row of a list; with an action it can be tapped.
-nonisolated struct ExtensionRowComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var subtitle: String?
-    var value: String?
-    var badge: ExtensionBadge?
-    var action: ExtensionAction?
+public nonisolated struct ExtensionRowComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var subtitle: String?
+    public var value: String?
+    public var badge: ExtensionBadge?
+    public var action: ExtensionAction?
     /// At most one of icon, avatar and thumbnail.
-    var icon: String?
-    var avatar: ExtensionAvatar?
-    var thumbnail: ExtensionThumbnail?
-    var iconColor: String?
+    public var icon: String?
+    public var avatar: ExtensionAvatar?
+    public var thumbnail: ExtensionThumbnail?
+    public var iconColor: String?
     /// A switch, a slider or a stepper; the row then has a key.
-    var control: ExtensionRowControl?
+    public var control: ExtensionRowControl?
     /// Extra actions in the row's menu and under a swipe: shortcuts only, the same must be possible on the page the
     /// row opens.
-    var actions: [ExtensionRowAction]?
-    var spark: ExtensionSpark?
+    public var actions: [ExtensionRowAction]?
+    public var spark: ExtensionSpark?
 
-    init(key: String? = nil, title: String = "", subtitle: String? = nil, value: String? = nil, badge: ExtensionBadge? = nil, action: ExtensionAction? = nil, icon: String? = nil, avatar: ExtensionAvatar? = nil, thumbnail: ExtensionThumbnail? = nil, iconColor: String? = nil, control: ExtensionRowControl? = nil, actions: [ExtensionRowAction]? = nil, spark: ExtensionSpark? = nil) {
+    public init(key: String? = nil, title: String = "", subtitle: String? = nil, value: String? = nil, badge: ExtensionBadge? = nil, action: ExtensionAction? = nil, icon: String? = nil, avatar: ExtensionAvatar? = nil, thumbnail: ExtensionThumbnail? = nil, iconColor: String? = nil, control: ExtensionRowControl? = nil, actions: [ExtensionRowAction]? = nil, spark: ExtensionSpark? = nil) {
         self.key = key
         self.title = title
         self.subtitle = subtitle
@@ -4553,7 +4553,7 @@ nonisolated struct ExtensionRowComponent: Codable, Hashable, Sendable {
         case spark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -4572,13 +4572,13 @@ nonisolated struct ExtensionRowComponent: Codable, Hashable, Sendable {
 }
 
 /// A button; its title never wraps.
-nonisolated struct ExtensionButtonComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var action: ExtensionAction
-    var role: String?
+public nonisolated struct ExtensionButtonComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var action: ExtensionAction
+    public var role: String?
 
-    init(key: String? = nil, title: String = "", action: ExtensionAction = ExtensionAction(), role: String? = nil) {
+    public init(key: String? = nil, title: String = "", action: ExtensionAction = ExtensionAction(), role: String? = nil) {
         self.key = key
         self.title = title
         self.action = action
@@ -4592,7 +4592,7 @@ nonisolated struct ExtensionButtonComponent: Codable, Hashable, Sendable {
         case role
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -4602,12 +4602,12 @@ nonisolated struct ExtensionButtonComponent: Codable, Hashable, Sendable {
 }
 
 /// A link the app opens inside itself: https only.
-nonisolated struct ExtensionLinkComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var url: String
+public nonisolated struct ExtensionLinkComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var url: String
 
-    init(key: String? = nil, title: String = "", url: String = "") {
+    public init(key: String? = nil, title: String = "", url: String = "") {
         self.key = key
         self.title = title
         self.url = url
@@ -4619,7 +4619,7 @@ nonisolated struct ExtensionLinkComponent: Codable, Hashable, Sendable {
         case url
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -4628,22 +4628,22 @@ nonisolated struct ExtensionLinkComponent: Codable, Hashable, Sendable {
 }
 
 /// An input; its value goes back under name when an action submits. A secret is never filled in.
-nonisolated struct ExtensionFieldComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var name: String
-    var label: String
-    var kind: String
-    var value: String?
-    var choices: [ExtensionChoice]?
-    var placeholder: String?
+public nonisolated struct ExtensionFieldComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var name: String
+    public var label: String
+    public var kind: String
+    public var value: String?
+    public var choices: [ExtensionChoice]?
+    public var placeholder: String?
     /// date, time, datetime: the first one allowed, written like value.
-    var earliest: String?
+    public var earliest: String?
     /// date, time, datetime: the last one allowed.
-    var latest: String?
+    public var latest: String?
     /// A line of help under the field.
-    var detail: String?
+    public var detail: String?
 
-    init(key: String? = nil, name: String = "", label: String = "", kind: String = "", value: String? = nil, choices: [ExtensionChoice]? = nil, placeholder: String? = nil, earliest: String? = nil, latest: String? = nil, detail: String? = nil) {
+    public init(key: String? = nil, name: String = "", label: String = "", kind: String = "", value: String? = nil, choices: [ExtensionChoice]? = nil, placeholder: String? = nil, earliest: String? = nil, latest: String? = nil, detail: String? = nil) {
         self.key = key
         self.name = name
         self.label = label
@@ -4669,7 +4669,7 @@ nonisolated struct ExtensionFieldComponent: Codable, Hashable, Sendable {
         case detail
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -4685,10 +4685,10 @@ nonisolated struct ExtensionFieldComponent: Codable, Hashable, Sendable {
 }
 
 /// A line between two groups of a section.
-nonisolated struct ExtensionDividerComponent: Codable, Hashable, Sendable {
-    var key: String?
+public nonisolated struct ExtensionDividerComponent: Codable, Hashable, Sendable {
+    public var key: String?
 
-    init(key: String? = nil) {
+    public init(key: String? = nil) {
         self.key = key
     }
 
@@ -4696,7 +4696,7 @@ nonisolated struct ExtensionDividerComponent: Codable, Hashable, Sendable {
         case key
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
     }
@@ -4705,20 +4705,20 @@ nonisolated struct ExtensionDividerComponent: Codable, Hashable, Sendable {
 /// A chart: bar, line, and in UI version 6 area, candlestick, donut, pie. Every series has the same labels in the
 /// same order; with more than one series each is named. A candlestick has one series whose points all have open,
 /// high, low and close (value is the close), at most 240 of them; a donut or a pie one series of 2 to 8 points.
-nonisolated struct ExtensionChartComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var kind: String
-    var series: [ExtensionChartSeries]
-    var title: String?
-    var unit: String?
-    var stacked: Bool?
-    var detail: String?
+public nonisolated struct ExtensionChartComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var kind: String
+    public var series: [ExtensionChartSeries]
+    public var title: String?
+    public var unit: String?
+    public var stacked: Bool?
+    public var detail: String?
     /// donut: the words in the hole (a total).
-    var center: String?
+    public var center: String?
     /// candlestick: the color of a rising candle.
-    var rising: String?
+    public var rising: String?
 
-    init(key: String? = nil, kind: String = "", series: [ExtensionChartSeries] = [], title: String? = nil, unit: String? = nil, stacked: Bool? = nil, detail: String? = nil, center: String? = nil, rising: String? = nil) {
+    public init(key: String? = nil, kind: String = "", series: [ExtensionChartSeries] = [], title: String? = nil, unit: String? = nil, stacked: Bool? = nil, detail: String? = nil, center: String? = nil, rising: String? = nil) {
         self.key = key
         self.kind = kind
         self.series = series
@@ -4742,7 +4742,7 @@ nonisolated struct ExtensionChartComponent: Codable, Hashable, Sendable {
         case rising
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
@@ -4757,11 +4757,11 @@ nonisolated struct ExtensionChartComponent: Codable, Hashable, Sendable {
 }
 
 /// A few numbers side by side.
-nonisolated struct ExtensionStatGridComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var stats: [ExtensionStat]
+public nonisolated struct ExtensionStatGridComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var stats: [ExtensionStat]
 
-    init(key: String? = nil, stats: [ExtensionStat] = []) {
+    public init(key: String? = nil, stats: [ExtensionStat] = []) {
         self.key = key
         self.stats = stats
     }
@@ -4771,7 +4771,7 @@ nonisolated struct ExtensionStatGridComponent: Codable, Hashable, Sendable {
         case stats
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.stats = (try? c.decodeIfPresent([ExtensionStat].self, forKey: .stats)) ?? []
@@ -4779,14 +4779,14 @@ nonisolated struct ExtensionStatGridComponent: Codable, Hashable, Sendable {
 }
 
 /// One of a few, chosen at once: its action goes with values {name: the chosen value}.
-nonisolated struct ExtensionSegmentedComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var name: String
-    var choices: [ExtensionChoice]
-    var value: String
-    var action: ExtensionAction
+public nonisolated struct ExtensionSegmentedComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var name: String
+    public var choices: [ExtensionChoice]
+    public var value: String
+    public var action: ExtensionAction
 
-    init(key: String? = nil, name: String = "", choices: [ExtensionChoice] = [], value: String = "", action: ExtensionAction = ExtensionAction()) {
+    public init(key: String? = nil, name: String = "", choices: [ExtensionChoice] = [], value: String = "", action: ExtensionAction = ExtensionAction()) {
         self.key = key
         self.name = name
         self.choices = choices
@@ -4802,7 +4802,7 @@ nonisolated struct ExtensionSegmentedComponent: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -4815,11 +4815,11 @@ nonisolated struct ExtensionSegmentedComponent: Codable, Hashable, Sendable {
 /// Text in a safe subset of Markdown: headings (1 to 3), paragraphs, lists, bold, italics, inline code, code blocks,
 /// quotes, https links (opened in the app). No HTML, no images, no tables (a table is a table component). An older
 /// app gets it as plain text.
-nonisolated struct ExtensionMarkdownComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var text: String
+public nonisolated struct ExtensionMarkdownComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var text: String
 
-    init(key: String? = nil, text: String = "") {
+    public init(key: String? = nil, text: String = "") {
         self.key = key
         self.text = text
     }
@@ -4829,7 +4829,7 @@ nonisolated struct ExtensionMarkdownComponent: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -4838,13 +4838,13 @@ nonisolated struct ExtensionMarkdownComponent: Codable, Hashable, Sendable {
 
 /// A table: 1 to 8 columns, at most 100 rows, each with as many cells as there are columns. Narrow screens scroll it
 /// sideways; cells never squeeze. An older app gets a row per line.
-nonisolated struct ExtensionTableComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var columns: [ExtensionTableColumn]
-    var rows: [[String]]
-    var caption: String?
+public nonisolated struct ExtensionTableComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var columns: [ExtensionTableColumn]
+    public var rows: [[String]]
+    public var caption: String?
 
-    init(key: String? = nil, columns: [ExtensionTableColumn] = [], rows: [[String]] = [], caption: String? = nil) {
+    public init(key: String? = nil, columns: [ExtensionTableColumn] = [], rows: [[String]] = [], caption: String? = nil) {
         self.key = key
         self.columns = columns
         self.rows = rows
@@ -4858,7 +4858,7 @@ nonisolated struct ExtensionTableComponent: Codable, Hashable, Sendable {
         case caption
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.columns = (try? c.decodeIfPresent([ExtensionTableColumn].self, forKey: .columns)) ?? []
@@ -4868,15 +4868,15 @@ nonisolated struct ExtensionTableComponent: Codable, Hashable, Sendable {
 }
 
 /// An empty state: nothing here yet, and maybe one thing to do about it. An older app gets a text and a button.
-nonisolated struct ExtensionEmptyComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var detail: String?
-    var icon: String?
-    var button: ExtensionEmptyButton?
-    var iconColor: String?
+public nonisolated struct ExtensionEmptyComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var detail: String?
+    public var icon: String?
+    public var button: ExtensionEmptyButton?
+    public var iconColor: String?
 
-    init(key: String? = nil, title: String = "", detail: String? = nil, icon: String? = nil, button: ExtensionEmptyButton? = nil, iconColor: String? = nil) {
+    public init(key: String? = nil, title: String = "", detail: String? = nil, icon: String? = nil, button: ExtensionEmptyButton? = nil, iconColor: String? = nil) {
         self.key = key
         self.title = title
         self.detail = detail
@@ -4894,7 +4894,7 @@ nonisolated struct ExtensionEmptyComponent: Codable, Hashable, Sendable {
         case iconColor = "icon_color"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -4907,11 +4907,11 @@ nonisolated struct ExtensionEmptyComponent: Codable, Hashable, Sendable {
 
 /// Loading: the extension answers it while its data comes, then sends ui.invalidate to be drawn again. An older app
 /// gets a quiet text.
-nonisolated struct ExtensionLoadingComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String?
+public nonisolated struct ExtensionLoadingComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String?
 
-    init(key: String? = nil, title: String? = nil) {
+    public init(key: String? = nil, title: String? = nil) {
         self.key = key
         self.title = title
     }
@@ -4921,7 +4921,7 @@ nonisolated struct ExtensionLoadingComponent: Codable, Hashable, Sendable {
         case title
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -4930,13 +4930,13 @@ nonisolated struct ExtensionLoadingComponent: Codable, Hashable, Sendable {
 
 /// Assistant only: self-contained HTML. Execution requires an isolated, network-denying renderer; unsupported clients
 /// show the root fallback. Extensions never execute it.
-nonisolated struct ExtensionHtmlComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var html: String
-    var height: Int?
-    var title: String?
+public nonisolated struct ExtensionHtmlComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var html: String
+    public var height: Int?
+    public var title: String?
 
-    init(key: String? = nil, html: String = "", height: Int? = nil, title: String? = nil) {
+    public init(key: String? = nil, html: String = "", height: Int? = nil, title: String? = nil) {
         self.key = key
         self.html = html
         self.height = height
@@ -4950,7 +4950,7 @@ nonisolated struct ExtensionHtmlComponent: Codable, Hashable, Sendable {
         case title
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.html = (try? c.decodeIfPresent(String.self, forKey: .html)) ?? ""
@@ -4961,15 +4961,15 @@ nonisolated struct ExtensionHtmlComponent: Codable, Hashable, Sendable {
 
 /// A detail page's head: a big title, state badges, a line of facts (author, branches, time, size). An older app gets
 /// a text and a row per fact.
-nonisolated struct ExtensionHeaderComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var subtitle: String?
-    var badges: [ExtensionBadge]?
-    var facts: [ExtensionFact]?
-    var avatar: ExtensionAvatar?
+public nonisolated struct ExtensionHeaderComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var subtitle: String?
+    public var badges: [ExtensionBadge]?
+    public var facts: [ExtensionFact]?
+    public var avatar: ExtensionAvatar?
 
-    init(key: String? = nil, title: String = "", subtitle: String? = nil, badges: [ExtensionBadge]? = nil, facts: [ExtensionFact]? = nil, avatar: ExtensionAvatar? = nil) {
+    public init(key: String? = nil, title: String = "", subtitle: String? = nil, badges: [ExtensionBadge]? = nil, facts: [ExtensionFact]? = nil, avatar: ExtensionAvatar? = nil) {
         self.key = key
         self.title = title
         self.subtitle = subtitle
@@ -4987,7 +4987,7 @@ nonisolated struct ExtensionHeaderComponent: Codable, Hashable, Sendable {
         case avatar
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -4999,11 +4999,11 @@ nonisolated struct ExtensionHeaderComponent: Codable, Hashable, Sendable {
 }
 
 /// A path (repo / src / main.go): every crumb but the last may be tapped. An older app gets one text.
-nonisolated struct ExtensionBreadcrumbComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var crumbs: [ExtensionCrumb]
+public nonisolated struct ExtensionBreadcrumbComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var crumbs: [ExtensionCrumb]
 
-    init(key: String? = nil, crumbs: [ExtensionCrumb] = []) {
+    public init(key: String? = nil, crumbs: [ExtensionCrumb] = []) {
         self.key = key
         self.crumbs = crumbs
     }
@@ -5013,7 +5013,7 @@ nonisolated struct ExtensionBreadcrumbComponent: Codable, Hashable, Sendable {
         case crumbs
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.crumbs = (try? c.decodeIfPresent([ExtensionCrumb].self, forKey: .crumbs)) ?? []
@@ -5023,14 +5023,14 @@ nonisolated struct ExtensionBreadcrumbComponent: Codable, Hashable, Sendable {
 /// Files as a tree the app builds from their paths (a directory with one child folds into a/b/c). action opens a file
 /// (values {path}); expand loads a directory given with no entries under it (values {path}). An older app gets a row
 /// per entry.
-nonisolated struct ExtensionFileTreeComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var entries: [ExtensionTreeEntry]
-    var selected: String?
-    var action: ExtensionAction?
-    var expand: ExtensionAction?
+public nonisolated struct ExtensionFileTreeComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var entries: [ExtensionTreeEntry]
+    public var selected: String?
+    public var action: ExtensionAction?
+    public var expand: ExtensionAction?
 
-    init(key: String? = nil, entries: [ExtensionTreeEntry] = [], selected: String? = nil, action: ExtensionAction? = nil, expand: ExtensionAction? = nil) {
+    public init(key: String? = nil, entries: [ExtensionTreeEntry] = [], selected: String? = nil, action: ExtensionAction? = nil, expand: ExtensionAction? = nil) {
         self.key = key
         self.entries = entries
         self.selected = selected
@@ -5046,7 +5046,7 @@ nonisolated struct ExtensionFileTreeComponent: Codable, Hashable, Sendable {
         case expand
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.entries = (try? c.decodeIfPresent([ExtensionTreeEntry].self, forKey: .entries)) ?? []
@@ -5059,20 +5059,20 @@ nonisolated struct ExtensionFileTreeComponent: Codable, Hashable, Sendable {
 /// A file's content: line numbers, the app's own syntax highlighting (language, else guessed from path), no wrapping.
 /// truncated with load: the rest comes from load (values {path, from: the next line}). An older app gets a code
 /// block.
-nonisolated struct ExtensionCodeComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var path: String?
-    var language: String?
-    var text: String
-    var startLine: Int?
-    var highlight: ExtensionLineRange?
-    var truncated: Bool?
-    var load: ExtensionAction?
+public nonisolated struct ExtensionCodeComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var path: String?
+    public var language: String?
+    public var text: String
+    public var startLine: Int?
+    public var highlight: ExtensionLineRange?
+    public var truncated: Bool?
+    public var load: ExtensionAction?
     /// An https link to lines of this file on its site, {start} and {end} standing for the lines
     /// (…/blob/<sha>/a.go#L{start}-L{end}).
-    var lineUrl: String?
+    public var lineUrl: String?
 
-    init(key: String? = nil, path: String? = nil, language: String? = nil, text: String = "", startLine: Int? = nil, highlight: ExtensionLineRange? = nil, truncated: Bool? = nil, load: ExtensionAction? = nil, lineUrl: String? = nil) {
+    public init(key: String? = nil, path: String? = nil, language: String? = nil, text: String = "", startLine: Int? = nil, highlight: ExtensionLineRange? = nil, truncated: Bool? = nil, load: ExtensionAction? = nil, lineUrl: String? = nil) {
         self.key = key
         self.path = path
         self.language = language
@@ -5096,7 +5096,7 @@ nonisolated struct ExtensionCodeComponent: Codable, Hashable, Sendable {
         case lineUrl = "line_url"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.path = try? c.decodeIfPresent(String.self, forKey: .path)
@@ -5114,41 +5114,41 @@ nonisolated struct ExtensionCodeComponent: Codable, Hashable, Sendable {
 /// choice. threads are inline comments at their lines; comment adds one (values {path, side, line, start_line?,
 /// body}); expand shows hidden lines between hunks (values {path, hunk, direction: up, down or all}); collapsed, or
 /// without hunks, it shows a button calling load (values {path}). An older app gets a code block.
-nonisolated struct ExtensionDiffComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var path: String
-    var oldPath: String?
-    var status: String?
-    var language: String?
-    var additions: Int?
-    var deletions: Int?
-    var binary: Bool?
-    var collapsed: Bool?
-    var hunks: [ExtensionHunk]?
-    var threads: [ExtensionThread]?
-    var load: ExtensionAction?
-    var expand: ExtensionAction?
-    var comment: ExtensionAction?
+public nonisolated struct ExtensionDiffComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var path: String
+    public var oldPath: String?
+    public var status: String?
+    public var language: String?
+    public var additions: Int?
+    public var deletions: Int?
+    public var binary: Bool?
+    public var collapsed: Bool?
+    public var hunks: [ExtensionHunk]?
+    public var threads: [ExtensionThread]?
+    public var load: ExtensionAction?
+    public var expand: ExtensionAction?
+    public var comment: ExtensionAction?
     /// Fetch hidden lines of the file (UI version 5): values {path, side: new or old, from, to: a line or end}; the
     /// extension answers with lines (ActionResult.lines), the page is not drawn again.
-    var context: ExtensionAction?
+    public var context: ExtensionAction?
     /// The user has marked this file viewed.
-    var viewed: Bool?
+    public var viewed: Bool?
     /// Mark the file viewed or not: values {path, viewed: true or false}. Without it the app keeps viewed on the
     /// device, by path and revision.
-    var markViewed: ExtensionAction?
+    public var markViewed: ExtensionAction?
     /// What this file's change is (a blob id): a viewed mark kept on the device holds for it only.
-    var revision: String?
+    public var revision: String?
     /// A generated file or a lockfile: folded at first.
-    var generated: Bool?
+    public var generated: Bool?
     /// How alike a renamed file is to its old one, in percent.
-    var similarity: Int?
+    public var similarity: Int?
     /// Add a comment to the pending review instead of sending it alone: values as comment's.
-    var draft: ExtensionAction?
+    public var draft: ExtensionAction?
     /// The extension takes ```suggestion blocks in comments.
-    var suggestions: Bool?
+    public var suggestions: Bool?
 
-    init(key: String? = nil, path: String = "", oldPath: String? = nil, status: String? = nil, language: String? = nil, additions: Int? = nil, deletions: Int? = nil, binary: Bool? = nil, collapsed: Bool? = nil, hunks: [ExtensionHunk]? = nil, threads: [ExtensionThread]? = nil, load: ExtensionAction? = nil, expand: ExtensionAction? = nil, comment: ExtensionAction? = nil, context: ExtensionAction? = nil, viewed: Bool? = nil, markViewed: ExtensionAction? = nil, revision: String? = nil, generated: Bool? = nil, similarity: Int? = nil, draft: ExtensionAction? = nil, suggestions: Bool? = nil) {
+    public init(key: String? = nil, path: String = "", oldPath: String? = nil, status: String? = nil, language: String? = nil, additions: Int? = nil, deletions: Int? = nil, binary: Bool? = nil, collapsed: Bool? = nil, hunks: [ExtensionHunk]? = nil, threads: [ExtensionThread]? = nil, load: ExtensionAction? = nil, expand: ExtensionAction? = nil, comment: ExtensionAction? = nil, context: ExtensionAction? = nil, viewed: Bool? = nil, markViewed: ExtensionAction? = nil, revision: String? = nil, generated: Bool? = nil, similarity: Int? = nil, draft: ExtensionAction? = nil, suggestions: Bool? = nil) {
         self.key = key
         self.path = path
         self.oldPath = oldPath
@@ -5198,7 +5198,7 @@ nonisolated struct ExtensionDiffComponent: Codable, Hashable, Sendable {
         case suggestions
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
@@ -5227,14 +5227,14 @@ nonisolated struct ExtensionDiffComponent: Codable, Hashable, Sendable {
 
 /// A discussion: comments in order (an event is drawn as a quiet line), and a reply box when reply is set (values
 /// {body}). An older app gets a row and a text per comment.
-nonisolated struct ExtensionCommentThreadComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String?
-    var comments: [ExtensionComment]
-    var resolved: Bool?
-    var reply: ExtensionAction?
+public nonisolated struct ExtensionCommentThreadComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String?
+    public var comments: [ExtensionComment]
+    public var resolved: Bool?
+    public var reply: ExtensionAction?
 
-    init(key: String? = nil, title: String? = nil, comments: [ExtensionComment] = [], resolved: Bool? = nil, reply: ExtensionAction? = nil) {
+    public init(key: String? = nil, title: String? = nil, comments: [ExtensionComment] = [], resolved: Bool? = nil, reply: ExtensionAction? = nil) {
         self.key = key
         self.title = title
         self.comments = comments
@@ -5250,7 +5250,7 @@ nonisolated struct ExtensionCommentThreadComponent: Codable, Hashable, Sendable 
         case reply
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -5262,14 +5262,14 @@ nonisolated struct ExtensionCommentThreadComponent: Codable, Hashable, Sendable 
 
 /// A multi-line input (Markdown) with a few buttons (comment, approve, request changes, merge): the one tapped sends
 /// the text as name, with the page's fields. An older app gets a field and a button each.
-nonisolated struct ExtensionComposerComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var name: String
-    var placeholder: String?
-    var value: String?
-    var buttons: [ExtensionComposerButton]
+public nonisolated struct ExtensionComposerComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var name: String
+    public var placeholder: String?
+    public var value: String?
+    public var buttons: [ExtensionComposerButton]
 
-    init(key: String? = nil, name: String = "", placeholder: String? = nil, value: String? = nil, buttons: [ExtensionComposerButton] = []) {
+    public init(key: String? = nil, name: String = "", placeholder: String? = nil, value: String? = nil, buttons: [ExtensionComposerButton] = []) {
         self.key = key
         self.name = name
         self.placeholder = placeholder
@@ -5285,7 +5285,7 @@ nonisolated struct ExtensionComposerComponent: Codable, Hashable, Sendable {
         case buttons
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -5298,18 +5298,18 @@ nonisolated struct ExtensionComposerComponent: Codable, Hashable, Sendable {
 /// A picture with an optional caption; tapping it shows it full screen unless no_zoom. A ref is the extension's own
 /// picture (a camera, a map) fetched through the hub. An older app gets a row with a thumbnail (url) or a line of
 /// text (ref).
-nonisolated struct ExtensionImageComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var src: ExtensionImageSource
+public nonisolated struct ExtensionImageComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var src: ExtensionImageSource
     /// Read out, and shown when the picture does not load.
-    var alt: String
-    var caption: String?
-    var aspect: String?
-    var fit: String?
+    public var alt: String
+    public var caption: String?
+    public var aspect: String?
+    public var fit: String?
     /// Tapping does nothing (else it shows the picture full screen).
-    var noZoom: Bool?
+    public var noZoom: Bool?
 
-    init(key: String? = nil, src: ExtensionImageSource = ExtensionImageSource(), alt: String = "", caption: String? = nil, aspect: String? = nil, fit: String? = nil, noZoom: Bool? = nil) {
+    public init(key: String? = nil, src: ExtensionImageSource = ExtensionImageSource(), alt: String = "", caption: String? = nil, aspect: String? = nil, fit: String? = nil, noZoom: Bool? = nil) {
         self.key = key
         self.src = src
         self.alt = alt
@@ -5329,7 +5329,7 @@ nonisolated struct ExtensionImageComponent: Codable, Hashable, Sendable {
         case noZoom = "no_zoom"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.src = (try? c.decodeIfPresent(ExtensionImageSource.self, forKey: .src)) ?? ExtensionImageSource()
@@ -5343,12 +5343,12 @@ nonisolated struct ExtensionImageComponent: Codable, Hashable, Sendable {
 
 /// Tiles in columns that fit the width: two on a phone, more on wider screens, at most max_columns (4 when absent).
 /// Each tile counts as a component of the page. An older app gets a row per tile.
-nonisolated struct ExtensionGridComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var tiles: [ExtensionTile]
-    var maxColumns: Int?
+public nonisolated struct ExtensionGridComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var tiles: [ExtensionTile]
+    public var maxColumns: Int?
 
-    init(key: String? = nil, tiles: [ExtensionTile] = [], maxColumns: Int? = nil) {
+    public init(key: String? = nil, tiles: [ExtensionTile] = [], maxColumns: Int? = nil) {
         self.key = key
         self.tiles = tiles
         self.maxColumns = maxColumns
@@ -5360,7 +5360,7 @@ nonisolated struct ExtensionGridComponent: Codable, Hashable, Sendable {
         case maxColumns = "max_columns"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.tiles = (try? c.decodeIfPresent([ExtensionTile].self, forKey: .tiles)) ?? []
@@ -5370,13 +5370,13 @@ nonisolated struct ExtensionGridComponent: Codable, Hashable, Sendable {
 
 /// Tiles in one line that scrolls sideways: cameras, rooms, a watchlist. Each tile counts as a component of the page.
 /// An older app gets a text (the title) and a row per tile.
-nonisolated struct ExtensionCarouselComponent: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String?
-    var tiles: [ExtensionTile]
-    var width: String?
+public nonisolated struct ExtensionCarouselComponent: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String?
+    public var tiles: [ExtensionTile]
+    public var width: String?
 
-    init(key: String? = nil, title: String? = nil, tiles: [ExtensionTile] = [], width: String? = nil) {
+    public init(key: String? = nil, title: String? = nil, tiles: [ExtensionTile] = [], width: String? = nil) {
         self.key = key
         self.title = title
         self.tiles = tiles
@@ -5390,7 +5390,7 @@ nonisolated struct ExtensionCarouselComponent: Codable, Hashable, Sendable {
         case width
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -5402,14 +5402,14 @@ nonisolated struct ExtensionCarouselComponent: Codable, Hashable, Sendable {
 /// Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension
 /// serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own
 /// address, which the app loads with its device credentials. An extension that writes path is refused.
-nonisolated struct ExtensionImageSource: Codable, Hashable, Sendable {
-    var url: String?
-    var ref: String?
-    var path: String?
-    var width: Int?
-    var height: Int?
+public nonisolated struct ExtensionImageSource: Codable, Hashable, Sendable {
+    public var url: String?
+    public var ref: String?
+    public var path: String?
+    public var width: Int?
+    public var height: Int?
 
-    init(url: String? = nil, ref: String? = nil, path: String? = nil, width: Int? = nil, height: Int? = nil) {
+    public init(url: String? = nil, ref: String? = nil, path: String? = nil, width: Int? = nil, height: Int? = nil) {
         self.url = url
         self.ref = ref
         self.path = path
@@ -5425,7 +5425,7 @@ nonisolated struct ExtensionImageSource: Codable, Hashable, Sendable {
         case height
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = try? c.decodeIfPresent(String.self, forKey: .url)
         self.ref = try? c.decodeIfPresent(String.self, forKey: .ref)
@@ -5437,52 +5437,52 @@ nonisolated struct ExtensionImageSource: Codable, Hashable, Sendable {
 
 /// square 1:1, landscape 4:3 (the default), wide 16:9, portrait 3:4, auto from src's width and height (4:3 until the
 /// picture comes).
-nonisolated enum ExtensionImageAspect {
-    static let square = "square"
-    static let landscape = "landscape"
-    static let wide = "wide"
-    static let portrait = "portrait"
-    static let auto = "auto"
-    static let all = ["square", "landscape", "wide", "portrait", "auto"]
+public nonisolated enum ExtensionImageAspect {
+    public static let square = "square"
+    public static let landscape = "landscape"
+    public static let wide = "wide"
+    public static let portrait = "portrait"
+    public static let auto = "auto"
+    public static let all = ["square", "landscape", "wide", "portrait", "auto"]
 }
 
 /// fill crops to fill the frame (the default); fit shows all of it.
-nonisolated enum ExtensionImageFit {
-    static let fill = "fill"
-    static let fit = "fit"
-    static let all = ["fill", "fit"]
+public nonisolated enum ExtensionImageFit {
+    public static let fill = "fill"
+    public static let fit = "fit"
+    public static let all = ["fill", "fit"]
 }
 
 /// Values of RowControlKind.
-nonisolated enum ExtensionRowControlKind {
-    static let `switch` = "switch"
-    static let slider = "slider"
-    static let stepper = "stepper"
-    static let all = ["switch", "slider", "stepper"]
+public nonisolated enum ExtensionRowControlKind {
+    public static let `switch` = "switch"
+    public static let slider = "slider"
+    public static let stepper = "stepper"
+    public static let all = ["switch", "slider", "stepper"]
 }
 
 /// A control in a row or a tile (UI version 6). Changing it calls ui.action with action and values {name: the new
 /// value} (a switch "true" or "false", a slider and a stepper the number). The app shows the new value at once and
 /// puts back the old one if the action fails. A slider sends when the finger lifts, a stepper 0.6 s after the last
 /// tap.
-nonisolated struct ExtensionRowControl: Codable, Hashable, Sendable {
-    var kind: String
-    var name: String
+public nonisolated struct ExtensionRowControl: Codable, Hashable, Sendable {
+    public var kind: String
+    public var name: String
     /// switch: on or off.
-    var on: Bool?
+    public var on: Bool?
     /// slider, stepper: the value now.
-    var value: Double?
-    var min: Double?
-    var max: Double?
+    public var value: Double?
+    public var min: Double?
+    public var max: Double?
     /// More than 0 (checked by the hub); a slider's is (max - min) / 100 when absent.
-    var step: Double?
-    var unit: String?
+    public var step: Double?
+    public var unit: String?
     /// How to write the value ("22.5 °C"); else the number and unit.
-    var display: String?
-    var disabled: Bool?
-    var action: ExtensionAction
+    public var display: String?
+    public var disabled: Bool?
+    public var action: ExtensionAction
 
-    init(kind: String = "", name: String = "", on: Bool? = nil, value: Double? = nil, min: Double? = nil, max: Double? = nil, step: Double? = nil, unit: String? = nil, display: String? = nil, disabled: Bool? = nil, action: ExtensionAction = ExtensionAction()) {
+    public init(kind: String = "", name: String = "", on: Bool? = nil, value: Double? = nil, min: Double? = nil, max: Double? = nil, step: Double? = nil, unit: String? = nil, display: String? = nil, disabled: Bool? = nil, action: ExtensionAction = ExtensionAction()) {
         self.kind = kind
         self.name = name
         self.on = on
@@ -5510,7 +5510,7 @@ nonisolated struct ExtensionRowControl: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -5529,15 +5529,15 @@ nonisolated struct ExtensionRowControl: Codable, Hashable, Sendable {
 /// One of a row's or a tile's extra actions (UI version 6): in its menu (long press, right click, the … button) and,
 /// with swipe, under a swipe from the trailing edge. confirm and push work as on any action; a destructive one has
 /// confirm.
-nonisolated struct ExtensionRowAction: Codable, Hashable, Sendable {
-    var title: String
-    var icon: String?
-    var role: String?
+public nonisolated struct ExtensionRowAction: Codable, Hashable, Sendable {
+    public var title: String
+    public var icon: String?
+    public var role: String?
     /// Also under a swipe. At most two of a row's actions.
-    var swipe: Bool?
-    var action: ExtensionAction
+    public var swipe: Bool?
+    public var action: ExtensionAction
 
-    init(title: String = "", icon: String? = nil, role: String? = nil, swipe: Bool? = nil, action: ExtensionAction = ExtensionAction()) {
+    public init(title: String = "", icon: String? = nil, role: String? = nil, swipe: Bool? = nil, action: ExtensionAction = ExtensionAction()) {
         self.title = title
         self.icon = icon
         self.role = role
@@ -5553,7 +5553,7 @@ nonisolated struct ExtensionRowAction: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.icon = try? c.decodeIfPresent(String.self, forKey: .icon)
@@ -5565,14 +5565,14 @@ nonisolated struct ExtensionRowAction: Codable, Hashable, Sendable {
 
 /// A small trend line inside a row, a metric, a stat or a tile (UI version 6): values only, no axes. Without color or
 /// tone, the app's quiet ink.
-nonisolated struct ExtensionSpark: Codable, Hashable, Sendable {
-    var values: [Double]
-    var color: String?
-    var tone: String?
+public nonisolated struct ExtensionSpark: Codable, Hashable, Sendable {
+    public var values: [Double]
+    public var color: String?
+    public var tone: String?
     /// Shade under the line.
-    var fill: Bool?
+    public var fill: Bool?
 
-    init(values: [Double] = [], color: String? = nil, tone: String? = nil, fill: Bool? = nil) {
+    public init(values: [Double] = [], color: String? = nil, tone: String? = nil, fill: Bool? = nil) {
         self.values = values
         self.color = color
         self.tone = tone
@@ -5586,7 +5586,7 @@ nonisolated struct ExtensionSpark: Codable, Hashable, Sendable {
         case fill
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.values = (try? c.decodeIfPresent([Double].self, forKey: .values)) ?? []
         self.color = try? c.decodeIfPresent(String.self, forKey: .color)
@@ -5597,33 +5597,33 @@ nonisolated struct ExtensionSpark: Codable, Hashable, Sendable {
 
 /// A carousel's tiles: narrow about 140pt (scenes), regular about 200pt (the default; rooms), wide about 80% of the
 /// screen (camera pictures).
-nonisolated enum ExtensionTileWidth {
-    static let narrow = "narrow"
-    static let regular = "regular"
-    static let wide = "wide"
-    static let all = ["narrow", "regular", "wide"]
+public nonisolated enum ExtensionTileWidth {
+    public static let narrow = "narrow"
+    public static let regular = "regular"
+    public static let wide = "wide"
+    public static let all = ["narrow", "regular", "wide"]
 }
 
 /// A tile of a grid or a carousel (UI version 6): an icon or a picture, a title, a state line, a value; tapping does
 /// its action. active marks a tile that is on (a scene running, a light on) in its color.
-nonisolated struct ExtensionTile: Codable, Hashable, Sendable {
-    var key: String?
-    var title: String
-    var subtitle: String?
-    var value: String?
+public nonisolated struct ExtensionTile: Codable, Hashable, Sendable {
+    public var key: String?
+    public var title: String
+    public var subtitle: String?
+    public var value: String?
     /// At most one of icon and image.
-    var icon: String?
-    var image: ExtensionImageSource?
-    var color: String?
-    var badge: ExtensionBadge?
-    var active: Bool?
-    var spark: ExtensionSpark?
+    public var icon: String?
+    public var image: ExtensionImageSource?
+    public var color: String?
+    public var badge: ExtensionBadge?
+    public var active: Bool?
+    public var spark: ExtensionSpark?
     /// A switch only; the tile then has a key.
-    var control: ExtensionRowControl?
-    var actions: [ExtensionRowAction]?
-    var action: ExtensionAction?
+    public var control: ExtensionRowControl?
+    public var actions: [ExtensionRowAction]?
+    public var action: ExtensionAction?
 
-    init(key: String? = nil, title: String = "", subtitle: String? = nil, value: String? = nil, icon: String? = nil, image: ExtensionImageSource? = nil, color: String? = nil, badge: ExtensionBadge? = nil, active: Bool? = nil, spark: ExtensionSpark? = nil, control: ExtensionRowControl? = nil, actions: [ExtensionRowAction]? = nil, action: ExtensionAction? = nil) {
+    public init(key: String? = nil, title: String = "", subtitle: String? = nil, value: String? = nil, icon: String? = nil, image: ExtensionImageSource? = nil, color: String? = nil, badge: ExtensionBadge? = nil, active: Bool? = nil, spark: ExtensionSpark? = nil, control: ExtensionRowControl? = nil, actions: [ExtensionRowAction]? = nil, action: ExtensionAction? = nil) {
         self.key = key
         self.title = title
         self.subtitle = subtitle
@@ -5655,7 +5655,7 @@ nonisolated struct ExtensionTile: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try? c.decodeIfPresent(String.self, forKey: .key)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -5676,44 +5676,44 @@ nonisolated struct ExtensionTile: Codable, Hashable, Sendable {
 /// stack: sections one under another. split: on a wide screen the side pane's sections in a column at the start, the
 /// rest beside it, each scrolling on its own; on a narrow one the side pane folds into a bar on top that opens as a
 /// sheet.
-nonisolated enum ExtensionLayout {
-    static let stack = "stack"
-    static let split = "split"
-    static let all = ["stack", "split"]
+public nonisolated enum ExtensionLayout {
+    public static let stack = "stack"
+    public static let split = "split"
+    public static let all = ["stack", "split"]
 }
 
 /// Where a section of a split view goes.
-nonisolated enum ExtensionPane {
-    static let main = "main"
-    static let side = "side"
-    static let all = ["main", "side"]
+public nonisolated enum ExtensionPane {
+    public static let main = "main"
+    public static let side = "side"
+    public static let all = ["main", "side"]
 }
 
 /// Values of FileStatus.
-nonisolated enum ExtensionFileStatus {
-    static let added = "added"
-    static let modified = "modified"
-    static let deleted = "deleted"
-    static let renamed = "renamed"
-    static let all = ["added", "modified", "deleted", "renamed"]
+public nonisolated enum ExtensionFileStatus {
+    public static let added = "added"
+    public static let modified = "modified"
+    public static let deleted = "deleted"
+    public static let renamed = "renamed"
+    public static let all = ["added", "modified", "deleted", "renamed"]
 }
 
 /// Values of DiffSide.
-nonisolated enum ExtensionDiffSide {
-    static let old = "old"
-    static let new = "new"
-    static let all = ["old", "new"]
+public nonisolated enum ExtensionDiffSide {
+    public static let old = "old"
+    public static let new = "new"
+    public static let all = ["old", "new"]
 }
 
 /// Tabs on top of the page (UI version 4): choosing calls ui.action with action and values {name: the value} (and the
 /// search's q). An older app gets a segmented, or buttons.
-nonisolated struct ExtensionTabs: Codable, Hashable, Sendable {
-    var name: String
-    var value: String
-    var items: [ExtensionTab]
-    var action: ExtensionAction
+public nonisolated struct ExtensionTabs: Codable, Hashable, Sendable {
+    public var name: String
+    public var value: String
+    public var items: [ExtensionTab]
+    public var action: ExtensionAction
 
-    init(name: String = "", value: String = "", items: [ExtensionTab] = [], action: ExtensionAction = ExtensionAction()) {
+    public init(name: String = "", value: String = "", items: [ExtensionTab] = [], action: ExtensionAction = ExtensionAction()) {
         self.name = name
         self.value = value
         self.items = items
@@ -5727,7 +5727,7 @@ nonisolated struct ExtensionTabs: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
@@ -5736,12 +5736,12 @@ nonisolated struct ExtensionTabs: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionTab: Codable, Hashable, Sendable {
-    var value: String
-    var title: String?
-    var badge: String?
+public nonisolated struct ExtensionTab: Codable, Hashable, Sendable {
+    public var value: String
+    public var title: String?
+    public var badge: String?
 
-    init(value: String = "", title: String? = nil, badge: String? = nil) {
+    public init(value: String = "", title: String? = nil, badge: String? = nil) {
         self.value = value
         self.title = title
         self.badge = badge
@@ -5753,7 +5753,7 @@ nonisolated struct ExtensionTab: Codable, Hashable, Sendable {
         case badge
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -5762,12 +5762,12 @@ nonisolated struct ExtensionTab: Codable, Hashable, Sendable {
 }
 
 /// A label and its value in a header (Author · someone).
-nonisolated struct ExtensionFact: Codable, Hashable, Sendable {
-    var label: String?
-    var value: String
-    var icon: String?
+public nonisolated struct ExtensionFact: Codable, Hashable, Sendable {
+    public var label: String?
+    public var value: String
+    public var icon: String?
 
-    init(label: String? = nil, value: String = "", icon: String? = nil) {
+    public init(label: String? = nil, value: String = "", icon: String? = nil) {
         self.label = label
         self.value = value
         self.icon = icon
@@ -5779,7 +5779,7 @@ nonisolated struct ExtensionFact: Codable, Hashable, Sendable {
         case icon
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = try? c.decodeIfPresent(String.self, forKey: .label)
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
@@ -5787,11 +5787,11 @@ nonisolated struct ExtensionFact: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionCrumb: Codable, Hashable, Sendable {
-    var title: String
-    var action: ExtensionAction?
+public nonisolated struct ExtensionCrumb: Codable, Hashable, Sendable {
+    public var title: String
+    public var action: ExtensionAction?
 
-    init(title: String = "", action: ExtensionAction? = nil) {
+    public init(title: String = "", action: ExtensionAction? = nil) {
         self.title = title
         self.action = action
     }
@@ -5801,7 +5801,7 @@ nonisolated struct ExtensionCrumb: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.action = try? c.decodeIfPresent(ExtensionAction.self, forKey: .action)
@@ -5809,18 +5809,18 @@ nonisolated struct ExtensionCrumb: Codable, Hashable, Sendable {
 }
 
 /// A file (or a directory, kind dir) by its whole path from the root, / between names.
-nonisolated struct ExtensionTreeEntry: Codable, Hashable, Sendable {
-    var path: String
-    var kind: String?
-    var status: String?
-    var additions: Int?
-    var deletions: Int?
-    var comments: Int?
-    var badge: ExtensionBadge?
-    var viewed: Bool?
-    var generated: Bool?
+public nonisolated struct ExtensionTreeEntry: Codable, Hashable, Sendable {
+    public var path: String
+    public var kind: String?
+    public var status: String?
+    public var additions: Int?
+    public var deletions: Int?
+    public var comments: Int?
+    public var badge: ExtensionBadge?
+    public var viewed: Bool?
+    public var generated: Bool?
 
-    init(path: String = "", kind: String? = nil, status: String? = nil, additions: Int? = nil, deletions: Int? = nil, comments: Int? = nil, badge: ExtensionBadge? = nil, viewed: Bool? = nil, generated: Bool? = nil) {
+    public init(path: String = "", kind: String? = nil, status: String? = nil, additions: Int? = nil, deletions: Int? = nil, comments: Int? = nil, badge: ExtensionBadge? = nil, viewed: Bool? = nil, generated: Bool? = nil) {
         self.path = path
         self.kind = kind
         self.status = status
@@ -5844,7 +5844,7 @@ nonisolated struct ExtensionTreeEntry: Codable, Hashable, Sendable {
         case generated
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
         self.kind = try? c.decodeIfPresent(String.self, forKey: .kind)
@@ -5859,17 +5859,17 @@ nonisolated struct ExtensionTreeEntry: Codable, Hashable, Sendable {
 }
 
 /// Values of TreeEntryKind.
-nonisolated enum ExtensionTreeEntryKind {
-    static let file = "file"
-    static let dir = "dir"
-    static let all = ["file", "dir"]
+public nonisolated enum ExtensionTreeEntryKind {
+    public static let file = "file"
+    public static let dir = "dir"
+    public static let all = ["file", "dir"]
 }
 
-nonisolated struct ExtensionLineRange: Codable, Hashable, Sendable {
-    var start: Int
-    var end: Int
+public nonisolated struct ExtensionLineRange: Codable, Hashable, Sendable {
+    public var start: Int
+    public var end: Int
 
-    init(start: Int = 0, end: Int = 0) {
+    public init(start: Int = 0, end: Int = 0) {
         self.start = start
         self.end = end
     }
@@ -5879,7 +5879,7 @@ nonisolated struct ExtensionLineRange: Codable, Hashable, Sendable {
         case end
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.start = (try? c.decodeIfPresent(Int.self, forKey: .start)) ?? 0
         self.end = (try? c.decodeIfPresent(Int.self, forKey: .end)) ?? 0
@@ -5888,13 +5888,13 @@ nonisolated struct ExtensionLineRange: Codable, Hashable, Sendable {
 
 /// A run of a diff: where it starts in the old and the new file, and its lines (' ' both, '+' new, '-' old, '\' a
 /// note such as no newline at end of file).
-nonisolated struct ExtensionHunk: Codable, Hashable, Sendable {
-    var header: String?
-    var oldStart: Int
-    var newStart: Int
-    var lines: [String]
+public nonisolated struct ExtensionHunk: Codable, Hashable, Sendable {
+    public var header: String?
+    public var oldStart: Int
+    public var newStart: Int
+    public var lines: [String]
 
-    init(header: String? = nil, oldStart: Int = 0, newStart: Int = 0, lines: [String] = []) {
+    public init(header: String? = nil, oldStart: Int = 0, newStart: Int = 0, lines: [String] = []) {
         self.header = header
         self.oldStart = oldStart
         self.newStart = newStart
@@ -5908,7 +5908,7 @@ nonisolated struct ExtensionHunk: Codable, Hashable, Sendable {
         case lines
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.header = try? c.decodeIfPresent(String.self, forKey: .header)
         self.oldStart = (try? c.decodeIfPresent(Int.self, forKey: .oldStart)) ?? 0
@@ -5918,21 +5918,21 @@ nonisolated struct ExtensionHunk: Codable, Hashable, Sendable {
 }
 
 /// Inline comments at a line of a diff: line (and start_line for a range) on the side's numbering.
-nonisolated struct ExtensionThread: Codable, Hashable, Sendable {
-    var id: String?
-    var side: String
-    var line: Int
-    var startLine: Int?
-    var resolved: Bool?
-    var outdated: Bool?
-    var comments: [ExtensionComment]
-    var reply: ExtensionAction?
+public nonisolated struct ExtensionThread: Codable, Hashable, Sendable {
+    public var id: String?
+    public var side: String
+    public var line: Int
+    public var startLine: Int?
+    public var resolved: Bool?
+    public var outdated: Bool?
+    public var comments: [ExtensionComment]
+    public var reply: ExtensionAction?
     /// A draft of the pending review, not sent yet.
-    var pending: Bool?
+    public var pending: Bool?
     /// Resolve or reopen: values {thread: id, resolved: true or false}.
-    var resolve: ExtensionAction?
+    public var resolve: ExtensionAction?
 
-    init(id: String? = nil, side: String = "", line: Int = 0, startLine: Int? = nil, resolved: Bool? = nil, outdated: Bool? = nil, comments: [ExtensionComment] = [], reply: ExtensionAction? = nil, pending: Bool? = nil, resolve: ExtensionAction? = nil) {
+    public init(id: String? = nil, side: String = "", line: Int = 0, startLine: Int? = nil, resolved: Bool? = nil, outdated: Bool? = nil, comments: [ExtensionComment] = [], reply: ExtensionAction? = nil, pending: Bool? = nil, resolve: ExtensionAction? = nil) {
         self.id = id
         self.side = side
         self.line = line
@@ -5958,7 +5958,7 @@ nonisolated struct ExtensionThread: Codable, Hashable, Sendable {
         case resolve
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.side = (try? c.decodeIfPresent(String.self, forKey: .side)) ?? ""
@@ -5975,16 +5975,16 @@ nonisolated struct ExtensionThread: Codable, Hashable, Sendable {
 
 /// A comment: its author, when (the app draws it relative), a body in the markdown subset, a badge (Approved). An
 /// event is a quiet line (merged, pushed two commits).
-nonisolated struct ExtensionComment: Codable, Hashable, Sendable {
-    var id: String?
-    var author: String
-    var avatar: ExtensionAvatar?
-    var at: String?
-    var body: String?
-    var badge: ExtensionBadge?
-    var event: Bool?
+public nonisolated struct ExtensionComment: Codable, Hashable, Sendable {
+    public var id: String?
+    public var author: String
+    public var avatar: ExtensionAvatar?
+    public var at: String?
+    public var body: String?
+    public var badge: ExtensionBadge?
+    public var event: Bool?
 
-    init(id: String? = nil, author: String = "", avatar: ExtensionAvatar? = nil, at: String? = nil, body: String? = nil, badge: ExtensionBadge? = nil, event: Bool? = nil) {
+    public init(id: String? = nil, author: String = "", avatar: ExtensionAvatar? = nil, at: String? = nil, body: String? = nil, badge: ExtensionBadge? = nil, event: Bool? = nil) {
         self.id = id
         self.author = author
         self.avatar = avatar
@@ -6004,7 +6004,7 @@ nonisolated struct ExtensionComment: Codable, Hashable, Sendable {
         case event
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.author = (try? c.decodeIfPresent(String.self, forKey: .author)) ?? ""
@@ -6016,12 +6016,12 @@ nonisolated struct ExtensionComment: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionComposerButton: Codable, Hashable, Sendable {
-    var title: String
-    var action: ExtensionAction
-    var tone: String?
+public nonisolated struct ExtensionComposerButton: Codable, Hashable, Sendable {
+    public var title: String
+    public var action: ExtensionAction
+    public var tone: String?
 
-    init(title: String = "", action: ExtensionAction = ExtensionAction(), tone: String? = nil) {
+    public init(title: String = "", action: ExtensionAction = ExtensionAction(), tone: String? = nil) {
         self.title = title
         self.action = action
         self.tone = tone
@@ -6033,7 +6033,7 @@ nonisolated struct ExtensionComposerButton: Codable, Hashable, Sendable {
         case tone
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.action = (try? c.decodeIfPresent(ExtensionAction.self, forKey: .action)) ?? ExtensionAction()
@@ -6041,15 +6041,15 @@ nonisolated struct ExtensionComposerButton: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionAssistantView: Codable, Hashable, Sendable {
-    var id: String
-    var conversation: String
-    var version: Int64
-    var view: ExtensionView
-    var createdAt: String
-    var updatedAt: String
+public nonisolated struct ExtensionAssistantView: Codable, Hashable, Sendable {
+    public var id: String
+    public var conversation: String
+    public var version: Int64
+    public var view: ExtensionView
+    public var createdAt: String
+    public var updatedAt: String
 
-    init(id: String = "", conversation: String = "", version: Int64 = 0, view: ExtensionView = ExtensionView(), createdAt: String = "", updatedAt: String = "") {
+    public init(id: String = "", conversation: String = "", version: Int64 = 0, view: ExtensionView = ExtensionView(), createdAt: String = "", updatedAt: String = "") {
         self.id = id
         self.conversation = conversation
         self.version = version
@@ -6067,7 +6067,7 @@ nonisolated struct ExtensionAssistantView: Codable, Hashable, Sendable {
         case updatedAt = "updated_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.conversation = (try? c.decodeIfPresent(String.self, forKey: .conversation)) ?? ""
@@ -6078,26 +6078,26 @@ nonisolated struct ExtensionAssistantView: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionViewAction: Codable, Hashable, Sendable {
-    var key: String
-    var action: String
-    var page: String?
-    var values: [String: String]?
-    var clientMsgId: String
-    var status: String
-    var revision: Int64?
-    var error: String?
-    var updatedAt: String?
-    var at: String
+public nonisolated struct ExtensionViewAction: Codable, Hashable, Sendable {
+    public var key: String
+    public var action: String
+    public var page: String?
+    public var values: [String: String]?
+    public var clientMsgId: String
+    public var status: String
+    public var revision: Int64?
+    public var error: String?
+    public var updatedAt: String?
+    public var at: String
     /// Absent or action: a declared Action (action is its id). html: an HTML bridge reply (action is the html
     /// component's key, text the confirmed reply).
-    var kind: String?
+    public var kind: String?
     /// The card version the user saw and confirmed when this was committed; absent on records committed before #2019.
-    var version: Int64?
+    public var version: Int64?
     /// kind html only: the reply text the user confirmed.
-    var text: String?
+    public var text: String?
 
-    init(key: String = "", action: String = "", page: String? = nil, values: [String: String]? = nil, clientMsgId: String = "", status: String = "", revision: Int64? = nil, error: String? = nil, updatedAt: String? = nil, at: String = "", kind: String? = nil, version: Int64? = nil, text: String? = nil) {
+    public init(key: String = "", action: String = "", page: String? = nil, values: [String: String]? = nil, clientMsgId: String = "", status: String = "", revision: Int64? = nil, error: String? = nil, updatedAt: String? = nil, at: String = "", kind: String? = nil, version: Int64? = nil, text: String? = nil) {
         self.key = key
         self.action = action
         self.page = page
@@ -6129,7 +6129,7 @@ nonisolated struct ExtensionViewAction: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = (try? c.decodeIfPresent(String.self, forKey: .key)) ?? ""
         self.action = (try? c.decodeIfPresent(String.self, forKey: .action)) ?? ""
@@ -6148,37 +6148,37 @@ nonisolated struct ExtensionViewAction: Codable, Hashable, Sendable {
 }
 
 /// Values of ViewActionStatus.
-nonisolated enum ExtensionViewActionStatus {
-    static let pending = "pending"
-    static let sent = "sent"
-    static let failed = "failed"
-    static let all = ["pending", "sent", "failed"]
+public nonisolated enum ExtensionViewActionStatus {
+    public static let pending = "pending"
+    public static let sent = "sent"
+    public static let failed = "failed"
+    public static let all = ["pending", "sent", "failed"]
 }
 
 /// Values of ViewActionKind.
-nonisolated enum ExtensionViewActionKind {
-    static let action = "action"
-    static let html = "html"
-    static let all = ["action", "html"]
+public nonisolated enum ExtensionViewActionKind {
+    public static let action = "action"
+    public static let html = "html"
+    public static let all = ["action", "html"]
 }
 
 /// The body of POST /api/v1/assistant/conversations/{id}/views/{key}/actions. The reply text and form definition are
 /// read from the stored View, never from the client.
-nonisolated struct ExtensionViewActionInput: Codable, Hashable, Sendable {
+public nonisolated struct ExtensionViewActionInput: Codable, Hashable, Sendable {
     /// A declared reply action's id.
-    var action: String
+    public var action: String
     /// The named page the action is on; absent for the root page.
-    var page: String?
+    public var page: String?
     /// The fields this action submits, by name.
-    var values: [String: String]?
-    var clientMsgId: String
+    public var values: [String: String]?
+    public var clientMsgId: String
     /// The user confirmed the action's confirm prompt natively.
-    var confirmed: Bool?
+    public var confirmed: Bool?
     /// The card version shown (and confirmed) to the user. Required when the action has confirm; a different stored
     /// version answers 409 view_changed.
-    var expectedVersion: Int64?
+    public var expectedVersion: Int64?
 
-    init(action: String = "", page: String? = nil, values: [String: String]? = nil, clientMsgId: String = "", confirmed: Bool? = nil, expectedVersion: Int64? = nil) {
+    public init(action: String = "", page: String? = nil, values: [String: String]? = nil, clientMsgId: String = "", confirmed: Bool? = nil, expectedVersion: Int64? = nil) {
         self.action = action
         self.page = page
         self.values = values
@@ -6196,7 +6196,7 @@ nonisolated struct ExtensionViewActionInput: Codable, Hashable, Sendable {
         case expectedVersion = "expected_version"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.action = (try? c.decodeIfPresent(String.self, forKey: .action)) ?? ""
         self.page = try? c.decodeIfPresent(String.self, forKey: .page)
@@ -6208,31 +6208,31 @@ nonisolated struct ExtensionViewActionInput: Codable, Hashable, Sendable {
 }
 
 /// Values of AssistantHTMLActionKind.
-nonisolated enum ExtensionAssistantHTMLActionKind {
-    static let reply = "reply"
-    static let open = "open"
-    static let all = ["reply", "open"]
+public nonisolated enum ExtensionAssistantHTMLActionKind {
+    public static let reply = "reply"
+    public static let open = "open"
+    public static let all = ["reply", "open"]
 }
 
 /// The body of POST /api/v1/assistant/conversations/{id}/views/{key}/html-actions: a persona.reply / persona.open
 /// call of a keyed html component, after the user confirmed it natively.
-nonisolated struct ExtensionAssistantHTMLActionInput: Codable, Hashable, Sendable {
-    var kind: String
+public nonisolated struct ExtensionAssistantHTMLActionInput: Codable, Hashable, Sendable {
+    public var kind: String
     /// The key of the html component on that page of the stored card.
-    var componentKey: String
+    public var componentKey: String
     /// The named page the component is on; absent for the root page.
-    var page: String?
+    public var page: String?
     /// The card version that ran the HTML and was shown in the confirmation.
-    var expectedVersion: Int64
+    public var expectedVersion: Int64
     /// reply only: the text shown in full in the confirmation.
-    var text: String?
+    public var text: String?
     /// open only: an https or supported persona:// target.
-    var url: String?
-    var clientMsgId: String
+    public var url: String?
+    public var clientMsgId: String
     /// Always true: the call was confirmed natively, outside the HTML.
-    var confirmed: Bool
+    public var confirmed: Bool
 
-    init(kind: String = "", componentKey: String = "", page: String? = nil, expectedVersion: Int64 = 0, text: String? = nil, url: String? = nil, clientMsgId: String = "", confirmed: Bool = false) {
+    public init(kind: String = "", componentKey: String = "", page: String? = nil, expectedVersion: Int64 = 0, text: String? = nil, url: String? = nil, clientMsgId: String = "", confirmed: Bool = false) {
         self.kind = kind
         self.componentKey = componentKey
         self.page = page
@@ -6254,7 +6254,7 @@ nonisolated struct ExtensionAssistantHTMLActionInput: Codable, Hashable, Sendabl
         case confirmed
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
         self.componentKey = (try? c.decodeIfPresent(String.self, forKey: .componentKey)) ?? ""
@@ -6269,11 +6269,11 @@ nonisolated struct ExtensionAssistantHTMLActionInput: Codable, Hashable, Sendabl
 
 /// What an html-actions open answers: the validated target to open inside the app, and the card version it was
 /// checked against.
-nonisolated struct ExtensionAssistantHTMLOpenResult: Codable, Hashable, Sendable {
-    var open: String
-    var version: Int64
+public nonisolated struct ExtensionAssistantHTMLOpenResult: Codable, Hashable, Sendable {
+    public var open: String
+    public var version: Int64
 
-    init(open: String = "", version: Int64 = 0) {
+    public init(open: String = "", version: Int64 = 0) {
         self.open = open
         self.version = version
     }
@@ -6283,7 +6283,7 @@ nonisolated struct ExtensionAssistantHTMLOpenResult: Codable, Hashable, Sendable
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.open = (try? c.decodeIfPresent(String.self, forKey: .open)) ?? ""
         self.version = (try? c.decodeIfPresent(Int64.self, forKey: .version)) ?? 0
@@ -6292,15 +6292,15 @@ nonisolated struct ExtensionAssistantHTMLOpenResult: Codable, Hashable, Sendable
 
 /// 409 code view_changed: the stored card is not the version the user saw. Refresh, keep the draft and confirm again;
 /// never resubmit with the new version automatically.
-nonisolated struct ExtensionViewChangedError: Codable, Hashable, Sendable {
-    var error: String
-    var code: String
+public nonisolated struct ExtensionViewChangedError: Codable, Hashable, Sendable {
+    public var error: String
+    public var code: String
     /// The current stored version.
-    var version: Int64
+    public var version: Int64
     /// The current card, as feed.views carries it (a transcript card: id is its key, version 1).
-    var view: ExtensionAssistantView?
+    public var view: ExtensionAssistantView?
 
-    init(error: String = "", code: String = "", version: Int64 = 0, view: ExtensionAssistantView? = nil) {
+    public init(error: String = "", code: String = "", version: Int64 = 0, view: ExtensionAssistantView? = nil) {
         self.error = error
         self.code = code
         self.version = version
@@ -6314,7 +6314,7 @@ nonisolated struct ExtensionViewChangedError: Codable, Hashable, Sendable {
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.error = (try? c.decodeIfPresent(String.self, forKey: .error)) ?? ""
         self.code = (try? c.decodeIfPresent(String.self, forKey: .code)) ?? ""
@@ -6325,28 +6325,28 @@ nonisolated struct ExtensionViewChangedError: Codable, Hashable, Sendable {
 
 /// What a row, a button or a segmented does: ui.action with its id. An object, so later kinds of action (push or pop
 /// a page) are fields added here.
-nonisolated struct ExtensionAction: Codable, Hashable, Sendable {
-    var id: String
+public nonisolated struct ExtensionAction: Codable, Hashable, Sendable {
+    public var id: String
     /// Ask the user first, in these words.
-    var confirm: String?
+    public var confirm: String?
     /// Send the page's fields as values.
-    var submit: Bool?
+    public var submit: Bool?
     /// Assistant only: send this text back to the same conversation. The hub reads it from the saved view, not from
     /// the client.
-    var reply: String?
+    public var reply: String?
     /// Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside
     /// the app.
-    var open: String?
+    public var open: String?
     /// Assistant only: return one page within the card.
-    var pop: Bool?
+    public var pop: Bool?
     /// Open a page on top of this one instead of calling ui.action (an app of UI version 3; an older one calls
     /// ui.action with id).
-    var push: ExtensionPush?
+    public var push: ExtensionPush?
     /// Values the action carries (UI version 4): sent with the page's and the component's values, these winning on a
     /// name they share. An older app sends none.
-    var values: [String: String]?
+    public var values: [String: String]?
 
-    init(id: String = "", confirm: String? = nil, submit: Bool? = nil, reply: String? = nil, open: String? = nil, pop: Bool? = nil, push: ExtensionPush? = nil, values: [String: String]? = nil) {
+    public init(id: String = "", confirm: String? = nil, submit: Bool? = nil, reply: String? = nil, open: String? = nil, pop: Bool? = nil, push: ExtensionPush? = nil, values: [String: String]? = nil) {
         self.id = id
         self.confirm = confirm
         self.submit = submit
@@ -6368,7 +6368,7 @@ nonisolated struct ExtensionAction: Codable, Hashable, Sendable {
         case values
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.confirm = try? c.decodeIfPresent(String.self, forKey: .confirm)
@@ -6383,14 +6383,14 @@ nonisolated struct ExtensionAction: Codable, Hashable, Sendable {
 
 /// A page pushed on the navigation stack: ui.render of the extension's ui (this one when empty; a full page:
 /// extension_page, plugin_page or nav_page) with state. title is shown until the view comes.
-nonisolated struct ExtensionPush: Codable, Hashable, Sendable {
-    var ui: String?
+public nonisolated struct ExtensionPush: Codable, Hashable, Sendable {
+    public var ui: String?
     /// Assistant only: a page in the root View.pages. Never combined with ui or state.
-    var page: String?
-    var state: String?
-    var title: String?
+    public var page: String?
+    public var state: String?
+    public var title: String?
 
-    init(ui: String? = nil, page: String? = nil, state: String? = nil, title: String? = nil) {
+    public init(ui: String? = nil, page: String? = nil, state: String? = nil, title: String? = nil) {
         self.ui = ui
         self.page = page
         self.state = state
@@ -6404,7 +6404,7 @@ nonisolated struct ExtensionPush: Codable, Hashable, Sendable {
         case title
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.ui = try? c.decodeIfPresent(String.self, forKey: .ui)
         self.page = try? c.decodeIfPresent(String.self, forKey: .page)
@@ -6415,12 +6415,12 @@ nonisolated struct ExtensionPush: Codable, Hashable, Sendable {
 
 /// A search box on top of the page (UI version 3): the app calls ui.action with action and values {"q": the text},
 /// 0.3 s after the user stops typing.
-nonisolated struct ExtensionSearch: Codable, Hashable, Sendable {
-    var placeholder: String?
-    var value: String?
-    var action: ExtensionAction
+public nonisolated struct ExtensionSearch: Codable, Hashable, Sendable {
+    public var placeholder: String?
+    public var value: String?
+    public var action: ExtensionAction
 
-    init(placeholder: String? = nil, value: String? = nil, action: ExtensionAction = ExtensionAction()) {
+    public init(placeholder: String? = nil, value: String? = nil, action: ExtensionAction = ExtensionAction()) {
         self.placeholder = placeholder
         self.value = value
         self.action = action
@@ -6432,7 +6432,7 @@ nonisolated struct ExtensionSearch: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.placeholder = try? c.decodeIfPresent(String.self, forKey: .placeholder)
         self.value = try? c.decodeIfPresent(String.self, forKey: .value)
@@ -6442,14 +6442,14 @@ nonisolated struct ExtensionSearch: Codable, Hashable, Sendable {
 
 /// A drop-down beside the search box (UI version 3): choosing calls ui.action with action and values {name: the
 /// value} (and the search's q).
-nonisolated struct ExtensionFilter: Codable, Hashable, Sendable {
-    var name: String
-    var title: String?
-    var choices: [ExtensionChoice]
-    var value: String
-    var action: ExtensionAction
+public nonisolated struct ExtensionFilter: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String?
+    public var choices: [ExtensionChoice]
+    public var value: String
+    public var action: ExtensionAction
 
-    init(name: String = "", title: String? = nil, choices: [ExtensionChoice] = [], value: String = "", action: ExtensionAction = ExtensionAction()) {
+    public init(name: String = "", title: String? = nil, choices: [ExtensionChoice] = [], value: String = "", action: ExtensionAction = ExtensionAction()) {
         self.name = name
         self.title = title
         self.choices = choices
@@ -6465,7 +6465,7 @@ nonisolated struct ExtensionFilter: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -6477,11 +6477,11 @@ nonisolated struct ExtensionFilter: Codable, Hashable, Sendable {
 
 /// A section's last row, Load More (UI version 3): reaching it (or tapping it) calls ui.action with action once; the
 /// extension answers the whole view, longer.
-nonisolated struct ExtensionMore: Codable, Hashable, Sendable {
-    var title: String?
-    var action: ExtensionAction
+public nonisolated struct ExtensionMore: Codable, Hashable, Sendable {
+    public var title: String?
+    public var action: ExtensionAction
 
-    init(title: String? = nil, action: ExtensionAction = ExtensionAction()) {
+    public init(title: String? = nil, action: ExtensionAction = ExtensionAction()) {
         self.title = title
         self.action = action
     }
@@ -6491,7 +6491,7 @@ nonisolated struct ExtensionMore: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.action = (try? c.decodeIfPresent(ExtensionAction.self, forKey: .action)) ?? ExtensionAction()
@@ -6499,15 +6499,15 @@ nonisolated struct ExtensionMore: Codable, Hashable, Sendable {
 }
 
 /// A person's or a chat's picture: an https image, else up to two characters drawn as the app's initials avatar.
-nonisolated struct ExtensionAvatar: Codable, Hashable, Sendable {
-    var url: String?
-    var text: String?
+public nonisolated struct ExtensionAvatar: Codable, Hashable, Sendable {
+    public var url: String?
+    public var text: String?
     /// The extension's own picture (ui.image) through the hub, in place of url.
-    var ref: String?
+    public var ref: String?
     /// Written by the hub only, for a ref.
-    var path: String?
+    public var path: String?
 
-    init(url: String? = nil, text: String? = nil, ref: String? = nil, path: String? = nil) {
+    public init(url: String? = nil, text: String? = nil, ref: String? = nil, path: String? = nil) {
         self.url = url
         self.text = text
         self.ref = ref
@@ -6521,7 +6521,7 @@ nonisolated struct ExtensionAvatar: Codable, Hashable, Sendable {
         case path
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = try? c.decodeIfPresent(String.self, forKey: .url)
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
@@ -6532,14 +6532,14 @@ nonisolated struct ExtensionAvatar: Codable, Hashable, Sendable {
 
 /// A small picture at the row's start: an https image the app loads without any credentials, or (UI version 6) a ref
 /// the extension serves (ui.image) through the hub; exactly one of url and ref.
-nonisolated struct ExtensionThumbnail: Codable, Hashable, Sendable {
-    var url: String?
-    var aspect: String?
-    var ref: String?
+public nonisolated struct ExtensionThumbnail: Codable, Hashable, Sendable {
+    public var url: String?
+    public var aspect: String?
+    public var ref: String?
     /// Written by the hub only, for a ref.
-    var path: String?
+    public var path: String?
 
-    init(url: String? = nil, aspect: String? = nil, ref: String? = nil, path: String? = nil) {
+    public init(url: String? = nil, aspect: String? = nil, ref: String? = nil, path: String? = nil) {
         self.url = url
         self.aspect = aspect
         self.ref = ref
@@ -6553,7 +6553,7 @@ nonisolated struct ExtensionThumbnail: Codable, Hashable, Sendable {
         case path
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = try? c.decodeIfPresent(String.self, forKey: .url)
         self.aspect = try? c.decodeIfPresent(String.self, forKey: .aspect)
@@ -6563,24 +6563,24 @@ nonisolated struct ExtensionThumbnail: Codable, Hashable, Sendable {
 }
 
 /// Values of ThumbnailAspect.
-nonisolated enum ExtensionThumbnailAspect {
-    static let square = "square"
-    static let wide = "wide"
-    static let all = ["square", "wide"]
+public nonisolated enum ExtensionThumbnailAspect {
+    public static let square = "square"
+    public static let wide = "wide"
+    public static let all = ["square", "wide"]
 }
 
 /// Values of TableAlign.
-nonisolated enum ExtensionTableAlign {
-    static let start = "start"
-    static let end = "end"
-    static let all = ["start", "end"]
+public nonisolated enum ExtensionTableAlign {
+    public static let start = "start"
+    public static let end = "end"
+    public static let all = ["start", "end"]
 }
 
-nonisolated struct ExtensionTableColumn: Codable, Hashable, Sendable {
-    var title: String
-    var align: String?
+public nonisolated struct ExtensionTableColumn: Codable, Hashable, Sendable {
+    public var title: String
+    public var align: String?
 
-    init(title: String = "", align: String? = nil) {
+    public init(title: String = "", align: String? = nil) {
         self.title = title
         self.align = align
     }
@@ -6590,7 +6590,7 @@ nonisolated struct ExtensionTableColumn: Codable, Hashable, Sendable {
         case align
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.align = try? c.decodeIfPresent(String.self, forKey: .align)
@@ -6598,11 +6598,11 @@ nonisolated struct ExtensionTableColumn: Codable, Hashable, Sendable {
 }
 
 /// An empty state's one button.
-nonisolated struct ExtensionEmptyButton: Codable, Hashable, Sendable {
-    var title: String
-    var action: ExtensionAction
+public nonisolated struct ExtensionEmptyButton: Codable, Hashable, Sendable {
+    public var title: String
+    public var action: ExtensionAction
 
-    init(title: String = "", action: ExtensionAction = ExtensionAction()) {
+    public init(title: String = "", action: ExtensionAction = ExtensionAction()) {
         self.title = title
         self.action = action
     }
@@ -6612,19 +6612,19 @@ nonisolated struct ExtensionEmptyButton: Codable, Hashable, Sendable {
         case action
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.action = (try? c.decodeIfPresent(ExtensionAction.self, forKey: .action)) ?? ExtensionAction()
     }
 }
 
-nonisolated struct ExtensionBadge: Codable, Hashable, Sendable {
-    var text: String
-    var tone: String?
-    var color: String?
+public nonisolated struct ExtensionBadge: Codable, Hashable, Sendable {
+    public var text: String
+    public var tone: String?
+    public var color: String?
 
-    init(text: String = "", tone: String? = nil, color: String? = nil) {
+    public init(text: String = "", tone: String? = nil, color: String? = nil) {
         self.text = text
         self.tone = tone
         self.color = color
@@ -6636,7 +6636,7 @@ nonisolated struct ExtensionBadge: Codable, Hashable, Sendable {
         case color
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.tone = try? c.decodeIfPresent(String.self, forKey: .tone)
@@ -6644,11 +6644,11 @@ nonisolated struct ExtensionBadge: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionChoice: Codable, Hashable, Sendable {
-    var value: String
-    var title: String?
+public nonisolated struct ExtensionChoice: Codable, Hashable, Sendable {
+    public var value: String
+    public var title: String?
 
-    init(value: String = "", title: String? = nil) {
+    public init(value: String = "", title: String? = nil) {
         self.value = value
         self.title = title
     }
@@ -6658,7 +6658,7 @@ nonisolated struct ExtensionChoice: Codable, Hashable, Sendable {
         case title
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -6667,13 +6667,13 @@ nonisolated struct ExtensionChoice: Codable, Hashable, Sendable {
 
 /// One line, or one color of bars. No tone and no color: the app's own colors, in order. At most 120 points (240 for
 /// a candlestick, checked by the hub).
-nonisolated struct ExtensionChartSeries: Codable, Hashable, Sendable {
-    var name: String?
-    var tone: String?
-    var points: [ExtensionChartPoint]
-    var color: String?
+public nonisolated struct ExtensionChartSeries: Codable, Hashable, Sendable {
+    public var name: String?
+    public var tone: String?
+    public var points: [ExtensionChartPoint]
+    public var color: String?
 
-    init(name: String? = nil, tone: String? = nil, points: [ExtensionChartPoint] = [], color: String? = nil) {
+    public init(name: String? = nil, tone: String? = nil, points: [ExtensionChartPoint] = [], color: String? = nil) {
         self.name = name
         self.tone = tone
         self.points = points
@@ -6687,7 +6687,7 @@ nonisolated struct ExtensionChartSeries: Codable, Hashable, Sendable {
         case color
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
         self.tone = try? c.decodeIfPresent(String.self, forKey: .tone)
@@ -6698,17 +6698,17 @@ nonisolated struct ExtensionChartSeries: Codable, Hashable, Sendable {
 
 /// A value at a label (a day, a model); display is how to write it ("¥1.20"), else the app writes value with the
 /// unit.
-nonisolated struct ExtensionChartPoint: Codable, Hashable, Sendable {
-    var label: String
-    var value: Double
-    var display: String?
-    var open: Double?
-    var high: Double?
-    var low: Double?
-    var close: Double?
-    var volume: Double?
+public nonisolated struct ExtensionChartPoint: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: Double
+    public var display: String?
+    public var open: Double?
+    public var high: Double?
+    public var low: Double?
+    public var close: Double?
+    public var volume: Double?
 
-    init(label: String = "", value: Double = 0, display: String? = nil, open: Double? = nil, high: Double? = nil, low: Double? = nil, close: Double? = nil, volume: Double? = nil) {
+    public init(label: String = "", value: Double = 0, display: String? = nil, open: Double? = nil, high: Double? = nil, low: Double? = nil, close: Double? = nil, volume: Double? = nil) {
         self.label = label
         self.value = value
         self.display = display
@@ -6730,7 +6730,7 @@ nonisolated struct ExtensionChartPoint: Codable, Hashable, Sendable {
         case volume
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.value = (try? c.decodeIfPresent(Double.self, forKey: .value)) ?? 0
@@ -6743,14 +6743,14 @@ nonisolated struct ExtensionChartPoint: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionStat: Codable, Hashable, Sendable {
-    var label: String
-    var value: String
-    var detail: String?
-    var tone: String?
-    var spark: ExtensionSpark?
+public nonisolated struct ExtensionStat: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: String
+    public var detail: String?
+    public var tone: String?
+    public var spark: ExtensionSpark?
 
-    init(label: String = "", value: String = "", detail: String? = nil, tone: String? = nil, spark: ExtensionSpark? = nil) {
+    public init(label: String = "", value: String = "", detail: String? = nil, tone: String? = nil, spark: ExtensionSpark? = nil) {
         self.label = label
         self.value = value
         self.detail = detail
@@ -6766,7 +6766,7 @@ nonisolated struct ExtensionStat: Codable, Hashable, Sendable {
         case spark
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
@@ -6778,21 +6778,21 @@ nonisolated struct ExtensionStat: Codable, Hashable, Sendable {
 
 /// What ui.action answers: a new view, a short message, an https link to open, a page to push or to pop (UI version
 /// 3), or nothing (draw again).
-nonisolated struct ExtensionActionResult: Codable, Hashable, Sendable {
-    var view: ExtensionView?
-    var toast: String?
-    var openUrl: String?
+public nonisolated struct ExtensionActionResult: Codable, Hashable, Sendable {
+    public var view: ExtensionView?
+    public var toast: String?
+    public var openUrl: String?
     /// Then open this page on top (after a submit: list, detail, edit).
-    var push: ExtensionPush?
+    public var push: ExtensionPush?
     /// Then go back a page; the page below is drawn again.
-    var pop: Bool?
+    public var pop: Bool?
     /// Lines of a file a diff's context asked for: the page is not drawn again.
-    var lines: ExtensionFileLines?
+    public var lines: ExtensionFileLines?
     /// Components to put in place of those with the same key on the page (each has a key): the rest is not drawn
     /// again.
-    var items: [ExtensionComponent]?
+    public var items: [ExtensionComponent]?
 
-    init(view: ExtensionView? = nil, toast: String? = nil, openUrl: String? = nil, push: ExtensionPush? = nil, pop: Bool? = nil, lines: ExtensionFileLines? = nil, items: [ExtensionComponent]? = nil) {
+    public init(view: ExtensionView? = nil, toast: String? = nil, openUrl: String? = nil, push: ExtensionPush? = nil, pop: Bool? = nil, lines: ExtensionFileLines? = nil, items: [ExtensionComponent]? = nil) {
         self.view = view
         self.toast = toast
         self.openUrl = openUrl
@@ -6812,7 +6812,7 @@ nonisolated struct ExtensionActionResult: Codable, Hashable, Sendable {
         case items
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.view = try? c.decodeIfPresent(ExtensionView.self, forKey: .view)
         self.toast = try? c.decodeIfPresent(String.self, forKey: .toast)
@@ -6826,14 +6826,14 @@ nonisolated struct ExtensionActionResult: Codable, Hashable, Sendable {
 
 /// Lines of one side of a file from start (1 the first), as many as the extension has at hand (all of it, say); total
 /// is how many the file has.
-nonisolated struct ExtensionFileLines: Codable, Hashable, Sendable {
-    var path: String
-    var side: String?
-    var start: Int
-    var lines: [String]
-    var total: Int?
+public nonisolated struct ExtensionFileLines: Codable, Hashable, Sendable {
+    public var path: String
+    public var side: String?
+    public var start: Int
+    public var lines: [String]
+    public var total: Int?
 
-    init(path: String = "", side: String? = nil, start: Int = 0, lines: [String] = [], total: Int? = nil) {
+    public init(path: String = "", side: String? = nil, start: Int = 0, lines: [String] = [], total: Int? = nil) {
         self.path = path
         self.side = side
         self.start = start
@@ -6849,7 +6849,7 @@ nonisolated struct ExtensionFileLines: Codable, Hashable, Sendable {
         case total
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
         self.side = try? c.decodeIfPresent(String.self, forKey: .side)
@@ -6862,14 +6862,14 @@ nonisolated struct ExtensionFileLines: Codable, Hashable, Sendable {
 /// The pending review (UI version 5): a bar at the page's foot saying how many drafts there are, a summary box (name)
 /// and buttons (comment, approve, request changes) that send them all, discard throws them away. An older app gets a
 /// text and a composer on top.
-nonisolated struct ExtensionReview: Codable, Hashable, Sendable {
-    var count: Int
-    var name: String
-    var placeholder: String?
-    var buttons: [ExtensionComposerButton]
-    var discard: ExtensionAction?
+public nonisolated struct ExtensionReview: Codable, Hashable, Sendable {
+    public var count: Int
+    public var name: String
+    public var placeholder: String?
+    public var buttons: [ExtensionComposerButton]
+    public var discard: ExtensionAction?
 
-    init(count: Int = 0, name: String = "", placeholder: String? = nil, buttons: [ExtensionComposerButton] = [], discard: ExtensionAction? = nil) {
+    public init(count: Int = 0, name: String = "", placeholder: String? = nil, buttons: [ExtensionComposerButton] = [], discard: ExtensionAction? = nil) {
         self.count = count
         self.name = name
         self.placeholder = placeholder
@@ -6885,7 +6885,7 @@ nonisolated struct ExtensionReview: Codable, Hashable, Sendable {
         case discard
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.count = (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -6896,30 +6896,30 @@ nonisolated struct ExtensionReview: Codable, Hashable, Sendable {
 }
 
 /// ring: one day's total and its parts (a donut); stacked_bar: parts side by side to compare (days, people).
-nonisolated enum ExtensionPersonaCardKind {
-    static let stat = "stat"
-    static let stackedBar = "stacked_bar"
-    static let line = "line"
-    static let bar = "bar"
-    static let ring = "ring"
-    static let all = ["stat", "stacked_bar", "line", "bar", "ring"]
+public nonisolated enum ExtensionPersonaCardKind {
+    public static let stat = "stat"
+    public static let stackedBar = "stacked_bar"
+    public static let line = "line"
+    public static let bar = "bar"
+    public static let ring = "ring"
+    public static let all = ["stat", "stacked_bar", "line", "bar", "ring"]
 }
 
 /// The assistant's ```persona-card block (#886): one JSON object. Joins the components in #1850; this form keeps
 /// drawing.
-nonisolated struct ExtensionPersonaCard: Codable, Hashable, Sendable {
-    var type: String
-    var title: String?
-    var subtitle: String?
-    var value: Double?
-    var unit: String?
-    var note: String?
-    var total: ExtensionCardAmount?
-    var segments: [ExtensionCardPart]?
-    var rest: ExtensionCardPart?
-    var points: [ExtensionCardPart]?
+public nonisolated struct ExtensionPersonaCard: Codable, Hashable, Sendable {
+    public var type: String
+    public var title: String?
+    public var subtitle: String?
+    public var value: Double?
+    public var unit: String?
+    public var note: String?
+    public var total: ExtensionCardAmount?
+    public var segments: [ExtensionCardPart]?
+    public var rest: ExtensionCardPart?
+    public var points: [ExtensionCardPart]?
 
-    init(type: String = "", title: String? = nil, subtitle: String? = nil, value: Double? = nil, unit: String? = nil, note: String? = nil, total: ExtensionCardAmount? = nil, segments: [ExtensionCardPart]? = nil, rest: ExtensionCardPart? = nil, points: [ExtensionCardPart]? = nil) {
+    public init(type: String = "", title: String? = nil, subtitle: String? = nil, value: Double? = nil, unit: String? = nil, note: String? = nil, total: ExtensionCardAmount? = nil, segments: [ExtensionCardPart]? = nil, rest: ExtensionCardPart? = nil, points: [ExtensionCardPart]? = nil) {
         self.type = type
         self.title = title
         self.subtitle = subtitle
@@ -6945,7 +6945,7 @@ nonisolated struct ExtensionPersonaCard: Codable, Hashable, Sendable {
         case points
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -6960,11 +6960,11 @@ nonisolated struct ExtensionPersonaCard: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionCardAmount: Codable, Hashable, Sendable {
-    var value: Double
-    var unit: String?
+public nonisolated struct ExtensionCardAmount: Codable, Hashable, Sendable {
+    public var value: Double
+    public var unit: String?
 
-    init(value: Double = 0, unit: String? = nil) {
+    public init(value: Double = 0, unit: String? = nil) {
         self.value = value
         self.unit = unit
     }
@@ -6974,19 +6974,19 @@ nonisolated struct ExtensionCardAmount: Codable, Hashable, Sendable {
         case unit
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.value = (try? c.decodeIfPresent(Double.self, forKey: .value)) ?? 0
         self.unit = try? c.decodeIfPresent(String.self, forKey: .unit)
     }
 }
 
-nonisolated struct ExtensionCardPart: Codable, Hashable, Sendable {
-    var label: String
-    var value: Double
-    var note: String?
+public nonisolated struct ExtensionCardPart: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: Double
+    public var note: String?
 
-    init(label: String = "", value: Double = 0, note: String? = nil) {
+    public init(label: String = "", value: Double = 0, note: String? = nil) {
         self.label = label
         self.value = value
         self.note = note
@@ -6998,7 +6998,7 @@ nonisolated struct ExtensionCardPart: Codable, Hashable, Sendable {
         case note
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.value = (try? c.decodeIfPresent(Double.self, forKey: .value)) ?? 0
@@ -7007,46 +7007,46 @@ nonisolated struct ExtensionCardPart: Codable, Hashable, Sendable {
 }
 
 /// What a source supports (docs "3. Capabilities"). The apps show only what is supported; an unknown one is ignored.
-nonisolated enum ExtensionMessagingCapability {
-    static let accounts = "accounts"
-    static let pinned = "pinned"
-    static let mentions = "mentions"
-    static let attachments = "attachments"
-    static let attachmentReplies = "attachment_replies"
-    static let threads = "threads"
-    static let topics = "topics"
-    static let reactions = "reactions"
-    static let readReceipts = "read_receipts"
-    static let chatPins = "chat_pins"
-    static let profiles = "profiles"
-    static let urlPreviews = "url_previews"
-    static let documents = "documents"
-    static let docComments = "doc_comments"
-    static let posts = "posts"
-    static let editHistory = "edit_history"
-    static let translation = "translation"
-    static let all = ["accounts", "pinned", "mentions", "attachments", "attachment_replies", "threads", "topics", "reactions", "read_receipts", "chat_pins", "profiles", "url_previews", "documents", "doc_comments", "posts", "edit_history", "translation"]
+public nonisolated enum ExtensionMessagingCapability {
+    public static let accounts = "accounts"
+    public static let pinned = "pinned"
+    public static let mentions = "mentions"
+    public static let attachments = "attachments"
+    public static let attachmentReplies = "attachment_replies"
+    public static let threads = "threads"
+    public static let topics = "topics"
+    public static let reactions = "reactions"
+    public static let readReceipts = "read_receipts"
+    public static let chatPins = "chat_pins"
+    public static let profiles = "profiles"
+    public static let urlPreviews = "url_previews"
+    public static let documents = "documents"
+    public static let docComments = "doc_comments"
+    public static let posts = "posts"
+    public static let editHistory = "edit_history"
+    public static let translation = "translation"
+    public static let all = ["accounts", "pinned", "mentions", "attachments", "attachment_replies", "threads", "topics", "reactions", "read_receipts", "chat_pins", "profiles", "url_previews", "documents", "doc_comments", "posts", "edit_history", "translation"]
 }
 
 /// A message box mode besides plain (docs "7. Composer modes"): what is sent is handled by the extension (encoded,
 /// sealed).
-nonisolated struct ExtensionMessagingComposerMode: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
+public nonisolated struct ExtensionMessagingComposerMode: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
     /// A name from the fixed icon set (NavIcon), or lock / shield; an unknown one draws as the default.
-    var icon: String?
+    public var icon: String?
     /// One line over the box while the mode is chosen.
-    var description: String?
+    public var description: String?
     /// Pictures and files can go with it.
-    var attachments: Bool
+    public var attachments: Bool
     /// @ works in it.
-    var mentions: Bool
+    public var mentions: Bool
     /// Sending takes a compose step first (POST compose → token or a view to fill).
-    var prepare: Bool?
+    public var prepare: Bool?
     /// It can go into a thread (reply_to + thread).
-    var threads: Bool?
+    public var threads: Bool?
 
-    init(id: String = "", title: String = "", icon: String? = nil, description: String? = nil, attachments: Bool = false, mentions: Bool = false, prepare: Bool? = nil, threads: Bool? = nil) {
+    public init(id: String = "", title: String = "", icon: String? = nil, description: String? = nil, attachments: Bool = false, mentions: Bool = false, prepare: Bool? = nil, threads: Bool? = nil) {
         self.id = id
         self.title = title
         self.icon = icon
@@ -7068,7 +7068,7 @@ nonisolated struct ExtensionMessagingComposerMode: Codable, Hashable, Sendable {
         case threads
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -7082,13 +7082,13 @@ nonisolated struct ExtensionMessagingComposerMode: Codable, Hashable, Sendable {
 }
 
 /// Links the source opens when tapped in the apps.
-nonisolated struct ExtensionMessagingLink: Codable, Hashable, Sendable {
-    var hosts: [String]
+public nonisolated struct ExtensionMessagingLink: Codable, Hashable, Sendable {
+    public var hosts: [String]
     /// Path prefixes; none is any path.
-    var paths: [String]?
-    var opens: String
+    public var paths: [String]?
+    public var opens: String
 
-    init(hosts: [String] = [], paths: [String]? = nil, opens: String = "") {
+    public init(hosts: [String] = [], paths: [String]? = nil, opens: String = "") {
         self.hosts = hosts
         self.paths = paths
         self.opens = opens
@@ -7100,7 +7100,7 @@ nonisolated struct ExtensionMessagingLink: Codable, Hashable, Sendable {
         case opens
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.hosts = (try? c.decodeIfPresent([String].self, forKey: .hosts)) ?? []
         self.paths = try? c.decodeIfPresent([String].self, forKey: .paths)
@@ -7109,18 +7109,18 @@ nonisolated struct ExtensionMessagingLink: Codable, Hashable, Sendable {
 }
 
 /// The manifest's contributes.messaging[]: one messaging source (docs "2. Manifest").
-nonisolated struct ExtensionMessagingItem: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var icon: String?
+public nonisolated struct ExtensionMessagingItem: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var icon: String?
     /// MessagingCapability values; one this hub does not know is kept (a newer extension), the apps ignore it.
-    var capabilities: [String]?
-    var composerModes: [ExtensionMessagingComposerMode]?
+    public var capabilities: [String]?
+    public var composerModes: [ExtensionMessagingComposerMode]?
     /// A ui contribution (extension_page) of the same extension.
-    var settingsUi: String?
-    var links: [ExtensionMessagingLink]?
+    public var settingsUi: String?
+    public var links: [ExtensionMessagingLink]?
 
-    init(id: String = "", name: String = "", icon: String? = nil, capabilities: [String]? = nil, composerModes: [ExtensionMessagingComposerMode]? = nil, settingsUi: String? = nil, links: [ExtensionMessagingLink]? = nil) {
+    public init(id: String = "", name: String = "", icon: String? = nil, capabilities: [String]? = nil, composerModes: [ExtensionMessagingComposerMode]? = nil, settingsUi: String? = nil, links: [ExtensionMessagingLink]? = nil) {
         self.id = id
         self.name = name
         self.icon = icon
@@ -7140,7 +7140,7 @@ nonisolated struct ExtensionMessagingItem: Codable, Hashable, Sendable {
         case links
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -7153,17 +7153,17 @@ nonisolated struct ExtensionMessagingItem: Codable, Hashable, Sendable {
 }
 
 /// GET /api/v1/messaging: an enabled source, its manifest item and the extension it is in.
-nonisolated struct ExtensionMessagingSource: Codable, Hashable, Sendable {
-    var `extension`: String
-    var id: String
-    var name: String
-    var icon: String?
-    var capabilities: [String]?
-    var composerModes: [ExtensionMessagingComposerMode]?
-    var settingsUi: String?
-    var links: [ExtensionMessagingLink]?
+public nonisolated struct ExtensionMessagingSource: Codable, Hashable, Sendable {
+    public var `extension`: String
+    public var id: String
+    public var name: String
+    public var icon: String?
+    public var capabilities: [String]?
+    public var composerModes: [ExtensionMessagingComposerMode]?
+    public var settingsUi: String?
+    public var links: [ExtensionMessagingLink]?
 
-    init(`extension`: String = "", id: String = "", name: String = "", icon: String? = nil, capabilities: [String]? = nil, composerModes: [ExtensionMessagingComposerMode]? = nil, settingsUi: String? = nil, links: [ExtensionMessagingLink]? = nil) {
+    public init(`extension`: String = "", id: String = "", name: String = "", icon: String? = nil, capabilities: [String]? = nil, composerModes: [ExtensionMessagingComposerMode]? = nil, settingsUi: String? = nil, links: [ExtensionMessagingLink]? = nil) {
         self.extension = `extension`
         self.id = id
         self.name = name
@@ -7185,7 +7185,7 @@ nonisolated struct ExtensionMessagingSource: Codable, Hashable, Sendable {
         case links
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.extension = (try? c.decodeIfPresent(String.self, forKey: .`extension`)) ?? ""
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -7198,10 +7198,10 @@ nonisolated struct ExtensionMessagingSource: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingSources: Codable, Hashable, Sendable {
-    var sources: [ExtensionMessagingSource]
+public nonisolated struct ExtensionMessagingSources: Codable, Hashable, Sendable {
+    public var sources: [ExtensionMessagingSource]
 
-    init(sources: [ExtensionMessagingSource] = []) {
+    public init(sources: [ExtensionMessagingSource] = []) {
         self.sources = sources
     }
 
@@ -7209,22 +7209,22 @@ nonisolated struct ExtensionMessagingSources: Codable, Hashable, Sendable {
         case sources
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.sources = (try? c.decodeIfPresent([ExtensionMessagingSource].self, forKey: .sources)) ?? []
     }
 }
 
 /// GET status: whether the source is set up and signed in, and the composer modes usable now.
-nonisolated struct ExtensionMessagingStatus: Codable, Hashable, Sendable {
-    var configured: Bool
-    var connected: Bool
-    var signedIn: Bool
-    var name: String?
-    var error: String?
-    var modes: [String]?
+public nonisolated struct ExtensionMessagingStatus: Codable, Hashable, Sendable {
+    public var configured: Bool
+    public var connected: Bool
+    public var signedIn: Bool
+    public var name: String?
+    public var error: String?
+    public var modes: [String]?
 
-    init(configured: Bool = false, connected: Bool = false, signedIn: Bool = false, name: String? = nil, error: String? = nil, modes: [String]? = nil) {
+    public init(configured: Bool = false, connected: Bool = false, signedIn: Bool = false, name: String? = nil, error: String? = nil, modes: [String]? = nil) {
         self.configured = configured
         self.connected = connected
         self.signedIn = signedIn
@@ -7242,7 +7242,7 @@ nonisolated struct ExtensionMessagingStatus: Codable, Hashable, Sendable {
         case modes
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.configured = (try? c.decodeIfPresent(Bool.self, forKey: .configured)) ?? false
         self.connected = (try? c.decodeIfPresent(Bool.self, forKey: .connected)) ?? false
@@ -7254,12 +7254,12 @@ nonisolated struct ExtensionMessagingStatus: Codable, Hashable, Sendable {
 }
 
 /// GET me: who the account is now (the outbox keys sends by it).
-nonisolated struct ExtensionMessagingMe: Codable, Hashable, Sendable {
-    var account: String
-    var userId: String
-    var name: String?
+public nonisolated struct ExtensionMessagingMe: Codable, Hashable, Sendable {
+    public var account: String
+    public var userId: String
+    public var name: String?
 
-    init(account: String = "", userId: String = "", name: String? = nil) {
+    public init(account: String = "", userId: String = "", name: String? = nil) {
         self.account = account
         self.userId = userId
         self.name = name
@@ -7271,7 +7271,7 @@ nonisolated struct ExtensionMessagingMe: Codable, Hashable, Sendable {
         case name
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = (try? c.decodeIfPresent(String.self, forKey: .account)) ?? ""
         self.userId = (try? c.decodeIfPresent(String.self, forKey: .userId)) ?? ""
@@ -7279,15 +7279,15 @@ nonisolated struct ExtensionMessagingMe: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable {
-    var id: String
-    var name: String?
-    var avatar: String?
-    var tenant: String?
-    var signedIn: Bool
-    var unread: Int?
+public nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String?
+    public var avatar: String?
+    public var tenant: String?
+    public var signedIn: Bool
+    public var unread: Int?
 
-    init(id: String = "", name: String? = nil, avatar: String? = nil, tenant: String? = nil, signedIn: Bool = false, unread: Int? = nil) {
+    public init(id: String = "", name: String? = nil, avatar: String? = nil, tenant: String? = nil, signedIn: Bool = false, unread: Int? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
@@ -7305,7 +7305,7 @@ nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable {
         case unread
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
@@ -7316,11 +7316,11 @@ nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingAccounts: Codable, Hashable, Sendable {
-    var accounts: [ExtensionMessagingAccount]
-    var `default`: String?
+public nonisolated struct ExtensionMessagingAccounts: Codable, Hashable, Sendable {
+    public var accounts: [ExtensionMessagingAccount]
+    public var `default`: String?
 
-    init(accounts: [ExtensionMessagingAccount] = [], `default`: String? = nil) {
+    public init(accounts: [ExtensionMessagingAccount] = [], `default`: String? = nil) {
         self.accounts = accounts
         self.default = `default`
     }
@@ -7330,7 +7330,7 @@ nonisolated struct ExtensionMessagingAccounts: Codable, Hashable, Sendable {
         case `default`
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.accounts = (try? c.decodeIfPresent([ExtensionMessagingAccount].self, forKey: .accounts)) ?? []
         self.default = try? c.decodeIfPresent(String.self, forKey: .`default`)
@@ -7338,32 +7338,32 @@ nonisolated struct ExtensionMessagingAccounts: Codable, Hashable, Sendable {
 }
 
 /// Values of MessagingConversationKind.
-nonisolated enum ExtensionMessagingConversationKind {
-    static let direct = "direct"
-    static let group = "group"
-    static let topicGroup = "topic_group"
-    static let bot = "bot"
-    static let all = ["direct", "group", "topic_group", "bot"]
+public nonisolated enum ExtensionMessagingConversationKind {
+    public static let direct = "direct"
+    public static let group = "group"
+    public static let topicGroup = "topic_group"
+    public static let bot = "bot"
+    public static let all = ["direct", "group", "topic_group", "bot"]
 }
 
-nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var avatar: String?
-    var kind: String
-    var unread: Int
-    var markedUnread: Bool?
-    var mentioned: Bool?
-    var muted: Bool?
-    var pinned: Bool?
-    var preview: String
-    var previewSender: String?
-    var previewMine: Bool?
-    var updatedAt: String?
-    var readPosition: String?
-    var mentionPosition: String?
+public nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var avatar: String?
+    public var kind: String
+    public var unread: Int
+    public var markedUnread: Bool?
+    public var mentioned: Bool?
+    public var muted: Bool?
+    public var pinned: Bool?
+    public var preview: String
+    public var previewSender: String?
+    public var previewMine: Bool?
+    public var updatedAt: String?
+    public var readPosition: String?
+    public var mentionPosition: String?
 
-    init(id: String = "", name: String = "", avatar: String? = nil, kind: String = "", unread: Int = 0, markedUnread: Bool? = nil, mentioned: Bool? = nil, muted: Bool? = nil, pinned: Bool? = nil, preview: String = "", previewSender: String? = nil, previewMine: Bool? = nil, updatedAt: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
+    public init(id: String = "", name: String = "", avatar: String? = nil, kind: String = "", unread: Int = 0, markedUnread: Bool? = nil, mentioned: Bool? = nil, muted: Bool? = nil, pinned: Bool? = nil, preview: String = "", previewSender: String? = nil, previewMine: Bool? = nil, updatedAt: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
@@ -7399,7 +7399,7 @@ nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sendable {
         case mentionPosition = "mention_position"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -7419,12 +7419,12 @@ nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingConversationPage: Codable, Hashable, Sendable {
-    var account: String?
-    var conversations: [ExtensionMessagingConversation]
-    var nextCursor: String?
+public nonisolated struct ExtensionMessagingConversationPage: Codable, Hashable, Sendable {
+    public var account: String?
+    public var conversations: [ExtensionMessagingConversation]
+    public var nextCursor: String?
 
-    init(account: String? = nil, conversations: [ExtensionMessagingConversation] = [], nextCursor: String? = nil) {
+    public init(account: String? = nil, conversations: [ExtensionMessagingConversation] = [], nextCursor: String? = nil) {
         self.account = account
         self.conversations = conversations
         self.nextCursor = nextCursor
@@ -7436,7 +7436,7 @@ nonisolated struct ExtensionMessagingConversationPage: Codable, Hashable, Sendab
         case nextCursor = "next_cursor"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.conversations = (try? c.decodeIfPresent([ExtensionMessagingConversation].self, forKey: .conversations)) ?? []
@@ -7444,13 +7444,13 @@ nonisolated struct ExtensionMessagingConversationPage: Codable, Hashable, Sendab
     }
 }
 
-nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable {
-    var id: String?
-    var name: String
-    var avatar: String?
-    var kind: String?
+public nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable {
+    public var id: String?
+    public var name: String
+    public var avatar: String?
+    public var kind: String?
 
-    init(id: String? = nil, name: String = "", avatar: String? = nil, kind: String? = nil) {
+    public init(id: String? = nil, name: String = "", avatar: String? = nil, kind: String? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
@@ -7464,7 +7464,7 @@ nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable {
         case kind
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -7473,10 +7473,10 @@ nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingMembers: Codable, Hashable, Sendable {
-    var members: [ExtensionMessagingPerson]
+public nonisolated struct ExtensionMessagingMembers: Codable, Hashable, Sendable {
+    public var members: [ExtensionMessagingPerson]
 
-    init(members: [ExtensionMessagingPerson] = []) {
+    public init(members: [ExtensionMessagingPerson] = []) {
         self.members = members
     }
 
@@ -7484,19 +7484,19 @@ nonisolated struct ExtensionMessagingMembers: Codable, Hashable, Sendable {
         case members
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.members = (try? c.decodeIfPresent([ExtensionMessagingPerson].self, forKey: .members)) ?? []
     }
 }
 
-nonisolated struct ExtensionMessagingReplyTo: Codable, Hashable, Sendable {
-    var id: String
-    var senderName: String?
-    var summary: String
-    var recalled: Bool?
+public nonisolated struct ExtensionMessagingReplyTo: Codable, Hashable, Sendable {
+    public var id: String
+    public var senderName: String?
+    public var summary: String
+    public var recalled: Bool?
 
-    init(id: String = "", senderName: String? = nil, summary: String = "", recalled: Bool? = nil) {
+    public init(id: String = "", senderName: String? = nil, summary: String = "", recalled: Bool? = nil) {
         self.id = id
         self.senderName = senderName
         self.summary = summary
@@ -7510,7 +7510,7 @@ nonisolated struct ExtensionMessagingReplyTo: Codable, Hashable, Sendable {
         case recalled
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.senderName = try? c.decodeIfPresent(String.self, forKey: .senderName)
@@ -7519,11 +7519,11 @@ nonisolated struct ExtensionMessagingReplyTo: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingThread: Codable, Hashable, Sendable {
-    var count: Int
-    var latestAt: String?
+public nonisolated struct ExtensionMessagingThread: Codable, Hashable, Sendable {
+    public var count: Int
+    public var latestAt: String?
 
-    init(count: Int = 0, latestAt: String? = nil) {
+    public init(count: Int = 0, latestAt: String? = nil) {
         self.count = count
         self.latestAt = latestAt
     }
@@ -7533,20 +7533,20 @@ nonisolated struct ExtensionMessagingThread: Codable, Hashable, Sendable {
         case latestAt = "latest_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.count = (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
         self.latestAt = try? c.decodeIfPresent(String.self, forKey: .latestAt)
     }
 }
 
-nonisolated struct ExtensionMessagingReaction: Codable, Hashable, Sendable {
-    var key: String
-    var count: Int
-    var mine: Bool?
-    var users: [String]?
+public nonisolated struct ExtensionMessagingReaction: Codable, Hashable, Sendable {
+    public var key: String
+    public var count: Int
+    public var mine: Bool?
+    public var users: [String]?
 
-    init(key: String = "", count: Int = 0, mine: Bool? = nil, users: [String]? = nil) {
+    public init(key: String = "", count: Int = 0, mine: Bool? = nil, users: [String]? = nil) {
         self.key = key
         self.count = count
         self.mine = mine
@@ -7560,7 +7560,7 @@ nonisolated struct ExtensionMessagingReaction: Codable, Hashable, Sendable {
         case users
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = (try? c.decodeIfPresent(String.self, forKey: .key)) ?? ""
         self.count = (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
@@ -7570,12 +7570,12 @@ nonisolated struct ExtensionMessagingReaction: Codable, Hashable, Sendable {
 }
 
 /// A mode supported by the message source.
-nonisolated struct ExtensionMessagingDecoration: Codable, Hashable, Sendable {
-    var text: String
-    var icon: String?
-    var tone: String?
+public nonisolated struct ExtensionMessagingDecoration: Codable, Hashable, Sendable {
+    public var text: String
+    public var icon: String?
+    public var tone: String?
 
-    init(text: String = "", icon: String? = nil, tone: String? = nil) {
+    public init(text: String = "", icon: String? = nil, tone: String? = nil) {
         self.text = text
         self.icon = icon
         self.tone = tone
@@ -7587,7 +7587,7 @@ nonisolated struct ExtensionMessagingDecoration: Codable, Hashable, Sendable {
         case tone
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.icon = try? c.decodeIfPresent(String.self, forKey: .icon)
@@ -7596,14 +7596,14 @@ nonisolated struct ExtensionMessagingDecoration: Codable, Hashable, Sendable {
 }
 
 /// An action of the extension's on a message, in its long-press menu: POST messages/{id}/actions/{id}.
-nonisolated struct ExtensionMessagingAction: Codable, Hashable, Sendable {
-    var id: String
-    var title: String
-    var icon: String?
-    var destructive: Bool?
-    var confirm: String?
+public nonisolated struct ExtensionMessagingAction: Codable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var icon: String?
+    public var destructive: Bool?
+    public var confirm: String?
 
-    init(id: String = "", title: String = "", icon: String? = nil, destructive: Bool? = nil, confirm: String? = nil) {
+    public init(id: String = "", title: String = "", icon: String? = nil, destructive: Bool? = nil, confirm: String? = nil) {
         self.id = id
         self.title = title
         self.icon = icon
@@ -7619,7 +7619,7 @@ nonisolated struct ExtensionMessagingAction: Codable, Hashable, Sendable {
         case confirm
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
@@ -7629,12 +7629,12 @@ nonisolated struct ExtensionMessagingAction: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingEditVersion: Codable, Hashable, Sendable {
-    var editedAt: String?
-    var text: String
-    var parts: [ExtensionMessagingPart]?
+public nonisolated struct ExtensionMessagingEditVersion: Codable, Hashable, Sendable {
+    public var editedAt: String?
+    public var text: String
+    public var parts: [ExtensionMessagingPart]?
 
-    init(editedAt: String? = nil, text: String = "", parts: [ExtensionMessagingPart]? = nil) {
+    public init(editedAt: String? = nil, text: String = "", parts: [ExtensionMessagingPart]? = nil) {
         self.editedAt = editedAt
         self.text = text
         self.parts = parts
@@ -7646,7 +7646,7 @@ nonisolated struct ExtensionMessagingEditVersion: Codable, Hashable, Sendable {
         case parts
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.editedAt = try? c.decodeIfPresent(String.self, forKey: .editedAt)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -7654,34 +7654,34 @@ nonisolated struct ExtensionMessagingEditVersion: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingMessage: Codable, Hashable, Sendable {
-    var id: String
-    var position: String
-    var createdAt: String?
-    var sender: ExtensionMessagingPerson
-    var mine: Bool
-    var clientId: String?
-    var state: String?
-    var parts: [ExtensionMessagingPart]
-    var text: String
-    var replyTo: ExtensionMessagingReplyTo?
-    var thread: ExtensionMessagingThread?
-    var reactions: [ExtensionMessagingReaction]?
-    var edited: Bool?
-    var editHistory: [ExtensionMessagingEditVersion]?
-    var recalled: Bool?
-    var decorations: [ExtensionMessagingDecoration]?
+public nonisolated struct ExtensionMessagingMessage: Codable, Hashable, Sendable {
+    public var id: String
+    public var position: String
+    public var createdAt: String?
+    public var sender: ExtensionMessagingPerson
+    public var mine: Bool
+    public var clientId: String?
+    public var state: String?
+    public var parts: [ExtensionMessagingPart]
+    public var text: String
+    public var replyTo: ExtensionMessagingReplyTo?
+    public var thread: ExtensionMessagingThread?
+    public var reactions: [ExtensionMessagingReaction]?
+    public var edited: Bool?
+    public var editHistory: [ExtensionMessagingEditVersion]?
+    public var recalled: Bool?
+    public var decorations: [ExtensionMessagingDecoration]?
     /// The body must not be written to disk (an opened sealed message): caches keep private_text.
-    var `private`: Bool?
-    var privateText: String?
-    var actions: [ExtensionMessagingAction]?
-    var canPin: Bool?
-    var canUnpin: Bool?
-    var canReply: Bool?
-    var canReact: Bool?
-    var read: Bool?
+    public var `private`: Bool?
+    public var privateText: String?
+    public var actions: [ExtensionMessagingAction]?
+    public var canPin: Bool?
+    public var canUnpin: Bool?
+    public var canReply: Bool?
+    public var canReact: Bool?
+    public var read: Bool?
 
-    init(id: String = "", position: String = "", createdAt: String? = nil, sender: ExtensionMessagingPerson = ExtensionMessagingPerson(), mine: Bool = false, clientId: String? = nil, state: String? = nil, parts: [ExtensionMessagingPart] = [], text: String = "", replyTo: ExtensionMessagingReplyTo? = nil, thread: ExtensionMessagingThread? = nil, reactions: [ExtensionMessagingReaction]? = nil, edited: Bool? = nil, editHistory: [ExtensionMessagingEditVersion]? = nil, recalled: Bool? = nil, decorations: [ExtensionMessagingDecoration]? = nil, `private`: Bool? = nil, privateText: String? = nil, actions: [ExtensionMessagingAction]? = nil, canPin: Bool? = nil, canUnpin: Bool? = nil, canReply: Bool? = nil, canReact: Bool? = nil, read: Bool? = nil) {
+    public init(id: String = "", position: String = "", createdAt: String? = nil, sender: ExtensionMessagingPerson = ExtensionMessagingPerson(), mine: Bool = false, clientId: String? = nil, state: String? = nil, parts: [ExtensionMessagingPart] = [], text: String = "", replyTo: ExtensionMessagingReplyTo? = nil, thread: ExtensionMessagingThread? = nil, reactions: [ExtensionMessagingReaction]? = nil, edited: Bool? = nil, editHistory: [ExtensionMessagingEditVersion]? = nil, recalled: Bool? = nil, decorations: [ExtensionMessagingDecoration]? = nil, `private`: Bool? = nil, privateText: String? = nil, actions: [ExtensionMessagingAction]? = nil, canPin: Bool? = nil, canUnpin: Bool? = nil, canReply: Bool? = nil, canReact: Bool? = nil, read: Bool? = nil) {
         self.id = id
         self.position = position
         self.createdAt = createdAt
@@ -7735,7 +7735,7 @@ nonisolated struct ExtensionMessagingMessage: Codable, Hashable, Sendable {
         case read
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.position = (try? c.decodeIfPresent(String.self, forKey: .position)) ?? ""
@@ -7764,18 +7764,18 @@ nonisolated struct ExtensionMessagingMessage: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingMessagePage: Codable, Hashable, Sendable {
-    var account: String?
-    var messages: [ExtensionMessagingMessage]
-    var hasOlder: Bool
-    var hasNewer: Bool?
-    var olderCursor: String?
-    var newerCursor: String?
-    var root: ExtensionMessagingMessage?
+public nonisolated struct ExtensionMessagingMessagePage: Codable, Hashable, Sendable {
+    public var account: String?
+    public var messages: [ExtensionMessagingMessage]
+    public var hasOlder: Bool
+    public var hasNewer: Bool?
+    public var olderCursor: String?
+    public var newerCursor: String?
+    public var root: ExtensionMessagingMessage?
     /// The conversation is a topic group and messages are its topics' roots.
-    var topic: Bool?
+    public var topic: Bool?
 
-    init(account: String? = nil, messages: [ExtensionMessagingMessage] = [], hasOlder: Bool = false, hasNewer: Bool? = nil, olderCursor: String? = nil, newerCursor: String? = nil, root: ExtensionMessagingMessage? = nil, topic: Bool? = nil) {
+    public init(account: String? = nil, messages: [ExtensionMessagingMessage] = [], hasOlder: Bool = false, hasNewer: Bool? = nil, olderCursor: String? = nil, newerCursor: String? = nil, root: ExtensionMessagingMessage? = nil, topic: Bool? = nil) {
         self.account = account
         self.messages = messages
         self.hasOlder = hasOlder
@@ -7797,7 +7797,7 @@ nonisolated struct ExtensionMessagingMessagePage: Codable, Hashable, Sendable {
         case topic
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.messages = (try? c.decodeIfPresent([ExtensionMessagingMessage].self, forKey: .messages)) ?? []
@@ -7811,11 +7811,11 @@ nonisolated struct ExtensionMessagingMessagePage: Codable, Hashable, Sendable {
 }
 
 /// GET messages/{id}.
-nonisolated struct ExtensionMessagingMessageAnswer: Codable, Hashable, Sendable {
-    var account: String?
-    var message: ExtensionMessagingMessage
+public nonisolated struct ExtensionMessagingMessageAnswer: Codable, Hashable, Sendable {
+    public var account: String?
+    public var message: ExtensionMessagingMessage
 
-    init(account: String? = nil, message: ExtensionMessagingMessage = ExtensionMessagingMessage()) {
+    public init(account: String? = nil, message: ExtensionMessagingMessage = ExtensionMessagingMessage()) {
         self.account = account
         self.message = message
     }
@@ -7825,7 +7825,7 @@ nonisolated struct ExtensionMessagingMessageAnswer: Codable, Hashable, Sendable 
         case message
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.message = (try? c.decodeIfPresent(ExtensionMessagingMessage.self, forKey: .message)) ?? ExtensionMessagingMessage()
@@ -7833,33 +7833,33 @@ nonisolated struct ExtensionMessagingMessageAnswer: Codable, Hashable, Sendable 
 }
 
 /// Values of MessagingMarks.
-nonisolated enum ExtensionMessagingMarks {
-    static let bold = "bold"
-    static let italic = "italic"
-    static let underline = "underline"
-    static let strike = "strike"
-    static let code = "code"
-    static let all = ["bold", "italic", "underline", "strike", "code"]
+public nonisolated enum ExtensionMessagingMarks {
+    public static let bold = "bold"
+    public static let italic = "italic"
+    public static let underline = "underline"
+    public static let strike = "strike"
+    public static let code = "code"
+    public static let all = ["bold", "italic", "underline", "strike", "code"]
 }
 
 /// Values of MessagingBlock.
-nonisolated enum ExtensionMessagingBlock {
-    static let paragraph = "paragraph"
-    static let heading1 = "heading1"
-    static let heading2 = "heading2"
-    static let heading3 = "heading3"
-    static let quote = "quote"
-    static let code = "code"
-    static let listItem = "list_item"
-    static let all = ["paragraph", "heading1", "heading2", "heading3", "quote", "code", "list_item"]
+public nonisolated enum ExtensionMessagingBlock {
+    public static let paragraph = "paragraph"
+    public static let heading1 = "heading1"
+    public static let heading2 = "heading2"
+    public static let heading3 = "heading3"
+    public static let quote = "quote"
+    public static let code = "code"
+    public static let listItem = "list_item"
+    public static let all = ["paragraph", "heading1", "heading2", "heading3", "quote", "code", "list_item"]
 }
 
-nonisolated struct ExtensionMessagingList: Codable, Hashable, Sendable {
-    var ordered: Bool
-    var level: Int?
-    var start: Int?
+public nonisolated struct ExtensionMessagingList: Codable, Hashable, Sendable {
+    public var ordered: Bool
+    public var level: Int?
+    public var start: Int?
 
-    init(ordered: Bool = false, level: Int? = nil, start: Int? = nil) {
+    public init(ordered: Bool = false, level: Int? = nil, start: Int? = nil) {
         self.ordered = ordered
         self.level = level
         self.start = start
@@ -7871,7 +7871,7 @@ nonisolated struct ExtensionMessagingList: Codable, Hashable, Sendable {
         case start
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.ordered = (try? c.decodeIfPresent(Bool.self, forKey: .ordered)) ?? false
         self.level = try? c.decodeIfPresent(Int.self, forKey: .level)
@@ -7879,12 +7879,12 @@ nonisolated struct ExtensionMessagingList: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingMediaSize: Codable, Hashable, Sendable {
-    var media: String
-    var width: Int?
-    var height: Int?
+public nonisolated struct ExtensionMessagingMediaSize: Codable, Hashable, Sendable {
+    public var media: String
+    public var width: Int?
+    public var height: Int?
 
-    init(media: String = "", width: Int? = nil, height: Int? = nil) {
+    public init(media: String = "", width: Int? = nil, height: Int? = nil) {
         self.media = media
         self.width = width
         self.height = height
@@ -7896,7 +7896,7 @@ nonisolated struct ExtensionMessagingMediaSize: Codable, Hashable, Sendable {
         case height
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.width = try? c.decodeIfPresent(Int.self, forKey: .width)
@@ -7904,11 +7904,11 @@ nonisolated struct ExtensionMessagingMediaSize: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingField: Codable, Hashable, Sendable {
-    var label: String
-    var value: String
+public nonisolated struct ExtensionMessagingField: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: String
 
-    init(label: String = "", value: String = "") {
+    public init(label: String = "", value: String = "") {
         self.label = label
         self.value = value
     }
@@ -7918,18 +7918,18 @@ nonisolated struct ExtensionMessagingField: Codable, Hashable, Sendable {
         case value
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
     }
 }
 
-nonisolated struct ExtensionMessagingPreview: Codable, Hashable, Sendable {
-    var senderName: String?
-    var text: String
+public nonisolated struct ExtensionMessagingPreview: Codable, Hashable, Sendable {
+    public var senderName: String?
+    public var text: String
 
-    init(senderName: String? = nil, text: String = "") {
+    public init(senderName: String? = nil, text: String = "") {
         self.senderName = senderName
         self.text = text
     }
@@ -7939,7 +7939,7 @@ nonisolated struct ExtensionMessagingPreview: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.senderName = try? c.decodeIfPresent(String.self, forKey: .senderName)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -7948,7 +7948,7 @@ nonisolated struct ExtensionMessagingPreview: Codable, Hashable, Sendable {
 
 /// A piece of a message's body, told apart by kind (docs "5. Conversations and messages"). An app that does not know
 /// a kind draws its text, or skips it.
-nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
+public nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
     case text(ExtensionMessagingTextPart)
     case mention(ExtensionMessagingMentionPart)
     case link(ExtensionMessagingLinkPart)
@@ -7967,13 +7967,13 @@ nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
     /// A kind this app does not know, or a variant it could not read: skipped when drawn.
     case unknown(kind: String)
 
-    static let kinds = ["text", "mention", "link", "emoji", "sticker", "image", "file", "video", "audio", "code", "divider", "card", "forward", "share", "system"]
+    public static let kinds = ["text", "mention", "link", "emoji", "sticker", "image", "file", "video", "audio", "code", "divider", "card", "forward", "share", "system"]
 
     private enum TagKey: String, CodingKey {
         case tag = "kind"
     }
 
-    var kind: String {
+    public var kind: String {
         switch self {
         case .text: "text"
         case .mention: "mention"
@@ -7994,7 +7994,7 @@ nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let t = (try? decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)) ?? ""
         switch t {
         case "text": self = (try? ExtensionMessagingTextPart(from: decoder)).map { .text($0) } ?? .unknown(kind: t)
@@ -8016,7 +8016,7 @@ nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .text(let v): try v.encode(to: encoder)
         case .mention(let v): try v.encode(to: encoder)
@@ -8040,16 +8040,16 @@ nonisolated enum ExtensionMessagingPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingTextPart: Codable, Hashable, Sendable {
-    var text: String
-    var marks: [String]?
-    var url: String?
-    var block: String?
-    var list: ExtensionMessagingList?
+public nonisolated struct ExtensionMessagingTextPart: Codable, Hashable, Sendable {
+    public var text: String
+    public var marks: [String]?
+    public var url: String?
+    public var block: String?
+    public var list: ExtensionMessagingList?
     /// Consecutive text parts with the same block_id are one block; another id starts another.
-    var blockId: String?
+    public var blockId: String?
 
-    init(text: String = "", marks: [String]? = nil, url: String? = nil, block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
+    public init(text: String = "", marks: [String]? = nil, url: String? = nil, block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
         self.text = text
         self.marks = marks
         self.url = url
@@ -8067,7 +8067,7 @@ nonisolated struct ExtensionMessagingTextPart: Codable, Hashable, Sendable {
         case blockId = "block_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.marks = try? c.decodeIfPresent([String].self, forKey: .marks)
@@ -8078,16 +8078,16 @@ nonisolated struct ExtensionMessagingTextPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingMentionPart: Codable, Hashable, Sendable {
-    var text: String
-    var userId: String?
-    var all: Bool?
-    var block: String?
-    var list: ExtensionMessagingList?
+public nonisolated struct ExtensionMessagingMentionPart: Codable, Hashable, Sendable {
+    public var text: String
+    public var userId: String?
+    public var all: Bool?
+    public var block: String?
+    public var list: ExtensionMessagingList?
     /// The block it is in, as a text part's block_id.
-    var blockId: String?
+    public var blockId: String?
 
-    init(text: String = "", userId: String? = nil, all: Bool? = nil, block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
+    public init(text: String = "", userId: String? = nil, all: Bool? = nil, block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
         self.text = text
         self.userId = userId
         self.all = all
@@ -8105,7 +8105,7 @@ nonisolated struct ExtensionMessagingMentionPart: Codable, Hashable, Sendable {
         case blockId = "block_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.userId = try? c.decodeIfPresent(String.self, forKey: .userId)
@@ -8116,15 +8116,15 @@ nonisolated struct ExtensionMessagingMentionPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingLinkPart: Codable, Hashable, Sendable {
-    var text: String
-    var url: String
-    var block: String?
-    var list: ExtensionMessagingList?
+public nonisolated struct ExtensionMessagingLinkPart: Codable, Hashable, Sendable {
+    public var text: String
+    public var url: String
+    public var block: String?
+    public var list: ExtensionMessagingList?
     /// The block it is in, as a text part's block_id.
-    var blockId: String?
+    public var blockId: String?
 
-    init(text: String = "", url: String = "", block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
+    public init(text: String = "", url: String = "", block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
         self.text = text
         self.url = url
         self.block = block
@@ -8140,7 +8140,7 @@ nonisolated struct ExtensionMessagingLinkPart: Codable, Hashable, Sendable {
         case blockId = "block_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
@@ -8150,15 +8150,15 @@ nonisolated struct ExtensionMessagingLinkPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingEmojiPart: Codable, Hashable, Sendable {
-    var key: String
-    var text: String
-    var block: String?
-    var list: ExtensionMessagingList?
+public nonisolated struct ExtensionMessagingEmojiPart: Codable, Hashable, Sendable {
+    public var key: String
+    public var text: String
+    public var block: String?
+    public var list: ExtensionMessagingList?
     /// The block it is in, as a text part's block_id.
-    var blockId: String?
+    public var blockId: String?
 
-    init(key: String = "", text: String = "", block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
+    public init(key: String = "", text: String = "", block: String? = nil, list: ExtensionMessagingList? = nil, blockId: String? = nil) {
         self.key = key
         self.text = text
         self.block = block
@@ -8174,7 +8174,7 @@ nonisolated struct ExtensionMessagingEmojiPart: Codable, Hashable, Sendable {
         case blockId = "block_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = (try? c.decodeIfPresent(String.self, forKey: .key)) ?? ""
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -8184,13 +8184,13 @@ nonisolated struct ExtensionMessagingEmojiPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingStickerPart: Codable, Hashable, Sendable {
-    var media: String
-    var width: Int?
-    var height: Int?
-    var text: String?
+public nonisolated struct ExtensionMessagingStickerPart: Codable, Hashable, Sendable {
+    public var media: String
+    public var width: Int?
+    public var height: Int?
+    public var text: String?
 
-    init(media: String = "", width: Int? = nil, height: Int? = nil, text: String? = nil) {
+    public init(media: String = "", width: Int? = nil, height: Int? = nil, text: String? = nil) {
         self.media = media
         self.width = width
         self.height = height
@@ -8204,7 +8204,7 @@ nonisolated struct ExtensionMessagingStickerPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.width = try? c.decodeIfPresent(Int.self, forKey: .width)
@@ -8213,13 +8213,13 @@ nonisolated struct ExtensionMessagingStickerPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingImagePart: Codable, Hashable, Sendable {
-    var media: String
-    var width: Int?
-    var height: Int?
-    var text: String?
+public nonisolated struct ExtensionMessagingImagePart: Codable, Hashable, Sendable {
+    public var media: String
+    public var width: Int?
+    public var height: Int?
+    public var text: String?
 
-    init(media: String = "", width: Int? = nil, height: Int? = nil, text: String? = nil) {
+    public init(media: String = "", width: Int? = nil, height: Int? = nil, text: String? = nil) {
         self.media = media
         self.width = width
         self.height = height
@@ -8233,7 +8233,7 @@ nonisolated struct ExtensionMessagingImagePart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.width = try? c.decodeIfPresent(Int.self, forKey: .width)
@@ -8242,15 +8242,15 @@ nonisolated struct ExtensionMessagingImagePart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingFilePart: Codable, Hashable, Sendable {
-    var name: String
-    var media: String?
-    var size: Int64?
-    var ext: String?
-    var expired: Bool?
-    var text: String?
+public nonisolated struct ExtensionMessagingFilePart: Codable, Hashable, Sendable {
+    public var name: String
+    public var media: String?
+    public var size: Int64?
+    public var ext: String?
+    public var expired: Bool?
+    public var text: String?
 
-    init(name: String = "", media: String? = nil, size: Int64? = nil, ext: String? = nil, expired: Bool? = nil, text: String? = nil) {
+    public init(name: String = "", media: String? = nil, size: Int64? = nil, ext: String? = nil, expired: Bool? = nil, text: String? = nil) {
         self.name = name
         self.media = media
         self.size = size
@@ -8268,7 +8268,7 @@ nonisolated struct ExtensionMessagingFilePart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.media = try? c.decodeIfPresent(String.self, forKey: .media)
@@ -8279,13 +8279,13 @@ nonisolated struct ExtensionMessagingFilePart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingVideoPart: Codable, Hashable, Sendable {
-    var media: String
-    var durationMs: Int?
-    var poster: ExtensionMessagingMediaSize?
-    var text: String?
+public nonisolated struct ExtensionMessagingVideoPart: Codable, Hashable, Sendable {
+    public var media: String
+    public var durationMs: Int?
+    public var poster: ExtensionMessagingMediaSize?
+    public var text: String?
 
-    init(media: String = "", durationMs: Int? = nil, poster: ExtensionMessagingMediaSize? = nil, text: String? = nil) {
+    public init(media: String = "", durationMs: Int? = nil, poster: ExtensionMessagingMediaSize? = nil, text: String? = nil) {
         self.media = media
         self.durationMs = durationMs
         self.poster = poster
@@ -8299,7 +8299,7 @@ nonisolated struct ExtensionMessagingVideoPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.durationMs = try? c.decodeIfPresent(Int.self, forKey: .durationMs)
@@ -8308,12 +8308,12 @@ nonisolated struct ExtensionMessagingVideoPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingAudioPart: Codable, Hashable, Sendable {
-    var media: String
-    var durationMs: Int?
-    var text: String?
+public nonisolated struct ExtensionMessagingAudioPart: Codable, Hashable, Sendable {
+    public var media: String
+    public var durationMs: Int?
+    public var text: String?
 
-    init(media: String = "", durationMs: Int? = nil, text: String? = nil) {
+    public init(media: String = "", durationMs: Int? = nil, text: String? = nil) {
         self.media = media
         self.durationMs = durationMs
         self.text = text
@@ -8325,7 +8325,7 @@ nonisolated struct ExtensionMessagingAudioPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.durationMs = try? c.decodeIfPresent(Int.self, forKey: .durationMs)
@@ -8333,11 +8333,11 @@ nonisolated struct ExtensionMessagingAudioPart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingCodePart: Codable, Hashable, Sendable {
-    var text: String
-    var language: String?
+public nonisolated struct ExtensionMessagingCodePart: Codable, Hashable, Sendable {
+    public var text: String
+    public var language: String?
 
-    init(text: String = "", language: String? = nil) {
+    public init(text: String = "", language: String? = nil) {
         self.text = text
         self.language = language
     }
@@ -8347,17 +8347,17 @@ nonisolated struct ExtensionMessagingCodePart: Codable, Hashable, Sendable {
         case language
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         self.language = try? c.decodeIfPresent(String.self, forKey: .language)
     }
 }
 
-nonisolated struct ExtensionMessagingDividerPart: Codable, Hashable, Sendable {
-    var text: String?
+public nonisolated struct ExtensionMessagingDividerPart: Codable, Hashable, Sendable {
+    public var text: String?
 
-    init(text: String? = nil) {
+    public init(text: String? = nil) {
         self.text = text
     }
 
@@ -8365,19 +8365,19 @@ nonisolated struct ExtensionMessagingDividerPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
     }
 }
 
 /// A card: the source's card turned into a declarative View by the extension; fallback when it cannot be drawn.
-nonisolated struct ExtensionMessagingCardPart: Codable, Hashable, Sendable {
-    var view: ExtensionView
+public nonisolated struct ExtensionMessagingCardPart: Codable, Hashable, Sendable {
+    public var view: ExtensionView
     /// The fallback: what to show when the view cannot be drawn.
-    var text: String?
+    public var text: String?
 
-    init(view: ExtensionView = ExtensionView(), text: String? = nil) {
+    public init(view: ExtensionView = ExtensionView(), text: String? = nil) {
         self.view = view
         self.text = text
     }
@@ -8387,7 +8387,7 @@ nonisolated struct ExtensionMessagingCardPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.view = (try? c.decodeIfPresent(ExtensionView.self, forKey: .view)) ?? ExtensionView()
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
@@ -8395,14 +8395,14 @@ nonisolated struct ExtensionMessagingCardPart: Codable, Hashable, Sendable {
 }
 
 /// Forwarded messages, merged: the messages (at most 50) or only previews of them.
-nonisolated struct ExtensionMessagingForwardPart: Codable, Hashable, Sendable {
-    var title: String
-    var messages: [ExtensionMessagingMessage]?
-    var previews: [ExtensionMessagingPreview]?
-    var count: Int?
-    var text: String?
+public nonisolated struct ExtensionMessagingForwardPart: Codable, Hashable, Sendable {
+    public var title: String
+    public var messages: [ExtensionMessagingMessage]?
+    public var previews: [ExtensionMessagingPreview]?
+    public var count: Int?
+    public var text: String?
 
-    init(title: String = "", messages: [ExtensionMessagingMessage]? = nil, previews: [ExtensionMessagingPreview]? = nil, count: Int? = nil, text: String? = nil) {
+    public init(title: String = "", messages: [ExtensionMessagingMessage]? = nil, previews: [ExtensionMessagingPreview]? = nil, count: Int? = nil, text: String? = nil) {
         self.title = title
         self.messages = messages
         self.previews = previews
@@ -8418,7 +8418,7 @@ nonisolated struct ExtensionMessagingForwardPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.messages = try? c.decodeIfPresent([ExtensionMessagingMessage].self, forKey: .messages)
@@ -8429,15 +8429,15 @@ nonisolated struct ExtensionMessagingForwardPart: Codable, Hashable, Sendable {
 }
 
 /// Something shared as a card: a group, a person, an event, a meeting, a vote.
-nonisolated struct ExtensionMessagingSharePart: Codable, Hashable, Sendable {
-    var title: String
-    var subtitle: String?
-    var image: ExtensionMessagingMediaSize?
-    var fields: [ExtensionMessagingField]?
-    var url: String?
-    var text: String?
+public nonisolated struct ExtensionMessagingSharePart: Codable, Hashable, Sendable {
+    public var title: String
+    public var subtitle: String?
+    public var image: ExtensionMessagingMediaSize?
+    public var fields: [ExtensionMessagingField]?
+    public var url: String?
+    public var text: String?
 
-    init(title: String = "", subtitle: String? = nil, image: ExtensionMessagingMediaSize? = nil, fields: [ExtensionMessagingField]? = nil, url: String? = nil, text: String? = nil) {
+    public init(title: String = "", subtitle: String? = nil, image: ExtensionMessagingMediaSize? = nil, fields: [ExtensionMessagingField]? = nil, url: String? = nil, text: String? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.image = image
@@ -8455,7 +8455,7 @@ nonisolated struct ExtensionMessagingSharePart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.subtitle = try? c.decodeIfPresent(String.self, forKey: .subtitle)
@@ -8466,10 +8466,10 @@ nonisolated struct ExtensionMessagingSharePart: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingSystemPart: Codable, Hashable, Sendable {
-    var text: String
+public nonisolated struct ExtensionMessagingSystemPart: Codable, Hashable, Sendable {
+    public var text: String
 
-    init(text: String = "") {
+    public init(text: String = "") {
         self.text = text
     }
 
@@ -8477,17 +8477,17 @@ nonisolated struct ExtensionMessagingSystemPart: Codable, Hashable, Sendable {
         case text
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
     }
 }
 
-nonisolated struct ExtensionMessagingMention: Codable, Hashable, Sendable {
-    var userId: String
-    var name: String
+public nonisolated struct ExtensionMessagingMention: Codable, Hashable, Sendable {
+    public var userId: String
+    public var name: String
 
-    init(userId: String = "", name: String = "") {
+    public init(userId: String = "", name: String = "") {
         self.userId = userId
         self.name = name
     }
@@ -8497,7 +8497,7 @@ nonisolated struct ExtensionMessagingMention: Codable, Hashable, Sendable {
         case name
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.userId = (try? c.decodeIfPresent(String.self, forKey: .userId)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -8505,18 +8505,18 @@ nonisolated struct ExtensionMessagingMention: Codable, Hashable, Sendable {
 }
 
 /// POST conversations/{id}/messages (docs "6. Sending").
-nonisolated struct ExtensionMessagingOutgoing: Codable, Hashable, Sendable {
-    var clientId: String
-    var text: String
-    var mentions: [ExtensionMessagingMention]?
-    var replyTo: String?
-    var thread: Bool?
-    var mode: String?
-    var prepared: String?
+public nonisolated struct ExtensionMessagingOutgoing: Codable, Hashable, Sendable {
+    public var clientId: String
+    public var text: String
+    public var mentions: [ExtensionMessagingMention]?
+    public var replyTo: String?
+    public var thread: Bool?
+    public var mode: String?
+    public var prepared: String?
     /// GET me's user_id: not sent (409 account_changed) when the account is someone else's now.
-    var expectUser: String?
+    public var expectUser: String?
 
-    init(clientId: String = "", text: String = "", mentions: [ExtensionMessagingMention]? = nil, replyTo: String? = nil, thread: Bool? = nil, mode: String? = nil, prepared: String? = nil, expectUser: String? = nil) {
+    public init(clientId: String = "", text: String = "", mentions: [ExtensionMessagingMention]? = nil, replyTo: String? = nil, thread: Bool? = nil, mode: String? = nil, prepared: String? = nil, expectUser: String? = nil) {
         self.clientId = clientId
         self.text = text
         self.mentions = mentions
@@ -8538,7 +8538,7 @@ nonisolated struct ExtensionMessagingOutgoing: Codable, Hashable, Sendable {
         case expectUser = "expect_user"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.clientId = (try? c.decodeIfPresent(String.self, forKey: .clientId)) ?? ""
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -8551,10 +8551,10 @@ nonisolated struct ExtensionMessagingOutgoing: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingSendReceipt: Codable, Hashable, Sendable {
-    var messageId: String?
+public nonisolated struct ExtensionMessagingSendReceipt: Codable, Hashable, Sendable {
+    public var messageId: String?
 
-    init(messageId: String? = nil) {
+    public init(messageId: String? = nil) {
         self.messageId = messageId
     }
 
@@ -8562,20 +8562,20 @@ nonisolated struct ExtensionMessagingSendReceipt: Codable, Hashable, Sendable {
         case messageId = "message_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
     }
 }
 
 /// POST conversations/{id}/compose: a mode that prepares before sending.
-nonisolated struct ExtensionMessagingCompose: Codable, Hashable, Sendable {
-    var mode: String
-    var text: String
-    var replyTo: String?
-    var values: [String: String]?
+public nonisolated struct ExtensionMessagingCompose: Codable, Hashable, Sendable {
+    public var mode: String
+    public var text: String
+    public var replyTo: String?
+    public var values: [String: String]?
 
-    init(mode: String = "", text: String = "", replyTo: String? = nil, values: [String: String]? = nil) {
+    public init(mode: String = "", text: String = "", replyTo: String? = nil, values: [String: String]? = nil) {
         self.mode = mode
         self.text = text
         self.replyTo = replyTo
@@ -8589,7 +8589,7 @@ nonisolated struct ExtensionMessagingCompose: Codable, Hashable, Sendable {
         case values
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? ""
         self.text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -8599,12 +8599,12 @@ nonisolated struct ExtensionMessagingCompose: Codable, Hashable, Sendable {
 }
 
 /// Ready to send with token, or a view (declarative UI) the user fills first.
-nonisolated struct ExtensionMessagingComposeAnswer: Codable, Hashable, Sendable {
-    var ready: Bool?
-    var token: String?
-    var view: ExtensionView?
+public nonisolated struct ExtensionMessagingComposeAnswer: Codable, Hashable, Sendable {
+    public var ready: Bool?
+    public var token: String?
+    public var view: ExtensionView?
 
-    init(ready: Bool? = nil, token: String? = nil, view: ExtensionView? = nil) {
+    public init(ready: Bool? = nil, token: String? = nil, view: ExtensionView? = nil) {
         self.ready = ready
         self.token = token
         self.view = view
@@ -8616,7 +8616,7 @@ nonisolated struct ExtensionMessagingComposeAnswer: Codable, Hashable, Sendable 
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.ready = try? c.decodeIfPresent(Bool.self, forKey: .ready)
         self.token = try? c.decodeIfPresent(String.self, forKey: .token)
@@ -8624,11 +8624,11 @@ nonisolated struct ExtensionMessagingComposeAnswer: Codable, Hashable, Sendable 
     }
 }
 
-nonisolated struct ExtensionMessagingReadReport: Codable, Hashable, Sendable {
-    var position: String
-    var messageIds: [String]?
+public nonisolated struct ExtensionMessagingReadReport: Codable, Hashable, Sendable {
+    public var position: String
+    public var messageIds: [String]?
 
-    init(position: String = "", messageIds: [String]? = nil) {
+    public init(position: String = "", messageIds: [String]? = nil) {
         self.position = position
         self.messageIds = messageIds
     }
@@ -8638,19 +8638,19 @@ nonisolated struct ExtensionMessagingReadReport: Codable, Hashable, Sendable {
         case messageIds = "message_ids"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.position = (try? c.decodeIfPresent(String.self, forKey: .position)) ?? ""
         self.messageIds = try? c.decodeIfPresent([String].self, forKey: .messageIds)
     }
 }
 
-nonisolated struct ExtensionMessagingReadState: Codable, Hashable, Sendable {
-    var messageId: String
-    var read: Int
-    var unread: Int
+public nonisolated struct ExtensionMessagingReadState: Codable, Hashable, Sendable {
+    public var messageId: String
+    public var read: Int
+    public var unread: Int
 
-    init(messageId: String = "", read: Int = 0, unread: Int = 0) {
+    public init(messageId: String = "", read: Int = 0, unread: Int = 0) {
         self.messageId = messageId
         self.read = read
         self.unread = unread
@@ -8662,7 +8662,7 @@ nonisolated struct ExtensionMessagingReadState: Codable, Hashable, Sendable {
         case unread
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.messageId = (try? c.decodeIfPresent(String.self, forKey: .messageId)) ?? ""
         self.read = (try? c.decodeIfPresent(Int.self, forKey: .read)) ?? 0
@@ -8670,10 +8670,10 @@ nonisolated struct ExtensionMessagingReadState: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingReadStates: Codable, Hashable, Sendable {
-    var states: [ExtensionMessagingReadState]
+public nonisolated struct ExtensionMessagingReadStates: Codable, Hashable, Sendable {
+    public var states: [ExtensionMessagingReadState]
 
-    init(states: [ExtensionMessagingReadState] = []) {
+    public init(states: [ExtensionMessagingReadState] = []) {
         self.states = states
     }
 
@@ -8681,20 +8681,20 @@ nonisolated struct ExtensionMessagingReadStates: Codable, Hashable, Sendable {
         case states
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.states = (try? c.decodeIfPresent([ExtensionMessagingReadState].self, forKey: .states)) ?? []
     }
 }
 
-nonisolated struct ExtensionMessagingChatPin: Codable, Hashable, Sendable {
-    var id: String
-    var messageId: String
-    var message: ExtensionMessagingMessage?
-    var operatorName: String?
-    var createdAt: String?
+public nonisolated struct ExtensionMessagingChatPin: Codable, Hashable, Sendable {
+    public var id: String
+    public var messageId: String
+    public var message: ExtensionMessagingMessage?
+    public var operatorName: String?
+    public var createdAt: String?
 
-    init(id: String = "", messageId: String = "", message: ExtensionMessagingMessage? = nil, operatorName: String? = nil, createdAt: String? = nil) {
+    public init(id: String = "", messageId: String = "", message: ExtensionMessagingMessage? = nil, operatorName: String? = nil, createdAt: String? = nil) {
         self.id = id
         self.messageId = messageId
         self.message = message
@@ -8710,7 +8710,7 @@ nonisolated struct ExtensionMessagingChatPin: Codable, Hashable, Sendable {
         case createdAt = "created_at"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.messageId = (try? c.decodeIfPresent(String.self, forKey: .messageId)) ?? ""
@@ -8720,13 +8720,13 @@ nonisolated struct ExtensionMessagingChatPin: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingChatPins: Codable, Hashable, Sendable {
-    var account: String?
-    var items: [ExtensionMessagingChatPin]
-    var nextCursor: String?
-    var total: Int?
+public nonisolated struct ExtensionMessagingChatPins: Codable, Hashable, Sendable {
+    public var account: String?
+    public var items: [ExtensionMessagingChatPin]
+    public var nextCursor: String?
+    public var total: Int?
 
-    init(account: String? = nil, items: [ExtensionMessagingChatPin] = [], nextCursor: String? = nil, total: Int? = nil) {
+    public init(account: String? = nil, items: [ExtensionMessagingChatPin] = [], nextCursor: String? = nil, total: Int? = nil) {
         self.account = account
         self.items = items
         self.nextCursor = nextCursor
@@ -8740,7 +8740,7 @@ nonisolated struct ExtensionMessagingChatPins: Codable, Hashable, Sendable {
         case total
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.items = (try? c.decodeIfPresent([ExtensionMessagingChatPin].self, forKey: .items)) ?? []
@@ -8749,12 +8749,12 @@ nonisolated struct ExtensionMessagingChatPins: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingPinTarget: Codable, Hashable, Sendable {
-    var message: ExtensionMessagingMessage
-    var root: ExtensionMessagingMessage?
-    var page: ExtensionMessagingMessagePage
+public nonisolated struct ExtensionMessagingPinTarget: Codable, Hashable, Sendable {
+    public var message: ExtensionMessagingMessage
+    public var root: ExtensionMessagingMessage?
+    public var page: ExtensionMessagingMessagePage
 
-    init(message: ExtensionMessagingMessage = ExtensionMessagingMessage(), root: ExtensionMessagingMessage? = nil, page: ExtensionMessagingMessagePage = ExtensionMessagingMessagePage()) {
+    public init(message: ExtensionMessagingMessage = ExtensionMessagingMessage(), root: ExtensionMessagingMessage? = nil, page: ExtensionMessagingMessagePage = ExtensionMessagingMessagePage()) {
         self.message = message
         self.root = root
         self.page = page
@@ -8766,7 +8766,7 @@ nonisolated struct ExtensionMessagingPinTarget: Codable, Hashable, Sendable {
         case page
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.message = (try? c.decodeIfPresent(ExtensionMessagingMessage.self, forKey: .message)) ?? ExtensionMessagingMessage()
         self.root = try? c.decodeIfPresent(ExtensionMessagingMessage.self, forKey: .root)
@@ -8774,11 +8774,11 @@ nonisolated struct ExtensionMessagingPinTarget: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingPinTargetAnswer: Codable, Hashable, Sendable {
-    var account: String?
-    var target: ExtensionMessagingPinTarget
+public nonisolated struct ExtensionMessagingPinTargetAnswer: Codable, Hashable, Sendable {
+    public var account: String?
+    public var target: ExtensionMessagingPinTarget
 
-    init(account: String? = nil, target: ExtensionMessagingPinTarget = ExtensionMessagingPinTarget()) {
+    public init(account: String? = nil, target: ExtensionMessagingPinTarget = ExtensionMessagingPinTarget()) {
         self.account = account
         self.target = target
     }
@@ -8788,18 +8788,18 @@ nonisolated struct ExtensionMessagingPinTargetAnswer: Codable, Hashable, Sendabl
         case target
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.target = (try? c.decodeIfPresent(ExtensionMessagingPinTarget.self, forKey: .target)) ?? ExtensionMessagingPinTarget()
     }
 }
 
-nonisolated struct ExtensionMessagingPinAnswer: Codable, Hashable, Sendable {
-    var account: String?
-    var pinned: Bool
+public nonisolated struct ExtensionMessagingPinAnswer: Codable, Hashable, Sendable {
+    public var account: String?
+    public var pinned: Bool
 
-    init(account: String? = nil, pinned: Bool = false) {
+    public init(account: String? = nil, pinned: Bool = false) {
         self.account = account
         self.pinned = pinned
     }
@@ -8809,18 +8809,18 @@ nonisolated struct ExtensionMessagingPinAnswer: Codable, Hashable, Sendable {
         case pinned
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.account = try? c.decodeIfPresent(String.self, forKey: .account)
         self.pinned = (try? c.decodeIfPresent(Bool.self, forKey: .pinned)) ?? false
     }
 }
 
-nonisolated struct ExtensionMessagingEmoji: Codable, Hashable, Sendable {
-    var label: String
-    var url: String?
+public nonisolated struct ExtensionMessagingEmoji: Codable, Hashable, Sendable {
+    public var label: String
+    public var url: String?
 
-    init(label: String = "", url: String? = nil) {
+    public init(label: String = "", url: String? = nil) {
         self.label = label
         self.url = url
     }
@@ -8830,18 +8830,18 @@ nonisolated struct ExtensionMessagingEmoji: Codable, Hashable, Sendable {
         case url
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.url = try? c.decodeIfPresent(String.self, forKey: .url)
     }
 }
 
-nonisolated struct ExtensionMessagingEmojiGroup: Codable, Hashable, Sendable {
-    var title: String
-    var keys: [String]
+public nonisolated struct ExtensionMessagingEmojiGroup: Codable, Hashable, Sendable {
+    public var title: String
+    public var keys: [String]
 
-    init(title: String = "", keys: [String] = []) {
+    public init(title: String = "", keys: [String] = []) {
         self.title = title
         self.keys = keys
     }
@@ -8851,18 +8851,18 @@ nonisolated struct ExtensionMessagingEmojiGroup: Codable, Hashable, Sendable {
         case keys
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.keys = (try? c.decodeIfPresent([String].self, forKey: .keys)) ?? []
     }
 }
 
-nonisolated struct ExtensionMessagingEmojis: Codable, Hashable, Sendable {
-    var emojis: [String: ExtensionMessagingEmoji]
-    var groups: [ExtensionMessagingEmojiGroup]?
+public nonisolated struct ExtensionMessagingEmojis: Codable, Hashable, Sendable {
+    public var emojis: [String: ExtensionMessagingEmoji]
+    public var groups: [ExtensionMessagingEmojiGroup]?
 
-    init(emojis: [String: ExtensionMessagingEmoji] = [:], groups: [ExtensionMessagingEmojiGroup]? = nil) {
+    public init(emojis: [String: ExtensionMessagingEmoji] = [:], groups: [ExtensionMessagingEmojiGroup]? = nil) {
         self.emojis = emojis
         self.groups = groups
     }
@@ -8872,17 +8872,17 @@ nonisolated struct ExtensionMessagingEmojis: Codable, Hashable, Sendable {
         case groups
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.emojis = (try? c.decodeIfPresent([String: ExtensionMessagingEmoji].self, forKey: .emojis)) ?? [:]
         self.groups = try? c.decodeIfPresent([ExtensionMessagingEmojiGroup].self, forKey: .groups)
     }
 }
 
-nonisolated struct ExtensionMessagingQuickReactions: Codable, Hashable, Sendable {
-    var keys: [String]
+public nonisolated struct ExtensionMessagingQuickReactions: Codable, Hashable, Sendable {
+    public var keys: [String]
 
-    init(keys: [String] = []) {
+    public init(keys: [String] = []) {
         self.keys = keys
     }
 
@@ -8890,21 +8890,21 @@ nonisolated struct ExtensionMessagingQuickReactions: Codable, Hashable, Sendable
         case keys
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.keys = (try? c.decodeIfPresent([String].self, forKey: .keys)) ?? []
     }
 }
 
-nonisolated struct ExtensionMessagingURLPreview: Codable, Hashable, Sendable {
-    var url: String
-    var title: String?
-    var host: String?
-    var summary: String?
-    var image: ExtensionMessagingMediaSize?
-    var author: ExtensionMessagingPerson?
+public nonisolated struct ExtensionMessagingURLPreview: Codable, Hashable, Sendable {
+    public var url: String
+    public var title: String?
+    public var host: String?
+    public var summary: String?
+    public var image: ExtensionMessagingMediaSize?
+    public var author: ExtensionMessagingPerson?
 
-    init(url: String = "", title: String? = nil, host: String? = nil, summary: String? = nil, image: ExtensionMessagingMediaSize? = nil, author: ExtensionMessagingPerson? = nil) {
+    public init(url: String = "", title: String? = nil, host: String? = nil, summary: String? = nil, image: ExtensionMessagingMediaSize? = nil, author: ExtensionMessagingPerson? = nil) {
         self.url = url
         self.title = title
         self.host = host
@@ -8922,7 +8922,7 @@ nonisolated struct ExtensionMessagingURLPreview: Codable, Hashable, Sendable {
         case author
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
@@ -8933,14 +8933,14 @@ nonisolated struct ExtensionMessagingURLPreview: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingProfileField: Codable, Hashable, Sendable {
-    var label: String
-    var value: String
-    var url: String?
+public nonisolated struct ExtensionMessagingProfileField: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: String
+    public var url: String?
     /// Another person's id: tapping the row opens their profile.
-    var person: String?
+    public var person: String?
 
-    init(label: String = "", value: String = "", url: String? = nil, person: String? = nil) {
+    public init(label: String = "", value: String = "", url: String? = nil, person: String? = nil) {
         self.label = label
         self.value = value
         self.url = url
@@ -8954,7 +8954,7 @@ nonisolated struct ExtensionMessagingProfileField: Codable, Hashable, Sendable {
         case person
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
         self.value = (try? c.decodeIfPresent(String.self, forKey: .value)) ?? ""
@@ -8963,19 +8963,19 @@ nonisolated struct ExtensionMessagingProfileField: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable {
-    var id: String
-    var name: String
-    var avatar: String?
-    var cover: String?
-    var kind: String?
-    var subtitle: String?
-    var status: String?
-    var description: String?
-    var fields: [ExtensionMessagingProfileField]?
-    var canChat: Bool?
+public nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var avatar: String?
+    public var cover: String?
+    public var kind: String?
+    public var subtitle: String?
+    public var status: String?
+    public var description: String?
+    public var fields: [ExtensionMessagingProfileField]?
+    public var canChat: Bool?
 
-    init(id: String = "", name: String = "", avatar: String? = nil, cover: String? = nil, kind: String? = nil, subtitle: String? = nil, status: String? = nil, description: String? = nil, fields: [ExtensionMessagingProfileField]? = nil, canChat: Bool? = nil) {
+    public init(id: String = "", name: String = "", avatar: String? = nil, cover: String? = nil, kind: String? = nil, subtitle: String? = nil, status: String? = nil, description: String? = nil, fields: [ExtensionMessagingProfileField]? = nil, canChat: Bool? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
@@ -9001,7 +9001,7 @@ nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable {
         case canChat = "can_chat"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -9016,10 +9016,10 @@ nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingChatOpened: Codable, Hashable, Sendable {
-    var conversationId: String
+public nonisolated struct ExtensionMessagingChatOpened: Codable, Hashable, Sendable {
+    public var conversationId: String
 
-    init(conversationId: String = "") {
+    public init(conversationId: String = "") {
         self.conversationId = conversationId
     }
 
@@ -9027,43 +9027,43 @@ nonisolated struct ExtensionMessagingChatOpened: Codable, Hashable, Sendable {
         case conversationId = "conversation_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.conversationId = (try? c.decodeIfPresent(String.self, forKey: .conversationId)) ?? ""
     }
 }
 
 /// Values of MessagingDocBlockKind.
-nonisolated enum ExtensionMessagingDocBlockKind {
-    static let heading = "heading"
-    static let paragraph = "paragraph"
-    static let list = "list"
-    static let quote = "quote"
-    static let code = "code"
-    static let callout = "callout"
-    static let table = "table"
-    static let image = "image"
-    static let divider = "divider"
-    static let embed = "embed"
-    static let all = ["heading", "paragraph", "list", "quote", "code", "callout", "table", "image", "divider", "embed"]
+public nonisolated enum ExtensionMessagingDocBlockKind {
+    public static let heading = "heading"
+    public static let paragraph = "paragraph"
+    public static let list = "list"
+    public static let quote = "quote"
+    public static let code = "code"
+    public static let callout = "callout"
+    public static let table = "table"
+    public static let image = "image"
+    public static let divider = "divider"
+    public static let embed = "embed"
+    public static let all = ["heading", "paragraph", "list", "quote", "code", "callout", "table", "image", "divider", "embed"]
 }
 
 /// A block of a document. Inline content is parts (text / mention / link / emoji); list items and table cells are
 /// blocks.
-nonisolated struct ExtensionMessagingDocBlock: Codable, Hashable, Sendable {
-    var id: String?
-    var kind: String
-    var level: Int?
-    var ordered: Bool?
-    var language: String?
-    var parts: [ExtensionMessagingPart]?
-    var items: [ExtensionMessagingDocBlock]?
-    var rows: [[ExtensionMessagingDocBlock]]?
-    var image: ExtensionMessagingMediaSize?
-    var title: String?
-    var url: String?
+public nonisolated struct ExtensionMessagingDocBlock: Codable, Hashable, Sendable {
+    public var id: String?
+    public var kind: String
+    public var level: Int?
+    public var ordered: Bool?
+    public var language: String?
+    public var parts: [ExtensionMessagingPart]?
+    public var items: [ExtensionMessagingDocBlock]?
+    public var rows: [[ExtensionMessagingDocBlock]]?
+    public var image: ExtensionMessagingMediaSize?
+    public var title: String?
+    public var url: String?
 
-    init(id: String? = nil, kind: String = "", level: Int? = nil, ordered: Bool? = nil, language: String? = nil, parts: [ExtensionMessagingPart]? = nil, items: [ExtensionMessagingDocBlock]? = nil, rows: [[ExtensionMessagingDocBlock]]? = nil, image: ExtensionMessagingMediaSize? = nil, title: String? = nil, url: String? = nil) {
+    public init(id: String? = nil, kind: String = "", level: Int? = nil, ordered: Bool? = nil, language: String? = nil, parts: [ExtensionMessagingPart]? = nil, items: [ExtensionMessagingDocBlock]? = nil, rows: [[ExtensionMessagingDocBlock]]? = nil, image: ExtensionMessagingMediaSize? = nil, title: String? = nil, url: String? = nil) {
         self.id = id
         self.kind = kind
         self.level = level
@@ -9091,7 +9091,7 @@ nonisolated struct ExtensionMessagingDocBlock: Codable, Hashable, Sendable {
         case url
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
@@ -9107,11 +9107,11 @@ nonisolated struct ExtensionMessagingDocBlock: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingDocPermission: Codable, Hashable, Sendable {
-    var copy: Bool?
-    var export: Bool?
+public nonisolated struct ExtensionMessagingDocPermission: Codable, Hashable, Sendable {
+    public var copy: Bool?
+    public var export: Bool?
 
-    init(copy: Bool? = nil, export: Bool? = nil) {
+    public init(copy: Bool? = nil, export: Bool? = nil) {
         self.copy = copy
         self.export = export
     }
@@ -9121,21 +9121,21 @@ nonisolated struct ExtensionMessagingDocPermission: Codable, Hashable, Sendable 
         case export
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.copy = try? c.decodeIfPresent(Bool.self, forKey: .copy)
         self.export = try? c.decodeIfPresent(Bool.self, forKey: .export)
     }
 }
 
-nonisolated struct ExtensionMessagingDocument: Codable, Hashable, Sendable {
-    var title: String
-    var url: String
-    var blocks: [ExtensionMessagingDocBlock]
-    var permission: ExtensionMessagingDocPermission?
-    var partial: Bool?
+public nonisolated struct ExtensionMessagingDocument: Codable, Hashable, Sendable {
+    public var title: String
+    public var url: String
+    public var blocks: [ExtensionMessagingDocBlock]
+    public var permission: ExtensionMessagingDocPermission?
+    public var partial: Bool?
 
-    init(title: String = "", url: String = "", blocks: [ExtensionMessagingDocBlock] = [], permission: ExtensionMessagingDocPermission? = nil, partial: Bool? = nil) {
+    public init(title: String = "", url: String = "", blocks: [ExtensionMessagingDocBlock] = [], permission: ExtensionMessagingDocPermission? = nil, partial: Bool? = nil) {
         self.title = title
         self.url = url
         self.blocks = blocks
@@ -9151,7 +9151,7 @@ nonisolated struct ExtensionMessagingDocument: Codable, Hashable, Sendable {
         case partial
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
@@ -9161,14 +9161,14 @@ nonisolated struct ExtensionMessagingDocument: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingCommentReply: Codable, Hashable, Sendable {
-    var id: String
-    var author: ExtensionMessagingPerson
-    var parts: [ExtensionMessagingPart]
-    var createdAt: String?
-    var edited: Bool?
+public nonisolated struct ExtensionMessagingCommentReply: Codable, Hashable, Sendable {
+    public var id: String
+    public var author: ExtensionMessagingPerson
+    public var parts: [ExtensionMessagingPart]
+    public var createdAt: String?
+    public var edited: Bool?
 
-    init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], createdAt: String? = nil, edited: Bool? = nil) {
+    public init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], createdAt: String? = nil, edited: Bool? = nil) {
         self.id = id
         self.author = author
         self.parts = parts
@@ -9184,7 +9184,7 @@ nonisolated struct ExtensionMessagingCommentReply: Codable, Hashable, Sendable {
         case edited
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.author = (try? c.decodeIfPresent(ExtensionMessagingPerson.self, forKey: .author)) ?? ExtensionMessagingPerson()
@@ -9194,14 +9194,14 @@ nonisolated struct ExtensionMessagingCommentReply: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingCommentThread: Codable, Hashable, Sendable {
-    var id: String
-    var quote: String?
-    var blockId: String?
-    var resolved: Bool
-    var replies: [ExtensionMessagingCommentReply]
+public nonisolated struct ExtensionMessagingCommentThread: Codable, Hashable, Sendable {
+    public var id: String
+    public var quote: String?
+    public var blockId: String?
+    public var resolved: Bool
+    public var replies: [ExtensionMessagingCommentReply]
 
-    init(id: String = "", quote: String? = nil, blockId: String? = nil, resolved: Bool = false, replies: [ExtensionMessagingCommentReply] = []) {
+    public init(id: String = "", quote: String? = nil, blockId: String? = nil, resolved: Bool = false, replies: [ExtensionMessagingCommentReply] = []) {
         self.id = id
         self.quote = quote
         self.blockId = blockId
@@ -9217,7 +9217,7 @@ nonisolated struct ExtensionMessagingCommentThread: Codable, Hashable, Sendable 
         case replies
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.quote = try? c.decodeIfPresent(String.self, forKey: .quote)
@@ -9227,10 +9227,10 @@ nonisolated struct ExtensionMessagingCommentThread: Codable, Hashable, Sendable 
     }
 }
 
-nonisolated struct ExtensionMessagingCommentThreads: Codable, Hashable, Sendable {
-    var threads: [ExtensionMessagingCommentThread]
+public nonisolated struct ExtensionMessagingCommentThreads: Codable, Hashable, Sendable {
+    public var threads: [ExtensionMessagingCommentThread]
 
-    init(threads: [ExtensionMessagingCommentThread] = []) {
+    public init(threads: [ExtensionMessagingCommentThread] = []) {
         self.threads = threads
     }
 
@@ -9238,22 +9238,22 @@ nonisolated struct ExtensionMessagingCommentThreads: Codable, Hashable, Sendable
         case threads
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.threads = (try? c.decodeIfPresent([ExtensionMessagingCommentThread].self, forKey: .threads)) ?? []
     }
 }
 
 /// POST documents/comments and …/{thread}/replies.
-nonisolated struct ExtensionMessagingCommentWrite: Codable, Hashable, Sendable {
-    var url: String
-    var parts: [ExtensionMessagingPart]
-    var mentions: [ExtensionMessagingMention]?
-    var quote: String?
-    var blockId: String?
-    var clientId: String
+public nonisolated struct ExtensionMessagingCommentWrite: Codable, Hashable, Sendable {
+    public var url: String
+    public var parts: [ExtensionMessagingPart]
+    public var mentions: [ExtensionMessagingMention]?
+    public var quote: String?
+    public var blockId: String?
+    public var clientId: String
 
-    init(url: String = "", parts: [ExtensionMessagingPart] = [], mentions: [ExtensionMessagingMention]? = nil, quote: String? = nil, blockId: String? = nil, clientId: String = "") {
+    public init(url: String = "", parts: [ExtensionMessagingPart] = [], mentions: [ExtensionMessagingMention]? = nil, quote: String? = nil, blockId: String? = nil, clientId: String = "") {
         self.url = url
         self.parts = parts
         self.mentions = mentions
@@ -9271,7 +9271,7 @@ nonisolated struct ExtensionMessagingCommentWrite: Codable, Hashable, Sendable {
         case clientId = "client_id"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
         self.parts = (try? c.decodeIfPresent([ExtensionMessagingPart].self, forKey: .parts)) ?? []
@@ -9283,11 +9283,11 @@ nonisolated struct ExtensionMessagingCommentWrite: Codable, Hashable, Sendable {
 }
 
 /// POST documents/comments/{thread}/resolve: resolved false opens it again.
-nonisolated struct ExtensionMessagingResolve: Codable, Hashable, Sendable {
-    var url: String
-    var resolved: Bool
+public nonisolated struct ExtensionMessagingResolve: Codable, Hashable, Sendable {
+    public var url: String
+    public var resolved: Bool
 
-    init(url: String = "", resolved: Bool = false) {
+    public init(url: String = "", resolved: Bool = false) {
         self.url = url
         self.resolved = resolved
     }
@@ -9297,19 +9297,19 @@ nonisolated struct ExtensionMessagingResolve: Codable, Hashable, Sendable {
         case resolved
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
         self.resolved = (try? c.decodeIfPresent(Bool.self, forKey: .resolved)) ?? false
     }
 }
 
-nonisolated struct ExtensionMessagingPostImage: Codable, Hashable, Sendable {
-    var media: String
-    var width: Int?
-    var height: Int?
+public nonisolated struct ExtensionMessagingPostImage: Codable, Hashable, Sendable {
+    public var media: String
+    public var width: Int?
+    public var height: Int?
 
-    init(media: String = "", width: Int? = nil, height: Int? = nil) {
+    public init(media: String = "", width: Int? = nil, height: Int? = nil) {
         self.media = media
         self.width = width
         self.height = height
@@ -9321,7 +9321,7 @@ nonisolated struct ExtensionMessagingPostImage: Codable, Hashable, Sendable {
         case height
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? ""
         self.width = try? c.decodeIfPresent(Int.self, forKey: .width)
@@ -9329,17 +9329,17 @@ nonisolated struct ExtensionMessagingPostImage: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingPost: Codable, Hashable, Sendable {
-    var id: String
-    var author: ExtensionMessagingPerson
-    var parts: [ExtensionMessagingPart]
-    var images: [ExtensionMessagingPostImage]?
-    var reactions: [ExtensionMessagingReaction]?
-    var commentCount: Int?
-    var createdAt: String?
-    var categories: [String]?
+public nonisolated struct ExtensionMessagingPost: Codable, Hashable, Sendable {
+    public var id: String
+    public var author: ExtensionMessagingPerson
+    public var parts: [ExtensionMessagingPart]
+    public var images: [ExtensionMessagingPostImage]?
+    public var reactions: [ExtensionMessagingReaction]?
+    public var commentCount: Int?
+    public var createdAt: String?
+    public var categories: [String]?
 
-    init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], images: [ExtensionMessagingPostImage]? = nil, reactions: [ExtensionMessagingReaction]? = nil, commentCount: Int? = nil, createdAt: String? = nil, categories: [String]? = nil) {
+    public init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], images: [ExtensionMessagingPostImage]? = nil, reactions: [ExtensionMessagingReaction]? = nil, commentCount: Int? = nil, createdAt: String? = nil, categories: [String]? = nil) {
         self.id = id
         self.author = author
         self.parts = parts
@@ -9361,7 +9361,7 @@ nonisolated struct ExtensionMessagingPost: Codable, Hashable, Sendable {
         case categories
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.author = (try? c.decodeIfPresent(ExtensionMessagingPerson.self, forKey: .author)) ?? ExtensionMessagingPerson()
@@ -9374,14 +9374,14 @@ nonisolated struct ExtensionMessagingPost: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingPostComment: Codable, Hashable, Sendable {
-    var id: String
-    var author: ExtensionMessagingPerson
-    var parts: [ExtensionMessagingPart]
-    var createdAt: String?
-    var hot: Bool?
+public nonisolated struct ExtensionMessagingPostComment: Codable, Hashable, Sendable {
+    public var id: String
+    public var author: ExtensionMessagingPerson
+    public var parts: [ExtensionMessagingPart]
+    public var createdAt: String?
+    public var hot: Bool?
 
-    init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], createdAt: String? = nil, hot: Bool? = nil) {
+    public init(id: String = "", author: ExtensionMessagingPerson = ExtensionMessagingPerson(), parts: [ExtensionMessagingPart] = [], createdAt: String? = nil, hot: Bool? = nil) {
         self.id = id
         self.author = author
         self.parts = parts
@@ -9397,7 +9397,7 @@ nonisolated struct ExtensionMessagingPostComment: Codable, Hashable, Sendable {
         case hot
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.author = (try? c.decodeIfPresent(ExtensionMessagingPerson.self, forKey: .author)) ?? ExtensionMessagingPerson()
@@ -9407,10 +9407,10 @@ nonisolated struct ExtensionMessagingPostComment: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionMessagingPostComments: Codable, Hashable, Sendable {
-    var comments: [ExtensionMessagingPostComment]
+public nonisolated struct ExtensionMessagingPostComments: Codable, Hashable, Sendable {
+    public var comments: [ExtensionMessagingPostComment]
 
-    init(comments: [ExtensionMessagingPostComment] = []) {
+    public init(comments: [ExtensionMessagingPostComment] = []) {
         self.comments = comments
     }
 
@@ -9418,20 +9418,20 @@ nonisolated struct ExtensionMessagingPostComments: Codable, Hashable, Sendable {
         case comments
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.comments = (try? c.decodeIfPresent([ExtensionMessagingPostComment].self, forKey: .comments)) ?? []
     }
 }
 
 /// The event messaging.changed (and the WebSocket {type: messaging, …} the hub pushes with it).
-nonisolated struct ExtensionMessagingChanged: Codable, Hashable, Sendable {
-    var source: String
-    var conversations: [String]?
-    var account: String?
-    var settingsChanged: Bool?
+public nonisolated struct ExtensionMessagingChanged: Codable, Hashable, Sendable {
+    public var source: String
+    public var conversations: [String]?
+    public var account: String?
+    public var settingsChanged: Bool?
 
-    init(source: String = "", conversations: [String]? = nil, account: String? = nil, settingsChanged: Bool? = nil) {
+    public init(source: String = "", conversations: [String]? = nil, account: String? = nil, settingsChanged: Bool? = nil) {
         self.source = source
         self.conversations = conversations
         self.account = account
@@ -9445,7 +9445,7 @@ nonisolated struct ExtensionMessagingChanged: Codable, Hashable, Sendable {
         case settingsChanged = "settings_changed"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? ""
         self.conversations = try? c.decodeIfPresent([String].self, forKey: .conversations)
@@ -9455,15 +9455,15 @@ nonisolated struct ExtensionMessagingChanged: Codable, Hashable, Sendable {
 }
 
 /// Where an inbox item or a notification opens: a conversation of a source, and where in it.
-nonisolated struct ExtensionMessagingConversationRef: Codable, Hashable, Sendable {
-    var source: String
-    var id: String
-    var account: String?
-    var startPosition: String?
-    var readPosition: String?
-    var mentionPosition: String?
+public nonisolated struct ExtensionMessagingConversationRef: Codable, Hashable, Sendable {
+    public var source: String
+    public var id: String
+    public var account: String?
+    public var startPosition: String?
+    public var readPosition: String?
+    public var mentionPosition: String?
 
-    init(source: String = "", id: String = "", account: String? = nil, startPosition: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
+    public init(source: String = "", id: String = "", account: String? = nil, startPosition: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
         self.source = source
         self.id = id
         self.account = account
@@ -9481,7 +9481,7 @@ nonisolated struct ExtensionMessagingConversationRef: Codable, Hashable, Sendabl
         case mentionPosition = "mention_position"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? ""
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
@@ -9493,12 +9493,12 @@ nonisolated struct ExtensionMessagingConversationRef: Codable, Hashable, Sendabl
 }
 
 /// An error answer. code is one of the codes the apps act on (docs "4. API"); view comes with input_required.
-nonisolated struct ExtensionMessagingError: Codable, Hashable, Sendable {
-    var error: String
-    var code: String?
-    var view: ExtensionView?
+public nonisolated struct ExtensionMessagingError: Codable, Hashable, Sendable {
+    public var error: String
+    public var code: String?
+    public var view: ExtensionView?
 
-    init(error: String = "", code: String? = nil, view: ExtensionView? = nil) {
+    public init(error: String = "", code: String? = nil, view: ExtensionView? = nil) {
         self.error = error
         self.code = code
         self.view = view
@@ -9510,7 +9510,7 @@ nonisolated struct ExtensionMessagingError: Codable, Hashable, Sendable {
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.error = (try? c.decodeIfPresent(String.self, forKey: .error)) ?? ""
         self.code = try? c.decodeIfPresent(String.self, forKey: .code)
@@ -9520,19 +9520,19 @@ nonisolated struct ExtensionMessagingError: Codable, Hashable, Sendable {
 
 /// Bounded JSON scalar, not executable content. Strings at most 4096 code points; finite numbers in the JSON-safe
 /// range.
-typealias ExtensionUIStreamScalar = JSONValue
+public typealias ExtensionUIStreamScalar = JSONValue
 
 /// Interaction value: scalar, scalar array or scalar map only (one container level). No functions, callbacks, binary
 /// data or nested containers. Never send credentials or secret field contents.
-typealias ExtensionUIStreamValue = JSONValue
+public typealias ExtensionUIStreamValue = JSONValue
 
 /// Client opt-in for protocol 1 plus supported native component tags. ui_version alone does not opt in. Declaration
 /// is not runtime support.
-nonisolated struct ExtensionUIStreamCapability: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var components: [String]
+public nonisolated struct ExtensionUIStreamCapability: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var components: [String]
 
-    init(`protocol`: Int = 0, components: [String] = []) {
+    public init(`protocol`: Int = 0, components: [String] = []) {
         self.protocol = `protocol`
         self.components = components
     }
@@ -9542,7 +9542,7 @@ nonisolated struct ExtensionUIStreamCapability: Codable, Hashable, Sendable {
         case components
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.components = try c.decode([String].self, forKey: .components)
@@ -9551,15 +9551,15 @@ nonisolated struct ExtensionUIStreamCapability: Codable, Hashable, Sendable {
 
 /// Full authoritative tree before deltas, including after resume or recovery. Keys required on sections/items; tiles
 /// and global uniqueness need semantic validation.
-nonisolated struct ExtensionUIStreamSnapshot: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var session: String
-    var epoch: String
-    var version: Int64
-    var rootKey: String
-    var view: ExtensionView
+public nonisolated struct ExtensionUIStreamSnapshot: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var session: String
+    public var epoch: String
+    public var version: Int64
+    public var rootKey: String
+    public var view: ExtensionView
 
-    init(`protocol`: Int = 0, session: String = "", epoch: String = "", version: Int64 = 0, rootKey: String = "", view: ExtensionView = ExtensionView()) {
+    public init(`protocol`: Int = 0, session: String = "", epoch: String = "", version: Int64 = 0, rootKey: String = "", view: ExtensionView = ExtensionView()) {
         self.protocol = `protocol`
         self.session = session
         self.epoch = epoch
@@ -9577,7 +9577,7 @@ nonisolated struct ExtensionUIStreamSnapshot: Codable, Hashable, Sendable {
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.session = try c.decode(String.self, forKey: .session)
@@ -9591,15 +9591,15 @@ nonisolated struct ExtensionUIStreamSnapshot: Codable, Hashable, Sendable {
 /// Atomic batch, at most 256 operations. An explicit empty batch keeps the version for a non-event no-op or advances
 /// exactly one revision as an accepted or ambiguous callback fence. Validate against a staged whole tree before
 /// committing. Ordering/equality are reducer checks.
-nonisolated struct ExtensionUIStreamDelta: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var session: String
-    var epoch: String
-    var baseVersion: Int64
-    var version: Int64
-    var operations: [ExtensionUIStreamOperation]
+public nonisolated struct ExtensionUIStreamDelta: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var session: String
+    public var epoch: String
+    public var baseVersion: Int64
+    public var version: Int64
+    public var operations: [ExtensionUIStreamOperation]
 
-    init(`protocol`: Int = 0, session: String = "", epoch: String = "", baseVersion: Int64 = 0, version: Int64 = 0, operations: [ExtensionUIStreamOperation] = []) {
+    public init(`protocol`: Int = 0, session: String = "", epoch: String = "", baseVersion: Int64 = 0, version: Int64 = 0, operations: [ExtensionUIStreamOperation] = []) {
         self.protocol = `protocol`
         self.session = session
         self.epoch = epoch
@@ -9617,7 +9617,7 @@ nonisolated struct ExtensionUIStreamDelta: Codable, Hashable, Sendable {
         case operations
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.session = try c.decode(String.self, forKey: .session)
@@ -9631,19 +9631,19 @@ nonisolated struct ExtensionUIStreamDelta: Codable, Hashable, Sendable {
 /// Authenticated owner interaction for the displayed generation/version. Deduplicate event_id before writes. Validate
 /// action against the saved node/event slot, then resolve its callback server-side; no callback code or secrets in
 /// this payload.
-nonisolated struct ExtensionUIStreamEvent: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var session: String
-    var epoch: String
-    var version: Int64
-    var eventId: String
-    var key: String
+public nonisolated struct ExtensionUIStreamEvent: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var session: String
+    public var epoch: String
+    public var version: Int64
+    public var eventId: String
+    public var key: String
     /// Opaque registered callback Action.id for this node and event slot; never callback code or an authority claim.
-    var action: String
-    var event: String
-    var value: ExtensionUIStreamValue
+    public var action: String
+    public var event: String
+    public var value: ExtensionUIStreamValue
 
-    init(`protocol`: Int = 0, session: String = "", epoch: String = "", version: Int64 = 0, eventId: String = "", key: String = "", action: String = "", event: String = "", value: ExtensionUIStreamValue = .null) {
+    public init(`protocol`: Int = 0, session: String = "", epoch: String = "", version: Int64 = 0, eventId: String = "", key: String = "", action: String = "", event: String = "", value: ExtensionUIStreamValue = .null) {
         self.protocol = `protocol`
         self.session = session
         self.epoch = epoch
@@ -9667,7 +9667,7 @@ nonisolated struct ExtensionUIStreamEvent: Codable, Hashable, Sendable {
         case value
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.session = try c.decode(String.self, forKey: .session)
@@ -9683,7 +9683,7 @@ nonisolated struct ExtensionUIStreamEvent: Codable, Hashable, Sendable {
 
 /// Atomic native tree operation. Unknown operations invalidate the entire batch and require a snapshot, never
 /// skipping. Tiles update by replacing their containing grid/carousel.
-nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
+public nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
     case replace(ExtensionUIStreamReplace)
     case insert(ExtensionUIStreamInsert)
     case remove(ExtensionUIStreamRemove)
@@ -9691,13 +9691,13 @@ nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
     /// A op this app does not know, or a variant it could not read: reject the batch and request a full snapshot.
     case unknown(op: String)
 
-    static let ops = ["replace", "insert", "remove", "move"]
+    public static let ops = ["replace", "insert", "remove", "move"]
 
     private enum TagKey: String, CodingKey {
         case tag = "op"
     }
 
-    var op: String {
+    public var op: String {
         switch self {
         case .replace: "replace"
         case .insert: "insert"
@@ -9707,7 +9707,7 @@ nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let t = (try? decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)) ?? ""
         switch t {
         case "replace": self = (try? ExtensionUIStreamReplace(from: decoder)).map { .replace($0) } ?? .unknown(op: t)
@@ -9718,7 +9718,7 @@ nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .replace(let v): try v.encode(to: encoder)
         case .insert(let v): try v.encode(to: encoder)
@@ -9733,13 +9733,13 @@ nonisolated enum ExtensionUIStreamOperation: Codable, Hashable, Sendable {
 
 /// Replace a complete node/subtree; omitted properties are cleared. Exactly one payload, matching the target kind and
 /// key.
-nonisolated struct ExtensionUIStreamReplace: Codable, Hashable, Sendable {
-    var key: String
-    var view: ExtensionView?
-    var section: ExtensionSection?
-    var item: ExtensionComponent?
+public nonisolated struct ExtensionUIStreamReplace: Codable, Hashable, Sendable {
+    public var key: String
+    public var view: ExtensionView?
+    public var section: ExtensionSection?
+    public var item: ExtensionComponent?
 
-    init(key: String = "", view: ExtensionView? = nil, section: ExtensionSection? = nil, item: ExtensionComponent? = nil) {
+    public init(key: String = "", view: ExtensionView? = nil, section: ExtensionSection? = nil, item: ExtensionComponent? = nil) {
         self.key = key
         self.view = view
         self.section = section
@@ -9753,7 +9753,7 @@ nonisolated struct ExtensionUIStreamReplace: Codable, Hashable, Sendable {
         case item
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try c.decode(String.self, forKey: .key)
         self.view = c.contains(.view) ? try c.decode(ExtensionView.self, forKey: .view) : nil
@@ -9763,13 +9763,13 @@ nonisolated struct ExtensionUIStreamReplace: Codable, Hashable, Sendable {
 }
 
 /// Insert a section under root or item under section. before names a destination sibling; omitted means append.
-nonisolated struct ExtensionUIStreamInsert: Codable, Hashable, Sendable {
-    var parent: String
-    var before: String?
-    var section: ExtensionSection?
-    var item: ExtensionComponent?
+public nonisolated struct ExtensionUIStreamInsert: Codable, Hashable, Sendable {
+    public var parent: String
+    public var before: String?
+    public var section: ExtensionSection?
+    public var item: ExtensionComponent?
 
-    init(parent: String = "", before: String? = nil, section: ExtensionSection? = nil, item: ExtensionComponent? = nil) {
+    public init(parent: String = "", before: String? = nil, section: ExtensionSection? = nil, item: ExtensionComponent? = nil) {
         self.parent = parent
         self.before = before
         self.section = section
@@ -9783,7 +9783,7 @@ nonisolated struct ExtensionUIStreamInsert: Codable, Hashable, Sendable {
         case item
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.parent = try c.decode(String.self, forKey: .parent)
         self.before = c.contains(.before) ? try c.decode(String.self, forKey: .before) : nil
@@ -9793,10 +9793,10 @@ nonisolated struct ExtensionUIStreamInsert: Codable, Hashable, Sendable {
 }
 
 /// Remove a node and its subtree, never the root. Existence/root checks are semantic.
-nonisolated struct ExtensionUIStreamRemove: Codable, Hashable, Sendable {
-    var key: String
+public nonisolated struct ExtensionUIStreamRemove: Codable, Hashable, Sendable {
+    public var key: String
 
-    init(key: String = "") {
+    public init(key: String = "") {
         self.key = key
     }
 
@@ -9804,19 +9804,19 @@ nonisolated struct ExtensionUIStreamRemove: Codable, Hashable, Sendable {
         case key
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try c.decode(String.self, forKey: .key)
     }
 }
 
 /// Move a section/item subtree. No cycles, tile moves or wrong parent kinds. Omitted before appends.
-nonisolated struct ExtensionUIStreamMove: Codable, Hashable, Sendable {
-    var key: String
-    var parent: String
-    var before: String?
+public nonisolated struct ExtensionUIStreamMove: Codable, Hashable, Sendable {
+    public var key: String
+    public var parent: String
+    public var before: String?
 
-    init(key: String = "", parent: String = "", before: String? = nil) {
+    public init(key: String = "", parent: String = "", before: String? = nil) {
         self.key = key
         self.parent = parent
         self.before = before
@@ -9828,7 +9828,7 @@ nonisolated struct ExtensionUIStreamMove: Codable, Hashable, Sendable {
         case before
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try c.decode(String.self, forKey: .key)
         self.parent = try c.decode(String.self, forKey: .parent)
@@ -9838,7 +9838,7 @@ nonisolated struct ExtensionUIStreamMove: Codable, Hashable, Sendable {
 
 /// Owner-bound lifecycle request over the authenticated WebSocket. The transport supplies principal/hub identity;
 /// never trust an owner field from JSON. No endpoint or runtime is enabled by these contracts.
-nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
+public nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
     case open(ExtensionUIStreamOpenRequest)
     case close(ExtensionUIStreamCloseRequest)
     case suspend(ExtensionUIStreamSuspendRequest)
@@ -9848,13 +9848,13 @@ nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
     /// A request this app does not know, or a variant it could not read: reject the entire request.
     case unknown(request: String)
 
-    static let requests = ["open", "close", "suspend", "resume", "event", "snapshot"]
+    public static let requests = ["open", "close", "suspend", "resume", "event", "snapshot"]
 
     private enum TagKey: String, CodingKey {
         case tag = "request"
     }
 
-    var request: String {
+    public var request: String {
         switch self {
         case .open: "open"
         case .close: "close"
@@ -9866,7 +9866,7 @@ nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let t = (try? decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)) ?? ""
         switch t {
         case "open": self = (try? ExtensionUIStreamOpenRequest(from: decoder)).map { .open($0) } ?? .unknown(request: t)
@@ -9879,7 +9879,7 @@ nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .open(let v): try v.encode(to: encoder)
         case .close(let v): try v.encode(to: encoder)
@@ -9896,15 +9896,15 @@ nonisolated enum ExtensionUIStreamRequest: Codable, Hashable, Sendable {
 
 /// Reauthorize the extension/contribution and explicit context.stream capability; allocate an owner-bound session and
 /// send a snapshot before deltas.
-nonisolated struct ExtensionUIStreamOpenRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var `extension`: String
-    var contribution: String
-    var context: ExtensionUIContext
-    var state: String
+public nonisolated struct ExtensionUIStreamOpenRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var `extension`: String
+    public var contribution: String
+    public var context: ExtensionUIContext
+    public var state: String
 
-    init(`protocol`: Int = 0, requestId: String = "", `extension`: String = "", contribution: String = "", context: ExtensionUIContext = ExtensionUIContext(), state: String = "") {
+    public init(`protocol`: Int = 0, requestId: String = "", `extension`: String = "", contribution: String = "", context: ExtensionUIContext = ExtensionUIContext(), state: String = "") {
         self.protocol = `protocol`
         self.requestId = requestId
         self.extension = `extension`
@@ -9922,7 +9922,7 @@ nonisolated struct ExtensionUIStreamOpenRequest: Codable, Hashable, Sendable {
         case state
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -9934,13 +9934,13 @@ nonisolated struct ExtensionUIStreamOpenRequest: Codable, Hashable, Sendable {
 }
 
 /// Idempotent for unknown/already closed owned sessions; unmount and release state, callbacks and effects.
-nonisolated struct ExtensionUIStreamCloseRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var session: String
-    var epoch: String
+public nonisolated struct ExtensionUIStreamCloseRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var session: String
+    public var epoch: String
 
-    init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "") {
+    public init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "") {
         self.protocol = `protocol`
         self.requestId = requestId
         self.session = session
@@ -9954,7 +9954,7 @@ nonisolated struct ExtensionUIStreamCloseRequest: Codable, Hashable, Sendable {
         case epoch
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -9964,13 +9964,13 @@ nonisolated struct ExtensionUIStreamCloseRequest: Codable, Hashable, Sendable {
 }
 
 /// Stop UI intervals/polling and bound pending work. Service work is independent of visibility.
-nonisolated struct ExtensionUIStreamSuspendRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var session: String
-    var epoch: String
+public nonisolated struct ExtensionUIStreamSuspendRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var session: String
+    public var epoch: String
 
-    init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "") {
+    public init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "") {
         self.protocol = `protocol`
         self.requestId = requestId
         self.session = session
@@ -9984,7 +9984,7 @@ nonisolated struct ExtensionUIStreamSuspendRequest: Codable, Hashable, Sendable 
         case epoch
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -9994,14 +9994,14 @@ nonisolated struct ExtensionUIStreamSuspendRequest: Codable, Hashable, Sendable 
 }
 
 /// Reauthorize the owned session, discard stale delta chains and send a fresh snapshot before further deltas.
-nonisolated struct ExtensionUIStreamResumeRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var session: String
-    var epoch: String
-    var version: Int64
+public nonisolated struct ExtensionUIStreamResumeRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var session: String
+    public var epoch: String
+    public var version: Int64
 
-    init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "", version: Int64 = 0) {
+    public init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "", version: Int64 = 0) {
         self.protocol = `protocol`
         self.requestId = requestId
         self.session = session
@@ -10017,7 +10017,7 @@ nonisolated struct ExtensionUIStreamResumeRequest: Codable, Hashable, Sendable {
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -10029,12 +10029,12 @@ nonisolated struct ExtensionUIStreamResumeRequest: Codable, Hashable, Sendable {
 
 /// Authorize and deduplicate the interaction before invoking its registered server-side callback. request_id is
 /// correlation, not write deduplication.
-nonisolated struct ExtensionUIStreamEventRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var interaction: ExtensionUIStreamEvent
+public nonisolated struct ExtensionUIStreamEventRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var interaction: ExtensionUIStreamEvent
 
-    init(`protocol`: Int = 0, requestId: String = "", interaction: ExtensionUIStreamEvent = ExtensionUIStreamEvent()) {
+    public init(`protocol`: Int = 0, requestId: String = "", interaction: ExtensionUIStreamEvent = ExtensionUIStreamEvent()) {
         self.protocol = `protocol`
         self.requestId = requestId
         self.interaction = interaction
@@ -10046,7 +10046,7 @@ nonisolated struct ExtensionUIStreamEventRequest: Codable, Hashable, Sendable {
         case interaction
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -10055,14 +10055,14 @@ nonisolated struct ExtensionUIStreamEventRequest: Codable, Hashable, Sendable {
 }
 
 /// Read-only recovery request: reauthorize and send a complete snapshot, never replay an interaction or write.
-nonisolated struct ExtensionUIStreamSnapshotRequest: Codable, Hashable, Sendable {
-    var `protocol`: Int
-    var requestId: String
-    var session: String
-    var epoch: String
-    var version: Int64
+public nonisolated struct ExtensionUIStreamSnapshotRequest: Codable, Hashable, Sendable {
+    public var `protocol`: Int
+    public var requestId: String
+    public var session: String
+    public var epoch: String
+    public var version: Int64
 
-    init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "", version: Int64 = 0) {
+    public init(`protocol`: Int = 0, requestId: String = "", session: String = "", epoch: String = "", version: Int64 = 0) {
         self.protocol = `protocol`
         self.requestId = requestId
         self.session = session
@@ -10078,7 +10078,7 @@ nonisolated struct ExtensionUIStreamSnapshotRequest: Codable, Hashable, Sendable
         case version
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.protocol = try c.decode(Int.self, forKey: .`protocol`)
         self.requestId = try c.decode(String.self, forKey: .requestId)
@@ -10088,12 +10088,12 @@ nonisolated struct ExtensionUIStreamSnapshotRequest: Codable, Hashable, Sendable
     }
 }
 
-nonisolated struct ExtensionUIStreamClientEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var manager: String?
-    var request: ExtensionUIStreamRequest?
+public nonisolated struct ExtensionUIStreamClientEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var manager: String?
+    public var request: ExtensionUIStreamRequest?
 
-    init(type: String = "", manager: String? = nil, request: ExtensionUIStreamRequest? = nil) {
+    public init(type: String = "", manager: String? = nil, request: ExtensionUIStreamRequest? = nil) {
         self.type = type
         self.manager = manager
         self.request = request
@@ -10105,7 +10105,7 @@ nonisolated struct ExtensionUIStreamClientEnvelope: Codable, Hashable, Sendable 
         case request
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.manager = c.contains(.manager) ? try c.decode(String.self, forKey: .manager) : nil
@@ -10118,14 +10118,14 @@ nonisolated struct ExtensionUIStreamClientEnvelope: Codable, Hashable, Sendable 
 /// receipt.version; never execute HTML, JavaScript or infer authorization from a result. JSX state owns view/items
 /// updates through snapshots/deltas. Manager validates push ownership and credential-free HTTPS (or its own permitted
 /// native URL).
-nonisolated struct ExtensionUIStreamActionResult: Codable, Hashable, Sendable {
-    var toast: String?
-    var openUrl: String?
-    var push: ExtensionUIStreamPush?
-    var pop: Bool?
-    var lines: ExtensionUIStreamFileLines?
+public nonisolated struct ExtensionUIStreamActionResult: Codable, Hashable, Sendable {
+    public var toast: String?
+    public var openUrl: String?
+    public var push: ExtensionUIStreamPush?
+    public var pop: Bool?
+    public var lines: ExtensionUIStreamFileLines?
 
-    init(toast: String? = nil, openUrl: String? = nil, push: ExtensionUIStreamPush? = nil, pop: Bool? = nil, lines: ExtensionUIStreamFileLines? = nil) {
+    public init(toast: String? = nil, openUrl: String? = nil, push: ExtensionUIStreamPush? = nil, pop: Bool? = nil, lines: ExtensionUIStreamFileLines? = nil) {
         self.toast = toast
         self.openUrl = openUrl
         self.push = push
@@ -10141,7 +10141,7 @@ nonisolated struct ExtensionUIStreamActionResult: Codable, Hashable, Sendable {
         case lines
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.toast = c.contains(.toast) ? try c.decode(String.self, forKey: .toast) : nil
         self.openUrl = c.contains(.openUrl) ? try c.decode(String.self, forKey: .openUrl) : nil
@@ -10153,12 +10153,12 @@ nonisolated struct ExtensionUIStreamActionResult: Codable, Hashable, Sendable {
 
 /// Extension-owned native Push only: no assistant page or arbitrary target. State is additionally bounded to 16 KiB
 /// UTF-8. Not authority to invoke an action.
-nonisolated struct ExtensionUIStreamPush: Codable, Hashable, Sendable {
-    var ui: String?
-    var state: String?
-    var title: String?
+public nonisolated struct ExtensionUIStreamPush: Codable, Hashable, Sendable {
+    public var ui: String?
+    public var state: String?
+    public var title: String?
 
-    init(ui: String? = nil, state: String? = nil, title: String? = nil) {
+    public init(ui: String? = nil, state: String? = nil, title: String? = nil) {
         self.ui = ui
         self.state = state
         self.title = title
@@ -10170,7 +10170,7 @@ nonisolated struct ExtensionUIStreamPush: Codable, Hashable, Sendable {
         case title
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.ui = c.contains(.ui) ? try c.decode(String.self, forKey: .ui) : nil
         self.state = c.contains(.state) ? try c.decode(String.self, forKey: .state) : nil
@@ -10180,14 +10180,14 @@ nonisolated struct ExtensionUIStreamPush: Codable, Hashable, Sendable {
 
 /// Native FileLines presentation response correlated to the saved event, not filesystem access or code execution. The
 /// complete result remains limited to 64 KiB UTF-8 JSON.
-nonisolated struct ExtensionUIStreamFileLines: Codable, Hashable, Sendable {
-    var path: String
-    var side: String?
-    var start: Int
-    var lines: [String]
-    var total: Int?
+public nonisolated struct ExtensionUIStreamFileLines: Codable, Hashable, Sendable {
+    public var path: String
+    public var side: String?
+    public var start: Int
+    public var lines: [String]
+    public var total: Int?
 
-    init(path: String = "", side: String? = nil, start: Int = 0, lines: [String] = [], total: Int? = nil) {
+    public init(path: String = "", side: String? = nil, start: Int = 0, lines: [String] = [], total: Int? = nil) {
         self.path = path
         self.side = side
         self.start = start
@@ -10203,7 +10203,7 @@ nonisolated struct ExtensionUIStreamFileLines: Codable, Hashable, Sendable {
         case total
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.path = try c.decode(String.self, forKey: .path)
         self.side = c.contains(.side) ? try c.decode(String.self, forKey: .side) : nil
@@ -10213,15 +10213,15 @@ nonisolated struct ExtensionUIStreamFileLines: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIStreamReceipt: Codable, Hashable, Sendable {
-    var session: String
-    var epoch: String
-    var eventId: String
-    var version: Int64
-    var status: String
-    var result: ExtensionUIStreamActionResult?
+public nonisolated struct ExtensionUIStreamReceipt: Codable, Hashable, Sendable {
+    public var session: String
+    public var epoch: String
+    public var eventId: String
+    public var version: Int64
+    public var status: String
+    public var result: ExtensionUIStreamActionResult?
 
-    init(session: String = "", epoch: String = "", eventId: String = "", version: Int64 = 0, status: String = "", result: ExtensionUIStreamActionResult? = nil) {
+    public init(session: String = "", epoch: String = "", eventId: String = "", version: Int64 = 0, status: String = "", result: ExtensionUIStreamActionResult? = nil) {
         self.session = session
         self.epoch = epoch
         self.eventId = eventId
@@ -10239,7 +10239,7 @@ nonisolated struct ExtensionUIStreamReceipt: Codable, Hashable, Sendable {
         case result
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.session = try c.decode(String.self, forKey: .session)
         self.epoch = try c.decode(String.self, forKey: .epoch)
@@ -10250,11 +10250,11 @@ nonisolated struct ExtensionUIStreamReceipt: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIStreamFailure: Codable, Hashable, Sendable {
-    var code: String
-    var message: String
+public nonisolated struct ExtensionUIStreamFailure: Codable, Hashable, Sendable {
+    public var code: String
+    public var message: String
 
-    init(code: String = "", message: String = "") {
+    public init(code: String = "", message: String = "") {
         self.code = code
         self.message = message
     }
@@ -10264,20 +10264,20 @@ nonisolated struct ExtensionUIStreamFailure: Codable, Hashable, Sendable {
         case message
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.code = try c.decode(String.self, forKey: .code)
         self.message = try c.decode(String.self, forKey: .message)
     }
 }
 
-nonisolated struct ExtensionUIStreamSnapshotEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var snapshot: ExtensionUIStreamSnapshot
+public nonisolated struct ExtensionUIStreamSnapshotEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var snapshot: ExtensionUIStreamSnapshot
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, snapshot: ExtensionUIStreamSnapshot = ExtensionUIStreamSnapshot()) {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, snapshot: ExtensionUIStreamSnapshot = ExtensionUIStreamSnapshot()) {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10291,7 +10291,7 @@ nonisolated struct ExtensionUIStreamSnapshotEnvelope: Codable, Hashable, Sendabl
         case snapshot
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10300,13 +10300,13 @@ nonisolated struct ExtensionUIStreamSnapshotEnvelope: Codable, Hashable, Sendabl
     }
 }
 
-nonisolated struct ExtensionUIStreamDeltaEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var delta: ExtensionUIStreamDelta
+public nonisolated struct ExtensionUIStreamDeltaEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var delta: ExtensionUIStreamDelta
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, delta: ExtensionUIStreamDelta = ExtensionUIStreamDelta()) {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, delta: ExtensionUIStreamDelta = ExtensionUIStreamDelta()) {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10320,7 +10320,7 @@ nonisolated struct ExtensionUIStreamDeltaEnvelope: Codable, Hashable, Sendable {
         case delta
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10329,13 +10329,13 @@ nonisolated struct ExtensionUIStreamDeltaEnvelope: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIStreamReceiptEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var receipt: ExtensionUIStreamReceipt
+public nonisolated struct ExtensionUIStreamReceiptEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var receipt: ExtensionUIStreamReceipt
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, receipt: ExtensionUIStreamReceipt = ExtensionUIStreamReceipt()) {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, receipt: ExtensionUIStreamReceipt = ExtensionUIStreamReceipt()) {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10349,7 +10349,7 @@ nonisolated struct ExtensionUIStreamReceiptEnvelope: Codable, Hashable, Sendable
         case receipt
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10358,13 +10358,13 @@ nonisolated struct ExtensionUIStreamReceiptEnvelope: Codable, Hashable, Sendable
     }
 }
 
-nonisolated struct ExtensionUIStreamErrorEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var error: ExtensionUIStreamFailure
+public nonisolated struct ExtensionUIStreamErrorEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var error: ExtensionUIStreamFailure
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, error: ExtensionUIStreamFailure = ExtensionUIStreamFailure()) {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, error: ExtensionUIStreamFailure = ExtensionUIStreamFailure()) {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10378,7 +10378,7 @@ nonisolated struct ExtensionUIStreamErrorEnvelope: Codable, Hashable, Sendable {
         case error
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10387,13 +10387,13 @@ nonisolated struct ExtensionUIStreamErrorEnvelope: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIStreamClosedEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var session: String
+public nonisolated struct ExtensionUIStreamClosedEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var session: String
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, session: String = "") {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, session: String = "") {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10407,7 +10407,7 @@ nonisolated struct ExtensionUIStreamClosedEnvelope: Codable, Hashable, Sendable 
         case session
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10416,7 +10416,7 @@ nonisolated struct ExtensionUIStreamClosedEnvelope: Codable, Hashable, Sendable 
     }
 }
 
-nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
+public nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
     case snapshot(ExtensionUIStreamSnapshotEnvelope)
     case delta(ExtensionUIStreamDeltaEnvelope)
     case receipt(ExtensionUIStreamReceiptEnvelope)
@@ -10426,13 +10426,13 @@ nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
     /// A kind this app does not know, or a variant it could not read: reject the entire request.
     case unknown(kind: String)
 
-    static let kinds = ["snapshot", "delta", "receipt", "error", "closed", "suspended"]
+    public static let kinds = ["snapshot", "delta", "receipt", "error", "closed", "suspended"]
 
     private enum TagKey: String, CodingKey {
         case tag = "kind"
     }
 
-    var kind: String {
+    public var kind: String {
         switch self {
         case .snapshot: "snapshot"
         case .delta: "delta"
@@ -10444,7 +10444,7 @@ nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let t = (try? decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)) ?? ""
         switch t {
         case "snapshot": self = (try? ExtensionUIStreamSnapshotEnvelope(from: decoder)).map { .snapshot($0) } ?? .unknown(kind: t)
@@ -10457,7 +10457,7 @@ nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .snapshot(let v): try v.encode(to: encoder)
         case .delta(let v): try v.encode(to: encoder)
@@ -10472,13 +10472,13 @@ nonisolated enum ExtensionUIStreamServerEnvelope: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated struct ExtensionUIStreamSuspendedEnvelope: Codable, Hashable, Sendable {
-    var type: String
-    var requestId: String?
-    var manager: String?
-    var session: String
+public nonisolated struct ExtensionUIStreamSuspendedEnvelope: Codable, Hashable, Sendable {
+    public var type: String
+    public var requestId: String?
+    public var manager: String?
+    public var session: String
 
-    init(type: String = "", requestId: String? = nil, manager: String? = nil, session: String = "") {
+    public init(type: String = "", requestId: String? = nil, manager: String? = nil, session: String = "") {
         self.type = type
         self.requestId = requestId
         self.manager = manager
@@ -10492,7 +10492,7 @@ nonisolated struct ExtensionUIStreamSuspendedEnvelope: Codable, Hashable, Sendab
         case session
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decode(String.self, forKey: .type)
         self.requestId = c.contains(.requestId) ? try c.decode(String.self, forKey: .requestId) : nil
@@ -10503,13 +10503,13 @@ nonisolated struct ExtensionUIStreamSuspendedEnvelope: Codable, Hashable, Sendab
 
 /// Source-process native render revision, independent of manager-owned wire revisions. Validate original JSON before
 /// fitting; never trust source recipients or owners.
-nonisolated struct ExtensionUIPageSnapshot: Codable, Hashable, Sendable {
-    var generation: String
-    var version: Int64
-    var rootKey: String
-    var view: ExtensionView
+public nonisolated struct ExtensionUIPageSnapshot: Codable, Hashable, Sendable {
+    public var generation: String
+    public var version: Int64
+    public var rootKey: String
+    public var view: ExtensionView
 
-    init(generation: String = "", version: Int64 = 0, rootKey: String = "", view: ExtensionView = ExtensionView()) {
+    public init(generation: String = "", version: Int64 = 0, rootKey: String = "", view: ExtensionView = ExtensionView()) {
         self.generation = generation
         self.version = version
         self.rootKey = rootKey
@@ -10523,7 +10523,7 @@ nonisolated struct ExtensionUIPageSnapshot: Codable, Hashable, Sendable {
         case view
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.generation = try c.decode(String.self, forKey: .generation)
         self.version = try c.decode(Int64.self, forKey: .version)
@@ -10532,6 +10532,6 @@ nonisolated struct ExtensionUIPageSnapshot: Codable, Hashable, Sendable {
     }
 }
 
-nonisolated enum ExtensionWireSchemas {
-    static let json = ###"{"stream.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"stream.schema.json","title":"Extension native UI stream protocol","description":"Native UI stream protocol 1 (#5956). Server-only JSX execution, manager-owned sessions and native snapshots/deltas over the existing authenticated app WebSocket. Engine activation remains subject to independent sandbox gates. Empty deltas may retain a version for unchanged non-event work or advance exactly one to consume every accepted/ambiguous callback, including no-UI-change writes.","$defs":{"UIStreamItem":{"$ref":"view.schema.json#/$defs/Component","oneOf":[{"$ref":"view.schema.json#/$defs/TextComponent","properties":{"type":{},"key":{},"text":{},"style":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/MetricComponent","properties":{"type":{},"key":{},"label":{},"value":{},"detail":{},"tone":{},"icon":{},"icon_color":{},"spark":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ProgressComponent","properties":{"type":{},"key":{},"label":{},"ratio":{},"detail":{},"tone":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/RowComponent","properties":{"type":{},"key":{},"title":{},"subtitle":{},"value":{},"badge":{},"action":{},"icon":{},"avatar":{},"thumbnail":{},"icon_color":{},"control":{},"actions":{},"spark":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ButtonComponent","properties":{"type":{},"key":{},"title":{},"action":{},"role":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/LinkComponent","properties":{"type":{},"key":{},"title":{},"url":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/FieldComponent","properties":{"type":{},"key":{},"name":{},"label":{},"kind":{},"value":{},"choices":{},"placeholder":{},"earliest":{},"latest":{},"detail":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/DividerComponent","properties":{"type":{},"key":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ChartComponent","properties":{"type":{},"key":{},"kind":{},"series":{},"title":{},"unit":{},"stacked":{},"detail":{},"center":{},"rising":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/StatGridComponent","properties":{"type":{},"key":{},"stats":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/SegmentedComponent","properties":{"type":{},"key":{},"name":{},"choices":{},"value":{},"action":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/MarkdownComponent","properties":{"type":{},"key":{},"text":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/TableComponent","properties":{"type":{},"key":{},"columns":{},"rows":{},"caption":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/EmptyComponent","properties":{"type":{},"key":{},"title":{},"detail":{},"icon":{},"button":{},"icon_color":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/LoadingComponent","properties":{"type":{},"key":{},"title":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/HeaderComponent","properties":{"type":{},"key":{},"title":{},"subtitle":{},"badges":{},"facts":{},"avatar":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/BreadcrumbComponent","properties":{"type":{},"key":{},"crumbs":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/FileTreeComponent","properties":{"type":{},"key":{},"entries":{},"selected":{},"action":{},"expand":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CodeComponent","properties":{"type":{},"key":{},"path":{},"language":{},"text":{},"start_line":{},"highlight":{},"truncated":{},"load":{},"line_url":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/DiffComponent","properties":{"type":{},"key":{},"path":{},"old_path":{},"status":{},"language":{},"additions":{},"deletions":{},"binary":{},"collapsed":{},"hunks":{},"threads":{},"load":{},"expand":{},"comment":{},"context":{},"viewed":{},"mark_viewed":{},"revision":{},"generated":{},"similarity":{},"draft":{},"suggestions":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CommentThreadComponent","properties":{"type":{},"key":{},"title":{},"comments":{},"resolved":{},"reply":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ComposerComponent","properties":{"type":{},"key":{},"name":{},"placeholder":{},"value":{},"buttons":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ImageComponent","properties":{"type":{},"key":{},"src":{},"alt":{},"caption":{},"aspect":{},"fit":{},"no_zoom":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/GridComponent","properties":{"type":{},"key":{},"tiles":{},"max_columns":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CarouselComponent","properties":{"type":{},"key":{},"title":{},"tiles":{},"width":{}},"additionalProperties":false}],"x-discriminator":"type","properties":{"key":{"$ref":"#/$defs/UIStreamKey"}},"required":["key"]},"UIStreamSection":{"$ref":"view.schema.json#/$defs/Section","properties":{"key":{"$ref":"#/$defs/UIStreamKey"},"title":{},"footer":{},"items":{"type":"array","maxItems":300,"items":{"$ref":"#/$defs/UIStreamItem"}},"more":{},"pane":{}},"required":["key"],"additionalProperties":false},"UIStreamView":{"$ref":"view.schema.json#/$defs/View","properties":{"title":{},"sections":{"type":"array","maxItems":300,"items":{"$ref":"#/$defs/UIStreamSection"}},"state":{"type":"string","maxLength":16384},"refresh_after":{},"search":{},"filter":{},"tabs":{},"layout":{},"review":{},"fallback":{},"pages":{"type":"object","maxProperties":0}},"additionalProperties":false},"UIStreamKey":{"type":"string","minLength":1,"maxLength":128,"description":"Opaque stable node key; one namespace for root, sections, components and tiles. Uniqueness and topology are reducer checks."},"UIStreamID":{"type":"string","minLength":1,"maxLength":128,"description":"Opaque session, generation, request or event identifier. Never an authority claim or a credential."},"UIStreamVersion":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"Positive JSON-safe integer. Monotonic within an epoch; rotate the epoch before exhaustion. Ordering is a reducer check."},"UIStreamScalar":{"oneOf":[{"type":"null"},{"type":"boolean"},{"type":"number","minimum":-9007199254740991,"maximum":9007199254740991},{"type":"string","maxLength":4096}],"x-untagged":true,"x-json-value":true,"description":"Bounded JSON scalar, not executable content. Strings at most 4096 code points; finite numbers in the JSON-safe range."},"UIStreamValue":{"oneOf":[{"$ref":"#/$defs/UIStreamScalar"},{"type":"array","items":{"$ref":"#/$defs/UIStreamScalar"},"maxItems":64},{"type":"object","additionalProperties":{"$ref":"#/$defs/UIStreamScalar"},"propertyNames":{"type":"string","minLength":1,"maxLength":128},"maxProperties":64}],"x-untagged":true,"x-json-value":true,"description":"Interaction value: scalar, scalar array or scalar map only (one container level). No functions, callbacks, binary data or nested containers. Never send credentials or secret field contents."},"UIStreamCapability":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"components":{"type":"array","items":{"type":"string","minLength":1,"maxLength":64},"maxItems":64,"uniqueItems":true}},"required":["protocol","components"],"additionalProperties":false,"x-preserve-required":true,"description":"Client opt-in for protocol 1 plus supported native component tags. ui_version alone does not opt in. Declaration is not runtime support."},"UIStreamSnapshot":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"root_key":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"}},"required":["protocol","session","epoch","version","root_key","view"],"additionalProperties":false,"x-preserve-required":true,"description":"Full authoritative tree before deltas, including after resume or recovery. Keys required on sections/items; tiles and global uniqueness need semantic validation."},"UIStreamDelta":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"base_version":{"$ref":"#/$defs/UIStreamVersion"},"version":{"$ref":"#/$defs/UIStreamVersion"},"operations":{"type":"array","items":{"$ref":"#/$defs/UIStreamOperation"},"maxItems":256}},"required":["protocol","session","epoch","base_version","version","operations"],"additionalProperties":false,"x-preserve-required":true,"description":"Atomic batch, at most 256 operations. An explicit empty batch keeps the version for a non-event no-op or advances exactly one revision as an accepted or ambiguous callback fence. Validate against a staged whole tree before committing. Ordering/equality are reducer checks."},"UIStreamEvent":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"event_id":{"$ref":"#/$defs/UIStreamID"},"key":{"$ref":"#/$defs/UIStreamKey"},"action":{"$ref":"#/$defs/UIStreamID","description":"Opaque registered callback Action.id for this node and event slot; never callback code or an authority claim."},"event":{"type":"string","enum":["press","change","submit"]},"value":{"$ref":"#/$defs/UIStreamValue"}},"required":["protocol","session","epoch","version","event_id","key","action","event","value"],"additionalProperties":false,"x-preserve-required":true,"description":"Authenticated owner interaction for the displayed generation/version. Deduplicate event_id before writes. Validate action against the saved node/event slot, then resolve its callback server-side; no callback code or secrets in this payload."},"UIStreamOperation":{"oneOf":[{"$ref":"#/$defs/UIStreamReplace"},{"$ref":"#/$defs/UIStreamInsert"},{"$ref":"#/$defs/UIStreamRemove"},{"$ref":"#/$defs/UIStreamMove"}],"x-discriminator":"op","x-preserve-required":true,"x-unknown-policy":"recover","description":"Atomic native tree operation. Unknown operations invalidate the entire batch and require a snapshot, never skipping. Tiles update by replacing their containing grid/carousel."},"UIStreamReplace":{"type":"object","properties":{"op":{"const":"replace"},"key":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"},"section":{"$ref":"#/$defs/UIStreamSection"},"item":{"$ref":"#/$defs/UIStreamItem"}},"required":["op","key"],"additionalProperties":false,"description":"Replace a complete node/subtree; omitted properties are cleared. Exactly one payload, matching the target kind and key.","oneOf":[{"required":["view"]},{"required":["section"]},{"required":["item"]}]},"UIStreamInsert":{"type":"object","properties":{"op":{"const":"insert"},"parent":{"$ref":"#/$defs/UIStreamKey"},"before":{"$ref":"#/$defs/UIStreamKey"},"section":{"$ref":"#/$defs/UIStreamSection"},"item":{"$ref":"#/$defs/UIStreamItem"}},"required":["op","parent"],"additionalProperties":false,"description":"Insert a section under root or item under section. before names a destination sibling; omitted means append.","oneOf":[{"required":["section"]},{"required":["item"]}]},"UIStreamRemove":{"type":"object","properties":{"op":{"const":"remove"},"key":{"$ref":"#/$defs/UIStreamKey"}},"required":["op","key"],"additionalProperties":false,"description":"Remove a node and its subtree, never the root. Existence/root checks are semantic."},"UIStreamMove":{"type":"object","properties":{"op":{"const":"move"},"key":{"$ref":"#/$defs/UIStreamKey"},"parent":{"$ref":"#/$defs/UIStreamKey"},"before":{"$ref":"#/$defs/UIStreamKey"}},"required":["op","key","parent"],"additionalProperties":false,"description":"Move a section/item subtree. No cycles, tile moves or wrong parent kinds. Omitted before appends."},"UIStreamRequest":{"oneOf":[{"$ref":"#/$defs/UIStreamOpenRequest"},{"$ref":"#/$defs/UIStreamCloseRequest"},{"$ref":"#/$defs/UIStreamSuspendRequest"},{"$ref":"#/$defs/UIStreamResumeRequest"},{"$ref":"#/$defs/UIStreamEventRequest"},{"$ref":"#/$defs/UIStreamSnapshotRequest"}],"x-discriminator":"request","x-preserve-required":true,"x-unknown-policy":"reject","description":"Owner-bound lifecycle request over the authenticated WebSocket. The transport supplies principal/hub identity; never trust an owner field from JSON. No endpoint or runtime is enabled by these contracts."},"UIStreamOpenRequest":{"type":"object","properties":{"request":{"const":"open"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"extension":{"$ref":"#/$defs/UIStreamID"},"contribution":{"$ref":"#/$defs/UIStreamID"},"context":{"$ref":"protocol.schema.json#/$defs/UIContext"},"state":{"type":"string","maxLength":16384}},"required":["request","protocol","request_id","extension","contribution","context","state"],"additionalProperties":false,"description":"Reauthorize the extension/contribution and explicit context.stream capability; allocate an owner-bound session and send a snapshot before deltas."},"UIStreamCloseRequest":{"type":"object","properties":{"request":{"const":"close"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"}},"required":["request","protocol","request_id","session","epoch"],"additionalProperties":false,"description":"Idempotent for unknown/already closed owned sessions; unmount and release state, callbacks and effects."},"UIStreamSuspendRequest":{"type":"object","properties":{"request":{"const":"suspend"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"}},"required":["request","protocol","request_id","session","epoch"],"additionalProperties":false,"description":"Stop UI intervals/polling and bound pending work. Service work is independent of visibility."},"UIStreamResumeRequest":{"type":"object","properties":{"request":{"const":"resume"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"}},"required":["request","protocol","request_id","session","epoch","version"],"additionalProperties":false,"description":"Reauthorize the owned session, discard stale delta chains and send a fresh snapshot before further deltas."},"UIStreamEventRequest":{"type":"object","properties":{"request":{"const":"event"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"interaction":{"$ref":"#/$defs/UIStreamEvent"}},"required":["request","protocol","request_id","interaction"],"additionalProperties":false,"description":"Authorize and deduplicate the interaction before invoking its registered server-side callback. request_id is correlation, not write deduplication."},"UIStreamSnapshotRequest":{"type":"object","properties":{"request":{"const":"snapshot"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"}},"required":["request","protocol","request_id","session","epoch","version"],"additionalProperties":false,"description":"Read-only recovery request: reauthorize and send a complete snapshot, never replay an interaction or write."},"UIStreamClientEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"manager":{"type":"string","minLength":1,"maxLength":128},"request":{"$ref":"#/$defs/UIStreamRequest"}},"required":["type"],"oneOf":[{"required":["request"]}]},"UIStreamActionResult":{"x-preserve-required":true,"allOf":[{"$ref":"view.schema.json#/$defs/ActionResult"}],"type":"object","additionalProperties":false,"properties":{"toast":{"type":"string","maxLength":2000},"open_url":{"type":"string","maxLength":4096},"push":{"$ref":"#/$defs/UIStreamPush"},"pop":{"type":"boolean"},"lines":{"$ref":"#/$defs/UIStreamFileLines"}},"description":"Bounded presentation-only subset of native ActionResult, at most 64 KiB UTF-8 JSON. Carried in the correlated event receipt and cached on replay. Clients apply it once per session/epoch/event_id, only after reaching receipt.version; never execute HTML, JavaScript or infer authorization from a result. JSX state owns view/items updates through snapshots/deltas. Manager validates push ownership and credential-free HTTPS (or its own permitted native URL)."},"UIStreamPush":{"x-preserve-required":true,"allOf":[{"$ref":"view.schema.json#/$defs/Push"}],"type":"object","additionalProperties":false,"properties":{"ui":{"type":"string","maxLength":64},"state":{"type":"string","maxLength":16384},"title":{"type":"string","maxLength":2000}},"description":"Extension-owned native Push only: no assistant page or arbitrary target. State is additionally bounded to 16 KiB UTF-8. Not authority to invoke an action."},"UIStreamFileLines":{"allOf":[{"$ref":"view.schema.json#/$defs/FileLines"}],"type":"object","additionalProperties":false,"properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"side":{"$ref":"view.schema.json#/$defs/DiffSide"},"start":{"type":"integer","minimum":1,"maximum":9007199254740991},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}},"total":{"type":"integer","minimum":0,"maximum":9007199254740991}},"required":["path","start","lines"],"x-preserve-required":true,"description":"Native FileLines presentation response correlated to the saved event, not filesystem access or code execution. The complete result remains limited to 64 KiB UTF-8 JSON."},"UIStreamReceipt":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"session":{"type":"string","minLength":1,"maxLength":128},"epoch":{"type":"string","minLength":1,"maxLength":128},"event_id":{"type":"string","minLength":1,"maxLength":128},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"status":{"type":"string","enum":["accepted","ambiguous","rejected"]},"result":{"$ref":"#/$defs/UIStreamActionResult"}},"required":["session","epoch","event_id","version","status"]},"UIStreamFailure":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"code":{"type":"string","minLength":1,"maxLength":128},"message":{"type":"string","maxLength":4096}},"required":["code","message"]},"UIStreamSnapshotEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"snapshot"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"snapshot":{"$ref":"#/$defs/UIStreamSnapshot"}},"required":["type","kind","snapshot"]},"UIStreamDeltaEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"delta"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"delta":{"$ref":"#/$defs/UIStreamDelta"}},"required":["type","kind","delta"]},"UIStreamReceiptEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"receipt"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"receipt":{"$ref":"#/$defs/UIStreamReceipt"}},"required":["type","kind","receipt"]},"UIStreamErrorEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"error"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"error":{"$ref":"#/$defs/UIStreamFailure"}},"required":["type","kind","error"]},"UIStreamClosedEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"closed"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"session":{"type":"string","minLength":1,"maxLength":128}},"required":["type","kind","session"]},"UIStreamServerEnvelope":{"oneOf":[{"$ref":"#/$defs/UIStreamSnapshotEnvelope"},{"$ref":"#/$defs/UIStreamDeltaEnvelope"},{"$ref":"#/$defs/UIStreamReceiptEnvelope"},{"$ref":"#/$defs/UIStreamErrorEnvelope"},{"$ref":"#/$defs/UIStreamClosedEnvelope"},{"$ref":"#/$defs/UIStreamSuspendedEnvelope"}],"x-discriminator":"kind","x-preserve-required":true,"x-unknown-policy":"reject"},"UIStreamSuspendedEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"suspended"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"session":{"type":"string","minLength":1,"maxLength":128}},"required":["type","kind","session"]},"UIPageSnapshot":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"generation":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"rootKey":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"}},"required":["generation","version","rootKey","view"],"description":"Source-process native render revision, independent of manager-owned wire revisions. Validate original JSON before fitting; never trust source recipients or owners."}}},"view.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"view.schema.json","title":"Extension views","description":"What an extension draws (ui.render, ui.action): a View of sections of components, drawn by every app with its own design system. Also the assistant's persona-card, which joins the components in #1850.","$defs":{"Tone":{"description":"A role color the app picks, never one of the extension's own. An unknown tone draws as neutral.","type":"string","enum":["neutral","positive","caution","danger"]},"TextStyle":{"description":"title and headline (UI version 6) are a section's big title and a small heading; an older app draws them as body.","type":"string","enum":["body","secondary","caption","code","title","headline"]},"FieldKind":{"description":"date, time, datetime, multichoice and multiline are UI version 6. Values stay strings: date YYYY-MM-DD, time HH:MM (24 hours), datetime YYYY-MM-DDTHH:MM local to context.tz, multichoice a JSON array of the chosen values, multiline the text with \\n.","type":"string","enum":["text","secret","number","toggle","choice","date","time","datetime","multichoice","multiline"]},"ChartKind":{"description":"area, candlestick, donut and pie are UI version 6: an older app gets a line (an area, a candlestick's closes) or bars (a donut, a pie).","type":"string","enum":["bar","line","area","candlestick","donut","pie"]},"CandleRising":{"description":"A candlestick's rising candle: green (the default) or red, as the market writes it; the falling one is the other.","type":"string","enum":["green","red"]},"Color":{"description":"A named color (UI version 6): each app has its own of each, right in light and dark and in every style. Not a hex; an unknown one draws as the app's quiet ink. Only on badges, icons, tiles, chart series and sparks, never on text; never with a tone on the same object.","type":"string","enum":["red","orange","amber","yellow","green","teal","blue","indigo","purple","pink","gray"]},"ButtonRole":{"type":"string","enum":["normal","destructive"]},"Placement":{"description":"A slot in the apps an extension draws at (docs \"UI slots\"). extension_page is plugin_page's new name (UI version 3): the hub takes both and answers the new API with extension_page, the old one with plugin_page.","type":"string","enum":["plugin_page","launcher_section","nav_page","overview_card","machine_section","inbox_item","extension_page","widget","capsule_card"]},"Size":{"description":"How much room a view has: compact (a card), full (a page, a section), or for a widget the family it is drawn for (WidgetFamily).","type":"string","enum":["compact","full","small","medium","large","accessory_circular","accessory_rectangular","accessory_inline"]},"WidgetFamily":{"description":"A widget's size outside the app (docs \"System placements\"): a home screen widget's small / medium / large, a Lock Screen or watch face complication's accessory_*.","type":"string","enum":["small","medium","large","accessory_circular","accessory_rectangular","accessory_inline"]},"Platform":{"type":"string","enum":["ios","mac","android","web"]},"NavIcon":{"description":"The fixed icon set: a nav_page's icon, a row's, an empty state's (UI version 3 for the last two and the icons after money; 4 for those after settings; 6 for those after file, and a metric's, a tile's, a row action's). Each app draws its own icon for the meaning; an unknown one draws as the default (extension; plugin is its old name).","type":"string","enum":["plugin","chart","gauge","list","bell","doc","calendar","money","extension","person","chat","mail","link","folder","star","check","warning","clock","tag","search","settings","branch","commit","code","pull_request","merge","file","home","sofa","light","power","fan","thermometer","droplet","lock","unlock","door","window","camera","video","play","pause","stop","speaker","music","tv","plug","battery","bolt","sun","moon","cloud","rain","snow","wind","leaf","car","location","robot","wifi","shield","trend_up","trend_down","wallet","bank","heart","plus","minus","trash","edit","refresh","share","info"]},"View":{"type":"object","properties":{"title":{"type":"string","maxLength":2000},"sections":{"type":"array","items":{"$ref":"#/$defs/Section"}},"state":{"type":"string","description":"The extension's own, sent back with the next render or action; at most 16 KB."},"refresh_after":{"type":"integer","minimum":0,"maximum":86400,"x-since":2,"description":"Draw again after this many seconds while on screen (30 at least; 0 never)."},"search":{"$ref":"#/$defs/Search","x-since":3},"filter":{"$ref":"#/$defs/Filter","x-since":3},"tabs":{"$ref":"#/$defs/Tabs","x-since":4},"layout":{"$ref":"#/$defs/Layout","x-since":4},"review":{"$ref":"#/$defs/Review","x-since":5},"fallback":{"type":"string","minLength":1,"maxLength":2000,"description":"Plain text for an assistant card: required by CheckAssistantView; not required for extension views."},"pages":{"type":"object","additionalProperties":{"$ref":"#/$defs/View"},"description":"Assistant card details keyed by page name; at most 8. A detail page cannot contain pages itself. Push.page refers to this root map."}},"required":["sections"]},"Section":{"type":"object","properties":{"key":{"type":"string","minLength":1,"maxLength":128,"x-since":7,"description":"Stable section identity in stream protocol 1 (UI version 7); optional for legacy snapshots."},"title":{"type":"string","maxLength":2000},"footer":{"type":"string","maxLength":2000},"items":{"type":"array","items":{"$ref":"#/$defs/Component"}},"more":{"$ref":"#/$defs/More","x-since":3},"pane":{"$ref":"#/$defs/Pane","x-since":4}},"required":["items"]},"Component":{"description":"One component of a view, told apart by type. A type an app does not know is skipped and the rest drawn.","x-discriminator":"type","oneOf":[{"$ref":"#/$defs/TextComponent"},{"$ref":"#/$defs/MetricComponent"},{"$ref":"#/$defs/ProgressComponent"},{"$ref":"#/$defs/RowComponent"},{"$ref":"#/$defs/ButtonComponent"},{"$ref":"#/$defs/LinkComponent"},{"$ref":"#/$defs/FieldComponent"},{"$ref":"#/$defs/DividerComponent"},{"$ref":"#/$defs/ChartComponent"},{"$ref":"#/$defs/StatGridComponent"},{"$ref":"#/$defs/SegmentedComponent"},{"$ref":"#/$defs/MarkdownComponent"},{"$ref":"#/$defs/TableComponent"},{"$ref":"#/$defs/EmptyComponent"},{"$ref":"#/$defs/LoadingComponent"},{"$ref":"#/$defs/HtmlComponent"},{"$ref":"#/$defs/HeaderComponent"},{"$ref":"#/$defs/BreadcrumbComponent"},{"$ref":"#/$defs/FileTreeComponent"},{"$ref":"#/$defs/CodeComponent"},{"$ref":"#/$defs/DiffComponent"},{"$ref":"#/$defs/CommentThreadComponent"},{"$ref":"#/$defs/ComposerComponent"},{"$ref":"#/$defs/ImageComponent"},{"$ref":"#/$defs/GridComponent"},{"$ref":"#/$defs/CarouselComponent"}]},"TextComponent":{"description":"A paragraph.","type":"object","x-since":1,"properties":{"type":{"const":"text"},"key":{"type":"string","maxLength":128,"x-since":3},"text":{"type":"string","minLength":1,"maxLength":2000},"style":{"$ref":"#/$defs/TextStyle"}},"required":["type","text"]},"MetricComponent":{"description":"A number with its label.","type":"object","x-since":1,"properties":{"type":{"const":"metric"},"key":{"type":"string","maxLength":128,"x-since":3},"label":{"type":"string","minLength":1,"maxLength":2000},"value":{"type":"string","minLength":1,"maxLength":2000},"detail":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"},"icon":{"$ref":"#/$defs/NavIcon","x-since":6},"icon_color":{"$ref":"#/$defs/Color","x-since":6},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["type","label","value"]},"ProgressComponent":{"description":"A bar filled to ratio (0 to 1).","type":"object","x-since":1,"properties":{"type":{"const":"progress"},"key":{"type":"string","maxLength":128,"x-since":3},"label":{"type":"string","minLength":1,"maxLength":2000},"ratio":{"type":"number","minimum":0,"maximum":1,"x-go-pointer":true},"detail":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"}},"required":["type","label","ratio"]},"RowComponent":{"description":"A row of a list; with an action it can be tapped.","type":"object","x-since":1,"properties":{"type":{"const":"row"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"subtitle":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"badge":{"$ref":"#/$defs/Badge"},"action":{"$ref":"#/$defs/Action"},"icon":{"$ref":"#/$defs/NavIcon","x-since":3,"description":"At most one of icon, avatar and thumbnail."},"avatar":{"$ref":"#/$defs/Avatar","x-since":3},"thumbnail":{"$ref":"#/$defs/Thumbnail","x-since":3},"icon_color":{"$ref":"#/$defs/Color","x-since":6},"control":{"$ref":"#/$defs/RowControl","x-since":6,"description":"A switch, a slider or a stepper; the row then has a key."},"actions":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/RowAction"},"x-since":6,"description":"Extra actions in the row's menu and under a swipe: shortcuts only, the same must be possible on the page the row opens."},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["type","title"]},"ButtonComponent":{"description":"A button; its title never wraps.","type":"object","x-since":1,"properties":{"type":{"const":"button"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"},"role":{"$ref":"#/$defs/ButtonRole"}},"required":["type","title","action"]},"LinkComponent":{"description":"A link the app opens inside itself: https only.","type":"object","x-since":1,"properties":{"type":{"const":"link"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"url":{"type":"string","pattern":"^https://[^/?#]+"}},"required":["type","title","url"]},"FieldComponent":{"description":"An input; its value goes back under name when an action submits. A secret is never filled in.","type":"object","x-since":1,"properties":{"type":{"const":"field"},"key":{"type":"string","maxLength":128,"x-since":3},"name":{"type":"string","minLength":1},"label":{"type":"string","minLength":1,"maxLength":2000},"kind":{"$ref":"#/$defs/FieldKind"},"value":{"type":"string","maxLength":2000},"choices":{"type":"array","items":{"$ref":"#/$defs/Choice"}},"placeholder":{"type":"string","maxLength":2000},"earliest":{"type":"string","maxLength":40,"x-since":6,"description":"date, time, datetime: the first one allowed, written like value."},"latest":{"type":"string","maxLength":40,"x-since":6,"description":"date, time, datetime: the last one allowed."},"detail":{"type":"string","maxLength":2000,"x-since":6,"description":"A line of help under the field."}},"required":["type","name","label","kind"]},"DividerComponent":{"description":"A line between two groups of a section.","type":"object","x-since":1,"properties":{"type":{"const":"divider"},"key":{"type":"string","maxLength":128,"x-since":3}},"required":["type"]},"ChartComponent":{"description":"A chart: bar, line, and in UI version 6 area, candlestick, donut, pie. Every series has the same labels in the same order; with more than one series each is named. A candlestick has one series whose points all have open, high, low and close (value is the close), at most 240 of them; a donut or a pie one series of 2 to 8 points.","type":"object","x-since":2,"properties":{"type":{"const":"chart"},"key":{"type":"string","maxLength":128,"x-since":3},"kind":{"$ref":"#/$defs/ChartKind"},"series":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ChartSeries"}},"title":{"type":"string","maxLength":2000},"unit":{"type":"string","maxLength":2000},"stacked":{"type":"boolean"},"detail":{"type":"string","maxLength":2000},"center":{"type":"string","maxLength":20,"x-since":6,"description":"donut: the words in the hole (a total)."},"rising":{"$ref":"#/$defs/CandleRising","x-since":6,"description":"candlestick: the color of a rising candle."}},"required":["type","kind","series"]},"StatGridComponent":{"description":"A few numbers side by side.","type":"object","x-since":2,"properties":{"type":{"const":"stat_grid"},"key":{"type":"string","maxLength":128,"x-since":3},"stats":{"type":"array","minItems":1,"maxItems":6,"items":{"$ref":"#/$defs/Stat"}}},"required":["type","stats"]},"SegmentedComponent":{"description":"One of a few, chosen at once: its action goes with values {name: the chosen value}.","type":"object","x-since":2,"properties":{"type":{"const":"segmented"},"key":{"type":"string","maxLength":128,"x-since":3},"name":{"type":"string","minLength":1},"choices":{"type":"array","minItems":2,"maxItems":5,"items":{"$ref":"#/$defs/Choice"}},"value":{"type":"string"},"action":{"$ref":"#/$defs/Action"}},"required":["type","name","choices","value","action"]},"MarkdownComponent":{"description":"Text in a safe subset of Markdown: headings (1 to 3), paragraphs, lists, bold, italics, inline code, code blocks, quotes, https links (opened in the app). No HTML, no images, no tables (a table is a table component). An older app gets it as plain text.","type":"object","x-since":3,"properties":{"type":{"const":"markdown"},"key":{"type":"string","maxLength":128,"x-since":3},"text":{"type":"string","minLength":1,"maxLength":20000}},"required":["type","text"]},"TableComponent":{"description":"A table: 1 to 8 columns, at most 100 rows, each with as many cells as there are columns. Narrow screens scroll it sideways; cells never squeeze. An older app gets a row per line.","type":"object","x-since":3,"properties":{"type":{"const":"table"},"key":{"type":"string","maxLength":128,"x-since":3},"columns":{"type":"array","minItems":1,"maxItems":8,"items":{"$ref":"#/$defs/TableColumn"}},"rows":{"type":"array","maxItems":100,"items":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":2000}}},"caption":{"type":"string","maxLength":2000}},"required":["type","columns","rows"]},"EmptyComponent":{"description":"An empty state: nothing here yet, and maybe one thing to do about it. An older app gets a text and a button.","type":"object","x-since":3,"properties":{"type":{"const":"empty"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"detail":{"type":"string","maxLength":2000},"icon":{"$ref":"#/$defs/NavIcon"},"button":{"$ref":"#/$defs/EmptyButton"},"icon_color":{"$ref":"#/$defs/Color","x-since":6}},"required":["type","title"]},"LoadingComponent":{"description":"Loading: the extension answers it while its data comes, then sends ui.invalidate to be drawn again. An older app gets a quiet text.","type":"object","x-since":3,"properties":{"type":{"const":"loading"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","maxLength":2000}},"required":["type"]},"HtmlComponent":{"type":"object","x-since":4,"x-assistant-only":true,"description":"Assistant only: self-contained HTML. Execution requires an isolated, network-denying renderer; unsupported clients show the root fallback. Extensions never execute it.","properties":{"type":{"const":"html"},"key":{"type":"string","maxLength":128},"html":{"type":"string","minLength":1,"maxLength":65536},"height":{"type":"integer","minimum":160,"maximum":640},"title":{"type":"string","maxLength":2000}},"required":["type","html"]},"HeaderComponent":{"description":"A detail page's head: a big title, state badges, a line of facts (author, branches, time, size). An older app gets a text and a row per fact.","type":"object","x-since":4,"properties":{"type":{"const":"header"},"key":{"type":"string","maxLength":128},"title":{"type":"string","minLength":1,"maxLength":2000},"subtitle":{"type":"string","maxLength":2000},"badges":{"type":"array","maxItems":4,"items":{"$ref":"#/$defs/Badge"}},"facts":{"type":"array","maxItems":8,"items":{"$ref":"#/$defs/Fact"}},"avatar":{"$ref":"#/$defs/Avatar"}},"required":["type","title"]},"BreadcrumbComponent":{"description":"A path (repo / src / main.go): every crumb but the last may be tapped. An older app gets one text.","type":"object","x-since":4,"properties":{"type":{"const":"breadcrumb"},"key":{"type":"string","maxLength":128},"crumbs":{"type":"array","minItems":1,"maxItems":20,"items":{"$ref":"#/$defs/Crumb"}}},"required":["type","crumbs"]},"FileTreeComponent":{"description":"Files as a tree the app builds from their paths (a directory with one child folds into a/b/c). action opens a file (values {path}); expand loads a directory given with no entries under it (values {path}). An older app gets a row per entry.","type":"object","x-since":4,"properties":{"type":{"const":"file_tree"},"key":{"type":"string","maxLength":128},"entries":{"type":"array","maxItems":3000,"items":{"$ref":"#/$defs/TreeEntry"}},"selected":{"type":"string","maxLength":4096},"action":{"$ref":"#/$defs/Action"},"expand":{"$ref":"#/$defs/Action"}},"required":["type","entries"]},"CodeComponent":{"description":"A file's content: line numbers, the app's own syntax highlighting (language, else guessed from path), no wrapping. truncated with load: the rest comes from load (values {path, from: the next line}). An older app gets a code block.","type":"object","x-since":4,"properties":{"type":{"const":"code"},"key":{"type":"string","maxLength":128},"path":{"type":"string","maxLength":4096},"language":{"type":"string","maxLength":64},"text":{"type":"string","maxLength":200000},"start_line":{"type":"integer","minimum":1},"highlight":{"$ref":"#/$defs/LineRange"},"truncated":{"type":"boolean"},"load":{"$ref":"#/$defs/Action"},"line_url":{"type":"string","maxLength":4096,"x-since":5,"description":"An https link to lines of this file on its site, {start} and {end} standing for the lines (\u2026/blob/<sha>/a.go#L{start}-L{end})."}},"required":["type","text"]},"DiffComponent":{"description":"One file's diff: hunks of lines each starting with ' ', '+', '-' or '\\'; unified or side by side is the app's choice. threads are inline comments at their lines; comment adds one (values {path, side, line, start_line?, body}); expand shows hidden lines between hunks (values {path, hunk, direction: up, down or all}); collapsed, or without hunks, it shows a button calling load (values {path}). An older app gets a code block.","type":"object","x-since":4,"properties":{"type":{"const":"diff"},"key":{"type":"string","maxLength":128},"path":{"type":"string","minLength":1,"maxLength":4096},"old_path":{"type":"string","maxLength":4096},"status":{"$ref":"#/$defs/FileStatus"},"language":{"type":"string","maxLength":64},"additions":{"type":"integer","minimum":0},"deletions":{"type":"integer","minimum":0},"binary":{"type":"boolean"},"collapsed":{"type":"boolean"},"hunks":{"type":"array","maxItems":2000,"items":{"$ref":"#/$defs/Hunk"}},"threads":{"type":"array","maxItems":500,"items":{"$ref":"#/$defs/Thread"}},"load":{"$ref":"#/$defs/Action"},"expand":{"$ref":"#/$defs/Action"},"comment":{"$ref":"#/$defs/Action"},"context":{"$ref":"#/$defs/Action","x-since":5,"description":"Fetch hidden lines of the file (UI version 5): values {path, side: new or old, from, to: a line or end}; the extension answers with lines (ActionResult.lines), the page is not drawn again."},"viewed":{"type":"boolean","x-since":5,"description":"The user has marked this file viewed."},"mark_viewed":{"$ref":"#/$defs/Action","x-since":5,"description":"Mark the file viewed or not: values {path, viewed: true or false}. Without it the app keeps viewed on the device, by path and revision."},"revision":{"type":"string","maxLength":256,"x-since":5,"description":"What this file's change is (a blob id): a viewed mark kept on the device holds for it only."},"generated":{"type":"boolean","x-since":5,"description":"A generated file or a lockfile: folded at first."},"similarity":{"type":"integer","minimum":0,"maximum":100,"x-since":5,"description":"How alike a renamed file is to its old one, in percent."},"draft":{"$ref":"#/$defs/Action","x-since":5,"description":"Add a comment to the pending review instead of sending it alone: values as comment's."},"suggestions":{"type":"boolean","x-since":5,"description":"The extension takes ```suggestion blocks in comments."}},"required":["type","path"]},"CommentThreadComponent":{"description":"A discussion: comments in order (an event is drawn as a quiet line), and a reply box when reply is set (values {body}). An older app gets a row and a text per comment.","type":"object","x-since":4,"properties":{"type":{"const":"comment_thread"},"key":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":2000},"comments":{"type":"array","maxItems":200,"items":{"$ref":"#/$defs/Comment"}},"resolved":{"type":"boolean"},"reply":{"$ref":"#/$defs/Action"}},"required":["type","comments"]},"ComposerComponent":{"description":"A multi-line input (Markdown) with a few buttons (comment, approve, request changes, merge): the one tapped sends the text as name, with the page's fields. An older app gets a field and a button each.","type":"object","x-since":4,"properties":{"type":{"const":"composer"},"key":{"type":"string","maxLength":128},"name":{"type":"string","minLength":1},"placeholder":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"buttons":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ComposerButton"}}},"required":["type","name","buttons"]},"ImageComponent":{"description":"A picture with an optional caption; tapping it shows it full screen unless no_zoom. A ref is the extension's own picture (a camera, a map) fetched through the hub. An older app gets a row with a thumbnail (url) or a line of text (ref).","type":"object","x-since":6,"properties":{"type":{"const":"image"},"key":{"type":"string","maxLength":128},"src":{"$ref":"#/$defs/ImageSource"},"alt":{"type":"string","minLength":1,"maxLength":200,"description":"Read out, and shown when the picture does not load."},"caption":{"type":"string","maxLength":2000},"aspect":{"$ref":"#/$defs/ImageAspect"},"fit":{"$ref":"#/$defs/ImageFit"},"no_zoom":{"type":"boolean","description":"Tapping does nothing (else it shows the picture full screen)."}},"required":["type","src","alt"]},"GridComponent":{"description":"Tiles in columns that fit the width: two on a phone, more on wider screens, at most max_columns (4 when absent). Each tile counts as a component of the page. An older app gets a row per tile.","type":"object","x-since":6,"properties":{"type":{"const":"grid"},"key":{"type":"string","maxLength":128},"tiles":{"type":"array","minItems":1,"maxItems":60,"items":{"$ref":"#/$defs/Tile"}},"max_columns":{"type":"integer","minimum":1,"maximum":6}},"required":["type","tiles"]},"CarouselComponent":{"description":"Tiles in one line that scrolls sideways: cameras, rooms, a watchlist. Each tile counts as a component of the page. An older app gets a text (the title) and a row per tile.","type":"object","x-since":6,"properties":{"type":{"const":"carousel"},"key":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":2000},"tiles":{"type":"array","minItems":1,"maxItems":20,"items":{"$ref":"#/$defs/Tile"}},"width":{"$ref":"#/$defs/TileWidth"}},"required":["type","tiles"]},"ImageSource":{"description":"Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own address, which the app loads with its device credentials. An extension that writes path is refused.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+","maxLength":4096},"ref":{"type":"string","minLength":1,"maxLength":256},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048},"width":{"type":"integer","minimum":1,"maximum":8192},"height":{"type":"integer","minimum":1,"maximum":8192}}},"ImageAspect":{"description":"square 1:1, landscape 4:3 (the default), wide 16:9, portrait 3:4, auto from src's width and height (4:3 until the picture comes).","type":"string","enum":["square","landscape","wide","portrait","auto"]},"ImageFit":{"description":"fill crops to fill the frame (the default); fit shows all of it.","type":"string","enum":["fill","fit"]},"RowControlKind":{"type":"string","enum":["switch","slider","stepper"]},"RowControl":{"description":"A control in a row or a tile (UI version 6). Changing it calls ui.action with action and values {name: the new value} (a switch \"true\" or \"false\", a slider and a stepper the number). The app shows the new value at once and puts back the old one if the action fails. A slider sends when the finger lifts, a stepper 0.6 s after the last tap.","type":"object","properties":{"kind":{"$ref":"#/$defs/RowControlKind"},"name":{"type":"string","minLength":1,"maxLength":128},"on":{"type":"boolean","description":"switch: on or off."},"value":{"type":"number","x-go-pointer":true,"description":"slider, stepper: the value now."},"min":{"type":"number","x-go-pointer":true},"max":{"type":"number","x-go-pointer":true},"step":{"type":"number","x-go-pointer":true,"description":"More than 0 (checked by the hub); a slider's is (max - min) / 100 when absent."},"unit":{"type":"string","maxLength":8},"display":{"type":"string","maxLength":20,"description":"How to write the value (\"22.5 \u00b0C\"); else the number and unit."},"disabled":{"type":"boolean"},"action":{"$ref":"#/$defs/Action"}},"required":["kind","name","action"]},"RowAction":{"description":"One of a row's or a tile's extra actions (UI version 6): in its menu (long press, right click, the \u2026 button) and, with swipe, under a swipe from the trailing edge. confirm and push work as on any action; a destructive one has confirm.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":20},"icon":{"$ref":"#/$defs/NavIcon"},"role":{"$ref":"#/$defs/ButtonRole"},"swipe":{"type":"boolean","description":"Also under a swipe. At most two of a row's actions."},"action":{"$ref":"#/$defs/Action"}},"required":["title","action"]},"Spark":{"description":"A small trend line inside a row, a metric, a stat or a tile (UI version 6): values only, no axes. Without color or tone, the app's quiet ink.","type":"object","properties":{"values":{"type":"array","minItems":2,"maxItems":60,"items":{"type":"number"}},"color":{"$ref":"#/$defs/Color"},"tone":{"$ref":"#/$defs/Tone"},"fill":{"type":"boolean","description":"Shade under the line."}},"required":["values"]},"TileWidth":{"description":"A carousel's tiles: narrow about 140pt (scenes), regular about 200pt (the default; rooms), wide about 80% of the screen (camera pictures).","type":"string","enum":["narrow","regular","wide"]},"Tile":{"description":"A tile of a grid or a carousel (UI version 6): an icon or a picture, a title, a state line, a value; tapping does its action. active marks a tile that is on (a scene running, a light on) in its color.","type":"object","properties":{"key":{"type":"string","maxLength":128},"title":{"type":"string","minLength":1,"maxLength":40},"subtitle":{"type":"string","maxLength":80},"value":{"type":"string","maxLength":40},"icon":{"$ref":"#/$defs/NavIcon","description":"At most one of icon and image."},"image":{"$ref":"#/$defs/ImageSource"},"color":{"$ref":"#/$defs/Color"},"badge":{"$ref":"#/$defs/Badge"},"active":{"type":"boolean"},"spark":{"$ref":"#/$defs/Spark"},"control":{"$ref":"#/$defs/RowControl","description":"A switch only; the tile then has a key."},"actions":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/RowAction"}},"action":{"$ref":"#/$defs/Action"}},"required":["title"]},"Layout":{"description":"stack: sections one under another. split: on a wide screen the side pane's sections in a column at the start, the rest beside it, each scrolling on its own; on a narrow one the side pane folds into a bar on top that opens as a sheet.","type":"string","enum":["stack","split"]},"Pane":{"description":"Where a section of a split view goes.","type":"string","enum":["main","side"]},"FileStatus":{"type":"string","enum":["added","modified","deleted","renamed"]},"DiffSide":{"type":"string","enum":["old","new"]},"Tabs":{"description":"Tabs on top of the page (UI version 4): choosing calls ui.action with action and values {name: the value} (and the search's q). An older app gets a segmented, or buttons.","type":"object","properties":{"name":{"type":"string","minLength":1},"value":{"type":"string","maxLength":2000},"items":{"type":"array","minItems":2,"maxItems":8,"items":{"$ref":"#/$defs/Tab"}},"action":{"$ref":"#/$defs/Action"}},"required":["name","value","items","action"]},"Tab":{"type":"object","properties":{"value":{"type":"string","minLength":1,"maxLength":2000},"title":{"type":"string","maxLength":40},"badge":{"type":"string","maxLength":8}},"required":["value"]},"Fact":{"description":"A label and its value in a header (Author \u00b7 someone).","type":"object","properties":{"label":{"type":"string","maxLength":200},"value":{"type":"string","minLength":1,"maxLength":2000},"icon":{"$ref":"#/$defs/NavIcon"}},"required":["value"]},"Crumb":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["title"]},"TreeEntry":{"description":"A file (or a directory, kind dir) by its whole path from the root, / between names.","type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"kind":{"$ref":"#/$defs/TreeEntryKind"},"status":{"$ref":"#/$defs/FileStatus"},"additions":{"type":"integer","minimum":0},"deletions":{"type":"integer","minimum":0},"comments":{"type":"integer","minimum":0},"badge":{"$ref":"#/$defs/Badge"},"viewed":{"type":"boolean","x-since":5},"generated":{"type":"boolean","x-since":5}},"required":["path"]},"TreeEntryKind":{"type":"string","enum":["file","dir"]},"LineRange":{"type":"object","properties":{"start":{"type":"integer","minimum":1},"end":{"type":"integer","minimum":1}},"required":["start","end"]},"Hunk":{"description":"A run of a diff: where it starts in the old and the new file, and its lines (' ' both, '+' new, '-' old, '\\' a note such as no newline at end of file).","type":"object","properties":{"header":{"type":"string","maxLength":2000},"old_start":{"type":"integer","minimum":0},"new_start":{"type":"integer","minimum":0},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}}},"required":["old_start","new_start","lines"]},"Thread":{"description":"Inline comments at a line of a diff: line (and start_line for a range) on the side's numbering.","type":"object","properties":{"id":{"type":"string","maxLength":256},"side":{"$ref":"#/$defs/DiffSide"},"line":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"resolved":{"type":"boolean"},"outdated":{"type":"boolean"},"comments":{"type":"array","minItems":1,"maxItems":200,"items":{"$ref":"#/$defs/Comment"}},"reply":{"$ref":"#/$defs/Action"},"pending":{"type":"boolean","x-since":5,"description":"A draft of the pending review, not sent yet."},"resolve":{"$ref":"#/$defs/Action","x-since":5,"description":"Resolve or reopen: values {thread: id, resolved: true or false}."}},"required":["side","line","comments"]},"Comment":{"description":"A comment: its author, when (the app draws it relative), a body in the markdown subset, a badge (Approved). An event is a quiet line (merged, pushed two commits).","type":"object","properties":{"id":{"type":"string","maxLength":256},"author":{"type":"string","minLength":1,"maxLength":200},"avatar":{"$ref":"#/$defs/Avatar"},"at":{"type":"string","format":"date-time"},"body":{"type":"string","maxLength":20000},"badge":{"$ref":"#/$defs/Badge"},"event":{"type":"boolean"}},"required":["author"]},"ComposerButton":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"},"tone":{"$ref":"#/$defs/Tone"}},"required":["title","action"]},"AssistantView":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"conversation":{"type":"string","minLength":1,"maxLength":256},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"view":{"$ref":"#/$defs/View"},"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}},"required":["id","conversation","version","view","created_at","updated_at"]},"ViewAction":{"type":"object","properties":{"key":{"type":"string","minLength":1,"maxLength":512},"action":{"type":"string","minLength":1,"maxLength":128},"page":{"type":"string","maxLength":64},"values":{"type":"object","additionalProperties":{"type":"string","maxLength":2000}},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"status":{"$ref":"#/$defs/ViewActionStatus"},"revision":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"error":{"type":"string","maxLength":2000},"updated_at":{"type":"string","format":"date-time"},"at":{"type":"string","format":"date-time"},"kind":{"$ref":"#/$defs/ViewActionKind","description":"Absent or action: a declared Action (action is its id). html: an HTML bridge reply (action is the html component's key, text the confirmed reply)."},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version the user saw and confirmed when this was committed; absent on records committed before #2019."},"text":{"type":"string","maxLength":2000,"description":"kind html only: the reply text the user confirmed."}},"required":["key","action","client_msg_id","status","at"]},"ViewActionStatus":{"type":"string","enum":["pending","sent","failed"]},"ViewActionKind":{"type":"string","enum":["action","html"]},"ViewActionInput":{"description":"The body of POST /api/v1/assistant/conversations/{id}/views/{key}/actions. The reply text and form definition are read from the stored View, never from the client.","type":"object","additionalProperties":false,"properties":{"action":{"type":"string","minLength":1,"maxLength":128,"description":"A declared reply action's id."},"page":{"type":"string","maxLength":64,"description":"The named page the action is on; absent for the root page."},"values":{"type":"object","additionalProperties":{"type":"string","maxLength":2000},"description":"The fields this action submits, by name."},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"confirmed":{"type":"boolean","description":"The user confirmed the action's confirm prompt natively."},"expected_version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version shown (and confirmed) to the user. Required when the action has confirm; a different stored version answers 409 view_changed."}},"required":["action","client_msg_id"]},"AssistantHTMLActionKind":{"type":"string","enum":["reply","open"]},"AssistantHTMLActionInput":{"description":"The body of POST /api/v1/assistant/conversations/{id}/views/{key}/html-actions: a persona.reply / persona.open call of a keyed html component, after the user confirmed it natively.","type":"object","additionalProperties":false,"properties":{"kind":{"$ref":"#/$defs/AssistantHTMLActionKind"},"component_key":{"type":"string","minLength":1,"maxLength":128,"description":"The key of the html component on that page of the stored card."},"page":{"type":"string","maxLength":64,"description":"The named page the component is on; absent for the root page."},"expected_version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version that ran the HTML and was shown in the confirmation."},"text":{"type":"string","minLength":1,"maxLength":2000,"description":"reply only: the text shown in full in the confirmation."},"url":{"type":"string","minLength":1,"maxLength":2048,"description":"open only: an https or supported persona:// target."},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"confirmed":{"const":true,"type":"boolean","description":"Always true: the call was confirmed natively, outside the HTML."}},"required":["kind","component_key","expected_version","client_msg_id","confirmed"]},"AssistantHTMLOpenResult":{"description":"What an html-actions open answers: the validated target to open inside the app, and the card version it was checked against.","type":"object","properties":{"open":{"type":"string","minLength":1},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"}},"required":["open","version"]},"ViewChangedError":{"description":"409 code view_changed: the stored card is not the version the user saw. Refresh, keep the draft and confirm again; never resubmit with the new version automatically.","type":"object","properties":{"error":{"type":"string"},"code":{"const":"view_changed","type":"string"},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The current stored version."},"view":{"$ref":"#/$defs/AssistantView","description":"The current card, as feed.views carries it (a transcript card: id is its key, version 1)."}},"required":["error","code","version"]},"Action":{"description":"What a row, a button or a segmented does: ui.action with its id. An object, so later kinds of action (push or pop a page) are fields added here.","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"confirm":{"type":"string","description":"Ask the user first, in these words."},"submit":{"type":"boolean","description":"Send the page's fields as values."},"reply":{"type":"string","minLength":1,"maxLength":2000,"description":"Assistant only: send this text back to the same conversation. The hub reads it from the saved view, not from the client."},"open":{"type":"string","minLength":1,"maxLength":4096,"description":"Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the app."},"pop":{"type":"boolean","description":"Assistant only: return one page within the card."},"push":{"$ref":"#/$defs/Push","x-since":3,"description":"Open a page on top of this one instead of calling ui.action (an app of UI version 3; an older one calls ui.action with id)."},"values":{"type":"object","maxProperties":8,"additionalProperties":{"type":"string","maxLength":2000},"x-since":4,"description":"Values the action carries (UI version 4): sent with the page's and the component's values, these winning on a name they share. An older app sends none."}},"required":["id"]},"Push":{"description":"A page pushed on the navigation stack: ui.render of the extension's ui (this one when empty; a full page: extension_page, plugin_page or nav_page) with state. title is shown until the view comes.","type":"object","properties":{"ui":{"type":"string","maxLength":64},"page":{"type":"string","minLength":1,"maxLength":64,"description":"Assistant only: a page in the root View.pages. Never combined with ui or state."},"state":{"type":"string"},"title":{"type":"string","maxLength":2000}}},"Search":{"description":"A search box on top of the page (UI version 3): the app calls ui.action with action and values {\"q\": the text}, 0.3 s after the user stops typing.","type":"object","properties":{"placeholder":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["action"]},"Filter":{"description":"A drop-down beside the search box (UI version 3): choosing calls ui.action with action and values {name: the value} (and the search's q).","type":"object","properties":{"name":{"type":"string","minLength":1},"title":{"type":"string","maxLength":2000},"choices":{"type":"array","minItems":2,"maxItems":100,"items":{"$ref":"#/$defs/Choice"}},"value":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["name","choices","value","action"]},"More":{"description":"A section's last row, Load More (UI version 3): reaching it (or tapping it) calls ui.action with action once; the extension answers the whole view, longer.","type":"object","properties":{"title":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["action"]},"Avatar":{"description":"A person's or a chat's picture: an https image, else up to two characters drawn as the app's initials avatar.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+"},"text":{"type":"string","maxLength":2},"ref":{"type":"string","minLength":1,"maxLength":256,"x-since":6,"description":"The extension's own picture (ui.image) through the hub, in place of url."},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048,"x-since":6,"description":"Written by the hub only, for a ref."}}},"Thumbnail":{"description":"A small picture at the row's start: an https image the app loads without any credentials, or (UI version 6) a ref the extension serves (ui.image) through the hub; exactly one of url and ref.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+"},"aspect":{"$ref":"#/$defs/ThumbnailAspect"},"ref":{"type":"string","minLength":1,"maxLength":256,"x-since":6},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048,"x-since":6,"description":"Written by the hub only, for a ref."}}},"ThumbnailAspect":{"type":"string","enum":["square","wide"]},"TableAlign":{"type":"string","enum":["start","end"]},"TableColumn":{"type":"object","properties":{"title":{"type":"string","maxLength":200},"align":{"$ref":"#/$defs/TableAlign"}},"required":["title"]},"EmptyButton":{"description":"An empty state's one button.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["title","action"]},"Badge":{"type":"object","properties":{"text":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"},"color":{"$ref":"#/$defs/Color","x-since":6}},"required":["text"]},"Choice":{"type":"object","properties":{"value":{"type":"string"},"title":{"type":"string"}},"required":["value"]},"ChartSeries":{"description":"One line, or one color of bars. No tone and no color: the app's own colors, in order. At most 120 points (240 for a candlestick, checked by the hub).","type":"object","properties":{"name":{"type":"string","maxLength":40},"tone":{"$ref":"#/$defs/Tone"},"points":{"type":"array","minItems":1,"maxItems":240,"items":{"$ref":"#/$defs/ChartPoint"}},"color":{"$ref":"#/$defs/Color","x-since":6}},"required":["points"]},"ChartPoint":{"description":"A value at a label (a day, a model); display is how to write it (\"\u00a51.20\"), else the app writes value with the unit.","type":"object","properties":{"label":{"type":"string","maxLength":40},"value":{"type":"number"},"display":{"type":"string","maxLength":40},"open":{"type":"number","x-go-pointer":true,"x-since":6},"high":{"type":"number","x-go-pointer":true,"x-since":6},"low":{"type":"number","x-go-pointer":true,"x-since":6},"close":{"type":"number","x-go-pointer":true,"x-since":6},"volume":{"type":"number","minimum":0,"x-go-pointer":true,"x-since":6}},"required":["label","value"]},"Stat":{"type":"object","properties":{"label":{"type":"string","minLength":1},"value":{"type":"string","minLength":1},"detail":{"type":"string"},"tone":{"$ref":"#/$defs/Tone"},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["label","value"]},"ActionResult":{"description":"What ui.action answers: a new view, a short message, an https link to open, a page to push or to pop (UI version 3), or nothing (draw again).","type":"object","properties":{"view":{"$ref":"#/$defs/View"},"toast":{"type":"string"},"open_url":{"type":"string"},"push":{"$ref":"#/$defs/Push","x-since":3,"description":"Then open this page on top (after a submit: list, detail, edit)."},"pop":{"type":"boolean","x-since":3,"description":"Then go back a page; the page below is drawn again."},"lines":{"$ref":"#/$defs/FileLines","x-since":5,"description":"Lines of a file a diff's context asked for: the page is not drawn again."},"items":{"type":"array","maxItems":50,"items":{"$ref":"#/$defs/Component"},"x-since":5,"description":"Components to put in place of those with the same key on the page (each has a key): the rest is not drawn again."}}},"FileLines":{"description":"Lines of one side of a file from start (1 the first), as many as the extension has at hand (all of it, say); total is how many the file has.","type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"side":{"$ref":"#/$defs/DiffSide"},"start":{"type":"integer","minimum":1},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}},"total":{"type":"integer","minimum":0}},"required":["path","start","lines"]},"Review":{"description":"The pending review (UI version 5): a bar at the page's foot saying how many drafts there are, a summary box (name) and buttons (comment, approve, request changes) that send them all, discard throws them away. An older app gets a text and a composer on top.","type":"object","properties":{"count":{"type":"integer","minimum":0},"name":{"type":"string","minLength":1},"placeholder":{"type":"string","maxLength":2000},"buttons":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ComposerButton"}},"discard":{"$ref":"#/$defs/Action"}},"required":["count","name","buttons"]},"PersonaCardKind":{"type":"string","description":"ring: one day's total and its parts (a donut); stacked_bar: parts side by side to compare (days, people).","enum":["stat","stacked_bar","line","bar","ring"]},"PersonaCard":{"description":"The assistant's ```persona-card block (#886): one JSON object. Joins the components in #1850; this form keeps drawing.","type":"object","properties":{"type":{"$ref":"#/$defs/PersonaCardKind"},"title":{"type":"string"},"subtitle":{"type":"string"},"value":{"type":"number","x-go-pointer":true},"unit":{"type":"string"},"note":{"type":"string"},"total":{"$ref":"#/$defs/CardAmount"},"segments":{"type":"array","items":{"$ref":"#/$defs/CardPart"}},"rest":{"$ref":"#/$defs/CardPart"},"points":{"type":"array","items":{"$ref":"#/$defs/CardPart"}}},"required":["type"]},"CardAmount":{"type":"object","properties":{"value":{"type":"number"},"unit":{"type":"string"}},"required":["value"]},"CardPart":{"type":"object","properties":{"label":{"type":"string"},"value":{"type":"number"},"note":{"type":"string"}},"required":["label","value"]}}},"protocol.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"protocol.schema.json","title":"Extension process protocol","description":"The process protocol (version 1) between the hub and an extension's program: one JSON object a line on stdin / stdout (or a unix socket), keys in snake_case. Also what the apps send the hub to draw a slot.","$defs":{"Frame":{"description":"One line: a request {id, method, params}, an answer {id, result} or {id, error}, or an event {event, params}.","type":"object","properties":{"id":{"type":"string"},"method":{"type":"string"},"event":{"type":"string"},"params":{},"result":{},"error":{"$ref":"#/$defs/RPCError"}}},"RPCError":{"type":"object","properties":{"message":{"type":"string","description":"For people; never a secret or a message's body."},"code":{"type":"string","description":"One of ErrorCode, or an extension point's own (not_found, invalid, conflict\u2026)."},"data":{}},"required":["message"]},"ErrorCode":{"type":"string","enum":["not_initialized","unknown_method","wrong_protocol","no_capability","no_contribution","permission_denied","timeout","unsupported"]},"Method":{"description":"Methods of the base; every other method is <namespace>.<method>, the namespace an extension point's.","type":"string","enum":["initialize","ping","manifest"]},"AuthState":{"type":"string","enum":["signed_out","pending","signed_in","expired","error"]},"AuthStatus":{"description":"auth.status and auth.logout: the extension's sign-in now (manifest.auth).","type":"object","properties":{"state":{"$ref":"#/$defs/AuthState"},"account":{"type":"string"},"message":{"type":"string","description":"For people: why it is in error, what is signed in."},"expires_at":{"type":"string","format":"date-time"}},"required":["state"]},"AuthStepParams":{"description":"auth.step: step \"\" starts over; values are the fields of the step before.","type":"object","properties":{"step":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}}},"required":["step"]},"AuthField":{"type":"object","properties":{"name":{"type":"string"},"label":{"type":"string"},"secret":{"type":"boolean"},"placeholder":{"type":"string"}},"required":["name","label"]},"AuthPrompt":{"description":"auth.step's answer, the connectors' Prompt: fields to fill, a device code (url to open, user_code to enter) or a QR code (url, scanned with another app), or done. For device_code and qr the app asks the same step again (no values) every interval seconds.","type":"object","properties":{"step":{"type":"string"},"fields":{"type":"array","items":{"$ref":"#/$defs/AuthField"}},"kind":{"type":"string","description":"Empty: fields to fill; device_code; qr."},"url":{"type":"string"},"user_code":{"type":"string"},"interval":{"type":"integer"},"hint":{"type":"string"},"error":{"type":"string"},"done":{"type":"boolean"},"account":{"type":"string"},"expires_at":{"type":"string","format":"date-time"}}},"HubRole":{"type":"string","enum":["center","member"]},"HubCapability":{"type":"string","enum":["inbox_group","inbox_group_state"]},"InitializeParams":{"description":"What the hub sends first. The extension is under extension; hubs before the rename (#1844) send it as plugin, newer hubs send both.","type":"object","properties":{"protocol":{"type":"integer","const":1},"hub":{"$ref":"#/$defs/HubInfo"},"extension":{"$ref":"#/$defs/ExtensionInfo"},"plugin":{"$ref":"#/$defs/ExtensionInfo"},"config":{"description":"The configuration with the schema's defaults filled in."},"secrets":{"type":"object","additionalProperties":{"type":"string"}},"granted":{"$ref":"manifest.schema.json#/$defs/Permissions"},"active":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}},"description":"The contributions this run is for, by extension point."},"contributions_to_me":{"type":"object","additionalProperties":{"type":"array","items":{"$ref":"#/$defs/ExportedContribution"}},"description":"The contributions of the other extensions that are on to the points it exports, by its point id (event extension.contributions_changed says them again when they change)."}},"required":["protocol","hub","granted"]},"ExportedContribution":{"type":"object","properties":{"extension":{"type":"string","description":"The extension it comes from."},"item":{"description":"The contribution, as that extension's manifest wrote it."}},"required":["extension","item"]},"HubInfo":{"type":"object","properties":{"build":{"type":"integer","x-go-type":"int64"},"extension_points":{"type":"object","additionalProperties":{"type":"integer"}},"role":{"$ref":"#/$defs/HubRole"},"timezone":{"type":"string"},"locale":{"type":"string","description":"The user's language (zh-Hans, en, ja; see docs/protocol/i18n.md); empty means zh-Hans."},"capabilities":{"type":"array","items":{"type":"string"}},"url":{"type":"string","description":"The hub's API on this machine, for the token below."},"token":{"type":"string","description":"A token of the scopes it was granted (permissions.hub): new each start."},"scopes":{"type":"array","items":{"type":"string"}}},"required":["build","extension_points"]},"ExtensionInfo":{"type":"object","properties":{"id":{"type":"string"},"version":{"type":"string"},"dir":{"type":"string"},"data_dir":{"type":"string"}},"required":["id","version"]},"InitializeResult":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"id":{"type":"string"},"version":{"type":"string"},"contributes":{"type":"object","additionalProperties":{},"description":"A subset of the manifest's."},"ui_page_cancellation":{"type":"integer","const":1,"description":"Request-ID scoped rpc.cancel for mounted page lifecycle calls only."}},"required":["protocol","id","version"]},"UIParams":{"description":"ui.render's and ui.action's parameters: what to draw, where, for whom.","type":"object","properties":{"contribution":{"type":"string"},"state":{"type":"string"},"action":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}},"placement":{"$ref":"view.schema.json#/$defs/Placement"},"size":{"$ref":"view.schema.json#/$defs/Size"},"ui_version":{"type":"integer"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"},"machine":{"$ref":"#/$defs/UIMachine"},"launcher":{"$ref":"#/$defs/UILauncher"},"item":{"$ref":"#/$defs/UIInboxItem"}},"required":["contribution","state","placement","size","ui_version"]},"UIImageParams":{"description":"ui.image's parameters (UI version 6): the hub asks the extension for a picture it drew as a ref, for the ui contribution that drew it. width is the pixel width the app wants (320, 640, 1280 or 2048; 0 when it says nothing); the extension may ignore it.","type":"object","properties":{"contribution":{"type":"string"},"ref":{"type":"string","minLength":1,"maxLength":256},"width":{"type":"integer","minimum":0,"maximum":8192},"placement":{"$ref":"view.schema.json#/$defs/Placement"}},"required":["contribution","ref"]},"UIImage":{"description":"What ui.image answers: the picture's bytes in base64 (png, jpeg, webp or gif, at most 4 MB decoded and 8192 pixels a side; the hub reads the type from the bytes, not from mime) and how long the hub may keep it (seconds, 60 when absent; a camera 5 to 10, a still 86400).","type":"object","properties":{"mime":{"type":"string","maxLength":64},"data":{"type":"string","minLength":1},"max_age":{"type":"integer","minimum":0,"maximum":86400,"x-go-pointer":true}},"required":["mime","data"]},"UIMachine":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"os":{"type":"string"},"online":{"type":"boolean"}},"required":["id","name","online"]},"UILauncher":{"type":"object","properties":{"name":{"type":"string"},"base_url":{"type":"string"},"query_id":{"type":"string"}},"required":["name","base_url","query_id"]},"UIInboxItem":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"tier":{"type":"string"},"reason":{"type":"string"},"done":{"type":"boolean"},"meta":{"description":"The connector's own record of what the item gathers, as stored; null when it has none."},"extra":{"type":"object","additionalProperties":{}},"count":{"type":"integer"},"started_at":{"type":"string","format":"date-time"}},"required":["id","title","done","meta"]},"BadgeEvent":{"description":"ui.badge, sent by an extension: the badge on its nav_page's entry (no text clears it).","type":"object","properties":{"contribution":{"type":"string"},"text":{"type":"string","maxLength":8},"tone":{"$ref":"view.schema.json#/$defs/Tone"}},"required":["contribution"]},"InvalidateEvent":{"description":"ui.invalidate, sent by an extension (UI version 3): what it draws changed; the apps on screen draw it again (contribution: one ui; empty: all of the extension's).","type":"object","properties":{"contribution":{"type":"string"}}},"UIContext":{"description":"What an app says when it draws a slot: for whom and where (the hub checks it and hands the extension UIParams).","type":"object","properties":{"launcher":{"type":"string"},"machine":{"type":"string"},"item":{"type":"string"},"size":{"$ref":"view.schema.json#/$defs/Size"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"},"ui_version":{"type":"integer"},"stream":{"$ref":"stream.schema.json#/$defs/UIStreamCapability","description":"Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current client or hub advertises it."}}},"UIRequest":{"description":"An app's POST \u2026/-/ui/{ui}: without action it draws, with one a control was used.","type":"object","properties":{"context":{"$ref":"#/$defs/UIContext"},"state":{"type":"string"},"action":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}}}},"UIPlace":{"description":"Where an extension draws something, as the hub lists it (GET \u2026/-/ui). The new API names the extension extension / extension_name; the old one plugin / plugin_name.","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"plugin":{"type":"string"},"plugin_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"placement":{"$ref":"view.schema.json#/$defs/Placement"},"size":{"$ref":"view.schema.json#/$defs/Size"},"icon":{"$ref":"view.schema.json#/$defs/NavIcon"},"opens":{"type":"string"},"badge":{"$ref":"view.schema.json#/$defs/Badge"},"connector":{"type":"string"}},"required":["id","title","placement"]},"UIPlaces":{"type":"object","properties":{"ui":{"type":"array","items":{"$ref":"#/$defs/UIPlace"}}},"required":["ui"]},"WidgetPlace":{"description":"A widget an extension draws outside the app (GET \u2026/extensions/-/widgets; docs \"System placements\").","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"families":{"type":"array","items":{"$ref":"view.schema.json#/$defs/WidgetFamily"}},"refresh_minutes":{"type":"integer"},"opens":{"type":"string"}},"required":["extension","id","title","families","refresh_minutes"]},"WidgetPlaces":{"type":"object","properties":{"widgets":{"type":"array","items":{"$ref":"#/$defs/WidgetPlace"}}},"required":["widgets"]},"WidgetRequest":{"description":"An app's POST \u2026/extensions/{id}/-/widget/{ui}: context.size is the family it draws (WidgetFamily).","type":"object","properties":{"context":{"$ref":"#/$defs/UIContext"}}},"WidgetAnswer":{"description":"A widget's view, held to what the family draws, and until when the hub keeps it (the app's timeline's next entry).","type":"object","properties":{"view":{"$ref":"view.schema.json#/$defs/View"},"expires_at":{"type":"string","format":"date-time"}},"required":["view","expires_at"]},"DeviceWidget":{"description":"A widget a device has on a screen (PUT /api/v1/devices/{id}/widgets): the hub wakes that device when it changes.","type":"object","properties":{"extension":{"type":"string"},"id":{"type":"string"},"family":{"$ref":"view.schema.json#/$defs/WidgetFamily"}},"required":["extension","id","family"]},"DeviceWidgets":{"type":"object","properties":{"widgets":{"type":"array","items":{"$ref":"#/$defs/DeviceWidget"}}},"required":["widgets"]},"WidgetPush":{"description":"extension_widget in a background push (content-available): a widget the device has changed; the app reloads its timelines.","type":"object","properties":{"extension":{"type":"string"},"id":{"type":"string"}},"required":["extension","id"]},"ShortcutPlace":{"description":"An extension's action the system runs (GET \u2026/extensions/-/shortcuts).","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"params":{"type":"array","items":{"$ref":"manifest.schema.json#/$defs/ShortcutParam"}},"ui":{"type":"string"}},"required":["extension","id","title"]},"ShortcutPlaces":{"type":"object","properties":{"shortcuts":{"type":"array","items":{"$ref":"#/$defs/ShortcutPlace"}}},"required":["shortcuts"]},"ShortcutRequest":{"description":"An app's POST \u2026/extensions/{id}/-/shortcut/{sid}: the params' values (strings) and the context (tz, locale, platform, ui_version).","type":"object","properties":{"values":{"type":"object","additionalProperties":{"type":"string"}},"context":{"$ref":"#/$defs/UIContext"}}},"ShortcutRunParams":{"description":"shortcut.run's parameters: which shortcut, its values, for whom.","type":"object","properties":{"contribution":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}},"ui_version":{"type":"integer"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"}},"required":["contribution","values","ui_version"]},"ShortcutResult":{"description":"What shortcut.run answers (and the app gets): a sentence Siri says or shows, and a view held to the large widget's subset (the result card).","type":"object","properties":{"text":{"type":"string","maxLength":2000},"view":{"$ref":"view.schema.json#/$defs/View"}}},"NotifyAction":{"description":"A button on an extension's notification (POST /api/v1/notify actions, at most 3). A tap runs ui.action on the notification's ui with this id; input asks for a line of text first (values.text).","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"title":{"type":"string","minLength":1,"maxLength":40},"role":{"$ref":"view.schema.json#/$defs/ButtonRole"},"foreground":{"type":"boolean","description":"Open the app to run it; otherwise it runs in the background and its toast is shown as a notification."},"input":{"$ref":"#/$defs/NotifyActionInput"}},"required":["id","title"]},"NotifyActionInput":{"type":"object","properties":{"placeholder":{"type":"string","maxLength":80}}},"ErrorSource":{"description":"Which part of Persona an error report comes from.","type":"string","enum":["hub","manager","web","android","ios","mac","watch","vision"]},"ErrorKind":{"description":"What an error report is: a caught exception, a crash (the app died), an ANR (it hung), a Go panic, an error line of a log.","type":"string","enum":["exception","crash","anr","panic","log"]},"ErrorLevel":{"type":"string","enum":["fatal","error","warning"]},"ErrorFrame":{"description":"One frame of a stack trace.","type":"object","properties":{"function":{"type":"string","maxLength":256},"module":{"type":"string","maxLength":256},"file":{"type":"string","maxLength":256},"line":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"in_app":{"type":"boolean","description":"Persona's own code, not a library's or the system's."}},"required":[]},"ErrorException":{"description":"One exception of a report; frames innermost last (the order Sentry uses).","type":"object","properties":{"type":{"type":"string","maxLength":256},"value":{"type":"string","maxLength":1024},"frames":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/ErrorFrame"}}},"required":["type"]},"ErrorBreadcrumb":{"description":"Something that happened before the error: a screen opened, a request failed. Code-chosen short text, no user content.","type":"object","properties":{"time":{"type":"string"},"category":{"type":"string","maxLength":64},"message":{"type":"string","maxLength":200},"level":{"type":"string","maxLength":16}},"required":["category"]},"ErrorReport":{"description":"An error or crash of the hub or a device (docs/extensions/extensions.md \"Error reports\"). Clients send it to POST /api/v1/error-reports; the manager scrubs it and adds fingerprint, count and received_at before an extension gets it.","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Made by the sender; the same id again (a retry) is dropped."},"source":{"$ref":"#/$defs/ErrorSource"},"kind":{"$ref":"#/$defs/ErrorKind"},"level":{"$ref":"#/$defs/ErrorLevel"},"time":{"type":"string","description":"When it happened, RFC 3339."},"release":{"type":"string","maxLength":64},"build":{"type":"string","maxLength":64},"commit":{"type":"string","maxLength":64},"os":{"type":"string","maxLength":32},"os_version":{"type":"string","maxLength":64},"device_model":{"type":"string","maxLength":64,"description":"The model only, never an id of the device."},"message":{"type":"string","maxLength":1024},"exceptions":{"type":"array","maxItems":5,"items":{"$ref":"#/$defs/ErrorException"}},"breadcrumbs":{"type":"array","maxItems":30,"items":{"$ref":"#/$defs/ErrorBreadcrumb"}},"tags":{"type":"object","maxProperties":16,"additionalProperties":{"type":"string","maxLength":64}},"previous_launch":{"type":"boolean","description":"It happened in an earlier run of the app and is sent now."},"fingerprint":{"type":"string","description":"Set by the manager: reports with the same one are the same problem."},"count":{"type":"integer","minimum":1,"description":"Set by the manager: how many of this fingerprint it folded into this one (1 or more)."},"received_at":{"type":"string","description":"Set by the manager, RFC 3339."}},"required":["id","source","kind","level","time"]},"ErrorReportsDeliver":{"description":"error_reports.deliver, sent to an extension with an error_reports contribution: reports, already scrubbed, deduplicated and rate limited. A notification: no answer, not sent again.","type":"object","properties":{"contribution":{"type":"string"},"reports":{"type":"array","items":{"$ref":"#/$defs/ErrorReport"}}},"required":["contribution","reports"]},"AuthRelayCompleteParams":{"description":"auth_relay.complete's parameters: an authorization link one of the user's Agents stopped at, on a host and path the contribution names. The manager has checked that the Agent's own command printed it on one of the user's computers. The link is a secret while it lives: never log it.","type":"object","properties":{"contribution":{"type":"string"},"url":{"type":"string","maxLength":4096}},"required":["contribution","url"]},"AuthRelayStatus":{"description":"How auth_relay.complete ended: done (authorized, the Agent can go on), manual (not one it completes: the user's), failed (one it completes, but it did not go through).","type":"string","enum":["done","manual","failed"]},"AuthRelayReason":{"description":"Why it was not done: not_handled (not a link it completes), not_signed_in (its account is not signed in for the page), new_permissions (the page asks for more than was granted before), app_not_allowed (the extension's own settings leave this app to the user), unknown_page (not the page it knows), unavailable (what it completes them with can't be reached), not_confirmed (it clicked, the page never said it was done), expired (the link is no longer valid).","type":"string","enum":["not_handled","not_signed_in","new_permissions","app_not_allowed","unknown_page","unavailable","not_confirmed","expired"]},"AuthRelayResult":{"description":"What auth_relay.complete answers. Never the link, a token or a page's text.","type":"object","properties":{"status":{"$ref":"#/$defs/AuthRelayStatus"},"app":{"type":"string","maxLength":80,"description":"The app the page authorized (or asked to), as the page names it."},"reason":{"$ref":"#/$defs/AuthRelayReason"}},"required":["status"]},"SecretPurpose":{"description":"What a secret value is resolved for: kind extension (an extension's secret, id its id), launcher (a launcher's or model provider's key, id its name, machine the computer it goes to) or agent_run (handed to one Agent run after the user approved it on the phone, id the variable's name, machine and session the Agent's).","type":"object","properties":{"kind":{"type":"string","enum":["extension","launcher","agent_run"]},"id":{"type":"string","maxLength":200},"machine":{"type":"string","maxLength":200},"session":{"type":"string","maxLength":200}},"required":["kind","id"]},"SecretsDescribeParams":{"description":"secrets.describe's parameters: a reference of one of the contribution's schemes.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024}},"required":["contribution","reference"]},"SecretsDescribeResult":{"description":"What secrets.describe answers: words for people (the item and field), never a value.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":200},"detail":{"type":"string","maxLength":200}},"required":["title"]},"SecretsResolveParams":{"description":"secrets.resolve's parameters: the reference and what it is resolved for. Only the manager calls it.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024},"purpose":{"$ref":"#/$defs/SecretPurpose"}},"required":["contribution","reference","purpose"]},"SecretsResolveResult":{"description":"What secrets.resolve answers: the value, at most 16 KB. Errors: not_found, not_signed_in, rate_limited (data.retry_after), refused.","type":"object","properties":{"value":{"type":"string","minLength":1,"maxLength":16384}},"required":["value"]},"SecretsUsedEvent":{"description":"secrets.used (an event to the provider, no answer): a reference it resolved was used, for the usage record its own page shows. Never the value.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024},"purpose":{"$ref":"#/$defs/SecretPurpose"},"at":{"type":"string","format":"date-time"},"approved_by":{"type":"string","description":"settings (a reference saved in Settings), rule (an Always rule) or the approving device's id.","maxLength":200}},"required":["contribution","reference","purpose","at"]},"ExtensionNotification":{"description":"extension_notification in an extension's alert push: whose it is, the page a tap opens (ui with state) and its buttons (category ext.<extension>.<hash of the action ids>, registered by the app as it meets it).","type":"object","properties":{"extension":{"type":"string"},"ui":{"type":"string"},"state":{"type":"string"},"actions":{"type":"array","maxItems":3,"items":{"$ref":"#/$defs/NotifyAction"}}},"required":["extension"]}}}}"###
+public nonisolated enum ExtensionWireSchemas {
+    public static let json = ###"{"stream.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"stream.schema.json","title":"Extension native UI stream protocol","description":"Native UI stream protocol 1 (#5956). Server-only JSX execution, manager-owned sessions and native snapshots/deltas over the existing authenticated app WebSocket. Engine activation remains subject to independent sandbox gates. Empty deltas may retain a version for unchanged non-event work or advance exactly one to consume every accepted/ambiguous callback, including no-UI-change writes.","$defs":{"UIStreamItem":{"$ref":"view.schema.json#/$defs/Component","oneOf":[{"$ref":"view.schema.json#/$defs/TextComponent","properties":{"type":{},"key":{},"text":{},"style":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/MetricComponent","properties":{"type":{},"key":{},"label":{},"value":{},"detail":{},"tone":{},"icon":{},"icon_color":{},"spark":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ProgressComponent","properties":{"type":{},"key":{},"label":{},"ratio":{},"detail":{},"tone":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/RowComponent","properties":{"type":{},"key":{},"title":{},"subtitle":{},"value":{},"badge":{},"action":{},"icon":{},"avatar":{},"thumbnail":{},"icon_color":{},"control":{},"actions":{},"spark":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ButtonComponent","properties":{"type":{},"key":{},"title":{},"action":{},"role":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/LinkComponent","properties":{"type":{},"key":{},"title":{},"url":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/FieldComponent","properties":{"type":{},"key":{},"name":{},"label":{},"kind":{},"value":{},"choices":{},"placeholder":{},"earliest":{},"latest":{},"detail":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/DividerComponent","properties":{"type":{},"key":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ChartComponent","properties":{"type":{},"key":{},"kind":{},"series":{},"title":{},"unit":{},"stacked":{},"detail":{},"center":{},"rising":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/StatGridComponent","properties":{"type":{},"key":{},"stats":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/SegmentedComponent","properties":{"type":{},"key":{},"name":{},"choices":{},"value":{},"action":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/MarkdownComponent","properties":{"type":{},"key":{},"text":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/TableComponent","properties":{"type":{},"key":{},"columns":{},"rows":{},"caption":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/EmptyComponent","properties":{"type":{},"key":{},"title":{},"detail":{},"icon":{},"button":{},"icon_color":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/LoadingComponent","properties":{"type":{},"key":{},"title":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/HeaderComponent","properties":{"type":{},"key":{},"title":{},"subtitle":{},"badges":{},"facts":{},"avatar":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/BreadcrumbComponent","properties":{"type":{},"key":{},"crumbs":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/FileTreeComponent","properties":{"type":{},"key":{},"entries":{},"selected":{},"action":{},"expand":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CodeComponent","properties":{"type":{},"key":{},"path":{},"language":{},"text":{},"start_line":{},"highlight":{},"truncated":{},"load":{},"line_url":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/DiffComponent","properties":{"type":{},"key":{},"path":{},"old_path":{},"status":{},"language":{},"additions":{},"deletions":{},"binary":{},"collapsed":{},"hunks":{},"threads":{},"load":{},"expand":{},"comment":{},"context":{},"viewed":{},"mark_viewed":{},"revision":{},"generated":{},"similarity":{},"draft":{},"suggestions":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CommentThreadComponent","properties":{"type":{},"key":{},"title":{},"comments":{},"resolved":{},"reply":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ComposerComponent","properties":{"type":{},"key":{},"name":{},"placeholder":{},"value":{},"buttons":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/ImageComponent","properties":{"type":{},"key":{},"src":{},"alt":{},"caption":{},"aspect":{},"fit":{},"no_zoom":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/GridComponent","properties":{"type":{},"key":{},"tiles":{},"max_columns":{}},"additionalProperties":false},{"$ref":"view.schema.json#/$defs/CarouselComponent","properties":{"type":{},"key":{},"title":{},"tiles":{},"width":{}},"additionalProperties":false}],"x-discriminator":"type","properties":{"key":{"$ref":"#/$defs/UIStreamKey"}},"required":["key"]},"UIStreamSection":{"$ref":"view.schema.json#/$defs/Section","properties":{"key":{"$ref":"#/$defs/UIStreamKey"},"title":{},"footer":{},"items":{"type":"array","maxItems":300,"items":{"$ref":"#/$defs/UIStreamItem"}},"more":{},"pane":{}},"required":["key"],"additionalProperties":false},"UIStreamView":{"$ref":"view.schema.json#/$defs/View","properties":{"title":{},"sections":{"type":"array","maxItems":300,"items":{"$ref":"#/$defs/UIStreamSection"}},"state":{"type":"string","maxLength":16384},"refresh_after":{},"search":{},"filter":{},"tabs":{},"layout":{},"review":{},"fallback":{},"pages":{"type":"object","maxProperties":0}},"additionalProperties":false},"UIStreamKey":{"type":"string","minLength":1,"maxLength":128,"description":"Opaque stable node key; one namespace for root, sections, components and tiles. Uniqueness and topology are reducer checks."},"UIStreamID":{"type":"string","minLength":1,"maxLength":128,"description":"Opaque session, generation, request or event identifier. Never an authority claim or a credential."},"UIStreamVersion":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"Positive JSON-safe integer. Monotonic within an epoch; rotate the epoch before exhaustion. Ordering is a reducer check."},"UIStreamScalar":{"oneOf":[{"type":"null"},{"type":"boolean"},{"type":"number","minimum":-9007199254740991,"maximum":9007199254740991},{"type":"string","maxLength":4096}],"x-untagged":true,"x-json-value":true,"description":"Bounded JSON scalar, not executable content. Strings at most 4096 code points; finite numbers in the JSON-safe range."},"UIStreamValue":{"oneOf":[{"$ref":"#/$defs/UIStreamScalar"},{"type":"array","items":{"$ref":"#/$defs/UIStreamScalar"},"maxItems":64},{"type":"object","additionalProperties":{"$ref":"#/$defs/UIStreamScalar"},"propertyNames":{"type":"string","minLength":1,"maxLength":128},"maxProperties":64}],"x-untagged":true,"x-json-value":true,"description":"Interaction value: scalar, scalar array or scalar map only (one container level). No functions, callbacks, binary data or nested containers. Never send credentials or secret field contents."},"UIStreamCapability":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"components":{"type":"array","items":{"type":"string","minLength":1,"maxLength":64},"maxItems":64,"uniqueItems":true}},"required":["protocol","components"],"additionalProperties":false,"x-preserve-required":true,"description":"Client opt-in for protocol 1 plus supported native component tags. ui_version alone does not opt in. Declaration is not runtime support."},"UIStreamSnapshot":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"root_key":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"}},"required":["protocol","session","epoch","version","root_key","view"],"additionalProperties":false,"x-preserve-required":true,"description":"Full authoritative tree before deltas, including after resume or recovery. Keys required on sections/items; tiles and global uniqueness need semantic validation."},"UIStreamDelta":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"base_version":{"$ref":"#/$defs/UIStreamVersion"},"version":{"$ref":"#/$defs/UIStreamVersion"},"operations":{"type":"array","items":{"$ref":"#/$defs/UIStreamOperation"},"maxItems":256}},"required":["protocol","session","epoch","base_version","version","operations"],"additionalProperties":false,"x-preserve-required":true,"description":"Atomic batch, at most 256 operations. An explicit empty batch keeps the version for a non-event no-op or advances exactly one revision as an accepted or ambiguous callback fence. Validate against a staged whole tree before committing. Ordering/equality are reducer checks."},"UIStreamEvent":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"event_id":{"$ref":"#/$defs/UIStreamID"},"key":{"$ref":"#/$defs/UIStreamKey"},"action":{"$ref":"#/$defs/UIStreamID","description":"Opaque registered callback Action.id for this node and event slot; never callback code or an authority claim."},"event":{"type":"string","enum":["press","change","submit"]},"value":{"$ref":"#/$defs/UIStreamValue"}},"required":["protocol","session","epoch","version","event_id","key","action","event","value"],"additionalProperties":false,"x-preserve-required":true,"description":"Authenticated owner interaction for the displayed generation/version. Deduplicate event_id before writes. Validate action against the saved node/event slot, then resolve its callback server-side; no callback code or secrets in this payload."},"UIStreamOperation":{"oneOf":[{"$ref":"#/$defs/UIStreamReplace"},{"$ref":"#/$defs/UIStreamInsert"},{"$ref":"#/$defs/UIStreamRemove"},{"$ref":"#/$defs/UIStreamMove"}],"x-discriminator":"op","x-preserve-required":true,"x-unknown-policy":"recover","description":"Atomic native tree operation. Unknown operations invalidate the entire batch and require a snapshot, never skipping. Tiles update by replacing their containing grid/carousel."},"UIStreamReplace":{"type":"object","properties":{"op":{"const":"replace"},"key":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"},"section":{"$ref":"#/$defs/UIStreamSection"},"item":{"$ref":"#/$defs/UIStreamItem"}},"required":["op","key"],"additionalProperties":false,"description":"Replace a complete node/subtree; omitted properties are cleared. Exactly one payload, matching the target kind and key.","oneOf":[{"required":["view"]},{"required":["section"]},{"required":["item"]}]},"UIStreamInsert":{"type":"object","properties":{"op":{"const":"insert"},"parent":{"$ref":"#/$defs/UIStreamKey"},"before":{"$ref":"#/$defs/UIStreamKey"},"section":{"$ref":"#/$defs/UIStreamSection"},"item":{"$ref":"#/$defs/UIStreamItem"}},"required":["op","parent"],"additionalProperties":false,"description":"Insert a section under root or item under section. before names a destination sibling; omitted means append.","oneOf":[{"required":["section"]},{"required":["item"]}]},"UIStreamRemove":{"type":"object","properties":{"op":{"const":"remove"},"key":{"$ref":"#/$defs/UIStreamKey"}},"required":["op","key"],"additionalProperties":false,"description":"Remove a node and its subtree, never the root. Existence/root checks are semantic."},"UIStreamMove":{"type":"object","properties":{"op":{"const":"move"},"key":{"$ref":"#/$defs/UIStreamKey"},"parent":{"$ref":"#/$defs/UIStreamKey"},"before":{"$ref":"#/$defs/UIStreamKey"}},"required":["op","key","parent"],"additionalProperties":false,"description":"Move a section/item subtree. No cycles, tile moves or wrong parent kinds. Omitted before appends."},"UIStreamRequest":{"oneOf":[{"$ref":"#/$defs/UIStreamOpenRequest"},{"$ref":"#/$defs/UIStreamCloseRequest"},{"$ref":"#/$defs/UIStreamSuspendRequest"},{"$ref":"#/$defs/UIStreamResumeRequest"},{"$ref":"#/$defs/UIStreamEventRequest"},{"$ref":"#/$defs/UIStreamSnapshotRequest"}],"x-discriminator":"request","x-preserve-required":true,"x-unknown-policy":"reject","description":"Owner-bound lifecycle request over the authenticated WebSocket. The transport supplies principal/hub identity; never trust an owner field from JSON. No endpoint or runtime is enabled by these contracts."},"UIStreamOpenRequest":{"type":"object","properties":{"request":{"const":"open"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"extension":{"$ref":"#/$defs/UIStreamID"},"contribution":{"$ref":"#/$defs/UIStreamID"},"context":{"$ref":"protocol.schema.json#/$defs/UIContext"},"state":{"type":"string","maxLength":16384}},"required":["request","protocol","request_id","extension","contribution","context","state"],"additionalProperties":false,"description":"Reauthorize the extension/contribution and explicit context.stream capability; allocate an owner-bound session and send a snapshot before deltas."},"UIStreamCloseRequest":{"type":"object","properties":{"request":{"const":"close"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"}},"required":["request","protocol","request_id","session","epoch"],"additionalProperties":false,"description":"Idempotent for unknown/already closed owned sessions; unmount and release state, callbacks and effects."},"UIStreamSuspendRequest":{"type":"object","properties":{"request":{"const":"suspend"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"}},"required":["request","protocol","request_id","session","epoch"],"additionalProperties":false,"description":"Stop UI intervals/polling and bound pending work. Service work is independent of visibility."},"UIStreamResumeRequest":{"type":"object","properties":{"request":{"const":"resume"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"}},"required":["request","protocol","request_id","session","epoch","version"],"additionalProperties":false,"description":"Reauthorize the owned session, discard stale delta chains and send a fresh snapshot before further deltas."},"UIStreamEventRequest":{"type":"object","properties":{"request":{"const":"event"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"interaction":{"$ref":"#/$defs/UIStreamEvent"}},"required":["request","protocol","request_id","interaction"],"additionalProperties":false,"description":"Authorize and deduplicate the interaction before invoking its registered server-side callback. request_id is correlation, not write deduplication."},"UIStreamSnapshotRequest":{"type":"object","properties":{"request":{"const":"snapshot"},"protocol":{"type":"integer","const":1},"request_id":{"$ref":"#/$defs/UIStreamID"},"session":{"$ref":"#/$defs/UIStreamID"},"epoch":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"}},"required":["request","protocol","request_id","session","epoch","version"],"additionalProperties":false,"description":"Read-only recovery request: reauthorize and send a complete snapshot, never replay an interaction or write."},"UIStreamClientEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"manager":{"type":"string","minLength":1,"maxLength":128},"request":{"$ref":"#/$defs/UIStreamRequest"}},"required":["type"],"oneOf":[{"required":["request"]}]},"UIStreamActionResult":{"x-preserve-required":true,"allOf":[{"$ref":"view.schema.json#/$defs/ActionResult"}],"type":"object","additionalProperties":false,"properties":{"toast":{"type":"string","maxLength":2000},"open_url":{"type":"string","maxLength":4096},"push":{"$ref":"#/$defs/UIStreamPush"},"pop":{"type":"boolean"},"lines":{"$ref":"#/$defs/UIStreamFileLines"}},"description":"Bounded presentation-only subset of native ActionResult, at most 64 KiB UTF-8 JSON. Carried in the correlated event receipt and cached on replay. Clients apply it once per session/epoch/event_id, only after reaching receipt.version; never execute HTML, JavaScript or infer authorization from a result. JSX state owns view/items updates through snapshots/deltas. Manager validates push ownership and credential-free HTTPS (or its own permitted native URL)."},"UIStreamPush":{"x-preserve-required":true,"allOf":[{"$ref":"view.schema.json#/$defs/Push"}],"type":"object","additionalProperties":false,"properties":{"ui":{"type":"string","maxLength":64},"state":{"type":"string","maxLength":16384},"title":{"type":"string","maxLength":2000}},"description":"Extension-owned native Push only: no assistant page or arbitrary target. State is additionally bounded to 16 KiB UTF-8. Not authority to invoke an action."},"UIStreamFileLines":{"allOf":[{"$ref":"view.schema.json#/$defs/FileLines"}],"type":"object","additionalProperties":false,"properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"side":{"$ref":"view.schema.json#/$defs/DiffSide"},"start":{"type":"integer","minimum":1,"maximum":9007199254740991},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}},"total":{"type":"integer","minimum":0,"maximum":9007199254740991}},"required":["path","start","lines"],"x-preserve-required":true,"description":"Native FileLines presentation response correlated to the saved event, not filesystem access or code execution. The complete result remains limited to 64 KiB UTF-8 JSON."},"UIStreamReceipt":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"session":{"type":"string","minLength":1,"maxLength":128},"epoch":{"type":"string","minLength":1,"maxLength":128},"event_id":{"type":"string","minLength":1,"maxLength":128},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"status":{"type":"string","enum":["accepted","ambiguous","rejected"]},"result":{"$ref":"#/$defs/UIStreamActionResult"}},"required":["session","epoch","event_id","version","status"]},"UIStreamFailure":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"code":{"type":"string","minLength":1,"maxLength":128},"message":{"type":"string","maxLength":4096}},"required":["code","message"]},"UIStreamSnapshotEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"snapshot"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"snapshot":{"$ref":"#/$defs/UIStreamSnapshot"}},"required":["type","kind","snapshot"]},"UIStreamDeltaEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"delta"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"delta":{"$ref":"#/$defs/UIStreamDelta"}},"required":["type","kind","delta"]},"UIStreamReceiptEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"receipt"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"receipt":{"$ref":"#/$defs/UIStreamReceipt"}},"required":["type","kind","receipt"]},"UIStreamErrorEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"error"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"error":{"$ref":"#/$defs/UIStreamFailure"}},"required":["type","kind","error"]},"UIStreamClosedEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"closed"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"session":{"type":"string","minLength":1,"maxLength":128}},"required":["type","kind","session"]},"UIStreamServerEnvelope":{"oneOf":[{"$ref":"#/$defs/UIStreamSnapshotEnvelope"},{"$ref":"#/$defs/UIStreamDeltaEnvelope"},{"$ref":"#/$defs/UIStreamReceiptEnvelope"},{"$ref":"#/$defs/UIStreamErrorEnvelope"},{"$ref":"#/$defs/UIStreamClosedEnvelope"},{"$ref":"#/$defs/UIStreamSuspendedEnvelope"}],"x-discriminator":"kind","x-preserve-required":true,"x-unknown-policy":"reject"},"UIStreamSuspendedEnvelope":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"type":{"const":"extension_ui_stream"},"kind":{"const":"suspended"},"request_id":{"type":"string","minLength":1,"maxLength":128},"manager":{"type":"string","minLength":1,"maxLength":128},"session":{"type":"string","minLength":1,"maxLength":128}},"required":["type","kind","session"]},"UIPageSnapshot":{"type":"object","additionalProperties":false,"x-preserve-required":true,"properties":{"generation":{"$ref":"#/$defs/UIStreamID"},"version":{"$ref":"#/$defs/UIStreamVersion"},"rootKey":{"$ref":"#/$defs/UIStreamKey"},"view":{"$ref":"#/$defs/UIStreamView"}},"required":["generation","version","rootKey","view"],"description":"Source-process native render revision, independent of manager-owned wire revisions. Validate original JSON before fitting; never trust source recipients or owners."}}},"view.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"view.schema.json","title":"Extension views","description":"What an extension draws (ui.render, ui.action): a View of sections of components, drawn by every app with its own design system. Also the assistant's persona-card, which joins the components in #1850.","$defs":{"Tone":{"description":"A role color the app picks, never one of the extension's own. An unknown tone draws as neutral.","type":"string","enum":["neutral","positive","caution","danger"]},"TextStyle":{"description":"title and headline (UI version 6) are a section's big title and a small heading; an older app draws them as body.","type":"string","enum":["body","secondary","caption","code","title","headline"]},"FieldKind":{"description":"date, time, datetime, multichoice and multiline are UI version 6. Values stay strings: date YYYY-MM-DD, time HH:MM (24 hours), datetime YYYY-MM-DDTHH:MM local to context.tz, multichoice a JSON array of the chosen values, multiline the text with \\n.","type":"string","enum":["text","secret","number","toggle","choice","date","time","datetime","multichoice","multiline"]},"ChartKind":{"description":"area, candlestick, donut and pie are UI version 6: an older app gets a line (an area, a candlestick's closes) or bars (a donut, a pie).","type":"string","enum":["bar","line","area","candlestick","donut","pie"]},"CandleRising":{"description":"A candlestick's rising candle: green (the default) or red, as the market writes it; the falling one is the other.","type":"string","enum":["green","red"]},"Color":{"description":"A named color (UI version 6): each app has its own of each, right in light and dark and in every style. Not a hex; an unknown one draws as the app's quiet ink. Only on badges, icons, tiles, chart series and sparks, never on text; never with a tone on the same object.","type":"string","enum":["red","orange","amber","yellow","green","teal","blue","indigo","purple","pink","gray"]},"ButtonRole":{"type":"string","enum":["normal","destructive"]},"Placement":{"description":"A slot in the apps an extension draws at (docs \"UI slots\"). extension_page is plugin_page's new name (UI version 3): the hub takes both and answers the new API with extension_page, the old one with plugin_page.","type":"string","enum":["plugin_page","launcher_section","nav_page","overview_card","machine_section","inbox_item","extension_page","widget","capsule_card"]},"Size":{"description":"How much room a view has: compact (a card), full (a page, a section), or for a widget the family it is drawn for (WidgetFamily).","type":"string","enum":["compact","full","small","medium","large","accessory_circular","accessory_rectangular","accessory_inline"]},"WidgetFamily":{"description":"A widget's size outside the app (docs \"System placements\"): a home screen widget's small / medium / large, a Lock Screen or watch face complication's accessory_*.","type":"string","enum":["small","medium","large","accessory_circular","accessory_rectangular","accessory_inline"]},"Platform":{"type":"string","enum":["ios","mac","android","web"]},"NavIcon":{"description":"The fixed icon set: a nav_page's icon, a row's, an empty state's (UI version 3 for the last two and the icons after money; 4 for those after settings; 6 for those after file, and a metric's, a tile's, a row action's). Each app draws its own icon for the meaning; an unknown one draws as the default (extension; plugin is its old name).","type":"string","enum":["plugin","chart","gauge","list","bell","doc","calendar","money","extension","person","chat","mail","link","folder","star","check","warning","clock","tag","search","settings","branch","commit","code","pull_request","merge","file","home","sofa","light","power","fan","thermometer","droplet","lock","unlock","door","window","camera","video","play","pause","stop","speaker","music","tv","plug","battery","bolt","sun","moon","cloud","rain","snow","wind","leaf","car","location","robot","wifi","shield","trend_up","trend_down","wallet","bank","heart","plus","minus","trash","edit","refresh","share","info"]},"View":{"type":"object","properties":{"title":{"type":"string","maxLength":2000},"sections":{"type":"array","items":{"$ref":"#/$defs/Section"}},"state":{"type":"string","description":"The extension's own, sent back with the next render or action; at most 16 KB."},"refresh_after":{"type":"integer","minimum":0,"maximum":86400,"x-since":2,"description":"Draw again after this many seconds while on screen (30 at least; 0 never)."},"search":{"$ref":"#/$defs/Search","x-since":3},"filter":{"$ref":"#/$defs/Filter","x-since":3},"tabs":{"$ref":"#/$defs/Tabs","x-since":4},"layout":{"$ref":"#/$defs/Layout","x-since":4},"review":{"$ref":"#/$defs/Review","x-since":5},"fallback":{"type":"string","minLength":1,"maxLength":2000,"description":"Plain text for an assistant card: required by CheckAssistantView; not required for extension views."},"pages":{"type":"object","additionalProperties":{"$ref":"#/$defs/View"},"description":"Assistant card details keyed by page name; at most 8. A detail page cannot contain pages itself. Push.page refers to this root map."}},"required":["sections"]},"Section":{"type":"object","properties":{"key":{"type":"string","minLength":1,"maxLength":128,"x-since":7,"description":"Stable section identity in stream protocol 1 (UI version 7); optional for legacy snapshots."},"title":{"type":"string","maxLength":2000},"footer":{"type":"string","maxLength":2000},"items":{"type":"array","items":{"$ref":"#/$defs/Component"}},"more":{"$ref":"#/$defs/More","x-since":3},"pane":{"$ref":"#/$defs/Pane","x-since":4}},"required":["items"]},"Component":{"description":"One component of a view, told apart by type. A type an app does not know is skipped and the rest drawn.","x-discriminator":"type","oneOf":[{"$ref":"#/$defs/TextComponent"},{"$ref":"#/$defs/MetricComponent"},{"$ref":"#/$defs/ProgressComponent"},{"$ref":"#/$defs/RowComponent"},{"$ref":"#/$defs/ButtonComponent"},{"$ref":"#/$defs/LinkComponent"},{"$ref":"#/$defs/FieldComponent"},{"$ref":"#/$defs/DividerComponent"},{"$ref":"#/$defs/ChartComponent"},{"$ref":"#/$defs/StatGridComponent"},{"$ref":"#/$defs/SegmentedComponent"},{"$ref":"#/$defs/MarkdownComponent"},{"$ref":"#/$defs/TableComponent"},{"$ref":"#/$defs/EmptyComponent"},{"$ref":"#/$defs/LoadingComponent"},{"$ref":"#/$defs/HtmlComponent"},{"$ref":"#/$defs/HeaderComponent"},{"$ref":"#/$defs/BreadcrumbComponent"},{"$ref":"#/$defs/FileTreeComponent"},{"$ref":"#/$defs/CodeComponent"},{"$ref":"#/$defs/DiffComponent"},{"$ref":"#/$defs/CommentThreadComponent"},{"$ref":"#/$defs/ComposerComponent"},{"$ref":"#/$defs/ImageComponent"},{"$ref":"#/$defs/GridComponent"},{"$ref":"#/$defs/CarouselComponent"}]},"TextComponent":{"description":"A paragraph.","type":"object","x-since":1,"properties":{"type":{"const":"text"},"key":{"type":"string","maxLength":128,"x-since":3},"text":{"type":"string","minLength":1,"maxLength":2000},"style":{"$ref":"#/$defs/TextStyle"}},"required":["type","text"]},"MetricComponent":{"description":"A number with its label.","type":"object","x-since":1,"properties":{"type":{"const":"metric"},"key":{"type":"string","maxLength":128,"x-since":3},"label":{"type":"string","minLength":1,"maxLength":2000},"value":{"type":"string","minLength":1,"maxLength":2000},"detail":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"},"icon":{"$ref":"#/$defs/NavIcon","x-since":6},"icon_color":{"$ref":"#/$defs/Color","x-since":6},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["type","label","value"]},"ProgressComponent":{"description":"A bar filled to ratio (0 to 1).","type":"object","x-since":1,"properties":{"type":{"const":"progress"},"key":{"type":"string","maxLength":128,"x-since":3},"label":{"type":"string","minLength":1,"maxLength":2000},"ratio":{"type":"number","minimum":0,"maximum":1,"x-go-pointer":true},"detail":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"}},"required":["type","label","ratio"]},"RowComponent":{"description":"A row of a list; with an action it can be tapped.","type":"object","x-since":1,"properties":{"type":{"const":"row"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"subtitle":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"badge":{"$ref":"#/$defs/Badge"},"action":{"$ref":"#/$defs/Action"},"icon":{"$ref":"#/$defs/NavIcon","x-since":3,"description":"At most one of icon, avatar and thumbnail."},"avatar":{"$ref":"#/$defs/Avatar","x-since":3},"thumbnail":{"$ref":"#/$defs/Thumbnail","x-since":3},"icon_color":{"$ref":"#/$defs/Color","x-since":6},"control":{"$ref":"#/$defs/RowControl","x-since":6,"description":"A switch, a slider or a stepper; the row then has a key."},"actions":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/RowAction"},"x-since":6,"description":"Extra actions in the row's menu and under a swipe: shortcuts only, the same must be possible on the page the row opens."},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["type","title"]},"ButtonComponent":{"description":"A button; its title never wraps.","type":"object","x-since":1,"properties":{"type":{"const":"button"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"},"role":{"$ref":"#/$defs/ButtonRole"}},"required":["type","title","action"]},"LinkComponent":{"description":"A link the app opens inside itself: https only.","type":"object","x-since":1,"properties":{"type":{"const":"link"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"url":{"type":"string","pattern":"^https://[^/?#]+"}},"required":["type","title","url"]},"FieldComponent":{"description":"An input; its value goes back under name when an action submits. A secret is never filled in.","type":"object","x-since":1,"properties":{"type":{"const":"field"},"key":{"type":"string","maxLength":128,"x-since":3},"name":{"type":"string","minLength":1},"label":{"type":"string","minLength":1,"maxLength":2000},"kind":{"$ref":"#/$defs/FieldKind"},"value":{"type":"string","maxLength":2000},"choices":{"type":"array","items":{"$ref":"#/$defs/Choice"}},"placeholder":{"type":"string","maxLength":2000},"earliest":{"type":"string","maxLength":40,"x-since":6,"description":"date, time, datetime: the first one allowed, written like value."},"latest":{"type":"string","maxLength":40,"x-since":6,"description":"date, time, datetime: the last one allowed."},"detail":{"type":"string","maxLength":2000,"x-since":6,"description":"A line of help under the field."}},"required":["type","name","label","kind"]},"DividerComponent":{"description":"A line between two groups of a section.","type":"object","x-since":1,"properties":{"type":{"const":"divider"},"key":{"type":"string","maxLength":128,"x-since":3}},"required":["type"]},"ChartComponent":{"description":"A chart: bar, line, and in UI version 6 area, candlestick, donut, pie. Every series has the same labels in the same order; with more than one series each is named. A candlestick has one series whose points all have open, high, low and close (value is the close), at most 240 of them; a donut or a pie one series of 2 to 8 points.","type":"object","x-since":2,"properties":{"type":{"const":"chart"},"key":{"type":"string","maxLength":128,"x-since":3},"kind":{"$ref":"#/$defs/ChartKind"},"series":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ChartSeries"}},"title":{"type":"string","maxLength":2000},"unit":{"type":"string","maxLength":2000},"stacked":{"type":"boolean"},"detail":{"type":"string","maxLength":2000},"center":{"type":"string","maxLength":20,"x-since":6,"description":"donut: the words in the hole (a total)."},"rising":{"$ref":"#/$defs/CandleRising","x-since":6,"description":"candlestick: the color of a rising candle."}},"required":["type","kind","series"]},"StatGridComponent":{"description":"A few numbers side by side.","type":"object","x-since":2,"properties":{"type":{"const":"stat_grid"},"key":{"type":"string","maxLength":128,"x-since":3},"stats":{"type":"array","minItems":1,"maxItems":6,"items":{"$ref":"#/$defs/Stat"}}},"required":["type","stats"]},"SegmentedComponent":{"description":"One of a few, chosen at once: its action goes with values {name: the chosen value}.","type":"object","x-since":2,"properties":{"type":{"const":"segmented"},"key":{"type":"string","maxLength":128,"x-since":3},"name":{"type":"string","minLength":1},"choices":{"type":"array","minItems":2,"maxItems":5,"items":{"$ref":"#/$defs/Choice"}},"value":{"type":"string"},"action":{"$ref":"#/$defs/Action"}},"required":["type","name","choices","value","action"]},"MarkdownComponent":{"description":"Text in a safe subset of Markdown: headings (1 to 3), paragraphs, lists, bold, italics, inline code, code blocks, quotes, https links (opened in the app). No HTML, no images, no tables (a table is a table component). An older app gets it as plain text.","type":"object","x-since":3,"properties":{"type":{"const":"markdown"},"key":{"type":"string","maxLength":128,"x-since":3},"text":{"type":"string","minLength":1,"maxLength":20000}},"required":["type","text"]},"TableComponent":{"description":"A table: 1 to 8 columns, at most 100 rows, each with as many cells as there are columns. Narrow screens scroll it sideways; cells never squeeze. An older app gets a row per line.","type":"object","x-since":3,"properties":{"type":{"const":"table"},"key":{"type":"string","maxLength":128,"x-since":3},"columns":{"type":"array","minItems":1,"maxItems":8,"items":{"$ref":"#/$defs/TableColumn"}},"rows":{"type":"array","maxItems":100,"items":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":2000}}},"caption":{"type":"string","maxLength":2000}},"required":["type","columns","rows"]},"EmptyComponent":{"description":"An empty state: nothing here yet, and maybe one thing to do about it. An older app gets a text and a button.","type":"object","x-since":3,"properties":{"type":{"const":"empty"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","minLength":1,"maxLength":2000},"detail":{"type":"string","maxLength":2000},"icon":{"$ref":"#/$defs/NavIcon"},"button":{"$ref":"#/$defs/EmptyButton"},"icon_color":{"$ref":"#/$defs/Color","x-since":6}},"required":["type","title"]},"LoadingComponent":{"description":"Loading: the extension answers it while its data comes, then sends ui.invalidate to be drawn again. An older app gets a quiet text.","type":"object","x-since":3,"properties":{"type":{"const":"loading"},"key":{"type":"string","maxLength":128,"x-since":3},"title":{"type":"string","maxLength":2000}},"required":["type"]},"HtmlComponent":{"type":"object","x-since":4,"x-assistant-only":true,"description":"Assistant only: self-contained HTML. Execution requires an isolated, network-denying renderer; unsupported clients show the root fallback. Extensions never execute it.","properties":{"type":{"const":"html"},"key":{"type":"string","maxLength":128},"html":{"type":"string","minLength":1,"maxLength":65536},"height":{"type":"integer","minimum":160,"maximum":640},"title":{"type":"string","maxLength":2000}},"required":["type","html"]},"HeaderComponent":{"description":"A detail page's head: a big title, state badges, a line of facts (author, branches, time, size). An older app gets a text and a row per fact.","type":"object","x-since":4,"properties":{"type":{"const":"header"},"key":{"type":"string","maxLength":128},"title":{"type":"string","minLength":1,"maxLength":2000},"subtitle":{"type":"string","maxLength":2000},"badges":{"type":"array","maxItems":4,"items":{"$ref":"#/$defs/Badge"}},"facts":{"type":"array","maxItems":8,"items":{"$ref":"#/$defs/Fact"}},"avatar":{"$ref":"#/$defs/Avatar"}},"required":["type","title"]},"BreadcrumbComponent":{"description":"A path (repo / src / main.go): every crumb but the last may be tapped. An older app gets one text.","type":"object","x-since":4,"properties":{"type":{"const":"breadcrumb"},"key":{"type":"string","maxLength":128},"crumbs":{"type":"array","minItems":1,"maxItems":20,"items":{"$ref":"#/$defs/Crumb"}}},"required":["type","crumbs"]},"FileTreeComponent":{"description":"Files as a tree the app builds from their paths (a directory with one child folds into a/b/c). action opens a file (values {path}); expand loads a directory given with no entries under it (values {path}). An older app gets a row per entry.","type":"object","x-since":4,"properties":{"type":{"const":"file_tree"},"key":{"type":"string","maxLength":128},"entries":{"type":"array","maxItems":3000,"items":{"$ref":"#/$defs/TreeEntry"}},"selected":{"type":"string","maxLength":4096},"action":{"$ref":"#/$defs/Action"},"expand":{"$ref":"#/$defs/Action"}},"required":["type","entries"]},"CodeComponent":{"description":"A file's content: line numbers, the app's own syntax highlighting (language, else guessed from path), no wrapping. truncated with load: the rest comes from load (values {path, from: the next line}). An older app gets a code block.","type":"object","x-since":4,"properties":{"type":{"const":"code"},"key":{"type":"string","maxLength":128},"path":{"type":"string","maxLength":4096},"language":{"type":"string","maxLength":64},"text":{"type":"string","maxLength":200000},"start_line":{"type":"integer","minimum":1},"highlight":{"$ref":"#/$defs/LineRange"},"truncated":{"type":"boolean"},"load":{"$ref":"#/$defs/Action"},"line_url":{"type":"string","maxLength":4096,"x-since":5,"description":"An https link to lines of this file on its site, {start} and {end} standing for the lines (\u2026/blob/<sha>/a.go#L{start}-L{end})."}},"required":["type","text"]},"DiffComponent":{"description":"One file's diff: hunks of lines each starting with ' ', '+', '-' or '\\'; unified or side by side is the app's choice. threads are inline comments at their lines; comment adds one (values {path, side, line, start_line?, body}); expand shows hidden lines between hunks (values {path, hunk, direction: up, down or all}); collapsed, or without hunks, it shows a button calling load (values {path}). An older app gets a code block.","type":"object","x-since":4,"properties":{"type":{"const":"diff"},"key":{"type":"string","maxLength":128},"path":{"type":"string","minLength":1,"maxLength":4096},"old_path":{"type":"string","maxLength":4096},"status":{"$ref":"#/$defs/FileStatus"},"language":{"type":"string","maxLength":64},"additions":{"type":"integer","minimum":0},"deletions":{"type":"integer","minimum":0},"binary":{"type":"boolean"},"collapsed":{"type":"boolean"},"hunks":{"type":"array","maxItems":2000,"items":{"$ref":"#/$defs/Hunk"}},"threads":{"type":"array","maxItems":500,"items":{"$ref":"#/$defs/Thread"}},"load":{"$ref":"#/$defs/Action"},"expand":{"$ref":"#/$defs/Action"},"comment":{"$ref":"#/$defs/Action"},"context":{"$ref":"#/$defs/Action","x-since":5,"description":"Fetch hidden lines of the file (UI version 5): values {path, side: new or old, from, to: a line or end}; the extension answers with lines (ActionResult.lines), the page is not drawn again."},"viewed":{"type":"boolean","x-since":5,"description":"The user has marked this file viewed."},"mark_viewed":{"$ref":"#/$defs/Action","x-since":5,"description":"Mark the file viewed or not: values {path, viewed: true or false}. Without it the app keeps viewed on the device, by path and revision."},"revision":{"type":"string","maxLength":256,"x-since":5,"description":"What this file's change is (a blob id): a viewed mark kept on the device holds for it only."},"generated":{"type":"boolean","x-since":5,"description":"A generated file or a lockfile: folded at first."},"similarity":{"type":"integer","minimum":0,"maximum":100,"x-since":5,"description":"How alike a renamed file is to its old one, in percent."},"draft":{"$ref":"#/$defs/Action","x-since":5,"description":"Add a comment to the pending review instead of sending it alone: values as comment's."},"suggestions":{"type":"boolean","x-since":5,"description":"The extension takes ```suggestion blocks in comments."}},"required":["type","path"]},"CommentThreadComponent":{"description":"A discussion: comments in order (an event is drawn as a quiet line), and a reply box when reply is set (values {body}). An older app gets a row and a text per comment.","type":"object","x-since":4,"properties":{"type":{"const":"comment_thread"},"key":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":2000},"comments":{"type":"array","maxItems":200,"items":{"$ref":"#/$defs/Comment"}},"resolved":{"type":"boolean"},"reply":{"$ref":"#/$defs/Action"}},"required":["type","comments"]},"ComposerComponent":{"description":"A multi-line input (Markdown) with a few buttons (comment, approve, request changes, merge): the one tapped sends the text as name, with the page's fields. An older app gets a field and a button each.","type":"object","x-since":4,"properties":{"type":{"const":"composer"},"key":{"type":"string","maxLength":128},"name":{"type":"string","minLength":1},"placeholder":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"buttons":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ComposerButton"}}},"required":["type","name","buttons"]},"ImageComponent":{"description":"A picture with an optional caption; tapping it shows it full screen unless no_zoom. A ref is the extension's own picture (a camera, a map) fetched through the hub. An older app gets a row with a thumbnail (url) or a line of text (ref).","type":"object","x-since":6,"properties":{"type":{"const":"image"},"key":{"type":"string","maxLength":128},"src":{"$ref":"#/$defs/ImageSource"},"alt":{"type":"string","minLength":1,"maxLength":200,"description":"Read out, and shown when the picture does not load."},"caption":{"type":"string","maxLength":2000},"aspect":{"$ref":"#/$defs/ImageAspect"},"fit":{"$ref":"#/$defs/ImageFit"},"no_zoom":{"type":"boolean","description":"Tapping does nothing (else it shows the picture full screen)."}},"required":["type","src","alt"]},"GridComponent":{"description":"Tiles in columns that fit the width: two on a phone, more on wider screens, at most max_columns (4 when absent). Each tile counts as a component of the page. An older app gets a row per tile.","type":"object","x-since":6,"properties":{"type":{"const":"grid"},"key":{"type":"string","maxLength":128},"tiles":{"type":"array","minItems":1,"maxItems":60,"items":{"$ref":"#/$defs/Tile"}},"max_columns":{"type":"integer","minimum":1,"maximum":6}},"required":["type","tiles"]},"CarouselComponent":{"description":"Tiles in one line that scrolls sideways: cameras, rooms, a watchlist. Each tile counts as a component of the page. An older app gets a text (the title) and a row per tile.","type":"object","x-since":6,"properties":{"type":{"const":"carousel"},"key":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":2000},"tiles":{"type":"array","minItems":1,"maxItems":20,"items":{"$ref":"#/$defs/Tile"}},"width":{"$ref":"#/$defs/TileWidth"}},"required":["type","tiles"]},"ImageSource":{"description":"Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own address, which the app loads with its device credentials. An extension that writes path is refused.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+","maxLength":4096},"ref":{"type":"string","minLength":1,"maxLength":256},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048},"width":{"type":"integer","minimum":1,"maximum":8192},"height":{"type":"integer","minimum":1,"maximum":8192}}},"ImageAspect":{"description":"square 1:1, landscape 4:3 (the default), wide 16:9, portrait 3:4, auto from src's width and height (4:3 until the picture comes).","type":"string","enum":["square","landscape","wide","portrait","auto"]},"ImageFit":{"description":"fill crops to fill the frame (the default); fit shows all of it.","type":"string","enum":["fill","fit"]},"RowControlKind":{"type":"string","enum":["switch","slider","stepper"]},"RowControl":{"description":"A control in a row or a tile (UI version 6). Changing it calls ui.action with action and values {name: the new value} (a switch \"true\" or \"false\", a slider and a stepper the number). The app shows the new value at once and puts back the old one if the action fails. A slider sends when the finger lifts, a stepper 0.6 s after the last tap.","type":"object","properties":{"kind":{"$ref":"#/$defs/RowControlKind"},"name":{"type":"string","minLength":1,"maxLength":128},"on":{"type":"boolean","description":"switch: on or off."},"value":{"type":"number","x-go-pointer":true,"description":"slider, stepper: the value now."},"min":{"type":"number","x-go-pointer":true},"max":{"type":"number","x-go-pointer":true},"step":{"type":"number","x-go-pointer":true,"description":"More than 0 (checked by the hub); a slider's is (max - min) / 100 when absent."},"unit":{"type":"string","maxLength":8},"display":{"type":"string","maxLength":20,"description":"How to write the value (\"22.5 \u00b0C\"); else the number and unit."},"disabled":{"type":"boolean"},"action":{"$ref":"#/$defs/Action"}},"required":["kind","name","action"]},"RowAction":{"description":"One of a row's or a tile's extra actions (UI version 6): in its menu (long press, right click, the \u2026 button) and, with swipe, under a swipe from the trailing edge. confirm and push work as on any action; a destructive one has confirm.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":20},"icon":{"$ref":"#/$defs/NavIcon"},"role":{"$ref":"#/$defs/ButtonRole"},"swipe":{"type":"boolean","description":"Also under a swipe. At most two of a row's actions."},"action":{"$ref":"#/$defs/Action"}},"required":["title","action"]},"Spark":{"description":"A small trend line inside a row, a metric, a stat or a tile (UI version 6): values only, no axes. Without color or tone, the app's quiet ink.","type":"object","properties":{"values":{"type":"array","minItems":2,"maxItems":60,"items":{"type":"number"}},"color":{"$ref":"#/$defs/Color"},"tone":{"$ref":"#/$defs/Tone"},"fill":{"type":"boolean","description":"Shade under the line."}},"required":["values"]},"TileWidth":{"description":"A carousel's tiles: narrow about 140pt (scenes), regular about 200pt (the default; rooms), wide about 80% of the screen (camera pictures).","type":"string","enum":["narrow","regular","wide"]},"Tile":{"description":"A tile of a grid or a carousel (UI version 6): an icon or a picture, a title, a state line, a value; tapping does its action. active marks a tile that is on (a scene running, a light on) in its color.","type":"object","properties":{"key":{"type":"string","maxLength":128},"title":{"type":"string","minLength":1,"maxLength":40},"subtitle":{"type":"string","maxLength":80},"value":{"type":"string","maxLength":40},"icon":{"$ref":"#/$defs/NavIcon","description":"At most one of icon and image."},"image":{"$ref":"#/$defs/ImageSource"},"color":{"$ref":"#/$defs/Color"},"badge":{"$ref":"#/$defs/Badge"},"active":{"type":"boolean"},"spark":{"$ref":"#/$defs/Spark"},"control":{"$ref":"#/$defs/RowControl","description":"A switch only; the tile then has a key."},"actions":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/RowAction"}},"action":{"$ref":"#/$defs/Action"}},"required":["title"]},"Layout":{"description":"stack: sections one under another. split: on a wide screen the side pane's sections in a column at the start, the rest beside it, each scrolling on its own; on a narrow one the side pane folds into a bar on top that opens as a sheet.","type":"string","enum":["stack","split"]},"Pane":{"description":"Where a section of a split view goes.","type":"string","enum":["main","side"]},"FileStatus":{"type":"string","enum":["added","modified","deleted","renamed"]},"DiffSide":{"type":"string","enum":["old","new"]},"Tabs":{"description":"Tabs on top of the page (UI version 4): choosing calls ui.action with action and values {name: the value} (and the search's q). An older app gets a segmented, or buttons.","type":"object","properties":{"name":{"type":"string","minLength":1},"value":{"type":"string","maxLength":2000},"items":{"type":"array","minItems":2,"maxItems":8,"items":{"$ref":"#/$defs/Tab"}},"action":{"$ref":"#/$defs/Action"}},"required":["name","value","items","action"]},"Tab":{"type":"object","properties":{"value":{"type":"string","minLength":1,"maxLength":2000},"title":{"type":"string","maxLength":40},"badge":{"type":"string","maxLength":8}},"required":["value"]},"Fact":{"description":"A label and its value in a header (Author \u00b7 someone).","type":"object","properties":{"label":{"type":"string","maxLength":200},"value":{"type":"string","minLength":1,"maxLength":2000},"icon":{"$ref":"#/$defs/NavIcon"}},"required":["value"]},"Crumb":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["title"]},"TreeEntry":{"description":"A file (or a directory, kind dir) by its whole path from the root, / between names.","type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"kind":{"$ref":"#/$defs/TreeEntryKind"},"status":{"$ref":"#/$defs/FileStatus"},"additions":{"type":"integer","minimum":0},"deletions":{"type":"integer","minimum":0},"comments":{"type":"integer","minimum":0},"badge":{"$ref":"#/$defs/Badge"},"viewed":{"type":"boolean","x-since":5},"generated":{"type":"boolean","x-since":5}},"required":["path"]},"TreeEntryKind":{"type":"string","enum":["file","dir"]},"LineRange":{"type":"object","properties":{"start":{"type":"integer","minimum":1},"end":{"type":"integer","minimum":1}},"required":["start","end"]},"Hunk":{"description":"A run of a diff: where it starts in the old and the new file, and its lines (' ' both, '+' new, '-' old, '\\' a note such as no newline at end of file).","type":"object","properties":{"header":{"type":"string","maxLength":2000},"old_start":{"type":"integer","minimum":0},"new_start":{"type":"integer","minimum":0},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}}},"required":["old_start","new_start","lines"]},"Thread":{"description":"Inline comments at a line of a diff: line (and start_line for a range) on the side's numbering.","type":"object","properties":{"id":{"type":"string","maxLength":256},"side":{"$ref":"#/$defs/DiffSide"},"line":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"resolved":{"type":"boolean"},"outdated":{"type":"boolean"},"comments":{"type":"array","minItems":1,"maxItems":200,"items":{"$ref":"#/$defs/Comment"}},"reply":{"$ref":"#/$defs/Action"},"pending":{"type":"boolean","x-since":5,"description":"A draft of the pending review, not sent yet."},"resolve":{"$ref":"#/$defs/Action","x-since":5,"description":"Resolve or reopen: values {thread: id, resolved: true or false}."}},"required":["side","line","comments"]},"Comment":{"description":"A comment: its author, when (the app draws it relative), a body in the markdown subset, a badge (Approved). An event is a quiet line (merged, pushed two commits).","type":"object","properties":{"id":{"type":"string","maxLength":256},"author":{"type":"string","minLength":1,"maxLength":200},"avatar":{"$ref":"#/$defs/Avatar"},"at":{"type":"string","format":"date-time"},"body":{"type":"string","maxLength":20000},"badge":{"$ref":"#/$defs/Badge"},"event":{"type":"boolean"}},"required":["author"]},"ComposerButton":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"},"tone":{"$ref":"#/$defs/Tone"}},"required":["title","action"]},"AssistantView":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"conversation":{"type":"string","minLength":1,"maxLength":256},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"view":{"$ref":"#/$defs/View"},"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}},"required":["id","conversation","version","view","created_at","updated_at"]},"ViewAction":{"type":"object","properties":{"key":{"type":"string","minLength":1,"maxLength":512},"action":{"type":"string","minLength":1,"maxLength":128},"page":{"type":"string","maxLength":64},"values":{"type":"object","additionalProperties":{"type":"string","maxLength":2000}},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"status":{"$ref":"#/$defs/ViewActionStatus"},"revision":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"},"error":{"type":"string","maxLength":2000},"updated_at":{"type":"string","format":"date-time"},"at":{"type":"string","format":"date-time"},"kind":{"$ref":"#/$defs/ViewActionKind","description":"Absent or action: a declared Action (action is its id). html: an HTML bridge reply (action is the html component's key, text the confirmed reply)."},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version the user saw and confirmed when this was committed; absent on records committed before #2019."},"text":{"type":"string","maxLength":2000,"description":"kind html only: the reply text the user confirmed."}},"required":["key","action","client_msg_id","status","at"]},"ViewActionStatus":{"type":"string","enum":["pending","sent","failed"]},"ViewActionKind":{"type":"string","enum":["action","html"]},"ViewActionInput":{"description":"The body of POST /api/v1/assistant/conversations/{id}/views/{key}/actions. The reply text and form definition are read from the stored View, never from the client.","type":"object","additionalProperties":false,"properties":{"action":{"type":"string","minLength":1,"maxLength":128,"description":"A declared reply action's id."},"page":{"type":"string","maxLength":64,"description":"The named page the action is on; absent for the root page."},"values":{"type":"object","additionalProperties":{"type":"string","maxLength":2000},"description":"The fields this action submits, by name."},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"confirmed":{"type":"boolean","description":"The user confirmed the action's confirm prompt natively."},"expected_version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version shown (and confirmed) to the user. Required when the action has confirm; a different stored version answers 409 view_changed."}},"required":["action","client_msg_id"]},"AssistantHTMLActionKind":{"type":"string","enum":["reply","open"]},"AssistantHTMLActionInput":{"description":"The body of POST /api/v1/assistant/conversations/{id}/views/{key}/html-actions: a persona.reply / persona.open call of a keyed html component, after the user confirmed it natively.","type":"object","additionalProperties":false,"properties":{"kind":{"$ref":"#/$defs/AssistantHTMLActionKind"},"component_key":{"type":"string","minLength":1,"maxLength":128,"description":"The key of the html component on that page of the stored card."},"page":{"type":"string","maxLength":64,"description":"The named page the component is on; absent for the root page."},"expected_version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The card version that ran the HTML and was shown in the confirmation."},"text":{"type":"string","minLength":1,"maxLength":2000,"description":"reply only: the text shown in full in the confirmation."},"url":{"type":"string","minLength":1,"maxLength":2048,"description":"open only: an https or supported persona:// target."},"client_msg_id":{"type":"string","minLength":1,"maxLength":128},"confirmed":{"const":true,"type":"boolean","description":"Always true: the call was confirmed natively, outside the HTML."}},"required":["kind","component_key","expected_version","client_msg_id","confirmed"]},"AssistantHTMLOpenResult":{"description":"What an html-actions open answers: the validated target to open inside the app, and the card version it was checked against.","type":"object","properties":{"open":{"type":"string","minLength":1},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64"}},"required":["open","version"]},"ViewChangedError":{"description":"409 code view_changed: the stored card is not the version the user saw. Refresh, keep the draft and confirm again; never resubmit with the new version automatically.","type":"object","properties":{"error":{"type":"string"},"code":{"const":"view_changed","type":"string"},"version":{"type":"integer","minimum":1,"maximum":9007199254740991,"x-go-type":"int64","description":"The current stored version."},"view":{"$ref":"#/$defs/AssistantView","description":"The current card, as feed.views carries it (a transcript card: id is its key, version 1)."}},"required":["error","code","version"]},"Action":{"description":"What a row, a button or a segmented does: ui.action with its id. An object, so later kinds of action (push or pop a page) are fields added here.","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"confirm":{"type":"string","description":"Ask the user first, in these words."},"submit":{"type":"boolean","description":"Send the page's fields as values."},"reply":{"type":"string","minLength":1,"maxLength":2000,"description":"Assistant only: send this text back to the same conversation. The hub reads it from the saved view, not from the client."},"open":{"type":"string","minLength":1,"maxLength":4096,"description":"Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the app."},"pop":{"type":"boolean","description":"Assistant only: return one page within the card."},"push":{"$ref":"#/$defs/Push","x-since":3,"description":"Open a page on top of this one instead of calling ui.action (an app of UI version 3; an older one calls ui.action with id)."},"values":{"type":"object","maxProperties":8,"additionalProperties":{"type":"string","maxLength":2000},"x-since":4,"description":"Values the action carries (UI version 4): sent with the page's and the component's values, these winning on a name they share. An older app sends none."}},"required":["id"]},"Push":{"description":"A page pushed on the navigation stack: ui.render of the extension's ui (this one when empty; a full page: extension_page, plugin_page or nav_page) with state. title is shown until the view comes.","type":"object","properties":{"ui":{"type":"string","maxLength":64},"page":{"type":"string","minLength":1,"maxLength":64,"description":"Assistant only: a page in the root View.pages. Never combined with ui or state."},"state":{"type":"string"},"title":{"type":"string","maxLength":2000}}},"Search":{"description":"A search box on top of the page (UI version 3): the app calls ui.action with action and values {\"q\": the text}, 0.3 s after the user stops typing.","type":"object","properties":{"placeholder":{"type":"string","maxLength":2000},"value":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["action"]},"Filter":{"description":"A drop-down beside the search box (UI version 3): choosing calls ui.action with action and values {name: the value} (and the search's q).","type":"object","properties":{"name":{"type":"string","minLength":1},"title":{"type":"string","maxLength":2000},"choices":{"type":"array","minItems":2,"maxItems":100,"items":{"$ref":"#/$defs/Choice"}},"value":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["name","choices","value","action"]},"More":{"description":"A section's last row, Load More (UI version 3): reaching it (or tapping it) calls ui.action with action once; the extension answers the whole view, longer.","type":"object","properties":{"title":{"type":"string","maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["action"]},"Avatar":{"description":"A person's or a chat's picture: an https image, else up to two characters drawn as the app's initials avatar.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+"},"text":{"type":"string","maxLength":2},"ref":{"type":"string","minLength":1,"maxLength":256,"x-since":6,"description":"The extension's own picture (ui.image) through the hub, in place of url."},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048,"x-since":6,"description":"Written by the hub only, for a ref."}}},"Thumbnail":{"description":"A small picture at the row's start: an https image the app loads without any credentials, or (UI version 6) a ref the extension serves (ui.image) through the hub; exactly one of url and ref.","type":"object","properties":{"url":{"type":"string","pattern":"^https://[^/?#]+"},"aspect":{"$ref":"#/$defs/ThumbnailAspect"},"ref":{"type":"string","minLength":1,"maxLength":256,"x-since":6},"path":{"type":"string","pattern":"^/api/v1/extensions/[^/]+/-/image/[A-Za-z0-9_.-]+$","maxLength":2048,"x-since":6,"description":"Written by the hub only, for a ref."}}},"ThumbnailAspect":{"type":"string","enum":["square","wide"]},"TableAlign":{"type":"string","enum":["start","end"]},"TableColumn":{"type":"object","properties":{"title":{"type":"string","maxLength":200},"align":{"$ref":"#/$defs/TableAlign"}},"required":["title"]},"EmptyButton":{"description":"An empty state's one button.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":2000},"action":{"$ref":"#/$defs/Action"}},"required":["title","action"]},"Badge":{"type":"object","properties":{"text":{"type":"string","maxLength":2000},"tone":{"$ref":"#/$defs/Tone"},"color":{"$ref":"#/$defs/Color","x-since":6}},"required":["text"]},"Choice":{"type":"object","properties":{"value":{"type":"string"},"title":{"type":"string"}},"required":["value"]},"ChartSeries":{"description":"One line, or one color of bars. No tone and no color: the app's own colors, in order. At most 120 points (240 for a candlestick, checked by the hub).","type":"object","properties":{"name":{"type":"string","maxLength":40},"tone":{"$ref":"#/$defs/Tone"},"points":{"type":"array","minItems":1,"maxItems":240,"items":{"$ref":"#/$defs/ChartPoint"}},"color":{"$ref":"#/$defs/Color","x-since":6}},"required":["points"]},"ChartPoint":{"description":"A value at a label (a day, a model); display is how to write it (\"\u00a51.20\"), else the app writes value with the unit.","type":"object","properties":{"label":{"type":"string","maxLength":40},"value":{"type":"number"},"display":{"type":"string","maxLength":40},"open":{"type":"number","x-go-pointer":true,"x-since":6},"high":{"type":"number","x-go-pointer":true,"x-since":6},"low":{"type":"number","x-go-pointer":true,"x-since":6},"close":{"type":"number","x-go-pointer":true,"x-since":6},"volume":{"type":"number","minimum":0,"x-go-pointer":true,"x-since":6}},"required":["label","value"]},"Stat":{"type":"object","properties":{"label":{"type":"string","minLength":1},"value":{"type":"string","minLength":1},"detail":{"type":"string"},"tone":{"$ref":"#/$defs/Tone"},"spark":{"$ref":"#/$defs/Spark","x-since":6}},"required":["label","value"]},"ActionResult":{"description":"What ui.action answers: a new view, a short message, an https link to open, a page to push or to pop (UI version 3), or nothing (draw again).","type":"object","properties":{"view":{"$ref":"#/$defs/View"},"toast":{"type":"string"},"open_url":{"type":"string"},"push":{"$ref":"#/$defs/Push","x-since":3,"description":"Then open this page on top (after a submit: list, detail, edit)."},"pop":{"type":"boolean","x-since":3,"description":"Then go back a page; the page below is drawn again."},"lines":{"$ref":"#/$defs/FileLines","x-since":5,"description":"Lines of a file a diff's context asked for: the page is not drawn again."},"items":{"type":"array","maxItems":50,"items":{"$ref":"#/$defs/Component"},"x-since":5,"description":"Components to put in place of those with the same key on the page (each has a key): the rest is not drawn again."}}},"FileLines":{"description":"Lines of one side of a file from start (1 the first), as many as the extension has at hand (all of it, say); total is how many the file has.","type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"side":{"$ref":"#/$defs/DiffSide"},"start":{"type":"integer","minimum":1},"lines":{"type":"array","maxItems":20000,"items":{"type":"string","maxLength":20000}},"total":{"type":"integer","minimum":0}},"required":["path","start","lines"]},"Review":{"description":"The pending review (UI version 5): a bar at the page's foot saying how many drafts there are, a summary box (name) and buttons (comment, approve, request changes) that send them all, discard throws them away. An older app gets a text and a composer on top.","type":"object","properties":{"count":{"type":"integer","minimum":0},"name":{"type":"string","minLength":1},"placeholder":{"type":"string","maxLength":2000},"buttons":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/ComposerButton"}},"discard":{"$ref":"#/$defs/Action"}},"required":["count","name","buttons"]},"PersonaCardKind":{"type":"string","description":"ring: one day's total and its parts (a donut); stacked_bar: parts side by side to compare (days, people).","enum":["stat","stacked_bar","line","bar","ring"]},"PersonaCard":{"description":"The assistant's ```persona-card block (#886): one JSON object. Joins the components in #1850; this form keeps drawing.","type":"object","properties":{"type":{"$ref":"#/$defs/PersonaCardKind"},"title":{"type":"string"},"subtitle":{"type":"string"},"value":{"type":"number","x-go-pointer":true},"unit":{"type":"string"},"note":{"type":"string"},"total":{"$ref":"#/$defs/CardAmount"},"segments":{"type":"array","items":{"$ref":"#/$defs/CardPart"}},"rest":{"$ref":"#/$defs/CardPart"},"points":{"type":"array","items":{"$ref":"#/$defs/CardPart"}}},"required":["type"]},"CardAmount":{"type":"object","properties":{"value":{"type":"number"},"unit":{"type":"string"}},"required":["value"]},"CardPart":{"type":"object","properties":{"label":{"type":"string"},"value":{"type":"number"},"note":{"type":"string"}},"required":["label","value"]}}},"protocol.schema.json":{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"protocol.schema.json","title":"Extension process protocol","description":"The process protocol (version 1) between the hub and an extension's program: one JSON object a line on stdin / stdout (or a unix socket), keys in snake_case. Also what the apps send the hub to draw a slot.","$defs":{"Frame":{"description":"One line: a request {id, method, params}, an answer {id, result} or {id, error}, or an event {event, params}.","type":"object","properties":{"id":{"type":"string"},"method":{"type":"string"},"event":{"type":"string"},"params":{},"result":{},"error":{"$ref":"#/$defs/RPCError"}}},"RPCError":{"type":"object","properties":{"message":{"type":"string","description":"For people; never a secret or a message's body."},"code":{"type":"string","description":"One of ErrorCode, or an extension point's own (not_found, invalid, conflict\u2026)."},"data":{}},"required":["message"]},"ErrorCode":{"type":"string","enum":["not_initialized","unknown_method","wrong_protocol","no_capability","no_contribution","permission_denied","timeout","unsupported"]},"Method":{"description":"Methods of the base; every other method is <namespace>.<method>, the namespace an extension point's.","type":"string","enum":["initialize","ping","manifest"]},"AuthState":{"type":"string","enum":["signed_out","pending","signed_in","expired","error"]},"AuthStatus":{"description":"auth.status and auth.logout: the extension's sign-in now (manifest.auth).","type":"object","properties":{"state":{"$ref":"#/$defs/AuthState"},"account":{"type":"string"},"message":{"type":"string","description":"For people: why it is in error, what is signed in."},"expires_at":{"type":"string","format":"date-time"}},"required":["state"]},"AuthStepParams":{"description":"auth.step: step \"\" starts over; values are the fields of the step before.","type":"object","properties":{"step":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}}},"required":["step"]},"AuthField":{"type":"object","properties":{"name":{"type":"string"},"label":{"type":"string"},"secret":{"type":"boolean"},"placeholder":{"type":"string"}},"required":["name","label"]},"AuthPrompt":{"description":"auth.step's answer, the connectors' Prompt: fields to fill, a device code (url to open, user_code to enter) or a QR code (url, scanned with another app), or done. For device_code and qr the app asks the same step again (no values) every interval seconds.","type":"object","properties":{"step":{"type":"string"},"fields":{"type":"array","items":{"$ref":"#/$defs/AuthField"}},"kind":{"type":"string","description":"Empty: fields to fill; device_code; qr."},"url":{"type":"string"},"user_code":{"type":"string"},"interval":{"type":"integer"},"hint":{"type":"string"},"error":{"type":"string"},"done":{"type":"boolean"},"account":{"type":"string"},"expires_at":{"type":"string","format":"date-time"}}},"HubRole":{"type":"string","enum":["center","member"]},"HubCapability":{"type":"string","enum":["inbox_group","inbox_group_state"]},"InitializeParams":{"description":"What the hub sends first. The extension is under extension; hubs before the rename (#1844) send it as plugin, newer hubs send both.","type":"object","properties":{"protocol":{"type":"integer","const":1},"hub":{"$ref":"#/$defs/HubInfo"},"extension":{"$ref":"#/$defs/ExtensionInfo"},"plugin":{"$ref":"#/$defs/ExtensionInfo"},"config":{"description":"The configuration with the schema's defaults filled in."},"secrets":{"type":"object","additionalProperties":{"type":"string"}},"granted":{"$ref":"manifest.schema.json#/$defs/Permissions"},"active":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}},"description":"The contributions this run is for, by extension point."},"contributions_to_me":{"type":"object","additionalProperties":{"type":"array","items":{"$ref":"#/$defs/ExportedContribution"}},"description":"The contributions of the other extensions that are on to the points it exports, by its point id (event extension.contributions_changed says them again when they change)."}},"required":["protocol","hub","granted"]},"ExportedContribution":{"type":"object","properties":{"extension":{"type":"string","description":"The extension it comes from."},"item":{"description":"The contribution, as that extension's manifest wrote it."}},"required":["extension","item"]},"HubInfo":{"type":"object","properties":{"build":{"type":"integer","x-go-type":"int64"},"extension_points":{"type":"object","additionalProperties":{"type":"integer"}},"role":{"$ref":"#/$defs/HubRole"},"timezone":{"type":"string"},"locale":{"type":"string","description":"The user's language (zh-Hans, en, ja; see docs/protocol/i18n.md); empty means zh-Hans."},"capabilities":{"type":"array","items":{"type":"string"}},"url":{"type":"string","description":"The hub's API on this machine, for the token below."},"token":{"type":"string","description":"A token of the scopes it was granted (permissions.hub): new each start."},"scopes":{"type":"array","items":{"type":"string"}}},"required":["build","extension_points"]},"ExtensionInfo":{"type":"object","properties":{"id":{"type":"string"},"version":{"type":"string"},"dir":{"type":"string"},"data_dir":{"type":"string"}},"required":["id","version"]},"InitializeResult":{"type":"object","properties":{"protocol":{"type":"integer","const":1},"id":{"type":"string"},"version":{"type":"string"},"contributes":{"type":"object","additionalProperties":{},"description":"A subset of the manifest's."},"ui_page_cancellation":{"type":"integer","const":1,"description":"Request-ID scoped rpc.cancel for mounted page lifecycle calls only."}},"required":["protocol","id","version"]},"UIParams":{"description":"ui.render's and ui.action's parameters: what to draw, where, for whom.","type":"object","properties":{"contribution":{"type":"string"},"state":{"type":"string"},"action":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}},"placement":{"$ref":"view.schema.json#/$defs/Placement"},"size":{"$ref":"view.schema.json#/$defs/Size"},"ui_version":{"type":"integer"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"},"machine":{"$ref":"#/$defs/UIMachine"},"launcher":{"$ref":"#/$defs/UILauncher"},"item":{"$ref":"#/$defs/UIInboxItem"}},"required":["contribution","state","placement","size","ui_version"]},"UIImageParams":{"description":"ui.image's parameters (UI version 6): the hub asks the extension for a picture it drew as a ref, for the ui contribution that drew it. width is the pixel width the app wants (320, 640, 1280 or 2048; 0 when it says nothing); the extension may ignore it.","type":"object","properties":{"contribution":{"type":"string"},"ref":{"type":"string","minLength":1,"maxLength":256},"width":{"type":"integer","minimum":0,"maximum":8192},"placement":{"$ref":"view.schema.json#/$defs/Placement"}},"required":["contribution","ref"]},"UIImage":{"description":"What ui.image answers: the picture's bytes in base64 (png, jpeg, webp or gif, at most 4 MB decoded and 8192 pixels a side; the hub reads the type from the bytes, not from mime) and how long the hub may keep it (seconds, 60 when absent; a camera 5 to 10, a still 86400).","type":"object","properties":{"mime":{"type":"string","maxLength":64},"data":{"type":"string","minLength":1},"max_age":{"type":"integer","minimum":0,"maximum":86400,"x-go-pointer":true}},"required":["mime","data"]},"UIMachine":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"os":{"type":"string"},"online":{"type":"boolean"}},"required":["id","name","online"]},"UILauncher":{"type":"object","properties":{"name":{"type":"string"},"base_url":{"type":"string"},"query_id":{"type":"string"}},"required":["name","base_url","query_id"]},"UIInboxItem":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"tier":{"type":"string"},"reason":{"type":"string"},"done":{"type":"boolean"},"meta":{"description":"The connector's own record of what the item gathers, as stored; null when it has none."},"extra":{"type":"object","additionalProperties":{}},"count":{"type":"integer"},"started_at":{"type":"string","format":"date-time"}},"required":["id","title","done","meta"]},"BadgeEvent":{"description":"ui.badge, sent by an extension: the badge on its nav_page's entry (no text clears it).","type":"object","properties":{"contribution":{"type":"string"},"text":{"type":"string","maxLength":8},"tone":{"$ref":"view.schema.json#/$defs/Tone"}},"required":["contribution"]},"InvalidateEvent":{"description":"ui.invalidate, sent by an extension (UI version 3): what it draws changed; the apps on screen draw it again (contribution: one ui; empty: all of the extension's).","type":"object","properties":{"contribution":{"type":"string"}}},"UIContext":{"description":"What an app says when it draws a slot: for whom and where (the hub checks it and hands the extension UIParams).","type":"object","properties":{"launcher":{"type":"string"},"machine":{"type":"string"},"item":{"type":"string"},"size":{"$ref":"view.schema.json#/$defs/Size"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"},"ui_version":{"type":"integer"},"stream":{"$ref":"stream.schema.json#/$defs/UIStreamCapability","description":"Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current client or hub advertises it."}}},"UIRequest":{"description":"An app's POST \u2026/-/ui/{ui}: without action it draws, with one a control was used.","type":"object","properties":{"context":{"$ref":"#/$defs/UIContext"},"state":{"type":"string"},"action":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}}}},"UIPlace":{"description":"Where an extension draws something, as the hub lists it (GET \u2026/-/ui). The new API names the extension extension / extension_name; the old one plugin / plugin_name.","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"plugin":{"type":"string"},"plugin_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"placement":{"$ref":"view.schema.json#/$defs/Placement"},"size":{"$ref":"view.schema.json#/$defs/Size"},"icon":{"$ref":"view.schema.json#/$defs/NavIcon"},"opens":{"type":"string"},"badge":{"$ref":"view.schema.json#/$defs/Badge"},"connector":{"type":"string"}},"required":["id","title","placement"]},"UIPlaces":{"type":"object","properties":{"ui":{"type":"array","items":{"$ref":"#/$defs/UIPlace"}}},"required":["ui"]},"WidgetPlace":{"description":"A widget an extension draws outside the app (GET \u2026/extensions/-/widgets; docs \"System placements\").","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"families":{"type":"array","items":{"$ref":"view.schema.json#/$defs/WidgetFamily"}},"refresh_minutes":{"type":"integer"},"opens":{"type":"string"}},"required":["extension","id","title","families","refresh_minutes"]},"WidgetPlaces":{"type":"object","properties":{"widgets":{"type":"array","items":{"$ref":"#/$defs/WidgetPlace"}}},"required":["widgets"]},"WidgetRequest":{"description":"An app's POST \u2026/extensions/{id}/-/widget/{ui}: context.size is the family it draws (WidgetFamily).","type":"object","properties":{"context":{"$ref":"#/$defs/UIContext"}}},"WidgetAnswer":{"description":"A widget's view, held to what the family draws, and until when the hub keeps it (the app's timeline's next entry).","type":"object","properties":{"view":{"$ref":"view.schema.json#/$defs/View"},"expires_at":{"type":"string","format":"date-time"}},"required":["view","expires_at"]},"DeviceWidget":{"description":"A widget a device has on a screen (PUT /api/v1/devices/{id}/widgets): the hub wakes that device when it changes.","type":"object","properties":{"extension":{"type":"string"},"id":{"type":"string"},"family":{"$ref":"view.schema.json#/$defs/WidgetFamily"}},"required":["extension","id","family"]},"DeviceWidgets":{"type":"object","properties":{"widgets":{"type":"array","items":{"$ref":"#/$defs/DeviceWidget"}}},"required":["widgets"]},"WidgetPush":{"description":"extension_widget in a background push (content-available): a widget the device has changed; the app reloads its timelines.","type":"object","properties":{"extension":{"type":"string"},"id":{"type":"string"}},"required":["extension","id"]},"ShortcutPlace":{"description":"An extension's action the system runs (GET \u2026/extensions/-/shortcuts).","type":"object","properties":{"extension":{"type":"string"},"extension_name":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"params":{"type":"array","items":{"$ref":"manifest.schema.json#/$defs/ShortcutParam"}},"ui":{"type":"string"}},"required":["extension","id","title"]},"ShortcutPlaces":{"type":"object","properties":{"shortcuts":{"type":"array","items":{"$ref":"#/$defs/ShortcutPlace"}}},"required":["shortcuts"]},"ShortcutRequest":{"description":"An app's POST \u2026/extensions/{id}/-/shortcut/{sid}: the params' values (strings) and the context (tz, locale, platform, ui_version).","type":"object","properties":{"values":{"type":"object","additionalProperties":{"type":"string"}},"context":{"$ref":"#/$defs/UIContext"}}},"ShortcutRunParams":{"description":"shortcut.run's parameters: which shortcut, its values, for whom.","type":"object","properties":{"contribution":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":"string"}},"ui_version":{"type":"integer"},"tz":{"type":"string"},"locale":{"type":"string"},"platform":{"$ref":"view.schema.json#/$defs/Platform"}},"required":["contribution","values","ui_version"]},"ShortcutResult":{"description":"What shortcut.run answers (and the app gets): a sentence Siri says or shows, and a view held to the large widget's subset (the result card).","type":"object","properties":{"text":{"type":"string","maxLength":2000},"view":{"$ref":"view.schema.json#/$defs/View"}}},"NotifyAction":{"description":"A button on an extension's notification (POST /api/v1/notify actions, at most 3). A tap runs ui.action on the notification's ui with this id; input asks for a line of text first (values.text).","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":128},"title":{"type":"string","minLength":1,"maxLength":40},"role":{"$ref":"view.schema.json#/$defs/ButtonRole"},"foreground":{"type":"boolean","description":"Open the app to run it; otherwise it runs in the background and its toast is shown as a notification."},"input":{"$ref":"#/$defs/NotifyActionInput"}},"required":["id","title"]},"NotifyActionInput":{"type":"object","properties":{"placeholder":{"type":"string","maxLength":80}}},"ErrorSource":{"description":"Which part of Persona an error report comes from.","type":"string","enum":["hub","manager","web","android","ios","mac","watch","vision"]},"ErrorKind":{"description":"What an error report is: a caught exception, a crash (the app died), an ANR (it hung), a Go panic, an error line of a log.","type":"string","enum":["exception","crash","anr","panic","log"]},"ErrorLevel":{"type":"string","enum":["fatal","error","warning"]},"ErrorFrame":{"description":"One frame of a stack trace.","type":"object","properties":{"function":{"type":"string","maxLength":256},"module":{"type":"string","maxLength":256},"file":{"type":"string","maxLength":256},"line":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"in_app":{"type":"boolean","description":"Persona's own code, not a library's or the system's."}},"required":[]},"ErrorException":{"description":"One exception of a report; frames innermost last (the order Sentry uses).","type":"object","properties":{"type":{"type":"string","maxLength":256},"value":{"type":"string","maxLength":1024},"frames":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/ErrorFrame"}}},"required":["type"]},"ErrorBreadcrumb":{"description":"Something that happened before the error: a screen opened, a request failed. Code-chosen short text, no user content.","type":"object","properties":{"time":{"type":"string"},"category":{"type":"string","maxLength":64},"message":{"type":"string","maxLength":200},"level":{"type":"string","maxLength":16}},"required":["category"]},"ErrorReport":{"description":"An error or crash of the hub or a device (docs/extensions/extensions.md \"Error reports\"). Clients send it to POST /api/v1/error-reports; the manager scrubs it and adds fingerprint, count and received_at before an extension gets it.","type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Made by the sender; the same id again (a retry) is dropped."},"source":{"$ref":"#/$defs/ErrorSource"},"kind":{"$ref":"#/$defs/ErrorKind"},"level":{"$ref":"#/$defs/ErrorLevel"},"time":{"type":"string","description":"When it happened, RFC 3339."},"release":{"type":"string","maxLength":64},"build":{"type":"string","maxLength":64},"commit":{"type":"string","maxLength":64},"os":{"type":"string","maxLength":32},"os_version":{"type":"string","maxLength":64},"device_model":{"type":"string","maxLength":64,"description":"The model only, never an id of the device."},"message":{"type":"string","maxLength":1024},"exceptions":{"type":"array","maxItems":5,"items":{"$ref":"#/$defs/ErrorException"}},"breadcrumbs":{"type":"array","maxItems":30,"items":{"$ref":"#/$defs/ErrorBreadcrumb"}},"tags":{"type":"object","maxProperties":16,"additionalProperties":{"type":"string","maxLength":64}},"previous_launch":{"type":"boolean","description":"It happened in an earlier run of the app and is sent now."},"fingerprint":{"type":"string","description":"Set by the manager: reports with the same one are the same problem."},"count":{"type":"integer","minimum":1,"description":"Set by the manager: how many of this fingerprint it folded into this one (1 or more)."},"received_at":{"type":"string","description":"Set by the manager, RFC 3339."}},"required":["id","source","kind","level","time"]},"ErrorReportsDeliver":{"description":"error_reports.deliver, sent to an extension with an error_reports contribution: reports, already scrubbed, deduplicated and rate limited. A notification: no answer, not sent again.","type":"object","properties":{"contribution":{"type":"string"},"reports":{"type":"array","items":{"$ref":"#/$defs/ErrorReport"}}},"required":["contribution","reports"]},"AuthRelayCompleteParams":{"description":"auth_relay.complete's parameters: an authorization link one of the user's Agents stopped at, on a host and path the contribution names. The manager has checked that the Agent's own command printed it on one of the user's computers. The link is a secret while it lives: never log it.","type":"object","properties":{"contribution":{"type":"string"},"url":{"type":"string","maxLength":4096}},"required":["contribution","url"]},"AuthRelayStatus":{"description":"How auth_relay.complete ended: done (authorized, the Agent can go on), manual (not one it completes: the user's), failed (one it completes, but it did not go through).","type":"string","enum":["done","manual","failed"]},"AuthRelayReason":{"description":"Why it was not done: not_handled (not a link it completes), not_signed_in (its account is not signed in for the page), new_permissions (the page asks for more than was granted before), app_not_allowed (the extension's own settings leave this app to the user), unknown_page (not the page it knows), unavailable (what it completes them with can't be reached), not_confirmed (it clicked, the page never said it was done), expired (the link is no longer valid).","type":"string","enum":["not_handled","not_signed_in","new_permissions","app_not_allowed","unknown_page","unavailable","not_confirmed","expired"]},"AuthRelayResult":{"description":"What auth_relay.complete answers. Never the link, a token or a page's text.","type":"object","properties":{"status":{"$ref":"#/$defs/AuthRelayStatus"},"app":{"type":"string","maxLength":80,"description":"The app the page authorized (or asked to), as the page names it."},"reason":{"$ref":"#/$defs/AuthRelayReason"}},"required":["status"]},"SecretPurpose":{"description":"What a secret value is resolved for: kind extension (an extension's secret, id its id), launcher (a launcher's or model provider's key, id its name, machine the computer it goes to) or agent_run (handed to one Agent run after the user approved it on the phone, id the variable's name, machine and session the Agent's).","type":"object","properties":{"kind":{"type":"string","enum":["extension","launcher","agent_run"]},"id":{"type":"string","maxLength":200},"machine":{"type":"string","maxLength":200},"session":{"type":"string","maxLength":200}},"required":["kind","id"]},"SecretsDescribeParams":{"description":"secrets.describe's parameters: a reference of one of the contribution's schemes.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024}},"required":["contribution","reference"]},"SecretsDescribeResult":{"description":"What secrets.describe answers: words for people (the item and field), never a value.","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":200},"detail":{"type":"string","maxLength":200}},"required":["title"]},"SecretsResolveParams":{"description":"secrets.resolve's parameters: the reference and what it is resolved for. Only the manager calls it.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024},"purpose":{"$ref":"#/$defs/SecretPurpose"}},"required":["contribution","reference","purpose"]},"SecretsResolveResult":{"description":"What secrets.resolve answers: the value, at most 16 KB. Errors: not_found, not_signed_in, rate_limited (data.retry_after), refused.","type":"object","properties":{"value":{"type":"string","minLength":1,"maxLength":16384}},"required":["value"]},"SecretsUsedEvent":{"description":"secrets.used (an event to the provider, no answer): a reference it resolved was used, for the usage record its own page shows. Never the value.","type":"object","properties":{"contribution":{"type":"string"},"reference":{"type":"string","maxLength":1024},"purpose":{"$ref":"#/$defs/SecretPurpose"},"at":{"type":"string","format":"date-time"},"approved_by":{"type":"string","description":"settings (a reference saved in Settings), rule (an Always rule) or the approving device's id.","maxLength":200}},"required":["contribution","reference","purpose","at"]},"ExtensionNotification":{"description":"extension_notification in an extension's alert push: whose it is, the page a tap opens (ui with state) and its buttons (category ext.<extension>.<hash of the action ids>, registered by the app as it meets it).","type":"object","properties":{"extension":{"type":"string"},"ui":{"type":"string"},"state":{"type":"string"},"actions":{"type":"array","maxItems":3,"items":{"$ref":"#/$defs/NotifyAction"}}},"required":["extension"]}}}}"###
 }
