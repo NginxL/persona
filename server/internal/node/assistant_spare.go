@@ -2,9 +2,11 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
 )
@@ -47,7 +49,7 @@ func (n *Node) adoptSpare(cwd, launcher string, options ...modelExecution) *assi
 func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) error {
 	if n.assistantRuntime(launcher) != nil { // a runtime is running already: nothing to start ahead
 		if executionOption(options).ConfigDir != "" {
-			return fmt.Errorf("config_dir is only supported for Claude assistant conversations")
+			return errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		return nil
 	}
@@ -69,7 +71,7 @@ func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) er
 			return err
 		}
 	} else if execution.ConfigDir != "" {
-		return fmt.Errorf("config_dir is only supported for Claude assistant conversations")
+		return errors.New(assistantwire.ConfigDirClaudeOnly)
 	}
 	n.mu.Lock()
 	old := n.spare
