@@ -68,6 +68,7 @@ struct KnowledgeView: View {
         KBKindBar(kind: $kind, counts: counts)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .unclippedListRow() // the first pills reach the cell's rounded corners (#7735)
     }
 
     var body: some View {
@@ -524,6 +525,7 @@ struct KBKindBar: View {
                     Haptics.tap()
                     withAnimation(Theme.Motion.standard) { kind = k }
                 }
+                .accessibilityIdentifier("kb.kind." + k.rawValue)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
