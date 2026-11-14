@@ -76,7 +76,11 @@ class SentToAgentsShotsTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     @After fun close() = scope.cancel()
 
-    private val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+    // The task card counts as "today's" (and takes the hand-off in) only on the day it was drawn: shortly after local midnight
+    // "10 minutes ago" is yesterday, so the clock is held at least 15 minutes into the day.
+    private val now = Instant.now().truncatedTo(ChronoUnit.SECONDS).let {
+        it.coerceAtLeast(java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().plus(15, ChronoUnit.MINUTES))
+    }
     private fun ago(min: Long, plusMillis: Long = 0) = now.minus(min, ChronoUnit.MINUTES).plusMillis(plusMillis).toString()
     private val handOff = "把设置页的内存占用降下来。\n\n1. 先用示例数据复现：打开设置页来回切 20 次。\n2. 找出没释放的缓存。\n3. 改完跑一遍单元测试，把结果写进 PR。"
     private val rework = "先停一下：缓存的大小不要写死，改成按屏幕数算。\n其余照旧。"
@@ -144,6 +148,7 @@ class SentToAgentsShotsTest {
         }
         rule.waitForIdle()
         // the rework and the message to a task with no card are folded lines; the hand-off is not a line; the user's word is a bubble
+
         rule.onAllNodesWithTag("sent-line", useUnmergedTree = true).assertCountEquals(2)
         rule.onNodeWithText("打断「降低设置页的内存占用」后发送").assertIsDisplayed()
         rule.onNodeWithText("发给「升级示例项目的依赖」").assertIsDisplayed()
