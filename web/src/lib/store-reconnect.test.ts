@@ -429,6 +429,14 @@ describe("client_hello heartbeat", () => {
       expect(hello.heartbeat).toEqual({ pong_timeout: 45 });
     }
   });
+
+  it("names this browser's notification device, so the hub pushes nothing to it while a page is open (#7459)", () => {
+    connect();
+    last().open();
+    const hello = last().sent.map((m) => JSON.parse(m)).find((m) => m.type === "client_hello");
+    expect(hello.device_id).toBeTruthy();
+    expect(hello.device_id).toBe(localStorage.getItem("persona.notifyDevice"));
+  });
 });
 
 describe("keeping a quiet connection (app_ping)", () => {

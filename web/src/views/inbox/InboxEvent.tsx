@@ -1,6 +1,6 @@
 // An inbox item as an event (docs/assistant/inbox.md "Events and handling chain", docs/web/web.md "Inbox"): the row's mark (the
-// manager's current state, or an older hub's handling / suggestion line) and the detail's body — ✦ summary, recap, the suggestion card
-// with its buttons right under it, then the handling chain folded to its three newest entries, each entry going where its link says.
+// manager's current state, or an older hub's handling / suggestion line) and the detail's body — ✦ summary, the suggestion card
+// with its buttons right under it, any recap, then the handling chain folded to its three newest entries, each entry going where its link says.
 // Drawn only for an item that carries this phase's fields (lib/inbox-events.ts `hasEvent`).
 import { useEffect, useRef, useState } from "react";
 import {
@@ -111,7 +111,7 @@ export function EventMark({ it }: { it: InboxItem }) {
 // ── the detail ───────────────────────────────────────────
 
 /**
- * The detail's body for an event: the active state and its actions, the suggestion, summary and recap, the handling chain, "Related" and "Trail".
+ * The detail's body for an event: the active state and its actions, the summary, any suggestion and recap, the handling chain, "Related" and "Trail".
  * `embedded`: above the item's own page (a Feishu chat or mail, #3262 / #5471), as tall as it needs up to a share of the pane, then scrolling.
  */
 export function EventBody({ item, onSource, embedded = false }: { item: InboxItem; onSource: (at: SourceAt) => void; embedded?: boolean }) {
@@ -131,8 +131,22 @@ export function EventBody({ item, onSource, embedded = false }: { item: InboxIte
             {t("inbox-inboxevent.manager_done")}
           </p>
         )}
+        {!done && item.suggestion && item.summary && (
+          <p className="text-[13.5px] leading-relaxed font-medium text-ink" data-event-summary>
+            <Spark />
+            {item.summary}
+          </p>
+        )}
         {!done && item.suggestion && <SuggestionCard key={`${item.id}@${item.suggestion.version}`} item={item} suggestion={item.suggestion} />}
-        {(item.summary || item.recap) && (
+        {!done && item.suggestion && item.recap && (
+          <section className="flex flex-col gap-2">
+            <div>
+              <p className="text-submeta font-medium text-ink-3">{t("inbox-inboxevent.recap")}</p>
+              <p className="mt-0.5 text-meta leading-relaxed whitespace-pre-wrap text-ink-2" data-event-recap>{item.recap}</p>
+            </div>
+          </section>
+        )}
+        {(done || !item.suggestion) && (item.summary || item.recap) && (
           <section className="flex flex-col gap-2">
             {item.summary && (
               <p className="text-[13.5px] leading-relaxed font-medium text-ink">

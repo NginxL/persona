@@ -198,6 +198,12 @@ The App Group ID itself has no team prefix, so the Info.plist writes `$(PERSONA_
 - **Check after export**: `python3 scripts/release/entitlements.py check <ipa>` lists every problem and exits non-zero; it reports 9 issues on build 92's ipa.
   App Groups are checked the same way: every bundle's signature has its target's group, and the Info.plist's `PersonaAppGroup` is one of them.
   In the exported ipa / pkg, the push entitlement (`aps-environment`; on Mac `com.apple.developer.aps-environment`) must be `production`. A Mac .pkg can be checked too.
+- **HealthKit background delivery** (`com.apple.developer.healthkit.background-delivery`, #2526): signed in only with config.json
+  `app.health_background_delivery: true`, so that workout reports come right after a workout (`docs/assistant/health.md`,
+  "Automatic workout reports (iOS)"). The App ID's HealthKit capability covers it. If the profiles predate it, rerun
+  `asc_signing.py` before turning the switch on. `entitlements.py check` errors if an exported App built with the switch lacks
+  it, because the Settings page would promise reports that wait for Persona to open. Check the first such build on a device:
+  finish a workout on the Watch with Persona closed, and the report should arrive.
 - **Time-sensitive notifications** (`com.apple.developer.usernotifications.time-sensitive`, #1572): the hub's "Needs you" pushes and plugins' urgent alerts carry `interruption-level: time-sensitive`.
   If the App's signature lacks this entitlement, the system shows them all as `active`: they don't break through Focus, so with Focus on the phone doesn't ring and the watch doesn't get them either, and nothing reports an error. The App ID must first enable `USERNOTIFICATIONS_TIMESENSITIVE`
   (`asc_signing.py` enables it; afterwards the old profiles are invalid and need one rerun to rebuild); `entitlements.py check` errors if the exported App lacks it.
@@ -430,6 +436,17 @@ git tag v1.2.0 && git push origin v1.2.0
 - The image's personad uses the tag minus `v` as its version (`personad version`); when node differs, the App prompts to redeploy, using the image's own builds or the release's (`docs/operations/docker.md` ("Node builds")).
 - The image's personad is on the `docker` channel: no skills (like all binaries), no self-update; a new image prompts you to pull it (`docs/operations/hub-update.md`).
 - When the repository is private, the package is private too; NAS installs need `docker login ghcr.io` (`docs/operations/docker.md` ("Image")).
+
+### Desktop packages on version tags
+
+The same workflow attaches the Electron desktop packages to the Release (`docs/desktop/desktop.md`, "Updates"); installed desktop apps update from them.
+
+- Nothing extra to run: push the stable tag as above. After the `authorize` job, `desktop-gate` checks which signing secrets are configured, `desktop-mac` and `desktop-win` build and verify signed packages on native runners with the tag's version, and `desktop-publish` attaches them after the Release exists: packages and block maps first, `latest-mac.yml` and `latest.yml` last.
+- **Without the signing secrets the release still succeeds and has no desktop packages.** The run's summary says which platform was skipped and which secrets are missing. This is the state today: no Developer ID or Windows code-signing certificate has been supplied (`docs/desktop/desktop.md`, "What the owner must provide", lists the eight secrets and what each must contain).
+- Each platform stands alone: with only the macOS secrets configured, the Release gets the macOS packages and the summary says Windows was skipped.
+- Prerelease tags (`v1.3.0-rc1`) and manual dispatches publish no desktop packages.
+- If a desktop job fails after the Release was created, rerun the failed jobs for the same tag; uploads replace assets of the same name. The hub image and the Release itself are not affected by a desktop failure.
+- After the first signed release, check on a real Mac and a real Windows PC that an installed older version offers "Restart to update" and reopens as the new one. That path is not covered by any automated test (the update test uses an unsigned build and a local feed).
 
 ### Private version-tag consumers
 

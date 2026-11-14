@@ -620,7 +620,7 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 // fleetAppCall answers the manager's app.call for what is still the hub's to run for the nodes: the phone's tools;
 // false for the others. (The connectors', Cua's and ego's tools, the gated commands' text, lark-cli's settings and the
 // channels' owner actions are the manager's extensions': internal/extmgr, in its process.)
-func (h *Hub) fleetAppCall(ctx context.Context, p assistantwire.AppCall) (json.RawMessage, bool, error) {
+func (h *Hub) fleetAppCall(ctx context.Context, from string, p assistantwire.AppCall) (json.RawMessage, bool, error) {
 	var a struct {
 		Assistant     bool            `json:"assistant"`
 		MachineID     string          `json:"machine_id"`
@@ -631,12 +631,15 @@ func (h *Hub) fleetAppCall(ctx context.Context, p assistantwire.AppCall) (json.R
 		Summary       string          `json:"summary"`
 		InteractionID string          `json:"interaction_id"`
 		Action        string          `json:"action"`
+		CallID        json.RawMessage `json:"call_id"`
 	}
 	if len(p.Params) > 0 {
 		if err := json.Unmarshal(p.Params, &a); err != nil {
 			return nil, true, err
 		}
 	}
+	var callID string
+	_ = json.Unmarshal(a.CallID, &callID)
 	var out any
 	switch p.AppID + " " + p.Method {
 	case assistantwire.AppPhone + " " + assistantwire.PhoneTools:
@@ -645,7 +648,7 @@ func (h *Hub) fleetAppCall(ctx context.Context, p assistantwire.AppCall) (json.R
 		if a.Name == runtimeCLITool || !strings.HasPrefix(a.Name, "phone_") {
 			out = proto.TextResult("unknown tool "+a.Name, true)
 		} else {
-			out = h.callPhone(ctx, a.Name, a.Args)
+			out = h.callPhoneWithWait(ctx, a.Name, a.Args, h.mcpWaitReporter(from, a.MachineID, callID))
 		}
 	default:
 		return nil, false, nil
@@ -697,10 +700,11 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) error {
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
 		h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
-			pushRecordingID(n.RecordingID))
+			pushRecordingID(n.RecordingID), pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey})
 	case assistantwire.NotifyDone:
-		h.notifyDone(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
-			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond})
+		h.notifyDoneUnder(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
+			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond},
+			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey})
 	case assistantwire.NotifyReply:
 		h.notifyReply(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body)
 	case assistantwire.NotifyDecide:

@@ -145,6 +145,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         MetaGlasses.shared.configure() // a no-op without the Meta Wearables SDK (docs/apple/meta-glasses.md)
         #if os(iOS)
         QuickAction.publish()
+        // Here, for HealthKit to wake the app after a workout (#2526); only a build with background delivery reads the
+        // reports' small state file this early.
+        if WorkoutReports.deliversInBackground { WorkoutReports.shared.observe() }
         #endif
         #if DEBUG
         // Simulator automation: `simctl launch … -pairURL persona://pair?...`; `-pairURL2`, `-pairURL3` pair more hubs

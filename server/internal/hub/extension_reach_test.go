@@ -217,7 +217,8 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/machines/{id}/metrics":                "path",
 		"GET /api/v1/machines/{id}/usage":                  "path",
 		"GET /api/v1/machines/{mid}/stat":                  "path",
-		"POST /api/v1/notify":                              "body", // machine_id, session_id: its manager's (ownsRef)
+		"POST /api/v1/notify":                              "body",    // machine_id, session_id: its manager's (ownsRef)
+		"GET /api/v1/push/intercepts":                      "manager", // only entries with its manager (lnRoutes, TestLnInterceptsHeldToManager)
 		"GET /api/v1/assistant":                            "manager",
 		"GET /api/v1/assistant/capabilities":               "manager",
 		"POST /api/v1/assistant/conversations":             "manager",

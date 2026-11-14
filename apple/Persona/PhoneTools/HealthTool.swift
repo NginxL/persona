@@ -12,6 +12,9 @@ enum HealthTool {
             if let type = HKQuantityType.quantityType(forIdentifier: identifier) { types.insert(type) }
         }
         if let sleep = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
+        #if os(iOS) || os(visionOS)
+        types.formUnion(WorkoutReader.readTypes) // phone_workouts_recent / phone_workout_detail (#2526)
+        #endif
         return types
     }
 

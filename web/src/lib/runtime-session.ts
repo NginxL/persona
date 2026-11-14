@@ -172,5 +172,6 @@ export function useRuntimeSession(mid: string, sid: string, enabled = true) {
     return () => { live = false; loader.stop(); offHello(); offList(); offRow(); document.removeEventListener("visibilitychange", visible); };
   }, [mid, sid, lookup, online, enabled]);
   const unavailable = detail.missing ? { ...session, machine_id: mid, session_id: sid, title: session?.title ?? sid, cwd: session?.cwd ?? "", status: "idle", state: "unknown", read_only_reason: detail.error } as Session : session;
-  return { session: unavailable, detail, retry };
+  // `known`: this browser had a row for it, so a chat the hub no longer has still has something of it to show
+  return { session: unavailable, detail, retry, known: Boolean(session) };
 }

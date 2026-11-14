@@ -281,8 +281,9 @@ type Snapshot struct {
 	Plans          []SnapshotPlan     // plan cards in the main conversation waiting for "Start", newest first (at most five)
 	PlansTotal     int
 
-	Following      []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
-	FollowingTotal int                 // all of them
+	FollowingEnabled bool                // Inbox is enabled and available; false leaves the whole section out
+	Following        []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
+	FollowingTotal   int                 // all of them
 	// Asked: the assistant's ask_user questions nobody answered in time, now to-dos waiting for the user's call (#1617),
 	// oldest first.
 	Asked []SnapshotAsked
@@ -398,12 +399,10 @@ type TaskRun struct {
 	Label          string
 	Once, Interval bool   // neither: daily
 	Every          string // interval: "30 minutes"
-	// Accelerated: a leader's open supervised todos shortened this run's interval.
-	Accelerated bool
-	Late        string // "" when on time; else how late ("25 minutes")
-	Due         time.Time
-	Prompt      string
-	KBHint      bool // daily runs with the knowledge base on
+	Late           string // "" when on time; else how late ("25 minutes")
+	Due            time.Time
+	Prompt         string
+	KBHint         bool // daily runs with the knowledge base on
 	// KnowledgeDir: the knowledge base directory the hint names; "" is the default ~/.persona/data.
 	KnowledgeDir string
 	// Continued: it goes into the task's own conversation, which got the background on the first run.

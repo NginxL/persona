@@ -17,6 +17,7 @@ import { SESSIONS_TODO_FEATURE } from "../lib/session-groups";
 import { GROUPING_KEY, pagedAgentList } from "../lib/sidebar-api";
 import { filterAgentList } from "../lib/agent-list-filters";
 import { conversationPage } from "../lib/conversation-page";
+import { conversationTitle } from "./assistant/conversations";
 import { href, navigate, type Route } from "../lib/router";
 import { composing } from "../lib/send-history";
 import { useAgentSessions } from "../lib/sessions";
@@ -29,12 +30,13 @@ import { AgentMark, SessionMark } from "../ui/AgentMark";
 import { CARD_OUT, EASE, EXIT_MS, Kbd, toast, useExit } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
-import { useModalFocus } from "../ui/overlay";
+import { useEscapeClose, useModalFocus } from "../ui/overlay";
 import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit, usePaletteFiles, type FileRow } from "./palette/FilesSection";
 import { AgentConditions } from "./palette/AgentConditions";
 import { t } from "../i18n";
 import { byTime } from "../lib/times";
 import { STATE_LABEL } from "../lib/state-labels";
+import { plainMarkdown } from "../lib/plain-markdown";
 import { PHONE, useMedia } from "../lib/viewport";
 import type { AssistantSearchAnswer, AssistantSearchHit } from "../lib/assistant-search";
 
@@ -106,10 +108,11 @@ const ROW_TITLE = "block truncate text-[13px] font-medium text-ink";
 const ROW_DETAIL = "block truncate text-[11.5px] text-ink-3";
 const ROW_END = "shrink-0 text-[11px] text-ink-3";
 
-/** A group's heading above its first row ("Inbox", "Go to"). */
-const groupHeadingClass = "px-2.5 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase";
-function GroupHeading({ children }: { children: React.ReactNode }) {
-  return <div className={groupHeadingClass}>{children}</div>;
+/** A group's heading above its first row ("Inbox", "Go to"), in a label's capitals; `asWritten`: one that holds a name
+ *  (the pane's, the space's), which capitals would rewrite. */
+const groupHeadingClass = "px-2.5 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3";
+function GroupHeading({ children, asWritten = false }: { children: React.ReactNode; asWritten?: boolean }) {
+  return <div className={asWritten ? groupHeadingClass : `${groupHeadingClass} uppercase`}>{children}</div>;
 }
 
 /** One row of the list as drawn: the option, and the heading above it when a group starts there. */
@@ -140,11 +143,15 @@ function sections(items: Section[], listId: string): ReactNode[] {
   });
 }
 
+/** What a row calls a chat: a Persona chat by its readable title as the sidebar does (a `<persona-context>` tag read,
+ *  "New chat" for none), an Agent by its session's. */
+const chatTitle = (s: Session, persona: boolean) => (persona ? conversationTitle(s) : sessionTitle(s));
+
 /** A chat's match by its title (starting with what was typed 100, containing it 80), then every word in its folder,
  *  computer or last line (40): a Persona chat's, and an Agent's until lib/agent-search.ts has loaded. */
-function score(s: Session, q: string, machine: string): number {
+function score(s: Session, q: string, machine: string, persona = false): number {
   if (!q) return 1;
-  const title = sessionTitle(s).toLowerCase();
+  const title = chatTitle(s, persona).toLowerCase();
   if (title.startsWith(q)) return 100;
   if (title.includes(q)) return 80;
   const hay = [s.cwd, s.space_name, s.slot_name, machine, s.last_text].join(" ").toLowerCase();
@@ -287,7 +294,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
       if (found.score) out.push({ key: `s:${s.machine_id}/${s.session_id}`, s, to: { name: "session", mid: s.machine_id, sid: s.session_id }, score: found.score + (stateOf(s) === "offline" ? 0 : 5), evidence: found.snippet });
     }
     for (const s of operators ? [] : assistant?.conversations ?? []) {
-      const sc = score(s, query, "persona");
+      const sc = score(s, query, "persona", true);
       if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationPage(s.session_id, s.machine_id, s.manager), assistant: true, score: sc });
     }
     // what the manager found: a chat found by a message opens at it (not one found by its title); one not listed here
@@ -330,7 +337,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     // Go back to the previous conversation (#2191): the newest opened here other than the one on the page that still exists
     const back = previousChat(recentChats, sessions, assistant?.conversations ?? []);
     const extra: PaletteCommand[] = [
-      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: sessionTitle(back.s), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
+      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: chatTitle(back.s, back.to.name === "persona"), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
       { id: "app:new-agent", title: t("palette.new_agent"), section: SCOPE_LABEL.global, icon: "plus", keywords: "new agent", run: onNewAgent },
       { id: "app:new-conversation", title: t("palette.new_conversation"), section: SCOPE_LABEL.global, icon: "chat", keywords: "persona new", run: () => navigate({ name: "persona-new" }) },
     ];
@@ -361,6 +368,9 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   // a modal for the keyboard (ui/overlay.ts): Tab stays in, and closing gives the focus back to where it was. Called
   // before the effect below, so it notes that place before the field takes the focus.
   useModalFocus(card, open);
+  // Esc closes it wherever the focus is in it (the field, a row Tab reached, the Filter), and only it: a Dialog under it
+  // stays open, a menu over it (the Filter's) closes first
+  useEscapeClose(open, onClose);
   // the field takes the focus on every open (opened again on its way out, it is not mounted anew)
   useEffect(() => {
     if (open) input.current?.focus({ preventScroll: true });
@@ -404,7 +414,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (composing(e.nativeEvent)) return;
+              if (composing(e.nativeEvent)) {
+                if (e.key === "Escape") e.stopPropagation(); // it ends the input method's word, not the palette
+                return;
+              }
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 if (shown.length) setActive((a) => (a + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length);
@@ -418,7 +431,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
                   onClose();
                   void copyFileMention(row);
                 } else if (row) pick(row);
-              } else if (e.key === "Escape") onClose();
+              }
             }}
             placeholder={command ? t("palette.command_placeholder") : files.ctx ? t("files-find.searching_placeholder") : t("palette.search_placeholder")}
             className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3"
@@ -445,7 +458,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
               const heading = c.section && c.section !== (shown[i - 1] as Extract<Row, { kind: "command" }> | undefined)?.cmd.section;
               return {
                 key: r.key,
-                heading: heading ? <GroupHeading>{c.section}</GroupHeading> : null,
+                heading: heading ? <GroupHeading asWritten={c.sectionAsWritten}>{c.section}</GroupHeading> : null,
                 row: (
                   <button ref={ref} type="button" {...option} onMouseMove={() => setActive(i)} onClick={() => pick(r)} className={rowClass}>
                     <span className="flex size-5 shrink-0 items-center justify-center">{c.icon && <Icon name={c.icon} size={13} className={c.danger ? "text-red" : "text-ink-3"} />}</span>
@@ -525,7 +538,9 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             }
             const h = r.hit;
             const st = stateOf(h.s);
-            const meta = h.assistant ? "Persona" : [machineWithHub(h.s.machine_id, machines), h.s.space_name, tabLabel(h.s)].filter(Boolean).join(" › ");
+            // a Persona chat says what was said last (its folder is the assistant's own, the same for every chat); an Agent
+            // where it runs
+            const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [[machineWithHub(h.s.machine_id, machines), h.s.space_name, tabLabel(h.s)].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
             return {
               key: h.key,
               heading: sessionsHeading,
@@ -535,7 +550,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
                 <span className="flex size-5 shrink-0 items-center justify-center">{h.assistant ? <Icon name="spark" size={13} className="text-ink-3" /> : <StatusMark state={st} />}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-ink">{sessionTitle(h.s)}</span>
+                    <span className="truncate text-[13px] font-medium text-ink">{chatTitle(h.s, Boolean(h.assistant))}</span>
                     {r.previous && <span className="shrink-0 rounded-[5px] bg-field px-1.5 text-[10.5px] text-ink-3 shadow-hairline">{t("palette.previous")}</span>}
                   </span>
                   {h.evidence ? (
@@ -549,7 +564,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
                       {(found.marks?.(h.said.snippet, h.said.ranges, phone ? "phone" : "wide") ?? [[h.said.snippet, false] as [string, boolean]]).map(([words, match], k) => (match ? <mark key={k} className="rounded-[3px] bg-accent-tint text-ink">{words}</mark> : <span key={k}>{words}</span>))}
                     </span>
                   ) : (
-                    <span className={ROW_DETAIL}>{[meta, shortPath(h.s.cwd)].filter(Boolean).join(" · ")}</span>
+                    <span className={ROW_DETAIL}>{meta}</span>
                   )}
                 </span>
                 <span className={ROW_END}>{st === "offline" || h.assistant ? ago(h.s.updated_at) : STATE_LABEL[st]}</span>

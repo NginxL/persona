@@ -2051,7 +2051,8 @@ struct ChatView: View {
                     .accessibilityHidden(!terminalShown)
             }
             if pane == .git {
-                GitPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", status: $git, review: openReview).padding(.top, headerRoom)
+                GitPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", status: $git, review: openReview,
+                        commentKey: session?.canSend == false ? nil : key).padding(.top, headerRoom)
                     .transition(.move(edge: .trailing))
             } else if pane == .files {
                 FilesPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", git: git, key: key, reveal: $filesReveal, transfers: folderTransfers).padding(.top, headerRoom)
@@ -2068,7 +2069,8 @@ struct ChatView: View {
                     .padding(.top, style == .dev ? chrome.height - min(chrome.collapse, chrome.maxCollapse) : 0)
             } else { chatPane.stackSegment() }
         // Files and Git come in from the right (a swipe to the left), the chat back from the left.
-        case .git: GitPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", status: $git, review: openReview).padding(.top, headerRoom)
+        case .git: GitPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", status: $git, review: openReview,
+                        commentKey: session?.canSend == false ? nil : key).padding(.top, headerRoom)
             .transition(.move(edge: .trailing))
         case .files: FilesPane(machineID: key.machineID, group: key.group, cwd: session?.cwd ?? "", git: git, key: key,
                                      reloadGit: { await loadGit() }, reveal: $filesReveal, transfers: folderTransfers).padding(.top, headerRoom)

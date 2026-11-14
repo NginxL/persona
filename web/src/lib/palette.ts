@@ -75,6 +75,8 @@ export interface PaletteCommand {
   detail?: string;
   /** The group it is listed under: a heading in the list, also searched. */
   section?: string;
+  /** The section holds a name (the pane's, the space's): its heading is drawn as written, not in a label's capitals. */
+  sectionAsWritten?: boolean;
   icon?: IconName;
   /** Its shortcut, in the chord spelling (shortcuts.ts); drawn as keycaps on its row. */
   chord?: string;

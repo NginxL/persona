@@ -18,10 +18,10 @@ var Platforms = []string{"linux/amd64", "linux/arm64", "darwin/arm64", "darwin/a
 
 // HubOwn are the hub's own packages: persona-manager links none of them. A contract between the hub and a helper of
 // its own (relayproto with the push relay, shareproof with the sharing ingress, passwordpake with the web app's
-// password WASM) is the hub's too.
+// password WASM) is the hub's too, as is a push to a browser (webpush, the hub's Web Push).
 var HubOwn = []string{"cmd/persona-hub", "internal/hub", "internal/hubcli", "internal/hubedge", "internal/apns",
 	"internal/mdns", "internal/passwordpake", "internal/proxyproto", "internal/pushcrypto", "internal/relay",
-	"internal/relayproto", "internal/shareproof", "internal/webasset"}
+	"internal/relayproto", "internal/shareproof", "internal/webasset", "internal/webpush"}
 
 // Shared are the packages both programs link (the wire types, the database, the configuration, identity, the update
 // code and its proxy, netproxy): the hub links these and its own, nothing else; a new package the hub needs is put in

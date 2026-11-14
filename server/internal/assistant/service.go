@@ -76,6 +76,9 @@ type Service struct {
 	// (SetExtensions); nil: none (tests).
 	trans              transcribers
 	transcriptionReady transcriptionReadiness
+	// heard is told when the owner speaks in a conversation (extensions.go ownerHeard): the extensions' when they
+	// listen; nil: none.
+	heard ownerHeard
 	// humanSent: the messages a person's own app sent, as the hub vouched (secret_handoff.go).
 	humanSent humanSends
 
@@ -153,18 +156,19 @@ type Service struct {
 	noBackground bool
 	// briefsOptional: task_plan takes a task without done_when / expect_minutes (briefRequired). Only the tests of
 	// what a plan does once it exists set it; the hub never does.
-	briefsOptional bool
-	background     backgroundBook // supervise_background.go
-	autoRuns       autoReviewBook // supervise_autoreview.go
-	reports        reportBook     // reports.go
-	upReports      reportRate     // agent_control.go: report_to_supervisor
-	noteRate       reportRate     // todo_decisions.go: todo_decision_add
-	dispatch       dispatchBook   // dispatch.go: dispatch_start, dispatch_read
-	admission      admissionBook  // admission.go: execution-agent resource and direction gate
-	adoptMu        sync.Mutex     // agent_control.go: one agent_supervise at a time
-	placeBook      placeBook      // places.go
-	accept         acceptBook     // acceptance.go
-	deploy         deployProbe    // deploy_check.go: is the work in the running hub
+	briefsOptional  bool
+	background      backgroundBook  // supervise_background.go
+	autoRuns        autoReviewBook  // supervise_autoreview.go
+	reports         reportBook      // reports.go
+	upReports       reportRate      // agent_control.go: report_to_supervisor
+	noteRate        reportRate      // todo_decisions.go: todo_decision_add
+	dispatch        dispatchBook    // dispatch.go: dispatch_start, dispatch_read
+	admission       admissionBook   // admission.go: execution-agent resource and direction gate
+	adoptMu         sync.Mutex      // agent_control.go: one agent_supervise at a time
+	placeBook       placeBook       // places.go
+	savedPromptBook savedPromptBook // saved_prompts.go
+	accept          acceptBook      // acceptance.go
+	deploy          deployProbe     // deploy_check.go: is the work in the running hub
 
 	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
 	// ownerVerifiesAll: every deployed task asks the owner to verify, not only the big ones (ownerVerifies; tests).
@@ -209,6 +213,8 @@ type Service struct {
 	viewMemo   viewMemo          // views.go: encoded cards for the feed snapshot, checked against the database
 
 	devs          Devices // the computers (devices.go); nil: no fleet
+	mcpWaitMu     sync.Mutex
+	mcpWaits      map[string]*mcpWaitReporter // live opted-in mcp.call requests, by their validated call id
 	agentArchives agentArchiveBook
 	orphans       orphanBook      // tasks_orphan.go: the open to-dos nobody works on
 	agentNative   agentNativeBook // the tools' own archives (agent_archive_native.go)
@@ -261,6 +267,7 @@ func New(o Options) *Service {
 	s.archiveRoutes()
 	s.modelPickRoutes()
 	s.agentArchiveRoutes()
+	s.agentNamingRoutes() // agent_naming_request.go
 	s.alwaysRoutes()
 	s.standingAuthorizationRoutes()
 	s.ruleSuggestionRoutes()
@@ -281,6 +288,7 @@ func New(o Options) *Service {
 	s.workoutRoutes()
 	s.scheduleRoutes()
 	s.placeRoutes()
+	s.savedPromptRoutes()
 	s.repositoryRoutes()
 	s.taskRoutes()
 	s.viewActionRoutes()
@@ -667,6 +675,7 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 // of conversations.
 func (s *Service) UserSpoke(ctx context.Context, r SessionRef) {
 	s.availOwnerSpoke(r, time.Now()) // before anything else: what the conversation is doing as the message comes (availability.go)
+	s.ownerHeard(r.SessionID)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopUserInput)
 	// A meeting's turn under way is the user's from here on (meeting_turns.go).
 	s.meetingTurnUserSpoke(r.MachineID, r.SessionID)

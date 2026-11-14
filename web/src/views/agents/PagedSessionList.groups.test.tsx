@@ -269,6 +269,28 @@ describe("the list by computer", () => {
   });
 });
 
+describe("a list by group whose first read fails", () => {
+  // audit item 4: the groups come from the root list's counts, and its failed read left them on "Loading…" for good
+  it("says why with Retry instead of loading for good, and draws the groups once Retry reads them", async () => {
+    localStorage.setItem("persona.agentBrowseBy", "machine");
+    const answer = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(() => Promise.reject(new Error("HTTP 500")));
+    await list.load().catch(() => {});
+    await act(async () => root.render(<PagedSessionList root={list} path="/sessions" identity={identity} compare={compare} event="sessions_list"
+      label={(_, id) => NAMES[id] ?? id} renderRow={(r) => <span data-row={r.id}>{r.id}</span>} />));
+    await settle();
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    const alerts = [...host.querySelectorAll('[role="alert"]')].map((el) => el.textContent);
+    expect(alerts).toEqual(["HTTP 500"]);
+    vi.mocked(api).mockImplementation(answer);
+    const retry = [...host.querySelectorAll("button")].find((b) => b.textContent === t("sidebar.retry"))!;
+    await act(async () => retry.click());
+    await settle();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(sections().map(summary)).toEqual(["MacBook 1 3", "Windows PC 2", "Lab 1", "NAS 1"]);
+  });
+});
+
 describe("the list by project, on a hub with the catalog", () => {
   it("makes a repository on two computers one project that lists both directories and their sessions together", async () => {
     await show();

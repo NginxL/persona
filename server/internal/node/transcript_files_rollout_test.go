@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,30 @@ func TestTranscriptPathOfARolloutAgentReadsNoProjects(t *testing.T) {
 	}
 	if read := n.projectGlobs.Load() - before; read != 0 {
 		t.Fatalf("rollout agents read the projects directories %d times, want 0", read)
+	}
+}
+
+// A cached base rollout must not hide a newer continuation (#7354).
+func TestTranscriptPathFollowsContinuationForRolloutAgent(t *testing.T) {
+	n, home := testNode(t)
+	n.pathsAt = map[string]time.Time{}
+	const thread = "0e000000-0000-4000-8000-0000000000f1"
+	writeRollout(t, home, thread, "/work/app", time.Now(), time.Now())
+	n.agents[thread] = host.Agent{Agent: "codex"}
+	base := rolloutPath(n.codexHome(), thread)
+	if got := n.transcriptPath(thread); got != base || base == "" {
+		t.Fatalf("cached base = %q, want %q", got, base)
+	}
+	path := strings.TrimSuffix(base, ".jsonl") + "_" + continuationSegment + ".jsonl"
+	continuationFixture(t, path, thread, "")
+	expireRollouts(n.codexHome(), true)
+	age(n, thread)
+	before := n.projectGlobs.Load()
+	if got := n.transcriptPath(thread); got != path {
+		t.Fatalf("transcript = %q, want the continuation %q", got, path)
+	}
+	if read := n.projectGlobs.Load() - before; read != 0 {
+		t.Fatalf("following a continuation read the projects directories %d times, want 0", read)
 	}
 }
 

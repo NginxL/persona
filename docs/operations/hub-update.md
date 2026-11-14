@@ -571,6 +571,7 @@ Download → Verify → Prepare → Wait for idle → Replace → Restart → Co
      Update history and bad versions still go into Postgres.
 4. **Wait for idle** (check every 30 seconds; also do not restart while redeploying a machine): automatic and manual are the same: **restart only when the assistant and every Agent are idle**, with no time-of-day restriction (user, 2026-11-02).
    - Idle = no session working or waiting for the user's answer (both assistant chats and Agents in herdr count). If they never become idle, never install; keep the download ready.
+   - A chat that waits only on the assistant's `ask_user` cards asked without waiting (`wait: false`, or a question that let go of its turn) is idle for this: no turn waits on them and they outlive a restart, so a card that is up for two hours does not hold the update (`hub/selfupdate_install.go` `updateBusy`, #7392; `docs/assistant/assistant.md`, "Asking without holding the turn"). A running turn, a blocked terminal, any other card of that chat, or a card the hub was not shown still holds it.
    - For a manual update, the App shows "what is still busy" (which chats, on which machine), and offers **Update Now** in a second confirmation:
      the confirmation states, "This interrupts anything waiting on the hub (the assistant's current turn, uploads in progress, terminal connections). Agents in herdr aren't affected and reconnect on their own."
      After confirmation, skip waiting for idle; all other steps (verification, rollback) stay the same.

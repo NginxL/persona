@@ -84,6 +84,7 @@ var RouteScopes = map[string]string{
 	"GET /api/v1/machines/{id}/usage":                    ScopeMachinesRead,
 	"GET /api/v1/machines/{mid}/stat":                    ScopeMachinesRead,
 	"POST /api/v1/notify":                                ScopeNotify,
+	"GET /api/v1/push/intercepts":                        ScopeNotify, // read-only: pushes ln mode held back, including an extension's own
 	"GET /api/v1/assistant":                              ScopeAssistantAsk,
 	"GET /api/v1/assistant/capabilities":                 ScopeAssistantAsk,
 	"POST /api/v1/assistant/conversations":               ScopeAssistantAsk,

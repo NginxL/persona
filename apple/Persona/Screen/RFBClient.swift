@@ -18,13 +18,17 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     /// - Parameter pair: ties this screen-sharing stream to a later video stream of the same Mac (#3954): the node follows
     ///   Screen Sharing's sign-in on it, and opens video only for a pair that signed in. Hubs and nodes from before the
     ///   video channel ignore it.
-    convenience init(api: APIClient, machine: String, pair: String? = nil) {
-        self.init(api: api, path: "/api/v1/machines/\(machine)/ports/5900/connect", pair: pair)
+    convenience init(api: APIClient, machine: String, pair: String? = nil, protocols: [String] = []) {
+        self.init(api: api, path: "/api/v1/machines/\(machine)/ports/5900/connect", pair: pair, protocols: protocols)
     }
 
     /// Another of the hub's binary relays the same way: the live screen's video channel (`…/screen/video/connect`, #3954).
-    init(api: APIClient, path: String, pair: String?) {
-        var req = URLRequest(url: Self.url(api.url(path), pair: pair))
+    /// - Parameter protocols: WebSocket subprotocols to offer (the live screen's session, #6398); `subprotocol` says
+    ///   which the hub selected once the socket is open.
+    /// - Parameter attach: rejoin the live screen session of `pair` (#6398) instead of opening a new stream.
+    init(api: APIClient, path: String, pair: String?, protocols: [String] = [], attach: Bool = false) {
+        var req = URLRequest(url: Self.url(api.url(path), pair: pair, attach: attach))
+        if !protocols.isEmpty { req.setValue(protocols.joined(separator: ", "), forHTTPHeaderField: "Sec-WebSocket-Protocol") }
         api.config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
         req.timeoutInterval = 15
@@ -35,11 +39,12 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     }
 
     /// The WebSocket URL for the hub's `http(s)` one, with `pair` when there is one.
-    static func url(_ http: URL, pair: String?) -> URL {
+    static func url(_ http: URL, pair: String?, attach: Bool = false) -> URL {
         var comps = URLComponents(url: http, resolvingAgainstBaseURL: false)!
         comps.scheme = comps.scheme == "https" ? "wss" : "ws"
         if let pair, !pair.isEmpty {
             comps.queryItems = (comps.queryItems ?? []) + [URLQueryItem(name: "pair", value: pair)]
+                + (attach ? [URLQueryItem(name: "attach", value: "1")] : [])
         }
         return comps.url!
     }
@@ -61,6 +66,11 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     }
 
     func close() { task.cancel(with: .normalClosure, reason: nil) }
+
+    /// The subprotocol the hub selected, once the socket is open (after the first message); nil for none.
+    var subprotocol: String? {
+        (task.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol")
+    }
 }
 
 /// What came in, read a few bytes at a time.
