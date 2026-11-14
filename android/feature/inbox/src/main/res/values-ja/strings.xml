@@ -271,6 +271,7 @@
     <string name="inbox_event_view_source">原文を見る</string>
     <string name="inbox_done_by_manager">アシスタントが処理済み</string>
     <string name="inbox_event_related">関連</string>
-    <!-- Source subscriptions (#2041): with the Inbox's other settings -->
+    <!-- Source subscriptions (#2041): with the Inbox's other settings. Inbox Sources (#5308) once the hub says so. -->
     <string name="inbox_subscriptions">購読</string>
+    <string name="inbox_sources">受信箱のソース</string>
 </resources>

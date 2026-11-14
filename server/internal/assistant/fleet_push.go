@@ -459,7 +459,7 @@ func (s *Service) deliver(n Notification) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
+		if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 			s.logf("assistant: push: %v", err)
 		}
 	}()

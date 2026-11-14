@@ -80,16 +80,20 @@ class SentToAgentsShotsTest {
     private fun ago(min: Long, plusMillis: Long = 0) = now.minus(min, ChronoUnit.MINUTES).plusMillis(plusMillis).toString()
     private val handOff = "把设置页的内存占用降下来。\n\n1. 先用示例数据复现：打开设置页来回切 20 次。\n2. 找出没释放的缓存。\n3. 改完跑一遍单元测试，把结果写进 PR。"
     private val rework = "先停一下：缓存的大小不要写死，改成按屏幕数算。\n其余照旧。"
-    private fun routed(id: String, ref: String, at: String, text: String, persona: Boolean, interrupted: Boolean = false) =
+    private fun routed(id: String, ref: String, at: String, text: String, persona: Boolean, interrupted: Boolean = false, newAgent: String? = null) =
         FeedItem(id, "main", at, "routed", ref, buildJsonObject {
             put("text", JsonPrimitive(text))
             if (persona) put("from", JsonPrimitive("assistant"))
             if (interrupted) put("interrupted", JsonPrimitive(true))
+            newAgent?.let {
+                put("new_agent", JsonPrimitive(it))
+                put("new_agent_machine", JsonPrimitive("desk"))
+            }
         })
     private val feed = listOf(
         FeedItem("card1", "main", ago(10), "task", "task1"),
         routed("handoff", "task1", ago(10, 8), handOff, persona = true),
-        routed("said", "task1", ago(8), "顺便看看日志里有没有报错", persona = false),
+        routed("said", "task1", ago(8), "顺便看看日志里有没有报错", persona = false, newAgent = "successor"),
         routed("rework", "task1", ago(3), rework, persona = true, interrupted = true),
         routed("other", "task2", ago(2), "把示例项目的依赖升到最新的小版本，跑完测试告诉我。", persona = true),
     )
@@ -144,6 +148,8 @@ class SentToAgentsShotsTest {
         rule.onNodeWithText("打断「降低设置页的内存占用」后发送").assertIsDisplayed()
         rule.onNodeWithText("发给「升级示例项目的依赖」").assertIsDisplayed()
         rule.onNodeWithText("顺便看看日志里有没有报错").assertIsDisplayed()
+        rule.onNodeWithTag("new-agent-handoff").assertIsDisplayed()
+        rule.onNodeWithText("新建").assertIsDisplayed()
         rule.onNodeWithText("把设置页的内存占用降下来。", substring = true).assertDoesNotExist()
         rule.onNodeWithText("已发 2 条指令").assertIsDisplayed()
         shots("folded")

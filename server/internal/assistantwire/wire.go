@@ -221,6 +221,15 @@ type NotifyRequest struct {
 	Notification Notification `json:"notification"`
 }
 
+// NotifyResult is notify.request's answer. Held says the hub's low-distraction (ln) mode kept the push off the phone
+// (for the "Needs you" list / briefings); Reason is why ("" when it went out), one of the hub's intercept reasons.
+// The assistant's notify_user tool shows it to the model, which otherwise would assume the user was alerted.
+type NotifyResult struct {
+	OK     bool   `json:"ok"`
+	Held   bool   `json:"held,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // Notification is one notification intent: a push (kind assistant) to every device whose settings take it, like an
 // agent's. The hub delivers it as it is: it does not derive what it means.
 type Notification struct {

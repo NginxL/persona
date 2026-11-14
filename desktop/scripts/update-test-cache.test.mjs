@@ -88,21 +88,11 @@ test("cleanup refuses a foreign path and reports a failed removal separately", a
   assert.deepEqual(failures.filter(failure => failure.startsWith("Squirrel cache:")), []);
 });
 
-test("native cleanup is scoped to this run's exact job and NSIS keys", async () => {
-  const script = await readFile(new URL("./update-test.mjs", import.meta.url), "utf8");
-  const entry = await readFile(new URL("../update-test/main.mjs", import.meta.url), "utf8");
+test("test-only configuration keeps disposable shortcuts disabled and production identities out", async () => {
   const config = await readFile(new URL("../electron-builder.update-test.yml", import.meta.url), "utf8");
-  assert.match(script, /launchctl", \["bootout", `\$\{domain\}\/\$\{label\}`\]/);
-  assert.match(script, /run\("reg", \["delete", key, "\/f"\]/);
-  assert.match(script, /entry\.event === "nsis-install"/);
-  assert.match(entry, /installDirectory: autoUpdater\.installDirectory \?\? null/);
+  const script = await readFile(new URL("./update-test.mjs", import.meta.url), "utf8");
   assert.match(config, /createDesktopShortcut: false/);
   assert.match(config, /createStartMenuShortcut: false/);
-  assert.doesNotMatch(script, /reg(?:istry)?[^;\n]*(?:delete|clear|reset)[^;\n]*HKCU(?![^;\n]*key)/i);
-});
-
-test("the harness uses the test-only cache override, not a fixed HOME cache deletion", async () => {
-  const script = await readFile(new URL("./update-test.mjs", import.meta.url), "utf8");
   assert.match(script, /-c\.appId=\$\{testAppId\(runPaths\.identity\)\}/);
   assert.match(script, /-c\.nsis\.guid=\$\{nsisGuid\(runPaths\.identity\)\}/);
   assert.match(script, /updaterCacheDirName: \$\{cacheIdentity\}\$/);

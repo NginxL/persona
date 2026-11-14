@@ -53,6 +53,14 @@ async function search(query: string) {
   setPaletteQuery(query);
   act(() => root.render(<Palette open onClose={() => {}} onNewAgent={() => {}} />));
   await act(async () => { await new Promise((ok) => setTimeout(ok, 300)); });
+  // The palette loads lib/assistant-search with the first query typed and asks after its debounce, later than 300 ms on a
+  // busy machine: wait for the ask, each poll in act, so the results are in before anything is read.
+  if (fake.features.includes("assistant_search")) {
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((ok) => setTimeout(ok, 20)); });
+      expect(fake.asked).toContain(query);
+    }, { timeout: 5000, interval: 20 });
+  }
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
   return document.body;
 }
