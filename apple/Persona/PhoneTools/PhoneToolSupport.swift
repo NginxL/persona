@@ -144,16 +144,24 @@ nonisolated enum ToolArgs {
 /// ISO 8601 in the phone's local timezone, the format every tool documents.
 nonisolated enum ToolDate {
     static func string(_ date: Date) -> String {
+        string(date, timeZone: .current)
+    }
+
+    static func string(_ date: Date, timeZone: TimeZone) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        formatter.timeZone = .current
+        formatter.timeZone = timeZone
         return formatter.string(from: date)
     }
 
     static func day(_ date: Date) -> String {
+        day(date, timeZone: .current)
+    }
+
+    static func day(_ date: Date, timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }

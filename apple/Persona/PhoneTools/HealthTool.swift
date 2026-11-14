@@ -257,13 +257,14 @@ enum HealthTool {
                 rows[day, default: [:]][metric] = value
             }
         }
-        await snapshotStore.save(HealthSnapshot(
+        let saved = await snapshotStore.save(HealthSnapshot(
             asOf: end,
             windowDays: HealthSnapshotStore.windowDays,
             metrics: metricNames,
-            rows: rows
+            rows: rows,
+            timeZone: calendar.timeZone.identifier
         ))
-        await snapshotStore.markRefreshed(at: end)
+        if saved { await snapshotStore.markRefreshed(at: end) }
     }
 
     /// One metric's per-day values over the last `days` days (today included), keyed "yyyy-MM-dd": the numbers the

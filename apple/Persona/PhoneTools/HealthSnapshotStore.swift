@@ -27,19 +27,32 @@ nonisolated enum HealthDataLock {
 /// in the foreground and the device is unlocked, read at any time, including
 /// while the phone is locked.
 nonisolated struct HealthSnapshot: Codable, Sendable {
+    /// Locked-phone answers must not present old health data as if it were current.
+    static let maximumAge: TimeInterval = 48 * 60 * 60
+
     var asOf: Date
     var windowDays: Int
     var metrics: [String]
     var rows: [String: [String: JSONValue]]
+    /// The save-time zone keeps day rows and `partial` stable after travel.
+    /// Optional so snapshots written before this field existed still decode.
+    var timeZone: String? = nil
 
     /// Builds a `phone_health_summary`-shaped answer from the stored rows,
-    /// restricted to the requested metrics and day window. Returns nil when the
-    /// snapshot holds nothing inside the window (callers then say `device_locked`).
+    /// restricted to the requested metrics and day window ending at `asOf`.
+    /// Returns nil when the snapshot is expired or holds nothing inside the
+    /// window (callers then say `device_locked`).
     func response(metrics requested: [String], days: Int, now: Date, calendar: Calendar = .current) -> JSONValue? {
-        let end = now
-        let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: end) ?? end)
-        let firstDay = ToolDate.day(start)
-        let lastDay = ToolDate.day(end)
+        guard now.timeIntervalSince(asOf) <= Self.maximumAge else { return nil }
+        var snapshotCalendar = calendar
+        if let timeZone, let savedTimeZone = TimeZone(identifier: timeZone) {
+            snapshotCalendar.timeZone = savedTimeZone
+        }
+        let zone = snapshotCalendar.timeZone
+        let end = asOf
+        let start = snapshotCalendar.startOfDay(for: snapshotCalendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: end) ?? end)
+        let firstDay = ToolDate.day(start, timeZone: zone)
+        let lastDay = ToolDate.day(end, timeZone: zone)
 
         var byDay: [String: [String: JSONValue]] = [:]
         for (day, metrics) in rows where day >= firstDay && day <= lastDay {
@@ -54,16 +67,17 @@ nonisolated struct HealthSnapshot: Codable, Sendable {
         let rows: [JSONValue] = byDay.keys.sorted().map { day in
             var row: [String: JSONValue] = ["date": .string(day)]
             for (metric, value) in byDay[day] ?? [:] { row[metric] = value }
+            if day == lastDay { row["partial"] = .bool(true) }
             return .object(row)
         }
         return .object([
-            "start": .string(ToolDate.string(start)),
-            "end": .string(ToolDate.string(end)),
+            "start": .string(ToolDate.string(start, timeZone: zone)),
+            "end": .string(ToolDate.string(end, timeZone: zone)),
             "days": .number(Double(days)),
             "metrics": .array(requested.map { .string($0) }),
             "data": .array(rows),
             "source": .string("snapshot"),
-            "as_of": .string(ToolDate.string(asOf)),
+            "as_of": .string(ToolDate.string(asOf, timeZone: zone)),
         ])
     }
 }
@@ -74,7 +88,8 @@ nonisolated struct HealthSnapshot: Codable, Sendable {
 /// it readable after the first unlock, including while the phone is locked again.
 nonisolated protocol HealthSnapshotStoring: Sendable {
     func load() async -> HealthSnapshot?
-    func save(_ snapshot: HealthSnapshot) async
+    @discardableResult
+    func save(_ snapshot: HealthSnapshot) async -> Bool
     /// Returns the current snapshot when a refresh ran less than the throttle interval ago.
     func cachedIfFresh(now: Date) async -> HealthSnapshot?
     func markRefreshed(at date: Date) async
@@ -112,7 +127,8 @@ actor HealthSnapshotStore: HealthSnapshotStoring {
         return snapshot
     }
 
-    func save(_ snapshot: HealthSnapshot) {
+    @discardableResult
+    func save(_ snapshot: HealthSnapshot) -> Bool {
         do {
             if !files.fileExists(atPath: directory.path) {
                 try files.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -120,14 +136,27 @@ actor HealthSnapshotStore: HealthSnapshotStoring {
                 try files.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                                         ofItemAtPath: directory.path)
             }
+            // Reassert both flags on every save so snapshots written by older builds are excluded too.
+            try excludeFromBackup(at: directory)
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            // The file is already new; keep the in-memory copy consistent even if setting its flag fails.
             cached = snapshot
+            try excludeFromBackup(at: fileURL)
+            return true
         } catch {
             // A missing snapshot only makes the first locked call say device_locked; never fail the live tool over it.
+            return false
         }
+    }
+
+    private func excludeFromBackup(at url: URL) throws {
+        var url = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try url.setResourceValues(values)
     }
 
     func cachedIfFresh(now: Date) -> HealthSnapshot? {
