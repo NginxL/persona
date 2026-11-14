@@ -103,6 +103,8 @@ const { keepOutgoing, outboxKey, resetOutboxClaimsForTests, resetRestoredForTest
 const { configureMessageFeedback, receiveMessageSend, resetMessageFeedback } = await import("../../lib/message-send");
 configureMessageFeedback({ getSession, send, onHubEvent, subscribe, receiptsAllowed: () => true }); // injected trusted transport
 const { SESSIONS_LOOKUP_FEATURE } = await import("../../lib/runtime-list");
+// ChatView's own React.lazy notice must be ready before the missing-chat assertions, not only lazyPage's registry.
+await import("./NotFoundNotice");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
