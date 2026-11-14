@@ -125,7 +125,7 @@ func TestAssistantCompactionRPCAndSpare(t *testing.T) {
 				t.Fatalf("stored scope %v", st.IsMain)
 			}
 			n.spare = p
-			if main && n.adoptSpare(p.cwd, p.launcher, modelExecution{}) != nil {
+			if main && n.adoptSpare(p.cwd, p.launcher, modelExecution{ConfigDir: p.model.ConfigDir}) != nil { // only the scope differs
 				t.Fatal("a main process was adopted for an ordinary conversation")
 			}
 		})
