@@ -18968,7 +18968,7 @@ def search_index_text(item):
     return text if text.strip() else None
 
 
-# A reply's Markdown as the chat shows it (#7072): the manager's searchPlain (server/internal/assistant/search_text.go),
+# A reply's Markdown as the chat shows it (#7072): the manager's searchPlain (server/internal/assistant/chatsearch/text.go),
 # pattern for pattern; spec/fixtures/chat-search checks both.
 _PLAIN_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 _PLAIN_RULE = re.compile(r"^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")

@@ -1,4 +1,4 @@
-package assistant
+package chatsearch
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 // The index keeps what spec/fixtures/chat-search says of each item (its "index"), the rule the web's search in chat
 // reads too (#6281, #6282).
 func TestSearchIndexTextFollowsTheSharedRule(t *testing.T) {
-	raw, err := os.ReadFile("../../../spec/fixtures/chat-search/cases.json")
+	raw, err := os.ReadFile("../../../../spec/fixtures/chat-search/cases.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestSearchIndexTextFollowsTheSharedRule(t *testing.T) {
 		t.Fatalf("only %d cases read", len(fixture.Cases))
 	}
 	for _, c := range fixture.Cases {
-		got, ok := searchIndexText(c.Item)
+		got, ok := IndexText(c.Item)
 		switch {
 		case c.Index == nil && ok:
 			t.Errorf("%s: indexed %q, want nothing", c.Name, got)
@@ -48,43 +48,43 @@ func TestSearchIndexTextLeavesOutWhatIsNotTheUsersWords(t *testing.T) {
 		"a thought":                 {Role: "assistant", Kind: proto.KindThinking, Text: "thinking it over"},
 		"a tool's output":           {Role: "user", Kind: proto.KindToolResult, Text: "ok"},
 	} {
-		if got, ok := searchIndexText(it); ok {
+		if got, ok := IndexText(it); ok {
 			t.Errorf("%s: indexed %q", name, got)
 		}
 	}
 	// read off the text when the hub has not marked it, as the hub's withInjected does; a message the app sent is the user's
 	if prompt := (proto.Item{Role: "user", Kind: proto.KindText, Text: notice}); searchInjected(prompt) {
-		if _, ok := searchIndexText(prompt); ok {
+		if _, ok := IndexText(prompt); ok {
 			t.Error("an unmarked injected notice was indexed")
 		}
 	}
-	if _, ok := searchIndexText(proto.Item{Role: "user", Kind: proto.KindText, Text: notice, ClientMsgID: "c1"}); !ok {
+	if _, ok := IndexText(proto.Item{Role: "user", Kind: proto.KindText, Text: notice, ClientMsgID: "c1"}); !ok {
 		t.Error("the user's own message was left out because it reads like a notice")
 	}
 }
 
 func TestSearchWordsFoldCaseAndWidth(t *testing.T) {
-	if got := searchWords("  ＷＥＥＫＬＹ Report  weekly 日历 "); !reflect.DeepEqual(got, []string{"weekly", "report", "日历"}) {
+	if got := Words("  ＷＥＥＫＬＹ Report  weekly 日历 "); !reflect.DeepEqual(got, []string{"weekly", "report", "日历"}) {
 		t.Fatalf("words %q", got)
 	}
-	if got := searchWords("   "); got != nil {
+	if got := Words("   "); got != nil {
 		t.Fatalf("blank query gave %q", got)
 	}
-	if got := searchWords("a b c d e f g h i j"); len(got) != searchMaxWords {
+	if got := Words("a b c d e f g h i j"); len(got) != searchMaxWords {
 		t.Fatalf("%d words kept, want %d", len(got), searchMaxWords)
 	}
-	if !searchHolds(searchFold("周末去青石巷 BlueLane 看看"), searchWords("bluelane 青石")) || searchHolds("abc", nil) {
-		t.Fatal("searchHolds")
+	if !Holds(Fold("周末去青石巷 BlueLane 看看"), Words("bluelane 青石")) || Holds("abc", nil) {
+		t.Fatal("Holds")
 	}
 }
 
 func TestSearchSnippetMarksMatchesInUTF16(t *testing.T) {
-	snippet, ranges := searchSnippet("我想去青石巷 BlueLane 看看", searchWords("bluelane"))
+	snippet, ranges := Snippet("我想去青石巷 BlueLane 看看", Words("bluelane"))
 	if snippet != "我想去青石巷 BlueLane 看看" || !reflect.DeepEqual(ranges, [][2]int{{7, 15}}) {
 		t.Fatalf("snippet %q ranges %v", snippet, ranges)
 	}
 	// a character outside the BMP counts two before the match, as the apps' strings do
-	if _, r := searchSnippet("😀 Ｋｅｙ here", searchWords("key")); !reflect.DeepEqual(r, [][2]int{{3, 6}}) {
+	if _, r := Snippet("😀 Ｋｅｙ here", Words("key")); !reflect.DeepEqual(r, [][2]int{{3, 6}}) {
 		t.Fatalf("ranges %v", r)
 	}
 	// cut around the first match, on one line, with ellipses; every match marked
@@ -92,7 +92,7 @@ func TestSearchSnippetMarksMatchesInUTF16(t *testing.T) {
 	for range 30 {
 		long += "前文"
 	}
-	snippet, ranges = searchSnippet(long+"\n\n铜钥匙 挂在门后。\n"+long+long, searchWords("铜钥匙"))
+	snippet, ranges = Snippet(long+"\n\n铜钥匙 挂在门后。\n"+long+long, Words("铜钥匙"))
 	if []rune(snippet)[0] != '…' || []rune(snippet)[len([]rune(snippet))-1] != '…' {
 		t.Fatalf("not cut: %q", snippet)
 	}
@@ -122,12 +122,12 @@ func TestSearchPlainKeepsAReplysWordsWithoutTheMarkup(t *testing.T) {
 		}
 	}
 	// the user's words stay as typed (neither app renders them as Markdown); a reply's split words are found together
-	user, _ := searchIndexText(proto.Item{Role: "user", Kind: proto.KindText, Text: "**不是** Markdown"})
-	reply, _ := searchIndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "**照片**同步脚本"})
-	if user != "**不是** Markdown" || !searchHolds(searchFold(reply), searchWords("照片同步")) {
+	user, _ := IndexText(proto.Item{Role: "user", Kind: proto.KindText, Text: "**不是** Markdown"})
+	reply, _ := IndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "**照片**同步脚本"})
+	if user != "**不是** Markdown" || !Holds(Fold(reply), Words("照片同步")) {
 		t.Fatalf("user %q reply %q", user, reply)
 	}
-	if snippet, ranges := searchSnippet(reply, searchWords("照片同步")); snippet != "照片同步脚本" || !reflect.DeepEqual(ranges, [][2]int{{0, 4}}) {
+	if snippet, ranges := Snippet(reply, Words("照片同步")); snippet != "照片同步脚本" || !reflect.DeepEqual(ranges, [][2]int{{0, 4}}) {
 		t.Fatalf("snippet %q ranges %v", snippet, ranges)
 	}
 }
@@ -153,8 +153,8 @@ func TestSearchPlainLeavesNoStrongMarkers(t *testing.T) {
 		}
 	}
 	// a match's range is counted on the text without the stars
-	reply, _ := searchIndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "结论：**先跑 `go vet` 再提交**"})
-	if snippet, ranges := searchSnippet(reply, searchWords("go vet 再提交")); snippet != "结论：先跑 go vet 再提交" || !reflect.DeepEqual(ranges, [][2]int{{6, 8}, {9, 12}, {13, 16}}) {
+	reply, _ := IndexText(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "结论：**先跑 `go vet` 再提交**"})
+	if snippet, ranges := Snippet(reply, Words("go vet 再提交")); snippet != "结论：先跑 go vet 再提交" || !reflect.DeepEqual(ranges, [][2]int{{6, 8}, {9, 12}, {13, 16}}) {
 		t.Fatalf("snippet %q ranges %v", snippet, ranges)
 	}
 }

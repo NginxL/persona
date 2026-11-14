@@ -1,4 +1,4 @@
-package assistant
+package chatsearch
 
 import (
 	"slices"
@@ -31,8 +31,8 @@ var (
 	searchActionRe = lazyre.New(`\n<persona-action view="[^"<>]*" action="[^"<>]*">\{[^<>]*\}</persona-action>$`)
 )
 
-// searchIndexText is the text the index keeps of it, and false for an item it keeps nothing of.
-func searchIndexText(it proto.Item) (string, bool) {
+// IndexText is the text the index keeps of it, and false for an item it keeps nothing of.
+func IndexText(it proto.Item) (string, bool) {
 	if it.Kind != proto.KindText {
 		return "", false
 	}
@@ -309,8 +309,8 @@ func searchOperand(c byte) bool {
 	return '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
-// searchFold is what a search matches: NFKC (full and half width alike) and lower case.
-func searchFold(s string) string { return strings.ToLower(norm.NFKC.String(s)) }
+// Fold is what a search matches: NFKC (full and half width alike) and lower case.
+func Fold(s string) string { return strings.ToLower(norm.NFKC.String(s)) }
 
 // searchMaxRunes is the longest query read; searchMaxWords the most words of it that must all match.
 const (
@@ -318,14 +318,14 @@ const (
 	searchMaxWords = 8
 )
 
-// searchWords is a query's words, folded, each once, in order: every one must be in a message (or the title).
-func searchWords(q string) []string {
+// Words is a query's words, folded, each once, in order: every one must be in a message (or the title).
+func Words(q string) []string {
 	r := []rune(strings.TrimSpace(q))
 	if len(r) > searchMaxRunes {
 		r = r[:searchMaxRunes]
 	}
 	var out []string
-	for _, w := range strings.Fields(searchFold(string(r))) {
+	for _, w := range strings.Fields(Fold(string(r))) {
 		if len(out) == searchMaxWords {
 			break
 		}
@@ -336,8 +336,8 @@ func searchWords(q string) []string {
 	return out
 }
 
-// searchHolds: folded holds every word.
-func searchHolds(folded string, words []string) bool {
+// Holds: folded holds every word.
+func Holds(folded string, words []string) bool {
 	for _, w := range words {
 		if !strings.Contains(folded, w) {
 			return false
@@ -352,10 +352,10 @@ const (
 	snippetAfter  = 80
 )
 
-// searchSnippet is the text around the first match of words in body, on one line, with "…" where it was cut, and the
+// Snippet is the text around the first match of words in body, on one line, with "…" where it was cut, and the
 // [start, end) of every match in it as UTF-16 offsets (as the apps count them); the start of body when no word is
 // found in it rune by rune (a match only the whole text's normalization makes).
-func searchSnippet(body string, words []string) (string, [][2]int) {
+func Snippet(body string, words []string) (string, [][2]int) {
 	runes := []rune(body)
 	folded, from := searchFoldRunes(runes)
 	start, end := 0, min(len(runes), snippetBefore+snippetAfter)
@@ -392,7 +392,7 @@ func searchFoldRunes(runes []rune) ([]rune, []int) {
 	folded := make([]rune, 0, len(runes))
 	from := make([]int, 0, len(runes))
 	for i, r := range runes {
-		for _, f := range searchFold(string(r)) {
+		for _, f := range Fold(string(r)) {
 			folded = append(folded, f)
 			from = append(from, i)
 		}
