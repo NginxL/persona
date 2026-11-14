@@ -177,6 +177,58 @@ func TestWarmSpareStartsInTheMainChatsProfile(t *testing.T) {
 	}
 }
 
+// After /clear the next main conversation starts on the carried pick, in the main chat's profile (startMain, startOn).
+// The spare is warmed for that start as it runs: the same launcher, fingerprint and profile, or the start never adopts
+// it (node/assistant_spare.go). A carried Codex pick has no profile to warm in; a node too old for config_dir gets
+// both without it.
+func TestWarmSpareForACarriedPickStartsInTheMainChatsProfile(t *testing.T) {
+	for _, tc := range []struct {
+		pick  string
+		older bool
+		want  any // nil: not sent
+	}{
+		{`{"launcher":"claude","model":"opus"}`, false, assistantConfigDirLegacy},
+		{`{"launcher":"claude","model":"opus"}`, true, nil},
+		{`{"launcher":"cx","model":"gpt-5"}`, false, nil},
+	} {
+		ctx := context.Background()
+		s, f := pickFixture(t)
+		f.refuseConfigDir = tc.older
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.gw", ConfigDir: assistantConfigDirLegacy})
+		if r := putPick(t, s, "main", tc.pick); r.Code != 200 {
+			t.Fatal(r.Body.String())
+		}
+		if _, err := s.clearMain(ctx, ""); err != nil {
+			t.Fatal(err)
+		}
+		s.warm("")
+		var warm map[string]any
+		f.mu.Lock()
+		for _, c := range f.calls {
+			if c.Method == DeviceAssistantWarm {
+				warm = nil
+				_ = json.Unmarshal(c.Params, &warm)
+			}
+		}
+		f.mu.Unlock()
+		if warm == nil {
+			t.Fatalf("%s older=%v: not warmed", tc.pick, tc.older)
+		}
+		if code, sess := startConv(t, s, `{"prompt":"hi","main":true}`); code != 200 {
+			t.Fatalf("%s older=%v: start %d %+v", tc.pick, tc.older, code, sess)
+		}
+		start := f.lastSend(t)
+		if start["config_dir"] != tc.want {
+			t.Fatalf("%s older=%v: started in %v, want %v", tc.pick, tc.older, start["config_dir"], tc.want)
+		}
+		for _, k := range []string{"launcher", "model_fingerprint", "config_dir"} {
+			if warm[k] != start[k] {
+				t.Fatalf("%s older=%v: %s warmed %v, started %v", tc.pick, tc.older, k, warm[k], start[k])
+			}
+		}
+	}
+}
+
 // Switching to a model profile and back keeps the main chat's profile choice, as it keeps its runtime, including one
 // made between the switch and the rollback; a model profile cannot set one.
 func TestModelProfileSwitchKeepsTheMainChatsConfigDir(t *testing.T) {
