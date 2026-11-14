@@ -104,7 +104,7 @@ func TestSessionRowsEncodeAllocations(t *testing.T) {
 		for i := range list {
 			_ = enc.Encode(&list[i])
 		}
-	}); n > 0 {
+	}); n > 0 && !raceEnabled {
 		t.Fatalf("encoding 150 sessions allocates %v times", n)
 	}
 }
