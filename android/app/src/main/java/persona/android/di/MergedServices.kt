@@ -287,6 +287,10 @@ internal class MergedShellServices(private val stacks: GroupStacks) {
             stacks.use(GroupKeys.namespaceOf(machineId)) { HttpTerminalPanes(it.connection).panes(GroupKeys.raw(machineId)) }
         override suspend fun newTab(machineId: String, workspaceId: String, kind: String?, cwd: String?) =
             stacks.use(GroupKeys.namespaceOf(machineId)) { HttpTerminalPanes(it.connection).newTab(GroupKeys.raw(machineId), workspaceId, kind, cwd) }
+        override suspend fun close(machineId: String, pane: String) =
+            stacks.use(GroupKeys.namespaceOf(machineId)) { HttpTerminalPanes(it.connection).close(GroupKeys.raw(machineId), pane) }
+        override suspend fun closeFinished(machineId: String, preview: Boolean, panes: List<String>) =
+            stacks.use(GroupKeys.namespaceOf(machineId)) { HttpTerminalPanes(it.connection).closeFinished(GroupKeys.raw(machineId), preview, panes) }
     }
 
     val files: SessionFiles = routedFiles { stacks.of(it)?.files }
