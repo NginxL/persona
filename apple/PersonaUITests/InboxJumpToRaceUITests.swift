@@ -80,6 +80,27 @@ final class InboxJumpToRaceUITests: XCTestCase {
         foldDoneGroups() // the groups' folds are kept across launches
     }
 
+    /// Jump To the oldest group (its page held), then open an item of the newest group over the list: the page comes
+    /// while the list is out of sight, and back on it the list is where it was left (leaving the list stops the wait).
+    @MainActor func testLeavingTheListStopsIt() throws {
+        let (newest, oldest) = try openDone()
+        mock("inbox_done_hold")
+        jump(to: oldest)
+        sleep(1)
+        XCTAssertTrue(topGroup()?.hasPrefix(newest) == true, "Jump To moved the list before its page came (top: \(topGroup() ?? "none"))")
+        openItem(under: newest)
+        mock("inbox_done_release")
+        sleep(Self.settle)
+        let back = app.navigationBars.buttons["BackButton"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 3), "no Back on the item:\n\(app.debugDescription)")
+        back.tap()
+        XCTAssertTrue(app.buttons["inbox.jumpTo"].firstMatch.waitForExistence(timeout: 5), "not back on the list:\n\(app.debugDescription)")
+        sleep(1)
+        XCTAssertTrue(topGroup()?.hasPrefix(newest) == true,
+                      "the Jump To's page came while the list was out of sight and took it to \(topGroup() ?? "none")")
+        foldDoneGroups() // the groups' folds are kept across launches
+    }
+
     /// Holds or lets go the mock's Done group pages (`/mock/inbox_done_hold`, `/mock/inbox_done_release`).
     private func mock(_ path: String) {
         _ = try? Data(contentsOf: URL(string: hub + "/mock/" + path)!)
@@ -117,6 +138,18 @@ final class InboxJumpToRaceUITests: XCTestCase {
         sleep(1)
         XCTAssertTrue(onScreen(app.buttons["inbox.jumpTo"].firstMatch), "Jump To is not on screen:\n\(app.debugDescription)")
         return (newest, oldest)
+    }
+
+    /// Opens the first item under `group`'s title (Done's rows have no identifier: a tap just below the title), and
+    /// waits for its page over the list.
+    @MainActor private func openItem(under group: String) {
+        let title = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", "inbox.groupTitle", group)).firstMatch
+        XCTAssertTrue(onScreen(title), "\(group)'s title is not on screen:\n\(app.debugDescription)")
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: title.frame.maxY + 30)).tap()
+        XCTAssertTrue(app.buttons["inbox.jumpTo"].firstMatch.waitForNonExistence(timeout: 5),
+                      "the item did not open over the list:\n\(app.debugDescription)")
     }
 
     /// Picks `group` in Jump To's menu.

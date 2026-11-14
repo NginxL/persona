@@ -95,7 +95,8 @@ struct InboxPage: View {
     /// Done groups that loaded their first page by themselves on opening (#2969): once while the page is up.
     @State private var autoLoaded: Set<String> = []
     /// Jump To waiting for its group's first page before it scrolls there. The next Jump To or a drag of the list cancels
-    /// it, so a page that comes late does not move the list away from where it went since (#6661).
+    /// it, so a page that comes late does not move the list away from where it went since (#6661); so does leaving the
+    /// list, so its poll stops with it.
     @State private var jumping: Task<Void, Never>?
     @State private var composing: ComposeDraft?
     @State private var editingDraft: InboxItem? // Edit on the AI Twin's draft
@@ -769,6 +770,7 @@ struct InboxPage: View {
         // Done's day counts once the list is in, so Done lists its groups and counts before it opens (#2969); a hub
         // without them gets the history's first page instead
         .task(id: store.listed) { if store.listed { store.loadDoneDays() } }
+        .onDisappear { jumping?.cancel() } // left during Jump To's wait (#6661): no poll, no scroll, while unseen
         .onChange(of: scrollTarget) { _, id in
             guard let id else { return }
             withAnimation(Theme.Motion.standard) { proxy.scrollTo(id, anchor: .top) }
