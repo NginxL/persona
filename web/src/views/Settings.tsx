@@ -24,6 +24,7 @@ import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-termina
 import { HubList } from "./Hubs";
 import { useDisconnect } from "./DisconnectBrowser";
 import { KnowledgeSelection } from "./settings/KnowledgeSelection";
+import { SavedPrompts } from "./settings/SavedPrompts";
 import { SourcesUI } from "./subscriptions/SourcesUI";
 import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
@@ -313,6 +314,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               )}
               {tab === "notifications" && <NotificationSettings />}
               {tab === "knowledge" && <KnowledgeSelection />}
+              {tab === "prompts" && <SavedPrompts />}
               {tab === "sources" && <SourcesUI title={TAB_INFO.sources.label} onGraph={setSourcesGraph} />}
               {tab === "models" && <>
                 <section id="settings-providers" className="scroll-mt-4">

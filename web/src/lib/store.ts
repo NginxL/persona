@@ -739,7 +739,7 @@ export function onHello(f: () => void): () => void {
 }
 
 // The assistant's live updates about the page itself rather than one conversation: only the shown manager's count.
-const PAGE_EVENTS = new Set(["assistant_schedule"]);
+const PAGE_EVENTS = new Set(["assistant_schedule", "assistant_saved_prompts"]);
 
 function onMessage(msg: Record<string, unknown>) {
   cursor = msg.type === "hello" ? afterHello(cursor, msg) : afterEvent(cursor, msg);

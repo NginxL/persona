@@ -53,6 +53,7 @@ extensions.call:{id} /api/v1/extensions/{id}/
 -                    DELETE /api/v1/assistant/memory/{name}
 -                    DELETE /api/v1/assistant/places/{id}
 -                    DELETE /api/v1/assistant/repositories/{id}
+-                    DELETE /api/v1/assistant/saved-prompts/{id}
 -                    DELETE /api/v1/assistant/standing-authorizations/{id}
 -                    DELETE /api/v1/assistant/tasks/{id}
 -                    DELETE /api/v1/auth/tokens/{id}
@@ -142,6 +143,7 @@ assistant.ask        GET /api/v1/assistant/reporters
 -                    GET /api/v1/assistant/repositories/{id}
 -                    GET /api/v1/assistant/routines
 -                    GET /api/v1/assistant/runs
+-                    GET /api/v1/assistant/saved-prompts
 -                    GET /api/v1/assistant/search
 -                    GET /api/v1/assistant/skills
 -                    GET /api/v1/assistant/standing-authorizations
@@ -389,6 +391,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/routines/{id}/run
 -                    POST /api/v1/assistant/rule-suggestions/{id}/always
 -                    POST /api/v1/assistant/rule-suggestions/{id}/not-now
+-                    POST /api/v1/assistant/saved-prompts
 -                    POST /api/v1/assistant/tasks
 -                    POST /api/v1/assistant/tasks/{id}/fresh
 -                    POST /api/v1/assistant/tasks/{id}/run
@@ -596,6 +599,8 @@ todos.write          POST /api/v1/todos/{id}/decisions
 -                    PUT /api/v1/assistant/places/{id}
 -                    PUT /api/v1/assistant/repositories/{id}
 -                    PUT /api/v1/assistant/routines
+-                    PUT /api/v1/assistant/saved-prompts/order
+-                    PUT /api/v1/assistant/saved-prompts/{id}
 -                    PUT /api/v1/assistant/tasks/{id}
 -                    PUT /api/v1/bots/feishu
 -                    PUT /api/v1/channels/{id}

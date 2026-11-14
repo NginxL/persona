@@ -354,26 +354,26 @@ func readTokenLine(r io.Reader) (string, error) {
 
 // startScreenHelper is screenStart on a Mac: the helper started for this stream and joined to it. The stream ends when
 // the helper does, when the phone or hub closes it, or when the paired screen-sharing stream closes.
-func (n *Node) startScreenHelper(ctx context.Context, id, pair string, keepAwake bool, done func()) error {
+func (n *Node) startScreenHelper(ctx context.Context, id, pair string, keepAwake, link bool, done func()) (bool, error) {
 	logf := func(string, ...any) {}
 	if n.logger != nil {
 		logf = n.logger.Printf
 	}
 	helper := screenHelpers.helper(ctx, logf)
 	if helper == "" {
-		return &rpc.Error{Code: "video_unavailable", Message: "Persona Screen isn't installed on this Mac (it comes with Persona Link)"}
+		return false, &rpc.Error{Code: "video_unavailable", Message: "Persona Screen isn't installed on this Mac (it comes with Persona Link)"}
 	}
 	if screenPermissions.get(ctx, helper) == "missing" {
-		return &rpc.Error{Code: "video_unavailable", Message: "Persona Screen has no Screen Recording permission on this Mac"}
+		return false, &rpc.Error{Code: "video_unavailable", Message: "Persona Screen has no Screen Recording permission on this Mac"}
 	}
 	conn, err := dialScreenHelper(ctx, helper)
 	if err != nil {
 		logf("screen helper: %v", err)
-		return &rpc.Error{Code: "video_unavailable", Message: "Persona Screen did not start: " + err.Error()}
+		return false, &rpc.Error{Code: "video_unavailable", Message: "Persona Screen did not start: " + err.Error()}
 	}
 	if err := n.streams.Open(id); err != nil {
 		_ = conn.Close()
-		return err // screenDial releases the slot
+		return false, err // screenDial releases the slot
 	}
 	// From here closing c releases the slot (done), so no error is returned: screenDial would release it again.
 	var c net.Conn = &helperConn{Conn: conn, done: done}
@@ -383,10 +383,19 @@ func (n *Node) startScreenHelper(ctx context.Context, id, pair string, keepAwake
 	if !n.screens.attach(pair, c) { // the screen-sharing stream closed while the helper started
 		_ = c.Close()
 		n.streams.Abort(id, errors.New("the screen-sharing stream closed"))
-		return nil
+		return false, nil
+	}
+	if link {
+		// The video joins the pair's screen session as a channel (#6398); the session closes c when it ends.
+		if s := n.links.Get(pair); s != nil {
+			if relay, ok := s.Video(c); ok {
+				n.streams.Start(id, relay)
+				return true, nil
+			}
+		}
 	}
 	n.streams.Start(id, c)
-	return nil
+	return false, nil
 }
 
 // helperConn is the helper's connection: closing it (whoever does) releases the stream's slot once.

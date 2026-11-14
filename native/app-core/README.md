@@ -64,6 +64,26 @@ toolchain task, not a physical-device requirement. Device selection, signing, SD
 belong to the maintainer's environment if it later becomes available; none is silently substituted by an emulator or
 a release upload.
 
+## Host-only boundary diagnostics
+
+On an x86_64 Linux host, `cd android && ./gradlew :core:rustcore:boundaryCostTest` builds a separate optimized
+`test-support` FFI library and runs the segmented Runtime/JNI/codec measurements. Ordinary `:core:rustcore:test`
+excludes these measurement classes and keeps its debug host-JNI replay. The dedicated task writes raw nanoseconds and
+metadata to `core/rustcore/build/reports/boundary-cost/boundary-cost.json` and
+`core/rustcore/build/reports/codec-comparison/codec-comparison.json` (paths relative to `android/`). A missing native
+library or measurement nonce fails the task rather than silently skipping evidence.
+
+Each run uses 100 warm-ups and 1,000 retained samples per segment, with the same bounded item/action and a real
+nonempty patch per frame. The frame is exactly JNI drain + Kotlin decode + list apply on the same patch bytes;
+OpenChat and flush are excluded. `PERSONA_MEASUREMENT_DIAGNOSTICS=0` disables runtime diagnostics entirely; do not
+interpret the absent native counters in that mode as zero cost. With diagnostics enabled, the `/proc` reads and lock
+observation can dominate the measured spans. The registry lease, queue send, patch clone/encode and Kotlin decode
+are reported separately and overlap rather than forming an additive wall-clock decomposition.
+
+The codec comparison is an allocation microbenchmark with strict UTF-8 and matching validation on its fixed input,
+not a general codec-equivalence or frame-performance proof. Host and emulator values are diagnostic references only:
+they do not replace the original Android benchmark, the 50 µs / 1 ms budgets, or physical-device evidence.
+
 ## Rules
 
 - **A wire type change ships with its regenerated codecs.** Never edit generated files by hand.

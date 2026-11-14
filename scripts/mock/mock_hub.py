@@ -2363,6 +2363,88 @@ def save_place(body, pid):
     return {"place": place}, 200
 
 
+# Saved prompts (Settings › Saved Prompts, #7329): the user's own "/" prompts, as the manager keeps them
+# (assistant/saved_prompts.go). None by default, so the "/" list of every other screenshot stays as it was;
+# MOCK_SAVED_PROMPTS=1 has three; MOCK_SAVED_PROMPTS=old is an assistant from before them (its routes answer 404).
+SAVED_PROMPTS = [
+    {"id": "sp1", "name": "review", "text": "Review this diff for security issues. List each finding with its file and line, and say how bad it is.",
+     "created_at": ago(days=4), "updated_at": ago(days=4)},
+    {"id": "sp2", "name": "release-notes", "text": "Write the release notes for the commits since the last tag: what changed for users first, then the fixes.",
+     "created_at": ago(days=2), "updated_at": ago(days=1)},
+    {"id": "sp3", "name": "standup", "text": "Write today's standup from my commits and merged PRs:\n- done\n- next\n- blocked",
+     "created_at": ago(hours=5), "updated_at": ago(hours=5)},
+] if os.environ.get("MOCK_SAVED_PROMPTS") == "1" else []
+
+
+def saved_prompt_name_ok(name):
+    """One word of letters, digits, combining marks and - _ . (the manager's savedPromptNameRune), at most 32."""
+    return 0 < len(name) <= 32 and all(c in "-_." or unicodedata.category(c)[0] == "L" or unicodedata.category(c) in ("Nd", "Mn") for c in name)
+
+
+def push_saved_prompts():
+    for send, _ in list(LIVE):
+        try:
+            send(from_default({"type": "assistant_saved_prompts"}))
+        except Exception:
+            pass
+
+
+def save_saved_prompt(body, pid):
+    """Adds a saved prompt (pid None) or changes prompt pid, as the manager does: (answer, status)."""
+    name = str(body.get("name") or "").strip().removeprefix("/")
+    text = str(body.get("text") or "").replace("\r\n", "\n").strip()
+    if not saved_prompt_name_ok(name):
+        return {"error": "A prompt needs a name of at most 32 letters, digits, “-”, “_” or “.”, with no spaces."}, 400
+    if not text or len(text) > 8000:
+        return {"error": "A prompt needs some text, at most 8000 characters."}, 400
+    if any(x["name"].lower() == name.lower() and x["id"] != pid for x in SAVED_PROMPTS):
+        return {"error": f"There is already a prompt called “/{name}”."}, 409
+    now = ago()
+    if pid:
+        for x in SAVED_PROMPTS:
+            if x["id"] == pid:
+                x.update(name=name, text=text, updated_at=now)
+                push_saved_prompts()
+                return {"prompt": x}, 200
+        return {"error": "That saved prompt is gone."}, 404
+    if len(SAVED_PROMPTS) >= 100:
+        return {"error": "You can save at most 100 prompts."}, 400
+    prompt = {"id": f"sp{uuid.uuid4().hex[:8]}", "name": name, "text": text, "created_at": now, "updated_at": now}
+    SAVED_PROMPTS.append(prompt)
+    push_saved_prompts()
+    return {"prompt": prompt}, 200
+
+
+def saved_prompts_route(h, p, method):
+    """The saved prompts' routes; False when p is not one of them."""
+    base = "/api/v1/assistant/saved-prompts"
+    if p != base and not p.startswith(base + "/"):
+        return False
+    if os.environ.get("MOCK_SAVED_PROMPTS") == "old":
+        h.send_json({"error": "not found"}, 404)
+    elif p == base and method == "GET":
+        h.send_json({"prompts": SAVED_PROMPTS})
+    elif p == base and method == "POST":
+        h.send_json(*save_saved_prompt(json.loads(h.last_body or b"{}"), None))
+    elif p == base + "/order" and method == "PUT":
+        ids = json.loads(h.last_body or b"{}").get("ids") or []
+        if sorted(ids) != sorted(x["id"] for x in SAVED_PROMPTS) or len(set(ids)) != len(ids):
+            h.send_json({"error": "The saved prompts changed on another device. Reload the list and try again."}, 409)
+        else:
+            SAVED_PROMPTS[:] = [next(x for x in SAVED_PROMPTS if x["id"] == i) for i in ids]
+            push_saved_prompts()
+            h.send_json({"prompts": SAVED_PROMPTS})
+    elif method == "PUT":
+        h.send_json(*save_saved_prompt(json.loads(h.last_body or b"{}"), p.rsplit("/", 1)[1]))
+    elif method == "DELETE":
+        pid = p.rsplit("/", 1)[1]
+        SAVED_PROMPTS[:] = [x for x in SAVED_PROMPTS if x["id"] != pid]
+        push_saved_prompts()
+        h.send_json({"ok": True})
+    else:
+        h.send_json({"error": "method not allowed"}, 405)
+    return True
+
 MEMORY = [
     {"name": "MEMORY.md", "content": "- [早报格式](morning-format.md) — 一屏以内，结论先行", "updated_at": ago(days=1)},
     {"name": "morning-format.md", "content": "---\nname: morning-format\ndescription: 早报一屏以内\nmetadata:\n  type: feedback\n---\n\n早报一屏以内，结论先行。",
@@ -2401,8 +2483,8 @@ ASSISTANT_CONFIG = {"machine_id": "server", "launcher": "claude", "timezone": "A
                     # went (#3780, MOCK_MINUTES_DAYS): 0 means forever; finite windows are never fewer than the recordings'.
                     "recording_days": int(os.environ.get("MOCK_RECORDING_DAYS", "14")),
                     "minutes_days": int(os.environ.get("MOCK_MINUTES_DAYS", "0")),
-                    # Knowledge points by topic (#3783), on by default.
-                    "kb_topics": True}
+                    # Knowledge points by topic (#3783), on by default; MOCK_KB_TOPICS_OFF=1 starts it off (#7251's empty map).
+                    "kb_topics": os.environ.get("MOCK_KB_TOPICS_OFF") != "1"}
 # What PUT /api/v1/assistant takes for the two retentions, as the hub's profile_write.go.
 RETENTION_BOUNDS = {"recording_days": (1, 365), "minutes_days": (0, 3650)}
 
@@ -8980,14 +9062,19 @@ if os.environ.get("MOCK_ASK_LONG") in ("actions", "swipe", "review"):
         "kind": "question", "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "ask_user",
         "questions": questions})
     INTERACTIONS.extend(copy.deepcopy(ASK_LONG_INTERACTIONS))
-# MOCK_QUESTION_CANCEL=1: the main ask_user card (with a MOCK_ASK_LONG question mode) and the network tests'
-# Agent question advertise question-only cancellation. Keep the Agent card for /mock/reset too.
+# MOCK_QUESTION_CANCEL=1: the network tests' Agent question and the main ask_user card for
+# MOCK_ASK_LONG=1|actions|swipe|review advertise question-only cancellation; /mock/reset restores both unanswered exactly
+# once and clears their resolved and interaction history entries.
 QUESTION_CANCEL_INTERACTIONS = []
 if os.environ.get("MOCK_QUESTION_CANCEL") == "1":
     for ix in INTERACTIONS + ASK_LONG_INTERACTIONS:
         if ix["id"] in ("ix_tests", "ix_ask_long"):
             ix["can_cancel"] = True
-    QUESTION_CANCEL_INTERACTIONS = [copy.deepcopy(ix) for ix in INTERACTIONS if ix["id"] == "ix_tests"]
+    ask_long_ids = {saved["id"] for saved in ASK_LONG_INTERACTIONS}
+    QUESTION_CANCEL_INTERACTIONS = [
+        copy.deepcopy(ix) for ix in INTERACTIONS
+        if ix["id"] in ("ix_tests", "ix_ask_long") and ix["id"] not in ask_long_ids
+    ]
 # A very long `python3 -c …` script for a Feishu permission card (MOCK_ASK_LONG=perm|agent): taller than the dock on
 # every width, so its buttons have to stay reachable.
 def _long_lark_cmd(verb):
@@ -16470,15 +16557,16 @@ if os.environ.get("MOCK_CHAT_CONTENT") == "1":
         it("assistant", "text", 60 * 27 - 1, text="看起来是一家小馆子，周五晚上要提前订位。"),
     ]
 
-# MOCK_LONG_HISTORY=1: the weather chat with fifteen earlier exchanges in front, so its work line and thought sit in
+# MOCK_LONG_HISTORY=1 (or "oldest": the work line first): the weather chat with fifteen earlier exchanges in front, so its work line and thought sit in
 # the middle of a long chat and the list can scroll both ways around them (opening and closing them in place).
-if os.environ.get("MOCK_LONG_HISTORY") == "1":
+if os.environ.get("MOCK_LONG_HISTORY") in ("1", "oldest"):
     _hist = []
     for _k in range(15):
         _hist.append(it("user", "text", 600 - _k * 30, text="第 %d 个问题：顺便看一下这一块的写法有没有问题？" % (_k + 1)))
         _hist.append(it("assistant", "text", 599 - _k * 30, text="看过了，第 %d 块没有问题。命名可以再统一一点，"
                                                             "测试也覆盖到了主要的分支，我顺手把两处重复的判断合并了。" % (_k + 1)))
-    _all = _hist + ITEMS[WIDGET]
+    # "oldest": the work line comes first and the exchanges after it, so a tool row sits at the oldest end (#7237)
+    _all = ITEMS[WIDGET] + _hist if os.environ.get("MOCK_LONG_HISTORY") == "oldest" else _hist + ITEMS[WIDGET]
     for _i, _d in enumerate(_all):  # transcript order: the history first
         _d["seq"] = _i + 1
     ITEMS[WIDGET] = _all
@@ -19454,7 +19542,8 @@ def git_branches():
     return {"branches": [{"name": n, "remote": r, "current": n == GIT_W["branch"], "hash": "a1b2c3d",
                           "subject": MOCK_COMMITS[i % len(MOCK_COMMITS)]["subject"], "date": ago(hours=3 * i + 1)}
                          for i, (n, r) in enumerate(GIT_W["branches"])
-                         if not (r and (n.split("/", 1)[1], False) in GIT_W["branches"])]}  # as the node: a remote one with a local one of its name is left out
+                         if not (r and (n.split("/", 1)[1], False) in GIT_W["branches"])],  # as the node: a remote one with a local one of its name is left out
+            "default": "main"}  # origin/HEAD (#7014)
 
 
 def git_write(h, p, body):
@@ -23638,7 +23727,9 @@ MOCK_HELP = [
     "MOCK_TURN_USAGE=1|multi|unpriced  What a finished exchange cost, after the reply's time: \"菜谱搜索按用时排序\" on Opus 5.5 (1), with a Sonnet 5.5 subagent (multi), or on Haiku 5.5 without a price (unpriced: its tokens); the main conversation's last exchange the same (#5426)",
     "MOCK_CF_ACCESS=<client id>:<client secret>  The hub behind Cloudflare Access: /api/ requests without those two CF-Access-Client-* headers get a 302 to an Access login (no token) or Access's 403 page (wrong token) (#3502)",
     "MOCK_TODO_PROJECTS=1  To-dos filed under the example knowledge-base projects (#7077: the detail's Project, Group By › Project)",
+    "MOCK_SAVED_PROMPTS=1|old  Settings › Saved Prompts and every chat's / list: three saved prompts (1), or an assistant from before them, its routes answering 404 (old) (#7329)",
     "MOCK_KB_CORRECTIONS=1  Knowledge base: the lists links are held in, so links can be removed, and confirmed facts on one person (#6997)",
+    "MOCK_KB_TOPICS_OFF=1  Knowledge points by topic starts off (the assistant's kb_topics), for the off state of the map (#7251)",
     "MOCK_KB_TOPICS=1  Knowledge base: five topics of knowledge points from the example projects and chats (Topics tab, a topic's page, the knowledge map)",
     "MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection: a hub from before it (404) / a document with a field clients don't know / a save the hub refuses (503)",
     "MOCK_SESSIONS_LIST=1  Paged Agents, counts, exact lookup and by to-do (todo=, #6662); list-mode sockets send hints instead of full lists (#6362)",
@@ -24662,6 +24753,8 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"runs": [r for r in RUNS if not ref or r["ref_id"] == ref]})
         if p == "/api/v1/assistant/places":
             return self.send_json({"places": PLACES})
+        if saved_prompts_route(self, p, "GET"):
+            return
         if p == "/api/v1/assistant/memory":
             if parse_qs(urlparse(self.path).query).get("space", [""])[0] == "health":
                 return self.send_json({"files": HEALTH_MEMORY, "dir": "/home/me/.persona/health/memory"})
@@ -26084,6 +26177,8 @@ class H(BaseHTTPRequestHandler):
             mute, settled = mute_item(body.get("item_id"), body.get("tag"), other[0] if other else None)
             if not mute: return self.send_json({"error": "这一条没有可静音的" + str(body.get("tag"))}, 400)
             return self.send_json({"mute": mute, "settled": settled})
+        if saved_prompts_route(self, p, self.command):
+            return
         if p == "/api/v1/assistant/places" and self.command == "POST":
             return self.send_json(*save_place(json.loads(self.last_body or b"{}"), None))
         if p.startswith("/api/v1/assistant/places/") and self.command == "PUT":
@@ -27406,7 +27501,7 @@ MOCK_HELP.append("MOCK_EXTENSION_OPS=1|fail  （配合 MOCK_EXTENSIONS）扩展�
 MOCK_HELP.append("MOCK_MANAGER_NAS=1  （默认的三个管理者）NAS 归离线的「家里」：像 hub 一样显示成离线，error 是 hub 的「助手暂时连不上，稍后再试」；它的一个 agent（备份脚本）状态 unknown")
 MOCK_HELP.append("MOCK_ASSISTANT_BASH=1  主对话自己的第一条 Bash 在等批准（#4883），是它唯一的卡片：对话里输入区上方显示「在等你批准」，不只在收起的「需要你」里")
 MOCK_HELP.append("MOCK_LONG_REPORT=1|cjk|<items.json>  An Agent chat (macbook/a1f3c2d4-0000-4000-8000-000000000090) ending in one ~33,000-character report with nine tables and a dozen code blocks after 120 folded tool calls (#4970); cjk: the report as varied in Chinese characters as a real one, ~800 distinct (#5076); a path serves that file's transcript items instead")
-MOCK_HELP.append("MOCK_QUESTION_CANCEL=1  Adds can_cancel to the network tests' Agent question and, with a MOCK_ASK_LONG question mode, Persona's main ask_user card; /mock/reset restores both")
+MOCK_HELP.append("MOCK_QUESTION_CANCEL=1  Adds can_cancel to the network tests' Agent question and Persona's main ask_user card for MOCK_ASK_LONG=1|actions|swipe|review; /mock/reset restores both unanswered exactly once and clears their resolved and interaction history entries")
 MOCK_HELP.append("MOCK_ASK_LONG=1|actions|swipe|review|perm|agent  卡片比输入区上方的盒子还高（#3112）：1 主对话的 ask_user 提问卡（八个带说明的选项）；actions 单道八个带说明选项的多选题，swipe 短单选拖动不误发，review 六道单选题的长复核页，Submit 首屏可达（#4839）；perm 主对话的飞书授权卡（超长命令）；agent MacBook 上补测试的 Agent 对话里两张这样的授权卡、没有别的卡（手机和侧边面板把第二张折在「还有 1 件」后面）")
 MOCK_HELP.append("MOCK_MANAGER_NEEDS_YOU=0  名册不带 inbox_needs_you（旧 hub，或还不上报这个数的旧管理者）；默认每个在线的管理者带它收件箱里「需要你处理」的未完成条目数，数变了推 managers")
 MOCK_HELP.append("MOCK_MANAGER_OUTDATED=1  设置 › 管理者：「工作」带 needs_update（它还不读自己的 manager.json，hub 在它在线时这样标）")

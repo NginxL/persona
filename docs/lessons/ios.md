@@ -2539,6 +2539,18 @@ that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder 
   autocorrection off did not change it. `FilesActionsTests`, which takes a screenshot between typing and tapping, saw it
   once. Tap again while the alert stays up, then check what reached the mock; a single tap reads as an app bug.
 
+## A row opened at the oldest end jumped 100 pt: the pin let go too early (2026-11-14, #7237)
+
+- At the oldest end of the chat the list rests about 100 pt past the end its own arithmetic gives (`within`), and UIKit sets
+  it back to that end once the content size follows a pass after the row grew. A held row was clamped to `within`, so it went
+  up by the difference, and the hold ended on SwiftUI's first report of the row, which still said it had not moved (SwiftUI
+  reports the position its own layout gives, ahead of the scroll view). Your own long message and a work line both did it.
+- `ChatPin` now remembers how far past the end the list was when the hold began (`Held.slack`) and allows it, and a hold
+  does not end until the row has said its content grew and the list is where the hold wants it. Evidence: per-frame row top
+  (`UnfoldTrace`) constant on opening and folding at the oldest end; `UnfoldTests.testWorkLineAtTheOldestEnd` with
+  `MOCK_LONG_HISTORY=oldest` and `-showOldest`. A stale report is not proof the list is there: also read the offset
+  (`-scrollTrace`, the `why` column of the pin says how the last hold ended).
+
 ## A UI test's scroll drags whatever is under the finger (2026-11-13, #6783)
 
 `TodoStageBarUITests` scrolled the to-do's page by dragging from the middle of the window. Before the interface stopped

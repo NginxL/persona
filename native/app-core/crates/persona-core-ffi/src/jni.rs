@@ -4,14 +4,14 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 use std::time::Duration;
 
 use jni::JNIEnv;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JByteArray, JClass, JMethodID, JObject, JString};
 use jni::signature::{Primitive, ReturnType};
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 use jni::sys::jlongArray;
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jbyteArray, jint, jlong, jvalue};
 use persona_core_runtime::Host;
@@ -157,7 +157,7 @@ pub extern "system" fn Java_persona_core_rustcore_NativeBridge_destroy(_env: JNI
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_enableDiagnostics(
     _env: JNIEnv,
@@ -171,7 +171,17 @@ pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_enableDiagno
     }));
 }
 
-#[cfg(target_os = "android")]
+#[cfg(feature = "test-support")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_lease(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jboolean {
+    boolean(core(handle).is_some())
+}
+
+#[cfg(any(target_os = "android", feature = "test-support"))]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_flushDiagnostic(
     _env: JNIEnv,
@@ -181,10 +191,10 @@ pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_flushDiagnos
 ) -> jboolean {
     let Some(runtime) = core(handle) else { return JNI_FALSE };
     let timeout = Duration::from_millis(timeout_ms.max(0) as u64);
-    catch_unwind(AssertUnwindSafe(|| runtime.flush_diagnostic(timeout))).map_or(JNI_FALSE, boolean)
+    catch_unwind(AssertUnwindSafe(|| runtime.flush(timeout))).map_or(JNI_FALSE, boolean)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_diagnostics(
     env: JNIEnv,

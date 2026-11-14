@@ -490,7 +490,9 @@ For every component: use the design-system one, not a lookalike. Counts are appr
   Dark at the top, and Share (the picture), Save, Copy and Share Text along the bottom; the card is 390 pt wide, wider for
   tables, code and very tall cards, at most 520 pt (`ShareCardWidth`). Android has no Forward: on Glass the message
   menu's Share opens the page (`MessageSharePage`, Light / Dark in the top bar, the picture drawn from the card's
-  `GraphicsLayer`); Brief and Board share the words.
+  `GraphicsLayer`); Brief and Board share the words. What you see is what you share: a reply's cards are drawn as the
+  chat draws them, with nothing to use, and a card that only draws live is its fallback, never its JSON (#7261,
+  `docs/assistant/assistant-views.md` "Sharing a reply as a picture").
 - A message sent from here and not in the transcript yet (iOS `PendingBubble`): drawn as a sent bubble at once, with a
   mark before it, level with its last line: a quiet clock while it sends; a clock while it waits for the network, whose
   small menu is Retry Now and Don't Send, with "Sends when connected" under the bubble; a red mark once it failed, with
@@ -1650,6 +1652,7 @@ your permission" (section 5, "Notifications"); moving them to the card's words i
 - Text Size (Small / Standard / Large) moves the system's size first and the cap comes after: the interface is `min(moved size, xxxLarge)`, reading content is the moved size. At the system's xxxLarge and above, Large has no effect on the interface (it is at the cap) and still adds a step to reading content; Small always takes a step off both.
 
 - Text uses `Theme.Font` levels only. Shapes use `scaledFrame`.
+- A heading's counts and an agent row's time sit beside the name, and go under it when the name would keep less than half the width (`BesideOrUnder`: `CountsHeading`, `TimeBesideOrUnder`); the choice is by measured width, not text size.
 - Rows with name plus chips stack at accessibility sizes (`NameWithChips`). Use `firstFittingText` when several candidate labels exist.
 - A date, or a date and a time, in a form row is a `FormDatePicker` (`apple/Persona/DesignSystem/FormDatePicker.swift`, #6108): the system's compact picker beside its label at the usual sizes; at the accessibility sizes, where the compact date and time are wider than the row and were cut off, the label on its own line and a wheel under it across the row (the wheel's words don't grow; that is the system's wheel). A sheet holding one sets its height with `formSheetDetents`, which opens it full height at those sizes. Used by New To-Do, the to-do's page (Due, Remind At) and "Change Due Date…"; new date rows use it too.
 - Caps are allowed for glyphs in fixed-size buttons and for top bars that must fit a small iPhone. They must be named, and the control must keep a 44 pt hit area.
@@ -2532,6 +2535,19 @@ as finished without verifying a star, and opens GitHub outside the app.
   and waits three days. It stays away while requests or sessions need the user, or a search is active.
 - **Onboarding toast**: once per device on Android's setup **Done** (proposed iOS **Get started**), unless Star was
   already tapped. It uses the platform's timed toast and action.
+
+## Knowledge map outline (#7251)
+
+The web's knowledge map is a two-sided mind map; on the iPhone it is turned upright into an outline (`KnowledgeMapView`,
+logic in `KBMap`), which the owner chose over a pinch-to-zoom map that, fitted to a phone, drew its words at 5–8 pt. Rows
+are list rows: a topic (a dot in its branch's tone: accent, green, orange in turn), its subtopics and its points (the kind
+as a `KBPill`, Pitfall and Open question in `Theme.caution`), each level indented by `Theme.Space.l` with a rail in the tone.
+Folding uses the app's fold chevron (`Theme.Icon.disclosure`, turned when open, a 44 pt target) rather than the web's
+round +/−, as every other fold on iOS. What starts open is the web's: the six biggest topics onto their subtopics, every
+subtopic closed, more than three loose points beside subtopics under one closed Other. Tapping a point opens its sheet,
+a topic or a project its page. From `Theme.Size.knowledgeMapTwoColumns` of width (any iPad in landscape, a 13-inch one upright beside its
+sidebar) the outline sits beside a detail column for the selected node, the web map's side panel.
+Text follows Dynamic Type (the rows are reading content) and every row reads as one VoiceOver element.
 
 ## Repository link preview
 

@@ -105,7 +105,7 @@ struct VNCPage: View {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
             // `-showScreenVideoDemo` stands in for a node that advertises the video channel (videoAdvertised), and picks
-            // the video channel, so a screenshot shows the Picture and Quality items the switcher offers.
+            // the video channel, so a screenshot shows the Picture item (Quality also needs a helper with tiers).
             if args.contains("-showScreenVideoDemo") { picture = .video }
             if args.contains("-showScreenStatsDemo") { statsOn = true }
             if args.contains("-showScreenFallbackDemo") { fallbackDemo = .lost }
@@ -363,6 +363,7 @@ struct VNCPage: View {
             // Picture channel and its quality bias (#3954), remembered per Mac — only when this Mac's node advertises the
             // video channel, so no Mac shows a control it can't use (the switcher stays hidden until it does). Input stays
             // on RFB in both; only the picture path changes. Video falls back to VNC on its own and says why on the page.
+            // Quality only once the helper says it has tiers (#6396): before that the choice would change nothing.
             if videoAdvertised {
                 Picker(selection: Binding(get: { picture }, set: { picture = $0; ScreenPicture.set($0, for: ref) })) {
                     ForEach(ScreenPicture.allCases, id: \.self) { p in Label(p.label, systemImage: p.icon).tag(p) }
@@ -371,7 +372,7 @@ struct VNCPage: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("screen-picture")
-                if picture == .video {
+                if picture == .video, qualityOffered {
                     Picker(selection: Binding(get: { quality }, set: { quality = $0; ScreenQuality.set($0, for: ref) })) {
                         ForEach(ScreenQuality.allCases, id: \.self) { q in Text(q.label).tag(q) }
                     } label: {
@@ -595,13 +596,24 @@ struct VNCPage: View {
     }
     #endif
 
-    /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture and Quality items appear only
-    /// then, so no Mac shows a control it can't use. A `-showScreenVideoDemo` build forces it on for screenshots.
+    /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture item appears only then, so no
+    /// Mac shows a control it can't use (Quality also waits for `qualityOffered`). A `-showScreenVideoDemo` build forces
+    /// it on for screenshots.
     private var videoAdvertised: Bool {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
         #endif
         return model.screenVideoAdvertised(ref)
+    }
+
+    /// Whether ⋯ › Quality is offered: once this session's helper said it has quality tiers (#6396, `hello.features`).
+    /// Before that the choice would change nothing, so it is not shown.
+    private var qualityOffered: Bool {
+        #if os(iOS) && canImport(PersonaScreenKit)
+        return session?.video.tiers == true
+        #else
+        return false
+        #endif
     }
     #endif
 

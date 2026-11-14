@@ -11,10 +11,11 @@ import "../views/theme"; // follows the system's light / dark while open (index.
 import { ensureSubtleAES } from "./aes";
 import { displayChoice, framing, keepPointerIn, layoutDisplays, machineDisplays, setDisplayChoice, type MachineDisplay, type Rect, type Size } from "./displays";
 import { accountOf, keepLabel, keysymsOf, screenSocket, toApp, type ScreenTarget } from "./screen";
-import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, videoAdvertised, type ScreenPicture, type ScreenQuality } from "./video";
+import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, setStatsShown, statsShown, videoAdvertised, type ScreenPicture, type ScreenQuality } from "./video";
 
 type DisplayMenuView = typeof import("./DisplayMenu").default;
 type ScreenMenuView = typeof import("./ScreenMenu").default;
+type StatsKit = typeof import("./StatsOverlay");
 
 type Phase =
   | { kind: "checking" }
@@ -65,6 +66,10 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   const [hasVideo, setHasVideo] = useState(false);
   const [picture, setPicture] = useState<ScreenPicture>(() => pictureChoice(target.mid) ?? "vnc");
   const [quality, setQuality] = useState<ScreenQuality>(() => qualityChoice(target.mid));
+  // Connection stats (#6558): off until turned on, kept per Mac (video.ts). The overlay measures this connection: noVNC
+  // and the RFB WebSocket the page handed it, while it is shown.
+  const [statsOn, setStatsOn] = useState(() => statsShown(target.mid));
+  const [link, setLink] = useState<{ rfb: RFB; socket: WebSocket } | null>(null);
 
   // What the hub says first: why there would be nothing to connect to.
   useEffect(() => {
@@ -102,7 +107,17 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   useEffect(() => {
     if (!go || !screen.current) return;
     ensureSubtleAES(); // an http page has no crypto.subtle, and the ARD sign-in needs AES
-    const r = new RFB(screen.current, screenSocket(window.location, target.mid, target.token), { shared: true });
+    // The page opens the RFB WebSocket and hands it to noVNC (its constructor takes a channel), so the connection stats
+    // can count what it carries; it is the socket noVNC would open itself, the same URL with no subprotocols. noVNC
+    // closes it when it disconnects.
+    const socket = new WebSocket(screenSocket(window.location, target.mid, target.token));
+    let r: RFB;
+    try {
+      r = new RFB(screen.current, socket, { shared: true });
+    } catch (e) {
+      socket.close();
+      throw e;
+    }
     r.viewOnly = true;
     r.scaleViewport = true;
     r.resizeSession = false;
@@ -169,11 +184,13 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
       setPhase((p) => (p.kind === "signin" && p.failed ? p : { kind: "closed", why: clean ? t("screen-screenview.disconnected") : t("screen-screenview.connection_lost") }));
     });
     rfb.current = r;
+    setLink({ rfb: r, socket });
     return () => {
       sized.disconnect();
       clearTimeout(appSilent);
       answer.current = null;
       rfb.current = null;
+      setLink(null);
       r.disconnect();
     };
   }, [go, attempt, target, canKeep]);
@@ -269,6 +286,26 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
     setQualityChoice(target.mid, q);
   };
 
+  // The connection stats' toggle and overlay are a chunk of their own too (their words in screen-video), fetched once the
+  // screen is live in a page with a bar; one that would not load leaves the bar without the toggle.
+  const [Stats, setStats] = useState<StatsKit | null>(null);
+  const statsWanted = phase.kind === "live" && !target.embedded;
+  useEffect(() => {
+    if (Stats || !statsWanted) return;
+    let gone = false;
+    import("./StatsOverlay").then(
+      (m) => !gone && setStats(m),
+      () => {},
+    );
+    return () => {
+      gone = true;
+    };
+  }, [Stats, statsWanted]);
+  const showStats = (on: boolean) => {
+    setStatsOn(on);
+    setStatsShown(target.mid, on);
+  };
+
   // In the app (#1343) the app draws the name, the state and "View only" / "Take control" around the page: it hears the phase, and
   // says "Take control" through window.personaScreen.
   useEffect(() => {
@@ -347,6 +384,7 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         {live && !target.embedded && hasVideo && ScreenMenu && (
           <ScreenMenu picture={picture} quality={quality} onPicture={choosePicture} onQuality={chooseQuality} />
         )}
+        {live && Stats && <Stats.StatsToggle on={statsOn} onToggle={showStats} />}
         {live && (
           <div role="group" aria-label={t("screen-screenview.mode_label")} className="flex shrink-0 rounded-control bg-field p-0.5">
             {[false, true].map((on) => (
@@ -372,6 +410,7 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         <div ref={clip} className={cx("absolute", frame ? "overflow-hidden" : "inset-0", !live && "invisible")} style={frame ? place(frame.clip) : undefined}>
           <div ref={screen} className={cx("absolute", !frame && "inset-0")} style={frame ? place(frame.inner) : undefined} data-testid="screen" />
         </div>
+        {live && !target.embedded && statsOn && Stats && link && <Stats.StatsOverlay rfb={link.rfb} socket={link.socket} onClose={() => showStats(false)} />}
         {!live && (
           <div className="absolute inset-0 flex items-center justify-center p-6">
             {phase.kind === "signin" ? (

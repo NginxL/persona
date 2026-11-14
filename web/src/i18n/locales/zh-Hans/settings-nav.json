@@ -36,5 +36,7 @@
   "assistant_footer": "只显示「{name}」自己的内容。要改别的助手，先切换过去。",
   "hub_footer": "这两组和当前是哪个助手无关。",
   "tab_sources": "收件箱来源",
-  "hint_sources": "哪些来源会往收件箱里放新东西"
+  "hint_sources": "哪些来源会往收件箱里放新东西",
+  "tab_prompts": "常用提示词",
+  "hint_prompts": "在任何对话里用 / 调出的提示词"
 }

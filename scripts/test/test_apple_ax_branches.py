@@ -19,7 +19,6 @@ ALLOWED = {
     "PersonaWatch/PersonaWatchApp.swift": "the watch's showLargeText launch switch",
     # Both files have another PR in flight (#6623, #5969); their branches go in a follow-up.
     "Persona/DesignSystem/Components.swift": "an AX branch left while #6623 is open",
-    "Persona/Views/Chats/ChatsView.swift": "AX branches left while #5969 is open",
 }
 
 USE = re.compile(r"isAccessibilitySize|\.accessibility[1-5]\b")

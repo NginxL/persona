@@ -109,6 +109,9 @@ import UIKit
     private(set) var reading = ScreenVideoReading()
     private(set) var codec: String?
     private(set) var size: CGSize?
+    /// The helper said it has quality tiers (#6396, `hello.features`): only then does ⋯ › Quality do anything, so only
+    /// then is it offered. Kept once heard, for this session.
+    private(set) var tiers = false
     /// When video is tried again after it stopped (tests).
     @ObservationIgnored private(set) var retryAt: Date?
 
@@ -241,6 +244,7 @@ import UIKit
     private func hello(_ h: HelloMessage) {
         codec = h.codec == "h264" ? "H.264" : "HEVC"
         size = CGSize(width: h.width, height: h.height)
+        if h.features?.contains("tiers") == true { tiers = true }
         if let r = h.rect, r.count == 4 { rect = CGRect(x: r[0], y: r[1], width: r[2], height: r[3]) }
     }
 

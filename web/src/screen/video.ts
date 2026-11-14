@@ -7,8 +7,8 @@
 //
 // What the overlay shows comes from the same instrumentation that would measure the stream, so what is shown equals what
 // was measured; a number that is not measured is left out (undefined), never guessed. Today the web picture is always
-// RFB and the browser measures none of these, so the live overlay shows only mode and path until the video path (and its
-// measurements) land; `path` (#6398) and `tier` (#6396) are the interfaces those follow-ups fill.
+// RFB: the overlay (StatsOverlay, #6558) shows its bitrate and frame rate and the round trip to the hub (./meter,
+// ./probes); the video path's segments, `path` (#6398) and `tier` (#6396) are the interfaces the follow-ups fill.
 
 /** Which picture channel a Mac's live screen uses: the hardware **video** channel (smoother, far less bandwidth) or
  *  **VNC/RFB** (always available). Null until the user picks one, so the page can default to video when the computer
@@ -40,6 +40,9 @@ export interface ScreenStats {
   totalMs?: number;
   // VNC mode: what the client can measure.
   roundTripMs?: number;
+  /** The browser's HTTP round trip to the hub (#6558, ./probes): not the hub's way on to the Mac, so the overlay names it
+   *  and never shows it as the picture's latency. */
+  hubRoundTripMs?: number;
 }
 
 /** The latency segments present, in pipeline order, for the overlay's "capture · encode · network · decode" line. `key`

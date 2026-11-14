@@ -13,14 +13,19 @@ public struct HelloMessage: Codable, Equatable, Sendable {
     public var width: Int
     public var height: Int
     public var rect: [Int]?
+    /// What this helper can do beyond the version's messages: `tiers` (#6396) makes the phone offer ⋯ › Quality. Absent
+    /// from a helper before it, which offers nothing more.
+    public var features: [String]?
 
-    public init(version: Int, codec: String, display: Int, width: Int, height: Int, rect: [Int]? = nil) {
+    public init(version: Int, codec: String, display: Int, width: Int, height: Int, rect: [Int]? = nil,
+                features: [String]? = nil) {
         self.version = version
         self.codec = codec
         self.display = display
         self.width = width
         self.height = height
         self.rect = rect
+        self.features = features
     }
 }
 

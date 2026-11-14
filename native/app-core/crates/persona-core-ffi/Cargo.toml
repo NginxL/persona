@@ -12,7 +12,7 @@ name = "persona_core"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-test-support = []
+test-support = ["persona-core-runtime/test-support"]
 
 [dependencies]
 persona-core-runtime.workspace = true

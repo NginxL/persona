@@ -7,14 +7,14 @@
 
 pub mod wire;
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 mod diagnostics;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 use diagnostics::{Diagnostics, scheduler_switches};
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "test-support"))]
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -52,9 +52,9 @@ struct Shared {
     queue: Mutex<Queue>,
     idle: Condvar,
     /// Once-lock means ordinary dispatch/drain only read a null pointer; all instrumentation is opt-in.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", feature = "test-support"))]
     diagnostics: std::sync::OnceLock<Arc<Diagnostics>>,
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", feature = "test-support"))]
     worker_thread: std::sync::atomic::AtomicU64,
 }
 
@@ -97,7 +97,7 @@ impl Runtime {
 
     /// Queues an encoded `wire::Action`. Never blocks on the worker.
     pub fn dispatch(&self, action: &[u8]) -> bool {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         let sent = if self.shared.diagnostics.get().is_some() {
             let mut sent = Err(std::sync::mpsc::SendError(Message::Stop));
             diagnostics::measure_queue(&self.shared, || {
@@ -119,7 +119,7 @@ impl Runtime {
             queue.pending += 1;
             self.sender.send(Message::Action(action.to_vec()))
         };
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", feature = "test-support")))]
         let sent = {
             let mut queue = lock(&self.shared.queue);
             if queue.stopping {
@@ -138,11 +138,11 @@ impl Runtime {
     /// The chat's encoded `wire::ChatPatch` since the last successful drain. Encoding and removal are committed in
     /// that order: a failed encode leaves the pending operations and wake available for the next drain.
     pub fn drain(&self, chat: &str) -> Vec<u8> {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         let mut patches = diagnostics::timed_lock(&self.shared, &self.shared.patches, true);
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", feature = "test-support")))]
         let mut patches = lock(&self.shared.patches);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         {
             diagnostics::measure_patch_held(&self.shared, || {
                 let started = Instant::now();
@@ -162,7 +162,7 @@ impl Runtime {
                 encoded
             })
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", feature = "test-support")))]
         {
             let patch = patches.chats.get(chat).cloned().unwrap_or_default();
             let encoded = wire::encode(&patch);
@@ -203,13 +203,13 @@ impl Runtime {
     }
 
     /// Same wait as [flush], with opt-in caller timing outside the original benchmark spans.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", feature = "test-support"))]
     pub fn flush_diagnostic(&self, timeout: Duration) -> bool {
         self.flush(timeout)
     }
     /// Cumulative opt-in timings, off the ordinary dispatch/drain path. Nanosecond values are inclusive spans, so
     /// nested queue and lock diagnostics overlap. Scheduler counters are zero when /proc cannot be read.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", feature = "test-support"))]
     pub fn diagnostics(&self) -> Vec<i64> {
         let counters = self
             .shared
@@ -220,7 +220,8 @@ impl Runtime {
         let worker = self.shared.worker_thread.load(Ordering::Relaxed);
         let (worker_voluntary, worker_involuntary) = scheduler_switches(worker);
         let (caller_voluntary, caller_involuntary) = scheduler_switches(0);
-        vec![
+        #[allow(unused_mut)]
+        let mut values = vec![
             counters.pending_lock.load(Ordering::Relaxed) as i64,
             counters.pending_switches.load(Ordering::Relaxed) as i64,
             counters.pending_lock_calls.load(Ordering::Relaxed) as i64,
@@ -245,10 +246,13 @@ impl Runtime {
             worker_involuntary as i64,
             caller_voluntary as i64,
             caller_involuntary as i64,
-        ]
+        ];
+        #[cfg(feature = "test-support")]
+        values.push(counters.pending_lock_without_proc.load(Ordering::Relaxed) as i64);
+        values
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", feature = "test-support"))]
     pub fn enable_diagnostics(&self) {
         self.shared.diagnostics.get_or_init(|| Arc::new(Diagnostics::default()));
     }
@@ -335,7 +339,7 @@ impl Worker {
     }
 
     fn run(mut self, receiver: Receiver<Message>) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         self.shared
             .worker_thread
             .store(diagnostics::thread_id(), Ordering::Relaxed);
@@ -362,7 +366,7 @@ impl Worker {
     }
 
     fn reject(&self, reason: String) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         if let Some(diagnostics) = self.shared.diagnostics.get() {
             let started = Instant::now();
             let encoded = wire::encode(&Effect::Rejected { reason });
@@ -376,9 +380,9 @@ impl Worker {
     }
 
     fn action(&mut self, bytes: &[u8]) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         let started = Instant::now();
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         if let Some(diagnostics) = self.shared.diagnostics.get() {
             diagnostics::increment(&diagnostics.counters.worker_actions);
         }
@@ -434,7 +438,7 @@ impl Worker {
                 self.after_step(&chat, step);
             }
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", feature = "test-support"))]
         if let Some(diagnostics) = self.shared.diagnostics.get() {
             diagnostics::add(&diagnostics.counters.worker_decode_apply, started);
         }
@@ -442,7 +446,7 @@ impl Worker {
 
     fn after_step(&mut self, chat: &str, step: Step) {
         for request in step.requests {
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", feature = "test-support"))]
             if let Some(diagnostics) = self.shared.diagnostics.get() {
                 let started = Instant::now();
                 let encoded = wire::encode(&Effect::Fetch {
@@ -497,7 +501,7 @@ impl Worker {
             }
         };
         if let Some(version) = wake {
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", feature = "test-support"))]
             if let Some(diagnostics) = self.shared.diagnostics.get() {
                 let started = Instant::now();
                 self.host.changed(version);

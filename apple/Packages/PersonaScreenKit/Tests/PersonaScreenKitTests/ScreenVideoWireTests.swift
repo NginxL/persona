@@ -7,6 +7,7 @@ final class ScreenVideoWireTests: XCTestCase {
     private let samples: [ScreenVideoMessage] = [
         .hello(HelloMessage(version: 1, codec: "hevc", display: 2, width: 1920, height: 1080, rect: [0, 0, 1920, 1080])),
         .hello(HelloMessage(version: 1, codec: "h264", display: 0, width: 800, height: 600, rect: nil)),
+        .hello(HelloMessage(version: 1, codec: "hevc", display: 1, width: 1920, height: 1080, features: ["tiers"])),
         .format(FormatMessage(parameterSets: [Data([1, 2, 3]), Data([4, 5]), Data()])),
         .frame(VideoFrame(number: 42, captureMicros: 1_000_000_007, flags: [.keyframe], sample: Data([0, 0, 0, 4, 9, 9, 9, 9]))),
         .frame(VideoFrame(number: 43, captureMicros: 2, flags: [.refinement], sample: Data())),
@@ -94,5 +95,18 @@ final class ScreenVideoWireTests: XCTestCase {
         XCTAssertEqual(object?["max_size"] as? Int, 1600)
         XCTAssertEqual(object?["max_kbps"] as? Int, 12000)
         XCTAssertNil(object?["maxSize"])
+    }
+
+    /// `hello.features` (#6396) is new: an older helper's hello has none and reads as nil, and nil stays off the wire.
+    func testHelloFeaturesAreOptional() throws {
+        let old = ScreenVideoWire.frame(ScreenVideoWire.Kind.hello.rawValue,
+                                        body: Data(#"{"version":1,"codec":"hevc","display":0,"width":800,"height":600}"#.utf8))
+        var parser = ScreenVideoParser()
+        let raw = try XCTUnwrap(try parser.push(old).first)
+        guard case let .hello(h) = try ScreenVideoMessage.decode(type: raw.type, body: raw.body) else { return XCTFail("not a hello") }
+        XCTAssertNil(h.features)
+        let body = ScreenVideoMessage.hello(h).framed().dropFirst(5)
+        let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        XCTAssertNil(object?["features"])
     }
 }

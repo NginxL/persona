@@ -689,6 +689,10 @@ extension Theme {
         static let search = "magnifyingglass"
         /// The knowledge base (~/.persona/data).
         static let knowledge = "books.vertical"
+        /// A knowledge-base topic (#7251): what Persona learned on one subject.
+        static let topic = "lightbulb.2"
+        /// The knowledge map (#7251): topics and projects as one outline.
+        static let knowledgeMap = "map"
         /// Health: the health space (docs/assistant/health.md), its entry and its conversations' mark.
         static let health = "heart"
         static let healthFilled = "heart.fill"

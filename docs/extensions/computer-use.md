@@ -256,12 +256,45 @@ Only through the hub tunnel, no new externally exposed port:
   - View Only (`viewOnly`) by default. Switching View Only / Take Over in the top bar hands keyboard and mouse (touch) input to that Mac.
   - Scale to the window (`scaleViewport`), without changing the Mac's resolution.
   - On a Mac with several displays, the top bar's Displays menu shows one of them ("Displays" below).
+  - The top bar's Connection stats shows this connection's numbers ("Connection stats on the web" below).
   - On disconnection, offer Reconnect.
 - **Without `crypto.subtle`**: ARD login AES-encrypts the account and password; noVNC's AES uses browser `crypto.subtle`. Pages opened over HTTP (hub LAN address, App WebView) aren't secure contexts and lack `crypto.subtle`.
   - `aes.ts` supplies an AES-CBC-encryption-only substitute when missing.
   - Tests: three FIPS-197 standard vectors and byte-for-byte comparison with WebCrypto.
   - HTTPS or localhost uses the browser's implementation, without the substitute.
 - **View**: Cua Driver operates in the background without taking focus, so the view is the real desktop. Its agent cursor is a topmost window and visible.
+
+#### Connection stats on the web (#6558)
+
+- **Toggle**: the top bar's **Connection stats**, on any live Mac as the App's ⋯ › Connection Stats, off by default and
+  kept per Mac in this browser (`video.ts` `statsShown`). It shows a small panel at the top right of the picture, which
+  drags anywhere inside it and has a close button. A page an app embeds has no bar and no panel. The toggle and the panel
+  are a chunk of their own (`StatsOverlay.tsx`, words in `screen-video`), loaded once the screen is live.
+- **What it shows**, once a second (`meter.ts`): `VNC · Via hub`, then bitrate and frame rate, then on a line of its own
+  **Round trip to the hub N ms**. Only what was measured: a number with nothing behind it is left out, never guessed. A
+  still screen sends nothing, so it says 0 fps.
+- **How**, only while the panel is shown (`probes.ts`):
+  - Bitrate: the page opens the RFB WebSocket itself and hands it to noVNC (its constructor takes a channel: the same URL,
+    no subprotocols, and noVNC closes it). A listener beside noVNC's counts each message's bytes, RFB's own without the
+    WebSocket and TLS framing.
+  - Frame rate: noVNC has no frame event. The hook wraps its display's `flip()`, which puts each finished update on the
+    screen, at once or from its render queue, and counts the flips that draw. A noVNC whose display has no `flip()` and
+    `_renderQ` is not hooked, and the frame rate is left out. `probes.test.ts` runs the hook on the real noVNC 1.7, so an
+    upgrade that changes it fails there.
+  - Round trip to the hub: the screen page holds no hub connection (`main.tsx` loads only `ScreenView` here), and another
+    `/api/v1/ws` would count as one more connection of the device (a `device_sessions` row, every broadcast, the snapshots
+    sent on connect). So every 2 s while the page is visible it fetches `GET /api/v1/health?probe=N` (no sign-in, the
+    hub's memory only; `cache: "no-store"`, `redirect: "manual"`) and takes `responseStart − requestStart` from that
+    request's own Resource Timing entry, through a `PerformanceObserver` (the global buffer is never cleared). A probe
+    counts only when the hub answered `{"ok":true}` and both times are there; the panel shows the median of the last 5
+    from the last 20 s, and a background tab probes nothing. That is the browser's HTTP round trip to the hub, a little
+    of it the hub answering, and not the hub's way on to the Mac, so it never sits on the first line, where the App puts
+    the video's end-to-end total.
+- **Not yet**: the video channel's segments (capture · encode · network · decode), `path` (#6398) and `tier` (#6396)
+  come with the web video path.
+- **Tests**: `meter.test.ts`, `probes.test.ts`, `ScreenView.stats.test.tsx`, and in a real browser against the mock's
+  moving box (`MOCK_COMPUTER=ready MOCK_SCREEN=fake MOCK_SCREEN_ANIMATE=1`) `node web/e2e/screen-stats.mjs <web URL>`:
+  off by default, measured numbers in light and dark, kept per Mac, no round-trip line while the hub's health is refused.
 
 ### Native client in the App (#1343, `apple/Persona/Screen/`)
 
@@ -458,7 +491,8 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     no frame reordering, `MaxFrameDelayCount` 0, capture queue depth 3, NV12 straight into the encoder; ≈5 ms p50 and
     ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
     (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
-  - **Messages**: `start` gets `hello` (codec, display, size), then `format` and a keyframe; `format` again whenever the
+  - **Messages**: `start` gets `hello` (codec, display, size, and `features` from a helper that has more, `tiers` for #6396's
+    quality tiers), then `format` and a keyframe; `format` again whenever the
     parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did. Each
     second frames did, `timing` carries the helper's medians for the phone's Connection Stats (`TimingWindow`):
     capture (display time to ScreenCaptureKit's callback, about 0), encode (VideoToolbox in to out) and network (half
@@ -518,7 +552,8 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   signed in, shows its pictures in a layer over RFB's on the same display (`hello.rect`, else the display shown; RFB's layer is
   hidden meanwhile, so a picture of another shape leaves black, not a stale frame), and holds RFB's update requests while
   they show; the request held goes out when video stops, so RFB's picture catches up.
-  Video is chosen by default on a Mac that offers it (⋯ › Picture, kept per Mac) and runs only while one display is
+  Video is chosen by default on a Mac that offers it (⋯ › Picture, kept per Mac; ⋯ › Quality appears only once the
+  helper's `hello.features` has `tiers`, since before #6396 it would change nothing) and runs only while one display is
   shown: the Mac's only one, or one picked from several the node numbered; all of several displays at once stay RFB.
   It pauses while Picture in Picture shows the screen or the app is in the background (RFB carries the picture then).
   When VNC shows instead, a line under the bars says why in plain words: the video stopped, the Mac is locked, or the
@@ -531,6 +566,69 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
   binding); no password travels anywhere new. `computer.status` / `browser.status` gain `screen_video {version, codecs,
   permission}` (absent from an old node or one without the helper, so an old app keeps RFB).
+
+### Live screen routes (#6398)
+
+The live screen, picture and input together, takes the fastest route the phone can reach: the same local network,
+Tailscale, or the hub relay ([#6398](https://github.com/nwverse/persona/issues/6398) has the design). The node's end is
+`internal/screenlink`. What is in place: the screen session over the hub's relays and the node's direct routes; the
+iPhone's side comes next.
+
+- **Screen session**: a phone that asks for one gets its RFB stream and its video stream as channels of one session at
+  the node, keyed by `pair`: channel 1 is the connection to Screen Sharing (still followed for the login, so video binds
+  to the pair as before), and each video stream is a channel of its own from 2 up (Persona Screen's socket). Each channel
+  is a resumable byte stream: bytes carry their offset, the receiver acknowledges them, and the sender keeps what isn't
+  acknowledged yet, so any of the session's transports can carry a channel on from where the other side is.
+  **A transport only carries a session the hub opened**: Screen Sharing is dialed and Persona Screen started through
+  `port.dial` / `screen.dial` exactly as before; a transport joining later sends the session's token first.
+- **Asking for it**: the phone offers the WebSocket subprotocol `persona-screen-link.1` (beside `binary`) on
+  `…/ports/5900/connect?pair=…` and `…/screen/video/connect?pair=…`. The hub then passes `link: true` in `port.dial` /
+  `screen.dial`, and selects the subprotocol only when the node answers `{link: 1}`. The web's noVNC (`binary`), apps
+  before it (no subprotocol), a hub before it (never passes `link`) and a node before it (answers `{}`) all keep the raw
+  stream, byte for byte.
+- **Wire**: the video wire's framing (u32 length, u8 type, body) with its own types: `data` (channel, offset, bytes),
+  `ack` (channel, received through), `paths` (the token; candidates and the certificate with the direct routes), `attach`
+  / `attached` (a transport joining with the token), `ping` / `pong` (the pong adds the node's TCP retransmitted and sent
+  packets on a direct route; 0 on a relay), `use` / `resumed` (carry these channels on this transport from these
+  offsets), `close` (a channel's end) and `reset` (the video channel goes on at a message boundary). A new video
+  channel's relay starts with `resumed` naming it.
+- **Limits** (`screenlink.Limits`): the node keeps at most 4 MB of RFB and 512 KB of video unacknowledged, and reads
+  Screen Sharing or Persona Screen only with room (Screen Sharing waits; the helper drops frames as it already does when
+  the stream is full), so memory never grows with how long a route is down. Bytes left unacknowledged for 10 s mean the
+  transport carrying them is stuck: it is closed and the channel goes on elsewhere. A channel with no transport for 10 s
+  closes (RFB's ends the session), and so does a session with no hub relay for 10 s, so revoking the device or turning
+  the screen off on the hub also ends it.
+- **Moving a channel**: RFB is always sent on exactly from the phone's offset; its protocol state can't lose a byte.
+  Video with a backlog older than 200 ms is not replayed: the node drops it, sends `reset` with where the stream goes
+  on, asks Persona Screen for a keyframe (between two of the phone's messages, never inside one) and drops frames until
+  it comes, so a late picture replaces a burst of old ones and the rate control isn't misled by their delay. When the
+  transport carrying a channel fails, the node moves it to the channel's own relay (or another transport) by itself.
+- **Direct routes** (`screenlink.Direct`): while at least one session is live, the node listens on one TCP port bound
+  to each of its candidate addresses (never the wildcard), and closes the listener with the last session. Candidates
+  come from its own interfaces, with no Tailscale API or command: private IPv4 and unique-local IPv6 on Ethernet or
+  Wi-Fi (`lan`, with the prefix length so the phone can tell whether it is on the same network), and Tailscale's ranges
+  (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) on a point-to-point interface (`tailscale`). Loopback, link-local, global
+  addresses (not in v1), proxies' tunnels and their fake-IP range (RFC 2544's benchmark block, 198.18/15), other VPNs, and VM or container
+  bridges are left out, and so are MagicDNS names. At most 8; the node reads them again every 5 s and sends new `paths`
+  when they change. A connection must finish TLS 1.3 with ALPN `persona-screen/1` against a self-signed P-256
+  certificate made per node process (named `screen.persona.invalid`; `paths` carries its SHA-256 for the phone to
+  pin), then send `attach` with a live session's token, all within 3 s; at most 16 handshakes at once and 8 direct
+  transports per session. Its pongs carry the TCP packets retransmitted and sent on it since the last pong (macOS
+  `TCP_CONNECTION_INFO`, Linux `TCP_INFO`), the phone's measure of loss. When macOS's application firewall is on and the
+  node isn't explicitly allowed through it (read with `socketfilterfw`, at most once a minute, never changed), the node
+  doesn't listen and `paths` says `unavailable: "firewall"`, so no prompt appears on the Mac.
+- **The phone's side** (`PersonaScreenKit`, pure and tested with `swift test`): `ScreenLinkMessage` frames the wire
+  exactly as the node does (both check `spec/fixtures/screen-link`); `LinkReceiver` / `LinkSender` keep each channel's
+  offsets (bytes once and in order, what the node hasn't acknowledged kept within a window); `VideoMessageAssembler`
+  hands the decoder whole video messages only and drops a partial one on `reset`; `LinkMeter` turns pongs into
+  `LinkStats`; `RouteEligibility` names the phone interface a candidate may be dialed on (a LAN address only from
+  Wi-Fi or Ethernet on its subnet, a Tailscale address only through the phone's own Tailscale tunnel, never cellular,
+  another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
+  relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost
+  route left at once and a degraded one (loss ≥ 5 %, or 50 ms over its own floor for 5 s) when another is healthy.
+- **Rejoining**: a relay that dropped while the session went on (a hub restart, the phone changing networks) is opened
+  again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
+  or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.
 
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 
