@@ -1,4 +1,4 @@
-import PersonaScreenKit
+import PersonaScreenCore
 import XCTest
 
 /// The capture source's decisions from the phone's `start` (#3954): codec, size, frame rate, bitrate.

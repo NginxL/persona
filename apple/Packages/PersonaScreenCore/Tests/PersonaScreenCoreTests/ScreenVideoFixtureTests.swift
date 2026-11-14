@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import PersonaScreenKit
+@testable import PersonaScreenCore
 
 /// The video wire's shared cases (spec/fixtures/screen-video, #6558): the browser's client
 /// (web/src/screen/video-wire.ts) frames every message as these do. The cases are written from the messages below:

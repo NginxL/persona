@@ -1,5 +1,5 @@
 import XCTest
-@testable import PersonaScreenKit
+@testable import PersonaScreenCore
 
 /// The helper's side of the overlay's latency (#3954): medians over a second, the network as half the round trip.
 final class TimingWindowTests: XCTestCase {

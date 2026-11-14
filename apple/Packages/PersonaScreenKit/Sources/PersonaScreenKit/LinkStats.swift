@@ -77,3 +77,16 @@ public struct PathChange: Equatable, Sendable {
         self.reason = reason
     }
 }
+
+/// `update.path` (PersonaScreenCore's wire) from and to the route as measured here: kept with `LinkStats`, so the helper's
+/// module, which never measures a route, doesn't carry it (#7927).
+public extension UpdateMessage.Path {
+    /// The route `link` measures, as `update` carries it.
+    init(_ link: LinkStats) {
+        self.init(kind: link.kind.rawValue, via: link.via.rawValue, minRttMs: link.minRttMs)
+    }
+
+    /// The kind as `LinkStats` names it; nil for one this side doesn't know.
+    var linkKind: LinkStats.Kind? { LinkStats.Kind(rawValue: kind) }
+    var linkVia: LinkStats.Via? { LinkStats.Via(rawValue: via) }
+}

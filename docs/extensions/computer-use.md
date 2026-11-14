@@ -535,19 +535,33 @@ advertises `screen_video`, which a node does once it has the helper (the picture
 otherwise). The web, the Mac app and Android don't decode video yet: they keep RFB and show no switcher (the web's is
 behind `webVideo.plays` in `web/src/screen/video.ts`).
 
-- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenKit`): a Swift helper app inside
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenCore`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
   with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
   Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
   (`open -g -n <helper> --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
-  per stream, whose first line is the token. `mac-link.sh` builds it the same way every time (no timestamp), so an
-  unchanged helper keeps its ad-hoc signature, and its grant, across Persona Link updates. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
+  per stream, whose first line is the token.
+  - **Keeping its grant** (#7927): signed ad hoc, macOS holds the grant to the helper's exact bytes. So the helper is
+    built only from `PersonaScreenCore` (the wire, `CapturePlan`, `CaptureTick`, `HelperArguments`, `ScreenSource`,
+    `RateController`, `Refinement`, `Timing` and `CaptureConfigGate`), never from the rest of `PersonaScreenKit` (the
+    route session, the quality tiers), which changes far more often. `mac-link.sh` builds it with `swift build -c
+    release`, linked with `-S` (no debug symbols, so no checkout paths), and keeps the executable by a hash of its
+    sources, `PersonaScreenCore`'s, its Info.plist template and the architectures
+    (`~/.persona/cache/persona-screen`). Every later Persona Link build reuses it byte for byte until those change,
+    as it does for Persona Input. `mac-link.sh verify-screen` checks that two clean copies at different paths build
+    the same executable and cdhash. With a certificate set (`mac.link_signing_identity`,
+    `docs/operations/persona-link-install.md`) both helpers are signed with it, and their grants follow the certificate
+    across any change.
+  - `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
   `--preflight` prints whether Screen Recording is granted without asking (`CGPreflightScreenCaptureAccess()`), which
   the node reports as `screen_video.permission`.
   - **Capture** (`ScreenCaptureSource`): the encoder settings gate ① measured (`RealTime`, low-latency rate control,
     no frame reordering, `MaxFrameDelayCount` 0, capture queue depth 3, NV12 straight into the encoder; ≈5 ms p50 and
     ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
     (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
+    A configuration change (an `update`'s frame rate or size) made before `startCapture` has completed waits and is
+    applied from its completion (`CaptureConfigGate`, #7856): ScreenCaptureKit would keep the stream's first
+    configuration, so a client's first tier, which comes right after `hello`, never took effect.
   - **Messages**: `start` gets `hello` (codec, display, size, and `features` from a helper that has more, `tiers` for #6396's
     quality tiers), then `format` and a keyframe; `format` again whenever the
     parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did. Each
@@ -589,12 +603,14 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`, `timing`, `encoding`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
-  are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
-  package for macOS and iOS) is the codec, shared by the helper and the app's client. `update.path`
+  are skipped by length, so either side may add more. `PersonaScreenCore` (`apple/Packages/PersonaScreenCore`, its own
+  package for macOS and iOS) is the codec, shared by the helper and the app's client through `PersonaScreenKit`
+  (`apple/Packages/PersonaScreenKit`), which re-exports it. `update.path`
   `{kind, via, min_rtt_ms}` (#6398) says the stream moved to another network route, so the helper can start its delay
   baseline again (#6396); helpers that don't know the field skip it. `kind` (`lan`, `tailscale`, `ipv6`, `relay`) and
   `via` (the phone's `wifi`, `cellular`, `wired` or `other` interface) name the cases of `LinkStats`, the route
-  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange`).
+  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange` and the
+  `UpdateMessage.Path` conversions, in `PersonaScreenKit`: the helper only carries the strings).
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
   delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
   delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.

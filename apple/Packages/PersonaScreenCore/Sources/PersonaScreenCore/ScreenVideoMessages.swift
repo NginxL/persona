@@ -102,15 +102,7 @@ public struct UpdateMessage: Codable, Equatable, Sendable {
             self.via = via
             self.minRttMs = minRttMs
         }
-
-        /// The route `link` measures, as `update` carries it.
-        public init(_ link: LinkStats) {
-            self.init(kind: link.kind.rawValue, via: link.via.rawValue, minRttMs: link.minRttMs)
-        }
-
-        /// The kind as `LinkStats` names it; nil for one this side doesn't know.
-        public var linkKind: LinkStats.Kind? { LinkStats.Kind(rawValue: kind) }
-        public var linkVia: LinkStats.Via? { LinkStats.Via(rawValue: via) }
+        // From and to `LinkStats`: PersonaScreenKit's extension (LinkStats.swift), apart from the helper's code (#7927).
     }
 
     public var display: Int?

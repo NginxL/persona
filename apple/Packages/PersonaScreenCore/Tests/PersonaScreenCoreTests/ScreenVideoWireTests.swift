@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import PersonaScreenKit
+@testable import PersonaScreenCore
 
 final class ScreenVideoWireTests: XCTestCase {
     /// A representative message in each direction, for round-trip and streaming tests.

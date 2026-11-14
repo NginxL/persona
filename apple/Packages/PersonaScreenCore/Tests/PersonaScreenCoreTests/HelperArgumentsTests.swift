@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import PersonaScreenKit
+@testable import PersonaScreenCore
 
 final class HelperArgumentsTests: XCTestCase {
     func testStreamMode() throws {

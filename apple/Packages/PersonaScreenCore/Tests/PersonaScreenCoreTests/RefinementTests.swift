@@ -1,4 +1,4 @@
-import PersonaScreenKit
+import PersonaScreenCore
 import XCTest
 
 /// Idle refinement (#3954, `frame` flag 2): 300 ms after the screen stops changing, then every 200 ms, three passes,

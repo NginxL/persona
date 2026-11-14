@@ -1,4 +1,4 @@
-import PersonaScreenKit
+import PersonaScreenCore
 import XCTest
 
 /// Bandwidth adaptation from receiver reports (#3954, docs/extensions/computer-use.md "Adaptation"): cut 30% over

@@ -1,4 +1,4 @@
-import PersonaScreenKit
+import PersonaScreenCore
 import XCTest
 
 /// The capture source's once-a-second check (#3954): a heartbeat while the screen is still, `paused` when the Mac
