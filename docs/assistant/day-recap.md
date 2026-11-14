@@ -485,7 +485,8 @@ meeting is the entry's only when it is there at the entry's time (a calendar ite
 Notes and recaps are committed only while the recording still has the base they were made from, and never after it
 was deleted or trimmed; a job that finds it changed before a call stops there.
 
-The model and limits are the minutes' (`kb.compress`, the call and job timeouts, three unusable answers before
+The model is `kb.compress` (Information processing; the minutes have their own purpose since #7980, `meeting.minutes`, which the
+recap does not use) and the limits are the minutes' (the call and job timeouts, three unusable answers before
 `failed`, the timeout back-off), counted per chunk (base and hash) for notes and per target for the merge, so new text
 arriving every minute neither resets them nor restarts work already done; `POST …/minutes` starts both over.
 
