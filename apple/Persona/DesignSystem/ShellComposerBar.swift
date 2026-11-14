@@ -169,6 +169,9 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 TextField("", text: $text, selection: fieldSelection, axis: .vertical)
                     .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .font(Theme.Font.body)
+                    // On the field, not over its placeholder too: there the hidden placeholder came back into the UI-test
+                    // tree under this identifier, listed first on iPhone, and typing went to it (#7632).
+                    .accessibilityIdentifier("shell-composer-field")
                     .overlay(alignment: .leading) {
                         // The placeholder is interface text: capped with it, one line, shrunk before it is cut ("Ask Per…").
                         if text.isEmpty {
@@ -198,7 +201,6 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                     .padding(.trailing, fieldRightInset)
                     .padding(.top, expanded ? Theme.Space.l : 0)
                     .scaledFrame(minHeight: fieldMinimumHeight)
-                    .accessibilityIdentifier("shell-composer-field")
                     #if os(iOS)
                     // Measure at full width, before the button's reserved inset, not the field's capped height.
                     // Not while the page is up: it has its own lines, and the box measures again as it comes back.
@@ -698,6 +700,7 @@ private struct ComposerPageEditor: View {
                     .font(Theme.Font.body)
                     .focused($focused)
                     .scrollContentBackground(.hidden)
+                    .accessibilityIdentifier("composer-page-field") // on the editor, not over its placeholder (#7632)
                     .overlay(alignment: .topLeading) {
                         if text.isEmpty {
                             // Where the text view's first line starts: its inset, then its line padding.
@@ -713,7 +716,6 @@ private struct ComposerPageEditor: View {
                     .padding(.horizontal, Theme.Space.m)
                     .shellScaled() // the box's type size, a size up
                     .accessibilityLabel(placeholder)
-                    .accessibilityIdentifier("composer-page-field")
                 HStack {
                     Spacer()
                     if !canSend, let stop {

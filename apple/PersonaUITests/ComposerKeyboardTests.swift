@@ -75,6 +75,9 @@ final class ComposerKeyboardTests: XCTestCase {
         if shell {
             XCTAssertFalse(dismissButton.exists, "dismiss-keyboard button should not appear before typing")
         }
+        // Only the field: the placeholder over it once carried the identifier too, and on iPhone took the typing (#7632).
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "shell-composer-field").count, 1,
+                       "something besides the field has its identifier")
         let before = headerButtons()
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no software keyboard")
