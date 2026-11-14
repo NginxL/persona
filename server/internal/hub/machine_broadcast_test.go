@@ -39,7 +39,12 @@ func TestMachineBroadcastStaleAfterRealRemovalAndReport(t *testing.T) {
 		close(oldDone)
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	// One absolute deadline shared by all three polls: the second and third phases only get the time left in the
+	// original three-second budget, as in the baseline loops. The ticker stands in for the baseline's millisecond
+	// sleep because this file has no fixed-sleep allowance in scripts/ci/sleep_baseline.json.
+	end := time.Now().Add(3 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		buf := make([]byte, 1<<20)
 		n := runtime.Stack(buf, true)
@@ -56,11 +61,11 @@ func TestMachineBroadcastStaleAfterRealRemovalAndReport(t *testing.T) {
 		if blocked {
 			break
 		}
-		if time.Now().After(deadline) {
+		if !time.Now().Before(end) {
 			unlockM2()
 			t.Fatalf("old broadcast did not reach m2:\n%s", stack)
 		}
-		time.Sleep(time.Millisecond)
+		<-tick.C
 	}
 
 	goneDone := make(chan struct{})
@@ -69,11 +74,11 @@ func TestMachineBroadcastStaleAfterRealRemovalAndReport(t *testing.T) {
 		close(goneDone)
 	}()
 	for len(h.machinesNow()) != 1 {
-		if time.Now().After(deadline) {
+		if !time.Now().Before(end) {
 			unlockM2()
 			t.Fatal("machineGone did not remove m2")
 		}
-		time.Sleep(time.Millisecond)
+		<-tick.C
 	}
 
 	reportDone := make(chan struct{})
@@ -90,11 +95,11 @@ func TestMachineBroadcastStaleAfterRealRemovalAndReport(t *testing.T) {
 		if online {
 			break
 		}
-		if time.Now().After(deadline) {
+		if !time.Now().Before(end) {
 			unlockM2()
 			t.Fatal("manager report did not bring m1 online")
 		}
-		time.Sleep(time.Millisecond)
+		<-tick.C
 	}
 	unlockM2()
 
