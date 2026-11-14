@@ -63,7 +63,7 @@ struct GitBranchesSheet: View {
             }
             .listStyle(.insetGrouped)
             .themedPage()
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Find or name a branch"))
+            .pageSearchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "Find or name a branch"))
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .navigationTitle(Text("Branches"))
