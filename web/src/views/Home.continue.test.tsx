@@ -159,4 +159,169 @@ describe("Continue on a finished agent's row", () => {
     expect(host.textContent).toContain("fix the login page");
     expect(button("继续")).toBeUndefined();
   });
+
+  it("does not duplicate a successful send that settles while closed when reopened", async () => {
+    let finish!: (ok: boolean) => void;
+    const sent = new Promise<boolean>((resolve) => { finish = resolve; });
+    fake.queue.mockImplementationOnce((_mid, sid, out) => {
+      fake.entries.set("slow", { id: "slow", text: out.text, images: [], at: 0, state: "sending" });
+      return { id: "slow", sent, sid };
+    });
+    mount([finished()]);
+    open();
+    type("first message");
+    await submit();
+    act(() => input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await act(async () => {
+      fake.entries.get("slow")!.state = "sent";
+      finish(true);
+      await sent;
+    });
+    const closedStatus = status();
+    expect(input()).toBeNull();
+    open();
+    const reopenedText = input()?.value;
+    await submit();
+    expect(fake.queue).toHaveBeenCalledTimes(1);
+    expect(closedStatus).toContain("已发出");
+    expect(reopenedText).toBe("");
+    expect(fake.retry).not.toHaveBeenCalled();
+    expect(fake.discard).not.toHaveBeenCalled();
+    expect(fake.entries.get("slow")?.state).toBe("sent");
+  });
+
+  it("retries the same outbox entry when a send fails while closed and is reopened", async () => {
+    let finish!: (ok: boolean) => void;
+    const sent = new Promise<boolean>((resolve) => { finish = resolve; });
+    fake.queue.mockImplementationOnce((_mid, sid, out) => {
+      fake.entries.set("slow", { id: "slow", text: out.text, images: [], at: 0, state: "sending" });
+      return { id: "slow", sent, sid };
+    });
+    mount([finished()]);
+    open();
+    type("first message");
+    await submit();
+    act(() => input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await act(async () => {
+      Object.assign(fake.entries.get("slow")!, { state: "failed", error: "late failure" });
+      finish(false);
+      await sent;
+    });
+    expect(input()).toBeNull();
+    expect(fake.entries.get("slow")?.state).toBe("failed");
+    open();
+    expect(input()?.value).toBe("first message");
+    await submit();
+    expect(fake.retry).toHaveBeenCalledWith("mac", "s1", "slow");
+    expect(fake.queue).toHaveBeenCalledTimes(1);
+    expect(fake.discard).not.toHaveBeenCalled();
+    expect(fake.entries.get("slow")?.state).toBe("sent");
+    expect(input()).toBeNull();
+    expect(status()).toContain("已发出");
+  });
+
+  it("keeps a reopened replacement draft when the earlier send succeeds late", async () => {
+    let finish!: (ok: boolean) => void;
+    const sent = new Promise<boolean>((resolve) => { finish = resolve; });
+    fake.queue.mockImplementationOnce((_mid, sid, out) => {
+      fake.entries.set("slow", { id: "slow", text: out.text, images: [], at: 0, state: "sending" });
+      return { id: "slow", sent, sid };
+    });
+    mount([finished()]);
+    open();
+    type("first message");
+    await submit();
+    act(() => input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(input()).toBeNull();
+    open();
+    type("new unsent draft");
+    await act(async () => {
+      fake.entries.get("slow")!.state = "sent";
+      finish(true);
+      await sent;
+    });
+    expect(input()?.value).toBe("new unsent draft");
+    expect(fake.queue).toHaveBeenCalledTimes(1);
+    expect(fake.entries.get("slow")?.state).toBe("sent");
+    expect(status()).toBe("");
+  });
+
+  it("ignores an earlier late failure and sends the reopened replacement as new", async () => {
+    let finish!: (ok: boolean) => void;
+    const sent = new Promise<boolean>((resolve) => { finish = resolve; });
+    fake.queue.mockImplementationOnce((_mid, sid, out) => {
+      fake.entries.set("slow", { id: "slow", text: out.text, images: [], at: 0, state: "sending" });
+      return { id: "slow", sent, sid };
+    });
+    mount([finished()]);
+    open();
+    type("first message");
+    await submit();
+    act(() => input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    open();
+    type("new unsent draft");
+    await act(async () => {
+      Object.assign(fake.entries.get("slow")!, { state: "failed", error: "late failure" });
+      finish(false);
+      await sent;
+    });
+    expect(input()?.value).toBe("new unsent draft");
+    expect(status()).toBe("");
+    expect(fake.entries.get("slow")?.state).toBe("failed");
+    await submit();
+    expect(fake.queue).toHaveBeenCalledTimes(2);
+    expect(fake.queue).toHaveBeenLastCalledWith("mac", "s1", { text: "new unsent draft" });
+    expect(fake.retry).not.toHaveBeenCalled();
+    expect(fake.discard).not.toHaveBeenCalled();
+    expect(fake.entries.get("slow")?.state).toBe("failed");
+    expect(input()).toBeNull();
+    expect(status()).toContain("已发出");
+  });
+
+  it("keeps the second pending send untouched when the first send completes late", async () => {
+    let finishFirst!: (ok: boolean) => void;
+    let finishSecond!: (ok: boolean) => void;
+    const firstSent = new Promise<boolean>((resolve) => { finishFirst = resolve; });
+    const secondSent = new Promise<boolean>((resolve) => { finishSecond = resolve; });
+    fake.queue
+      .mockImplementationOnce((_mid, sid, out) => {
+        fake.entries.set("first", { id: "first", text: out.text, images: [], at: 0, state: "sending" });
+        return { id: "first", sent: firstSent, sid };
+      })
+      .mockImplementationOnce((_mid, sid, out) => {
+        fake.entries.set("second", { id: "second", text: out.text, images: [], at: 0, state: "sending" });
+        return { id: "second", sent: secondSent, sid };
+      });
+    mount([finished()]);
+    open();
+    type("first message");
+    await submit();
+    act(() => input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    open();
+    type("second message");
+    await submit();
+    expect(fake.queue).toHaveBeenCalledTimes(2);
+    expect(input()?.value).toBe("second message");
+    expect(input()?.readOnly).toBe(true);
+    await act(async () => {
+      fake.entries.get("first")!.state = "sent";
+      finishFirst(true);
+      await firstSent;
+    });
+    expect(input()?.value).toBe("second message");
+    expect(input()?.readOnly).toBe(true);
+    expect(status()).toBe("");
+    expect(fake.entries.get("second")?.state).toBe("sending");
+    expect(fake.retry).not.toHaveBeenCalled();
+    expect(fake.discard).not.toHaveBeenCalled();
+    await act(async () => {
+      fake.entries.get("second")!.state = "sent";
+      finishSecond(true);
+      await secondSent;
+    });
+    expect(input()).toBeNull();
+    expect(status()).toContain("已发出");
+    expect(fake.entries.get("first")?.state).toBe("sent");
+    expect(fake.entries.get("second")?.state).toBe("sent");
+  });
 });

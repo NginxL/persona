@@ -411,6 +411,7 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
   const [failed, setFailed] = useState<{ id: string; why: string } | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const refocus = useRef(false);
+  const attempt = useRef(0);
   useEffect(() => {
     if (!to && refocus.current) {
       refocus.current = false;
@@ -425,13 +426,16 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
     const words = text.trim();
     if (!to || !words || phase === "sending") return;
     const { machine_id: mid, session_id: sid } = to;
+    const attempted = attempt.current;
     setPhase("sending");
     // the line again after a failure is the outbox's Retry of that message (same id while the hub never answered, so
     // it goes in once); changed, the old one is dropped and this one goes as new
     const prev = failed && outboxEntry(mid, sid, failed.id);
     if (prev && prev.text !== words) discardOutbox(mid, sid, prev.id);
     const r = prev?.state === "failed" && prev.text === words ? retryOutboxEntry(mid, sid, prev.id) : queueToSession(mid, sid, { text: words });
-    if (await r.sent) {
+    const ok = await r.sent;
+    if (attempted !== attempt.current) return;
+    if (ok) {
       setFailed(null);
       setText("");
       setPhase("sent");
@@ -467,7 +471,7 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
         </form>
       ) : (
         <div className="flex">
-          <Button tone="secondary" icon="send" onClick={() => { setTo(s); setPhase("idle"); }}>
+          <Button tone="secondary" icon="send" onClick={() => { attempt.current++; setTo(s); setPhase("idle"); }}>
             {t("home.continue")}
             {/* every row has one: the row's title tells them apart to a screen reader */}
             <span className="sr-only">{t("home.continue_label", { title })}</span>
