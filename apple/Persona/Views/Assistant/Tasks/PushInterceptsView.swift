@@ -120,8 +120,7 @@ struct PushInterceptsEntry: View {
                 .fixedSize()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(String(localized: "Held pushes, \(model.groups.total) today [Push Intercepts]",
-                                        defaultValue: "Held pushes, \(model.groups.total) today"))
+            .accessibilityLabel(String(localized: "Held pushes, \(model.groups.total) today [Push Intercepts]"))
             .accessibilityAddTraits(open ? .isSelected : [])
             .accessibilityIdentifier("action-bar.push-intercepts")
             }
