@@ -804,10 +804,12 @@ nonisolated struct DockAgent: Hashable, Identifiable, Sendable {
     }
 
     /// The agents going on in a session list (Persona's own conversations are not agents): waiting for the user
-    /// first, then the newest. Only what a pill shows goes in, so it changes when a pill would. A subtask (a Codex
-    /// subagent, an agent another agent created) is left out while a session above it is going too, which stands for
-    /// it, as the Agents list folds it under that one (`CodexTasks`); one that waits for the user never is.
+    /// first, then the newest. Only what a pill shows goes in, so it changes when a pill would. A child the hub
+    /// folded under a listed parent is not a pill of its own (`ChildSessions`). A subtask the hub did not fold (a
+    /// Codex subagent, an agent another agent created) is left out while a session above it is going too, which
+    /// stands for it (`CodexTasks`); one that waits for the user never is.
     @MainActor static func going(_ sessions: [Session]) -> [DockAgent] {
+        let sessions = ChildSessions.fold(sessions)
         let goes = { (s: Session) in !s.assistant && (s.state == .needsYou || s.state == .working) }
         var going = sessions.filter(goes)
         if going.contains(where: \.isNestedSubtask), let parent = CodexTasks.parents(sessions, runs: goes) {

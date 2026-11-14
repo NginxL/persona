@@ -2450,6 +2450,11 @@ extension Interaction {
     /// The line under a card's title in a list: its session's title; a sessionless card says where it comes from, and
     /// Script when its title does not already name who asks (`personad ask` labels its cards Script, docs/integrations/script-cli.md).
     func placeLine(machine: String?) -> String {
+        if let under = foldedUnder, !under.isEmpty, under != sessionID {
+            let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let name = title.isEmpty ? String(localized: "Subagent task [Child Session]") : title
+            return String(localized: "From subagent · \(name)")
+        }
         let mark = (agentLabelHint ?? "").isEmpty ? String(localized: "Script") : nil
         let parts: [String?] = isSessionless ? [mark, sessionlessPlace, machine] : [sessionTitle, machine]
         return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")

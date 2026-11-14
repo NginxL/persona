@@ -152,8 +152,23 @@ nonisolated extension Interaction {
     var isSessionless: Bool { sessionID.isEmpty }
 
     /// Whether the app may answer it: a sessionless card always (no session source says no); else as its session's source
-    /// allows (`canApprove`; a read-only Codex history does not), and not while that session is unknown.
-    func canAnswer(session: Session?) -> Bool { isSessionless || session?.canApprove == true }
+    /// allows (`canApprove`; a read-only Codex history does not). A folded child's card is not blocked while its row
+    /// is still loading. Any other card whose session is unknown stays blocked.
+    func canAnswer(session: Session?) -> Bool {
+        if let session { return isSessionless || session.canApprove }
+        if let under = foldedUnder, !under.isEmpty, under != sessionID { return true }
+        return isSessionless
+    }
+
+    /// The words a list row shows for this card: the question, else the summary, else the tool.
+    var askPreview: String? {
+        if let question = questions?.first?.question.trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty {
+            return Fmt.plain(question)
+        }
+        if let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty { return Fmt.plain(summary) }
+        if let tool = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !tool.isEmpty { return tool }
+        return nil
+    }
 
     /// Where a sessionless card comes from, for its list row: the title the node gave it, else its directory's name.
     var sessionlessPlace: String? {

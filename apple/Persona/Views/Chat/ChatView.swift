@@ -1007,6 +1007,9 @@ struct ChatView: View {
         // Frozen: the items up to the snapshot (they are in transcript order); what comes after waits.
         let cut = frozen.map { f in Self.prefixCount(items) { ($0.seq, $0.part) <= (f.seq, f.part) } } ?? items.count
         let feed = style == .assistant ? TasksStore.shared.feed(shownKey.sessionID) : []
+        let kids = model.childRows(shownKey)
+        scratch.childRows = kids
+        let childStamp = kids.map { "\($0.sessionID):\($0.rev ?? 0):\($0.state.rawValue):\($0.updatedAt?.timeIntervalSince1970 ?? 0)" }.joined(separator: "|")
         let key = ChatScratch.LinesKey(store: "\(shownKey.machineID)/\(shownKey.sessionID)", version: frozen == nil ? store.version : cut,
                                        first: items.first?.id, live: frozen == nil ? liveTurnID : frozen?.live, open: openWork,
                                        runs: openRuns, frozen: frozen, feed: ChatLines.feedKey(feed),
@@ -1014,7 +1017,7 @@ struct ChatView: View {
                                        quietAgents: quietSubagents, workflowCalls: workflowCalls,
                                        day: style == .assistant ? Calendar.current.startOfDay(for: .now) : nil,
                                        supervision: openSupervision, active: shownRoundActive, background: foldsBackground,
-                                       closeout: shownCloseout != nil)
+                                       closeout: shownCloseout != nil, children: childStamp)
         if scratch.linesKey == key { return scratch.lines }
         var blocks = store.blocks
         if frozen != nil {
@@ -1022,7 +1025,13 @@ struct ChatView: View {
             scratch.frozenSettled = built.settled
             blocks = built.blocks
         }
-        var lines = lineBuilder.build(Self.debugTrim(blocks), live: key.live, streaming: key.streaming)
+        var builder = lineBuilder
+        var seen = model.childIndex.seen
+        builder.childPlaces = ChildSessions.places(kids, seen: &seen)
+        model.childIndex.seen = seen
+        builder.childSessions = Dictionary(uniqueKeysWithValues: kids.map { ($0.sessionID, $0) })
+        builder.historyComplete = store.loadedOnce && !store.hasMore
+        var lines = builder.build(Self.debugTrim(blocks), live: key.live, streaming: key.streaming)
         #if os(iOS)
         // An Agent's long finished answers as several rows: one row many screens tall stuttered whenever it was on
         // screen (#4970). Persona's own conversation keeps its boxed answers whole.
@@ -1074,6 +1083,7 @@ struct ChatView: View {
         lineBuilder.runID(holding: call, group: group, items: items)
     }
     private func foldsIntoRun(_ call: ToolCall) -> Bool {
+        if call.id.hasPrefix(ChildSessions.callPrefix) { return false } // a child session's card stays its own step
         if SubagentCard.isAgent(call) { return false } // its card is a line of its own
         guard let id = call.use.toolUseID else { return true }
         if WorkflowCallCard.staysOut(call, listed: workflowCalls) { return false } // its run's card (#3436)
@@ -2222,6 +2232,12 @@ struct ChatView: View {
         .environment(\.openSubagent, actions.openSubagent)
         .environment(\.openPlan, actions.openPlan)
         .environment(\.subagentsByCall, subagentsByCall)
+        .environment(\.childSessionRows, Dictionary(uniqueKeysWithValues: scratch.childRows.map { ($0.sessionID, $0) }))
+        .environment(\.showsChildHarness, style != .assistant)
+        .task(id: model.revealChild) {
+            guard let sid = model.revealChild?.sessionID, let group = ChildSessionLines.group(of: sid, in: currentLines()) else { return }
+            openWork.insert(group)
+        }
         .environment(\.workflowChat, key)
         .environment(\.chatActions, actions)
         .environment(\.subagentParent, key)
@@ -7088,6 +7104,8 @@ struct WorkStepView: View, Equatable {
         #endif
         Group {
             switch item {
+            case .step(.call(let c)) where c.id.hasPrefix(ChildSessions.callPrefix):
+                ChildSessionCard(sessionID: String(c.id.dropFirst(ChildSessions.callPrefix.count)))
             case .step(.call(let c)) where SubagentCard.isAgent(c):
                 SubagentCard(call: c)
             case .step(.call(let c)) where WorkflowCallCard.isWorkflow(c):
@@ -7814,6 +7832,8 @@ final class ChatScratch {
         var background = false
         /// The header shows the session's closeout card: its raw block is left out of the last reply.
         var closeout = false
+        /// Folded children placed in this chat. A change of row rebuilds the lines.
+        var children = ""
     }
     /// What was sent from this chat lately: its transcript copy arriving brings you to the newest, others do not.
     var sentHere: [(id: UUID, text: String)] = []
@@ -7855,6 +7875,8 @@ final class ChatScratch {
     var lastActivity = Date.now
     var linesKey: LinesKey?
     var lines: [ChatLine] = []
+    /// Folded children of the open parent, read once while the lines are built and handed to the cards.
+    var childRows: [Session] = []
     /// Where each open work line's header is on screen (global midY), and the list's frame: folding or opening from
     /// the header keeps the header under the finger.
     var workHeadY: [String: CGFloat] = [:]

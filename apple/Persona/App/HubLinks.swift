@@ -51,6 +51,7 @@ final class HubLink: Identifiable {
         c.personaNaming = live.personaContracts
         c.sessionLookup = features.contains("sessions_lookup")
         c.sessionList = features.contains("sessions_list")
+        c.sessionsHierarchy = features.contains(ChildSessions.feature)
         #if DEBUG
         c.transport = transportForTests
         #endif

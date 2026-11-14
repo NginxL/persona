@@ -40589,6 +40589,29 @@
         }
       }
     },
+    "Completed [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Completed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成"
+          }
+        }
+      }
+    },
     "Compress" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63063,6 +63086,29 @@
       },
       "extractionState" : "manual"
     },
+    "Failed [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败"
+          }
+        }
+      }
+    },
     "Failed [Subagent Card]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -79383,6 +79429,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上次"
+          }
+        }
+      }
+    },
+    "Last tool: %@ [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last tool: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直近のツール: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近工具：%1$@"
           }
         }
       }
@@ -128724,6 +128793,29 @@
       },
       "extractionState" : "manual"
     },
+    "Running [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行中"
+          }
+        }
+      }
+    },
     "Running [Extensions Model 1f1cd2]" : {
       "localizations" : {
         "en" : {
@@ -128838,6 +128930,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Running for %@ [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running for %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行時間 %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已运行 %1$@"
+          }
+        }
+      }
     },
     "Running in the background" : {
       "extractionState" : "manual",
@@ -137891,6 +138006,29 @@
         }
       }
     },
+    "Show full result [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show full result"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全文を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看全文"
+          }
+        }
+      }
+    },
     "Show in Files Page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -144519,6 +144657,29 @@
         }
       }
     },
+    "Stopped [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止"
+          }
+        }
+      }
+    },
     "Stopped [Port Chips f00645]" : {
       "localizations" : {
         "en" : {
@@ -145221,6 +145382,29 @@
       },
       "extractionState" : "manual"
     },
+    "Subagent task [Child Session]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subagent task"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サブエージェントのタスク"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子 Agent 任务"
+          }
+        }
+      }
+    },
     "Subagent · %@" : {
       "localizations" : {
         "en" : {
@@ -145313,6 +145497,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Subagents running: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subagents running: %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サブエージェント %lld 件が実行中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子 Agent %lld 个在跑"
+          }
+        }
+      }
     },
     "Subject" : {
       "localizations" : {

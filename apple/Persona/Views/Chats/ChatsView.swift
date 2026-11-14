@@ -873,15 +873,17 @@ private struct AgentsList: View {
         let settings = projectionSettings()
         let partitions = AgentListProjectionCache.partitions(model)
         let follows = feed.following && feed.hasPartitions(partitions)
+        let asks = ChildSessions.asks(model.pendingInteractions)
         let key = AgentListProjectionCache.Key(revision: feed.revision, partitions: partitions, settings: settings,
-                                               workspaceRevision: workspaceCatalog.revision)
+                                               workspaceRevision: workspaceCatalog.revision, asks: asks)
         return feed.projection.resolve(key, immediate: !follows || feed.immediateRevision == key.revision,
             input: { .init(sessions: follows ? feed.sessions : model.sessionLists.sessions,
                            machines: follows ? feed.machines : model.scopedMachines(), settings: settings,
-                           workspaces: workspaceCatalog.workspaces) },
+                           workspaces: workspaceCatalog.workspaces, asks: asks) },
             valid: { key in
                 key.revision >= feed.immediateRevision && AgentListProjectionCache.partitions(model) == key.partitions &&
-                    projectionSettings() == key.settings && workspaceCatalog.revision == key.workspaceRevision
+                    projectionSettings() == key.settings && workspaceCatalog.revision == key.workspaceRevision &&
+                    key.asks == asks
             },
             canPublish: { key in feed.mayPublish(key.revision) },
             willPublish: { feed.reader.willChange() })
@@ -966,7 +968,7 @@ private struct AgentsList: View {
         let waiting = AgentsNeedsYou.rows(
             cards: AgentsNeedsYou.cards(feed.following ? feed.interactions : model.scopedInteractions, session: session,
                                         machine: machineFilter, hub: model.isMultiHub ? hubFilter : nil),
-            waiting: AgentsNeedsYou.waiting(base)) // a subtask waiting for you is a row of its own (`CodexTasks`)
+            waiting: AgentsNeedsYou.waiting(base)) // a folded child's card sits under its parent; a subtask the hub did not fold stays its own row
         let _ = (lookup.needsYou = waiting.count)
         let needsYou = quick == .all || quick == .needsYou ? waiting : []
         let interactions = needsYou.flatMap(\.cards)
@@ -3495,7 +3497,12 @@ nonisolated struct AgentsListShown: Encodable, Equatable {
             revision &+= 1
         }
         show(s)
-        if i != interactions { reader.willChange(); interactions = i }
+        if i != interactions {
+            reader.willChange()
+            interactions = i
+            // A waiting child's words land on the parent row. The session list itself did not change.
+            applyFoldedRows(s)
+        }
         if !Self.sameListing(m, machines) { reader.willChange(); machines = m; revision &+= 1 }
         if immediate { immediateRevision = revision }
     }
@@ -3516,19 +3523,28 @@ nonisolated struct AgentsListShown: Encodable, Equatable {
         guard s != shown else { return }
         shown = s
         reader.willChange() // a row above the one being read may grow or shrink (its last line), not only the structure
+        applyFoldedRows(s)
+        restructure(force: false)
+    }
+
+    /// The row shows the folded copy: a waiting child makes the parent Needs You, and says what that child asks.
+    /// The stored list stays the hub's own rows, so the chat page and the structure's equality are unchanged.
+    private func applyFoldedRows(_ s: [Session]) {
+        let folded = Dictionary(ChildSessions.fold(s, asks: ChildSessions.asks(interactions)).map { ($0.id, $0) },
+                                uniquingKeysWith: { a, _ in a })
         for x in s {
+            let display = folded[x.id] ?? x
             if let r = rows[x.id] {
-                if !Session.sameApartFromTicks(r.session, x) { r.session = x }
+                if !Session.sameApartFromTicks(r.session, display) { r.session = display }
                 if r.time.updatedAt != x.updatedAt { r.time.updatedAt = x.updatedAt }
             } else {
-                rows[x.id] = Row(x)
+                rows[x.id] = Row(display)
             }
         }
         if rows.count > s.count {
             let ids = Set(s.map(\.id))
             rows = rows.filter { ids.contains($0.key) }
         }
-        restructure(force: false)
     }
 
     private func restructure(force: Bool) {
@@ -4152,6 +4168,7 @@ nonisolated struct SlotRow: View, Equatable {
                     }
                 } detail: {
                     if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                    RunningChildrenCaption(session: session)
                 }
                 // The badge's column holds the state alone (#3004): the agent's mark leads the title (#6390), with
                 // ultracode's mark after it while that is on (#1307; the library's row has no slot after the title).
@@ -4193,6 +4210,7 @@ nonisolated struct SlotRow: View, Equatable {
                             }
                             // A workflow running in the background (#2935): its name, phase and progress.
                             if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                            RunningChildrenCaption(session: session)
                             HStack(spacing: Theme.Space.xs) {
                                 metaText.lineLimit(1)
                                 if let todo = session.todo {
