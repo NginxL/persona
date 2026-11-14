@@ -1469,9 +1469,10 @@ Claude Code's AskUserQuestion, the assistant's ask_user and Codex's questions.
   row is wider than the card (the largest text sizes) it scrolls, opening with the current one in sight; the card's title
   then wraps to up to three lines.
 - **Previous / Next** move one question at a time. A question gone back to shows the answer it had.
-- **A single-select pick** moves on to the next question by itself after a short pause (250 ms), once. It moves only from
-  the question it was made on, and never past the last one: a second tap within the pause, or Previous / Next meanwhile,
-  moves nothing more (`QuestionSteps.next`, #6549; a fast double tap used to skip a question).
+- **A single-select pick** moves on to the next question by itself after a short pause (250 ms), once, and never past
+  the last one. A second pick within the pause starts the pause again, so the card moves a whole pause after the last
+  pick and its tick is seen; Previous / Next meanwhile cancel the move (`QuestionSteps.step`, #6549; two taps within the
+  pause used to skip a question).
 - **The review** (`ScreenReview`, `apple/Persona/Views/Interactions/ScreenReview.swift`): a row per question, Previous and
   **Submit N Answers**. A question left reads **Not answered** in the caution color; the main button then goes to it,
   and **Submit Without Them** sends the rest. At the largest text sizes the buttons stack, the main one first, and so

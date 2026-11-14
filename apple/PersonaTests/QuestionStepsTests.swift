@@ -35,13 +35,33 @@ struct QuestionStepsTests {
     /// A single-select pick steps once, from the page it was made on (#6549): two taps within its pause made two steps.
     @Test func aPickStepsOnceFromItsOwnPage() {
         #expect(QuestionSteps.next(after: 0, now: 0, count: 3) == 1)
-        // the second tap's pause ends after the first one stepped: nowhere
+        // a step from a page the card has left (it got past its cancel): nowhere
         #expect(QuestionSteps.next(after: 0, now: 1, count: 3) == nil)
         // never past the last question
         #expect(QuestionSteps.next(after: 1, now: 1, count: 3) == 2)
         #expect(QuestionSteps.next(after: 2, now: 2, count: 3) == nil)
         // Previous within the pause: the card stays where it went
         #expect(QuestionSteps.next(after: 1, now: 0, count: 3) == nil)
+    }
+
+    @MainActor private final class Count { var steps = 0 }
+
+    /// A second pick within the pause starts it again (#6549): the first pick's step never comes, and the card steps
+    /// once, a whole pause after the second pick. The first pick's step used to come a pause after it, and the second
+    /// pick's tick was on screen for a moment only. Previous / Next within the pause cancel the step: none at all.
+    @MainActor @Test func aSecondPickWithinThePauseStartsItAgainAndStepsOnce() async {
+        let count = Count()
+        let first = QuestionSteps.step(replacing: nil, after: .seconds(5)) { count.steps += 1 }
+        let picked = ContinuousClock.now
+        let second = QuestionSteps.step(replacing: first, after: .milliseconds(200)) { count.steps += 1 }
+        await first.value
+        await second.value
+        #expect(count.steps == 1)
+        #expect(ContinuousClock.now - picked >= .milliseconds(200))
+        let next = QuestionSteps.step(replacing: nil, after: .milliseconds(50)) { count.steps += 1 }
+        next.cancel()
+        await next.value
+        #expect(count.steps == 1)
     }
 
     @Test func aRowPerQuestionAndTheOneLeftHasNoAnswer() {
