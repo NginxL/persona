@@ -787,7 +787,7 @@ class TasksStore(
     fun finishTaskNow(todo: Todo, onError: (Throwable) -> Unit, onChanged: () -> Unit) {
         val ask = todo.ask?.takeIf { it.outcome == "decide" } ?: return
         if (todo.isDone || todo.cancelledAt != null) return
-        finishDecision(todo.id, ask.askedAt, expectedAsk = ask, manager = null, onError = onError, onChanged = onChanged)
+        finishDecision(todo.id, ask.askedAt, expectedAsk = ask, manager = todo.manager, onError = onError, onChanged = onChanged)
     }
 
     /** Both direct-completion entries share the current-round fence and the confirmed local merge. */
