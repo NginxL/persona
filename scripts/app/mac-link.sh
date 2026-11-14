@@ -1,12 +1,18 @@
 #!/bin/bash
 # Independently installable Persona Link: persona-link, persona-node and Persona Screen, no desktop UI required.
-# The bundle id is mac.link_bundle_id in ~/.config/persona/config.json (or PERSONA_LINK_BUNDLE_ID),
-# else the placeholder com.example.persona.link. UNIVERSAL=1 builds for Apple silicon and Intel together.
+# The bundle id is PERSONA_LINK_BUNDLE_ID, else mac.link_bundle_id in ~/.config/persona/config.json, else the app's
+# registered identity (PERSONA_BUNDLE_ID, else app.bundle_id) + ".link". Never a placeholder: macOS keeps Persona
+# Screen's Screen Recording grant per bundle id, so a later build with another id has to be allowed again (#7569).
+# UNIVERSAL=1 builds for Apple silicon and Intel together.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=$PWD
 ID=${PERSONA_LINK_BUNDLE_ID:-$(python3 scripts/persona_config.py get mac.link_bundle_id 2>/dev/null || true)}
-ID=${ID:-com.example.persona.link}
+if [ -z "$ID" ]; then
+  APP_ID=${PERSONA_BUNDLE_ID:-$(python3 scripts/persona_config.py get app.bundle_id 2>/dev/null || true)}
+  [ -n "$APP_ID" ] || { echo "Persona Link needs a bundle id: set mac.link_bundle_id or app.bundle_id in ~/.config/persona/config.json, or PERSONA_LINK_BUNDLE_ID (docs/operations/config.md)" >&2; exit 2; }
+  ID=$APP_ID.link
+fi
 PKG="$ROOT/apple/PersonaLink"
 OUT="$PKG/build"
 APP="$OUT/Persona Link.app"

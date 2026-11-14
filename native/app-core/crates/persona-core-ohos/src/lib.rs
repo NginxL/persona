@@ -7,7 +7,7 @@ pub mod registry;
 #[cfg(feature = "ohos")]
 mod binding {
     use napi_derive_ohos::napi;
-    use napi_ohos::bindgen_prelude::{Buffer, FnArgs, Result};
+    use napi_ohos::bindgen_prelude::{Buffer, FnArgs, Result, Status};
     use napi_ohos::threadsafe_function::ThreadsafeFunction;
 
     use crate::registry::{self, CoreHost};
@@ -15,18 +15,19 @@ mod binding {
     #[napi(catch_unwind)]
     pub fn core_create(
         config: Buffer,
-        changed: ThreadsafeFunction<i64>,
-        effects: ThreadsafeFunction<Vec<u8>>,
+        changed: ThreadsafeFunction<i64, (), i64, Status, false>,
+        effects: ThreadsafeFunction<Buffer, (), Buffer, Status, false>,
     ) -> Result<i64> {
         registry::create(config.as_ref(), CoreHost::new(changed, effects))
     }
 
     #[napi(catch_unwind)]
+    #[allow(clippy::type_complexity)] // Type aliases are not expanded by napi-derive's TypeScript generator.
     pub fn core_create_with_chat(
         config: Buffer,
-        changed: ThreadsafeFunction<i64>,
-        changed_chat: ThreadsafeFunction<FnArgs<(String, i64)>>,
-        effects: ThreadsafeFunction<Vec<u8>>,
+        changed: ThreadsafeFunction<i64, (), i64, Status, false>,
+        changed_chat: ThreadsafeFunction<FnArgs<(String, i64)>, (), FnArgs<(String, i64)>, Status, false>,
+        effects: ThreadsafeFunction<Buffer, (), Buffer, Status, false>,
     ) -> Result<i64> {
         registry::create(
             config.as_ref(),
@@ -45,8 +46,8 @@ mod binding {
     }
 
     #[napi(catch_unwind)]
-    pub fn core_flush(handle: i64, timeout_ms: u32) -> Result<bool> {
-        registry::flush(handle, timeout_ms)
+    pub fn core_flush(handle: i64, timeout_millis: u32) -> Result<bool> {
+        registry::flush(handle, timeout_millis)
     }
 
     #[napi(catch_unwind)]

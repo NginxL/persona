@@ -9,7 +9,7 @@ use persona_core_runtime::wire::{self, Config};
 use persona_core_runtime::{Host, Runtime};
 
 #[cfg(feature = "ohos")]
-use napi_ohos::bindgen_prelude::{Error, FnArgs, Result, Status};
+use napi_ohos::bindgen_prelude::{Buffer, Error, FnArgs, Result, Status};
 #[cfg(feature = "ohos")]
 use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 
@@ -93,18 +93,23 @@ pub fn config() -> Vec<u8> {
 }
 
 #[cfg(feature = "ohos")]
-type ChangedChatCallback = ThreadsafeFunction<FnArgs<(String, i64)>>;
+// The false const argument selects callee-unhandled callbacks: JavaScript receives no leading error argument.
+type ChangedCallback = ThreadsafeFunction<i64, (), i64, Status, false>;
+#[cfg(feature = "ohos")]
+type ChangedChatCallback = ThreadsafeFunction<FnArgs<(String, i64)>, (), FnArgs<(String, i64)>, Status, false>;
+#[cfg(feature = "ohos")]
+type EffectsCallback = ThreadsafeFunction<Buffer, (), Buffer, Status, false>;
 
 #[cfg(feature = "ohos")]
 pub struct CoreHost {
-    changed: Arc<ThreadsafeFunction<i64>>,
+    changed: Arc<ChangedCallback>,
     changed_chat: Option<Arc<ChangedChatCallback>>,
-    effects: Arc<ThreadsafeFunction<Vec<u8>>>,
+    effects: Arc<EffectsCallback>,
 }
 
 #[cfg(feature = "ohos")]
 impl CoreHost {
-    pub fn new(changed: ThreadsafeFunction<i64>, effects: ThreadsafeFunction<Vec<u8>>) -> Arc<Self> {
+    pub fn new(changed: ChangedCallback, effects: EffectsCallback) -> Arc<Self> {
         Arc::new(CoreHost {
             changed: Arc::new(changed),
             changed_chat: None,
@@ -113,9 +118,9 @@ impl CoreHost {
     }
 
     pub fn with_changed_chat(
-        changed: ThreadsafeFunction<i64>,
+        changed: ChangedCallback,
         changed_chat: ChangedChatCallback,
-        effects: ThreadsafeFunction<Vec<u8>>,
+        effects: EffectsCallback,
     ) -> Arc<Self> {
         Arc::new(CoreHost {
             changed: Arc::new(changed),
@@ -130,7 +135,7 @@ impl Host for CoreHost {
     fn changed(&self, version: u64) {
         // This is a wake-up only. The patch's u64 version stays in bincode; do not silently wrap a NAPI number.
         let Ok(version) = i64::try_from(version) else { return };
-        let _ = self.changed.call(Ok(version), ThreadsafeFunctionCallMode::NonBlocking);
+        let _ = self.changed.call(version, ThreadsafeFunctionCallMode::NonBlocking);
     }
 
     fn changed_chat(&self, chat: &str, version: u64) {
@@ -140,7 +145,7 @@ impl Host for CoreHost {
         };
         let Ok(version) = i64::try_from(version) else { return };
         let _ = callback.call(
-            Ok(FnArgs::from((chat.to_owned(), version))),
+            FnArgs::from((chat.to_owned(), version)),
             ThreadsafeFunctionCallMode::NonBlocking,
         );
     }
@@ -148,7 +153,7 @@ impl Host for CoreHost {
     fn run(&self, effect: &[u8]) {
         let _ = self
             .effects
-            .call(Ok(effect.to_vec()), ThreadsafeFunctionCallMode::NonBlocking);
+            .call(Buffer::from(effect.to_vec()), ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
 

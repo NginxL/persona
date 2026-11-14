@@ -666,6 +666,65 @@ class WatcherTests(unittest.TestCase):
             second.single_instance()
         second.instance.close()
 
+    def test_superseded_verification_dequeues_before_fresh_review(self):
+        self.watcher.state.put("example/one", 8, SHA_B,
+                               evidence_key="example/one#8@" + SHA_BASE + ".." + SHA_B,
+                               base=SHA_BASE, format=1, outcome="failed", semantic="passed")
+        self.watcher.enqueue("example/one", 7, SHA_A, "poll")
+        self.watcher.enqueue("example/one", 8, SHA_B, "poll")
+        self.assertEqual(self.watcher.tasks.get()[2], ("example/one", 8))
+        self.watcher.tasks.task_done()
+        self.assertEqual(self.watcher.tasks.get()[2], ("example/one", 7))
+        self.watcher.tasks.task_done()
+
+    def test_enqueue_marks_active_and_queues_under_one_lock(self):
+        calls = []
+        class RecordingLock:
+            def __init__(self):
+                self.depth = 0
+            def __enter__(self):
+                self.depth += 1
+                calls.append("enter")
+            def __exit__(self, *args):
+                calls.append("exit")
+                self.depth -= 1
+        lock = RecordingLock()
+        self.watcher.queue_lock = lock
+        self.watcher.queue_priority = lambda *args: calls.append("priority") or 0
+        self.watcher.tasks.put = lambda item: calls.append(("put", item))
+        self.watcher.enqueue("example/one", 7, SHA_A, "poll")
+        self.assertEqual(calls, ["enter", "priority", ("put", (0, 0, ("example/one", 7))), "exit"])
+        self.assertEqual(lock.depth, 0)
+
+    def test_priority_queue_accepts_shutdown_sentinel_after_queued_work(self):
+        self.watcher.enqueue("example/one", 7, SHA_A, "poll")
+        self.watcher.tasks.put((2, -1, None))
+        worker = threading.Thread(target=self.watcher.worker)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(self.watcher.tasks.empty())
+
+    def test_findings_and_exhausted_repairs_do_not_get_migration_priority(self):
+        for outcome, fields in (("findings", {"semantic": "findings"}),
+                                ("repair_exhausted", {"repair_exhausted": True})):
+            self.watcher.state.put("example/one", 8, SHA_B, outcome=outcome, format=1, **fields)
+            self.assertEqual(self.watcher.queue_priority("example/one", 8, SHA_B), 1)
+
+    def test_queue_priority_requires_exact_migratable_head(self):
+        evidence_key = "example/one#8@" + SHA_BASE + ".." + SHA_B
+        self.watcher.state.put("example/one", 8, SHA_B, evidence_key=evidence_key,
+                               base=SHA_BASE, format=1, outcome="failed")
+        self.assertEqual(self.watcher.queue_priority("example/one", 8, SHA_B), 0)
+        self.assertEqual(self.watcher.queue_priority("example/one", 8, SHA_A), 1)
+        for fields in ({"retry_after": 10**12}, {"outcome": "merge_failed"},
+                       {"outcome": "merge_failed", "blocking": False}):
+            with self.subTest(fields=fields):
+                self.watcher.state.data["prs"]["example/one#8"].update(fields)
+                self.assertEqual(self.watcher.queue_priority("example/one", 8, SHA_B), 1)
+                self.watcher.state.data["prs"]["example/one#8"].update(
+                    {"retry_after": 0, "outcome": "failed", "blocking": False})
+
     def test_config_has_no_implicit_merge_or_repositories(self):
         path = self.root / "config.json"
         path.write_text(json.dumps({"repositories": [{"name": "example/one", "checkout": str(self.root), "verify": {}}]}))
