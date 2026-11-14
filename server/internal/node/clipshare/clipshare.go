@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 // Sharing this computer's clipboard with the phone (#3064, docs/operations/clipboard.md): clipboard.get reads it,
 // clipboard.set puts text or an image on it. The node runs in the user's login session (a LaunchAgent in gui/<uid>
@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,6 +36,9 @@ type clipBackend interface {
 // Windows clipboard) must not hold the request.
 const clipTimeout = 15 * time.Second
 
+// installOS is the OS the backend is chosen for (tests set it).
+var installOS = runtime.GOOS
+
 // clipboardBackend is the backend for installOS (tests set it).
 var clipboardBackend = func() clipBackend {
 	switch installOS {
@@ -48,8 +52,8 @@ var clipboardBackend = func() clipBackend {
 	return unsupportedClip{reason: proto.ClipboardReasonOS}
 }
 
-// clipboardSupport is node.info's clipboard.
-func clipboardSupport() *proto.ClipboardSupport {
+// Support is node.info's clipboard.
+func Support() *proto.ClipboardSupport {
 	s := clipboardBackend().support()
 	return &s
 }
@@ -71,8 +75,8 @@ func clipTooLarge(what string, n int) error {
 	return &rpc.Error{Code: proto.CodeTooLarge, Message: fmt.Sprintf("%s is too large (%d bytes)", what, n)}
 }
 
-// clipboardGet is clipboard.get: {} → proto.ClipboardContent.
-func clipboardGet(ctx context.Context) (any, error) {
+// Get is clipboard.get: {} → proto.ClipboardContent.
+func Get(ctx context.Context) (any, error) {
 	b := clipboardBackend()
 	if s := b.support(); !s.Supported {
 		return nil, clipUnsupported(s.Reason)
@@ -115,8 +119,8 @@ func checkClipContent(c proto.ClipboardContent) (proto.ClipboardContent, error) 
 	return proto.ClipboardContent{Kind: proto.ClipboardKindEmpty}, nil
 }
 
-// clipboardSet is clipboard.set: {"text": …} or {"image": {"mime", "data"}} → {}.
-func clipboardSet(ctx context.Context, params json.RawMessage) (any, error) {
+// Set is clipboard.set: {"text": …} or {"image": {"mime", "data"}} → {}.
+func Set(ctx context.Context, params json.RawMessage) (any, error) {
 	var in proto.ClipboardContent
 	if err := json.Unmarshal(params, &in); err != nil {
 		return nil, &rpc.Error{Message: "bad params: " + err.Error()}

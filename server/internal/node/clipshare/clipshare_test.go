@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 import (
 	"bytes"
@@ -53,7 +53,7 @@ func fakeOsascript(t *testing.T) (board string) {
 
 func getClip(t *testing.T) proto.ClipboardContent {
 	t.Helper()
-	out, err := clipboardGet(context.Background())
+	out, err := Get(context.Background())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -66,14 +66,14 @@ func TestMacClipShareRoundTrip(t *testing.T) {
 	if c := getClip(t); c.Kind != proto.ClipboardKindEmpty || c.Text != nil || c.Image != nil {
 		t.Fatalf("empty: %+v", c)
 	}
-	if _, err := clipboardSet(context.Background(), json.RawMessage(`{"text":"从手机来的 · ok\nline 2"}`)); err != nil {
+	if _, err := Set(context.Background(), json.RawMessage(`{"text":"从手机来的 · ok\nline 2"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if c := getClip(t); c.Kind != proto.ClipboardKindText || c.Text == nil || *c.Text != "从手机来的 · ok\nline 2" {
 		t.Fatalf("text: %+v", c)
 	}
 	params, _ := json.Marshal(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/png", Data: tinyPNG}})
-	if _, err := clipboardSet(context.Background(), params); err != nil {
+	if _, err := Set(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
 	c := getClip(t)
@@ -106,13 +106,13 @@ func TestClipShareSetChecks(t *testing.T) {
 		{"gif", proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/gif", Data: []byte("GIF89a")}}, proto.CodeClipboardBadImage},
 	} {
 		params, _ := json.Marshal(tc.in)
-		_, err := clipboardSet(context.Background(), params)
+		_, err := Set(context.Background(), params)
 		if err == nil || rpcCode(err) != tc.code {
 			t.Errorf("%s: %v (code %q, want %q)", tc.name, err, rpcCode(err), tc.code)
 		}
 	}
 	params, _ := json.Marshal(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/jpg", Data: jpeg}})
-	if _, err := clipboardSet(context.Background(), params); err != nil {
+	if _, err := Set(context.Background(), params); err != nil {
 		t.Fatalf("a JPEG called image/jpg: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestClipShareErrorsLeaveContentOut(t *testing.T) {
 	oldPath, oldOS := osascriptPath, installOS
 	osascriptPath, installOS = script, "darwin"
 	t.Cleanup(func() { osascriptPath, installOS = oldPath, oldOS })
-	_, err := clipboardSet(context.Background(), json.RawMessage(`{"text":"secret-value-123"}`))
+	_, err := Set(context.Background(), json.RawMessage(`{"text":"secret-value-123"}`))
 	if rpcCode(err) != proto.CodeClipboardFailed || strings.Contains(err.Error(), "secret-value-123") {
 		t.Fatalf("%v", err)
 	}
@@ -139,14 +139,14 @@ func TestClipShareSupport(t *testing.T) {
 	old := installOS
 	t.Cleanup(func() { installOS = old })
 	installOS = "darwin"
-	if s := clipboardSupport(); !s.Supported {
+	if s := Support(); !s.Supported {
 		t.Fatalf("mac: %+v", s)
 	}
 	installOS = "plan9"
-	if s := clipboardSupport(); s.Supported || s.Reason != proto.ClipboardReasonOS {
+	if s := Support(); s.Supported || s.Reason != proto.ClipboardReasonOS {
 		t.Fatalf("plan9: %+v", s)
 	}
-	_, err := clipboardGet(context.Background())
+	_, err := Get(context.Background())
 	if rpcCode(err) != proto.CodeClipboardUnsupported {
 		t.Fatalf("get on plan9: %v", err)
 	}
@@ -161,21 +161,21 @@ func TestMacClipShareLive(t *testing.T) {
 	before := getClip(t)
 	t.Cleanup(func() {
 		if before.Text != nil {
-			_, _ = clipboardSet(context.Background(), mustJSON(proto.ClipboardContent{Text: before.Text}))
+			_, _ = Set(context.Background(), mustJSON(proto.ClipboardContent{Text: before.Text}))
 		} else if before.Image != nil {
-			_, _ = clipboardSet(context.Background(), mustJSON(proto.ClipboardContent{Image: before.Image}))
+			_, _ = Set(context.Background(), mustJSON(proto.ClipboardContent{Image: before.Image}))
 		} else {
 			_ = exec.Command(osascriptPath, "-l", "JavaScript", "-e", "ObjC.import('AppKit'); $.NSPasteboard.generalPasteboard.clearContents; ''").Run()
 		}
 	})
 	text := "从手机来的 · ok ✓ 日本語"
-	if _, err := clipboardSet(context.Background(), mustJSON(proto.ClipboardContent{Text: &text})); err != nil {
+	if _, err := Set(context.Background(), mustJSON(proto.ClipboardContent{Text: &text})); err != nil {
 		t.Fatal(err)
 	}
 	if c := getClip(t); c.Kind != proto.ClipboardKindText || *c.Text != text {
 		t.Fatalf("text: %+v", c)
 	}
-	if _, err := clipboardSet(context.Background(), mustJSON(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/png", Data: tinyPNG}})); err != nil {
+	if _, err := Set(context.Background(), mustJSON(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/png", Data: tinyPNG}})); err != nil {
 		t.Fatal(err)
 	}
 	if c := getClip(t); c.Kind != proto.ClipboardKindImage || sniffImage(c.Image.Data) != "image/png" {

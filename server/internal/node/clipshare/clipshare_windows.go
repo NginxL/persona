@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 // The Windows clipboard through user32 (clipshare.go): CF_UNICODETEXT for text; for images the registered "PNG"
 // format when an app put one there (browsers, Office), else CF_DIB turned into PNG (clipdib.go). Setting an image puts

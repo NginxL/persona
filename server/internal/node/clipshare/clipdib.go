@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 // Windows' clipboard bitmaps (CF_DIB: a BITMAPINFOHEADER and its pixels) to and from PNG, for clipshare_windows.go.
 // Kept free of Windows APIs so it is tested everywhere.

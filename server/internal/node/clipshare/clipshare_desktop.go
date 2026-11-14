@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 // The Linux clipboard (clipshare.go), only where the node runs in a graphical session: Wayland through wl-clipboard
 // (wl-paste / wl-copy), X11 through xclip. A headless machine (no DISPLAY / WAYLAND_DISPLAY, the node a systemd user

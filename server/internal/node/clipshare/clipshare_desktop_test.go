@@ -1,4 +1,4 @@
-package node
+package clipshare
 
 import (
 	"context"
@@ -50,15 +50,15 @@ func fakeLinuxTools(t *testing.T, env map[string]string, tools ...string) (dir s
 // No graphical session, or no tool for it: unsupported, with a reason the app can show.
 func TestLinuxClipSupport(t *testing.T) {
 	fakeLinuxTools(t, nil, "xclip")
-	if s := clipboardSupport(); s.Supported || s.Reason != proto.ClipboardReasonNoDisplay {
+	if s := Support(); s.Supported || s.Reason != proto.ClipboardReasonNoDisplay {
 		t.Fatalf("headless: %+v", s)
 	}
-	_, err := clipboardSet(context.Background(), json.RawMessage(`{"text":"x"}`))
+	_, err := Set(context.Background(), json.RawMessage(`{"text":"x"}`))
 	if rpcCode(err) != proto.CodeClipboardUnsupported || err.Error() == "" {
 		t.Fatalf("set headless: %v", err)
 	}
 	fakeLinuxTools(t, map[string]string{"WAYLAND_DISPLAY": "wayland-0"})
-	if s := clipboardSupport(); s.Supported || s.Reason != proto.ClipboardReasonNoTool {
+	if s := Support(); s.Supported || s.Reason != proto.ClipboardReasonNoTool {
 		t.Fatalf("no tool: %+v", s)
 	}
 	// Wayland without wl-clipboard but with XWayland's DISPLAY and xclip: xclip.
@@ -82,13 +82,13 @@ func TestLinuxClipRoundTrip(t *testing.T) {
 			if c := getClip(t); c.Kind != proto.ClipboardKindEmpty {
 				t.Fatalf("empty: %+v", c)
 			}
-			if _, err := clipboardSet(context.Background(), json.RawMessage(`{"text":"从手机来的 · ok"}`)); err != nil {
+			if _, err := Set(context.Background(), json.RawMessage(`{"text":"从手机来的 · ok"}`)); err != nil {
 				t.Fatal(err)
 			}
 			if c := getClip(t); c.Kind != proto.ClipboardKindText || *c.Text != "从手机来的 · ok" {
 				t.Fatalf("text: %+v", c)
 			}
-			if _, err := clipboardSet(context.Background(), mustJSON(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/png", Data: tinyPNG}})); err != nil {
+			if _, err := Set(context.Background(), mustJSON(proto.ClipboardContent{Image: &proto.ClipboardImage{Mime: "image/png", Data: tinyPNG}})); err != nil {
 				t.Fatal(err)
 			}
 			if c := getClip(t); c.Kind != proto.ClipboardKindImage || string(c.Image.Data) != string(tinyPNG) {
