@@ -1,0 +1,8 @@
+light projects (16.0, 207.0, w 88.0, h 34.0): contrast 242, 0 of 881 left-end pixels unlike the right end
+light docs (16.0, 249.0, w 86.3, h 34.0): contrast 242, 0 of 881 left-end pixels unlike the right end
+dark projects (16.0, 207.0, w 88.0, h 34.0): contrast 255, 0 of 881 left-end pixels unlike the right end
+dark docs (16.0, 249.0, w 86.3, h 34.0): contrast 255, 0 of 881 left-end pixels unlike the right end
+light-ax5 projects (16.0, 221.0, w 110.0, h 42.3): contrast 242, 0 of 1002 left-end pixels unlike the right end
+light-ax5 people (16.0, 271.3, w 106.3, h 41.3): contrast 242, 0 of 987 left-end pixels unlike the right end
+light-ax5 events (16.0, 320.7, w 109.7, h 41.3): contrast 242, 0 of 987 left-end pixels unlike the right end
+no pill end cut

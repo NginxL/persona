@@ -1,0 +1,4 @@
+light projects (420.0, 238.5, w 68.0, h 34.0): contrast 242, 0 of 347 left-end pixels unlike the right end
+dark projects (420.0, 238.5, w 68.0, h 34.0): contrast 255, 0 of 347 left-end pixels unlike the right end
+light-ax5 projects (420.0, 257.0, w 82.0, h 41.5): contrast 242, 0 of 388 left-end pixels unlike the right end
+no pill end cut

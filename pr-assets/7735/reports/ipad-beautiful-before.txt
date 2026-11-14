@@ -1,0 +1,5 @@
+light projects (420.0, 241.0, w 70.5, h 28.5): contrast 11, 0 of 180 left-end pixels unlike the right end
+dark projects (420.0, 241.0, w 70.5, h 28.5): contrast 30, 0 of 180 left-end pixels unlike the right end
+light-ax5 projects (420.0, 263.5, w 87.0, h 28.5): contrast 12, 0 of 180 left-end pixels unlike the right end
+light-ax5 events (420.0, 284.5, w 87.0, h 28.0): contrast 12, 33 of 176 left-end pixels unlike the right end
+light-ax5: events (420.0, 284.5, w 87.0, h 28.0) has 33 pixels of its left end cut
