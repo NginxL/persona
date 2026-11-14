@@ -29,27 +29,44 @@ enum Keyboard {
     private init() {
         #if os(iOS)
         let center = NotificationCenter.default
-        center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { @Sendable note in
-            let (frame, screen) = KeyboardState.frame(note)
-            MainActor.assumeIsolated {
-                KeyboardState.shared.isUp = frame.height > KeyboardState.least && KeyboardState.undocked(frame, screen: screen) != true
-            }
-        }
-        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { @Sendable _ in
-            MainActor.assumeIsolated { KeyboardState.shared.isUp = false }
-        }
-        // Undocking says Will Hide with the floating keyboard's frame; focusing a field while it floats and docking it
-        // again change the frame first.
-        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { @Sendable note in
-            let (frame, screen) = KeyboardState.frame(note)
-            MainActor.assumeIsolated {
-                guard let undocked = KeyboardState.undocked(frame, screen: screen) else { return }
-                let state = KeyboardState.shared
-                if state.isUndocked != undocked { state.isUndocked = undocked }
-                if undocked, state.isUp { state.isUp = false }
+        let notes: [(Notification.Name, Note)] = [
+            (UIResponder.keyboardWillShowNotification, .show),
+            (UIResponder.keyboardWillHideNotification, .hide),
+            // Undocking says Will Hide with the floating keyboard's frame; focusing a field while it floats and docking
+            // it again change the frame first.
+            (UIResponder.keyboardWillChangeFrameNotification, .change),
+        ]
+        for (name, kind) in notes {
+            center.addObserver(forName: name, object: nil, queue: .main) { @Sendable note in
+                let (frame, screen) = KeyboardState.frame(note)
+                MainActor.assumeIsolated { KeyboardState.shared.apply(kind, frame: frame, screen: screen) }
             }
         }
         #endif
+    }
+
+    /// Which keyboard notification came.
+    enum Note: Sendable { case show, hide, change }
+
+    /// The state after a keyboard notification, from its end frame in the coordinates of the screen it is on. What an
+    /// iPad (iOS 27.2) says: undocking, Will Change Frame and Will Hide with the floating frame; putting the floating
+    /// keyboard away and bringing it back, only Will Change Frame (no size, then the floating frame); docking it again,
+    /// Will Change Frame and Will Show with the docked frame.
+    /// - Will Show: up unless the keyboard is a hardware keyboard's bar or undocked.
+    /// - Will Hide: down, and still undocked if it was: undocking itself says Will Hide, and a floating keyboard comes
+    ///   back floating. The next frame on the screen says where it is.
+    /// - Will Change Frame: undocked or docked, as the frame says (nothing for a keyboard going away). Undocked counts as
+    ///   down; a docked frame after a floating one is the keyboard docked again, up, whether Will Show follows or not.
+    nonisolated static func after(_ note: Note, frame: CGRect, screen: CGRect?, up: Bool,
+                                  undocked: Bool) -> (up: Bool, undocked: Bool) {
+        let floats = Self.undocked(frame, screen: screen)
+        switch note {
+        case .show: return (frame.height > least && floats != true, undocked)
+        case .hide: return (false, undocked)
+        case .change:
+            guard let floats else { return (up, undocked) }
+            return (!floats && (up || (undocked && frame.height > least)), floats)
+        }
     }
 
     /// Whether a keyboard frame (the screen's coordinates) is undocked: an on-screen keyboard, taller than a hardware
@@ -62,9 +79,22 @@ enum Keyboard {
     }
 
     #if os(iOS)
+    private func apply(_ note: Note, frame: CGRect, screen: CGRect?) {
+        let next = Self.after(note, frame: frame, screen: screen ?? Self.appScreen, up: isUp, undocked: isUndocked)
+        if isUp != next.up { isUp = next.up }
+        if isUndocked != next.undocked { isUndocked = next.undocked }
+    }
+
     /// The keyboard's frame at the end of the change and the bounds of the screen it is on (the notification's object).
     nonisolated private static func frame(_ note: Notification) -> (CGRect, CGRect?) {
         (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .zero, (note.object as? UIScreen)?.bounds)
+    }
+
+    /// The screen the app is on, for a keyboard notification that does not name its screen: the foreground scene's,
+    /// or any scene's before one is active.
+    private static var appScreen: CGRect? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?.screen.bounds
     }
     #endif
 }

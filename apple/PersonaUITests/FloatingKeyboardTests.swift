@@ -129,4 +129,26 @@ final class FloatingKeyboardTests: XCTestCase {
         try open(["-app.tab", "assistant", "-tab", "assistant", "-newAssistant", "YES"])
         check("new conversation")
     }
+
+    /// A lone question card (#1912) with the keyboard docked again after it floated: the card takes the conversation's
+    /// room above the composer, as before the keyboard floated, not the room it grows to with the keyboard down.
+    @MainActor func testQuestionCardDockedAgain() throws {
+        try open(["-app.tab", "chats", "-tab", "dev", "-openSession", agent, "-showSampleQuestion", "YES"])
+        let cards = app.scrollViews["pending-cards"]
+        XCTAssertTrue(cards.waitForExistence(timeout: 10), "the question card")
+        focus()
+        if floating { dock() }
+        XCTAssertFalse(floating, "the keyboard did not dock")
+        sleep(1)
+        shot("question docked")
+        let docked = cards.frame
+        float()
+        shot("question floating")
+        dock()
+        XCTAssertFalse(floating, "the keyboard did not dock again")
+        sleep(1)
+        shot("question docked again")
+        XCTAssertEqual(cards.frame.height, docked.height, accuracy: 1, "docked again, the card is \(cards.frame), docked before \(docked)")
+        XCTAssertLessThanOrEqual(add.frame.maxY, keyboard.frame.minY + 1, "docked again, the composer is under the keyboard")
+    }
 }
