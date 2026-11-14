@@ -70,6 +70,7 @@ func (h *Hub) routes() http.Handler {
 	h.phoneWriteRoutes(api)
 	h.deviceRoutes(api)
 	h.pushRoutes(api)
+	h.webPushRoutes(api)
 	h.live.routes(api)
 	h.metricsRoutesRelayed(api) // the monitoring is the manager's (devices_routes.go)
 	h.lockTestRoutes(api)

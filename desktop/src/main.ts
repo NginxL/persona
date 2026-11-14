@@ -8,6 +8,10 @@ import { installSetupIPC } from "./setup-ipc.js";
 import { JSONStore } from "./store.js";
 import { restoreWindow, DEFAULT_WINDOW } from "./window-state.js";
 import { closeToTray, installTray } from "./tray.js";
+import type { DesktopTray } from "./tray.js";
+import { desktopLocale, loadStrings } from "./strings.js";
+import { updateMenu } from "./update-state.js";
+import type { UpdateMenuItem } from "./update-state.js";
 import { hubPartition } from "./sessions.js";
 import { installSmokeCapture } from "./smoke.js";
 import { installAutoUpdate } from "./updater.js";
@@ -206,7 +210,14 @@ else {
     // Resume by itself is not proof that the person unlocked the computer; only unlock-screen restores presence.
     powerMonitor.on("resume", publishPresence);
     presenceTimer = setInterval(publishPresence, 30_000);
-    installAutoUpdate();
+    const strings = await loadStrings(join(import.meta.dirname, "locales"), desktopLocale(app.getLocale()));
+    // The first check starts here, before any window loads; its state is kept until the tray exists to show it.
+    let tray: DesktopTray | undefined;
+    let updateItems: readonly UpdateMenuItem[] = [];
+    const updates = installAutoUpdate({
+      changed: state => { updateItems = updateMenu(state, strings); tray?.setUpdate(updateItems); },
+      prepareQuit: () => { quitting = true; },
+    });
     const saved = await store().read<{ hub?: string }>();
     try { hub = parseHubAddress(process.env.PERSONA_HUB_URL ?? saved?.hub ?? ""); } catch { hub = undefined; }
     for (const scheme of ["persona", "jarvis"]) {
@@ -214,10 +225,14 @@ else {
     }
     if (hub) await showMain();
     else await showSetup();
-    installTray(() => {
+    tray = installTray({ open: strings.tray_open ?? "Open Persona", quit: strings.tray_quit ?? "Quit Persona" }, () => {
       if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
       else void showMain();
-    }, () => { quitting = true; app.quit(); });
+    }, () => { quitting = true; app.quit(); }, action => {
+      if (action === "restart") updates?.restart();
+      else updates?.check();
+    });
+    tray.setUpdate(updateItems);
   }).catch(error => {
     dialog.showErrorBox("Persona could not start", error instanceof Error ? error.message : String(error));
     app.quit();

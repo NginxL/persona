@@ -53,6 +53,8 @@ type Pusher struct {
 	// desktopOpen: the desktop app with this push device id is connected (Hub.desktopOpen); it posts its own
 	// notifications for agents then (the Mac's MacAttentionWatcher).
 	desktopOpen func(device string) bool
+	// web pushes to the browsers that turned Web Push on (webpush.go, #7459).
+	web *webPusher
 	// devicesChanged runs after a device was registered, forgotten or reloaded, or its settings changed (Hub:
 	// fleet.clients, whether a phone would be pushed an MCP form). It may run under the Pusher's locks: it must not block.
 	devicesChanged func()
@@ -85,7 +87,9 @@ const deviceStoreTimeout = 5 * time.Second
 
 func newPusher(dir string, store Store, logf func(string, ...any)) *Pusher {
 	p := &Pusher{dir: dir, store: store, logf: logf, devices: map[string]Device{}, replaced: map[string]string{}, failed: map[string]pushFailure{}, withdrawals: newWithdrawals(), relay: &http.Client{Timeout: 20 * time.Second, Transport: apns.NewTransport()},
-		retryWaits: []time.Duration{time.Second, 4 * time.Second}, now: time.Now, storeTimeout: deviceStoreTimeout}
+		retryWaits: []time.Duration{time.Second, 4 * time.Second}, now: time.Now, storeTimeout: deviceStoreTimeout,
+		// Web Push in memory here; the hub gives it the store when it starts (hub.go): a test's store may have no settings.
+		web: newWebPusher(nil, logf)}
 	if store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), deviceStoreTimeout)
 		if _, err := store.ReconcilePushDevices(ctx, p.now().UTC(), pushDeviceMaxIdle); err != nil {
@@ -274,6 +278,15 @@ func (p *Pusher) signedOut(credential string) {
 		p.forget(d)
 		p.logf("device %s signed out: no more pushes", d.Name)
 	}
+	p.web.signedOut(credential)
+}
+
+// webPusher is p's Web Push (nil for a nil Pusher).
+func (p *Pusher) webPusher() *webPusher {
+	if p == nil {
+		return nil
+	}
+	return p.web
 }
 
 // forget drops a device, whatever token it has now (signedOut), with all of its push bookkeeping: a push accepted

@@ -1214,3 +1214,10 @@ px, while `offsetHeight` and the computed height say 44. Reduced motion only sho
 frame is still drawn. Wait for the panel's animations before measuring:
 `await dialog.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)))`
 (`web/e2e/standing-authorizations.mjs`).
+
+## Testing Web Push in Playwright needs a real profile (2026-11-14, #7459)
+
+- Chrome has no push messaging in an incognito-like context, and every `browser.newContext()` is one: `pushManager.subscribe` fails with "AbortError: Registration failed - permission denied" whatever permissions are granted, headless or not. `chromium.launchPersistentContext(<temp dir>)` gives a real profile, where headless Chrome subscribes at FCM and receives pushes; drop `--disable-background-networking` from Playwright's default switches (`ignoreDefaultArgs`), which push needs.
+- A push can be handed to the service worker without a push service: DevTools' `ServiceWorker.deliverPushMessage` with the registration id from `ServiceWorker.workerRegistrationUpdated` (`web/e2e/web-push.mjs`).
+- FCM now and then answers 410 for a subscription a fresh headless profile made moments before; subscribing again works. A live check retries once that way instead of failing.
+- Vite's dev server registers no service worker (`lib/pwa.ts`): anything that depends on it is checked against the built app under `vite preview`, which keeps the dev server's `/api` proxy.

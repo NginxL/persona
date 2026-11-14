@@ -20308,6 +20308,13 @@ if os.environ.get("MOCK_SENT"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import sent_ledger_mock as _sent
 
+# MOCK_WEB_PUSH=1|failed (#7459, scripts/mock/web_push_mock.py): Settings › Notifications › When Persona is closed, the
+# routes of a browser's Web Push; without it they are an older hub's 404.
+_web_push = None
+if os.environ.get("MOCK_WEB_PUSH"):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import web_push_mock as _web_push
+
 
 def sessions_for_delta_app(obj, have):
     """A machine's whole list as an app on the delta protocol gets it (hub/sessions_push.go): the first one whole,
@@ -24159,6 +24166,7 @@ class H(BaseHTTPRequestHandler):
         if managers_route(self, "GET", p): return
         if file_operation_route(self, p): return
         if _sent and _sent.route(self, "GET", p, q): return
+        if _web_push and _web_push.route(self, "GET", p): return
         if providers_route(self, "GET", p, q, b""): return
         if MOCK_MESSAGING and p.startswith("/api/v1/messaging") and lark_messaging.route(self, "GET", p, q, b""): return
         if net_control(p, q): return self.send_json({"ok": True, **NET})
@@ -25226,6 +25234,7 @@ class H(BaseHTTPRequestHandler):
         if preview_route and preview_route(self, self.command, p, parse_qs(urlparse(self.path).query)): return
         if custom_models_route(self, self.command, p, parse_qs(urlparse(self.path).query), self.last_body): return
         if _sent and _sent.route(self, self.command, p, {}, self.last_body): return
+        if _web_push and _web_push.route(self, self.command, p, self.last_body): return
         if PERSONAL_AGENTS and p.startswith("/api/v1/agents/sessions/") and p.rsplit("/", 1)[-1] in ("hide", "unhide"):
             sid, op = unquote(p[len("/api/v1/agents/sessions/"):].rsplit("/", 1)[0]), p.rsplit("/", 1)[-1]
             if sid not in [r["id"] for r in personal_rows()]: return self.send_json({"error": "no such session"}, 404)

@@ -205,6 +205,7 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 		selected++
 	}
 	h.ringNotify(live, required, wantsOn, msgIn, msgFor)
+	h.webPushNotify(kind, required, wantsOn, msgIn) // the browsers with no page open (webpush.go)
 	return selected, reachable
 }
 

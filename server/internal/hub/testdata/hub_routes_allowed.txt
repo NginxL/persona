@@ -206,6 +206,14 @@ PUT /api/v1/pins
 # Phone write delivery receipts (full credentials only).
 GET /api/v1/phone/write-queue
 POST /api/v1/phone/write-queue/{id}/cancel
+
+# Web Push to browsers (#7459): push delivery, the hub's own (hub/webpush_routes.go).
+DELETE /api/v1/push/web/{device}
+GET /api/v1/push/web
+GET /api/v1/push/web/{device}
+POST /api/v1/push/web/{device}/test
+PUT /api/v1/push/web/{device}
+
 /api/v1/auth/password/
 GET /api/v1/auth/password/state
 POST /api/v1/auth/password/start
