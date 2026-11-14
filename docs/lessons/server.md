@@ -2273,3 +2273,14 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 - It showed up as a test that failed 21 times in 200 under load, and the first reading was "the test's ordering".
   Before making such a test deterministic, make the losing order happen on purpose (a store that runs the other
   side inside the read) and look at what the caller gets.
+
+## A seal anywhere in the server is counted by the key rotation guard (2026-11-15, #7984)
+
+`internal/assistant`'s `TestPlacesThatSealAreKnown` (`keyrotate_guard_test.go`) counts every `.Seal(`, `sealKey(`,
+`.encrypt(`, `SealWith(` and `secretkey.New` per file under `internal/` and `cmd/`, so nothing new seals with the
+manager's `secret.key` without the key rotation re-sealing it. It counts AEADs with keys of their own too, in packages
+that have nothing to do with the assistant: #7954 sealed the live screen's UDP packets in `internal/screenlink`, its
+tests and its importers passed, and the hub deploy failed on this guard. When code under `internal/` or `cmd/` seals,
+run `go test -run TestPlacesThatSealAreKnown ./internal/assistant` (no database needed) and record the file there:
+with `secret.key`, after putting where it keeps the sealed value into `db.sealedTables` or `db.sealedSettings`; with
+any other key, under "other keys" with where the key comes from. Never loosen the guard.

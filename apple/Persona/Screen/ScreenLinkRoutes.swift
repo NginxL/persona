@@ -28,6 +28,17 @@ enum ScreenRoutes {
     /// Whether this phone asks the hub for a screen session: offered, and the Settings switch on (it is by default).
     nonisolated static var enabled: Bool { offered && ScreenRoutePrefs.automatic }
 
+    /// The video over UDP on direct routes (#7873) stays off in release builds until the check on real devices; a
+    /// DEBUG build launched with -showScreenUDP has it. It needs direct routes on: the same Settings switch covers it.
+    nonisolated static let udpReleaseEnabled = false
+
+    nonisolated static var udpEnabled: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenUDP") { return enabled }
+        #endif
+        return udpReleaseEnabled && enabled
+    }
+
     /// The Settings switch went off: live sessions go back to their relays and close their direct connections now.
     @MainActor static func turnedOff() {
         for pair in probers.keys {
@@ -41,12 +52,16 @@ enum ScreenRoutes {
     @MainActor static var listeners: [String: @MainActor (PathChange) -> Void] = [:]
     /// And of the route in use as measured each second, with why the node has no direct routes when it says.
     @MainActor static var meters: [String: @MainActor (LinkStats?, String?) -> Void] = [:]
+    /// And of the UDP flow carrying the video, about once a second (#7873): the mobile data budget leaves room for its
+    /// parity and resends.
+    @MainActor static var flows: [String: @MainActor (ScreenUDPStatus?) -> Void] = [:]
     /// Each live screen's routes as last measured and the one in use, by pair (the DEBUG command channel reads them).
     @MainActor static var latest: [String: (routes: [String: LinkStats], current: String, change: PathChange?)] = [:]
 
     /// A session opened for pair: register it for the video stream and start probing its direct routes.
     nonisolated static func opened(_ s: ScreenLinkSession, pair: String, group: String, machine: String) {
         ScreenLinkRegistry.shared.set(s, for: pair)
+        if udpEnabled { Task { await s.enableUDP(ScreenUDPSetup { ScreenUDPAESGCM(key: $0) }) } }
         Task { @MainActor in
             let p = ScreenLinkProber(session: s, pair: pair, group: group, machine: machine)
             probers[pair] = p
@@ -54,6 +69,7 @@ enum ScreenRoutes {
             probers[pair] = nil
             listeners[pair] = nil
             meters[pair] = nil
+            flows[pair] = nil
             latest[pair] = nil
             ScreenLinkRegistry.shared.remove(pair)
         }
@@ -92,7 +108,7 @@ nonisolated final class ScreenLinkRFBTransport: RFBTransport, @unchecked Sendabl
 
 /// A direct connection to one of the node's candidates: TLS 1.3 with the session's ALPN, accepting only the node's
 /// certificate (its SHA-256 from paths), on the one phone interface the candidate may use.
-nonisolated final class ScreenLinkDirect: ScreenLinkTransport, @unchecked Sendable {
+nonisolated final class ScreenLinkDirect: ScreenLinkTransport, ScreenLinkKeyExporter, @unchecked Sendable {
     private let conn: NWConnection
     private static let queue = DispatchQueue(label: "persona.screen-link.direct")
 
@@ -160,6 +176,21 @@ nonisolated final class ScreenLinkDirect: ScreenLinkTransport, @unchecked Sendab
 
     func close() { conn.cancel() }
 
+    /// The TLS connection's exporter (RFC 8446): a UDP flow's keys (#7873), the same bytes the node's Go TLS gives.
+    func exportKeyingMaterial(label: String, context: Data, length: Int) -> Data? {
+        guard let meta = conn.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
+        let secret = label.withCString { l in
+            context.withUnsafeBytes { c in
+                sec_protocol_metadata_create_secret_with_context(meta.securityProtocolMetadata, label.utf8.count, l, c.count,
+                                                                 c.bindMemory(to: UInt8.self).baseAddress!, length)
+            }
+        }
+        guard let secret else { return nil }
+        var out = Data()
+        (secret as DispatchData).enumerateBytes { buf, _, _ in out.append(contentsOf: buf) }
+        return out.count == length ? out : nil
+    }
+
     private final class Once: @unchecked Sendable {
         private let lock = NSLock()
         private var done = false
@@ -168,6 +199,37 @@ nonisolated final class ScreenLinkDirect: ScreenLinkTransport, @unchecked Sendab
             if first { f() }
         }
     }
+}
+
+/// A UDP flow's socket (#7873): datagrams to the node's address on the route's own interface, as the direct
+/// connection's.
+nonisolated final class ScreenLinkUDPSocket: ScreenUDPSocket, @unchecked Sendable {
+    private let conn: NWConnection
+    private static let queue = DispatchQueue(label: "persona.screen-link.udp")
+
+    private init(_ conn: NWConnection) { self.conn = conn }
+
+    static func open(host: String, port: Int, interface: NWInterface) -> ScreenLinkUDPSocket? {
+        guard let p = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else { return nil }
+        let params = NWParameters.udp
+        params.requiredInterface = interface
+        params.prohibitExpensivePaths = false
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: p, using: params)
+        conn.start(queue: queue)
+        return ScreenLinkUDPSocket(conn)
+    }
+
+    func send(_ packet: Data) { conn.send(content: packet, completion: .idempotent) }
+
+    func receive() async throws -> Data {
+        try await withCheckedThrowingContinuation { k in
+            conn.receiveMessage { @Sendable data, _, _, error in
+                if let error { k.resume(throwing: error) } else { k.resume(returning: data ?? Data()) }
+            }
+        }
+    }
+
+    func close() { conn.cancel() }
 }
 
 extension Data {
@@ -295,6 +357,11 @@ actor ScreenLinkProber {
                     ScreenRoutes.listeners[pair]?(change)
                     if let l = ScreenRoutes.latest[pair] { ScreenRoutes.latest[pair] = (l.routes, l.current, change) }
                 }
+            case let .openFlow(route, port):
+                openFlow(route, port: port)
+            case let .flow(status):
+                let pair = pair
+                await MainActor.run { ScreenRoutes.flows[pair]?(status) }
             case let .reopen(video):
                 let group = group, machine = machine, pair = pair
                 if let relay = await MainActor.run(body: { ScreenRoutes.reopenRelay(group: group, machine: machine, pair: pair, video: video) }) {
@@ -341,6 +408,17 @@ actor ScreenLinkProber {
     }
 
     private static func route(_ c: ScreenLinkPaths.Candidate) -> String { "\(c.kind):\(c.addr)" }
+
+    /// The node opened a UDP flow beside a direct route (#7873): a socket to the same address, on the route's
+    /// interface. Without one the session gives the flow up and the route keeps its TLS connection.
+    private func openFlow(_ route: String, port: Int) {
+        guard let c = paths?.candidates.first(where: { Self.route($0) == route }),
+              let i = RouteEligibility.interface(for: c, among: interfaces.list), let nw = interfaces.byName[i.name],
+              let socket = ScreenLinkUDPSocket.open(host: c.addr, port: port, interface: nw) else { return }
+        ScreenRoutes.log.info("udp flow on \(c.kind, privacy: .public)")
+        let s = session
+        Task { await s.addFlow(socket, route: route) }
+    }
 
     private func dialed(_ conn: ScreenLinkDirect?, route: String, kind: LinkStats.Kind, via: LinkStats.Via) async {
         guard let conn else {

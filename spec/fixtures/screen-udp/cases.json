@@ -32,10 +32,10 @@
       "direction": "node_to_phone",
       "flow_hex": "0a1b2c3d4e5f6071",
       "packet_number": 0,
-      "body_hex": "010123456789abcdf000",
-      "sealed_hex": "010a1b2c3d4e5f60710000000000000000aaa7e897b28587ae85e33861e3ae3e2147654050a0ee94ef6fd1",
+      "body_hex": "0100000123456789ab00",
+      "sealed_hex": "010a1b2c3d4e5f60710000000000000000aaa6cbd3f6494beadee3f172de1592a876a3a225283b92de2b2b",
       "expected": {
-        "challenge": 81985529216486900,
+        "challenge": 1250999896491,
         "kind": "hello_node",
         "validated": 0
       }
@@ -46,10 +46,10 @@
       "direction": "phone_to_node",
       "flow_hex": "0a1b2c3d4e5f6071",
       "packet_number": 1,
-      "body_hex": "010123456789abcdf0000000000000000000000000000000000000000000000000",
-      "sealed_hex": "010a1b2c3d4e5f60710000000000000001ea218b9fb1a4451f04e5b293b2b5041a984afd128f43cddc91aea84b7b69667774d72e90194583d805f0a126bb34ab5fe9",
+      "body_hex": "0100000123456789ab000000000000000000000000000000000000000000000000",
+      "sealed_hex": "010a1b2c3d4e5f60710000000000000001ea20a8dbf568895b5fe5b293b2b5041a984afd128f43cddc91aea84b7b696677743d972d30cd0200e872351dadcac15a5b",
       "expected": {
-        "echo": 81985529216486900,
+        "echo": 1250999896491,
         "kind": "hello_phone"
       }
     },

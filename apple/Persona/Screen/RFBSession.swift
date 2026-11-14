@@ -90,6 +90,7 @@ import PersonaScreenKit
         if ScreenRoutes.enabled {
             ScreenRoutes.listeners[pair] = { [weak self] change in self?.video.routeChanged(change) }
             ScreenRoutes.meters[pair] = { [weak self] stats, why in self?.video.measured(stats, unavailable: why) }
+            ScreenRoutes.flows[pair] = { [weak self] status in self?.video.flowChanged(status) }
         }
         #endif
         run(RFBClient(transport: Self.transport(api: api, ref: ref, pair: pair)) { [weak self] in await self?.credentials() })

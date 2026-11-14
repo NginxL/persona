@@ -897,8 +897,9 @@ On a direct route (same network or Tailscale), the live screen's video can ride 
 connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
 by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
 on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
-`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`. The iPhone's side comes
-next; until then no phone opens a flow, and nothing changes for anyone.
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, off in
+release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`; a DEBUG build launched with
+-showScreenUDP has it). No setting of its own: the Settings switch for direct routes covers it.
 
 - **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
   requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,
@@ -937,6 +938,35 @@ next; until then no phone opens a flow, and nothing changes for anyone.
 - **Falling back**: when a flow is lost (silent, or its route gone), the video goes on over the flow's own TLS
   connection from what the phone acknowledged, or over its relay when the route went too. The node never moves RFB or
   link messages onto a flow, and moving the video onto one takes the phone's `use` on it.
+- **The phone's side** (`PersonaScreenKit`, tested with `swift test` against the shared cases): `ScreenUDPWire` (packets,
+  sealed with CryptoKit's AES-256-GCM, `ScreenUDPAESGCM`), `ReedSolomon`, `ScreenUDPReceiver` (blocks rebuilt from parity; a block still short asked for again
+  once all of it was sent, a message gone quiet for max(6 ms, 2 × jitter) counting as sent; again after max(10 ms,
+  1.5 round trips); a message known only from a later one asked for by its place; a frame that held the picture back
+  100 ms plus a round trip given up), `ScreenUDPParity` and `ScreenUDPLoss` (below). `ScreenLinkSession` asks for a
+  flow once a direct route attaches, takes its keys from the route's TLS exporter, has the app open the socket on the
+  route's interface (`openFlow`, `ScreenLinkUDPSocket`), proves its address, and moves the
+  video onto the flow once the route carries the session, from the start of the message it was in the middle of; the
+  video's bytes on other transports are ignored meanwhile. It pings the flow every second with the parity and pacing
+  it asks for (1.25 × the rate a message's packets arrive at, `ScreenUDPPace`; 150 Mbit/s on a LAN route, 40 on
+  Tailscale and 8 on cellular before it knows), and leaves the flow for the route's TLS connection, from
+  what the phone has, when the flow is silent for 1 s, gives more than 2 frames up in 10 s, or the phone's networks
+  change; a route asks again after 30 s, doubling to 5 min, and at once after a network change. Each move onto or off
+  the flow is a `PathChange` whose `LinkStats.transport` says `udp` or `tcp`, so the quality tiers look again.
+- **Not on cellular**: the phone opens no flow while its route, or its path under Tailscale, is cellular. On #7873's
+  shaped cellular-like link (40 ms, a 3 Mbit/s bottleneck with a short queue) a flow kept the picture going but brought
+  nothing over TCP: about the same bitrate, as many stalls or more, a worse tail. There the loss is a queue
+  overflowing, which parity and resends only add to. Before the fixes found there, it showed nothing at all: a
+  keyframe given up asked for another, and the node paced far above the bottleneck. A keyframe is now never given up
+  (the node never marks one droppable, and the phone reads its first shard), and 10 % loss or more over 2 s cuts the
+  cap given to the helper by half the loss, at most every 2 s, recovering 5 % a second below 2 %
+  (`ScreenUDPCongestion`); parity stays at 15 % or less meanwhile.
+- **Parity and mobile data**: the phone asks for three times the loss the packet numbers show (before recovery), from
+  5 % up to the cap: 40 % on Wi-Fi, 15 % on cellular (kept for when cellular gets flows); none under 0.2 %. Each block
+  gets one parity shard more than the ratio, a lot for the few-shard frames of a low bitrate, so the ratio is the
+  largest whose parity on the recent blocks stays within the cap's share, and none when even one shard per block would
+  not. On mobile data the cap the phone gives the helper is divided by one plus the flow's overhead (parity and resent
+  bytes per byte of video, from the node's pong counters, at least the parity asked for), so the bytes on the wire stay
+  within Data Saver's 1.5 Mbit/s or Clearer's 4, and the card's figures per hour hold.
 
 ### Pixel scrolling (#7775)
 
