@@ -15,6 +15,7 @@ import { applySessionDelta, SESSIONS_DELTA_FEATURE, sessionRefreshed, sessionSna
 import { dueMarks, heldRows, liveMarks, markOver, newMark, nextDue, unansweredMarks, type SeenMark, type SeenMarks } from "./seen-outbox";
 import { probeEdge } from "./edge-auth";
 import { api, ApiError, CLIENT_FEATURES, CLIENT_PONG_TIMEOUT, CLIENT_PLATFORM, CLIENT_VERSION, errorText, getToken, credentialOwner, sessionPath } from "./api";
+import { helloDeviceId } from "./device-id";
 import { currentLanguage } from "../i18n";
 import type { AgentMutes } from "./agent-groups";
 import { stateOf } from "./format";
@@ -29,6 +30,7 @@ import { releaseAttachments } from "./attachments";
 import { dropElicitationDraft } from "./elicitation";
 import type { OutboxEntry } from "./outbox";
 import { NO_LINK, RESTARTING_MS, type ConnLink } from "./connection";
+import { unreachable } from "./shell";
 import { setOfflineProbe } from "./feedback";
 import { readDirectionTree } from "./direction-names";
 import { unnamedTaskConversations } from "./background-supervisor";
@@ -412,6 +414,18 @@ export function useStore<T>(select: (s: State) => T): T {
   return useSyncExternalStore(subscribe, get, get); // the third: static rendering (tests)
 }
 
+// The page's Offline (lib/shell.ts unreachable) as one flag, followed from every change of the state whatever is drawn:
+// a list drawn while the socket retries says Offline as the page does, not Loading… (audit item 36).
+let hubAway = false;
+const readHubAway = () => (hubAway = unreachable(hubAway, state.conn, state.loaded));
+subscribe(() => void readHubAway());
+
+/** Whether the hub has not been reached since the page opened and the socket has given up for now (lib/shell.ts
+ *  unreachable): App.tsx's Offline page and the Agents list read this one flag, so they always agree. */
+export function useHubUnreachable(): boolean {
+  return useSyncExternalStore(subscribe, readHubAway, readHubAway);
+}
+
 // ── what the hub can do (hello `features`) ───────────────
 
 /**
@@ -585,7 +599,8 @@ export function connect() {
     socketOpenedAt = Date.now(); // a direction tree read since then serves this hello (lib/direction-tree.ts)
     // the interface language: this connection's text, and the user's language for pushes and the assistant (docs/protocol/i18n.md)
     // and what it can render: MCP forms and links come only to a socket that says so
-    sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: CLIENT_FEATURES, locale: currentLanguage(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
+    // device_id: this browser's (lib/device-id.ts), so the hub pushes nothing to it while a page is open (#7459)
+    sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: CLIENT_FEATURES, locale: currentLanguage(), device_id: helloDeviceId(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
     retry = 0;
     fastTries = 0;
     lastMessage = Date.now();
@@ -623,7 +638,7 @@ export function connect() {
     if (stopped) return;
     // an attempt that never got a hello carries no status: ask the hub once whether a sign-in layer in front of it has
     // expired (lib/edge-auth.ts); a socket that was live just dropped, and its reconnect attempt is the one to ask about
-    if (!wasLive && !restartNotice && ev.code !== 1001) void probeEdge();
+    if (!wasLive && !restartNotice && ev.code !== 1001) void probeEdge(undefined, probeCredential);
     const now = Date.now();
     const restart = restartNotice || ev.code === 1001;
     // the drop starts while online; a restart announced on a later attempt stretches its grace
@@ -646,6 +661,12 @@ export function connect() {
     retryTimer = window.setTimeout(connect, wait);
   };
 }
+
+// The hub answered while it refused the socket: a browser can't read why a WebSocket handshake failed, so one ordinary
+// read asks. A credential it no longer takes (removed in Settings › Devices, or the hub forgot it) answers 401, which
+// api() hands to the sign-in page with "signed out" (App.tsx handleUnauthorized) instead of retrying as if the hub were
+// out of reach. The read's own failures change nothing: the socket keeps retrying.
+const probeCredential = () => api("/machines", { timeout: 15_000 }).catch(() => {});
 
 // The grace is over and the socket is still not back: show it as before.
 function showDrop() {
@@ -1501,6 +1522,7 @@ export function reset() {
   disconnect();
   resetMessageFeedback();
   cursor = NO_CURSOR; // another login: another stream
+  hubAway = false; // and its own first connection
   ixChanges.clear();
   resolvedSeen.clear();
   endedHere.clear();

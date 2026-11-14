@@ -89,6 +89,18 @@ func (d *DB) TaskPlansMadeSince(ctx context.Context, since time.Time) ([]TaskPla
 	return scanTaskPlans(rows)
 }
 
+// TaskPlansQueued lists recently updated started or dismissed plans, oldest update first, for the admission queue.
+// Queueing or retrying a task refreshes updated_at even when its plan was made earlier; the sweep checks the task blobs
+// for actual queue records. Rule suggestions keep TaskPlansMadeSince's creation-time semantics instead.
+func (d *DB) TaskPlansQueued(ctx context.Context, since time.Time) ([]TaskPlanRow, error) {
+	rows, err := d.pool.Query(ctx, `SELECT id, conversation, tasks, state, created_at, updated_at FROM task_plans
+		WHERE updated_at >= $1 AND state IN ('started', 'dismissed') ORDER BY updated_at, id`, since)
+	if err != nil {
+		return nil, err
+	}
+	return scanTaskPlans(rows)
+}
+
 func scanTaskPlans(rows pgx.Rows) ([]TaskPlanRow, error) {
 	defer rows.Close()
 	var out []TaskPlanRow

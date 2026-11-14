@@ -680,6 +680,9 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 	}
 	if p.Port == screenPort && p.Pair != "" {
 		c = n.screens.observe(p.Pair, c) // follow Screen Sharing's login so screen.dial can bind to it (#3954)
+		if n.screenStart != nil {
+			n.askScreenPermission(p.Pair, nil) // once it signs in: macOS asks for the helper's grant, once per version
+		}
 	}
 	if link {
 		_, relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here

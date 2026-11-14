@@ -16,7 +16,7 @@ Mail tools `mail_*` use the same `personad mcp`, but execute on the hub without 
 | Entry | Purpose |
 | --- | --- |
 | `PhoneToolRegistry.all` | All tools (ignoring toggles), used by tests and settings |
-| `PhoneToolRegistry.enabledSpecs()` | Only user-enabled data sources; sent in `register_phone` after connecting to the hub |
+| `PhoneToolRegistry.enabledSpecs()` | Only data sources that are on and allowed, or on and not asked yet where the first use asks (`PhoneDataSource.offered`); sent in `register_phone` after connecting to the hub and after a call asked iOS |
 | `PhoneToolRegistry.call(name:args:confirm:)` | Executes one call, never throws: failure becomes `isError=true` + explanation |
 | `PhoneToolRegistry.authorizationStatus(_:)` / `requestAccess(_:)` | Displays status and requests permission in settings |
 
@@ -24,6 +24,8 @@ Each data source (contacts / calendar / reminders / location / health / photos /
 integrations alarms / messages / calls / shortcuts / media / home) can be disabled individually in settings. Disabled sources
 no longer appear in `enabledSpecs()`, so the model cannot see their tools, and calls are rejected too (preventing old sessions from continuing to call them).
 The iPhone integrations act outside Persona, so they start **off** (`PhoneDataSource.iPhoneOnly`): the user turns each one on; the older sources start on.
+A source that is on but refused is not offered either. One that iOS hasn't asked about yet is offered when its first use asks
+(see "Permissions"), so the switch in Settings shows it on: the switch always says what the hub is offered.
 
 The table above is for iOS (Mac uses the same code). **Android** uses `PhoneToolRegistry.kt` in `android/platform/phonetools/`, also with `all`, `enabledSpecs()`, and `call(…)`; all calls pass through this single gate:
 
@@ -291,10 +293,24 @@ If no rule matches, the default is confirm: the hub sends an approval card to th
 
 ## Permissions
 
-System permissions are requested at two points: when the user taps "Authorize" in settings (`PhoneToolRegistry.requestAccess`), or on the first actual use of a tool.
-Notifications are an exception: `phone_notify` displays its own permission prompt on the first call. Other tools encountering "Not requested" only return an error and tell the model to ask the user to authorize;
-they do not show system dialogs mid-execution (health only requests read permission again after a grant, to add newly introduced types). Previously denied permissions can only
-be changed in iOS Settings.
+System permissions are requested at two points: when the user turns a source on in Settings (`PhoneToolRegistry.requestAccess`), or on the first
+actual use of a tool (#7659).
+
+- **First use asks** for contacts, calendar, reminders, location, photos and notifications (`PhoneDataSource.asksWhenUsed`, iOS only). Their
+  tools are offered while the source is on and iOS hasn't asked yet, so "remind me to buy milk when I get home" works for someone who never
+  opened Settings. Before 2026-11-14 they were offered only once allowed: the model never saw them and could only guess that something was off.
+  - `PhoneToolRegistry.call` checks the switch, then shows a write's confirmation card, then iOS's own permission dialog
+    (`askOnFirstUse`), then runs the tool. A write the user turned down never asks iOS.
+  - Allowed, the call goes on. Refused, it fails with where to allow it ("Permission denied … iOS Settings › Persona").
+  - iOS shows the dialog only for the app in front. While Persona is not, the call fails with "open Persona on the iPhone and try again"
+    and nothing is asked.
+  - Calls that arrive together wait for one dialog.
+  - Either answer posts `phoneAccessAnswered`, and `AppModel` registers again, so a refused source leaves the hub's list.
+- **Settings only** for Health and the iPhone integrations. Health's sheet lists every type, and iOS never says which reads were allowed
+  (see below). The integrations act outside Persona and start off. Health only requests read permission again after a grant, to add newly
+  introduced types. Their tools that meet "Not requested" return an error and tell the model to ask the user to turn them on.
+- The Mac app (frozen) and Vision Pro keep asking from Settings only. Android has its own rules (above).
+- Previously denied permissions can only be changed in iOS Settings.
 
 | Data source | Info.plist key | Authorization |
 | --- | --- | --- |

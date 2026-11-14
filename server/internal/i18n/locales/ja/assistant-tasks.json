@@ -53,5 +53,8 @@
   "admission_recommend": " 推奨コンピューター：{machine}。",
   "admission_reroute": "{from} から {to} に変更しました：{reason}",
   "admission_queued": "順番待ちです。hub が自動で再試行します：{reason}",
-  "admission_queue_timeout": "{limit} 待っても開始できなかったため、開始を中止します。最後の理由：{reason}"
+  "admission_queue_timeout": "{limit} 待っても開始できなかったため、開始を中止します。最後の理由：{reason}",
+  "start_link_lost": "「{machine}」との接続が切れ、再接続後もタスクは起動していませんでした：{reason}",
+  "start_machine_busy": "「{machine}」は接続されたままですが、待機時間内に応答がありませんでした（混雑している可能性があります）：{reason}",
+  "start_link_down": "「{machine}」との接続が切れ、しばらく待っても再接続できませんでした：{reason}"
 }

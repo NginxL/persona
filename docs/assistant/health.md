@@ -140,7 +140,7 @@ On iOS, `HealthTool` reads the corresponding HealthKit quantity types and reques
 - A separate **Health** item in the sidebar opens `/health`, which resumes the latest health chat ("Entering Health" above).
 - Home (`/health/new`, the new health chat page): a one-line privacy note (chats and memory stay in the Health space, data is on your own hub, not a substitute for a doctor), data sources (Apple Health / Health Connect, via the phone's `phone_health_summary` / `phone_health_write_sample`; Persona must be open on the phone and authorized),
   suggested questions (tap one to start a health chat with it), past health chats, health memory (view, delete).
-- Tapping a chat opens `/health/<id>`, the same chat page as other assistant chats.
+- Tapping a chat opens `/health/<id>`, the same chat page as other assistant chats; its input box asks health questions as the home's does ("Ask a health question…", `ChatView`'s `placeholder`), not the main chat's line.
 - Health chats no longer appear in the main chat's history list.
 
 

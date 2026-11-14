@@ -18,6 +18,7 @@ import { t } from "../i18n";
 import { mbpsText, ScreenMeter } from "./meter";
 import { countBytes, countFrames, probeHub } from "./probes";
 import type { ScreenStats } from "./video";
+import type { Reading } from "./video-link";
 
 /** How often the panel draws a new reading. */
 export const READ_EVERY_MS = 1000;
@@ -45,7 +46,25 @@ export function StatsToggle({ on, onToggle }: { on: boolean; onToggle: (on: bool
 }
 
 /** The panel over the picture: measures `rfb` (noVNC) and `socket` (the RFB WebSocket it was handed) while shown. */
-export function StatsOverlay({ rfb, socket, onClose }: { rfb: object; socket: WebSocket; onClose: () => void }) {
+/** The video channel's numbers while its picture shows (#6558): ./video-link's reading, the codec and the size. */
+export type VideoStats = { reading: Reading; codec: string | null; size: { width: number; height: number } | null };
+/** Why the computer's video isn't playing on this page, said only when the computer offers it. */
+export type NoVideoReason = "insecure" | "unsupported" | "failed";
+
+const NO_VIDEO: Record<NoVideoReason, () => string> = {
+  insecure: () => t("screen-video.stats_no_video_insecure"),
+  unsupported: () => t("screen-video.stats_no_video_unsupported"),
+  failed: () => t("screen-video.stats_no_video_failed"),
+};
+
+export function StatsOverlay({ rfb, socket, onClose, video = null, noVideo = null }: {
+  rfb: object;
+  socket: WebSocket;
+  onClose: () => void;
+  /** Set while the video channel is the picture: the panel shows its numbers, as the iPhone's does. */
+  video?: VideoStats | null;
+  noVideo?: NoVideoReason | null;
+}) {
   const [stats, setStats] = useState<ScreenStats>({ mode: "vnc", path: "relay" });
   useEffect(() => {
     // The meter counts frames only when this noVNC could be hooked (frames come later, never during this call).
@@ -92,10 +111,32 @@ export function StatsOverlay({ rfb, socket, onClose }: { rfb: object; socket: We
     if (drag.current?.id === e.pointerId) drag.current = null;
   };
 
+  const r = video?.reading;
+  const bitrate = video ? r?.mbps : stats.bitrateMbps;
+  const fps = video ? r?.fps : stats.fps;
   const rates = [
-    stats.bitrateMbps !== undefined ? t("screen-video.stats_mbps", { mbps: mbpsText(stats.bitrateMbps) }) : null,
-    stats.fps !== undefined ? t("screen-video.stats_fps", { fps: Math.round(stats.fps) }) : null,
+    bitrate !== undefined ? t("screen-video.stats_mbps", { mbps: mbpsText(bitrate) }) : null,
+    fps !== undefined ? t("screen-video.stats_fps", { fps: Math.round(fps) }) : null,
+    video?.codec ?? null,
+    video?.size ? `${video.size.width}×${video.size.height}` : null,
   ].filter((x): x is string => x !== null);
+  // The latency broken down (video): capture · encode · network · decode, a segment not measured left out; their
+  // total leads the first line, as on the iPhone.
+  const segments = video
+    ? [
+        r?.captureMs !== undefined ? t("screen-video.stats_capture", { ms: Math.round(r.captureMs) }) : null,
+        r?.encodeMs !== undefined ? t("screen-video.stats_encode", { ms: Math.round(r.encodeMs) }) : null,
+        r?.networkMs !== undefined ? t("screen-video.stats_network", { ms: Math.round(r.networkMs) }) : null,
+        r?.decodeMs !== undefined ? t("screen-video.stats_decode", { ms: Math.round(r.decodeMs) }) : null,
+      ].filter((x): x is string => x !== null)
+    : [];
+  const dotted = (parts: string[]) =>
+    parts.map((part, i) => (
+      <Fragment key={i}>
+        {i > 0 && <span className="text-ink-3">·</span>}
+        <span>{part}</span>
+      </Fragment>
+    ));
   return (
     <div
       role="group"
@@ -109,11 +150,17 @@ export function StatsOverlay({ rfb, socket, onClose }: { rfb: object; socket: We
       className="absolute top-3 right-3 z-10 flex cursor-grab touch-none flex-col gap-1 rounded-card bg-surface/90 px-2.5 py-2 text-label text-ink shadow-overlay backdrop-blur-md select-none tabular-nums active:cursor-grabbing"
     >
       <div className="flex items-center gap-1.5 whitespace-nowrap">
-        <span className="font-semibold">{t("screen-video.stats_vnc")}</span>
+        <span className="font-semibold">{video ? t("screen-video.stats_video") : t("screen-video.stats_vnc")}</span>
         {stats.path === "relay" && (
           <>
             <span className="text-ink-3">·</span>
             <span className="text-ink-2">{t("screen-video.stats_via_hub")}</span>
+          </>
+        )}
+        {r?.totalMs !== undefined && (
+          <>
+            <span className="text-ink-3">·</span>
+            <span data-testid="screen-stats-total">{t("screen-video.stats_ms", { ms: Math.round(r.totalMs) })}</span>
           </>
         )}
         <span className="flex-1" />
@@ -128,19 +175,20 @@ export function StatsOverlay({ rfb, socket, onClose }: { rfb: object; socket: We
           <Icon name="x" size={12} />
         </button>
       </div>
-      {rates.length > 0 && (
-        <p className="flex items-center gap-1.5 whitespace-nowrap text-ink-2">
-          {rates.map((r, i) => (
-            <Fragment key={i}>
-              {i > 0 && <span className="text-ink-3">·</span>}
-              <span>{r}</span>
-            </Fragment>
-          ))}
+      {rates.length > 0 && <p className="flex items-center gap-1.5 whitespace-nowrap text-ink-2">{dotted(rates)}</p>}
+      {segments.length > 0 && (
+        <p className="flex items-center gap-1.5 whitespace-nowrap text-ink-2" data-testid="screen-stats-segments">
+          {dotted(segments)}
         </p>
       )}
       {stats.hubRoundTripMs !== undefined && (
         <p className="whitespace-nowrap text-ink-2" data-testid="screen-stats-hub">
           {t("screen-video.stats_hub_round_trip", { ms: Math.round(stats.hubRoundTripMs) })}
+        </p>
+      )}
+      {!video && noVideo && (
+        <p className="max-w-[240px] text-ink-3" data-testid="screen-stats-no-video">
+          {NO_VIDEO[noVideo]()}
         </p>
       )}
     </div>

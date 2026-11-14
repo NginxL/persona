@@ -69,6 +69,10 @@ export interface SessionGroupsQuery {
   /** The parent's counts of the scope without its state, and that read's query: used as they are when they fit. */
   facets: ListCounts | null;
   facetQuery: string;
+  /** Why the parent's facets read failed ("" none), and its Retry: the groups' own error while they are those facets and
+   *  none has come yet, so a failed read never leaves them loading for good. */
+  facetsError?: string;
+  retryFacets?: () => void;
   /** How many of the scope's sessions need the user, by the state chips' count; undefined while unknown. */
   waiting: number | undefined;
   event: "sessions_list" | "agents";
@@ -85,7 +89,7 @@ export interface SessionGroups {
   retry: () => void;
 }
 
-export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, waiting, event, todos }: SessionGroupsQuery): SessionGroups {
+export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, facetsError = "", retryFacets, waiting, event, todos }: SessionGroupsQuery): SessionGroups {
   const fromCatalog = catalog && (dimension === "project" || dimension === "group");
   const query = useMemo(() => filterQuery(scope), [scope]);
   // the groups' own counts are the parent's facets when no state narrows them: one read serves both
@@ -110,8 +114,10 @@ export function useSessionGroups({ dimension, catalog, countsPath, scope, facets
     }
     const counts = shared ? facets : countsRead.value ?? null;
     const groups = counts ? countGroups(counts, dimension, { machine: scope.machine_id, needs: badge ? countsNeeds.value : null, todos }) : null;
-    return { groups, total: counts ? counts.total : null, error: shared ? "" : countsRead.error ?? "", retry: countsRead.retry };
+    // from the facets: their failure while there are none (a later failed refresh keeps the last ones, as a read does)
+    if (shared) return { groups, total: counts ? counts.total : null, error: counts ? "" : facetsError, retry: retryFacets ?? (() => {}) };
+    return { groups, total: counts ? counts.total : null, error: countsRead.error ?? "", retry: countsRead.retry };
     // the retry functions are new on each render and do the same thing
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimension, fromCatalog, shared, badge, facets, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value, todos]);
+  }, [dimension, fromCatalog, shared, badge, facets, facetsError, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value, todos]);
 }

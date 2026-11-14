@@ -169,7 +169,7 @@
   },
   {
     "name": "ask_user",
-    "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this instead. The user can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card is put up the same way but this call returns at once without the answer: end the turn without guessing it, and the user's answer comes to this conversation later as a new message that quotes the question and the answer (so does word that the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default.",
+    "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this instead. The user can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card is put up the same way but this call returns at once without the answer: end the turn without guessing it, and the user's answer comes to this conversation later as a new message that quotes the question and the answer (so does word that the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default. A waiting call holds this turn, so anything else sent to this conversation (another conversation's message, a supervision message) waits behind it: once such a message waits and the question has been up for a couple of minutes, the call returns without the answer and the card stays up as with wait false; end the turn then, and the answer comes later as a new message.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -253,6 +253,18 @@
         },
         "body": {
           "type": "string"
+        },
+        "push_level": {
+          "type": "string",
+          "enum": [
+            "P0",
+            "P1"
+          ],
+          "description": "How urgent this is. P1 (default): worth knowing; in the hub's low-distraction mode it is held for the briefing instead of alerting. P0: the user must act now, so it alerts even in low-distraction mode. Use P0 only when waiting would cause real harm."
+        },
+        "related_key": {
+          "type": "string",
+          "description": "Optional: what this is about, such as a PR link or a to-do id. In low-distraction mode the same key interrupts at most once in 12 hours, and held notices about it are listed together."
         }
       }
     }
@@ -926,6 +938,60 @@
         "session_id": {
           "type": "string",
           "description": "the agent's session id, or its first 8 characters"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_autoname",
+    "description": "Rename one coding agent's session with the model when the user explicitly asks for Auto Rename. This replaces the current title, including a hand-written one, with a short title generated from its conversation; it does not change the terminal tab's title. The user must confirm this write on the phone every time; a declined or unanswered confirmation does nothing and makes no model call. The background automatic-naming switch and its once-only/placeholder restrictions do not block this explicit request. Do not use it on Persona conversations (including the main chat), on an agent the user has not asked to rename, or with a session-id prefix. Use the exact machine and session_id from agents_list. On success the JSON answer has title, title_source: auto and changed; on refusal it has the stable code and retryable fields. The HTTP endpoint used by client menus is separate and does not depend on this tool.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's exact id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's exact full session id, never a prefix"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_autoname_receipt",
+    "description": "Read-only: inspect the current assistant's existing agent_autoname confirmation cards and one coding agent's current naming snapshot. This does not prove that a particular earlier model call started, completed or succeeded: the model's tool-call id is not a manager-side correlation. The naming snapshot may predate the call or come from another caller, and background naming failures are not attributed to it. Do not retry a request from this result; unknown or ambiguous means the evidence cannot settle the outcome. Use only the exact machine and full session id from agents_list. The caller is verified from the actual assistant conversation; no other assistant's cards can be read. Optional since/before are an RFC3339 window of at most 24 hours, and must be supplied together. Confirmation history is read with bounded pages; incomplete pages are reported. This tool never calls the naming model, writes settings, approves or resolves a card, renames an agent, or publishes a session list. Not for Persona conversations, ordinary coding Agents, or extensions.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's exact id, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's exact full session id, never a prefix"
+        },
+        "since": {
+          "type": "string",
+          "format": "date-time",
+          "description": "inclusive RFC3339 start of the original confirmation window; requires before"
+        },
+        "before": {
+          "type": "string",
+          "format": "date-time",
+          "description": "exclusive RFC3339 end of the original confirmation window [since,before); at most 24 hours after since"
         }
       }
     }
@@ -1925,7 +1991,7 @@
   },
   {
     "name": "conversation_send",
-    "description": "Send a message to another Persona conversation (not this one). If it is running, the message waits until its current turn ends; if the user is talking in it, until they have been quiet for 2 minutes. The result says which. The message arrives marked as coming from this conversation, so the other side can answer with conversation_send. Conversations passing messages back and forth are limited (a few hops from the user's message, a few messages per pair in ten minutes): don't reply just to acknowledge.",
+    "description": "Send a message to another Persona conversation (not this one). If it is running, the message waits until its current turn ends; if the user is talking in it, until they have been quiet for 2 minutes. The result says which. The message arrives marked as coming from this conversation, so the other side can answer with conversation_send. Conversations passing messages back and forth are limited (a few requests from the user's message, a few messages per pair in ten minutes): your first message back to the conversation whose message you are working on is its answer and adds no hop. Don't reply just to acknowledge.",
     "input_schema": {
       "type": "object",
       "required": [

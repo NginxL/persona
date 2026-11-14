@@ -302,6 +302,20 @@ func (m *fleetMem) InsertInteraction(ctx context.Context, ix proto.Interaction) 
 	return nil
 }
 
+func (m *fleetMem) MarkInteractionResumable(_ context.Context, id string) (bool, error) {
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	if m.status[id] != "pending" {
+		return false, nil
+	}
+	for i := range m.recs {
+		if m.recs[i].Interaction.ID == id {
+			m.recs[i].Interaction.Resumable = true
+		}
+	}
+	return true, nil
+}
+
 func (m *fleetMem) FinishInteraction(_ context.Context, id, status string, res *proto.Resolution) error {
 	m.fmu.Lock()
 	defer m.fmu.Unlock()

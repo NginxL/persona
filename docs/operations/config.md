@@ -169,7 +169,7 @@ No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above s
 | `android.application_id` | The Android App's application id (`scripts/app/android.sh`, `docs/android/android.md`); defaults to `app.bundle_id` |
 | `android.release_keystore` | Optional: the keystore `scripts/app/android.sh release` signs the release APK with (`~` is expanded). Needs `android.release_key_alias` and `android.release_keystore_password_command`, a shell command that prints the keystore's password; `android.release_key_password_command` prints the key's own password when it differs. Without `android.release_keystore` the command signs with the SDK's local debug keystore, for your own phone only (`docs/android/android.md`, "Build and install") |
 | `android.google_oauth_scheme` | The scheme the Android App uses for the Google sign-in callback for Gmail: the reversed client ID of the hub's `google.client_id` (`docs/extensions/mail.md` ("Android")); without it Gmail can only be added with an app-specific password |
-| `mac.link_bundle_id` | Bundle-id prefix of the independent Mac Persona Screen helper (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to the placeholder `com.example.persona.link` |
+| `mac.link_bundle_id` | Bundle-id prefix of the independent Mac Persona Screen helper (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to `app.bundle_id` + `.link` (`PERSONA_BUNDLE_ID` + `.link` when exported), and the build stops when neither is set. macOS keeps Persona Screen's Screen Recording grant per bundle id, so changing it means allowing Screen Recording again on that Mac (#7569) |
 
 `python3 scripts/persona_config.py env` prints shell variables (scripts `eval` it at the top), and `xcconfig` generates `apple/Config.xcconfig`;
 `sim.sh` / `release.sh` generate it automatically. Before running `xcodegen` directly or opening Xcode, run `python3 scripts/persona_config.py xcconfig` once.
@@ -315,6 +315,9 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
   `live_metrics_seconds` (minimum interval between pushes to one device when only Live Activity numbers change, default 60; `docs/apple/live-activity.md` ("Push budget")).
   Each device's push preferences are set separately in the App (**Settings › Notifications**, stored in hub `devices.prefs`), not here.
   This section stays in hub.json: push delivery is the hub's, and it hands the timings to the managers in its hello.
+- `screen_link_off` (default `false`): the hub never selects the live screen's session subprotocol, so every live screen stays on the
+  plain relay through the hub, whatever the apps and nodes support ([computer-use.md](../extensions/computer-use.md) ("Live screen routes (#6398)")).
+  The switch for when direct routes misbehave; it takes effect when the hub restarts.
 - `shutdown_timeout_seconds` (default 8): total hub shutdown budget, including closing the database connection pool; external `docker stop -t` must be longer (`docs/server/server.md` ("Shutdown")).
 - `auto_update_nodes` (default `false`): lets the managers update the computers' nodes by themselves, after a confirmed hub update and when a node on another build reconnects (the hub hands it over in `devices.config`).
   Off, a node changes only when someone picks **Redeploy** for its computer ([hub-update.md](hub-update.md) ("Node upgrade policy")).

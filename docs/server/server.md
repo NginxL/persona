@@ -50,6 +50,7 @@ The hub and the managers apart:
 | `internal/nodeclient` | The client side of `node.sock` for hook / mcp / ask / notify / tool |
 | `internal/apns` | APNs client (.p 8 key, provider token, single push), shared by direct hub and relay |
 | `internal/pushcrypto` | Push-body encryption with phone public key (HPKE), `docs/operations/push-relay.md` |
+| `internal/webpush` | The hub's Web Push to browsers: VAPID signing and RFC 8291 message encryption, `docs/web/web.md` "Web Push" |
 | `internal/relay` | Publisher-run personad relay, `docs/operations/push-relay.md` |
 | `internal/tunnel` | Tailcat node key / endpoint, hub dialing, new-binary transfer over tailcat (“Tailcat hole punching” below) |
 
@@ -105,6 +106,23 @@ Foreground suppression applies to both activity updates and push-to-start; a sta
 suppressed in the foreground remains eligible after the last matching phone socket
 leaves. Important interaction alerts and the existing urgent activity fast path
 remain unchanged.
+
+## Calls to computers in the log (#7509)
+
+The hub's calls to a node (`devices.Machine.call`, `devices/calllog.go`) leave one line each in the hub's journal
+when they fail (a quick cancel excepted), and when they work but are slow (2 s and more), are a session start, or are
+the sampled one in 200 per computer. `result` is `ok`, `deadline` (the wait ran out), `canceled`, `closed` (the
+connection closed; `sent=true` means the request was out and the node may have done it), `offline` (no connection to
+send it on) or `error` (the node answered with an error; `code` when it has one).
+
+```text
+[m1] rpc call method=session.start result=closed took=1m2.31s via=ssh sent=true err="rpc: connection closed"
+[m1] connection over ssh closed with 2 call(s) out: ping, session.start (reason: "node exited")
+[m1] connection ended: via=ssh lasted=3h2m1s planned=false restarting=false reason="node exited"
+[m1] connected over ssh: … (trigger: reconnect after 1m58s down; the ssh connection ended: node exited)
+```
+
+`journalctl -u jarvisd | grep "rpc call"` lists them; filter on `result=` and `method=`.
 
 ## Connecting to herdr
 
@@ -518,6 +536,16 @@ Pairing: hub `~/.persona/bin/personad hub pair` calls running hub via loopback H
   - Duration = first working to final completion. Per-device `prefs.done` off / long / always; long receives turns at least `long_turn_seconds`; `prefs.input` off suppresses Needs you.
   - Hidden Agents and assistant turns already pushed by `notify_user` are skipped. Hub restart measures ongoing turns from first post-restart observation.
 - Extension notifications (`POST /api/v1/notify`, `hub/notify_api.go`): extension picks active / `time-sensitive`, filtered by device input and hidden status. Decision / rate limits belong to extension; `docs/extensions/extensions.md` (“Sending notifications”).
+
+### Low-distraction (ln) mode (`hub/lnmode.go`)
+
+A hub-side switch (`hub_settings` key `hub.ln_mode`, default off; `GET`/`PUT /api/v1/push/ln-mode`, full credentials only for the write). With it off every push behaves exactly as above. With it on, alerts are delivered by urgency instead of all alerting:
+
+- Every alert push carries a level and a related key. A manager notification may name them (`assistantwire.Notification.Level` / `RelatedKey`, omitempty; older managers let the hub derive them): `NotifyInput` / `NotifyDecide` / `NotifyReply` and other cards derive **P0**, `NotifyPush` (incl. `notify_user`) **P1**, `NotifyDone` **P2**. `POST /api/v1/notify` accepts `push_level` (`P0` / `P1` / `P2`, default `P1`).
+- P0 still alerts; P1 is held for the “Needs you” list / briefings; P2 stays silent. The WebSocket `notify` event is never filtered, so app lists and briefings keep updating; only the APNs alert is withheld.
+- One related key alerts at most once in 12 hours (`ln_dedup_12h`); the check and the note happen under one lock. Decisions are keyed by to-do and round (`todo:<id>@<asked_at>`), so a decision asked again rings again; `POST /api/v1/notify` keys by manager, extension and `id`; `notify_user` takes an optional `related_key` (a PR link, a to-do id). Held P1 entries of one manager merge when they arrive in the same minute or share a related key within 12 hours, so several conclusion notices, or three about one PR, are one entry.
+- The switch is read at startup, written through the API and refreshed in the background, so pushes never wait on the database; with it off the push path is unchanged. Held entries are saved by one background writer that coalesces bursts and never writes out of order.
+- Every held push is recorded with its reason (`ln_p1_held`, `ln_p2_silent`, `ln_dedup_12h`), in memory and under `hub_settings` key `hub.ln_intercepts` (bounded to 500 entries and 14 days), and read through `GET /api/v1/push/intercepts` (full credentials read all managers; an extension token with `notify` scope reads its own manager's entries only). The hub's own pairing / join alerts are P0 and always pass.
 
 <a id="关停hubshutdowngo"></a>
 
