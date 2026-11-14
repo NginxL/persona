@@ -993,7 +993,26 @@ scrolling stays on RFB's notches.
     so the phone never sends a record to a node that would pass it to Screen Sharing.
   - With the node signing setting the node runs its own signed copy (`~/.persona/bin/Persona Input.app`), as for Persona
     Screen. None of Persona Screen's node code changes for it.
-- Still to come on #7775: the phone saying hello and sending records.
+- **The phone** (`VNCPixelScroll`, `RFBSession`, `VNCScreenView`; the iOS app, which links `PersonaInputKit`; Vision
+  scrolls by notches):
+  - A two-finger touch scrolls by pixels when the Mac's status says its node reads records and Persona Input may post
+    them (`screen_input.permission` granted, read as the touch begins). As the page goes live on such a Mac it says
+    hello once a connection, so the helper is started before the first scroll.
+  - While scrolling by pixels: the Mac's pointer goes where the scroll began and stays there (as a trackpad's). One
+    record a display frame carries that frame's distance, by the same curve as the notches (slow fingers one to one,
+    quick ones up to 4×) but with no ceiling. The phases are `began`, `changed`, then `ended` at the lift. After a flick
+    comes the coast as momentum (`begin`, `continue`, `end`), with UIScrollView's normal deceleration, at most 6000
+    Mac points. A touch during the coast ends it, and its end goes too.
+  - Where the helper may not post yet and macOS was never asked (`permission` missing, `asked` false), the first
+    two-finger scroll of a connection says hello, so the node asks macOS once. A line under the page's bar, as the
+    video's fallback line, says what the window now on the Mac's screen is for ("To scroll more smoothly, allow Persona
+    Input on this Mac."). A tap on it gives the way through it in an alert (Open System Settings, then Persona Input
+    under Privacy & Security › Accessibility; scrolling still works meanwhile). The line goes once the Mac allows it or
+    the connection ends, and doesn't come back on later connections (macOS asks only once). Scrolling goes on by wheel
+    notches meanwhile, and for anyone who never allows it.
+  - Measuring: `VNCTests/testPixelScrolling` (mock `MOCK_SCREEN_INPUT=granted`) and `testPersonaInputNotice`
+    (`=missing`, with the notice's screenshots). The mock's relay takes records out as the node does and lists them as
+    `input`.
 
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 

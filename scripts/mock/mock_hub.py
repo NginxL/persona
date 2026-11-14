@@ -20406,7 +20406,7 @@ def png(w, h, rgb):
 # …&slow=S: it answers S seconds late (the small window's "Connecting…"); …&down=1: it hangs up on everyone, now and on
 # connecting (0: back).
 FAKE_SCREEN = {"account": "me", "password": "mock-pass", "port": 0, "signins": [], "typed": "",  # typed: keys after signing in
-               "pointer": None, "clicks": [], "clipboard": "", "conns": [], "frames": 0, "slow": 0.0, "down": False, "wheel_in": [],
+               "pointer": None, "clicks": [], "clipboard": "", "conns": [], "frames": 0, "slow": 0.0, "down": False, "wheel_in": [], "input": [],
                "events": []}  # clipboard writes (node / rfb) and keys, in the order they came (#3075: ⌘V after the write)
 # MOCK_SCREEN_DISPLAYS=2 (#80): the mock Mac has two 480×300 displays side by side, one picture 960×300 wide, each
 # numbered in its window (display 2 green). Its Screen Sharing sends their rectangles (ExtendedDesktopSize) when asked;
@@ -20563,6 +20563,12 @@ def zrle_rect(px, W, x, y, w, h, z):
 # to the phone's report on it. MOCK_SCREEN_VIDEO_TIERS=1: the hello says the helper has quality tiers (`features`,
 # #6396) on a 14-inch MacBook Pro's display (`points`, `pixels`; the fixture plays at its own size whatever the tier);
 # GET /mock/screen-video also lists the `update`s the client sent (#6558: a new data budget, the tier it picked).
+# MOCK_SCREEN_INPUT=granted|missing|asked (#7775): MacBook's node reads the live screen's pixel scroll records
+# (`screen_input`; =missing: Persona Input may not post events and macOS hasn't asked; =asked: not allowed, asked once).
+# As the node does, the 5900 relay takes each record (RFB client message type 200, 16 bytes) out of the stream, so the
+# fake Screen Sharing never sees it, and keeps it: GET /mock/screen-password lists them as `input` (kind, phase,
+# momentum, dy, when it came); ?clear=1 empties it.
+SCREEN_INPUT = {"mode": os.environ.get("MOCK_SCREEN_INPUT", "")}
 SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
                 "updates": [], "refuse": False, "tiers": os.environ.get("MOCK_SCREEN_VIDEO_TIERS") == "1"}
 _SCREEN_VIDEO_FIXTURE = {}
@@ -21788,6 +21794,9 @@ def computer_of(machine_id, enabled):
         c["screen_video"] = {"version": 1, "codecs": ["hevc", "h264"],
                              "permission": "missing" if SCREEN_VIDEO["mode"] in ("missing", "denied") else "granted"}
         if SCREEN_VIDEO["mode"] == "denied": c["screen_video"]["asked"] = True
+    if machine_id == "macbook" and c.get("screen_sharing") and SCREEN_INPUT["mode"]:  # MOCK_SCREEN_INPUT (#7775)
+        c["screen_input"] = {"version": 1, "permission": "granted" if SCREEN_INPUT["mode"] == "granted" else "missing"}
+        if SCREEN_INPUT["mode"] == "asked": c["screen_input"]["asked"] = True
     return c
 
 
@@ -24293,7 +24302,7 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(GIT_PULL_STATE)
         if p == "/mock/screen-password":  # MOCK_SCREEN=fake: the Mac's password changed; who signed in how; what was typed
             if "p" in q: FAKE_SCREEN["password"] = q["p"][0]
-            if "clear" in q: FAKE_SCREEN.update(typed="", clicks=[], clipboard="", events=[], wheel_in=[])
+            if "clear" in q: FAKE_SCREEN.update(typed="", clicks=[], clipboard="", events=[], wheel_in=[], input=[])
             if "clip" in q: fake_screen_clip(q["clip"][0])  # the Mac copied this
             if "bg" in q and q["bg"][0] in FAKE_BG_COLORS and FAKE_BG["kind"]:  # another background (MOCK_SCREEN_BG)
                 FAKE_BG["kind"] = q["bg"][0]
@@ -24309,7 +24318,8 @@ class H(BaseHTTPRequestHandler):
                     except OSError: pass
             return self.send_json({"signins": FAKE_SCREEN["signins"], "typed": FAKE_SCREEN["typed"], "clicks": FAKE_SCREEN["clicks"],
                                    "pointer": FAKE_SCREEN["pointer"], "clipboard": FAKE_SCREEN["clipboard"], "frames": FAKE_SCREEN["frames"],
-                                   "events": FAKE_SCREEN["events"][-200:], "wheel_in": FAKE_SCREEN["wheel_in"]})
+                                   "events": FAKE_SCREEN["events"][-200:], "wheel_in": FAKE_SCREEN["wheel_in"],
+                                   "input": FAKE_SCREEN["input"]})
         if p == "/mock/churn":
             CHURN["rounds"] = 0
             threading.Thread(target=churn, args=(int(q.get("n", ["20"])[0]), int(q.get("ms", ["300"])[0]),
@@ -27044,6 +27054,12 @@ class H(BaseHTTPRequestHandler):
                     # Screen Sharing reads it between its frames: when the app sent it (#7775).
                     if port == 5900 and len(payload) == 6 and payload[0] == 5 and payload[1] & 24:
                         FAKE_SCREEN["wheel_in"].append(time.time())
+                    if port == 5900 and len(payload) == 16 and payload[0] == 200:  # a pixel scroll record (#7775)
+                        kind, phase, momentum = payload[2], payload[3], payload[4]
+                        dy, dx = struct.unpack(">ff", payload[8:16])
+                        FAKE_SCREEN["input"].append({"kind": kind, "phase": phase, "momentum": momentum, "dy": dy, "dx": dx,
+                                                     "t": time.time()})
+                        continue
                     tcp.sendall(payload)
         except OSError:
             pass

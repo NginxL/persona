@@ -299,6 +299,25 @@ struct RFBClientTests {
         #expect(t.sent.filter { $0.first == 4 || $0.first == 5 || $0.first == 6 } == out)
     }
 
+    /// #7775: a pixel scroll record goes out as it is, in its place among the pointer events (never folded with them).
+    @Test func scrollRecordsGoOutAsTheyAre() async throws {
+        let t = ScriptedTransport([Array("RFB 003.889\n".utf8), [1, 1], RFBAuth.be32(0),
+                                   [0, 4, 0, 3] + [UInt8](repeating: 0, count: 16) + RFBAuth.be32(0)], holds: true)
+        let seen = Seen()
+        let client = RFBClient(transport: t) { nil }
+        client.onState = { s in Task { await seen.state(s) } }
+        client.start()
+        try await seen.until { $0.states.contains { if case .live = $0 { true } else { false } } }
+        var record: [UInt8] = [200, 1, 1, 1, 0, 0, 0, 0]
+        record += [0xc1, 0x48, 0, 0, 0, 0, 0, 0] // dy −12.5, dx 0
+        client.pointer(x: 5, y: 6, buttons: 0)
+        client.input(record)
+        client.pointer(x: 7, y: 8, buttons: 0)
+        try await Task.sleep(for: .milliseconds(300))
+        client.close()
+        #expect(t.sent.filter { $0.first == 5 || $0.first == 200 } == [[5, 0, 0, 5, 0, 6], record, [5, 0, 0, 7, 0, 8]])
+    }
+
     /// #3954: while the video channel shows the picture, an update that comes asks for no next one; released, the held
     /// request goes out once (incremental: the Mac sends what changed since its last update).
     @Test func heldUpdatesAskForNoMore() async throws {

@@ -309,6 +309,10 @@ nonisolated final class RFBClient: @unchecked Sendable {
         send([4, down ? 1 : 0, 0, 0] + RFBAuth.be32(keysym))
     }
 
+    /// A pixel scroll record (#7775, PersonaInputKit's ScrollRecord: client message type 200) for the Mac's node, which
+    /// takes it out of the stream for Persona Input. Only to a node that says it reads them: Screen Sharing would not.
+    func input(_ record: [UInt8]) { send(record) }
+
     /// Text onto the Mac's clipboard (ClientCutText: Latin-1 is all RFB carries; anything else goes as "?").
     func cutText(_ text: String) {
         let bytes = text.unicodeScalars.map { $0.value < 256 ? UInt8($0.value) : UInt8(ascii: "?") }

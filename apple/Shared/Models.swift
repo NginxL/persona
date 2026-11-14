@@ -301,6 +301,39 @@ nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
     var advertised: Bool { version > 0 }
 }
 
+/// What a Mac can do for pixel scrolling (#7775, docs/extensions/computer-use.md "Pixel scrolling"): its node takes the
+/// live screen's scroll records out of the RFB stream for Persona Input (`version`: the record's version it reads), and
+/// whether that helper may post events (Accessibility). Absent from a Mac without the helper or from an older node: the
+/// phone then scrolls by wheel notches only and never sends a record.
+nonisolated struct MachineScreenInput: Codable, Hashable, Sendable {
+    /// The record's version the node reads; 0 or absent: none.
+    var version = 0
+    /// Accessibility (posting events) for Persona Input: granted | missing | unknown.
+    var permission: String? = nil
+    /// The node has asked macOS for this helper version's permission (once), so Persona Input is in System Settings' list.
+    var asked = false
+
+    enum CodingKeys: String, CodingKey { case version, permission, asked }
+
+    init(version: Int = 0, permission: String? = nil, asked: Bool = false) {
+        self.version = version
+        self.permission = permission
+        self.asked = asked
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 0
+        permission = try c.decodeIfPresent(String.self, forKey: .permission)
+        asked = (try? c.decodeIfPresent(Bool.self, forKey: .asked)) ?? false
+    }
+
+    /// The node reads this phone's records (version 1).
+    var reads: Bool { version >= 1 }
+    /// Scroll records may go: the node reads them and the helper may post them.
+    var granted: Bool { reads && permission == "granted" }
+}
+
 /// A Mac the assistant may operate through Cua Driver (the hub's plugin cua, docs/extensions/computer-use.md). `enabled`: the user
 /// turned it on for this machine; the rest is what its node found when last asked, and only for an enabled one.
 nonisolated struct MachineComputer: Codable, Hashable, Sendable {
@@ -330,10 +363,13 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     var displays: [MachineDisplay] = []
     /// The live-screen hardware video channel this Mac can carry (#3954); nil from a Mac without the helper or an older node.
     var screenVideo: MachineScreenVideo? = nil
+    /// Pixel scrolling (#7775); nil from a Mac without Persona Input or an older node.
+    var screenInput: MachineScreenInput? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, daemon, accessibility, desktop, ready, note, job, backend, chatgpt, displays
         case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock", screenVideo = "screen_video"
+        case screenInput = "screen_input"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, daemon: Bool = false, accessibility: String? = nil,
@@ -373,6 +409,8 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
         // An unreadable channel only costs the video switcher, not the machine (the page stays on RFB).
         screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
+        // An unreadable one only costs pixel scrolling (wheel notches instead).
+        screenInput = (try? c.decodeIfPresent(MachineScreenInput.self, forKey: .screenInput)) ?? nil
     }
 
     /// The node has said how it is (a never-asked one has neither a verdict nor a note).
@@ -403,10 +441,12 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
     var displays: [MachineDisplay] = []
     /// As `MachineComputer.screenVideo` (#3954): a Mac the plugin ego is on for shares the same live screen and helper.
     var screenVideo: MachineScreenVideo? = nil
+    /// As `MachineComputer.screenInput` (#7775).
+    var screenInput: MachineScreenInput? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, imported, analytics, ready, note, job, displays
-        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video"
+        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video", screenInput = "screen_input"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, setUp: Bool = false, imported: Bool = false,
@@ -437,6 +477,7 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
         job = try? c.decodeIfPresent(ComputerJob.self, forKey: .job)
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
         screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
+        screenInput = (try? c.decodeIfPresent(MachineScreenInput.self, forKey: .screenInput)) ?? nil
     }
 
     /// The node has said how it is.

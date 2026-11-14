@@ -44,6 +44,11 @@ packages:
   # `#if os(iOS) && canImport`, and the watch and widgets never see it.
   PersonaScreenKit:
     path: Packages/PersonaScreenKit
+  # The live screen's pixel scroll record (#7775, docs/extensions/computer-use.md「Pixel scrolling (#7775)」), shared with
+  # Persona Link's Persona Input helper. The iOS app only, as PersonaScreenKit: Vision compiles the same sources and skips
+  # it with `#if canImport`.
+  PersonaInputKit:
+    path: Packages/PersonaInputKit
   # The composer's glow while a reply is generating (Settings › Appearance › Glow While Replying, `ComposerGlow`): the iOS
   # app only. Vision compiles the same sources and skips it with `#if os(iOS) && canImport`.
   MarqueeGlow:
@@ -95,6 +100,7 @@ targets:
       - package: PersonaCore
       - package: MarqueeGlow
       - package: PersonaScreenKit
+      - package: PersonaInputKit
     entitlements:
       path: Persona/Resources/Persona.entitlements
       properties:

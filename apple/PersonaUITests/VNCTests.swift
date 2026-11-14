@@ -394,6 +394,93 @@ final class VNCTests: XCTestCase {
         }
     }
 
+    // MARK: #7775 pixel scrolling
+
+    /// Two fingers 200 pt up the middle of the picture.
+    @MainActor private func dragUp(_ screen: XCUIElement) throws {
+        let r = screen.frame
+        let ys = (0...20).map { r.midY + 100 - CGFloat($0) * 10 }
+        try TouchScript.twoFingers(ys.map { CGPoint(x: r.midX - 40, y: $0) }, ys.map { CGPoint(x: r.midX + 40, y: $0) }, step: 0.03)
+    }
+
+    private func inputRecords(kind: Int) throws -> [[String: Any]] {
+        (try mockState()["input"] as? [[String: Any]] ?? []).filter { ($0["kind"] as? Int) == kind }
+    }
+
+    private func wheelNotches() throws -> Int {
+        (try mockState()["clicks"] as? [[String: Any]] ?? []).filter { $0["scroll"] != nil }.count
+    }
+
+    /// On a Mac whose Persona Input may post (the mock with MOCK_SCREEN_INPUT=granted, TEST_RUNNER_PERSONA_SCREEN_INPUT=
+    /// granted): the page says hello as it goes live (the node starts the helper), and two fingers scroll by pixels:
+    /// records with the trackpad's phases, began first and ended among them, showing what is below, and no wheel notches.
+    @MainActor func testPixelScrolling() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_SCREEN_INPUT"] == "granted" else {
+            throw XCTSkip("needs the mock with MOCK_SCREEN_INPUT=granted (TEST_RUNNER_PERSONA_SCREEN_INPUT=granted)")
+        }
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        rest(2)
+        XCTAssertEqual(try inputRecords(kind: 0).count, 1, "one hello as the page went live")
+        try mock(hub!, "/mock/screen-password?clear=1")
+        try dragUp(screen)
+        sleep(3) // any coast has ended
+        let records = try inputRecords(kind: 1)
+        let phases = records.map { $0["phase"] as? Int ?? -1 }
+        let dy = records.reduce(0.0) { $0 + ($1["dy"] as? Double ?? 0) }
+        print("PIXEL-SCROLL records=\(records.count) dy=\(dy) phases=\(phases)")
+        XCTAssertEqual(phases.first, 1, "began first: \(phases)")
+        XCTAssertTrue(phases.contains(4), "ended among them: \(phases)")
+        XCTAssertLessThan(dy, -50, "up the picture shows what is below, by pixels")
+        XCTAssertEqual(try wheelNotches(), 0, "no wheel notches")
+        XCTAssertTrue(try inputRecords(kind: 0).isEmpty, "no second hello")
+    }
+
+    /// On a Mac whose Persona Input may not post yet and whose node never asked macOS (MOCK_SCREEN_INPUT=missing,
+    /// TEST_RUNNER_PERSONA_SCREEN_INPUT=missing): no hello as the page goes live; the first two-finger scroll says hello
+    /// (the node asks macOS, once), a line under the bar says what the Mac's window is for and opens the way through it,
+    /// and scrolling goes on by wheel notches. For review: the line and its alert in English and Chinese, light and dark,
+    /// at the default size and xxxLarge.
+    @MainActor func testPersonaInputNotice() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_SCREEN_INPUT"] == "missing" else {
+            throw XCTSkip("needs the mock with MOCK_SCREEN_INPUT=missing (TEST_RUNNER_PERSONA_SCREEN_INPUT=missing)")
+        }
+        for lang in ["en", "zh-Hans"] {
+            for scheme in ["light", "dark"] {
+                for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryXXXL"] {
+                    let (app, _) = try signedInMachinePage(["-ui.scheme", scheme, "-UIPreferredContentSizeCategoryName", size,
+                                                            "-AppleLanguages", "(\(lang))", "-AppleLocale", lang == "en" ? "en_US" : "zh_CN"])
+                    let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+                    XCTAssertTrue(screen.waitForExistence(timeout: 10))
+                    rest(2)
+                    XCTAssertTrue(try inputRecords(kind: 0).isEmpty, "no hello as the page went live")
+                    try mock(hub!, "/mock/screen-password?clear=1")
+                    try dragUp(screen)
+                    let line = app.buttons["screen-smooth-scrolling"].firstMatch
+                    XCTAssertTrue(line.waitForExistence(timeout: 5), "the line:\n\(app.debugDescription)")
+                    let name = "\(lang)-\(scheme)-\(size.hasSuffix("XXXL") ? "xxxl" : "default")"
+                    sleep(1)
+                    shot(app, "vnc-smooth-scrolling-line-\(name)")
+                    line.tap()
+                    let alert = app.alerts.firstMatch
+                    XCTAssertTrue(alert.waitForExistence(timeout: 5), "the way through it")
+                    XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Persona Input")).firstMatch.exists)
+                    shot(app, "vnc-smooth-scrolling-alert-\(name)")
+                    alert.buttons.firstMatch.tap()
+                    XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+                    XCTAssertEqual(try inputRecords(kind: 0).count, 1, "one hello, at the first scroll")
+                    XCTAssertTrue(try inputRecords(kind: 1).isEmpty, "no records without the permission")
+                    XCTAssertGreaterThan(try wheelNotches(), 0, "scrolled by wheel notches")
+                    try dragUp(screen)
+                    sleep(1)
+                    XCTAssertEqual(try inputRecords(kind: 0).count, 1, "no second hello on the same connection")
+                    app.terminate()
+                }
+            }
+        }
+    }
+
     // MARK: #3075
 
     /// Picture in Picture is a button of its own right of Close, as round as it, and no longer inside ⋯. The simulators
@@ -822,7 +909,12 @@ final class VNCTests: XCTestCase {
             app.buttons[label].firstMatch.tap()
             rest()
         }
-        func scrolls() throws -> Int { (try mockState()["clicks"] as? [[String: Any]] ?? []).filter { $0["scroll"] != nil }.count }
+        // Wheel notches, or pixel scroll records where the Mac allows them (#7775, MOCK_SCREEN_INPUT=granted).
+        func scrolls() throws -> Int {
+            let state = try mockState()
+            return (state["clicks"] as? [[String: Any]] ?? []).filter { $0["scroll"] != nil }.count
+                + (state["input"] as? [[String: Any]] ?? []).filter { ($0["kind"] as? Int) == 1 }.count
+        }
         // A scroll up the middle of the view whose fingers open from 80 to 104 points.
         func driftingScroll() throws {
             let r = screen.frame, steps = 30, by: CGFloat = 150
@@ -1180,8 +1272,12 @@ final class VNCTests: XCTestCase {
     @MainActor private func live(_ app: XCUIApplication) -> Bool {
         let phase = app.descendants(matching: .any)["screen-phase"].firstMatch
         let deadline = Date.now.addingTimeInterval(30)
-        // Down a rail (on its side) the phase is the dot's value.
-        while Date.now < deadline { if phase.exists, (phase.label + (phase.value as? String ?? "")).contains("已连接") { return true }; usleep(250_000) }
+        // Down a rail (on its side) the phase is the dot's value. In Chinese, as these tests run, or English (#7775's shots).
+        while Date.now < deadline {
+            let said = phase.exists ? phase.label + (phase.value as? String ?? "") : ""
+            if said.contains("已连接") || said.contains("Connected") { return true }
+            usleep(250_000)
+        }
         return false
     }
 

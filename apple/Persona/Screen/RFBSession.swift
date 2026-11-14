@@ -3,6 +3,9 @@ import CoreMedia
 import CoreVideo
 import Observation
 import SwiftUI
+#if canImport(PersonaInputKit)
+import PersonaInputKit
+#endif
 #if os(iOS) && canImport(PersonaScreenKit)
 import PersonaScreenKit
 #endif
@@ -216,6 +219,9 @@ import PersonaScreenKit
             if pointer == .zero { pointer = CGPoint(x: width / 2, y: height / 2) }
             phase = .live
             input.signedIn() // once a connection: the Mac drops keys for a moment after it (#3075)
+            saidHello = false
+            askedForSmoothScrolling = false
+            if AppModel.shared.screenInput(ref)?.granted == true { sayHello() } // the helper starts before the first scroll
             if let t = typed {
                 if t.remember { ScreenCredentials.save(.init(account: t.0.account, password: t.0.password), for: ref) } else { ScreenCredentials.forget(ref) }
                 typed = nil
@@ -265,6 +271,54 @@ import PersonaScreenKit
         move(to: p, buttons: 0)
         move(to: p, buttons: button)
         move(to: p, buttons: 0)
+    }
+
+    // MARK: Pixel scrolling (#7775)
+
+    /// A hello went on this connection: the node knows this phone scrolls by pixels.
+    @ObservationIgnored private var saidHello = false
+    /// This connection's first two-finger scroll had the node ask macOS for Persona Input's permission: the page says,
+    /// under its bar, what the window now on the Mac's screen is for (until it is allowed or the connection ends).
+    private(set) var askedForSmoothScrolling = false
+
+    /// Whether two fingers scroll this Mac by pixels now: its node reads scroll records and Persona Input may post them.
+    var scrollsByPixels: Bool {
+        #if canImport(PersonaInputKit)
+        phase == .live && AppModel.shared.screenInput(ref)?.granted == true
+        #else
+        false
+        #endif
+    }
+
+    /// Two fingers went down. When Persona Input may not post yet and macOS was never asked, a hello asks the node to
+    /// ask, once: true when it did, so the page can say what the Mac's window is for.
+    func scrollBegan() -> Bool {
+        #if canImport(PersonaInputKit)
+        guard phase == .live, !saidHello, let input = AppModel.shared.screenInput(ref), !input.granted,
+              input.permission == "missing", !input.asked else { return false }
+        sayHello()
+        askedForSmoothScrolling = true
+        return true
+        #else
+        false
+        #endif
+    }
+
+    /// A pixel scroll step for the Mac's node, as PersonaInputKit's record (the iOS app; Vision never scrolls by pixels).
+    func scroll(_ step: VNCPixelScroll.Step) {
+        #if canImport(PersonaInputKit)
+        let record = ScrollRecord(kind: .scroll, phase: ScrollRecord.Phase(rawValue: step.phase.rawValue) ?? .none,
+                                  momentum: ScrollRecord.Momentum(rawValue: step.momentum.rawValue) ?? .none, dy: Float(step.dy))
+        client?.input(record.encoded())
+        #endif
+    }
+
+    private func sayHello() {
+        guard !saidHello else { return }
+        saidHello = true
+        #if canImport(PersonaInputKit)
+        client?.input(ScrollRecord.hello.encoded())
+        #endif
     }
 
     /// The wheel: up (positive) or down, a notch at a time, every one of them (#7775: it once dropped any past 20;

@@ -73123,6 +73123,29 @@
       },
       "extractionState" : "manual"
     },
+    "In the window that just opened on this Mac, choose Open System Settings, then turn on Persona Input (Privacy & Security › Accessibility). Until then, scrolling still works." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In the window that just opened on this Mac, choose Open System Settings, then turn on Persona Input (Privacy & Security › Accessibility). Until then, scrolling still works."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このMacに表示されたウインドウで「システム設定を開く」を選び、Persona Inputをオンにします（プライバシーとセキュリティ › アクセシビリティ）。それまでも、スクロールはこれまでどおり使えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这台 Mac 上刚弹出的窗口里选「打开系统设置」，再打开 Persona Input（隐私与安全性 › 辅助功能）。在那之前，照样可以滚动。"
+          }
+        }
+      }
+    },
     "In “%@” and its folders · %lld found" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -166009,6 +166032,29 @@
       },
       "extractionState" : "manual"
     },
+    "To scroll more smoothly, allow Persona Input on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To scroll more smoothly, allow Persona Input on this Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクロールを滑らかにするには、このMacでPersona Inputを許可してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想滚动更顺滑，请在这台 Mac 上允许 Persona Input。"
+          }
+        }
+      }
+    },
     "To send it anyway, change the instructions or open Hand to AI again." : {
       "localizations" : {
         "en" : {
@@ -169110,6 +169156,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Turn On Smooth Scrolling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Smooth Scrolling"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑らかなスクロールをオンにする"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开顺滑滚动"
+          }
+        }
+      }
     },
     "Turn On Video for This Mac" : {
       "extractionState" : "manual",
