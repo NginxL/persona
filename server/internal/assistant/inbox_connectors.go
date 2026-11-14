@@ -223,7 +223,7 @@ func fillConnectorItem(it *InboxItem, t connector.InboxThing) {
 // setRuleTier gives an item the tier its connector's rules decided: triage leaves it alone (it is triaged at this
 // move), the reason is the rule.
 func setRuleTier(it *InboxItem, t connector.InboxThing) {
-	it.Tier, it.Reason, it.TriagedAt = string(t.Tier), t.Why, it.Last
+	it.Tier, it.Reason, it.TriagedAt, it.TriageRev = string(t.Tier), t.Why, it.Last, inboxTriageRev
 	if it.Connector != nil {
 		it.Connector.RuleTier = string(t.Tier)
 	}

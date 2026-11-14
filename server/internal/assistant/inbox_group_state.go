@@ -126,6 +126,9 @@ func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxS
 
 // groupStateHasSelfReply says whether this position already has the reply's idempotency marker.
 func groupStateHasSelfReply(it *InboxItem, last string) bool {
+	if positionAfter(it.SettledOf, "-1") && !positionAfter(last, it.SettledOf) { // a conversation position, not mail: / todo:
+		return true // the manager filed it on evidence up to there (inbox_settle.go): reopened since, it stays open
+	}
 	for _, e := range it.Chain {
 		if e.Kind == ChainSelfReplied && e.Link != nil && e.Link.Position == last {
 			return true

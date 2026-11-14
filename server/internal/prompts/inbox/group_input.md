@@ -1,4 +1,4 @@
-会话：{{.Thread}}
+会话：{{.Thread}}{{with .Kind}}（{{.}}）{{end}}
 要归类的新消息：{{join .New "、"}}
 
 {{.Context}}

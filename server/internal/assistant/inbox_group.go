@@ -157,6 +157,8 @@ type plannedEvent struct {
 	// The model's words for it; under the fallback only a new one's title and rule tier (the connector's).
 	title, summary, tier, reason string
 	urgent                       bool
+	// settled: the model says this batch closed the open event (SettledReplied, SettledOver; inbox_settle.go).
+	settled string
 }
 
 // relateBatch relates one batch: by the model, else by the connector's fallback; then has each event written.
@@ -287,6 +289,7 @@ type groupAnswer struct {
 		Urgent    bool   `json:"urgent"`
 		Reopen    *bool  `json:"reopen"`
 		Continues string `json:"continues"`
+		Settled   any    `json:"settled"` // "replied" | "over"; anything else (false, null…) is ignored
 	} `json:"events"`
 }
 
@@ -309,6 +312,9 @@ func (s *Service) askGroup(ctx context.Context, c assistantwire.InboxSource, t c
 		seen[e.ID] = e
 	}
 	in := prompts.InboxGroupInput{Thread: t.Thread, New: t.Group.New, Context: t.Context, Events: jsonText(events)}
+	if t.Kind == KindDM || t.Kind == KindBot { // a person or a bot on the other side: the batch's lines don't say which
+		in.Kind = s.inbox.kindWords(c.ID, t.Kind)
+	}
 	budget := groupOutputBudget(len(t.Group.New), len(events))
 	retried := false
 	for {
@@ -479,6 +485,12 @@ func checkGroupAnswer(out groupAnswer, fresh []string, seen map[string]groupEven
 				pe.reopen = d.Reopen
 			}
 			pe.existing = ev
+		}
+		// Settled only means something for an existing event left open and not in "Needs you" (a new one the owner never
+		// saw is not filed unseen; its tier says what it is); any other value is ignored.
+		if how, _ := d.Settled.(string); (how == SettledReplied || how == SettledOver) && d.Tier != TierAction && pe.existing != "" &&
+			!seen[ev].Done {
+			pe.settled = how
 		}
 		plan.events = append(plan.events, pe)
 	}
@@ -800,6 +812,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 		}
 		it.Tier, it.Reason, it.TriagedBy = e.tier, clip(oneLine(e.reason), 30), "model"
 		it.Urgent = e.urgent && e.tier == TierAction
+		it.TriageRev = inboxTriageRev // decided now; a fallback append keeps the tier it had, and that tier's criteria
 	case prev.last != "":
 		// The fallback adds messages to an existing event; its structural title is only for new events. The saved tier,
 		// not the fill's provisional rule tier, is the original against which this batch's floor may raise it.
@@ -816,6 +829,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 			it.Title = t
 		}
 		it.Summary, it.Tier, it.Reason, it.TriagedBy, it.TitleBy = "", tier, b.byRules(), "rules", TitleByRules
+		it.TriageRev = inboxTriageRev
 	}
 	policyChanged := false
 	if !keepDone && !it.handled() { // what an event's conversation handles keeps its tier
@@ -845,6 +859,9 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 	}
 	if m != nil && it.open() {
 		b.fileMuted(it, now, m.Name)
+	}
+	if byModel && e.settled != "" && !keepDone && it.open() && it.Tier != TierAction && !it.handled() && currentSuggestion(it) == nil {
+		b.settleItem(it, e.settled, clip(oneLine(e.reason), 30), "", "", now)
 	}
 	b.items[it.ID] = it
 	delete(b.listMemo.kept, it.ID) // saved after the batch's other appends (writeGroup): listed as it is meanwhile
@@ -943,7 +960,7 @@ func (b *inboxBook) foldNoise(connectorID, thread string, plan *groupPlan) {
 		cur := ""
 		if e.existing != "" {
 			if it := b.items[e.existing]; it != nil {
-				if e.dmJoined || !it.open() {
+				if e.dmJoined || !it.open() || e.settled != "" { // a settled event is filed as itself (putEvent)
 					out = append(out, e)
 					continue
 				}

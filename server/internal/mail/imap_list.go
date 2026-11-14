@@ -342,6 +342,7 @@ func (s *Service) summaryFrom(a *MailAccount, mailbox string, m *imapclient.Fetc
 		Mailbox:   mailbox,
 		UID:       uint32(m.UID),
 		Seen:      hasFlag(m.Flags, imap.FlagSeen),
+		Answered:  hasFlag(m.Flags, imap.FlagAnswered),
 		Flagged:   hasFlag(m.Flags, imap.FlagFlagged),
 	}
 	if m.Envelope != nil {

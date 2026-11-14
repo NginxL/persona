@@ -4306,7 +4306,7 @@ The mail details page first reads the body and attachment list, then submits `{"
 // Extra field on add: password. With provider feishu, the supplied servers are ignored; the hub tries both imap/smtp.larkoffice.com and imap/smtp.feishu.cn (993 / 465, SSL), saving the first pair that signs in successfully (docs/extensions/mail.md ("Lark mail"))
 // MailSummary
 {"account_id","mailbox","uid":123,"message_id","subject","from":{"name","email"},"to":[{"name","email"}],
- "date","snippet","seen":false,"flagged":false,"has_attachments":false}
+ "date","snippet","seen":false,"answered":false,"flagged":false,"has_attachments":false}
 // MailMessage = MailSummary + {"cc":[…],"text":"…","html":"…","attachments":[{"id","filename","mime","size"}],
 //                               "in_reply_to","references":[…]}
 ```

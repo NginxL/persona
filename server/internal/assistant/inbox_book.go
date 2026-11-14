@@ -72,6 +72,14 @@ type inboxBook struct {
 	// mailAsked: when the mail of an open mail item off its account's page was last looked up (inbox_mail_off_page.go),
 	// by item id, under mu: the lookups take the longest unasked first. Memory only.
 	mailAsked map[string]time.Time
+	// retriaged: the stale "Needs you" items sorted again this run (retriageStale), tried once each. settling: one
+	// handled-elsewhere pass at a time; settleAsked: when each item was last looked at by one (inbox_settle.go). Memory
+	// only, under mu.
+	retriaged   map[string]bool
+	settling    sync.Mutex
+	settleAsked map[string]time.Time
+	settleSeen  map[string]string // the newest later position the settle model said "open" to, by item
+	settlePass  time.Time         // when the last handled-elsewhere pass started
 
 	cfgMu sync.Mutex
 	cfg   assistantwire.InboxConfig // the hub's (InboxConfigMethod), as last read
@@ -95,6 +103,7 @@ func (b *inboxBook) init() {
 		b.items = map[string]*InboxItem{}
 		b.extensions, b.builtin, b.kinds, b.names = map[string]bool{}, map[string]bool{}, map[string]string{}, map[string]string{}
 		b.vias = map[string]inboxVia{}
+		b.retriaged, b.settleAsked, b.settleSeen = map[string]bool{}, map[string]time.Time{}, map[string]string{}
 	})
 }
 

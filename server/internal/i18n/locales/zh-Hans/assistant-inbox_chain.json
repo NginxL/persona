@@ -35,6 +35,8 @@
   "done_read": "在别处看过了，已处理",
   "done_muted": "已静音，已处理",
   "done_manager": "助手看完，不用管",
+  "done_over": "看起来事情已经结了，标成已处理",
+  "done_task": "相关任务已完成，标成已处理",
   "failed_timeout": "处理超时了",
   "failed_stopped": "处理对话停下了，没有给出建议",
   "failed_send": "发送没有成功",
