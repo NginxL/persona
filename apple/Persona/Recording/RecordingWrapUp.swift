@@ -49,7 +49,7 @@ struct RecordingWrapUp: View {
             }
             .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) { buttons(phase, entry: entry) }
             .navigationDestination(isPresented: $opening) { RecordingDetailView(id: id) }
-            .task(id: "\(entry.revision)|\(minutes.round)|\(entry.transcribedAll)") { await followMinutes() }
+            .tabActiveTask(id: "\(entry.revision)|\(minutes.round)|\(entry.transcribedAll)") { await followMinutes() }
             .onChange(of: phase) { old, new in announce(from: old, to: new) }
         }
     }
