@@ -42,13 +42,16 @@ func (p *Pusher) sendLocalizedQuietTo(build localized, collapseID string, wants 
 // and to an open desktop. Returns the selected count and the reachable count before preferences are applied. Such a
 // push defaults to P1 for ln mode; callers that know its urgency use sendFromPolicy.
 func (p *Pusher) sendFrom(manager string, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, sent func(Device)) (selected, reachable int) {
-	return p.sendFromPolicy(manager, pushPolicy{level: assistantwire.LevelP1, manager: manager}, build, collapseID, wants, rule, nil, sent)
+	selected, reachable, _ = p.sendFromPolicy(manager, pushPolicy{level: assistantwire.LevelP1, manager: manager}, build, collapseID, wants, rule, nil, sent)
+	return selected, reachable
 }
 
 // sendFromPolicy is sendFrom with the push's ln-mode policy (level, related key and the held-push record's text).
-func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool, sent func(Device)) (selected, reachable int) {
+// heldReason is "" when the push went out, else why ln mode held it (lnmode.go): a caller that answers the model
+// (the assistant's notify_user) tells it the notice reached the briefing instead of the phone.
+func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool, sent func(Device)) (selected, reachable int, heldReason string) {
 	if p == nil {
-		return 0, 0
+		return 0, 0, ""
 	}
 	if p.lnModeOn() { // off: nothing below runs and the push goes exactly as before
 		policy.manager = manager
@@ -64,13 +67,14 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 				policy.body = b
 			}
 		}
-		if allow, _ := p.applyLn(policy); !allow {
+		if allow, reason := p.applyLn(policy); !allow {
 			// Held back for every device; the selection counts as zero. The WebSocket still carries it (callers run
 			// notifyWSFrom themselves), so the app's lists and briefings keep updating.
-			return 0, 0
+			return 0, 0, reason
 		}
 	}
-	return p.sendFromTo(manager, build, collapseID, wants, rule, only, sent)
+	selected, reachable = p.sendFromTo(manager, build, collapseID, wants, rule, only, sent)
+	return selected, reachable, ""
 }
 
 // sendFromTo is sendFrom to the devices only takes (nil: every device), before their settings decide.

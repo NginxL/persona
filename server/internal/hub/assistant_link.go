@@ -382,16 +382,23 @@ func init() {
 		}
 		from, id := c.managerID(), p.Notification.ID
 		if id != "" && !h.firstHandOver(ctx, from, id) {
-			return map[string]bool{"ok": true}, nil // delivered already: it came again (outbox_relay.go)
+			return map[string]any{"ok": true}, nil // delivered already: it came again (outbox_relay.go)
 		}
 		// Only about its own machines, sessions and cards (fleet_link.go deliverPushFrom).
-		if err := h.deliverPushFrom(from, p.Notification); err != nil {
+		heldReason, err := h.deliverPushFrom(from, p.Notification)
+		if err != nil {
 			if id != "" {
 				h.forgetHandOver(from, id)
 			}
 			return nil, busCodedError(err)
 		}
-		return map[string]bool{"ok": true}, nil
+		// held/reason let the assistant's notify_user tell the model the notice went to the briefing, not the phone.
+		res := map[string]any{"ok": true}
+		if heldReason != "" {
+			res["held"] = true
+			res["reason"] = heldReason
+		}
+		return res, nil
 	})
 	handleBus(assistantwire.MethodSnapshot, func(h *Hub, ctx context.Context, c *busConn, params json.RawMessage) (any, error) {
 		var s assistantwire.Snapshot

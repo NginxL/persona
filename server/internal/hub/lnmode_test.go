@@ -298,7 +298,7 @@ func TestLnInterceptsHeldToManager(t *testing.T) {
 	if err := h.push.setLnMode(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP2, "a", "from a")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP2, "a", "from a")); err != nil {
 		t.Fatal(err)
 	}
 	h.push.recordIntercept(pushIntercept{At: h.push.now().UTC(), Level: assistantwire.LevelP2, Reason: interceptReasonP2,
@@ -362,7 +362,7 @@ func TestLnMergeStaysWithinManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, from := range []string{"manager-a", "manager-b"} {
-		if err := h.deliverPushFrom(from, lnNotification(assistantwire.LevelP1, "", "from "+from)); err != nil {
+		if _, err := h.deliverPushFrom(from, lnNotification(assistantwire.LevelP1, "", "from "+from)); err != nil {
 			t.Fatal(err)
 		}
 	}
