@@ -1,5 +1,5 @@
 // Changing the two ends of a Trail relationship. The hub takes the parent object itself: null removes it.
-import { api, errorText } from "../../lib/api";
+import { api, ApiError, errorText } from "../../lib/api";
 import { itemPath, itemRequest, replaceItem, type InboxItem, type InboxParent } from "../../lib/inbox";
 import { t } from "../../i18n";
 import { toast } from "../../ui/atoms";
@@ -39,7 +39,8 @@ export async function linkInboxParent(item: InboxItemRef, parent: Pick<InboxItem
     toast(t("inbox-inboxline.linked", { title: parent.title }), "ok");
     return true;
   } catch (e) {
-    toast(errorText(e), "error");
+    const conflict = e instanceof ApiError && e.status === 409;
+    toast(conflict ? t("inbox-inboxline.link_conflict") : errorText(e), "error");
     return false;
   }
 }

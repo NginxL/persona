@@ -665,6 +665,8 @@ data class Item(
     @SerialName("wake") val wake: Boolean? = null,
     val task: TaskNote? = null,
     val fold: Fold? = null,
+    /** A user-visible action hidden in this work range; repeated full items retain it as on iOS. */
+    @SerialName("supervision_user") val supervisionUser: Boolean? = null,
     @SerialName("turn_duration") val turnDuration: TurnDuration? = null,
     /** The client message id of the message sent from a phone that this item came from (#968): its text, images,
      *  queued copy, or the notice it became. Older hubs never send it. */

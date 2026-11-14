@@ -10,15 +10,35 @@ import { Icon } from "../../ui/icons";
 import { linkInboxParent } from "./InboxParent";
 
 const NO_CHILDREN: InboxItem[] = [];
+const MAX_PARENT_DEPTH = 50;
 
-/** Open items this one can join: not itself or its direct children, newest first, matching title or where it happened. */
+/** Whether following inbox parents from candidate reaches ancestor, with corrupt cycles bounded. */
+function hasInboxAncestor(candidate: InboxItem, ancestorID: string, itemsByID: ReadonlyMap<string, InboxItem>): boolean {
+  const seen = new Set<string>();
+  let parent = candidate.parent;
+  for (let depth = 0; depth < MAX_PARENT_DEPTH && parent?.kind === "inbox"; depth++) {
+    if (parent.id === ancestorID) return true;
+    if (seen.has(parent.id)) return false;
+    seen.add(parent.id);
+    parent = itemsByID.get(parent.id)?.parent;
+  }
+  return false;
+}
+
+/** Open items this one can join: not itself or anything under it, newest first, matching title or where it happened. */
 export function sameMatterCandidates(items: readonly InboxItem[], item: InboxItem, children: readonly InboxItem[], query = ""): InboxItem[] {
   const excluded = new Set([item.id, ...children.map((c) => c.id)]);
+  // A parent id is local to its item's manager; another manager may reuse the same id.
+  const itemsByID = new Map<string, InboxItem>();
+  for (const candidate of items) {
+    if (sameManager(candidate.manager, item.manager)) itemsByID.set(candidate.id, candidate);
+  }
   const q = query.trim().toLowerCase();
   return items
     .filter((candidate) => !isDone(candidate)
       && sameManager(candidate.manager, item.manager)
       && !excluded.has(candidate.id)
+      && !hasInboxAncestor(candidate, item.id, itemsByID)
       && (!q || [candidate.title, (candidate as InboxItem & { where?: string }).where]
         .some((text) => text?.toLowerCase().includes(q))))
     .sort((a, b) => byTime(b.updated_at, a.updated_at) || a.id.localeCompare(b.id));
@@ -39,8 +59,8 @@ export function SameMatterList({ items, busy, onPick }: { items: readonly InboxI
             className={cx("flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors", busy ? "opacity-60" : "hover:bg-hover")}
           >
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] text-ink">{candidate.title}</span>
-              {meta && <span className="block truncate text-[11.5px] text-ink-3">{meta}</span>}
+              <span className="block truncate text-meta text-ink">{candidate.title}</span>
+              {meta && <span className="block truncate text-label text-ink-3">{meta}</span>}
             </span>
             <Icon name="chevronRight" size={13} className="shrink-0 text-ink-3" />
           </button>
@@ -130,7 +150,7 @@ export function InboxSameMatter({
           placeholder={t("inbox-inboxline.search_placeholder")}
           aria-label={t("inbox-inboxline.search_placeholder")}
           autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
+          className="min-w-0 flex-1 bg-transparent text-meta text-ink outline-none placeholder:text-ink-3"
         />
       </div>
       {reading || !effectiveTree ? (
@@ -138,7 +158,7 @@ export function InboxSameMatter({
       ) : candidates.length ? (
         <SameMatterList items={candidates} busy={busy} onPick={(choice) => void pick(choice)} />
       ) : (
-        <p className="py-6 text-center text-[12.5px] text-ink-3">{t("inbox-inboxline.empty")}</p>
+        <p className="py-6 text-center text-meta text-ink-3">{t("inbox-inboxline.empty")}</p>
       )}
     </Dialog>
   );

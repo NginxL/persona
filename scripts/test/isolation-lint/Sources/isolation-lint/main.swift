@@ -36,7 +36,7 @@ func run(_ tool: String, _ arguments: [String], environment: [String: String]) t
 }
 
 /// Test targets and tooling: they run on purpose where they run and ship nothing.
-let skippedParts: Set<String> = ["PersonaTests", "PersonaUITests", "PersonaMacTests", "PersonaWatchTests", "Tests", "verify"]
+let skippedParts: Set<String> = ["PersonaTests", "PersonaUITests", "PersonaWatchTests", "Tests", "verify"]
 let skippedFolders: Set<String> = [".build", "DerivedData", "build", "node_modules", ".swiftpm"]
 
 func main() throws -> Int32 {

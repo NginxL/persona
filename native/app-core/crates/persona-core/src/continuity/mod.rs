@@ -5,4 +5,4 @@ mod reducer;
 mod sync;
 
 pub use reducer::{Batch, Gap, Reducer};
-pub use sync::{FILL_DELAY_MS, MAX_FILL_PAGES, MAX_RANGE_PAGES, Request, Session, Step};
+pub use sync::{MAX_FILL_PAGES, MAX_RANGE_PAGES, Request, Session, Step};

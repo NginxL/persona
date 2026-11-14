@@ -120,6 +120,6 @@ Pinned group at all.
 | Test | Guards |
 | --- | --- |
 | `apple/PersonaTests/SidebarMetricsTests.swift` | Rows' `minHeight` is only `Theme.Sidebar.row` (headings: `HeadingMenu.minHeight`); each has `Theme.Sidebar.rowPadding`; no literal heights, vertical paddings or point sizes; the iOS row is 44 pt; a line of body text in SF and PingFang fits the row |
-| `apple/PersonaMacTests/MacSidebarMetricsTests.swift` | The Mac row is 24 / 28 / 32 pt for the system's small / medium / large Sidebar icon size; body text in SF and PingFang fits the smallest |
+| Retired native Mac sidebar tests | Historical only: the Mac row was 24 / 28 / 32 pt for the system's small / medium / large Sidebar icon size; the target and its tests were removed |
 | `web/src/views/SidebarRowTokens.test.ts` | `--sidebar-row` is 32 px; every sidebar row uses `sidebar-row` with no `py-*`; no heading is uppercased or letter-spaced |
 | `apple/PersonaTests/TokenRatchetTests.swift` | Literal paddings, frames and radii in views only go down |

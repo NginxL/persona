@@ -101,6 +101,7 @@ struct InboxPage: View {
     @State private var showingRules = false     // Rules
     @State private var showingSubscriptions = false  // source subscriptions (#2041)
     @State private var ruling: InboxPolicyTarget? // a row's Rule for This Chat / Sender / Repository…
+    @State private var todoRequest: InboxTodoRequest? // rows waiting for their to-do's due time (#6480)
     @State private var confirming = false // Clear All over many items asks first
     /// Selecting (#2059): the picked items' keys (`InboxItem.key`); nil when not selecting. Marking stays in Persona (done, with Undo).
     @State private var picked: Set<String>?
@@ -192,6 +193,7 @@ struct InboxPage: View {
                 .sheet(isPresented: $showingRules) { InboxRulesView() }
                 .sheet(isPresented: $showingSubscriptions) { SubscriptionsSheet() }
                 .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
+                .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
                 .confirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
                     Button(InboxBulk.confirmButton(count: cleanScope.count)) { clean(confirmed: true) }
                         .accessibilityIdentifier("inbox.cleanConfirm")
@@ -260,6 +262,20 @@ struct InboxPage: View {
                             picked = nil
                         }
                     }
+                    // `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES`: Select with the first two rows picked and the
+                    // due sheet open / those two merged / those two added to to-dos for today (#6480 screenshots).
+                    let actionKeys = ["showInboxDue", "showInboxMerge", "showInboxTodo"].filter { UserDefaults.standard.bool(forKey: $0) }
+                    if let action = actionKeys.first {
+                        for _ in 0..<20 where store.open.isEmpty { try? await Task.sleep(for: .milliseconds(500)) }
+                        picked = Set(pickable.prefix(2).map(\.key))
+                        try? await Task.sleep(for: .milliseconds(800))
+                        let two = chosen(picked ?? [])
+                        switch action {
+                        case "showInboxDue": todoRequest = InboxTodoRequest(items: two) { picked = nil }
+                        case "showInboxMerge": store.merge(two) { picked = nil }
+                        default: store.addTodos(two, due: .today) { picked = nil }
+                        }
+                    }
                     // `-showInboxDone YES`: the first group's Done open and scrolled to, its groups' titles sticking (#2059 screenshots).
                     if UserDefaults.standard.bool(forKey: "showInboxDone") {
                         for _ in 0..<20 where store.items.isEmpty || store.history.isEmpty && store.doneDays == nil { try? await Task.sleep(for: .milliseconds(500)) }
@@ -269,12 +285,12 @@ struct InboxPage: View {
                         // its newest group open (only Just Now and Today start open), then scrolled to its first row:
                         // Done's title and the group's stick above it
                         if UserDefaults.standard.bool(forKey: "showInboxDoneFolded"),
-                           let last = InboxGroups.done(done, now: .now).filter({ groupOpen("done", $0.key) }).last?.items.last {
+                           let last = InboxGroups.done(done, now: AppClock.now).filter({ groupOpen("done", $0.key) }).last?.items.last {
                             // `-showInboxDoneFolded YES`: the groups as they start (Just Now and Today open), the last
                             // open row at the top so the folded ones with their counts follow it (#2969 screenshots)
                             try? await Task.sleep(for: .milliseconds(300))
                             scrollTarget = last.key
-                        } else if let g = InboxGroups.done(done, now: .now).first {
+                        } else if let g = InboxGroups.done(done, now: AppClock.now).first {
                             setGroupOpen("done", g.key, true)
                             try? await Task.sleep(for: .milliseconds(300))
                             scrollTarget = g.items.first?.key
@@ -292,10 +308,10 @@ struct InboxPage: View {
                         if !folds.isOpen("done") { folds.toggle("done") }
                         setGroupOpen("done", key, true)
                         autoLoaded.insert(key)
-                        store.loadDoneGroup(key, range: InboxGroups.timeRange(key, now: .now))
+                        store.loadDoneGroup(key, range: InboxGroups.timeRange(key, now: AppClock.now))
                         for _ in 0..<50 where store.groupLoading.contains(key) || store.history.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
                         try? await Task.sleep(for: .milliseconds(300))
-                        scrollTarget = store.history.filter { InboxGroups.timeKey($0.doneAt, now: .now, recent: true) == key }
+                        scrollTarget = store.history.filter { InboxGroups.timeKey($0.doneAt, now: AppClock.now, recent: true) == key }
                             .max { ($0.doneAt ?? .distantPast) < ($1.doneAt ?? .distantPast) }?.key
                     }
                     // `-showInboxPickGroups YES`: Select with the mail group folded and picked whole and the Lark group picked.
@@ -343,7 +359,7 @@ struct InboxPage: View {
     /// A section's items by source (the chips' order) or by time.
     private func groupsOf(_ items: [InboxItem]) -> [InboxGroups.Group] {
         if grouping == InboxGroups.Grouping.time.rawValue {
-            return InboxGroups.byTime(items, now: .now, at: \.updatedAt)
+            return InboxGroups.byTime(items, now: AppClock.now, at: \.updatedAt)
         }
         let order = ["lark"] + accounts.map { "mail:\($0.id)" } + connectorSources.map { "c:\($0.id)" }
         return InboxGroups.bySource(items, order: order) { id in accounts.first { $0.id == id }?.email ?? id }
@@ -366,7 +382,7 @@ struct InboxPage: View {
     /// counts are of what is loaded ("n+" until the group is complete), and `next` is the group "Show Older" loads.
     /// Without them, as before: what the history has loaded, "n+" on the last group while there is more.
     private func doneGroups(_ done: [InboxItem], days: [String: Int]?) -> (groups: [DoneGroup], next: DoneGroup?) {
-        let now = Date.now
+        let now = AppClock.now
         let loaded = InboxGroups.done(done, now: now)
         guard let days else {
             let more = store.historyMore && !store.history.isEmpty
@@ -506,9 +522,41 @@ struct InboxPage: View {
             Button("Done") { withAnimation(Theme.Motion.standard) { self.picked = nil } }
                 .accessibilityIdentifier("inbox.selectDone")
         }
-        ToolbarItemGroup(placement: .bottomBar) {
-            Spacer()
-            // One request, versions checked, Undo on the toast (InboxStore.setDone); selecting ends.
+        // One item across the bar, so the three actions are measured together: the words where they fit, and where they do not
+        // (large text, a long language) Add to To-Dos is an icon, still named for VoiceOver. Separate toolbar items would fold
+        // Mark as Done into an overflow menu instead.
+        ToolbarItem(placement: .bottomBar) {
+            ViewThatFits(in: .horizontal) {
+                pickedBar(words: true)
+                pickedBar(words: false)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The bar's three actions. Merge: the picked rows become one row (undoable); Add to To-Dos asks the due time; Mark as Done is
+    /// one request with Undo on the toast (`InboxStore.setDone`). Each ends selecting when it went through.
+    private func pickedBar(words: Bool) -> some View {
+        let chosen = chosen(picked ?? [])
+        return HStack(spacing: Theme.Space.l) {
+            Button("Merge Rows") {
+                store.merge(chosen) { withAnimation(Theme.Motion.standard) { self.picked = nil } }
+            }
+            .disabled(!InboxStore.canMerge(chosen))
+            .accessibilityIdentifier("inbox.mergePicked")
+            Menu {
+                InboxDueButtons(add: { due in addTodos(chosen, due) }, pick: { todoRequest = InboxTodoRequest(items: chosen) { self.picked = nil } })
+            } label: {
+                if words {
+                    Text("Add to To-Dos")
+                } else {
+                    Label("Add to To-Dos", systemImage: Theme.Icon.todo).labelStyle(.iconOnly)
+                }
+            }
+            .disabled(chosen.isEmpty)
+            .accessibilityLabel("Add to To-Dos")
+            .accessibilityIdentifier("inbox.todoPicked")
+            Spacer(minLength: 0)
             Button("Mark as Done") {
                 withAnimation(Theme.Motion.standard) {
                     store.setDone(chosen, true)
@@ -518,6 +566,13 @@ struct InboxPage: View {
             .disabled(chosen.isEmpty)
             .accessibilityIdentifier("inbox.markPickedDone")
         }
+        .lineLimit(1)
+        .buttonStyle(.borderless)
+    }
+
+    /// Add to To-Dos with a due: one to-do per row; selecting ends once they were added.
+    private func addTodos(_ items: [InboxItem], _ due: InboxDue) {
+        store.addTodos(items, due: due) { withAnimation(Theme.Motion.standard) { self.picked = nil } }
     }
 
     private func pick(_ it: InboxItem) {
@@ -779,7 +834,7 @@ struct InboxPage: View {
             for _ in 0..<50 where first == nil {
                 try? await Task.sleep(for: .milliseconds(100))
                 if store.groupLoading.contains(key) { continue }
-                first = store.history.filter { InboxGroups.timeKey($0.doneAt, now: .now, recent: true) == key }
+                first = store.history.filter { InboxGroups.timeKey($0.doneAt, now: AppClock.now, recent: true) == key }
                     .max { ($0.doneAt ?? .distantPast) < ($1.doneAt ?? .distantPast) }?.key
             }
             guard let first else { return }
@@ -890,6 +945,9 @@ struct InboxPage: View {
             Button { store.setDone(it, false) } label: { Label("Move Back", systemImage: Theme.Icon.undo) }
         } else {
             Button { store.setDone(it, true) } label: { Label("Done [Inbox View 59f6c8]", systemImage: Theme.Icon.done) }
+            Menu {
+                InboxDueButtons(add: { store.addTodos([it], due: $0) }, pick: { todoRequest = InboxTodoRequest(items: [it]) })
+            } label: { Label("Add to To-Dos", systemImage: Theme.Icon.todo) }
         }
         if let mutes = it.mutes, !mutes.isEmpty {
             Section {
@@ -1059,6 +1117,11 @@ struct InboxRow: View {
                 if showAccount && !item.isLark {
                     Text(item.accountName).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                if let merged = item.mergedFrom?.count, merged > 0 {
+                    // Rows merged into this one (#6480): plain grey small text
+                    Text("Merged from \(merged + 1) rows").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .accessibilityIdentifier("inbox.mergedFrom")
+                }
                 if let now, !item.isDone {
                     nowLine(now)
                 } else if let mark = InboxEventText.mark(item) {
@@ -1097,27 +1160,14 @@ struct InboxRow: View {
     /// The same state line as the other clients: waiting has a still clock, only AI work spins, and anything that
     /// needs the owner carries the existing Needs you mark. FYI and folded states do not spin.
     private func nowLine(_ words: String) -> some View {
-        HStack(spacing: Theme.Space.sm) {
-            nowSymbol
+        let symbol = InboxNow.symbol(for: item)
+        return HStack(spacing: Theme.Space.sm) {
+            InboxNowSymbol(symbol: symbol)
             Text(words).font(Theme.Font.label)
-                .foregroundStyle(item.now == "failed" ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
+                .foregroundStyle(symbol == .failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
         }
         .padding(.top, Theme.Space.xxs)
-    }
-
-    @ViewBuilder private var nowSymbol: some View {
-        switch item.now {
-        case "waiting":
-            ThemedIcon(Theme.Icon.time).font(Theme.Font.label).foregroundStyle(.secondary)
-        case "queued", "looking", "agent_working":
-            InboxSpinner()
-        case "confirm_reply", "confirm_agent", "decide", "follow_up_ask", "check_due", "needs_you", "failed":
-            ThemedIcon(Theme.Icon.needsYou).font(Theme.Font.label)
-                .foregroundStyle(item.now == "failed" ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(StatusPalette.needsYou.text))
-        default:
-            EmptyView()
-        }
     }
 
     /// Who wrote what (under the AI's summary once it has one).
@@ -1328,7 +1378,9 @@ struct InboxDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var drafting = false
     @State private var handingOff = false
+    @State private var sameMatter = false
     @State private var ruling: InboxPolicyTarget?
+    @State private var todoRequest: InboxTodoRequest?
     @State private var slot: InboxItemSlotModel
 
     init(item: InboxItem, accounts: [MailAccount]) {
@@ -1345,7 +1397,9 @@ struct InboxDetailView: View {
                 InboxDraftSheet(item: current, accounts: accounts, onSent: { dismiss() })
             }
             .sheet(isPresented: $handingOff) { InboxHandOffSheet(item: current) }
+            .sheet(isPresented: $sameMatter) { InboxSameMatterPicker(item: current, tree: nil) }
             .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
+            .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
             #if DEBUG
             // `-showInboxAction draft|handoff`: open that sheet (screenshots).
             .task {
@@ -1357,12 +1411,23 @@ struct InboxDetailView: View {
             }
             #endif
             .pageToolbar {
-                if let mutes = current.mutes, !mutes.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu { InboxRuleButtons(item: current) { ruling = $0 } } label: { ThemedIcon(Theme.Icon.moreMenu) }
-                            .accessibilityLabel("More")
-                            .accessibilityIdentifier("inbox.detail.more")
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if !current.isDone {
+                            // Add to To-Dos (#6480): the row counts as handled, so the page closes like Done
+                            Menu {
+                                InboxDueButtons(add: { InboxStore.shared.addTodos([current], due: $0) { dismiss() } },
+                                                pick: { todoRequest = InboxTodoRequest(items: [current]) { dismiss() } })
+                            } label: { Label("Add to To-Dos", systemImage: Theme.Icon.todo) }
+                        }
+                        if let mutes = current.mutes, !mutes.isEmpty {
+                            InboxRuleButtons(item: current) { ruling = $0 }
+                        }
+                        Button { sameMatter = true } label: { Label("Same matter as…", systemImage: Theme.Icon.link) }
+                            .accessibilityIdentifier("inbox.detail.sameMatter")
+                    } label: { ThemedIcon(Theme.Icon.moreMenu) }
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("inbox.detail.more")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if current.isDone {

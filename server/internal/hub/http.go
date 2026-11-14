@@ -1518,6 +1518,8 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 		h.setPhoneTools(db.PhoneToolRegistration{DeviceID: deviceID, Platform: msg.Platform, CredentialID: c.device, Tools: tools})
 	case "register_desktop":
 		h.registerDesktop(c, msg.DeviceName, msg.DeviceID)
+	case "unregister_desktop":
+		h.unregisterDesktop(c)
 	case "seen":
 		if m := h.localMachine(msg.MachineID); m != nil && msg.SessionID != "" {
 			h.markSeen(m.cfg.ID, msg.SessionID)

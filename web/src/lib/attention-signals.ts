@@ -5,13 +5,14 @@ import { attentionReason, interactionCanAnswer, sessionTitle, stateOf } from "./
 import { agentKey } from "./pins";
 import { homeKey } from "./folded-rows";
 import { useCounts, useAgentSessions } from "./sessions";
-import { getState, useStore } from "./store";
+import { getState, useStore, onHello, send, appSocketReady, connect, disconnect, DESKTOP_UNREGISTER_FEATURE } from "./store";
 import { answeredTags, attentionSoundEnabled, badgeText, batchDue, finishedBatch, detectNewCards, detectTransitions, pickEvent, rateLimiter, SETTLE_MS, settledTags, suppressed, tabTitle, trackTurns, type Turn } from "./attention";
-import { claimNotification, closeNotification, dismissNotification, releaseClaim, FRONT_BEAT_MS, inQuietHours, loadNotifyPrefs, markFront, notificationText, notifyPrefs, waitingCard, otherTabInFront, postNotification, systemNotifyAllowed, wants, managerMuted } from "./notify";
+import { claimNotification, closeNotification, dismissNotification, releaseClaim, FRONT_BEAT_MS, inQuietHours, loadNotifyPrefs, markFront, notificationText, notifyPrefs, waitingCard, otherTabInFront, postNotification, systemNotifyAllowed, systemNotifyActive, onSystemNotifyChange, wants, managerMuted } from "./notify";
 import { defaultManager } from "./manager-choice";
 import { failedTagsOver, listenForNotificationClicks } from "./notification-answer";
 import { isMuted } from "./session-actions";
 import { href, navigate } from "./router";
+import { stripBase } from "./base";
 import { needsFieldValues } from "./quick-answers";
 import { t } from "../i18n";
 import { requestRoute } from "./card-focus";
@@ -235,7 +236,38 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
   useEffect(() => {
     document.title = tabTitle(label, needs);
   }, [label, needs]);
-  useEffect(() => setFaviconBadge(needs), [needs]);
+  useEffect(() => {
+    setFaviconBadge(needs);
+    window.personaDesktop?.setBadge(needs);
+  }, [needs]);
+
+  useEffect(() => {
+    const desktop = window.personaDesktop;
+    if (!desktop) return;
+    const reconcile = () => {
+      if (!appSocketReady()) return;
+      // A newer web app can run in an older desktop: missing additive capabilities retain the browser behavior.
+      const active = desktop.desktopPresence?.().active ?? true;
+      if (active && systemNotifyActive()) {
+        send({ type: "register_desktop", device_name: desktop.deviceName });
+        return;
+      }
+      if (getState().features.includes(DESKTOP_UNREGISTER_FEATURE)) send({ type: "unregister_desktop" });
+      else disconnect(); // Old hub: only closing this socket can withdraw its desktop registration.
+    };
+    const offHello = onHello(reconcile);
+    // Recovery must also work after an old hub's socket-close withdrawal: there is no new hello without reconnecting.
+    const restore = () => {
+      if ((desktop.desktopPresence?.().active ?? true) && systemNotifyActive()) connect();
+      reconcile();
+    };
+    const offPresence = desktop.onPresenceChange?.(restore) ?? (() => {});
+    const offNotifications = onSystemNotifyChange(restore);
+    const offNotification = desktop.onOpenNotification?.((route) => {
+      if (route.startsWith("/") && !route.startsWith("//") && !route.includes("\\")) navigate(stripBase(route));
+    }) ?? (() => {});
+    return () => { offHello(); offPresence(); offNotifications(); offNotification(); };
+  }, []);
 
   useEffect(armAudio, []);
   // Allow / Deny clicked on a permission card's notification: the service worker hands it to this page (#4464)

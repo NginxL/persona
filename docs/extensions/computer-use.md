@@ -459,7 +459,10 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
     (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
   - **Messages**: `start` gets `hello` (codec, display, size), then `format` and a keyframe; `format` again whenever the
-    parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did.
+    parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did. Each
+    second frames did, `timing` carries the helper's medians for the phone's Connection Stats (`TimingWindow`):
+    capture (display time to ScreenCaptureKit's callback, about 0), encode (VideoToolbox in to out) and network (half
+    the round trip from a frame going out to the phone's report on it, so no clocks need to agree), and what went out.
     `update` changes the bitrate cap and frame rate in place; a new display, size or codec restarts capture with a
     fresh `hello`, `format` and keyframe. `paused` says why capture stopped (`permission`, `locked`, `login_window`,
     `display_gone`, `busy`); when the Mac unlocks it sends `resumed` and starts again. The stream closing ends the
@@ -489,7 +492,7 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   (`…/ports/5900/connect?pair=…`, `RFBWebSocket`): 16 random bytes in hex, a new one each connection, so no other
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
-  `frame`, `heartbeat`, `paused`, `resumed`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
+  `frame`, `heartbeat`, `paused`, `resumed`, `timing`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
   are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
   package for macOS and iOS) is the codec, shared by the helper and the app's client.
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
@@ -502,7 +505,23 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
 - **Switching**: RFB signs in first and shows until the first video frame decodes; the phone then stops asking RFB for
   updates (Screen Sharing encodes nothing meanwhile). It returns to RFB within about a second on any of: the stream
   closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
-  doubling to 5 min, and at once when the helper reports the Mac unlocked (`resumed`).
+  doubling to 5 min, and at once when the helper reports the Mac unlocked (`resumed`). While capture is paused the
+  helper sends no heartbeat, so the 3 s rule waits for `resumed`.
+- **iPhone** (`apple/Persona/Screen/ScreenVideoStream.swift`, `ScreenVideoLink.swift`): the iOS app links
+  `PersonaScreenKit` (Mac and Vision compile the same sources and leave video out). `ScreenVideoStream` sends `start`,
+  decodes each frame with VideoToolbox as it comes (the helper never reorders), sends a `report` for every frame, and
+  shows only the newest picture of a burst. `ScreenVideoLink`, one per RFB session, opens the stream once RFB is
+  signed in, shows its pictures in a layer over RFB's on the same display (`hello.rect`, else the display shown; RFB's layer is
+  hidden meanwhile, so a picture of another shape leaves black, not a stale frame), and holds RFB's update requests while
+  they show; the request held goes out when video stops, so RFB's picture catches up.
+  Video is chosen by default on a Mac that offers it (⋯ › Picture, kept per Mac) and runs only while one display is
+  shown: the Mac's only one, or one picked from several the node numbered; all of several displays at once stay RFB.
+  It pauses while Picture in Picture shows the screen or the app is in the background (RFB carries the picture then).
+  When VNC shows instead, a line under the bars says why in plain words: the video stopped, the Mac is locked, or the
+  Mac hasn't allowed video yet (`permission` missing, so no stream is opened).
+  Connection Stats (⋯, off by default) reads the video once a second: frames shown and megabits that arrived, the
+  helper's capture, encode and network from `timing`, the phone's decode, and their total first when encode, network
+  and decode are all known (a helper before `timing` gives the phone's numbers only).
 - **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
   the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
@@ -691,6 +710,12 @@ Follow the order above, one PR per area. Item 6 can go with b, or a separate sma
   - `ComputerSectionTests.testTheLiveScreenAsksForTheMacsSignIn` taps VNC through to login required (ARD).
   - `ScreenDrawerTests` (mock with `MOCK_COMPUTER_OPERATING=1 MOCK_SCREEN=fake`; without `MOCK_SCREEN=fake`, it uses this Mac's real Screen Sharing, showing "hub doesn't allow this machine's screen" and failing if off; assistant and Agent chats each have a running operation): open the full page from the operating bar and ··· menu in assistant and Agent chats, close with ×.
   - `ScreenPasswordTests`: remember, automatic login next time (PiP on real device, full page in simulator), reenter changed password, forget; one-tap unlock.
+  - `VNCTests.testVideoTakesThePictureAndFallsBack` (#3954, mock `MOCK_SCREEN_VIDEO=1`, runner
+    `TEST_RUNNER_PERSONA_SCREEN_VIDEO=1`): video takes the picture after the sign-in, with Wi-Fi's cap in `start` and
+    reports coming back; the Mac locking and the stream dropping each put VNC back with their line, unlocking brings
+    video back. `testTheOverlayBreaksTheLatencyDown`: Connection Stats over the video shows every segment.
+    `ScreenVideoTests` (unit) decode the mock's fixture and drive the stream, the link and the overlay's reading from
+    a script; `TimingWindowTests` (`swift test`) the helper's medians.
   - `VNCTests`: PiP (real device: menu → PiP → remains on home screen → restore full page → PiP again; simulator has no PiP, verifies full-page fallback only). PiP source (`-showPiPSource`, also runs in simulator): appears within 1.5 seconds of tapping, shows Connecting (mock delays 3 seconds), then live view, and Failed to Connect after mock disconnects. On full page, tap/drag in both modes, Center Pointer (mock records clicks and pointer positions), clipboard both ways, typing and Mac shortcut row, Help. `TEST_RUNNER_PERSONA_VNC_PAUSE=2` slows it for recording; `testMeasure` (`MOCK_SCREEN_ANIMATE=1`, `TEST_RUNNER_PERSONA_VNC_MEASURE=1`) prints frame rate and latency.
   - Logging into a real Mac needs that Mac's password, so tests don't do it.
 - **Screenshots**: mock `MOCK_COMPUTER=ready|permissions|locked|missing|off` ([testing.md](../operations/testing.md)), with `-tab settings -openMachines YES -openMachineDetail macbook`.

@@ -6,7 +6,7 @@ import Foundation
 
 /// `hello` (helper → phone): the first message after the phone's `start`. `rect` is the display's rectangle in the
 /// RFB framebuffer's pixels when the node knows it, so the app lays the video onto the same place as RFB.
-public struct HelloMessage: Codable, Equatable {
+public struct HelloMessage: Codable, Equatable, Sendable {
     public var version: Int
     public var codec: String // "hevc" | "h264"
     public var display: Int
@@ -25,7 +25,7 @@ public struct HelloMessage: Codable, Equatable {
 }
 
 /// `start` (phone → helper): opens capture. `display` nil means the main display.
-public struct StartMessage: Codable, Equatable {
+public struct StartMessage: Codable, Equatable, Sendable {
     public var display: Int?
     public var maxSize: Int
     public var fps: Int
@@ -51,7 +51,7 @@ public struct StartMessage: Codable, Equatable {
 
 /// `update` (phone → helper): any of `start`'s fields again, plus `paused` for the app leaving the foreground
 /// without Picture in Picture.
-public struct UpdateMessage: Codable, Equatable {
+public struct UpdateMessage: Codable, Equatable, Sendable {
     public var display: Int?
     public var maxSize: Int?
     public var fps: Int?
@@ -81,7 +81,7 @@ public struct UpdateMessage: Codable, Equatable {
 
 /// `paused` (helper → phone): capture stopped; the phone goes back to RFB. `reason` is one of
 /// locked | login_window | permission | display_gone | busy.
-public struct PausedMessage: Codable, Equatable {
+public struct PausedMessage: Codable, Equatable, Sendable {
     public var reason: String
 
     public init(reason: String) {
@@ -91,7 +91,7 @@ public struct PausedMessage: Codable, Equatable {
 
 /// `heartbeat` (helper → phone): sent once a second while no frame went out, so the phone can tell a quiet screen
 /// from a dead stream.
-public struct HeartbeatMessage: Codable, Equatable {
+public struct HeartbeatMessage: Codable, Equatable, Sendable {
     public var last: Int
 
     public init(last: Int) {
@@ -99,9 +99,38 @@ public struct HeartbeatMessage: Codable, Equatable {
     }
 }
 
+/// `timing` (helper → phone, #3954): once a second while frames go out, the helper's side of the latency the phone's
+/// connection-stats overlay breaks down, as medians over that second in milliseconds, and what went out. `captureMs`
+/// is ScreenCaptureKit's display time to its callback (about 0: frames come before their display time), `encodeMs`
+/// VideoToolbox in to out, `networkMs` half the round trip from a frame going out to the phone's report on it (no
+/// clocks to agree). A segment with nothing to measure in that second is nil. Apps before it skip the type by length.
+public struct TimingMessage: Codable, Equatable, Sendable {
+    public var captureMs: Double?
+    public var encodeMs: Double?
+    public var networkMs: Double?
+    public var kbps: Int
+    public var fps: Int
+
+    enum CodingKeys: String, CodingKey {
+        case captureMs = "capture_ms"
+        case encodeMs = "encode_ms"
+        case networkMs = "network_ms"
+        case kbps
+        case fps
+    }
+
+    public init(captureMs: Double?, encodeMs: Double?, networkMs: Double?, kbps: Int, fps: Int) {
+        self.captureMs = captureMs
+        self.encodeMs = encodeMs
+        self.networkMs = networkMs
+        self.kbps = kbps
+        self.fps = fps
+    }
+}
+
 /// `format` (helper → phone): the codec's parameter sets (HEVC VPS/SPS/PPS, or H.264 SPS/PPS), sent before the
 /// first keyframe and whenever they change.
-public struct FormatMessage: Equatable {
+public struct FormatMessage: Equatable, Sendable {
     public var parameterSets: [Data]
 
     public init(parameterSets: [Data]) {
@@ -110,8 +139,8 @@ public struct FormatMessage: Equatable {
 }
 
 /// `frame` (helper → phone): one encoded sample as length-prefixed NAL units (AVCC).
-public struct VideoFrame: Equatable {
-    public struct Flags: OptionSet, Equatable {
+public struct VideoFrame: Equatable, Sendable {
+    public struct Flags: OptionSet, Equatable, Sendable {
         public let rawValue: UInt8
         public init(rawValue: UInt8) { self.rawValue = rawValue }
         public static let keyframe = Flags(rawValue: 1)
@@ -132,8 +161,8 @@ public struct VideoFrame: Equatable {
 }
 
 /// `report` (phone → helper): how the latest frame arrived, driving the helper's bandwidth adaptation.
-public struct ReceiverReport: Equatable {
-    public struct Flags: OptionSet, Equatable {
+public struct ReceiverReport: Equatable, Sendable {
+    public struct Flags: OptionSet, Equatable, Sendable {
         public let rawValue: UInt8
         public init(rawValue: UInt8) { self.rawValue = rawValue }
         public static let decodingError = Flags(rawValue: 1)
@@ -156,13 +185,14 @@ public struct ReceiverReport: Equatable {
 
 /// One decoded message in either direction. `unknown` keeps a type neither side understands, so a future field is
 /// skipped rather than fatal.
-public enum ScreenVideoMessage: Equatable {
+public enum ScreenVideoMessage: Equatable, Sendable {
     case hello(HelloMessage)
     case format(FormatMessage)
     case frame(VideoFrame)
     case heartbeat(HeartbeatMessage)
     case paused(PausedMessage)
     case resumed
+    case timing(TimingMessage)
     case start(StartMessage)
     case report(ReceiverReport)
     case keyframe
@@ -178,6 +208,7 @@ public enum ScreenVideoMessage: Equatable {
         case let .heartbeat(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.heartbeat.rawValue, body: Self.encodeJSON(m))
         case let .paused(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.paused.rawValue, body: Self.encodeJSON(m))
         case .resumed: return ScreenVideoWire.frame(ScreenVideoWire.Kind.resumed.rawValue, body: Data("{}".utf8))
+        case let .timing(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.timing.rawValue, body: Self.encodeJSON(m))
         case let .start(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.start.rawValue, body: Self.encodeJSON(m))
         case let .report(m): return ScreenVideoWire.frame(ScreenVideoWire.Kind.report.rawValue, body: Self.encodeReport(m))
         case .keyframe: return ScreenVideoWire.frame(ScreenVideoWire.Kind.keyframe.rawValue)
@@ -198,6 +229,7 @@ public enum ScreenVideoMessage: Equatable {
         case .heartbeat: return .heartbeat(try decodeJSON(body))
         case .paused: return .paused(try decodeJSON(body))
         case .resumed: return .resumed
+        case .timing: return .timing(try decodeJSON(body))
         case .start: return .start(try decodeJSON(body))
         case .report: return .report(try decodeReport(body))
         case .keyframe: return .keyframe

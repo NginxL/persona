@@ -7,6 +7,16 @@ import { AGENT_GROUPINGS, agentGrouping, type AgentGrouping } from "./agent-grou
 
 export const GROUPING_KEY = "persona.agentGrouping";
 
+/** Whether the Agents block draws the hub's paged list (`BoundedAgentsBlock`) rather than the complete one (#6662): every
+ *  grouping but By repository, whose worktree level needs every session, and By to-do only on a hub that lists sessions by
+ *  to-do; pins and several assistants' scopes need the complete list. ⌘K's "Filter Agents list" asks it too (#6589). */
+export function pagedAgentList(o: { bounded: boolean; byTodo: boolean; todosSupported: boolean; pins: { sessions: string[]; spaces: string[] }; stored: string | null; several: boolean }): boolean {
+  const grouping = agentGrouping(o.stored);
+  // a hub without todos shows by machine, a by-todo choice kept for when it has them
+  const shown = !o.todosSupported && grouping === "todo" ? "machine" : grouping;
+  return o.bounded && !o.several && o.pins.sessions.length === 0 && o.pins.spaces.length === 0 && shown !== "repo" && (shown !== "todo" || o.byTodo);
+}
+
 // ── fold all / open all ──────────────────────────────────
 
 const foldListeners = new Map<(folded: boolean) => void, string | undefined>();

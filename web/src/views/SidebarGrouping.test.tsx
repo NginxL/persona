@@ -183,9 +183,10 @@ describe("group controls in every Agents view", () => {
   });
 });
 
-// Collapse all / Expand all act on the list under the controls only (#6447): the grouping tabs, the quick filters, the
-// search and Filter stay on screen while every group folds to its heading; the chat-list view has no groups to fold to,
-// so it has no button (a first fix folded the whole block there, the controls with it).
+// Collapse all / Expand all act on the list under the controls only (#6447): the grouping tabs, the quick filters and
+// the title row's Filter (#6589: the list has no search field of its own) stay on screen while every group folds to its
+// heading; the chat-list view has no groups to fold to, so it has no button (a first fix folded the whole block there,
+// the controls with it).
 describe("the fold-all button keeps the Agents controls", () => {
   /** On screen: not inside an inert box or a closed Collapse (0fr), the two ways the sidebar folds. */
   const onScreen = (el: Element | null | undefined) => {
@@ -197,10 +198,9 @@ describe("the fold-all button keeps the Agents controls", () => {
   const controls = () => ({
     tabs: onScreen(grouping()),
     filters: onScreen(agentsBlock().querySelector(`[role="radiogroup"][aria-label="${t("sidebar.quick_filters")}"]`)),
-    search: onScreen(agentsBlock().querySelector("[data-testid=agent-dimension-filter-bar] input")),
-    filter: onScreen(agentsBlock().querySelector("[data-testid=agent-filter-button]")),
+    filter: onScreen(agentsBlock().querySelector("[data-sidebar-agents-controls] [data-testid=agent-filter-button]")),
   });
-  const everyControl = { tabs: true, filters: true, search: true, filter: true };
+  const everyControl = { tabs: true, filters: true, filter: true };
   /** The agent's title, wherever the grouping draws it. */
   const agentShown = () => {
     const walk = document.createTreeWalker(agentsBlock(), NodeFilter.SHOW_TEXT);

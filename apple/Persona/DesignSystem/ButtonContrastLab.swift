@@ -4,7 +4,7 @@ import SwiftUI
 
 /// `-showButtonContrast YES` (#6157): a secondary `.themedButton()` on every kind of fill one sits on in the app, for
 /// screenshots that measure each label against the button's own fill (`ButtonContrastUITests`). The places:
-/// - The first screen:
+/// - The first screen (and a row of every kind of control, `ButtonKindsRow`, #7214):
 ///   - `page`: the page itself.
 ///   - `grouped`: the grouped page; bottom bars use it too.
 ///   - `card`: `.card()`, the most common card.
@@ -44,6 +44,7 @@ struct ButtonContrastOverlay: View {
                     ButtonContrastRow(place: "card").card()
                     ButtonContrastRow(place: "themeCard").background(Theme.card, in: Self.box)
                     ButtonContrastRow(place: "surface").surface(in: Self.box)
+                    ButtonKindsRow()
                 }
                 HStack(spacing: Theme.Space.l) {
                     Button { second.toggle() } label: { Text(verbatim: "next") }
@@ -108,8 +109,38 @@ private struct ButtonContrastList: View {
     }
 }
 
-/// One place: a secondary button in the accent, one tinted `Theme.danger` and one with the destructive role (the system's
-/// red), with words of the length real ones have.
+/// One place: a secondary button in the accent, one tinted `Theme.danger` and one with the destructive role (which
+/// `.themedButton()` draws in `Theme.danger`, #7042), with words of the length real ones have.
+/// Every kind of control a call site styles with `.themedButton()`, on the page (#7214): a Button, a Menu, a Link and a
+/// ShareLink, each to draw the style's background (a Menu drew none in the glass styles and Lark after #7129).
+/// Identifiers `contrast.kinds.<button|menu|link|share>`, and `contrast.kinds` for the row (the page beside them).
+private struct ButtonKindsRow: View {
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Button {} label: { Text(verbatim: "Button").lineLimit(1) }
+                .themedButton()
+                .accessibilityIdentifier("contrast.kinds.button")
+            Menu {
+                Button {} label: { Text(verbatim: "One") }
+            } label: {
+                Text(verbatim: "Menu").lineLimit(1)
+            }
+            .themedButton()
+            .accessibilityIdentifier("contrast.kinds.menu")
+            Link(destination: URL(string: "https://example.com")!) { Text(verbatim: "Link").lineLimit(1) }
+                .themedButton()
+                .accessibilityIdentifier("contrast.kinds.link")
+            ShareLink(item: "Persona") { Text(verbatim: "Share").lineLimit(1) }
+                .themedButton()
+                .accessibilityIdentifier("contrast.kinds.share")
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("contrast.kinds")
+    }
+}
+
 private struct ButtonContrastRow: View {
     var place: String
 

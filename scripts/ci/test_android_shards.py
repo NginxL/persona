@@ -121,7 +121,7 @@ class ShellLaneTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         for directory in ("scripts/ci", "scripts/app", "android/gradle/wrapper", "jdk/bin",
-                          "sdk/platforms/android-37.0", "sdk/build-tools/37.0.0"):
+                          "sdk/platforms/android-37.0", "sdk/build-tools/37.0.0", "sdk/ndk/29.0.14206865"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         for name in ("android.sh", "android-shards.py", "common.sh"):
             shutil.copyfile(HERE / name, self.root / "scripts/ci" / name)
@@ -130,7 +130,8 @@ class ShellLaneTests(unittest.TestCase):
         (self.root / "native/app-core/rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.98.0"\n')
         (self.root / "bin").mkdir()
         rustup = self.root / "bin/rustup"
-        rustup.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$MOCK_RUSTUP_LOG"\n')
+        rustup.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$MOCK_RUSTUP_LOG"\n'
+                          'if [[ "$1 $2 $3" == "target list --installed" ]]; then printf \'aarch64-linux-android\\nx86_64-linux-android\\n\'; fi\n')
         rustup.chmod(0o700)
         (self.root / "scripts/ci/test_android_shards.py").write_text("pass\n")
         for name in ("test_android_i18n_check.py", "test_android_token_baseline.py", "test_android_slot_order.py",

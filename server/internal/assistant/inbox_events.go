@@ -11,8 +11,9 @@ import (
 )
 
 // Inbox events, phase 1 (docs/assistant/inbox.md "Events and handling chain"): an item is an event. Besides what it always had it
-// keeps its handling chain (chain: the key calls in time order, every one recorded by the program where it happens, never
-// written by a model), whether it is urgent, the manager's recap, the processing conversation bound to it (handling),
+// keeps its handling chain (chain: the key calls in time order, recorded by the program where they happen; the sole exception is
+// reported, a processing conversation's unverified statement that it or an Agent did something, drawn as "assistant says"), whether
+// it is urgent, the manager's recap, the processing conversation bound to it (handling),
 // at most one suggestion, and the items it is related to across atoms. Its section (status) is computed from those.
 
 // Item statuses (InboxItem.Status, listed for open items only).

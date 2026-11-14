@@ -893,11 +893,12 @@ var HubRoles = []string{"center", "member"}
 
 // Values of HubCapability.
 const (
-	HubCapabilityInboxGroup = "inbox_group"
+	HubCapabilityInboxGroup      = "inbox_group"
+	HubCapabilityInboxGroupState = "inbox_group_state"
 )
 
 // HubCapabilities are the values of HubCapability, in order.
-var HubCapabilities = []string{"inbox_group"}
+var HubCapabilities = []string{"inbox_group", "inbox_group_state"}
 
 // InitializeParams: what the hub sends first. The extension is under extension; hubs before the rename (#1844) send
 // it as plugin, newer hubs send both.

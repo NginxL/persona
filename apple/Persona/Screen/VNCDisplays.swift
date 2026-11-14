@@ -96,4 +96,11 @@ nonisolated struct VNCViewport: Equatable {
         let k = rect.width / visible.width
         return CGRect(x: -visible.minX * k, y: -visible.minY * k, width: size.width * k, height: size.height * k)
     }
+
+    /// Where a part of the framebuffer (pixels) is drawn, in the same space as `framebufferFrame` (the clip's).
+    func frame(of part: CGRect) -> CGRect {
+        let k = rect.width / visible.width
+        return CGRect(x: (part.minX - visible.minX) * k, y: (part.minY - visible.minY) * k,
+                      width: part.width * k, height: part.height * k)
+    }
 }

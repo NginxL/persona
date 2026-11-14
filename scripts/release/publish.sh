@@ -153,7 +153,8 @@ fi
 
 # The build number orders releases (UTC YYYYMMDDHHMM): hubs install only a larger one.
 BUILD="$(date -u +%Y%m%d%H%M)"
-VERSION="${VERSION:-$(git describe --always --dirty 2>/dev/null || echo dev)-$BUILD}"
+# The nearest vX.Y.Z tag, a lightweight one too, as deploy.sh names its builds (#7201).
+VERSION="${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}"
 COMMIT="$(git rev-parse HEAD)"
 # A release is the committed code: latest.json says which commit and lists every one it contains, and a hub
 # installs a release by itself only when its own commit is among them (docs/operations/hub-update.md "No regression"). Published with
@@ -315,7 +316,7 @@ done
 # The versioned copies, kept: release/<version>/ (and release/X.Y.Z/ when the release is the tag vX.Y.Z, the version
 # of the Docker image built from that tag), the node builds and the manifest only: a manager fetches a node build from
 # there (docs/operations/node-update.md). The tag is looked up among all the commit's tags (release.sh tags it testflight/<build>
-# too, and a lightweight vX.Y.Z is not what git describe picks).
+# too).
 VERSIONS=("$VERSION")
 # A build with changes not committed (-dirty) is not the tag's release, and gets no alias.
 if [[ "$VERSION" != *-dirty* ]] && tag="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)" && [ -n "$tag" ]; then

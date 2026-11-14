@@ -325,6 +325,7 @@ export function useNotifyPrefsGeneration() {
 export type Permission = "unsupported" | "default" | "granted" | "denied";
 
 export function permission(): Permission {
+  if (typeof window !== "undefined" && window.personaDesktop) return window.personaDesktop.notificationPermission() as Permission;
   if (typeof Notification === "undefined") return "unsupported";
   return Notification.permission;
 }
@@ -358,13 +359,17 @@ export async function setSystemNotify(on: boolean): Promise<Permission> {
     return permission();
   }
   let p = permission();
-  if (p === "default") p = await Notification.requestPermission();
+  if (p === "default") {
+    if (typeof window !== "undefined" && window.personaDesktop) p = "granted"; // Electron main owns the OS notification permission.
+    else p = await Notification.requestPermission();
+  }
   setSystemFlag(p === "granted");
   return p;
 }
 
 /** Notifications go out: the switch is on and the browser allows them. */
 export function systemNotifyActive(): boolean {
+  if (typeof window !== "undefined" && window.personaDesktop?.desktopPresence?.().notifies === false) return false;
   return systemNotifyOn() && permission() === "granted";
 }
 
@@ -409,6 +414,8 @@ function subscribeSystem(l: () => void) {
     window.removeEventListener("focus", l);
   };
 }
+
+export function onSystemNotifyChange(listener: () => void): () => void { return subscribeSystem(listener); }
 
 const snapshot = () => `${systemNotifyOn() ? 1 : 0}|${permission()}|${systemNotifyAlways() ? 1 : 0}`;
 
@@ -550,6 +557,7 @@ function buttonsOnNotifications(): boolean {
  */
 export function postNotification(n: { title: string; body: string; tag: string; url: string; icon?: string; ix?: string; silent?: boolean }, open: () => void): void {
   if (!systemNotifyActive()) return;
+  if (typeof window !== "undefined" && !(n.ix && buttonsOnNotifications()) && window.personaDesktop?.notify({ title: n.title, body: n.body, tag: n.tag, route: n.url, silent: n.silent, ix: n.ix })) return;
   if (n.ix && buttonsOnNotifications()) {
     // Chrome doesn't let the worker's notification replace the page's under the same tag: take the page's back first
     closePageNotification(n.tag);
@@ -601,6 +609,7 @@ export function dismissNotification(tag: string): void {
 }
 
 function closePageNotification(tag: string): void {
+  if (typeof window !== "undefined") window.personaDesktop?.closeNotification(tag);
   const note = posted.get(tag);
   if (!note) return;
   posted.delete(tag);

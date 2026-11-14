@@ -269,6 +269,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if p.Model != "" {
 		params["model"] = p.Model // picked with the first message, as with a message (sendModel): a typed id too
 	}
+	if p.ServiceTier != "" {
+		params["service_tier"] = p.ServiceTier // acknowledged on a new native thread before its first turn
+	}
 	if p.ConfigDir != "" {
 		params["config_dir"] = p.ConfigDir
 	}
@@ -501,6 +504,10 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 	carried := handoff.Pick
 	if carried != nil && (p.Launcher != "" || p.Model != "") {
 		carried = nil
+	}
+	if carried != nil && p.ServiceTier != "" && p.Launcher == "" && p.Model == "" {
+		// An unnamed tier can belong only to the client's displayed default, not to this carried setup it did not show.
+		p.ServiceTier = ""
 	}
 	if carried != nil {
 		// Held to what a message on it is held to: one that can't run here any more refuses this start, saying why
@@ -782,7 +789,8 @@ func (s *Service) startRoutes() {
 			Model          string        `json:"model"` // the first message's model (#5033): a model id, typed or listed
 			PermissionMode string        `json:"permission_mode"`
 			Effort         string        `json:"effort"`
-			Main           bool          `json:"main"` // becomes the main conversation
+			ServiceTier    string        `json:"service_tier"` // native Codex speed for the first turn, independent of effort
+			Main           bool          `json:"main"`         // becomes the main conversation
 			// Purpose is the model purpose it runs under ("assistant" when empty; a plugin's /agent asks for its own);
 			// MachineID one of the hub's machines instead of the assistant's (docs/protocol/protocol.md "REST (App → hub)").
 			Purpose   string `json:"purpose"`
@@ -850,7 +858,7 @@ func (s *Service) startRoutes() {
 		// The main conversation is the assistant's, on its machine.
 		ctx, note := withLauncherNote(ctx)
 		sess, err := s.Start(ctx, StartParams{Text: in.Prompt, Images: in.Images, Launcher: in.Launcher, Model: in.Model, PermissionMode: in.PermissionMode,
-			Effort: in.Effort, Purpose: in.Purpose, MachineID: in.MachineID, Main: in.Main, Space: in.Space, Origin: origin, OriginRef: ref,
+			Effort: in.Effort, ServiceTier: in.ServiceTier, Purpose: in.Purpose, MachineID: in.MachineID, Main: in.Main, Space: in.Space, Origin: origin, OriginRef: ref,
 			OpenedBy: requestOpener(r), GuestTools: guestTools, Human: own && in.Via == "" && assistantwire.HumanStartOf(r.Context())})
 		var refused *pickError
 		switch {

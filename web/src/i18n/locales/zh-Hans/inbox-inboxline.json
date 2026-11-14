@@ -9,6 +9,7 @@
   "same": "是同一件事…",
   "not_same_done": "已标为不是同一件事",
   "linked": "已连到「{title}」",
+  "link_conflict": "这个关联不成立，请选择其他内容。",
   "search_placeholder": "搜索标题和位置",
   "empty": "没有符合的未处理事项"
 }

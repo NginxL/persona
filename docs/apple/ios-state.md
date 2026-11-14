@@ -443,7 +443,7 @@ Why it works this way:
 Measurement: decode simulator recordings frame by frame, calculate content displacement relative to the previous frame, last-row distance from the composer, and "large change then reversal within a frame" jumps. In the App, `-scrollTrace YES`
 records UIKit / AppKit offset, content height, finger / inertia, and follow state each frame (`ScrollTrace`). Cases: `StreamingScrollTests` (mock `/mock/say?preset=markdown`:
 code blocks, tables, lists, delta every 80 ms like the hub; `&late=600` clears first and sends the committed message 600 ms later). A locked Mac can't record the screen and has no real trackpad:
-`MacScrollLab` sends synthetic two-finger scroll and inertia to the list, rendering the window every 0.1 s (`docs/apple/mac.md`). Tools live in `scripts/diag/stream-scroll/`.
+`MacScrollLab` sent synthetic two-finger scroll and inertia to the list, rendering the window every 0.1 s (`docs/archive/apple/mac.md`). Tools live in `scripts/diag/stream-scroll/`.
 
 | Symptom (before the fix) | Cause | Fix |
 | --- | --- | --- |

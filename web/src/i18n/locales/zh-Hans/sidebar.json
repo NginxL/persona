@@ -77,7 +77,6 @@
   "show_child_workspaces_other": "显示 {count} 个子工作树",
   "hide_child_workspaces_one": "隐藏 {count} 个子工作树",
   "hide_child_workspaces_other": "隐藏 {count} 个子工作树",
-  "paged_list": "最近更新（全部会话）",
   "children_title": "子项：{list}",
   "list_separator": "，",
   "child_sr_needs_you": "个子项需要你",

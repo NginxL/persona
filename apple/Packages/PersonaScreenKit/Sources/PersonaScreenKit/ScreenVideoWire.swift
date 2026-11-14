@@ -13,7 +13,7 @@ public enum ScreenVideoWire {
     /// A declared length over this closes the stream (design: "At most 4 MB").
     public static let maxMessageBytes = 4 * 1024 * 1024
 
-    /// Message types. Helper → phone: 1–6. Phone → helper: 16–19.
+    /// Message types. Helper → phone: 1–7. Phone → helper: 16–19.
     public enum Kind: UInt8 {
         case hello = 1
         case format = 2
@@ -21,6 +21,7 @@ public enum ScreenVideoWire {
         case heartbeat = 4
         case paused = 5
         case resumed = 6
+        case timing = 7
         case start = 16
         case report = 17
         case keyframe = 18
@@ -28,7 +29,7 @@ public enum ScreenVideoWire {
     }
 
     /// One framed message as it comes off the wire, before its body is decoded.
-    public struct RawMessage: Equatable {
+    public struct RawMessage: Equatable, Sendable {
         public var type: UInt8
         public var body: Data
         public init(type: UInt8, body: Data) {

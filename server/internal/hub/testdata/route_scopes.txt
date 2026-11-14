@@ -241,6 +241,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/file/convert
 -                    GET /api/v1/machines/{mid}/file/download
 -                    GET /api/v1/machines/{mid}/file/thumb
+-                    GET /api/v1/machines/{mid}/files/operations/{oid}
 -                    GET /api/v1/machines/{mid}/fs
 -                    GET /api/v1/machines/{mid}/fs/find
 -                    GET /api/v1/machines/{mid}/git/blob

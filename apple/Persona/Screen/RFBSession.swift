@@ -17,7 +17,9 @@ import SwiftUI
     }
 
     let ref: MachineRef
-    private(set) var phase: Phase = .connecting
+    private(set) var phase: Phase = .connecting {
+        didSet { if phase != oldValue { followVideo() } }
+    }
     /// The Mac's screen, in its pixels.
     private(set) var size: CGSize = .zero
     /// The server's screens on it (ExtendedDesktopSize, #80); empty from a server that sends none (macOS's, as far as is known).
@@ -31,6 +33,11 @@ import SwiftUI
     /// This connection's pair (#3954): the video channel binds to it, and only once Screen Sharing accepted the sign-in on
     /// it. A new one each connection; not observed, since only opening video reads it.
     @ObservationIgnored private(set) var pair: String?
+    #if os(iOS) && canImport(PersonaScreenKit)
+    /// The video channel (#3954): it binds to this connection's pair once it is live, and holds RFB's updates while its
+    /// picture shows.
+    let video = ScreenVideoLink()
+    #endif
     /// Frames a second shown, and how long the last one took from the mock's Screen Sharing to here (its stamp).
     private(set) var fps: Double = 0
     private(set) var latency: Double?
@@ -55,6 +62,9 @@ import SwiftUI
 
     init(ref: MachineRef) {
         self.ref = ref
+        #if os(iOS) && canImport(PersonaScreenKit)
+        video.onShowing = { [weak self] on in self?.client?.holdUpdates(on) }
+        #endif
         input = RFBInputQueue(send: { [weak self] e in self?.client?.key(e.keysym, down: e.down) },
                               write: { [weak self] text in
                                   // No connection: its ⌘V could not go out, so the paste counts as failed.
@@ -119,6 +129,17 @@ import SwiftUI
     /// display or a zoomed-in part is shown: macOS's Screen Sharing leaves most smaller requests unanswered (#3067).
     func show(in layer: AVSampleBufferDisplayLayer, timed: Bool = false) { sink.add(layer, timed: timed) }
     func hide(from layer: AVSampleBufferDisplayLayer) { sink.remove(layer) }
+
+    /// Video follows the connection: a live one (signed in) is what it binds to; anything else ends it.
+    private func followVideo() {
+        #if os(iOS) && canImport(PersonaScreenKit)
+        if phase == .live, let pair {
+            video.rfb(.init(group: ref.group, machine: ref.id, pair: pair))
+        } else {
+            video.rfb(nil)
+        }
+        #endif
+    }
 
     // MARK: Signing in
 

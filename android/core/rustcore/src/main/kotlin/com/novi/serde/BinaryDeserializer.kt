@@ -28,9 +28,12 @@ abstract class BinaryDeserializer(
         if (len < 0 || len > Int.MAX_VALUE.toLong()) {
             throw DeserializationError("Incorrect length value for Kotlin string")
         }
-        val content = readBytes(len.toInt())
+        // Decode the already-checked range without a temporary array; retain strict UTF-8 validation.
+        val start = position
+        requireAvailable(len.toInt())
+        position = start + len.toInt()
         return try {
-            content.decodeToString(throwOnInvalidSequence = true)
+            input.decodeToString(start, position, throwOnInvalidSequence = true)
         } catch (e: Throwable) {
             throw DeserializationError("Incorrect UTF8 string")
         }

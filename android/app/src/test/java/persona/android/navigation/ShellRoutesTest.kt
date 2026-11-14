@@ -1,9 +1,12 @@
 package persona.android.navigation
 
 import androidx.navigation3.runtime.NavKey
+import persona.core.contracts.InboxChainEntry
+import persona.core.contracts.InboxEventFields
 import persona.core.contracts.api.ExtensionUiPlace
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.*
+import persona.feature.inbox.InboxEventRoute
 import persona.feature.inbox.InboxItemPages
 import persona.feature.inbox.InboxDocRef
 import persona.feature.inbox.InboxMomentRef
@@ -48,6 +51,17 @@ class ShellRoutesTest {
         // A tab-only link keeps that tab's stack as the user left it.
         assertEquals(2, stacks.getValue(AppTab.Agents).size)
         assertNull(Router().open(NotificationRoute(null)))
+    }
+
+    @Test fun inboxItemLinksOpenEventPagesLikeRows() {
+        val event = InboxEventFields(chain = listOf(InboxChainEntry("c1", kind = "received", text = "Received")))
+        val chat = InboxRecord(InboxItem("chat-event", kind = "dm", status = "action"), feedId = "room", event = event)
+        val mail = InboxRecord(InboxItem("mail-event", kind = "mail", status = "action"), source = "mail", event = event)
+        val records = listOf(chat, mail)
+
+        assertEquals(InboxDestination.Open(InboxEventRoute("chat-event")), inboxDestination(InboxItemRoute("chat-event"), records, true))
+        assertEquals(InboxDestination.Open(InboxEventRoute("mail-event")), inboxDestination(InboxItemRoute("mail-event"), records, true))
+        assertEquals(InboxDestination.Open(LarkRoute("room", "chat-event", null)), inboxDestination(LarkChatRoute("room"), records, true))
     }
 
     @Test fun inboxLinksOpenTheSourcePageOnlyOnceTheItemIsKnown() {

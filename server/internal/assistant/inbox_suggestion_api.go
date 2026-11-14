@@ -122,9 +122,11 @@ func (s *Service) actOnSuggestion(ctx context.Context, id string, in suggestionR
 		return InboxItem{}, errAnswerOnly
 	}
 	if g != nil && g.Conversation != nil {
+		resetInboxFollowChecks(it)
 		return s.actOnHandedSuggestion(ctx, it, g, in, text) // it lets b.mu go
 	}
 	w := beginWrite(it)
+	resetInboxFollowChecks(it)
 	if it.Agent == nil { // an old draft's item, or a first instruction: its conversation's bookkeeping starts here
 		it.Agent = &InboxAgent{State: AgentSkipped}
 	}

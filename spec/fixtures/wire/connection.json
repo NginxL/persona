@@ -121,7 +121,10 @@
         "agents_page_counts",
         "sessions_hierarchy",
         "sessions_catalog",
+        "sessions_todo",
+        "sessions_quick_filters",
         "machine_rename",
+        "desktop_unregister",
         "assistant_views",
         "assistant_html_bridge"
       ],
@@ -258,7 +261,10 @@
           "agents_page_counts",
           "sessions_hierarchy",
           "sessions_catalog",
+          "sessions_todo",
+          "sessions_quick_filters",
           "machine_rename",
+          "desktop_unregister",
           "assistant_views",
           "assistant_html_bridge"
         ],
@@ -386,7 +392,10 @@
         "agents_page_counts",
         "sessions_hierarchy",
         "sessions_catalog",
+        "sessions_todo",
+        "sessions_quick_filters",
         "machine_rename",
+        "desktop_unregister",
         "assistant_views",
         "assistant_html_bridge"
       ],
@@ -512,7 +521,10 @@
           "agents_page_counts",
           "sessions_hierarchy",
           "sessions_catalog",
+          "sessions_todo",
+          "sessions_quick_filters",
           "machine_rename",
+          "desktop_unregister",
           "assistant_views",
           "assistant_html_bridge"
         ],

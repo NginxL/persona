@@ -39,7 +39,7 @@ const (
 	groupOpenMax      = 10                 // open events the events tool lists, independently of done events
 	groupDoneMax      = 6                  // recent done events the events tool lists, independently of open events
 	groupDoneFor      = 3 * 24 * time.Hour // how long a done event is still listed; keep whole days so DoneDays matches
-	groupDoneCountMax = 50                 // 50 is a starting value with no supporting measurements; done events at this count are not candidates
+	groupDoneCountMax = 50                 // 50 is a starting value with no supporting measurements; done non-direct-chat events at or above it are not candidates; direct-chat done events are exempt
 	groupConcurrency  = 4                  // batches related at once (the others wait for the next round)
 	groupAttempts     = 3                  // tries of one event's append
 	groupDMJoinWithin = 2 * time.Hour      // 2 hours is a starting value with no supporting measurements
@@ -211,9 +211,10 @@ func (s *Service) noteGroupWhy(id, why string) {
 }
 
 // groupEvents are the events of a conversation as the events tool answers: at most groupOpenMax open ones, then at
-// most groupDoneMax done ones within groupDoneFor that are not noise and have fewer than groupDoneCountMax messages.
-// Each group is newest first and has its own quota; query keeps those whose title, summary or meta has it before either
-// cap. Hidden members of merged rows are never candidates.
+// most groupDoneMax done ones within groupDoneFor that are not noise. Non-direct-chat done events also have fewer than
+// groupDoneCountMax messages; direct-chat done events have no message-count cap. Each group is newest first and has its
+// own quota; query keeps those whose title, summary or meta has it before either cap. Hidden members of merged rows are
+// never candidates.
 func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	b := &s.inbox
 	b.mu.Lock()
@@ -226,7 +227,7 @@ func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 			continue
 		}
 		isOpen := it.DoneAt == nil // merged members, the other way open() is false, are skipped above
-		if !isOpen && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || it.Count >= groupDoneCountMax) {
+		if !isOpen && (it.DoneAt.Before(cutoff) || it.Tier == TierNoise || (it.Kind != KindDM && it.Count >= groupDoneCountMax)) {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(it.Title+"\n"+it.Summary+"\n"+string(it.Meta)), q) {
@@ -663,7 +664,7 @@ func (s *Service) appendEvent(ctx context.Context, source string, a connector.Gr
 // keepsWords reports whether the handling conversation or the user owns the item's title and summary. Grouping still
 // advances the tier, reason and urgency, but leaves those words and their provenance alone.
 func keepsWords(it *InboxItem) bool {
-	return it.TitleBy == TitleByAssistant || it.TitleBy == TitleByUser
+	return it.TitleBy == TitleByAssistant || it.TitleBy == TitleByUser || it.TitleBy == TitleByMerged
 }
 
 // fallbackEventTitle removes a redundant conversation-name prefix only when a real title remains.

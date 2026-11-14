@@ -72,6 +72,21 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     /// The conversations it was handed to with Hand to AI's main chat (#1194), oldest first: they may write back to
     /// it, and the main conversation offers "Wrap up" for it (#5932). Older hubs leave it out.
     var handoffs: [Handoff]?
+    /// The rows merged into this one by hand (#6480); the hub hides them from every list.
+    var mergedFrom: [MergeRef]?
+
+    /// One row merged into another: where it came from.
+    nonisolated struct MergeRef: Codable, Hashable, Sendable {
+        var id: String
+        var source: String
+        var accountName: String?
+        var title: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, source, title
+            case accountName = "account_name"
+        }
+    }
 
     /// The follow-up facts a client reads (spec/fixtures/inbox/now.json); the manager keeps the counters and due flag.
     nonisolated struct Follow: Codable, Hashable, Sendable {
@@ -308,6 +323,7 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, source, kind, account, title, `where`, sender, avatar, preview, count, tier, summary, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
         case status, urgent, recap, handling, suggestion, follow, now, chain, related, manager, handoffs
+        case mergedFrom = "merged_from"
         case accountName = "account_name", startedAt = "started_at", updatedAt = "updated_at", doneAt = "done_at", doneBy = "done_by"
         case chainCount = "chain_count"
     }
@@ -582,6 +598,29 @@ extension APIClient {
     /// An item's Thread (#2128): what it hangs under and what hangs under it. Older hubs answer 404.
     func inboxTree(_ kind: String, _ id: String) async throws -> InboxTree {
         try await get(Self.inboxTreePath(kind, id))
+    }
+
+    /// The body of PUT /api/v1/inbox/{id}/parent is the parent object itself, or JSON null; it is never wrapped in
+    /// a `parent` field. An optional passed straight to `request` would instead leave the body empty.
+    private nonisolated struct InboxParentBody: Encodable, Sendable {
+        /// Only the value is encoded; this property name never appears in the JSON body.
+        var node: InboxParent?
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            if let node {
+                try container.encode(node)
+            } else {
+                try container.encodeNil()
+            }
+        }
+    }
+
+    /// Hangs an item under another item, a to-do or an Agent session, or removes that relationship with nil.
+    /// The hub answers with the changed item.
+    func setInboxParent(_ id: String, _ parent: InboxParent?) async throws -> InboxItem {
+        let data = try await request("PUT", "/api/v1/inbox/" + id + "/parent", body: InboxParentBody(node: parent))
+        return try JSON.decoder.decode(InboxItem.self, from: data)
     }
 
     /// `/api/v1/inbox/tree/<kind>/<id>`: each segment escaped (an id may carry '#', a space…), a session's slash kept

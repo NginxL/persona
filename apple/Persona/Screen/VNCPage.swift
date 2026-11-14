@@ -32,8 +32,10 @@ struct VNCPage: View {
     @State private var quality: ScreenQuality = .auto
     /// Whether the connection-stats overlay is shown (#3954), per Mac, off by default.
     @State private var statsOn = false
-    /// A one-line reason shown when the video channel falls back to VNC (#3954); nil when there's nothing to explain.
-    @State private var fallbackReason: String?
+    /// `-showScreenFallbackDemo`'s reason, for screenshots of the fallback line (#3954); the real one is `fallback`.
+    @State private var fallbackDemo: ScreenVideoFallback?
+    /// The not-allowed line's "How to turn it on" is showing its one sentence.
+    @State private var fallbackHelp = false
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
@@ -69,7 +71,7 @@ struct VNCPage: View {
                     if let a = model.computerActivities[ref], a.shown(at: ctx.date) { stepLine(a) }
                 }
                 #if os(iOS) || os(visionOS)
-                if let reason = fallbackReason { fallbackBanner(reason) }
+                if let f = fallback { fallbackBanner(f) }
                 #endif
                 ZStack {
                     Color.black
@@ -95,9 +97,9 @@ struct VNCPage: View {
             mode = VNCMode.of(ref)
             #if os(iOS) || os(visionOS)
             display = VNCDisplayChoice.of(ref)
-            // Picture defaults to VNC until the video channel's client wiring lands (it then defaults to video when the
-            // computer advertises `screen_video` and Screen Recording is granted); a saved choice always wins.
-            picture = ScreenPicture.of(ref) ?? .vnc
+            // Picture defaults to video on a Mac whose node offers it (it falls back to VNC by itself when it can't show);
+            // a saved choice always wins.
+            picture = ScreenPicture.of(ref) ?? (videoAdvertised ? .video : .vnc)
             quality = ScreenQuality.of(ref)
             statsOn = ScreenStatsPref.of(ref)
             #if DEBUG
@@ -106,12 +108,16 @@ struct VNCPage: View {
             // the video channel, so a screenshot shows the Picture and Quality items the switcher offers.
             if args.contains("-showScreenVideoDemo") { picture = .video }
             if args.contains("-showScreenStatsDemo") { statsOn = true }
-            if args.contains("-showScreenFallbackDemo") {
-                fallbackReason = String(localized: "Video couldn’t connect, switched to VNC: no route to the computer on this network.")
-            }
+            if args.contains("-showScreenFallbackDemo") { fallbackDemo = .lost }
             #endif
+            #endif
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.want(videoWant)
             #endif
         }
+        #if os(iOS) && canImport(PersonaScreenKit)
+        .onChange(of: videoWant) { _, want in session?.video.want(want) }
+        #endif
         .onDisappear {
             #if os(iOS)
             VNCPiP.shared.pagePicture(nil)
@@ -138,8 +144,16 @@ struct VNCPage: View {
         #if os(iOS) || os(visionOS)
         // Back from the background: the suspended app's connection is usually gone. Reconnect instead of waiting on
         // Reconnect being tapped; a sign-in asked for, or a connection still up, is left as it is.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in wentBackground = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            wentBackground = true
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.hold("background", true) // the small window, if any, shows RFB's picture meanwhile
+            #endif
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.hold("background", false)
+            #endif
             guard wentBackground, let s = session else { return }
             wentBackground = false
             if case .closed = s.phase {
@@ -492,29 +506,94 @@ struct VNCPage: View {
 
     #if os(iOS) || os(visionOS)
     /// A one-line reason under the bars when the video channel falls back to VNC (#3954).
-    private func fallbackBanner(_ reason: String) -> some View {
-        HStack(spacing: Theme.Space.xs) {
+    private func fallbackBanner(_ f: ScreenVideoFallback) -> some View {
+        let line = HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
             ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(Theme.caution)
-            Text(reason).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Text(Self.fallbackLine(f)).font(Theme.Font.label).foregroundStyle(.secondary)
+                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.Space.page)
         .padding(.bottom, Theme.Space.xs)
-        .accessibilityIdentifier("screen-fallback")
+        return Group {
+            if f == .notAllowed {
+                // The one reason the user can fix themselves: the whole line is the way to the one sentence saying where
+                // (a whole-width target, and "How to turn it on" wraps with the words at any text size).
+                Button { fallbackHelp = true } label: { line.contentShape(.rect) }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(Text("How to turn it on"))
+                    .accessibilityIdentifier("screen-fallback-help")
+            } else {
+                line.accessibilityElement(children: .combine).accessibilityIdentifier("screen-fallback")
+            }
+        }
+        .alert("Turn On Video for This Mac", isPresented: $fallbackHelp) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(ScreenVideoFallback.howToAllow)
+        }
     }
 
-    /// The reading the stats overlay draws (#3954). The video channel isn't wired on the client yet, so today the live
-    /// picture is RFB and these are VNC-mode numbers; a `-showScreenStatsDemo` build shows sample video-mode numbers.
+    /// The fallback's words; the not-allowed one ends with "How to turn it on" in the accent color.
+    private static func fallbackLine(_ f: ScreenVideoFallback) -> AttributedString {
+        var line = AttributedString(f.message)
+        if f == .notAllowed {
+            var how = AttributedString(String(localized: "How to turn it on"))
+            how.foregroundColor = Theme.accent
+            line += AttributedString(" ") + how
+        }
+        return line
+    }
+
+    /// The reading the stats overlay draws (#3954): the video channel's while its picture shows, else RFB's. A
+    /// `-showScreenStatsDemo` build shows sample video-mode numbers.
     private var currentStats: ScreenStats? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
         #endif
         guard let s = session else { return nil }
+        #if os(iOS) && canImport(PersonaScreenKit)
+        if s.video.showing {
+            let v = s.video, r = v.reading
+            return ScreenStats(mode: .video, path: .relay, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
+                               resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, captureMs: r.captureMs,
+                               encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs)
+        }
+        #endif
         return ScreenStats(mode: .vnc, path: .relay,
                            bitrateMbps: s.mbps > 0 ? s.mbps : nil,
                            fps: s.fps > 0 ? s.fps : nil,
                            roundTripMs: s.latency)
     }
+
+    /// Why the page shows VNC while video is chosen (#3954); nil when there is nothing to explain. Only while VNC is
+    /// live: while it connects or is closed, the page says so itself.
+    private var fallback: ScreenVideoFallback? {
+        #if DEBUG
+        if let fallbackDemo { return fallbackDemo }
+        #endif
+        #if os(iOS) && canImport(PersonaScreenKit)
+        guard picture == .video, videoAdvertised, let s = session, s.phase == .live else { return nil }
+        if model.screenVideo(ref)?.permission == "missing" { return .notAllowed }
+        return s.video.fallback
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(iOS) && canImport(PersonaScreenKit)
+    /// What the page asks of the video channel (#3954): video chosen, a Mac that offers and allows it, and one display
+    /// shown — its only one, or one chosen of several the node numbered (`display-<id>`); nil keeps VNC (all of several
+    /// displays at once stay RFB's, since video carries one).
+    private var videoWant: ScreenVideoLink.Want? {
+        guard picture == .video, videoAdvertised, model.screenVideo(ref)?.permission != "missing" else { return nil }
+        if let d = shownDisplay {
+            guard d.id.hasPrefix("display-"), let id = Int(d.id.dropFirst("display-".count)) else { return nil }
+            return .init(display: id, rect: d.frame)
+        }
+        return offeredDisplays.isEmpty ? .init(display: nil, rect: nil) : nil
+    }
+    #endif
 
     /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture and Quality items appear only
     /// then, so no Mac shows a control it can't use. A `-showScreenVideoDemo` build forces it on for screenshots.

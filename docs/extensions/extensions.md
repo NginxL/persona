@@ -2517,7 +2517,7 @@ The component showcase's version 6 pages are `web/src/showcase/v6` (with their p
 **iOS** (#827) draws all of it, with the rest of UI version 5, and sends 6: whole pages and the native stream (`ExtensionUIContext.pageVersion`,
 `ExtensionPageStream.uiVersion`) and the app's own cards and sections (`ExtensionUIContext.cardVersion`; version 4–5's code components there read-only, `ExtensionCodeSummary`),
 every `ExtensionViewModel` saying what the app's renderer draws (`drawnByApp`). Widgets, the watch and the system extensions keep the Shared version, 3: they draw none of it.
-The frozen Mac app compiles the same code but keeps what it reported before (pages 4, the stream 5, cards 3), so the hub goes on downgrading for it (`docs/apple/mac.md`: new features skip it).
+The retired native Mac app compiled the same code but kept what it reported before (pages 4, the stream 5, cards 3), so the hub downgraded for it (`docs/archive/apple/mac.md`: new features skipped it).
 See "App: Settings › Extensions" below for each part. One difference from the web and Android: a switch that asks first has already moved when the alert shows (a system switch cannot be held where it was), and Cancel puts it back.
 
 ## System-level placements (#1858)
@@ -3051,7 +3051,7 @@ Views, components, actions, responses, placements and context all use schema-gen
   two marketplaces and their catalogs; `-tab settings -openExtensions YES` (`-openExtension <id>` opens details directly, add `-openExtensionPage <ui>` for its page and `-openExtensionManager <id>` for another manager's copy; old `-openPlugin…` forms still work),
   `-openExtensionMarket YES` (catalog), `-openExtensionMarkets YES` (marketplace management), `-openMarketExtension <marketplace id>/<extension id>`, `-openLauncherPage <launcher>`.
   UI slots: `-tab settings` shows cards and entries; `-openExtension example-gateway -openExtensionPage usage` opens usage; `-openMachines YES -openMachineDetail macbook`
-  shows the machine section. Mac uses `scripts/app/mac_shot.sh` (`DEMO=0` plus `-pairURL`); `-openMacExtensionPage example-gateway/usage` opens that sidebar page.
+  shows the machine section. Desktop uses the Electron smoke's captured web pages; iOS uses `scripts/app/sim.sh` (`DEMO=0` plus `-pairURL`); `-openMacExtensionPage example-gateway/usage` opens that sidebar page.
   UI tests `ExtensionSettingsTests`, `ExtensionMarketTests` (marketplace installation, upgrade preview, marketplace management, saving extension pages, launcher section; `TEST_RUNNER_PERSONA_EXTENSIONS_HUB`),
   `ExtensionSlotsTests` (cards, entries/badges, usage-page segmented controls and chart, opening cards, machine sections),
   unit tests `ExtensionsModelTests`, `ExtensionMarketModelTests`, `ExtensionViewModelTests`, `ExtensionSlotsModelTests`.
@@ -3094,7 +3094,7 @@ events `{"event","params"}`. Hub-started extensions use stdin / stdout, remote o
 ```json
 {"protocol": 1,
  "hub": {"build": 202611050000, "extension_points": {"computer": 1, "connectors": 2, "voice": 1}, "role": "center", "timezone": "Asia/Shanghai", "locale": "en",
-         "capabilities": ["inbox_group"]},
+         "capabilities": ["inbox_group", "inbox_group_state"]},
  "extension": {"id": "example-notes", "version": "1.2.0", "dir": "…", "data_dir": "…"},
  "config": {"base_url": "https://notes.example.com", "folders": ["work"], "include_shared": false},
  "secrets": {"api_key": "…"},
@@ -3106,7 +3106,7 @@ events `{"event","params"}`. Hub-started extensions use stdin / stdout, remote o
 `member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`.
 `hub.timezone` is the user's time zone (IANA, as reported by devices), used for displayed times ("today", message timestamps); empty when only the hub's own clock is known, read at each start.
 `hub.locale` is the user's language (`zh-Hans` / `en` / `ja`, `docs/protocol/i18n.md` ("Protocol")); extensions use it for human-facing text (status, sign-in prompts, bot replies), read at each start, defaulting to `zh-Hans` if absent.
-`hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")).
+`hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")); `inbox_group_state` (a grouping connector may report the events the user read or replied to in the source, and its fallback plan may assign messages to an already handled event, which the hub accepts and reopens; `docs/assistant/inbox.md` ("Following up")).
 Missing field or entry means the hub does not do it.
 `hub.manager` is the id of the manager running the extension when it is not the built-in one (also `PERSONA_MANAGER` for a program it starts; `docs/assistant/managers.md`, "Extensions and the hub's API"); absent for the built-in manager.
 The program returns `{"protocol": 1, "id", "version", "contributes"?}`: protocol mismatch returns `wrong_protocol`

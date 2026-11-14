@@ -130,11 +130,12 @@ func (a *InboxAgent) startDue(now time.Time) bool {
 	return a.RetryAfter == nil || !a.RetryAfter.After(now)
 }
 
-// handInbox is one pass of the AI twin's work (docs/assistant/inbox.md"AI twin"): settle conversations that finished, hung or
-// were lost, escalate every newly triaged Needs you item to the manager (one processing conversation per event), deliver
-// what waits for the events' conversations (new messages, the user's answers), start conversations for the queued
-// ones. One pass at a time, in the background. A pass asked for while one runs is not dropped: the goroutine running
-// passes runs another after it (every caller is an event, and nothing else would come back for what it queued).
+// handInbox is one pass of the AI twin's work (docs/assistant/inbox.md"AI twin"): look again at waiting matters whose
+// time came, settle conversations that finished, hung or were lost, escalate every newly triaged Needs you item to the
+// manager (one processing conversation per event), deliver what waits for the events' conversations (new messages, the
+// user's answers), and start conversations for the queued ones. One pass at a time, in the background. A pass asked for
+// while one runs is not dropped: the goroutine running passes runs another after it (every caller is an event, and
+// nothing else would come back for what it queued).
 func (s *Service) handInbox(ctx context.Context) {
 	b := &s.inbox
 	b.handAgain.Store(true)
@@ -162,6 +163,7 @@ func (s *Service) handPass(ctx context.Context) {
 	cfg := s.inboxConfig(ctx).Agent
 	b := &s.inbox
 	s.linkInboxTaskURLs(ctx)
+	s.checkInboxFollowUps(ctx, cfg, time.Now())
 	if !cfg.Enabled {
 		s.releaseInboxAgents(ctx)
 		return
@@ -457,8 +459,9 @@ func (s *Service) requeueAgentStart(ctx context.Context, a *InboxAgent, err erro
 }
 
 // sweepInboxAgents settles the events' conversations: one looking that ended its turn without a suggestion (after its
-// first minute) or ran past the timeout fails, so does one whose sub-session ran past four timeouts; a start the
-// manager did not live to record goes back to the queue (the event's id finds its conversation).
+// first minute) or ran past the timeout fails, so does one whose sub-session ran past four timeouts. A turn woken from
+// waiting instead returns to waiting with its next check time. A start the manager did not live to record goes back to
+// the queue (the event's id finds its conversation).
 func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, now time.Time) {
 	b := &s.inbox
 	b.mu.Lock()
@@ -492,6 +495,7 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 		}
 		b.mu.Unlock()
 		reason := ""
+		returnToWaiting := false
 		switch {
 		case s.isWorkMachine(a.MachineID):
 			reason = i18n.T(s.lang(ctx), "assistant-start.work_machine")
@@ -518,9 +522,11 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 		case state != HandlingLooking:
 		case a.StartedAt != nil && now.Sub(*a.StartedAt) > agentTimeout(cfg):
 			reason = i18n.T(s.lang(ctx), "assistant-inbox_agent.timeout")
+			returnToWaiting = a.Back == HandlingWaiting
 		case a.StartedAt != nil && now.Sub(*a.StartedAt) > time.Minute:
 			if sess, ok := s.session(ctx, a.MachineID, a.SessionID); ok && sess.Status != proto.StatusWorking {
 				reason = i18n.T(s.lang(ctx), "assistant-inbox_agent.no_draft")
+				returnToWaiting = a.Back == HandlingWaiting
 			}
 		}
 		if reason == "" {
@@ -531,6 +537,8 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 			w := beginWrite(it)
 			if it.Suggestion != nil { // new messages left its suggestion standing: it still holds
 				b.setHandling(it, HandlingDone, "", now)
+			} else if returnToWaiting && it.Agent.Back == HandlingWaiting {
+				b.resumeInboxWaiting(it, now)
 			} else {
 				b.failHandling(it, reason, now)
 			}

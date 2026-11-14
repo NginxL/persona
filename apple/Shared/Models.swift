@@ -2147,10 +2147,10 @@ nonisolated struct Item: Codable, Identifiable, Hashable, Sendable {
     var modelRefusal: ModelRefusal? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, supervisionUser, source, outcome
+        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, source, outcome
         case modelRefusal = "model_refusal"
         case toolUseID = "tool_use_id", toolName = "tool_name", toolInput = "tool_input", isError = "is_error", fullSize = "full_size",
-             clientMsgID = "client_msg_id"
+             clientMsgID = "client_msg_id", supervisionUser = "supervision_user"
     }
 
     /// The text without the line the hub adds where it cut it (the app offers the whole text itself).
@@ -2220,6 +2220,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     var toolName: String?
     var toolUseID: String?
     var questions: [Question]?
+    /// Whether this question's runtime can release its waiter without an answer (`cancel` on Resolution).
+    var canCancel: Bool?
     var plan: String?
     var toolInput: JSONValue?
     var summary: String?
@@ -2300,7 +2302,7 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, kind, questions, plan, summary, screen, cwd, dialog, secret, fields, agent, reason, delegating, delegate, manager
-        case suggestion
+        case suggestion, canCancel = "can_cancel"
         case machineID = "machine_id", sessionID = "session_id", sessionTitle = "session_title", taskTitle = "task_title",
              createdAt = "created_at", expiresAt = "expires_at", toolName = "tool_name", toolUseID = "tool_use_id",
              toolInput = "tool_input", alwaysLabel = "always_label", alwaysKeys = "always_keys", alwaysHonored = "always_honored",
@@ -2367,6 +2369,8 @@ nonisolated struct Resolution: Codable, Sendable, Equatable {
     var keys: [String]?
     var text: String?
     var dismiss: Bool?
+    /// Close a question whose interaction advertised `can_cancel`, without sending an answer or another action.
+    var cancel: Bool?
     /// Keys before `text` (`keys` go after it): pick "Type something." by its number, then type.
     var preKeys: [String]?
     /// A screen dialog's option (Interaction.dialog): the node works out its keys, after checking the dialog is unchanged.
@@ -2384,11 +2388,12 @@ nonisolated struct Resolution: Codable, Sendable, Equatable {
     var content: [String: JSONValue]?
 
     enum CodingKeys: String, CodingKey {
-        case answers, approve, mode, feedback, allow, always, message, keys, text, dismiss, option, options, values, reason, action, content
+        case answers, approve, mode, feedback, allow, always, message, keys, text, dismiss, cancel, option, options, values, reason, action, content
         case preKeys = "pre_keys", answeredBy = "answered_by"
     }
 
     static let dismissed = Resolution(dismiss: true)
+    static let cancelled = Resolution(cancel: true)
 }
 
 /// One device's push settings, kept by the hub per device (Settings › Notifications). The timings come back from the hub's

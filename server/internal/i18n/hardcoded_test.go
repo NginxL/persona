@@ -38,7 +38,6 @@ var hardcodedDirs = []string{
 	"internal/extmgr",
 	"internal/feishubot",
 	"internal/hub",
-	"internal/linktray", // the Windows tray: everything it shows goes through link-tray.json
 	"internal/mail",
 	"internal/quota",
 	"internal/update",

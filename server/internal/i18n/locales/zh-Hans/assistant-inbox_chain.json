@@ -18,6 +18,7 @@
   "agent": "开了子会话：{title}",
   "agent_stopped": "Agent 停了",
   "agent_stopped_failed": "Agent 失败了",
+  "reported": "助手说：{text}",
   "confirmed": "你确认了",
   "confirmed_edited": "你确认了（改过文字）",
   "rejected": "你驳回了",
@@ -50,5 +51,10 @@
   "handed_conversation": "交给了「{title}」",
   "handed_conversation_generic": "交给了一个对话",
   "waiting_who": "等{who} · {at} 再看",
-  "waiting_reply": "等对方回复 · {at} 再看"
+  "waiting_reply": "等对方回复 · {at} 再看",
+  "check_due_next": "到了再看的时间：{next}",
+  "check_due": "到了再看的时间",
+  "check_follow_up_ask": "看过 3 次还没动静，还要跟吗？",
+  "check_started_next": "到点回看：{next}",
+  "check_started": "到点回看"
 }

@@ -28,6 +28,9 @@ struct LineFold<Words: View>: View {
             measured
                 .frame(height: folds && !open ? cut : nil, alignment: .top)
                 .clipped()
+                // What is folded away takes no touches: the words run on past the fold, and the chat's upside-down list
+                // draws this row over the one below it, whose taps they took (#6645: a work line there never opened).
+                .contentShape(.rect)
                 .mask { if folds && !open { FoldFadeMask(line: cut / CGFloat(max(lines, 1))) } else { Rectangle() } }
                 .background(alignment: .top) { FoldLinesProbe(lines: lines, font: Theme.Font.body, level: .body) { cut = $0 } }
             if folds { FoldToggle(open: open, prefix: "message", action: { flip(open) }) }

@@ -13,6 +13,8 @@ final class ScreenVideoWireTests: XCTestCase {
         .heartbeat(HeartbeatMessage(last: 43)),
         .paused(PausedMessage(reason: "locked")),
         .resumed,
+        .timing(TimingMessage(captureMs: 0, encodeMs: 5.2, networkMs: 7.5, kbps: 1800, fps: 60)),
+        .timing(TimingMessage(captureMs: nil, encodeMs: nil, networkMs: nil, kbps: 0, fps: 0)),
         .start(StartMessage(display: 1, maxSize: 1600, fps: 30, maxKbps: 12000, codecs: ["hevc", "h264"])),
         .start(StartMessage(display: nil, maxSize: 900, fps: 15, maxKbps: 1500, codecs: ["h264"])),
         .report(ReceiverReport(lastFrame: 42, captureMicros: 1_000_000_007, arrivalMicros: 1_000_050_000, bytesSinceLast: 40000, flags: [.decodingError])),

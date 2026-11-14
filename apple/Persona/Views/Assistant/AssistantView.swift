@@ -39,10 +39,13 @@ struct AssistantView: View {
     @Environment(\.splitDetail) private var split
     @Environment(\.splitShowList) private var showList
     private var embedded: Bool { unified != nil && shell == nil && hostPath != nil }
+    /// The Sidebar layout on a phone: the page under the drawer (`SplitDetail.drawer`).
+    private var drawerPage: Bool { embedded && split?.drawer == true }
     /// The path this page's pages are pushed on: the page beside the sidebar's in the Sidebar layout, its own otherwise.
     private var navPath: Binding<NavigationPath> { hostPath ?? $path }
     #else
     private var embedded: Bool { false }
+    private var drawerPage: Bool { false }
     private var navPath: Binding<NavigationPath> { $path }
     #endif
     /// The last shell request shown (`ShellState.request`'s serial).
@@ -218,7 +221,12 @@ struct AssistantView: View {
     }
 
     /// The drawer the page slides with: the shell's, or its own.
-    private var activeDrawer: AssistantDrawer { shell?.drawer ?? drawer }
+    private var activeDrawer: AssistantDrawer {
+        #if os(iOS)
+        if drawerPage, let unified { return unified.drawer } // the Sidebar layout's on a phone (#6332)
+        #endif
+        return shell?.drawer ?? drawer
+    }
 
     /// The stack's root page. Its own property so the stack's modifier chain stays within what Xcode 26.0 can
     /// type-check in time (#5333).
@@ -235,8 +243,9 @@ struct AssistantView: View {
                     .environment(\.messageLiftHost, liftHost)
                     #endif
                     // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
-                    .environment(\.shellChat, shell != nil || ChatComposerKind.padCard)
-            } else if shell != nil || pageTabSwitch {
+                    // The Sidebar layout's phone page too: the iPhone's conversation, as in the shell (#6332).
+                    .environment(\.shellChat, shell != nil || ChatComposerKind.padCard || drawerPage)
+            } else if shell != nil || pageTabSwitch || drawerPage {
                 // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
                 // over the composer. The iPad keeps `AssistantHome`.
                 ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
@@ -261,7 +270,7 @@ struct AssistantView: View {
 
     /// The root with its top bar, the lift layer and the pages it pushes: split from `stack` for Xcode 26.0 (#5333).
     private var dressedRoot: some View {
-        root
+        AnyView(root)
         // No system bar: the top bar floats over the conversation with a fog under it (it scrolls beneath).
         .toolbarVisibility(.hidden, for: .navigationBar)
         #if os(iOS) || os(visionOS)
@@ -272,6 +281,7 @@ struct AssistantView: View {
                             sidebarIsColumn: widthClass == .regular,
                             sidebarShown: sidebarColumnShown,
                             sidebarCounts: embedded,
+                            drawerTitle: drawerPage,
                             openSidebar: toggleSidebar,
                             // In a health conversation New opens Health's new conversation page, whose list has the
                             // space's past ones (#4329); elsewhere the assistant's.
@@ -332,7 +342,9 @@ struct AssistantView: View {
     /// The root as the stack's (or, in the Sidebar layout, the split's page's) first page: what it does there (its routes,
     /// the requests from the shell or the sidebar, the debug pages).
     private var routed: some View {
-            dressedRoot
+            // Erased here and in `dressedRoot` (#6735): unoptimized, this getter reserved a stack slot for every
+            // modifier below, each holding the whole page (375 KB of an iPhone's 1 MB main-thread stack).
+            AnyView(dressedRoot)
             // Full Screen in an agent's sheet (TasksStore.expand): its page pushed here, as from the Agents tab.
             .onChange(of: TasksStore.shared.fullAgent, initial: true) { _, key in
                 guard let key else { return }

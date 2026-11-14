@@ -18,6 +18,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.InboxEventFields
+import persona.core.contracts.InboxHandling
 import persona.core.contracts.Session
 import persona.core.contracts.api.InboxEntry
 import persona.core.contracts.api.InboxParentRef
@@ -104,6 +105,19 @@ class InboxLineSectionTest {
         show(FakeRepository(null).apply { failRead = true }, current)
         rule.onNodeWithText("线索").assertDoesNotExist()
         rule.onNodeWithText("不是同一件事").assertDoesNotExist()
+    }
+
+    @Test fun aLineItemPrefersTheSharedNowWordsOverItsLegacyMark() {
+        val current = record("current", "Current")
+        val parent = record("parent", "Parent").let { old ->
+            old.copy(item = old.item.copy(status = "working"),
+                event = old.event.copy(now = "queued", handling = InboxHandling(state = "looking")))
+        }
+        val repository = FakeRepository(InboxLineage(InboxParentRef("inbox", "current"), current,
+            listOf(InboxLineAncestor(InboxParentRef("inbox", "parent"), parent))))
+        show(repository, current)
+        rule.onNodeWithText("排队中，等 AI 看").assertExists()
+        rule.onNodeWithText("AI 正在看").assertDoesNotExist()
     }
 
     @Test fun aTodoRowUsesItsExistingRoute() {
