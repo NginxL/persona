@@ -1269,6 +1269,14 @@ capsule, one per open item handed to it, at most two.
 
 Today there are seven mechanisms and the same action can use different ones (DS-24). Archive in the sidebar, to-do swipe delete and mail-account delete have no confirmation and no Undo. Only the Mac discards edits with a prompt.
 
+The optional web workflow board's manual view supports bulk metadata edits (#7583). **Select** reveals native
+checkboxes and a selection bar using the existing `Button` and `Menu` components. **Select all visible** counts only
+cards in the current filters and, on a narrow board, the displayed column; hidden cards are not silently included.
+The bar wraps whole controls without wrapping button text. Movement, pinning and archive/restore use the reversible
+rung: immediate feedback, one atomic write, and **Undo last change** while its acknowledged board revision is current.
+A conflict reloads without replaying the operation or its inverse. This pattern belongs to the optional Agents board,
+not Assistant's primary chat. Older managers and view-only connections retain the existing single-card experience.
+
 ### 4.5 Push, notifications and reminders
 
 - The system prompt appears right after pairing and at launch, with no in-app explanation first (`apple/Persona/App/PushRegistrar.swift:41-53`, the options at `:174`). Requested options include time-sensitive. When denied, Settings explains and deep-links; allowing it there registers when the app comes back (#1861).
