@@ -12,6 +12,35 @@ Cards can be renamed, pinned, archived, and restored. Dragging moves a card acro
 
 Click a card to see its folder and linked Agents, open that machine's Files or Git, or use **New agent** to open the existing creation flow prefilled with the machine and folder. Binding, moving to Done, pinning, and archiving only update board metadata: they do not start or stop Agents, and do not run Git, PRs, releases, or delete folders. Starting an Agent requires an explicit submit in the creation flow.
 
+## Organizing several workspaces (#7583)
+
+For people managing several Agent workspaces, the manual view offers **Select** when the manager advertises bulk
+editing and this connection has full access. Selection is local to this board, manager and sign-in; it is not saved.
+Native checkboxes and **Select all visible** choose cards within the search, computer and archive filters. On narrow
+screens, only the chosen column participates. Changing these scopes drops hidden selections. Agent activity does not
+change manual placement. The selected count counts cards, not linked Agents or matching folders.
+
+The selection bar offers **Move to**, **Pin / Unpin**, and **Archive / Restore**. These are board metadata edits:
+they do not stop Agents, delete folders, or perform Git operations. One request applies all selected changes with one
+revision check and one save. The client shows the complete projected result immediately, disables competing edits while
+it waits, and restores the last confirmed board if the write fails. A 409 reloads the board and asks the user to retry;
+it never silently repeats the operation. Failure keeps the still-visible selection available.
+
+**Undo last change** restores only the fields that the last successful bulk operation changed, including the original
+relative order within each column. It is available while the board still has that operation's acknowledged revision.
+A later write, permission/capability change or refreshed revision retires it. If another device writes before Undo
+reaches the manager, the same revision check rejects Undo and reloads; newer work is not overwritten. Undo survives
+an unchanged refresh, but is not persisted across reloads. Single-card actions keep their existing behavior.
+
+The API accepts at most 1,000 distinct existing cards (the board's existing capacity). A malformed entry invalidates
+the entire batch. Older managers omit `batch_cards`, so the web keeps their single-card controls without exposing a
+bulk action that could not succeed. The automatic view does not expose selection.
+
+The implementation extends the existing manager-owned mutation endpoint instead of looping over single-card writes
+(which could partially succeed) or replacing the whole state from the browser (which would give it authority over
+bindings). No schema migration or new endpoint is needed. The browser regression runner is
+`web/e2e/workspace-board-bulk.mjs`; its fixtures and screenshots use made-up data, not a deployed hub.
+
 ## Who owns the board
 
 The board belongs to the manager (`personad assistant`) (moved from the hub on 2026-11-05; code in `server/internal/assistant/workspace_board*.go`). Cards bind folders on computers, and computers are connected by the manager ([machines.md](../server/machines.md), "Who connects to computers"), so the board, the toggle, and workspace discovery are all done there. Table and settings keys are unchanged, so no migration is needed. The hub only forwards: `/api/v1/workspace-board`, `/api/v1/workspaces`, and `/api/v1/workspace-board/settings` go as-is over the bus `http.request` to the manager (`boardRoutes` in `assistantwire`), carrying the requesting device's role. The `workspace_board` and `workspace_board_settings` events are sent by the manager via `ws.broadcast` and the hub pushes them unchanged to every client; their shape is the same, so clients need no changes.

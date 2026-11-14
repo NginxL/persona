@@ -1319,7 +1319,7 @@ The new fields are stored in the existing interaction JSON payload; no database 
 Workflow, upgrades and persistence are covered in [Workspace board](../web/workspace-board.md). The APIs below belong to the manager (the hub forwards them unchanged over the bus `http.request`, see "Forwarding App requests"; `503 assistant_offline` when the manager isn't there), and the two events are sent by the manager via `ws.broadcast` and pushed unchanged by the hub. The APIs use the hub machine's Postgres as the only persistent state, with no fallback to in-memory or JSON file writes. `answer` may GET the board and the list; POST requires `full`. `can_write` says whether the current request's role can edit; it grants no extra file, Git or Agent permissions.
 
 ```text
-BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool }
+BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool, batch_cards?: bool }
 Column { id, title }
 Card { id, machine_id, workspace_id, title, cwd, source, source_id?, branch?,
        column_id, pinned: bool, archived: bool }
@@ -1340,6 +1340,21 @@ POST must give `revision` explicitly; on success the database increments it atom
 | `update_column` | `id,title` |
 | `move_column` | `id,before_id?`; omitting before puts it at the end |
 | `delete_column` | `id,move_to?`; another column is required when it has cards (archived included); the last column can't be deleted |
+| `batch_cards` | `changes: CardChange[]`; atomically edits 1–1,000 distinct existing cards, as described below |
+
+`batch_cards: true` in a GET or successful POST response advertises `batch_cards` support; absent or false means
+clients must keep using single-card operations. A batch contains only `revision`, `action` and `changes`. Each
+`CardChange` has `id` and at least one of `column_id`, `pinned`, `archived`; optional `before_id` requires `column_id`.
+Omitted or empty `before_id` moves to the end; a nonempty anchor must be another card in the destination column at
+that point in the supplied operation order. Duplicate IDs, missing cards, malformed references, empty changes,
+unknown fields and batch fields on single actions are invalid. Batches cannot add/remove cards or columns, rename,
+change workspace bindings or contain nested operations. The request limit is 4 MiB for a batch and 64 KiB for
+single actions; the existing card, ID and state limits still apply.
+
+Changes run in the supplied order against an independent candidate state. Validation failure discards the whole
+candidate; success performs one compare-and-swap save, increments the revision once, and emits one `workspace_board`
+event. No node RPC runs. Undo is another batch at the last acknowledged revision; clients must not rebase or retry
+its inverse after a conflict. This preserves newer edits and the original binding authority.
 
 The workspace in `add_card` must belong to the given machine. The hub re-enumerates or checks the session directories, then has the node verify and resolve the physical directory with `workspace.resolve`; clients can't write `source/source_id/branch`. Only one new binding is allowed per effective machine and canonical directory, with archived cards counted in the duplicate check. Paths are handled in the remote syntax (POSIX, Windows drive letters, UNC); remote paths are never resolved with the hub's own filesystem. When a machine alias is later absorbed, it is only projected onto the current routing identity in responses; the original card's column and order are not merged or rewritten, and the original state still takes part in edits and CAS.
 
