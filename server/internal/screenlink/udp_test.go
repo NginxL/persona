@@ -404,3 +404,37 @@ func directTransport(s *Session) *transport {
 	}
 	return nil
 }
+
+// Only frames that aren't keyframes may be given up; every other message, a keyframe included, must arrive.
+func TestOnlyFramesThatArentKeyframesMayBeGivenUp(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		msg  []byte
+		want byte
+	}{
+		{"a frame", videoFrameMsg(7, false, 100), udpDroppable},
+		{"a keyframe", videoFrameMsg(8, true, 100), 0},
+		{"format", videoMessage(videoFormat, pattern(20)), 0},
+		{"a frame too short to say", videoMessage(videoFrame, pattern(5)), 0},
+	} {
+		if got := udpFlags(c.msg); got != c.want {
+			t.Errorf("%s: flags %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// The pacing follows the phone's request down to a slow link's rate: only 1.25 × the video's own rate and 1 Mbit/s
+// hold it up, and 150 Mbit/s caps it.
+func TestThePacingFollowsThePhone(t *testing.T) {
+	for _, c := range []struct{ want, video, got int }{
+		{0, 0, udpPaceDefault},
+		{3_750, 1_500, 3_750}, // a 3 Mbit/s cellular bottleneck: what the phone asks for
+		{1_000, 1_500, 1_875}, // never below 1.25 × the video
+		{100, 0, udpPaceMin},
+		{900_000, 0, udpPaceMax},
+	} {
+		if got := udpPaceFloor(c.want, c.video); got != c.got {
+			t.Errorf("want %d, video %d: paced at %d, want %d", c.want, c.video, got, c.got)
+		}
+	}
+}

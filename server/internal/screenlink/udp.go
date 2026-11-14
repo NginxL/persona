@@ -20,9 +20,10 @@ const (
 	// design: from the bursts it measures); before it does, and never above the ceiling, these apply.
 	udpPaceDefault = 40_000
 	udpPaceMax     = 150_000
-	// udpPaceMin: the pacing never goes below this, nor below 4 × the video's own rate, so a frame leaves well inside
-	// its interval.
-	udpPaceMin = 8_000
+	// udpPaceMin: the pacing never goes below this, nor below 1.25 × the video's own rate (udpPaceFloor), so the
+	// phone's request (from the rate its packets arrive at) decides on a slow link: a higher floor sent every keyframe
+	// as a burst several times a cellular bottleneck's queue.
+	udpPaceMin = 1_000
 	// udpChallenges: the most addresses with an outstanding challenge per flow.
 	udpChallenges = 4
 	// udpResendQueue bounds the shards and messages queued to go again.
@@ -321,16 +322,21 @@ func (f *udpFlow) send(body []byte) int {
 	return f.sendTo(body, peer, conn)
 }
 
-// pace waits until n more bytes may leave: the phone's rate, kept between 4 × the video's own rate (and udpPaceMin)
-// and udpPaceMax, with up to 2 ms of credit.
+// udpPaceFloor is the pacing in kbit/s for the phone's request `want` (0: none yet) and the video's own rate: the
+// request, kept between 1.25 × the video's rate (and udpPaceMin) and udpPaceMax.
+func udpPaceFloor(want, videoKbps int) int {
+	if want <= 0 {
+		want = udpPaceDefault
+	}
+	return min(max(want, videoKbps*5/4, udpPaceMin), udpPaceMax)
+}
+
+// pace waits until n more bytes may leave at udpPaceFloor's rate, with up to 2 ms of credit.
 func (f *udpFlow) pace(n int) {
 	f.mu.Lock()
 	want := f.paceKbps
 	f.mu.Unlock()
-	if want <= 0 {
-		want = udpPaceDefault
-	}
-	kbps := min(max(want, 4*f.videoKbps, udpPaceMin), udpPaceMax)
+	kbps := udpPaceFloor(want, f.videoKbps)
 	now := time.Now()
 	if f.paceNext.Before(now.Add(-2 * time.Millisecond)) {
 		f.paceNext = now.Add(-2 * time.Millisecond)
@@ -520,6 +526,16 @@ func (s *Session) skipBacklogLocked(ch *channel) {
 	go ch.upstream.inject(ch, keyframeRequest)
 }
 
+// udpFlags are a video message's data flags: a frame other than a keyframe may be given up. A keyframe never is:
+// giving one up asks for another, as large, and on a slow link the stream then fills with keyframes that never come
+// whole.
+func udpFlags(msg []byte) byte {
+	if len(msg) > 17 && msg[4] == videoFrame && msg[17]&videoKeyFlag == 0 {
+		return udpDroppable
+	}
+	return 0
+}
+
 // udpResend is a data shard (or a whole message) the phone asked for again.
 type udpResend struct {
 	off          uint64
@@ -685,10 +701,7 @@ func (f *udpFlow) sendJob(job udpJob) {
 		f.send(job.ctl)
 		return
 	}
-	var flags byte
-	if len(job.msg) > 4 && job.msg[4] == videoFrame {
-		flags = udpDroppable
-	}
+	flags := udpFlags(job.msg)
 	blocks := udpBlocks(len(job.msg))
 	f.mu.Lock()
 	ratio := f.ratio

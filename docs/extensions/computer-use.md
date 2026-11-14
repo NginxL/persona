@@ -923,13 +923,14 @@ next; until then no phone opens a flow, and nothing changes for anyone.
 - **Sending**: the node sends each video message whole from the phone's offset, cut into 1,146-byte shards, at most 128
   to a Reed-Solomon block (systematic, Cauchy, GF(2⁸)) with ⌈ratio × shards⌉ + 1 parity shards: the phone asks for the
   ratio in its pings (none by default, at most 40 %), and any `shards` of a block rebuild it. Packets are paced at the
-  rate the phone asks for, kept between 4 × the video's own rate (8 Mbit/s at least) and 150 Mbit/s, 40 Mbit/s until it
-  asks. The pong reports the bytes sent as data, parity and again, so the phone can count them against mobile data.
+  rate the phone asks for (from the rate its packets arrive at), kept between 1.25 × the video's own rate (1 Mbit/s
+  at least) and 150 Mbit/s, 40 Mbit/s until it asks. The pong reports the bytes sent as data, parity and again, so the phone can count them against mobile data.
 - **Recovering**: the phone asks again for the data shards a block still lacks (`nack`) and for messages it learned of
   only from a later one (`want`); the node sends them from the 512 KB window. Video left unacknowledged with nothing
   newer to send gets its newest message's last shard again after 50 ms (doubling to 800 ms), so a message lost whole
   at the end of a burst is found; the phone answers a shard it already has with its acknowledgement.
-- **Giving a frame up**: frames (and only frames) may be given up. On `skip`, the node drops the backlog's frames,
+- **Giving a frame up**: frames other than keyframes (and only those) may be given up; giving a keyframe up would ask
+  for another as large, and on a slow link the stream would fill with keyframes that never come whole. On `skip`, the node drops the backlog's frames,
   sends `reset` with where the stream goes on, asks Persona Screen for a keyframe and drops frames until it comes,
   as a move with an old backlog does; the backlog's other messages (`format`, `encoding`, …) still go out after the
   reset, so the keyframe decodes.
