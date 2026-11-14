@@ -68,17 +68,7 @@ func TestKeepRunningStartsItAgain(t *testing.T) {
 			return cmd
 		})
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		b, _ := os.ReadFile(marks)
-		if strings.Count(string(b), "\n") >= 3 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("started %d times; log:\n%s", strings.Count(string(b), "\n"), logged.String())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitStarts(t, marks, 3, logged.String)
 	cancel()
 	<-done
 	if !strings.Contains(logged.String(), "helper ended after") || !strings.Contains(logged.String(), "exit status 3") {
@@ -101,22 +91,33 @@ func TestKeepRunningRestartsAtOnceWhenAsked(t *testing.T) {
 			return cmd
 		})
 	}()
-	starts := func() int { b, _ := os.ReadFile(marks); return strings.Count(string(b), "\n") }
-	deadline := time.Now().Add(20 * time.Second)
-	for starts() < 2 {
-		if time.Now().After(deadline) {
-			t.Fatalf("started %d times, not again at once; log:\n%s", starts(), logged.String())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitStarts(t, marks, 2, logged.String)
 	time.Sleep(2 * time.Second) // sleep-ok: long enough for a third start, were the delay skipped again
-	if n := starts(); n != 2 {
+	if n := countStarts(marks); n != 2 {
 		t.Fatalf("a node asking again right after it started was restarted at once (%d starts); log:\n%s", n, logged.String())
 	}
 	cancel()
 	<-done
 	if !strings.Contains(logged.String(), "asking to start again: starting it now") || !strings.Contains(logged.String(), "starting it again in 1m0s") {
 		t.Fatalf("log:\n%s", logged.String())
+	}
+}
+
+// countStarts is how many times a helper program has started: each start appends its pid as a line to marks.
+func countStarts(marks string) int {
+	b, _ := os.ReadFile(marks)
+	return strings.Count(string(b), "\n")
+}
+
+// waitStarts polls until the helper program has started at least n times, or fails the test after 20 seconds.
+func waitStarts(t *testing.T, marks string, n int, logged func() string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for countStarts(marks) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("started %d times, want %d; log:\n%s", countStarts(marks), n, logged())
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

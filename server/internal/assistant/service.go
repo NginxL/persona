@@ -550,13 +550,21 @@ func (s *Service) kbReady(ctx context.Context) bool { return s.kbOn(ctx) }
 
 // push asks the hub to push n to the user (notify.request).
 func (s *Service) push(ctx context.Context, n Notification) {
+	_, _ = s.pushResult(ctx, n)
+}
+
+// pushResult is push with the hub's answer: Held/reason say ln mode kept the notice for the briefing instead of
+// alerting the phone (notify_user shows that to the model).
+func (s *Service) pushResult(ctx context.Context, n Notification) (NotifyResult, error) {
 	n.ID, n.Kind = "ntf_"+randomHex(8), NotifyPush
 	if n.Asked { // the conversation pushed what matters itself: its own finished push is left out (fleet_push.go)
 		s.noteAsked(n.SessionID)
 	}
-	if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
+	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	if err != nil {
 		s.logf("assistant: push: %v", err)
 	}
+	return res, err
 }
 
 // event tells the apps what changed (ws.broadcast: the hub sends ev to them as it is).

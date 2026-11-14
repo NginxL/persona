@@ -2602,3 +2602,19 @@ hub `sendBacklog` answers with an `error` frame if the node is not back yet afte
 short until the next push. The web reads `/items?after_seq=` itself after such a hello, which is why the shared case
 `sent_with_picture_on_other_device_reopened` passed there and failed on iOS. Now a full reconnect also runs `fill`
 for every open chat that has a `covered`; the backlog and the read merge by id and seq.
+
+## New files inherit the target's MainActor isolation; `nonisolated actor` is illegal (2026-11-14, #7677)
+
+The app target defaults to MainActor isolation, so every type in a new file is implicitly `@MainActor` unless it says
+otherwise. A file written to be used off the main actor (a background tool call answering a silent push) hit four
+compile errors at once: a `nonisolated(unsafe) static var` closure could not reference `UIApplication.shared`, a
+`Codable` model's synthesized (main-actor) conformances could not be used from an actor, and actor instance methods
+could not read the actor's own `static let`s. The fix is per declaration, and one tempting spelling is a hard error:
+
+- Mark the off-main types explicitly: `nonisolated struct` / `nonisolated enum` / `nonisolated protocol` (all legal,
+  already used in the repo), and mark the statics an actor method needs as `nonisolated static let`.
+- **`nonisolated actor` does not compile** ("'nonisolated' modifier cannot be applied to this declaration"): an actor
+  already defines its own isolation domain; leave the keyword off the actor and just make its protocol and statics
+  nonisolated. A plain actor can still conform to a `nonisolated ... : Sendable` protocol.
+- A `@Sendable` closure that must touch a main-actor API (`UIApplication.shared.isProtectedDataAvailable`) wraps the
+  read in `MainActor.assumeIsolated { ... }`; give tests an injectable closure so they never hit the real API.
