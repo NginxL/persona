@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devicewire"
@@ -119,5 +123,72 @@ func TestWorkSessionOptionsRespectsMachineAndLauncherScope(t *testing.T) {
 	if w := modelsRequest(h, "GET", target+"?configured=1&configured_agent=codex&machine_id=other", ""); w.Code != http.StatusConflict ||
 		!strings.Contains(w.Body.String(), "work_launcher_unavailable") || probe["name"] != "private" || probe["configured"] != nil || probe["configured_agent"] != nil {
 		t.Fatalf("client or other device vouched for launcher: %d %s (%v)", w.Code, w.Body, probe)
+	}
+}
+
+// #7425: New work session's start options and the assistant's agent_start agree on whether a computer takes a
+// session, as the hub decides it (machine_trust.go, ownership.go): a confirmed computer of the assistant's takes both;
+// one waiting to be confirmed, and one moved to another manager, take neither and neither reaches its node. Only the
+// one waiting to be confirmed is trust "pending" in the apps' list, the card's prompt to confirm it. The options are
+// asked of the assistant itself, as agent_start is (the hub relays another manager's computer to that manager).
+func TestWorkStartOptionsAndAgentStartAgreeOnTheComputer(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		set            func(h *Hub)
+		takes, confirm bool
+	}{
+		{"confirmed, the assistant's", func(*Hub) {}, true, false},
+		{"waiting to be confirmed", func(h *Hub) { h.setPendingLocal("box", time.Now(), true) }, false, true},
+		{"another manager's", func(h *Hub) {
+			h.devices.mu.Lock()
+			h.devices.assign = map[string]string{"box": "m-0c0c0c"}
+			h.devices.mu.Unlock()
+		}, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newTestHub(t)
+			ctx := context.Background()
+			if !h.loadMachineTrust(ctx) {
+				t.Fatal("machine trust could not be initialized")
+			}
+			cfg := MachineConfig{ID: "box"}
+			h.cfg.Machines = append(h.cfg.Machines, cfg)
+			var mu sync.Mutex
+			asked := map[string]int{}
+			modelsNode(t, h, cfg, func(method string, _ map[string]any) (any, error) {
+				mu.Lock()
+				asked[method]++
+				mu.Unlock()
+				switch method {
+				case "session.start.options":
+					return map[string]any{"agent_type": "claude", "model_mode": "default"}, nil
+				case "session.start":
+					return map[string]any{"session": proto.Session{SessionID: "started", MachineID: "box"}}, nil
+				}
+				return map[string]any{}, nil
+			})
+			connectAssistant(t, h)
+			h.applyDeviceStates(devicewire.States{})
+			c.set(h)
+
+			w := httptest.NewRecorder()
+			h.forwardHTTP(w, httptest.NewRequest("GET", "/api/v1/machines/box/launchers/claude/start-options", nil), assistantwire.AssistantID)
+			res := h.callAssistantTool(ctx, h.localMachine("box"), "", "agent_start", json.RawMessage(`{"machine":"box","cwd":"/project","prompt":"go"}`))
+			mu.Lock()
+			defer mu.Unlock()
+			options := w.Code == http.StatusOK && asked["session.start.options"] == 1
+			started := !res.IsError && asked["session.start"] == 1
+			if options != c.takes || started != c.takes {
+				t.Fatalf("options %d %s (node asked %d), agent_start %+v (node asked %d): want both %v",
+					w.Code, w.Body, asked["session.start.options"], res, asked["session.start"], c.takes)
+			}
+			if !c.takes && (w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "machine_pending") || asked["session.start.options"]+asked["session.start"] != 0) {
+				t.Fatalf("refused unlike before: options %d %s, node asked %v", w.Code, w.Body, asked)
+			}
+			pending := slices.ContainsFunc(h.machineList(), func(m proto.Machine) bool { return m.ID == "box" && m.Trust == trustPending })
+			if pending != c.confirm {
+				t.Fatalf("the apps' list says pending %v, want %v: %+v", pending, c.confirm, h.machineList())
+			}
+		})
 	}
 }

@@ -2246,3 +2246,16 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 - It showed up as a test that failed 21 times in 200 under load, and the first reading was "the test's ordering".
   Before making such a test deterministic, make the losing order happen on purpose (a store that runs the other
   side inside the read) and look at what the caller gets.
+
+## A 409 from start options is not always "confirm this computer" (2026-11-14, #7425)
+
+- New work session's `start-options` answers 409 for two different reasons: the manager's `machine_pending` (the hub
+  keeps the computer out of its list) and every refusal the node's strict work-session check makes
+  (`work_launcher_unavailable`, `apierr.Call` maps a coded node error to 409). The hub's log line is the same; the web
+  dialog tells them apart (its "This launcher cannot start a session…" line is only the node's). Read that code before
+  tracing trust or ownership. A fast answer says nothing either: the node refuses from its cached launcher list
+  before any login shell runs.
+- A list the manager shows is not the node's own list: the pickers add plain `claude` back on a computer whose shell
+  has another Claude launcher (#5908), so a node check that asks "is it in my list?" refuses what the picker offers
+  and what an Agent start runs. A check of what can run asks whether it runs (the login shell's `command -v`), as
+  `knownLauncher` does.
