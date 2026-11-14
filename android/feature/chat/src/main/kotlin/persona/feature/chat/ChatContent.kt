@@ -438,6 +438,10 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
         }
         is WorkItem.Tool -> {
             val call = step.call
+            persona.core.domain.lines.ChildSessionCards.session(call)?.let {
+                ChildSessionCard(it, assistant = style == ChatRenderStyle.Assistant)
+                return
+            }
             // A Workflow call whose run the session lists draws the run's card (#3435); otherwise the row it always was.
             if (call.name == "Workflow") LocalChatWorkflows.current?.let { workflows ->
                 call.use.item.toolUseId?.let(workflows.runs::get)?.let { run ->

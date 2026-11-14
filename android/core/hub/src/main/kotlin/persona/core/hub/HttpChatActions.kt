@@ -167,6 +167,45 @@ class HttpChatActions internal constructor(
         }
     }
 
+    override suspend fun childRows(session: Session): List<Session> = childPage(session).sessions
+
+    override suspend fun childPage(session: Session, since: String?): SessionListPage {
+        val rows = mutableListOf<Session>()
+        val removed = linkedSetOf<String>()
+        val cursors = mutableSetOf<String>()
+        var cursor: String? = null
+        var revision: String? = null
+        var total = 0
+        do {
+            val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/sessions")
+                .addQueryParameter("summary", "1").addQueryParameter("limit", "200")
+                .addQueryParameter("machine_id", session.machineId).addQueryParameter("parent_session_id", session.sessionId)
+                .apply {
+                    cursor?.let { addQueryParameter("cursor", it) }
+                    since?.let { addQueryParameter("since", it) }
+                }.build()
+            val page = request(url.encodedPath + "?" + url.encodedQuery, "GET", null).use {
+                if (!it.isSuccessful) {
+                    val failure = HubFailure.from(it)
+                    if (failure.status == 409 && failure.code in setOf("cursor_expired", "revision_expired")) throw SessionListExpired()
+                    throw failure
+                }
+                JsonCodec.decodeFromString<SessionListPage>(it.body!!.string())
+            }
+            if (revision != null && revision != page.revision) throw HubFailure(HubError.Protocol, retryable = false)
+            revision = page.revision
+            total = page.total
+            rows += page.sessions.filter { it.foldedUnder == session.sessionId }.map { it.copy(machineId = session.machineId) }
+            removed += page.remove
+            cursor = if (page.hasMore) {
+                page.nextCursor?.takeIf { it.isNotBlank() && cursors.add(it) }
+                    ?: throw HubFailure(HubError.Protocol, retryable = false)
+            } else null
+        } while (cursor != null)
+        return SessionListPage(sessions = rows.associateBy { it.key }.values.toList(), remove = removed.toList(),
+            revision = revision.orEmpty(), total = total)
+    }
+
     override suspend fun interactionHistory(session: Session): List<InteractionRecord> {
         val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/interactions/history")
             .addQueryParameter("machine_id", session.machineId).addQueryParameter("session_id", session.sessionId)

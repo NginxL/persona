@@ -83,6 +83,13 @@ interface ChatActions {
      */
     suspend fun completeRow(session: Session): Session? = null
 
+    /** Every depth folded under this parent; callers gate on sessions_hierarchy. */
+    suspend fun childRows(session: Session): List<Session> = emptyList()
+
+    /** A complete baseline or delta for the same parent filter, including its committed checkpoint and removals. */
+    suspend fun childPage(session: Session, since: String? = null): SessionListPage =
+        SessionListPage(sessions = childRows(session))
+
     /**
      * The session's cards and how each ended (GET /api/v1/interactions/history, iOS `DelegatedHistoryModel`), for Session
      * info's questions the assistant answered. A hub that keeps the history from this device (403) or has none (404) gives none.

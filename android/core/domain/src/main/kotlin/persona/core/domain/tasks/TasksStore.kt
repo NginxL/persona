@@ -471,7 +471,7 @@ class TasksStore(
 
     /** What [conversation]'s dock shows after its tasks (iOS `DockAgent.shown`); see [dockAgents]. */
     fun agentsOf(conversation: String, sessions: List<Session>): List<Session> =
-        dockAgents(conversation, mainConversation.value, sessions, _todos.value)
+        dockAgents(conversation, mainConversation.value, sessions, _todos.value, "sessions_hierarchy" in features?.value.orEmpty())
 
     /**
      * The hub counts the day in the assistant's time zone, which need not be the phone's (#5194): the card is asked

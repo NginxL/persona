@@ -202,6 +202,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     val main by host.tasks.mainConversation.collectAsStateWithLifecycle()
     val taskBusy by host.tasks.busy.collectAsStateWithLifecycle()
     val taskCards by host.tasks.taskCards.collectAsStateWithLifecycle()
+    val features by (host.tasks.features ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptySet<String>()) }).collectAsStateWithLifecycle()
+    val hierarchy = "sessions_hierarchy" in features
     val feed = feeds[host.conversation].orEmpty()
     val progress = trayProgress(todos, plans.values.toList(), host, feed, taskCards[host.conversation].orEmpty(),
         everyTodo = main != null && main == host.conversation)
@@ -213,7 +215,7 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000); nowMs = System.currentTimeMillis() } }
     val entries = assistantEntries(host.conversation, main, todos, host.sessions, requests, plans.values, feed.filterNot { it.id in later },
-        maxOf(nowMs, System.currentTimeMillis()), restores.read())
+        maxOf(nowMs, System.currentTimeMillis()), restores.read(), hierarchy)
     // "Later" is only a local, card-scoped choice; it never hides a newer draft for the same source item.
     // the conversation's own cards (Persona asking) are always the user's; they come first after the asking rows
     val own = requests.filter { it.sessionId == host.conversation }
@@ -225,7 +227,7 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     val needsGroups = needsYouGroups(entries.needsYou, host.conversation, groupByOrigin)
     val shownRequests = own + asking.flatMap { (it as? NeedsYouEntry.Task)?.asks ?: (it as NeedsYouEntry.Agent).asks }
     val approvals = shownRequests.mapNotNull { r -> trayApproval(r, bySession[GroupKeys.rawKey(r.sessionKey)])?.let { r to it } }
-    val standalone = persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos)
+    val standalone = persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos, hierarchy)
     // Glass folds the shelved tasks into one line under In progress, as iOS (#4339 C18); Brief and Board keep the tray as it was.
     val shelvedLine = PersonaTheme.style == AppStyle.Glass
     // the tray closes once its last thing is handled; tapped while empty it still opens "All caught up"

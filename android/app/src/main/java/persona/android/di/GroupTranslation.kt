@@ -174,6 +174,15 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun sendQueuedNow(session: Session) = source.sendQueuedNow(names.rawSession(session))
         override suspend fun info(session: Session) = source.info(names.rawSession(session))
         override suspend fun completeRow(session: Session) = source.completeRow(names.rawSession(session))?.let(names::session)
+        override suspend fun childRows(session: Session) = source.childRows(names.rawSession(session)).map(names::session)
+        override suspend fun childPage(session: Session, since: String?): SessionListPage {
+            val page = source.childPage(names.rawSession(session), since)
+            return page.copy(sessions = page.sessions.map(names::session), remove = page.remove.map { encoded ->
+                val key = JsonCodec.decodeFromString<List<String>>(encoded)
+                require(key.size == 2) { "Invalid session removal key" }
+                JsonCodec.encodeToString(listOf(names.machineId(key[0]), key[1]))
+            })
+        }
         override suspend fun interactionHistory(session: Session) = source.interactionHistory(names.rawSession(session))
             .map { it.copy(interaction = names.interaction(it.interaction)) }
         override suspend fun restoreModel(session: Session) = source.restoreModel(names.rawSession(session))
