@@ -83,20 +83,28 @@ import PersonaScreenKit
         }
         let pair = RFBWebSocket.newPair()
         self.pair = pair
-        run(RFBClient(transport: Self.transport(api: api, machine: ref.id, pair: pair)) { [weak self] in await self?.credentials() })
+        #if os(iOS) && canImport(PersonaScreenKit)
+        if ScreenRoutes.enabled {
+            ScreenRoutes.listeners[pair] = { [weak self] change in self?.video.routeChanged(change) }
+        }
+        #endif
+        run(RFBClient(transport: Self.transport(api: api, ref: ref, pair: pair)) { [weak self] in await self?.credentials() })
     }
 
     /// The hub's relay of Screen Sharing for this connection (opening it connects). With direct routes on it asks for a
     /// screen session (#6398): with a hub and a node that offer one, RFB is the session's channel; otherwise it is the
     /// same raw stream.
-    private static func transport(api: APIClient, machine: String, pair: String) -> RFBTransport {
+    private static func transport(api: APIClient, ref: MachineRef, pair: String) -> RFBTransport {
         #if os(iOS) && canImport(PersonaScreenKit)
         if ScreenRoutes.enabled {
-            let ws = RFBWebSocket(api: api, machine: machine, pair: pair, protocols: [ScreenLinkWire.subprotocol, "binary"])
-            return ScreenLinkRFBTransport(ScreenLinkRFBStream(socket: ScreenLinkRelaySocket(ws)) { ScreenRoutes.opened($0, pair: pair) })
+            let ws = RFBWebSocket(api: api, machine: ref.id, pair: pair, protocols: [ScreenLinkWire.subprotocol, "binary"])
+            let group = ref.group, machine = ref.id
+            return ScreenLinkRFBTransport(ScreenLinkRFBStream(socket: ScreenLinkRelaySocket(ws)) {
+                ScreenRoutes.opened($0, pair: pair, group: group, machine: machine)
+            })
         }
         #endif
-        return RFBWebSocket(api: api, machine: machine, pair: pair)
+        return RFBWebSocket(api: api, machine: ref.id, pair: pair)
     }
 
     /// Follows this client and starts it: start's over the hub's relay, or a test's over a scripted transport.

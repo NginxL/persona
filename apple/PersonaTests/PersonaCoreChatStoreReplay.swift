@@ -1,5 +1,5 @@
 import Foundation
-import PersonaCore
+import PersonaCoreTestSupport
 @testable import Persona
 
 /// Replays the shared JSON against the actual iOS `ChatStore`, not a second translation of the Rust reducer. The

@@ -32,6 +32,10 @@ struct VNCPage: View {
     @State private var quality: ScreenQuality = .auto
     /// Whether the connection-stats overlay is shown (#3954), per Mac, off by default.
     @State private var statsOn = false
+    /// The recent round trips to this Mac's hub, timed while the overlay is shown and the app is in front (#6558).
+    @State private var hubTrips = HubRoundTrips()
+    /// The app is in front: the round trip to the hub is timed only then.
+    @State private var appActive = true
     /// `-showScreenFallbackDemo`'s reason, for screenshots of the fallback line (#3954); the real one is `fallback`.
     @State private var fallbackDemo: ScreenVideoFallback?
     /// The not-allowed line's "How to turn it on" is showing its one sentence.
@@ -117,6 +121,11 @@ struct VNCPage: View {
         }
         #if os(iOS) && canImport(PersonaScreenKit)
         .onChange(of: videoWant) { _, want in session?.video.want(want) }
+        #endif
+        #if os(iOS)
+        .task(id: hubProbing) { await probeHub() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in appActive = false }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in appActive = true }
         #endif
         .onDisappear {
             #if os(iOS)
@@ -564,8 +573,25 @@ struct VNCPage: View {
         return ScreenStats(mode: .vnc, path: .relay,
                            bitrateMbps: s.mbps > 0 ? s.mbps : nil,
                            fps: s.fps > 0 ? s.fps : nil,
-                           roundTripMs: s.latency)
+                           roundTripMs: s.latency,
+                           hubRoundTripMs: hubTrips.median(at: .now))
     }
+
+    #if os(iOS)
+    /// Whether the round trip to the hub is timed (#6558): the stats overlay shown on a live screen, with the app in
+    /// front. A background app pings nothing.
+    private var hubProbing: Bool { statsOn && appActive && session?.phase == .live }
+
+    /// Pings this Mac's hub on the app's own connection to it every 2 s while `hubProbing` (the task restarts when it
+    /// changes). A ping without a pong counts nothing.
+    private func probeHub() async {
+        guard hubProbing, let live = model.link(ref.group)?.live else { return }
+        while !Task.isCancelled {
+            if let rtt = await live.roundTrip() { hubTrips.add(ms: rtt * 1000, at: .now) }
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+    #endif
 
     /// Why the page shows VNC while video is chosen (#3954); nil when there is nothing to explain. Only while VNC is
     /// live: while it connects or is closed, the page says so itself.

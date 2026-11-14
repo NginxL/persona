@@ -315,6 +315,9 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
   `live_metrics_seconds` (minimum interval between pushes to one device when only Live Activity numbers change, default 60; `docs/apple/live-activity.md` ("Push budget")).
   Each device's push preferences are set separately in the App (**Settings › Notifications**, stored in hub `devices.prefs`), not here.
   This section stays in hub.json: push delivery is the hub's, and it hands the timings to the managers in its hello.
+- `screen_link_off` (default `false`): the hub never selects the live screen's session subprotocol, so every live screen stays on the
+  plain relay through the hub, whatever the apps and nodes support ([computer-use.md](../extensions/computer-use.md) ("Live screen routes (#6398)")).
+  The switch for when direct routes misbehave; it takes effect when the hub restarts.
 - `shutdown_timeout_seconds` (default 8): total hub shutdown budget, including closing the database connection pool; external `docker stop -t` must be longer (`docs/server/server.md` ("Shutdown")).
 - `auto_update_nodes` (default `false`): lets the managers update the computers' nodes by themselves, after a confirmed hub update and when a node on another build reconnects (the hub hands it over in `devices.config`).
   Off, a node changes only when someone picks **Redeploy** for its computer ([hub-update.md](hub-update.md) ("Node upgrade policy")).

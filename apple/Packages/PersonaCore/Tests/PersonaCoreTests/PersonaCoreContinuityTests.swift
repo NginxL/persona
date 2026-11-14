@@ -1,6 +1,7 @@
 import XCTest
 import Synchronization
 @testable import PersonaCore
+import PersonaCoreTestSupport
 
 final class PersonaCoreContinuityTests: XCTestCase {
     func testEveryFixtureThroughTheRealCBinding() throws {

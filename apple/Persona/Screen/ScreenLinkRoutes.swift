@@ -24,17 +24,27 @@ enum ScreenRoutes {
 
     /// The probers of the sessions open now, by pair.
     @MainActor static var probers: [String: ScreenLinkProber] = [:]
+    /// Who hears of each live screen's route changes, by pair (its RFBSession's video link).
+    @MainActor static var listeners: [String: @MainActor (PathChange) -> Void] = [:]
 
     /// A session opened for pair: register it for the video stream and start probing its direct routes.
-    nonisolated static func opened(_ s: ScreenLinkSession, pair: String) {
+    nonisolated static func opened(_ s: ScreenLinkSession, pair: String, group: String, machine: String) {
         ScreenLinkRegistry.shared.set(s, for: pair)
         Task { @MainActor in
-            let p = ScreenLinkProber(session: s)
+            let p = ScreenLinkProber(session: s, pair: pair, group: group, machine: machine)
             probers[pair] = p
             await p.run()
             probers[pair] = nil
+            listeners[pair] = nil
             ScreenLinkRegistry.shared.remove(pair)
         }
+    }
+
+    /// One of the hub's relays of pair's live screen opened again to rejoin its session (attach), nil without the hub.
+    @MainActor static func reopenRelay(group: String, machine: String, pair: String, video: Bool) -> ScreenLinkRelaySocket? {
+        guard let api = AppModel.shared.api(group) else { return nil }
+        let path = video ? "/api/v1/machines/\(machine)/screen/video/connect" : "/api/v1/machines/\(machine)/ports/5900/connect"
+        return ScreenLinkRelaySocket(RFBWebSocket(api: api, path: path, pair: pair, protocols: [ScreenLinkWire.subprotocol], attach: true))
     }
 }
 
@@ -218,13 +228,19 @@ nonisolated struct PhoneInterfaces: Sendable {
 /// Its own actor: reading the phone's interfaces (getifaddrs) and dialing never touch the main actor.
 actor ScreenLinkProber {
     private let session: ScreenLinkSession
+    private let pair: String, group: String, machine: String
     private var paths: ScreenLinkPaths?
     private var plan = ProbePlan()
     private var interfaces = PhoneInterfaces()
     private var monitors: [NWPathMonitor] = []
     private var latest: [ObjectIdentifier: NWPath] = [:]
 
-    init(session: ScreenLinkSession) { self.session = session }
+    init(session: ScreenLinkSession, pair: String, group: String, machine: String) {
+        self.session = session
+        self.pair = pair
+        self.group = group
+        self.machine = machine
+    }
 
     /// Runs until the session ends.
     func run() async {
@@ -243,6 +259,15 @@ actor ScreenLinkProber {
                 }
             case let .lost(route):
                 plan.failed(route, now: ScreenLinkSession.monotonic())
+            case let .moved(change):
+                let kind = change.to.kind.rawValue, why = change.reason.rawValue, pair = pair
+                ScreenRoutes.log.info("moved to \(kind, privacy: .public) (\(why, privacy: .public))")
+                await MainActor.run { ScreenRoutes.listeners[pair]?(change) }
+            case let .reopen(video):
+                let group = group, machine = machine, pair = pair
+                if let relay = await MainActor.run(body: { ScreenRoutes.reopenRelay(group: group, machine: machine, pair: pair, video: video) }) {
+                    await session.reattach(relay, video: video)
+                }
             case .ended:
                 return
             }

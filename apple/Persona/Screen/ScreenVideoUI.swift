@@ -97,6 +97,16 @@ struct ScreenStats: Equatable {
     var totalMs: Double? = nil
     // VNC mode: what RFB can measure.
     var roundTripMs: Double? = nil
+    /// The phone's round trip to the hub on its own hub connection (#6558, `HubRoundTrips`): not the hub's way on to the
+    /// Mac, so the overlay names it on a line of its own and never shows it as the picture's latency. The web overlay
+    /// shows the same leg.
+    var hubRoundTripMs: Double? = nil
+
+    /// A bitrate as the overlay writes it, in Mbps: one decimal, two below 1 Mbps so a small stream that was measured
+    /// doesn't read as 0.0 (the web overlay's rule, `mbpsText`).
+    nonisolated static func mbpsText(_ mbps: Double) -> String {
+        String(format: mbps < 1 ? "%.2f Mbps" : "%.1f Mbps", mbps)
+    }
 
     /// The latency segments present, in pipeline order, for the overlay's "Capture · Encode · Network · Decode" line.
     var segments: [(label: String, ms: Double)] {
@@ -110,6 +120,32 @@ struct ScreenStats: Equatable {
 }
 
 #if os(iOS) || os(visionOS)
+
+// MARK: - Round trips to the hub
+
+/// The recent round trips to the hub (#6558), timed on the app's own hub connection while the stats overlay is shown.
+/// The overlay draws the median of the last `kept` from the last `fresh` seconds, as the web does, so one slow answer
+/// doesn't make it jump and an old one (the app was in the background) isn't shown.
+nonisolated struct HubRoundTrips: Equatable, Sendable {
+    static let kept = 5
+    static let fresh: TimeInterval = 20
+    private struct Sample: Equatable { var ms: Double; var at: Date }
+    private var samples: [Sample] = []
+
+    mutating func add(ms: Double, at: Date) {
+        guard ms.isFinite, ms >= 0 else { return }
+        samples.append(Sample(ms: ms, at: at))
+        if samples.count > Self.kept { samples.removeFirst(samples.count - Self.kept) }
+    }
+
+    /// The median of the fresh ones at `now`; nil when there are none.
+    func median(at now: Date) -> Double? {
+        let ms = samples.filter { now.timeIntervalSince($0.at) <= Self.fresh }.map(\.ms).sorted()
+        guard !ms.isEmpty else { return nil }
+        let m = ms.count / 2
+        return ms.count % 2 == 1 ? ms[m] : (ms[m - 1] + ms[m]) / 2
+    }
+}
 
 // MARK: - Overlay
 
@@ -128,6 +164,11 @@ struct ScreenStatsOverlay: View {
             if let tier = stats.tier { kv(String(localized: "Tier"), tier, note: stats.tierReason) }
             rateLine
             latencyLine
+            if let hub = stats.hubRoundTripMs {
+                Text("Round trip to the hub \(Int(hub.rounded())) ms")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("screen-stats-hub")
+            }
         }
         .font(Theme.Font.caption)
         .monospacedDigit()
@@ -175,7 +216,7 @@ struct ScreenStatsOverlay: View {
     /// bitrate · fps, and codec · resolution in video mode.
     private var rateLine: some View {
         var parts: [String] = []
-        if let mbps = stats.bitrateMbps { parts.append(String(format: "%.1f Mbps", mbps)) }
+        if let mbps = stats.bitrateMbps { parts.append(ScreenStats.mbpsText(mbps)) }
         if let fps = stats.fps { parts.append(String(format: "%.0f fps", fps)) }
         if let codec = stats.codec { parts.append(codec) }
         if let res = stats.resolution { parts.append(res) }

@@ -1,7 +1,7 @@
 import XCTest
 import Synchronization
 @testable import Persona
-import PersonaCore
+import PersonaCoreTestSupport
 
 @MainActor
 final class PersonaCoreContinuityTests: XCTestCase {

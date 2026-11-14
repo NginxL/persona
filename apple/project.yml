@@ -633,7 +633,9 @@ targets:
         excludes: ["*.json", "*.py"] # Static checks and TokenBaseline.json are read from the source tree, not the bundle
     dependencies:
       - target: Persona
+      # The continuity fixture reader and C replay, test-only; it brings PersonaCore with it. The app never links it.
       - package: PersonaCore
+        product: PersonaCoreTestSupport
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).tests

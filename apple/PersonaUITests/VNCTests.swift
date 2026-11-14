@@ -1070,6 +1070,25 @@ final class VNCTests: XCTestCase {
         XCTAssertTrue(stats.waitForNonExistence(timeout: 5))
     }
 
+    /// #6558: Connection Stats over VNC shows the round trip to the hub on a line of its own, timed on the app's own
+    /// hub connection (the mock answers its pings), as the web's overlay does.
+    @MainActor func testTheOverlayShowsTheRoundTripToTheHub() throws {
+        let (app, _) = try signedInMachinePage()
+        app.buttons["vnc-more"].tap()
+        let toggle = app.descendants(matching: .any)["screen-stats-toggle"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Connection Stats in ⋯:\n\(app.debugDescription)")
+        toggle.tap()
+        let stats = app.descendants(matching: .any)["screen-stats"].firstMatch
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), "the overlay:\n\(app.debugDescription)")
+        let words = ["VNC", "经 hub 中转", "到 hub 往返"]
+        let deadline = Date.now.addingTimeInterval(10)
+        while Date.now < deadline, !words.allSatisfy(stats.label.contains) { usleep(250_000) }
+        XCTAssertTrue(words.allSatisfy(stats.label.contains), "the round trip to the hub: \(stats.label)")
+        shot(app, "vnc-stats-hub")
+        app.buttons["screen-stats-close"].firstMatch.tap() // kept per Mac: off again for the other tests
+        XCTAssertTrue(stats.waitForNonExistence(timeout: 5))
+    }
+
     /// The picture the screen shows, as its DEBUG value says (`picture=video|vnc`), within 20 s.
     @MainActor private func picture(_ screen: XCUIElement, _ want: String) -> Bool {
         let deadline = Date.now.addingTimeInterval(20)

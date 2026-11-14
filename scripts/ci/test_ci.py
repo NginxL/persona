@@ -41,6 +41,11 @@ class PathTests(unittest.TestCase):
                          "scripts/ci/core.sh"]:
             self.assertTrue(paths.select([filename])["core"], filename)
         self.assertTrue(paths.select(["native/app-core/Cargo.lock"])["android"])
+        # The generated ArkTS codec and its host tests run in the same lane as the core they encode for (#7450).
+        for filename in ["harmony/entry/src/main/ets/core/rustcore/Wire.ts", "harmony/entry/src/main/ets/core/PersonaCore.ts",
+                         "harmony/entry/src/main/cpp/types/libpersona_core/index.d.ts", "harmony/tests/rustcore-wire.test.mjs",
+                         "harmony/tests/core-host/replay.test.mjs"]:
+            self.assertTrue(paths.select([filename])["core"], filename)
         self.assertFalse(paths.select(["web/src/App.tsx"])["core"])
         self.assertFalse(paths.select(["sdk/ts/README.md"])["server"])
 

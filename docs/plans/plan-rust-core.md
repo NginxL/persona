@@ -354,6 +354,15 @@ Phase 1 (#6871) lands in several PRs.
     Checked with a stub SDK layout only: the release closure compiles and the build stops at the link step.
   - Still open in #7414: the NAPI callbacks pass a leading error argument and effects as a number array, which the
     ArkTS declaration and adapter do not expect. The Node tests' fake hides it; it would fail on a device.
+- **ArkTS codec against the real core on the host (#7450, #7485).**
+  - A host replay drives the real runtime through `persona-core-ohos`'s registry with the generated ArkTS codec
+    encoding actions and decoding effects and patches: all 38 cases / 94 steps, plus 35 independently built values
+    whose ArkTS and Rust bytes must match in both directions. The core lane builds the helper and runs it with the
+    two existing ArkTS core tests; a missing helper fails rather than skips.
+  - It immediately caught a real defect the self-round-trip test could not see: `u32` wire fields were written and
+    read as 8 bytes, so the codec could not decode a real patch. Typegen now emits every integer at its own width;
+    Kotlin and Swift are unchanged.
+  - This is host evidence only: no NAPI library, thread-safe callbacks, HAP or device. `coreReplay` stays blocked.
 - **Still to come.**
   - iOS: physical-device performance, launch, memory and download-size evidence remains open; Xcode 26.0 is not verified.
   - HarmonyOS: the API 26 `.so`, HAP build and on-device replay.

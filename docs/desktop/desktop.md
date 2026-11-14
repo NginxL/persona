@@ -35,9 +35,30 @@ Closing the main window hides it to the tray while the signed-in renderer stays 
 
 `electron-builder.yml` defines universal macOS DMG/ZIP and Windows NSIS artifacts. `electron-builder.unsigned.yml` uses a temporary development app ID and explicitly disables certificate discovery/signing and notarization. It is for development only. Unsigned artifacts do not prove signed distribution, notarization or installation.
 
-CI has Linux policy tests, macOS universal packaging and Windows NSIS jobs, with native-runner Electron smoke and screenshots. Windows is built on Windows, not via a failed Wine cross-build. Signed artifacts require explicitly supplied repository credentials and an authorized run; no certificate is purchased, inferred from App Store signing or sought from a private key store.
+CI has a Linux job (policy tests, the web client's build and the headless acceptance smoke), macOS universal packaging and Windows NSIS jobs, each with the acceptance smoke on its own runner and its screenshots uploaded (`persona-desktop-<os>-smoke`). Windows is built on Windows, not via a failed Wine cross-build. The package steps run whether or not the smoke passed, so each reports its own verdict. The Linux job builds the web client once (`scripts/ci/desktop-web.sh`) and hands the bundle to the other two jobs. The desktop lane needs that bundle, not the web lane's verdict: when the only thing that failed in the web build is its first-screen size budget, checked after every file is written, the script warns and the smoke runs on the complete bundle; any other build failure fails the job. Signed artifacts require explicitly supplied repository credentials and an authorized run; no certificate is purchased, inferred from App Store signing or sought from a private key store.
 
-The real smoke starts an isolated Vite server and the repository's synthetic hub on owned ports, launches Electron with an isolated profile, waits for actual login/setup DOM and the entrance transition, captures the page and exits with a one-line verdict. Generated output is cleaned before compilation so deleted tests cannot linger. Linux/macOS development evidence does not substitute for Windows acceptance or a published-release update test.
+### The acceptance smoke
+
+`scripts/ci/desktop-smoke.sh` (`node desktop/scripts/smoke-with-hub.mjs [output directory]`) runs a real Electron process against the repository's synthetic hub. A small local gateway (`desktop/scripts/smoke-gateway.mjs`) serves the built web client the way the hub does: its files, `index.html` for page routes, `/api/` and the WebSocket forwarded to the hub. Every service is on a port the script owns and is stopped by it. The hub refuses every request without a credential; the app signs in with a temporary pairing code made for the run, through the same `persona://pair` path a person's pairing link takes. It needs `web/dist` (built when missing, which needs Go) and ends with one verdict line; `result.json` holds each scenario's steps, and each scenario's directory its screenshots, per-step details and Electron log.
+
+Two scenarios run, each in its own profile:
+
+- **Origin root**, against a hub that lists `desktop_unregister`: the hub's sign-in page, sign-in, then the main chat (light and dark), the Agents list, an Agent session with a waiting card, Inbox and To-dos, each captured once the hub's data is in the page's DOM. With the window closed to the tray, a new Needs-you item from the hub must produce a notification request with the session's title, tag and route, the badge the web's own count, and a click must show the window on that session. Locking withdraws the desktop registration with `unregister_desktop`; unlocking registers again.
+- **Reverse-proxy prefix**, against an older hub: the gateway answers only below the prefix and rewrites `<base>` as the hub does, and any request of the page outside the prefix fails the run. Sign-in, the chat and the Agents list load; an in-hub link meant for a new window stays in the window; an off-hub link, an off-hub navigation and the same origin outside the prefix are refused and handed to the system browser. Locking withdraws the registration by closing the socket.
+
+The driver, `desktop/scripts/e2e-main.mjs`, is Electron's entry point for the run and then loads the unmodified production main module. It is not part of `dist/`, so it is never packaged; it refuses to run packaged or without its switch, gives the hub renderer nothing and adds no IPC channel. It only watches or replaces the outer edge of the main process:
+
+| Observed or replaced | What the smoke therefore proves | What it does not |
+| --- | --- | --- |
+| `Notification.prototype.show` / `close` record the call; a click is the notification's own `click` event | The web's request crosses the production preload and IPC, passes route validation and reaches the system call with the right text; the click handler shows the window and routes | That the OS notification center displays, groups or delivers a click, and its permission prompt |
+| `Notification.isSupported` and the idle time answer "supported" and "just used" | Presence logic from those inputs to `register_desktop` / withdrawal on the authenticated socket | Real idle detection and a runner's own notification service |
+| `lock-screen` / `unlock-screen` are emitted on the power monitor | The shell's reaction to the events | That the OS emits them when a person locks the computer |
+| `shell.openExternal` records the address | The decision for each link | A browser opening |
+| `desktop:badge` is read beside the real handler; on macOS the Dock's count is read back | The count sent equals the web's | The Windows taskbar overlay and the Dock's drawing |
+
+On a Linux machine without a display server the smoke uses Chromium's headless platform and leaves out the tray's menu, which GTK cannot build there; Linux is not a shipping platform. The smoke runs the development build, not an installed package: it does not prove installation, signing, notarization, the tray's own interactions, launch at login or an update from a published release. Generated output is cleaned before compilation so deleted tests cannot linger, and a scenario's directory is emptied before it runs. Linux/macOS development evidence does not substitute for Windows acceptance or a published-release update test.
+
+`npm --prefix desktop run smoke` remains the quick check of the first window against a hub already running at `PERSONA_HUB_URL`.
 
 ## Migration boundaries
 

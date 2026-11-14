@@ -25,6 +25,9 @@ The real-C replay is `PersonaCoreContinuityTests` on macOS and in the iOS `Perso
 case under `spec/fixtures/continuity`, dispatches encoded actions, drains patches, applies Insert/Update/Remove, and
 compares complete items, ids, continuity fields and effects. `NativeChatStoreContinuityReplay` runs the same JSON
 against the unmodified native iOS `ChatStore`. A separate AppModel test proves the native immediate-fill scheduling.
+The fixture reader (`ContinuityCase`, `ContinuityJSON`) and the C replay (`ContinuityBindingReplay`) are the test-only
+`PersonaCoreTestSupport` target in `Tests/PersonaCoreTestSupport`. Only `PersonaCoreTests` and `PersonaTests` link it,
+so the `PersonaCore` library the app links reads no files.
 
 Only `dispatch` is suitable for the UI thread. `drain`, `flush`, creation and `close` stay off the main actor and off
 the launch path. Host callbacks run on the Rust worker thread and must not synchronously flush or free that same core;

@@ -126712,6 +126712,28 @@
       },
       "extractionState" : "manual"
     },
+    "Round trip to the hub %lld ms" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Round trip to the hub %lld ms"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブまでの往復 %lld ms"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到 hub 往返 %lld ms"
+          }
+        }
+      }
+    },
     "Rounds that another conversation, a scheduled task or a follow-up started in the main chat or a leader conversation show as one line you can open. Rounds that ask or tell you something stay shown." : {
       "extractionState" : "manual",
       "localizations" : {

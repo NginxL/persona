@@ -1,5 +1,6 @@
 import Foundation
 import CoreFoundation
+import PersonaCore
 
 /// Repository JSON, shared by the C-binding and native iOS ChatStore replays. It deliberately knows nothing about
 /// either implementation: both runners consume the same fixture and are checked against the same hand-written state.
@@ -103,8 +104,8 @@ public struct ContinuityCase: Sendable {
     }
 
     public static let repositoryDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent() // PersonaCore source directory
-        .deletingLastPathComponent() // Sources
+        .deletingLastPathComponent() // PersonaCoreTestSupport
+        .deletingLastPathComponent() // Tests
         .deletingLastPathComponent() // PersonaCore package
         .deletingLastPathComponent() // Packages
         .deletingLastPathComponent() // apple

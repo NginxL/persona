@@ -302,3 +302,181 @@ final class SessionBox: @unchecked Sendable {
     func set(_ v: ScreenLinkSession) { lock.withLock { s = v } }
     func get() -> ScreenLinkSession? { lock.withLock { s } }
 }
+
+/// A node's end of one transport that answers by itself: pongs (after `delay`), `resumed` for `use` with what it
+/// received of each channel, and `attached` for an attach; it keeps each channel's bytes once, by offset.
+final class AutoNode: @unchecked Sendable {
+    let end: PipeEnd
+    private let lock = NSLock()
+    private var got: [UInt8: Data] = [:]
+    private var seen: [ScreenLinkMessage] = []
+    private let delay: UInt64
+    private let shared: SharedReceive
+    /// The route went silent: nothing is answered (packets vanish, the connection stays open).
+    var silent: Bool { get { lock.withLock { mute } } set { lock.withLock { mute = newValue } } }
+    private var mute = false
+
+    /// What the node received of each channel over all its transports (a node has one count per channel).
+    final class SharedReceive: @unchecked Sendable {
+        let lock = NSLock()
+        var bytes: [UInt8: Data] = [:]
+    }
+
+    init(_ end: PipeEnd, delayMs: UInt64 = 0, shared: SharedReceive) {
+        self.end = end
+        delay = delayMs * 1_000_000
+        self.shared = shared
+        Task { await loop() }
+    }
+
+    private func loop() async {
+        var parser = ScreenVideoParser()
+        while let chunk = try? await end.receive() {
+            guard let raws = try? parser.push(chunk) else { return }
+            for raw in raws {
+                guard let m = try? ScreenLinkMessage.decode(type: raw.type, body: raw.body) else { return }
+                lock.withLock { seen.append(m) }
+                if silent { continue }
+                switch m {
+                case let .ping(v):
+                    if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+                    try? await say(.pong(v, retransmitted: 0, sent: 100))
+                case let .data(ch, off, bytes):
+                    shared.lock.withLock {
+                        let have = UInt64(shared.bytes[ch]?.count ?? 0)
+                        if off <= have, off + UInt64(bytes.count) > have {
+                            shared.bytes[ch, default: Data()].append(bytes.dropFirst(Int(have - off)))
+                        }
+                    }
+                case let .use(entries):
+                    let back = shared.lock.withLock { entries.map { ScreenLinkOffset($0.channel, UInt64(shared.bytes[$0.channel]?.count ?? 0)) } }
+                    try? await say(.resumed(back))
+                case .attach:
+                    try? await say(.attached)
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    func say(_ m: ScreenLinkMessage) async throws { try await end.send(m.framed()) }
+
+    func messages() -> [ScreenLinkMessage] { lock.withLock { seen } }
+
+    func used() -> Bool { messages().contains { if case .use = $0 { true } else { false } } }
+}
+
+final class ScreenLinkSwitchTests: XCTestCase {
+    private final class Collected: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var events: [ScreenLinkSession.Event] = []
+        init(_ s: ScreenLinkSession) { Task { for await e in s.events { self.lock.withLock { self.events.append(e) } } } }
+        func all() -> [ScreenLinkSession.Event] { lock.withLock { events } }
+        func moves() -> [PathChange] { all().compactMap { if case let .moved(c) = $0 { c } else { nil } } }
+        func reopens() -> Int { all().filter { if case .reopen = $0 { true } else { false } }.count }
+    }
+
+    private func until(_ what: String, timeout: Double = 6, _ cond: () async -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await cond() { return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("timed out: \(what)")
+    }
+
+    /// The whole story on one session: it starts on the relay; a faster direct route is used; RFB goes both ways over
+    /// it byte for byte; the direct route drops and RFB goes on over the relay at once, still byte for byte.
+    func testMovesToADirectRouteAndBackWithoutLosingAByte() async throws {
+        let shared = AutoNode.SharedReceive()
+        let (phoneR, nodeR) = PipeEnd.pair()
+        let relay = AutoNode(nodeR, delayMs: 30, shared: shared)
+        let s = ScreenLinkSession(rfbRelay: phoneR, first: ScreenLinkMessage.paths(ScreenLinkPaths(token: "tok")).framed())
+        let events = Collected(s)
+        let rfb = s.rfb()
+        var down = Data()
+        func nodeSends(_ n: AutoNode, _ text: String) async throws {
+            let bytes = Data(text.utf8)
+            try await n.say(.data(channel: 1, offset: UInt64(down.count), bytes: bytes))
+            down += bytes
+        }
+        var got = Data()
+        func read(_ n: Int) async throws { while got.count < n { got += try await rfb.receive() } }
+
+        try await nodeSends(relay, "RFB 003.889\n")
+        try await read(down.count)
+        try await rfb.send(Data("up-1 ".utf8))
+        await until("the first route: the relay") { events.moves().first?.reason == .start }
+
+        let (phoneD, nodeD) = PipeEnd.pair()
+        let direct = AutoNode(nodeD, shared: shared)
+        await until("paths read") { events.all().contains { if case .paths = $0 { true } else { false } } }
+        await s.addDirect(phoneD, route: "lan:a", kind: .lan, via: .wifi)
+        await until("moved to the direct route") { events.moves().contains { $0.to.kind == .lan && $0.reason == .faster } }
+        await until("use went out on the direct route") { direct.used() }
+        try await Task.sleep(nanoseconds: 100_000_000) // the node's resumed arrives
+        try await rfb.send(Data("up-2 ".utf8))
+        try await nodeSends(direct, "over direct ")
+        try await read(down.count)
+
+        phoneD.close() // the direct route drops
+        await until("back on the relay") { relay.used() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try await rfb.send(Data("up-3".utf8))
+        try await nodeSends(relay, "over the relay again")
+        try await read(down.count)
+        XCTAssertEqual(got, down, "every byte the node sent, once and in order")
+        await until("the node got every byte") { shared.lock.withLock { shared.bytes[1] } == Data("up-1 up-2 up-3".utf8) }
+        await until("the policy saw the route lost") { events.moves().contains { $0.reason == .lost && $0.to.kind == .relay } }
+        XCTAssertEqual(events.reopens(), 0, "the relay never dropped")
+    }
+
+    /// A direct route that goes silent (its connection stays open, nothing comes back) is left for the relay within
+    /// about two seconds.
+    func testASilentDirectRouteIsLeft() async throws {
+        let shared = AutoNode.SharedReceive()
+        let (phoneR, nodeR) = PipeEnd.pair()
+        let relay = AutoNode(nodeR, delayMs: 30, shared: shared)
+        let s = ScreenLinkSession(rfbRelay: phoneR, first: ScreenLinkMessage.paths(ScreenLinkPaths(token: "tok")).framed())
+        let events = Collected(s)
+        let (phoneD, nodeD) = PipeEnd.pair()
+        let direct = AutoNode(nodeD, shared: shared)
+        await until("paths read") { events.all().contains { if case .paths = $0 { true } else { false } } }
+        await s.addDirect(phoneD, route: "lan:a", kind: .lan, via: .wifi)
+        await until("on the direct route") { direct.used() }
+        let at = Date()
+        direct.silent = true
+        await until("back on the relay", timeout: 5) { relay.used() }
+        XCTAssertLessThan(Date().timeIntervalSince(at), 3.0, "the 1.5 s silence rule, plus a tick")
+        await until("the move says lost") { events.moves().contains { $0.reason == .lost } }
+    }
+
+    /// The relay drops while the direct route carries the session: the session goes on, and the app is asked to open
+    /// the relay again; the reopened one attaches with the token and becomes the channel's relay.
+    func testARelayThatDropsUnderADirectRouteIsOpenedAgain() async throws {
+        let shared = AutoNode.SharedReceive()
+        let (phoneR, nodeR) = PipeEnd.pair()
+        _ = AutoNode(nodeR, delayMs: 30, shared: shared)
+        let s = ScreenLinkSession(rfbRelay: phoneR, first: ScreenLinkMessage.paths(ScreenLinkPaths(token: "tok")).framed())
+        let events = Collected(s)
+        let rfb = s.rfb()
+        let (phoneD, nodeD) = PipeEnd.pair()
+        let direct = AutoNode(nodeD, shared: shared)
+        await until("paths read") { events.all().contains { if case .paths = $0 { true } else { false } } }
+        await s.addDirect(phoneD, route: "lan:a", kind: .lan, via: .wifi)
+        await until("on the direct route") { direct.used() }
+        phoneR.close() // the hub restarted
+        await until("asked to reopen the relay") { events.reopens() == 1 }
+        try await rfb.send(Data("still here".utf8))
+        await until("RFB went on over the direct route") { shared.lock.withLock { shared.bytes[1] } == Data("still here".utf8) }
+
+        let (phoneR2, nodeR2) = PipeEnd.pair()
+        let relay2 = AutoNode(nodeR2, shared: shared)
+        await s.reattach(phoneR2, video: false)
+        await until("the reopened relay attached with the token") {
+            relay2.messages().contains { if case .attach(token: "tok") = $0 { true } else { false } }
+        }
+        await until("and is measured again") { relay2.messages().contains { if case .ping = $0 { true } else { false } } }
+    }
+}

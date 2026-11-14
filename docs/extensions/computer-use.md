@@ -550,17 +550,42 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   25% after each calm second until the first cut; the phone moves to another tier when the band no longer fits.
   `update.path` (with or without a band) starts the 10 s delay floor, the delivered rate and the calm stretch over
   (`RateController.pathChanged`): the new route's one-way delay is its own, not a queue.
+  `timing` adds `target_kbps` (the bitrate asked of the encoder; `kbps` is what went out), `skipped` (frames left out
+  over the 500 ms queue), `blocked_ms` (time frames waited to be written to the stream) and `pending` (the most frames
+  the encoder held at once). An app without tiers sends none of the new fields and gets the adaptation above unchanged;
+  apps and helpers before it skip `encoding` by length and ignore the new JSON keys.
 - **Idle refinement** (`Refinement`, `frame` flag 2; for a phone that sets a band): 300 ms after the screen stops
   changing, the latest captured picture (even one skipped while a queue drained) is encoded again at four times the
   target bitrate, then twice more 200 ms apart, so text sharpens at any tier. A pass goes only while the link is calm
   (not skipping, the last frame's queueing under 150 ms) and the encoder holds nothing; one that comes back queued past
   150 ms ends the passes until the next change. Its report changes nothing in `RateController` but a keyframe request,
   and `timing` counts only its bytes. A still screen after a size change gets its keyframe through the first pass.
-  ScreenCaptureKit's queue depth is 4 for such a stream, since refinement holds one picture.
-  `timing` adds `target_kbps` (the bitrate asked of the encoder; `kbps` is what went out), `skipped` (frames left out
-  over the 500 ms queue), `blocked_ms` (time frames waited to be written to the stream) and `pending` (the most frames
-  the encoder held at once). An app without tiers sends none of the new fields and gets the adaptation above unchanged;
-  apps and helpers before it skip `encoding` by length and ignore the new JSON keys.
+  ScreenCaptureKit's queue depth is 4 for such a stream, since refinement holds one picture. Over budget, VideoToolbox's
+  low-latency rate control drops whole frames, for seconds after a keyframe at the lowest tier (`screenbench`), so a
+  dropped pass doesn't count and is tried again 200 ms later, up to `Refinement.attempts` (12) tries per still moment:
+  the screen's final picture still goes out once the budget allows.
+- **Quality tiers (#6396, the phone's side)** (`PersonaScreenKit`: `TierLadder`, `ReceiverSignals`, `TierPolicy`):
+  - **Ladder**: a tier is a scale (pixels per point) and a frame rate, best first. Auto steps 2×60, 1.5×60, 1.5×30, 1×30,
+    1×15; Sharper gives up frame rate first (2×60, 2×30, 2×15, 1.5×15, 1×15), Smoother pixels (2×60, 1.5×60, 1×60, 1×30,
+    1×15). Every tier keeps at least a pixel per point, so text stays readable. Each band is 0.02–0.08 bits per pixel per
+    frame, the ceiling at the phone's cap; a tier whose floor is above the cap is left out, and ones that come out the
+    same on a display merge. On `screenbench` the floor keeps scrolling text at SSIM ≥ 0.98 against what was encoded.
+  - **Signals** (the phone's, from the frames): queueing above the 10 s floor of the one-way delay (p50 / p95 over
+    0.5 s, rising or falling over 1 s), the rate the link carried while busy (frames queued behind one another: their
+    bytes over their arrival gaps, so quiet stretches don't read as a slow link), bursts of large frames, late frames,
+    decode time and pictures replaced before they showed. The route's round trip, jitter and loss are `LinkStats`'.
+  - **Policy**, every 250 ms. A tier fits the link when its floor is at most 80% of what the link carries. Down, fast:
+    a long queue (over 400 ms for a quarter second, or skipped frames) or one the bitrate can't fix (the helper's
+    bitrate within 15% of the band's floor and over 150 ms), with a tier that no longer fits, goes straight to the best
+    tier that does; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
+    can't decode or show as fast for 2 s gets a lower frame rate. Up, slow: one tier after a calm window (8 s; 3 s in the
+    first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
+    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route: the same
+    network the best tier, Tailscale (direct IPv6 too) under 30 ms the best else the second, the relay the second over
+    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits.
+  - **Simulated links** (`TierPolicySimulationTests`, the real types over a shaped link): a steady link never moves in
+    10 minutes; the relay settles on 2×60 in 5 s; 25 → 3 Mbit/s steps down in 1 s to 1.5×30 and holds (queueing p50 32
+    / p95 179 ms, against 543 / 1,033 with 2×60 fixed); a link jittering 5–9 Mbit/s for 10 minutes never moves.
 - **Switching**: RFB signs in first and shows until the first video frame decodes; the phone then stops asking RFB for
   updates (Screen Sharing encodes nothing meanwhile). It returns to RFB within about a second on any of: the stream
   closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
@@ -582,7 +607,12 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   Mac hasn't allowed video yet (`permission` missing, so no stream is opened).
   Connection Stats (⋯, off by default) reads the video once a second: frames shown and megabits that arrived, the
   helper's capture, encode and network from `timing`, the phone's decode, and their total first when encode, network
-  and decode are all known (a helper before `timing` gives the phone's numbers only).
+  and decode are all known (a helper before `timing` gives the phone's numbers only). Over VNC it shows RFB's bitrate
+  and frame rate and, on a line of its own, **Round trip to the hub** (#6558): while the overlay is shown and the app is
+  in front, the page pings the app's own connection to that Mac's hub every 2 s (`LiveConnection.roundTrip`, the
+  heartbeat's kind of ping) and shows the median of the last 5 from the last 20 s (`HubRoundTrips`). It is the same leg
+  the web overlay times ("Connection stats on the web"), and like it never sits on the first line. Bitrates have two
+  decimals under 1 Mbps, one above, as on the web.
 - **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
   the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
@@ -607,7 +637,7 @@ iPhone's side comes next.
   `…/ports/5900/connect?pair=…` and `…/screen/video/connect?pair=…`. The hub then passes `link: true` in `port.dial` /
   `screen.dial`, and selects the subprotocol only when the node answers `{link: 1}`. The web's noVNC (`binary`), apps
   before it (no subprotocol), a hub before it (never passes `link`) and a node before it (answers `{}`) all keep the raw
-  stream, byte for byte.
+  stream, byte for byte. hub.json's `screen_link_off` turns sessions off for everyone: the hub then never passes `link` on.
 - **Wire**: the video wire's framing (u32 length, u8 type, body) with its own types: `data` (channel, offset, bytes),
   `ack` (channel, received through), `paths` (the token; candidates and the certificate with the direct routes), `attach`
   / `attached` (a transport joining with the token), `ping` / `pong` (the pong adds the node's TCP retransmitted and sent
@@ -657,8 +687,17 @@ iPhone's side comes next.
   candidate `RouteEligibility` allows on that interface (`NWParameters.requiredInterface`, TLS 1.3 with the ALPN, the
   certificate accepted only by its SHA-256 from `paths`) as `ProbePlan` says (at once, then 30 s doubling to 5 min after a
   failure, again at once when the phone's networks change), and hands what connects to the session, which pings and
-  measures every route and runs the policy once a second. In this stage the picture and input stay on the relay; the
-  choice is only logged (category `screen-link`, route kinds and reasons, never addresses).
+  measures every route (the one in use every second, the others every two) and runs the policy once a second.
+- **Moving** (still only with `-showScreenRoutes`): when the policy picks another route, every live channel moves
+  there (to its own relay for the relay): `use` with what the phone has of each, and nothing more goes out on it until
+  the node's `resumed` says what the node has; each side then sends on from there, so RFB loses and repeats nothing,
+  and a stale video backlog is dropped for a keyframe on the node's side. A direct route that fails, or stays silent for
+  1.5 s with a ping out, puts the channels back on their relays at once (the node does the same on its side). A relay
+  that drops while a direct route carries the session doesn't end it: the session asks the app to open the relay again
+  (`attach=1`), which attaches with the token and is the channel's relay again, so the hub keeps the last word. A new
+  video stream joins the route in use. Each move is a `PathChange` (the stream's first route is one too, `start`):
+  `ScreenVideoLink` sends `update.path` to Persona Screen, keeps it as `route` and calls `onPathChange`, the quality
+  tiers' hook (#6396). Logs (category `screen-link`) carry route kinds and reasons, never addresses.
 - **Rejoining**: a relay that dropped while the session went on (a hub restart, the phone changing networks) is opened
   again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
   or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.

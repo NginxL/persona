@@ -5,9 +5,13 @@ private bytes: number[] = [];
 register(name: string, write: (key: string) => Object): void { this[name] = write; }
 private integer(value: number): void { if (!Number.isSafeInteger(value)) throw new Error('wire integer out of range'); }
 u8(value: number): void { this.integer(value); if (value < 0 || value > 255) throw new Error('u8 out of range'); this.bytes.push(value); }
-u32(value: number): void { this.integer(value); this.bytes.push(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255); }
-u64(value: number): void { this.integer(value); if (value < 0) throw new Error('u64 out of range'); const high = Math.floor(value / 4294967296); this.u32(value - high * 4294967296); this.u32(high); }
-i64(value: number): void { this.integer(value); const high = Math.floor(value / 4294967296); this.u32(value - high * 4294967296); this.u32(high); }
+u16(value: number): void { this.integer(value); if (value < 0 || value > 65535) throw new Error('u16 out of range'); this.bytes.push(value & 255, (value >>> 8) & 255); }
+u32(value: number): void { this.integer(value); if (value < 0 || value > 4294967295) throw new Error('u32 out of range'); this.bytes.push(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255); }
+u64(value: number): void { this.integer(value); if (value < 0) throw new Error('u64 out of range'); const low = value % 4294967296; this.u32(low < 0 ? low + 4294967296 : low); const high = Math.floor(value / 4294967296); this.u32(high < 0 ? high + 4294967296 : high); }
+i8(value: number): void { this.integer(value); if (value < -128 || value > 127) throw new Error('i8 out of range'); this.u8(value < 0 ? value + 256 : value); }
+i16(value: number): void { this.integer(value); if (value < -32768 || value > 32767) throw new Error('i16 out of range'); this.u16(value < 0 ? value + 65536 : value); }
+i32(value: number): void { this.integer(value); if (value < -2147483648 || value > 2147483647) throw new Error('i32 out of range'); this.u32(value < 0 ? value + 4294967296 : value); }
+i64(value: number): void { this.integer(value); const low = value % 4294967296; this.u32(low < 0 ? low + 4294967296 : low); const high = Math.floor(value / 4294967296); this.u32(high < 0 ? high + 4294967296 : high); }
 bool(value: boolean): void { this.u8(value ? 1 : 0); }
 string(value: string): void { const bytes = new TextEncoder().encode(value); this.u64(bytes.length); for (const byte of bytes) this.bytes.push(byte); }
 option<T>(value: T | null, write: (value: T) => void): void { if (value === null) { this.u8(0); } else { this.u8(1); write(value); } }
@@ -22,7 +26,11 @@ private readonly bytes: Uint8Array;
 constructor(bytes: Uint8Array) { this.bytes = bytes; }
 register(name: string, read: (key: string) => Object): void { this[name] = read; }
 u8(): number { if (this.offset >= this.bytes.length) throw new Error('truncated wire input'); return this.bytes[this.offset++]; }
+u16(): number { return this.u8() + this.u8() * 256; }
 u32(): number { return this.u8() + this.u8() * 256 + this.u8() * 65536 + this.u8() * 16777216; }
+i8(): number { const value = this.u8(); return value < 128 ? value : value - 256; }
+i16(): number { const value = this.u16(); return value < 32768 ? value : value - 65536; }
+i32(): number { const value = this.u32(); return value < 2147483648 ? value : value - 4294967296; }
 u64(): number { const value = this.u32() + this.u32() * 4294967296; if (!Number.isSafeInteger(value)) throw new Error('u64 out of range'); return value; }
 i64(): number { const low = this.u32(); let high = this.u32(); if (high >= 2147483648) high -= 4294967296; const value = high * 4294967296 + low; if (!Number.isSafeInteger(value)) throw new Error('i64 out of range'); return value; }
 bool(): boolean { const value = this.u8(); if (value > 1) throw new Error('invalid boolean'); return value === 1; }
@@ -302,17 +310,17 @@ function writeListOp(writer: Writer, value: ListOp): void {
   switch (value.kind) {
     case "remove":
       writer.u32(0);
-      writer.u64(value.index);;
+      writer.u32(value.index);;
       break;
     case "insert":
       writer.u32(1);
-      writer.u64(value.index);;
+      writer.u32(value.index);;
       writer.string(value.id);;
       writer.string(value.json);;
       break;
     case "update":
       writer.u32(2);
-      writer.u64(value.index);;
+      writer.u32(value.index);;
       writer.string(value.id);;
       writer.string(value.json);;
       break;
@@ -322,9 +330,9 @@ function writeListOp(writer: Writer, value: ListOp): void {
 function readListOp(reader: Reader): ListOp {
   const variant = reader.u32();
   switch (variant) {
-    case 0: return { kind: "remove", index: reader.u64() };
-    case 1: return { kind: "insert", index: reader.u64(), id: reader.string(), json: reader.string() };
-    case 2: return { kind: "update", index: reader.u64(), id: reader.string(), json: reader.string() };
+    case 0: return { kind: "remove", index: reader.u32() };
+    case 1: return { kind: "insert", index: reader.u32(), id: reader.string(), json: reader.string() };
+    case 2: return { kind: "update", index: reader.u32(), id: reader.string(), json: reader.string() };
     default: throw new Error('unknown ListOp variant: ' + variant);
   }
 }

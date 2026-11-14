@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Tailwind writes a utility for every class-like word in the files it scans. Tests and browser scripts are not the
+   page: their assertions and fixtures (`not.toContain("outline-white")`, `[typed:zzz]`) cost every page's first
+   screen about 0.2 KB (#7418). The admin UI and the showcase import this file too, so their sources stay in. */
+@source not "../**/*.test.{ts,tsx}";
+@source not "../e2e";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

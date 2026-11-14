@@ -1,4 +1,5 @@
 import Foundation
+import PersonaCore
 import Synchronization
 
 public struct ContinuityBindingReplay: Sendable {

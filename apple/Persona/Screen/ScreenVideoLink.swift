@@ -122,6 +122,10 @@ import UIKit
     /// Each change of `fallback`, and each wait before a retry (tests).
     @ObservationIgnored var onFallback: @MainActor (ScreenVideoFallback?) -> Void = { _ in }
     @ObservationIgnored var onRetry: @MainActor (Duration) -> Void = { _ in }
+    /// The live screen moved to another network route (#6398): the quality tiers (#6396) look again here.
+    @ObservationIgnored var onPathChange: @MainActor (PathChange) -> Void = { _ in }
+    /// The route the live screen takes and why it last changed (#6398); nil without a screen session.
+    private(set) var route: PathChange?
 
     @ObservationIgnored private var want: Want?
     @ObservationIgnored private var ready: Ready?
@@ -156,6 +160,14 @@ import UIKit
     // MARK: Inputs
 
     /// What the page wants shown as video; nil: VNC (chosen, or several displays shown at once).
+    /// The live screen's route changed (#6398): the helper starts its delay baseline again (`update.path`), since the
+    /// one-way delay changed with the route.
+    func routeChanged(_ change: PathChange) {
+        route = change
+        if change.reason != .start { stream?.send(UpdateMessage(path: .init(change.to))) }
+        onPathChange(change)
+    }
+
     func want(_ w: Want?) {
         guard w != want else { return }
         want = w

@@ -56,6 +56,7 @@ values and the open cells for #6871.
 | Apple XCFramework and real-C XCTest | `native/app-core/scripts/build-apple.sh`, then `xcrun swift test --package-path apple/Packages/PersonaCore -Xswiftc -warnings-as-errors` | macOS and Xcode; no physical phone is needed. `DEVELOPER_DIR=<Xcode 26.0.1>/Contents/Developer scripts/ci/apple.sh packages` checks the minimum compiler when that Xcode is installed. Other Xcode versions must be labelled "26.0 not verified". |
 | Apple launch, stream, scroll and ten-open/close memory | `scripts/app/perf-test.sh` covers only its listed frame/hitch suites. A launch and ten-open/close memory entry is not yet implemented; do not infer those results from it. | Physical-iPhone evidence is **blocked: no physical device** (maintainer decision, 2026-11-14); do not wait for it. An owned simulator and named optimized build may still supply reference data. App Launch / Allocations / Animation Hitches are the procedures for a later device; an XCFramework or archive is not a download-size measurement. |
 | HarmonyOS API 26 library | `OHOS_SDK_NATIVE=<API 26 native SDK> native/app-core/scripts/build-ohos.sh` | An installed API 26 native SDK, the Rust OHOS target and populated offline Cargo cache are still required. The script derives `OHOS_NDK_HOME` (which `napi-build-ohos` reads) from the directory that holds the SDK's `native` directory. With a stub SDK layout the build compiles the release closure and stops at the link step; an actual link has not been run. Host registry tests do not link the device NAPI. |
+| ArkTS codec against the real core, on the host | `scripts/ci/core.sh` builds the helper and runs `harmony/tests/core-host/replay.test.mjs`. Locally: `cd native/app-core && cargo build --locked -p persona-core-ohos --example host_replay`, then `PERSONA_CORE_HOST_REPLAY=$PWD/target/debug/examples/host_replay node --test ../harmony/tests/core-host/replay.test.mjs` (Node.js 22.15+). | ArkTS-encoded actions drive the real runtime through `persona-core-ohos`'s registry, and ArkTS decodes the effects and patches: 38 cases / 94 steps, plus 35 values built independently in Rust whose bytes must match in both directions. It caught `u32` fields being written and read as 8 bytes (#7485). No NAPI library, HAP or device is involved; the callbacks arrive as records, not thread-safe functions. |
 | HarmonyOS real-NAPI replay | `devecocli build --modules entry@ohosTest`, then install and run `aa test` with `coreReplay 1`; exact arguments are in `harmony/README.md`. | **Blocked: no physical device** (maintainer decision, 2026-11-14); do not wait for it. A future API 26/HDC environment must also have DevEco CLI and the native SDK. HAP linking, real NAPI callbacks, device timing and packaged increment remain unmeasured. |
 
 Physical-device cells are no longer prerequisites for the next milestones. They stay explicitly blocked above rather than
@@ -63,6 +64,10 @@ being marked passed or supplied by a simulator. Xcode 26.0.1 minimum-compiler ve
 toolchain task, not a physical-device requirement. Device selection, signing, SDK installation and license acceptance
 belong to the maintainer's environment if it later becomes available; none is silently substituted by an emulator or
 a release upload.
+
+The ArkTS host tests live outside the portable `harmony/tests/*.test.mjs` glob, because the replay needs the helper
+binary; a missing helper or too-old Node fails the test rather than skipping it. `harmony/tests/rustcore-wire.test.mjs`
+round-trips the generated codec against itself, which cannot catch a symmetric mistake, so it is not a substitute.
 
 ## Host-only boundary diagnostics
 
