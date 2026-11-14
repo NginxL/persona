@@ -9,7 +9,7 @@ struct ContinuousMotionTests {
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     /// The app targets; `Packages/` (BeautifulUI) is a library with its own rules.
     private static let dirs = ["Persona", "PersonaWatch", "PersonaWidgets", "PersonaWatchWidgets", "LiveActivity",
-                               "Shared", "Mac", "Vision", "PersonaVisionWidgets", "PersonaLink"]
+                               "Shared", "Vision", "PersonaVisionWidgets", "PersonaLink"]
     private static let loop = try! NSRegularExpression(
         pattern: #"repeatForever|TimelineView\(\.animation|phaseAnimator|repeatCount = \.infinity|startAnimating\(\)"#)
 
@@ -24,14 +24,12 @@ struct ContinuousMotionTests {
 
     static let registry: [String: Entry] = [
         "Persona/DesignSystem/BreathingRing.swift": Entry(count: 1, why: "Needs you: the dot breathes", stillIn: "Persona/DesignSystem/Components.swift"),
-        "Mac/Design/MacBreathingRing.swift": Entry(count: 1, why: "Needs you on the Mac", stillIn: "Persona/DesignSystem/Components.swift"),
         "Persona/DesignSystem/VoiceOrb.swift": Entry(count: 1, why: "A voice call: listening and speaking", stillIn: "Persona/DesignSystem/VoiceOrb.swift"),
         "Persona/Recording/RecordingLevelMeter.swift": Entry(count: 2, why: "A meeting recording: the level meter (a 30 fps clock) and the recording dot's blink", stillIn: "Persona/Recording/RecordingLevelMeter.swift"),
         "Persona/DesignSystem/ComposerHoldMic.swift": Entry(count: 1, why: "Recording while the finger holds the mic", stillIn: "Persona/DesignSystem/ComposerHoldMic.swift"),
         "Persona/Views/Assistant/AssistantAvatar.swift": Entry(count: 1, why: "The built-in persona working", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
         "Shared/Design/PersonaFace.swift": Entry(count: 1, why: "The built-in persona's blink", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
         "Persona/Persona/PersonaViews.swift": Entry(count: 1, why: "A downloaded persona's frames for its state", stillIn: "Persona/Persona/PersonaViews.swift"),
-        "Mac/Media/PersonaFramesView+Mac.swift": Entry(count: 1, why: "A downloaded persona's frames on the Mac", stillIn: "Persona/Persona/PersonaViews.swift"),
         "Persona/Views/Assistant/AssistantView.swift": Entry(count: 1, why: "The assistant thinking (typing dots)", stillIn: "Persona/Views/Assistant/AssistantView.swift"),
         "Persona/Views/Chat/ChatView.swift": Entry(count: 1, why: "A chat loading (skeleton)", stillIn: "Persona/Views/Chat/ChatView.swift"),
         "Persona/Views/Chat/ImagePager.swift": Entry(count: 1, why: "An image loading (the system spinner)", stillIn: nil),

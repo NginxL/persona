@@ -10,10 +10,6 @@ struct AppStorageRatchetTests {
 
     /// Converting one of these: take it off the list.
     private static let remaining: Set<String> = [
-        "Mac/App/MacPerfHarness.swift",
-        "Mac/Inbox/MacInboxDetail.swift",
-        "Mac/Link/MacLinkPanel.swift",
-        "Mac/Todos/MacTodosPage.swift",
         "Persona/App/AgentSync.swift",
         "Persona/App/PerfSignpost.swift",
         "Persona/App/StoredValue.swift", // its documentation
@@ -30,7 +26,7 @@ struct AppStorageRatchetTests {
     @Test func noNewAppStorage() throws {
         let apple = Self.here.deletingLastPathComponent()
         var holding: Set<String> = []
-        for dir in ["Persona", "Mac", "Shared"] {
+        for dir in ["Persona", "Shared"] {
             let files = FileManager.default.enumerator(at: apple.appending(path: dir), includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
             for url in files where try String(contentsOf: url, encoding: .utf8).contains("@AppStorage") {

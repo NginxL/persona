@@ -11,7 +11,6 @@ struct SidebarMetricsTests {
     static let files = [
         "Persona/Views/Assistant/AssistantSidebar.swift",
         "Persona/Views/Assistant/AssistantSidebarDirections.swift",
-        "Mac/Design/MacSidebarRow.swift",
     ]
 
     private static func source(_ file: String) throws -> String {

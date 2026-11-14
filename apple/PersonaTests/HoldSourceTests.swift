@@ -47,12 +47,11 @@ struct HoldSourceTests {
     /// The folders it reads are there (after a move, a check reading nothing passes for nothing).
     @Test func readsTheSources() {
         #expect(Self.sources(["Persona/Views"]).count > 50)
-        #expect(!Self.sources(["Mac"]).isEmpty)
     }
 
     @Test func scrollPhasesAreReportedNotWaitedOut() {
         var found: [String] = []
-        for (name, text) in Self.sources(["Persona", "Mac"]) {
+        for (name, text) in Self.sources(["Persona"]) {
             for b in Self.blocks(text, starting: ".onScrollPhaseChange") where Self.waits(b.body) {
                 found.append("\(name):\(b.line)")
             }
