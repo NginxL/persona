@@ -147,6 +147,21 @@ are in [protocol.md](protocol.md) ("MCP tools (`personad mcp`)").
 | Android 已排队确认 | `jarvis.phone.confirm` | `persona.phone.confirm` | receiver 双读 action，既有 data scheme 不加限制 | 保持 live callback 和锁屏授权限制；不自动批准 |
 | Android 更新缓存 | `jarvis-update-*.apk` | `persona-update-*.apk` | 两类都视为更新包 | 清理不当成普通 AppData；不改变 package／签名身份 |
 
+## Side-session fold (`sessions_side_fold`, #7944)
+
+The manager folds a Claude desktop app's side sessions under their parent (`folded_as: "side"`, `folded_side`, the
+`children` sides keys; `docs/protocol/protocol.md` "Session hierarchy") and names `sessions_side_fold` in its bus
+hello; the hub lists the feature only while every manager that carries Agents names it.
+
+| Pair | What it sees |
+| --- | --- |
+| New hub and managers, new client | Sides fold into their parent's chat; lists and counts show the parent once. |
+| A manager without the capability beside a new one | The hub does not list the feature; new clients keep sides as rows. The new manager's rows still carry the fold, so a `roots=1` page leaves its sides out of the rows, as it does any folded row. |
+| Old manager, new hub | No fold and no feature: clients keep today's behaviour. |
+| New hub and managers, an older web bundle | Until it reloads it folds by `folded_under` alone: a side is drawn as a child card in its parent's chat and left out of the rows; its parent shows the side's working or needs-you state, not its unseen result (`sides_unread`). |
+| New hub and managers, an older Android app | The same: it folds rows by `folded_under`, so a side is one of its parent's child sessions until the app is updated. |
+| New hub and managers, an older iOS app | From #8010 on it folds rows by `folded_under` too, so a side is one of its parent's child sessions until the app is updated; an app from before #8010 folds by its own child fields, which a side lacks (no `parent_session_id`), and the side stays a plain row of its own. |
+
 ## Apple 端交接
 
 原生协议兼容跟踪 #6192；本地状态与系统身份跟踪 #6152。Apple 的实现应遵循上述能力和字节约定；本清单不替它们宣称 Keychain、Intent、偏好、Shortcut、旧 controls、活动或 watch 在途数据已经验证。

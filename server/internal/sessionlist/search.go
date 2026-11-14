@@ -33,6 +33,10 @@ type SearchEvidence struct {
 type SearchHit struct {
 	Score    int             `json:"score"`
 	Evidence *SearchEvidence `json:"evidence,omitempty"`
+	// HitSessionID is the session the hit is in when it is not the row's own: with Options.Roots, a side session
+	// folded under the row (Fold.SearchAs, #7944). Its Evidence is that session's text, so a client opens the row with
+	// that side shown at the hit.
+	HitSessionID string `json:"hit_session_id,omitempty"`
 }
 type searchRecord struct {
 	doc   SearchDocument
@@ -163,12 +167,7 @@ func (i *Index) searchResult(o Options) (*result, error) {
 	}
 	r := &result{counts: emptyCounts(i.revisionToken(), o.Roots), ordered: true, searchHits: map[string]SearchHit{}}
 	f := o.filters()
-	for id, record := range i.items {
-		// Authorization and private exclusions run before decoding, matching,
-		// scoring or counting, never as a projection of already paginated hits.
-		if !f.matches(record) || (o.AllowedMachines != nil && !allowed[record.item.Machine]) {
-			continue
-		}
+	document := func(record *record) (*searchRecord, error) {
 		if record.searchDocument == nil {
 			doc, err := ctx.Document(record.item)
 			if err != nil {
@@ -176,19 +175,46 @@ func (i *Index) searchResult(o Options) (*result, error) {
 			}
 			record.searchDocument = &searchRecord{doc: doc, lower: normalizedDocument(doc)}
 		}
-		d := record.searchDocument
-		if d.doc.Assistant {
+		return record.searchDocument, nil
+	}
+	for id, record := range i.items {
+		// The row a hit comes back as: the item itself, or with Roots, for a side session folded under a listed row
+		// (Fold.SearchAs, #7944), that row, naming the side. The row is filtered, scored by state and ordered; the
+		// item's own text is what is searched.
+		row, rowID, side := record, id, ""
+		if fold := record.item.Fold; o.Roots && fold != nil && fold.SearchAs != "" && fold.Root != "" {
+			if f.NoPrivate && record.item.Private {
+				continue
+			}
+			row, rowID, side = i.items[fold.SearchAs], fold.SearchAs, fold.SearchSession
+		}
+		// Authorization and private exclusions run before decoding, matching,
+		// scoring or counting, never as a projection of already paginated hits.
+		if !f.matches(row) || (o.AllowedMachines != nil && !allowed[row.item.Machine]) {
 			continue
 		}
-		state := stateOf(record.item, o.Roots)
+		d, err := document(record)
+		if err != nil {
+			return nil, err
+		}
+		rd := d // the row's document, for the operators
+		if row != record {
+			if rd, err = document(row); err != nil {
+				return nil, err
+			}
+		}
+		if d.doc.Assistant || rd.doc.Assistant {
+			continue
+		}
+		state := stateOf(row.item, o.Roots)
 		if state == "" {
-			state = d.doc.State
+			state = rd.doc.State
 		}
-		name := strings.ToLower(ctx.MachineNames[record.item.Machine])
-		if !anySearch(q.machines, strings.ToLower(record.item.Machine), name) || !anySearch(q.projects, d.lower.Project, d.lower.Cwd) || !anySearch(q.harnesses, d.lower.Harness, d.lower.HarnessLabel) || !anySearch(q.models, d.lower.Model) || (len(q.states) > 0 && !slices.Contains(q.states, state)) || (q.pinned && !ctx.Pinned[id]) || (q.errors && !d.doc.HasErrors && state != "needs_you" && !ctx.Errors[id]) {
+		name := strings.ToLower(ctx.MachineNames[row.item.Machine])
+		if !anySearch(q.machines, strings.ToLower(row.item.Machine), name) || !anySearch(q.projects, rd.lower.Project, rd.lower.Cwd) || !anySearch(q.harnesses, rd.lower.Harness, rd.lower.HarnessLabel) || !anySearch(q.models, rd.lower.Model) || (len(q.states) > 0 && !slices.Contains(q.states, state)) || (q.pinned && !ctx.Pinned[rowID]) || (q.errors && !rd.doc.HasErrors && state != "needs_you" && !ctx.Errors[rowID]) {
 			continue
 		}
-		activeAt := record.item.UpdatedAt
+		activeAt := record.item.UpdatedAt // when the text searched was written: a side's own time
 		if activeAt.IsZero() {
 			activeAt = d.doc.ActiveAt
 		}
@@ -220,16 +246,24 @@ func (i *Index) searchResult(o Options) (*result, error) {
 				}
 			}
 		}
-		hit := SearchHit{Score: score}
+		hit := SearchHit{Score: score, HitSessionID: side}
 		if score == 40 {
 			hit.Evidence = searchSnippet(d.doc, q.terms)
 		}
 		if state != "offline" {
 			hit.Score += 5
 		}
-		r.searchHits[id] = hit
-		r.events = append(r.events, event{id: id, updated: record.item.UpdatedAt, value: record})
-		addCount(&r.counts, record.item, o.Roots, 1)
+		if was, listed := r.searchHits[rowID]; listed {
+			// The row is listed once, by its best hit: its own on a tie, else the side's first by id.
+			if hit.Score > was.Score || hit.Score == was.Score && was.HitSessionID != "" &&
+				(side == "" || side < was.HitSessionID) {
+				r.searchHits[rowID] = hit
+			}
+			continue
+		}
+		r.searchHits[rowID] = hit
+		r.events = append(r.events, event{id: rowID, updated: row.item.UpdatedAt, value: row})
+		addCount(&r.counts, row.item, o.Roots, 1)
 	}
 	sort.Slice(r.events, func(a, b int) bool {
 		x, y := r.events[a], r.events[b]

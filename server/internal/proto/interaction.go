@@ -147,8 +147,11 @@ type Interaction struct {
 	// session is a child folded under it (docs/protocol/protocol.md "Session hierarchy"). Set when sent to clients.
 	FoldedUnder string `json:"folded_under,omitempty"`
 	// FoldedAs is its session's Session.FoldedAs: "worker" when the asking session is a tab's worker folded under its
-	// lead (#5180). Set beside FoldedUnder when sent to clients.
+	// lead (#5180), "side" when it is a side session (#7944). Set beside FoldedUnder when sent to clients.
 	FoldedAs string `json:"folded_as,omitempty"`
+	// FoldedSide is its session's Session.FoldedSide: the side session whose chat the card is in when the asking
+	// session folds through one and is not that side (#7944). Set beside FoldedUnder when sent to clients.
+	FoldedSide string `json:"folded_side,omitempty"`
 	// Deadline is when an ask_user's questions take their recommended options by default (when Reversible) or are
 	// reminded again (when not); absent without one. Reversible is whether the asker said going ahead can be undone;
 	// absent when it did not say. Both are the asker's own words, kept on the card for the history

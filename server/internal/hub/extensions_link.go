@@ -186,6 +186,7 @@ func (h *Hub) features() []string {
 		featureSessionsSearch, featureAgentsPageCounts, featureSessionsHierarchy, featureSessionsCatalog, featureSessionsTodo, featureSessionsQuickFilters, featureMachineRename, featureDesktopUnregister, nodeproto.MCPWait)
 	out = append(out, h.agentSessionArchiveFeatures()...)
 	out = append(out, h.agentAutonameFeatures()...)
+	out = append(out, h.sessionsSideFoldFeatures()...)
 	out = append(out, h.meetingAttendanceFeatures()...)
 	out = append(out, h.meetingConversationFeatures()...)
 	out = append(out, h.meetingPhotosFeatures()...)
@@ -204,8 +205,8 @@ func (h *Hub) features() []string {
 		switch f {
 		case featureAgentSessionArchives, featureAgentSessionArchiveClose, featureAgentAutoname, featureMeetingAttendance, featureMeetingConversation,
 			featureMeetingPhotos, featureMeetingLiveView, featureMeetingHighlights, featureMeetingEcho, featureMeetingTranscription, featureRecordingDay,
-			featureAssistantSearch, featureAssistantStartServiceTier:
-			continue // only manager hello can promise fleet archives, requested names, meetings, all-day recordings, chat search and start speed
+			featureAssistantSearch, featureAssistantStartServiceTier, featureSessionsSideFold:
+			continue // only manager hello can promise fleet archives, requested names, meetings, all-day recordings, chat search, start speed and the side-session fold
 		}
 		if !slices.Contains(out, f) {
 			out = append(out, f)

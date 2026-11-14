@@ -219,12 +219,12 @@ func TestFoldLeavesReviewersOut(t *testing.T) {
 		foldRow("reviewer", proto.StateNeedsYou, func(s *proto.Session) { s.IsSubagent, s.ParentSessionID = true, "lead" }),
 	}
 	s.foldInventory("m1", again)
-	if under, _ := s.foldedUnder("m1", "reviewer"); again[0].Hierarchy != nil || under != "" {
+	if under, _, _ := s.foldedUnder("m1", "reviewer"); again[0].Hierarchy != nil || under != "" {
 		t.Fatalf("a reviewer folded: %+v", again[0].Hierarchy)
 	}
 	other := []proto.Session{again[0], foldRow("reviewer", proto.StateNeedsYou, func(s *proto.Session) { s.IsSubagent, s.ParentSessionID = true, "lead" })}
 	s.foldInventory("m2", other)
-	if under, _ := s.foldedUnder("m2", "reviewer"); under != "lead" {
+	if under, _, _ := s.foldedUnder("m2", "reviewer"); under != "lead" {
 		t.Fatal("another machine's session of the reviewer's id was left out")
 	}
 }

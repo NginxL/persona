@@ -58,10 +58,14 @@ type Item struct {
 // works or needs the user either. Todo is the id of the open to-do the row is on ("" for none): what Options.Todo
 // selects and Counts.Todo counts. The adapter knows which to-dos are open; the index only compares ids. Options.Roots
 // leaves out the items with a Root and filters and counts the others by their folded state; Options.Under selects the
-// items folded under one. Like the rest of an Item it is immutable once handed to Replace: copies of the item share it.
+// items folded under one. SearchAs is the ID of the item (Root's) a search with Options.Roots returns a hit in this
+// item as, and SearchSession the session id the hit names it by (SearchHit.HitSessionID): the adapter sets both on a
+// side session folded under Root (#7944), whose chat is reached from Root's. Like the rest of an Item it is immutable
+// once handed to Replace: copies of the item share it.
 type Fold struct {
-	Root, State, Todo string
-	BackgroundWaiting bool
+	Root, State, Todo       string
+	SearchAs, SearchSession string
+	BackgroundWaiting       bool
 }
 
 // root is the session v is folded under ("" for none).
