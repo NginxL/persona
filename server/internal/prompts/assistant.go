@@ -281,8 +281,9 @@ type Snapshot struct {
 	Plans          []SnapshotPlan     // plan cards in the main conversation waiting for "Start", newest first (at most five)
 	PlansTotal     int
 
-	Following      []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
-	FollowingTotal int                 // all of them
+	FollowingEnabled bool                // Inbox is enabled and available; false leaves the whole section out
+	Following        []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
+	FollowingTotal   int                 // all of them
 	// Asked: the assistant's ask_user questions nobody answered in time, now to-dos waiting for the user's call (#1617),
 	// oldest first.
 	Asked []SnapshotAsked

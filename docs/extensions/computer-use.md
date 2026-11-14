@@ -494,7 +494,11 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`, `timing`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
   are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
-  package for macOS and iOS) is the codec, shared by the helper and the app's client.
+  package for macOS and iOS) is the codec, shared by the helper and the app's client. `update.path`
+  `{kind, via, min_rtt_ms}` (#6398) says the stream moved to another network route, so the helper can start its delay
+  baseline again (#6396); helpers that don't know the field skip it. `kind` (`lan`, `tailscale`, `ipv6`, `relay`) and
+  `via` (the phone's `wifi`, `cellular`, `wired` or `other` interface) name the cases of `LinkStats`, the route
+  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange`).
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
   delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
   delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.

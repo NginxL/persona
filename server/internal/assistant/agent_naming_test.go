@@ -23,9 +23,14 @@ func TestBadAgentNames(t *testing.T) {
 			t.Errorf("bad name not recognized: %q", name)
 		}
 	}
-	for _, name := range []string{"修复会话标题", "Improve PDF export", "エクスポートを修正", "中文翻译", "Review the design", "Background job retries"} {
+	for _, name := range []string{"修复会话标题", "Improve PDF export", "エクスポートを修正", "中文翻译", "Review the design", "Background job retries", "请求重试机制", "请求限流", "请假审批"} {
 		if badAgentName(name, "/work/example-project") {
 			t.Errorf("meaningful name rejected: %q", name)
+		}
+	}
+	for _, name := range []string{"请求重试机制", "请求限流", "请假审批"} {
+		if !validAgentName(name) {
+			t.Errorf("meaningful model name rejected: %q", name)
 		}
 	}
 	for _, name := range []string{"◐ 修复导出", "# 修复导出", "Claude Code", strings.Repeat("名", 41), "two\nlines", "<title>"} {

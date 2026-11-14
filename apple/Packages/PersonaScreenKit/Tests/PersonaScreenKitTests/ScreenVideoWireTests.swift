@@ -21,6 +21,7 @@ final class ScreenVideoWireTests: XCTestCase {
         .keyframe,
         .update(UpdateMessage(maxKbps: 4000, paused: true)),
         .update(UpdateMessage(display: 3)),
+        .update(UpdateMessage(path: .init(kind: "tailscale", via: "cellular", minRttMs: 12.5))),
         .unknown(type: 200, body: Data([7, 7, 7])),
     ]
 

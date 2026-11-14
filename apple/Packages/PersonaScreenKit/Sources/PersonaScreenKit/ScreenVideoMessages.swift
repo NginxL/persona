@@ -50,14 +50,45 @@ public struct StartMessage: Codable, Equatable, Sendable {
 }
 
 /// `update` (phone → helper): any of `start`'s fields again, plus `paused` for the app leaving the foreground
-/// without Picture in Picture.
+/// without Picture in Picture, and `path` after the stream moved to another route (#6398).
 public struct UpdateMessage: Codable, Equatable, Sendable {
+    /// The route the stream now takes (`LinkStats`), so the helper starts its delay baseline again: the one-way delay
+    /// changed with the route, and a slower route must not read as a queue. Strings, not `LinkStats`' enums, so a
+    /// helper never fails an `update` over a route kind it doesn't know; helpers before it skip the field.
+    public struct Path: Codable, Equatable, Sendable {
+        public var kind: String
+        public var via: String
+        public var minRttMs: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case kind
+            case via
+            case minRttMs = "min_rtt_ms"
+        }
+
+        public init(kind: String, via: String, minRttMs: Double? = nil) {
+            self.kind = kind
+            self.via = via
+            self.minRttMs = minRttMs
+        }
+
+        /// The route `link` measures, as `update` carries it.
+        public init(_ link: LinkStats) {
+            self.init(kind: link.kind.rawValue, via: link.via.rawValue, minRttMs: link.minRttMs)
+        }
+
+        /// The kind as `LinkStats` names it; nil for one this side doesn't know.
+        public var linkKind: LinkStats.Kind? { LinkStats.Kind(rawValue: kind) }
+        public var linkVia: LinkStats.Via? { LinkStats.Via(rawValue: via) }
+    }
+
     public var display: Int?
     public var maxSize: Int?
     public var fps: Int?
     public var maxKbps: Int?
     public var codecs: [String]?
     public var paused: Bool?
+    public var path: Path?
 
     enum CodingKeys: String, CodingKey {
         case display
@@ -66,16 +97,18 @@ public struct UpdateMessage: Codable, Equatable, Sendable {
         case maxKbps = "max_kbps"
         case codecs
         case paused
+        case path
     }
 
     public init(display: Int? = nil, maxSize: Int? = nil, fps: Int? = nil, maxKbps: Int? = nil,
-                codecs: [String]? = nil, paused: Bool? = nil) {
+                codecs: [String]? = nil, paused: Bool? = nil, path: Path? = nil) {
         self.display = display
         self.maxSize = maxSize
         self.fps = fps
         self.maxKbps = maxKbps
         self.codecs = codecs
         self.paused = paused
+        self.path = path
     }
 }
 

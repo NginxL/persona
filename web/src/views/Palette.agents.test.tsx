@@ -182,6 +182,16 @@ describe("the Filter beside ⌘K's field", () => {
     expect(getPalette().query).toBe("machine:mac ");
   });
 
+  it("toggles the parser's pin alias off in the Filter menu", async () => {
+    await search("is:pin");
+    await act(async () => filterButton().click());
+    await ticks();
+    expect(menuRow(t("lib-agent-filter.filter_pinned"))?.querySelector("svg")?.getAttribute("class")).not.toContain("invisible");
+    await choose(t("lib-agent-filter.filter_pinned"));
+    expect(getPalette().query.trim()).toBe("");
+    expect(titles()).not.toEqual([]);
+  });
+
   it("keeps the words typed, Pinned and the time window as operators, and Reset leaves the words alone", async () => {
     await search("parser");
     await act(async () => filterButton().click());

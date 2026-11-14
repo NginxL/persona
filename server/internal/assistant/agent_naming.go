@@ -38,6 +38,7 @@ type agentNameRecord struct {
 	NamedAt     time.Time `json:"named_at,omitempty"`
 	NamedOutput int       `json:"named_output,omitempty"`
 	Failures    int       `json:"failures,omitempty"`
+	LastFailure string    `json:"last_failure,omitempty"`
 	NextAttempt time.Time `json:"next_attempt,omitempty"`
 }
 
@@ -71,8 +72,9 @@ func sameAgentRawTitle(a, b string) bool {
 	return a == b || agentTitleText(a) == agentTitleText(b)
 }
 
-// Claude's bare tool label falls back to its first message, while a spinner
-// label does not. Proven bad prompt fallbacks may differ without a native rename.
+// Claude's prompt provenance proves that the title is its first-message fallback,
+// even when that message does not start with a known instruction template.
+// Spinner/tool and prompt presentations are not native renames.
 func sameAgentNamingTitle(before string, current proto.Session) bool {
 	if sameAgentRawTitle(before, current.Title) {
 		return true
@@ -80,15 +82,21 @@ func sameAgentNamingTitle(before string, current proto.Session) bool {
 	if current.Agent != "claude" || current.TitleSource != proto.TitleSourcePrompt {
 		return false
 	}
-	return badClaudePromptFallback(before, current.Cwd) && badClaudePromptFallback(current.Title, current.Cwd)
+	return claudePromptFallback(before) && claudePromptFallback(current.Title)
 }
 
-func badClaudePromptFallback(title, cwd string) bool {
+func claudePromptFallback(title string) bool {
 	switch strings.ToLower(agentTitleText(title)) {
 	case "codex", "opencode", "pi", "persona":
 		return false // a different runtime/tool is not Claude's prompt fallback
 	}
-	return badAgentName(title, cwd)
+	return true
+}
+
+// Prompt provenance identifies copied or truncated first user messages without
+// reading every transcript on the list path. Auto/runtime titles need text evidence.
+func badAgentSessionName(c proto.Session) bool {
+	return badAgentName(c.Title, c.Cwd) || c.TitleSource == proto.TitleSourcePrompt && claudePromptFallback(c.Title)
 }
 
 // Bad names are recognizable placeholders or instruction scaffolding, not arbitrary
@@ -96,6 +104,9 @@ func badClaudePromptFallback(title, cwd string) bool {
 func badAgentName(title, cwd string) bool {
 	title = strings.TrimSpace(title)
 	plain := agentTitleText(title)
+	if utf8.RuneCountInString(plain) > agentNamingTitleRunes {
+		return true
+	}
 	low := strings.ToLower(plain)
 	// i18n-ignore: Observed native placeholder labels, matched as data rather than UI copy.
 	for _, name := range []string{"", "claude", "claude code", "codex", "opencode", "pi", "persona", "guest", "new chat", "untitled", "new session", "新对话", "新会话", "無題"} {
@@ -108,9 +119,9 @@ func badAgentName(title, cwd string) bool {
 	}
 	// i18n-ignore: Instruction-template openings must match the original text.
 	for _, prefix := range []string{
-		"用中文工作", "用中文汇报", "请全程用中文", "请用中文", "任务：", "任务:", "## 需求", "## 任务", "这是一次只读", "这是一次技术验收", // i18n-ignore: match instruction-template data
-		"/loop", "<system-reminder", "<persona-context", "ultrathink", "ultracode",
-		"work in chinese", "please work in chinese", "task:", "## task", "this is a read-only", "日本語で作業", "中国語で作業", // i18n-ignore: match instruction-template data
+		"用中文工作", "用中文汇报", "请全程", "请用", "请检查", "请帮", "请在", "请给", "请把", "请将", "请对", "请按", "请修", "请提供", "请执行", "请完成", "请实现", "请查", "你是", "你需要", "帮我", "帮忙", "参考已有", "这个如果", "执行一次", "读 ", "任务：", "任务:", "## 需求", "## 任务", "这是一次只读", "这是一次技术验收", // i18n-ignore: match instruction-template data
+		"/loop", "/goal", "<system-reminder", "<persona-context", "ultrathink", "ultracode",
+		"work in chinese", "please ", "you are ", "you need to ", "could you ", "can you ", "task:", "## task", "this is a read-only", "日本語で作業", "中国語で作業", // i18n-ignore: match instruction-template data
 	} {
 		if strings.HasPrefix(low, strings.ToLower(prefix)) {
 			return true
@@ -147,7 +158,7 @@ func agentNameDue(v Settings, r agentNameRecord, c proto.Session, now time.Time)
 		r.Manual || !knownAgentTitle(c) || r.Changes >= agentNamingLimit(v) || r.Failures >= agentNamingFailureLimit || now.Before(r.NextAttempt) {
 		return false
 	}
-	if r.Changes == 0 && badAgentName(c.Title, c.Cwd) {
+	if r.Changes == 0 && badAgentSessionName(c) && (r.Title == "" || !sameAgentNamingTitle(r.RawTitle, c)) {
 		return true
 	}
 	hours := agentNamingInterval(v)
@@ -322,7 +333,7 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 		b.mu.Unlock()
 		return false
 	}
-	if quietOn(prefs.AgentAutoNaming) && !c.Assistant && !c.Archived && knownAgentTitle(c) && !r.Manual && r.NamedAt.IsZero() && agentNamingInterval(prefs) > 0 && !badAgentName(c.Title, c.Cwd) {
+	if quietOn(prefs.AgentAutoNaming) && !c.Assistant && !c.Archived && knownAgentTitle(c) && !r.Manual && r.NamedAt.IsZero() && agentNamingInterval(prefs) > 0 && !badAgentSessionName(c) {
 		r.Machine, r.Session = machine, c.SessionID
 		r.NamedAt = now
 		r.NamedOutput = c.OutputTokens
@@ -339,22 +350,40 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 	r.NextAttempt = now.Add(10 * time.Minute)
 	if err := s.putAgentNameLocked(ctx, key, r); err != nil {
 		b.mu.Unlock()
+		s.logf("agent naming: session=%q/%q reason=lease_write_failed", machine, c.SessionID)
 		return false
 	}
 	b.mu.Unlock()
 	callCtx, cancel := context.WithTimeout(ctx, agentNamingTimeout)
 	defer cancel()
 	first, recent, err := s.agentNameDialogue(callCtx, machine, c.SessionID)
+	failureReason := "dialogue_unavailable"
 	var reply ai.Reply
 	if err == nil && first == "" && recent == "" {
 		err = errors.New("no dialogue")
+		failureReason = "no_dialogue"
 	}
 	if err == nil {
+		failureReason = "model_call_failed"
 		reply, err = s.purposeModel("inbox.triage").Chat(callCtx, ai.Request{System: prompts.RenderAgentSessionName(), Messages: []ai.Message{{Role: ai.RoleUser, Content: prompts.RenderAgentSessionNameInput(prompts.AgentSessionNameInput{First: first, Recent: recent})}}, MaxTokens: 256, BoundOutput: true})
 	}
 	title := strings.TrimSpace(strings.Trim(strings.TrimSpace(reply.Text), "\"“”『』")) // i18n-ignore: punctuation normalization
 	if err == nil && (reply.Truncated || !validAgentName(title)) {
 		err = errors.New("invalid name")
+		failureReason = "invalid_name"
+		if reply.Truncated {
+			failureReason = "model_output_truncated"
+		}
+	}
+	if err != nil {
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			failureReason = "naming_timeout"
+		} else if errors.Is(callCtx.Err(), context.Canceled) {
+			failureReason = "naming_canceled"
+		}
+		// Provider errors may contain credentials or echoed private text. Log only
+		// static reason codes, even if a later native-title recheck discards the result.
+		s.logf("agent naming: session=%q/%q reason=%s", machine, c.SessionID, failureReason)
 	}
 	// Observe the raw node row, not our decorated title; a native /rename wins immediately.
 	current, found := s.rawAgentForNaming(ctx, machine, c.SessionID)
@@ -372,30 +401,38 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 	}
 	if err != nil {
 		r.Failures++
+		r.LastFailure = failureReason
 		r.NextAttempt = now.Add(time.Duration(10*(1<<min(r.Failures-1, 5))) * time.Minute)
 		if saveErr := s.putAgentNameLocked(ctx, key, r); saveErr != nil {
-			s.logf("agent naming: record failure: %v", saveErr)
+			s.logf("agent naming: session=%q/%q reason=failure_record_write_failed", machine, c.SessionID)
 		}
 		return true
 	}
 	if r.Changes > 0 && agentNamingInterval(prefs) == 0 {
 		return true
 	}
-	if title == r.Title || title == current.Title {
+	if title == r.Title || r.Title == "" && title == current.Title {
 		// A successful check that keeps the same name still advances the periodic
 		// baseline. Otherwise a daily setting would call again every hour.
+		// Keep proof that this prompt fallback was checked, without counting a
+		// title change. Otherwise an already concise first message retries forever.
+		r.Title, r.RawTitle = title, current.Title
 		r.NamedAt, r.NamedOutput, r.Failures, r.NextAttempt = now, c.OutputTokens, 0, time.Time{}
-		_ = s.putAgentNameLocked(ctx, key, r)
+		r.LastFailure = ""
+		if err := s.putAgentNameLocked(ctx, key, r); err != nil {
+			s.logf("agent naming: session=%q/%q reason=result_write_failed", machine, c.SessionID)
+		}
 		return true
 	}
 	r.Title, r.RawTitle = title, current.Title
 	r.Changes++
 	r.Failures = 0
+	r.LastFailure = ""
 	r.NamedAt = now
 	r.NamedOutput = c.OutputTokens
 	r.NextAttempt = time.Time{}
 	if err := s.putAgentNameLocked(ctx, key, r); err != nil {
-		s.logf("agent naming: save result: %v", err)
+		s.logf("agent naming: session=%q/%q reason=result_write_failed", machine, c.SessionID)
 		return true
 	}
 	// Publishing takes the ledger lock to decorate, so release it before the asynchronous publication.
