@@ -68,6 +68,21 @@ final class TimingWindowTests: XCTestCase {
         XCTAssertEqual(next?.blockedMs, 0)
     }
 
+    /// A refinement pass (#3954) is bytes that went out, not a screen change, an encode of the stream or a round trip.
+    func testARefinementPassCountsOnlyItsBytes() {
+        var w = TimingWindow()
+        w.sent(number: 1, at: 100_000, captureMicros: 0, encodeMicros: 4_000, bytes: 1_000)
+        w.sent(number: 2, at: 500_000, captureMicros: 0, encodeMicros: 30_000, bytes: 9_000, blockedMicros: 50_000,
+               refinement: true)
+        w.reported(frame: 2, at: 900_000)
+        let t = w.take(now: 1_100_000, targetKbps: 1_000)
+        XCTAssertEqual(t?.fps, 1)
+        XCTAssertEqual(t?.encodeMs, 4)
+        XCTAssertNil(t?.networkMs)
+        XCTAssertEqual(t?.kbps, 80)
+        XCTAssertEqual(t?.blockedMs, 0)
+    }
+
     func testTheWindowStartsOverAtEachTake() {
         var w = TimingWindow()
         w.sent(number: 1, at: 0, captureMicros: 0, encodeMicros: 9_000, bytes: 1_000)

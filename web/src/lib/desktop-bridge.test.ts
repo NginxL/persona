@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DesktopBridge } from "../../../spec/desktop-bridge";
+import type { DesktopBridge } from "../../../spec/desktop-bridge.d.ts";
 
 function bridgeMock(overrides: Partial<DesktopBridge>): DesktopBridge {
   return {

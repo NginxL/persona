@@ -41,6 +41,16 @@ enum ScreenQuality: String, CaseIterable {
     }
 }
 
+/// Whether ⋯ › Quality can do anything (#6396): both this app and the Mac's helper must have quality tiers. The helper
+/// says so in `hello.features`; this app says so here. One release carries the app and Persona Link together, so a
+/// helper with tiers can meet an app without its side of them, and a choice that changes nothing must not show.
+/// `appSupported` turns on with the iPhone's tier policy.
+nonisolated enum ScreenTiers {
+    static let appSupported = false
+
+    static func offered(helperHasTiers: Bool, appSupported: Bool = appSupported) -> Bool { appSupported && helperHasTiers }
+}
+
 /// Whether the connection-stats overlay is shown for a Mac (#3954), kept per Mac. Off by default.
 enum ScreenStatsPref {
     private static func key(_ ref: MachineRef) -> String { "screen.stats." + ScreenCredentials.key(ref) }

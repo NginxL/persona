@@ -18,13 +18,16 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     /// - Parameter pair: ties this screen-sharing stream to a later video stream of the same Mac (#3954): the node follows
     ///   Screen Sharing's sign-in on it, and opens video only for a pair that signed in. Hubs and nodes from before the
     ///   video channel ignore it.
-    convenience init(api: APIClient, machine: String, pair: String? = nil) {
-        self.init(api: api, path: "/api/v1/machines/\(machine)/ports/5900/connect", pair: pair)
+    convenience init(api: APIClient, machine: String, pair: String? = nil, protocols: [String] = []) {
+        self.init(api: api, path: "/api/v1/machines/\(machine)/ports/5900/connect", pair: pair, protocols: protocols)
     }
 
     /// Another of the hub's binary relays the same way: the live screen's video channel (`…/screen/video/connect`, #3954).
-    init(api: APIClient, path: String, pair: String?) {
+    /// - Parameter protocols: WebSocket subprotocols to offer (the live screen's session, #6398); `subprotocol` says
+    ///   which the hub selected once the socket is open.
+    init(api: APIClient, path: String, pair: String?, protocols: [String] = []) {
         var req = URLRequest(url: Self.url(api.url(path), pair: pair))
+        if !protocols.isEmpty { req.setValue(protocols.joined(separator: ", "), forHTTPHeaderField: "Sec-WebSocket-Protocol") }
         api.config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
         req.timeoutInterval = 15
@@ -61,6 +64,11 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     }
 
     func close() { task.cancel(with: .normalClosure, reason: nil) }
+
+    /// The subprotocol the hub selected, once the socket is open (after the first message); nil for none.
+    var subprotocol: String? {
+        (task.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol")
+    }
 }
 
 /// What came in, read a few bytes at a time.

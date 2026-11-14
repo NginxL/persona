@@ -345,6 +345,15 @@ Phase 1 (#6871) lands in several PRs.
     for a changed full item. The `coreReplay` ohosTest is ready to replay that same corpus through the real NAPI handle.
   - The API 26 native SDK, HAP link, installed HAP and physical-device replay were not available in this environment;
     no device or performance claim is made. Its exact 38-package / 71-notice runtime closure is checked on the host.
+- **HarmonyOS host checks (#7414).**
+  - The core lane failed on every clean checkout: its HarmonyOS notices step compared against a build output only
+    the device build writes. It now writes that output itself (38 locked registry packages, 71 notice files).
+  - The lane adds the `aarch64-unknown-linux-ohos` Rust target and lints the binding with its `ohos` feature, so the
+    NAPI code is compiled by CI for the first time. Nothing is linked and no SDK is used.
+  - `build-ohos.sh` now exports `OHOS_NDK_HOME`, without which the binding's build script panicked before compiling.
+    Checked with a stub SDK layout only: the release closure compiles and the build stops at the link step.
+  - Still open in #7414: the NAPI callbacks pass a leading error argument and effects as a number array, which the
+    ArkTS declaration and adapter do not expect. The Node tests' fake hides it; it would fail on a device.
 - **Still to come.**
   - iOS: physical-device performance, launch, memory and download-size evidence remains open; Xcode 26.0 is not verified.
   - HarmonyOS: the API 26 `.so`, HAP build and on-device replay.

@@ -263,7 +263,7 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
     };
     const offPresence = desktop.onPresenceChange?.(restore) ?? (() => {});
     const offNotifications = onSystemNotifyChange(restore);
-    const offNotification = desktop.onOpenNotification?.((route) => {
+    const offNotification = desktop.onOpenNotification?.((route: string) => {
       if (route.startsWith("/") && !route.startsWith("//") && !route.includes("\\")) navigate(stripBase(route));
     }) ?? (() => {});
     return () => { offHello(); offPresence(); offNotifications(); offNotification(); };

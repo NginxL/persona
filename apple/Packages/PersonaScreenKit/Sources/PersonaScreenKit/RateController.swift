@@ -63,6 +63,8 @@ public struct RateController {
     /// The phone set a band (#6396): cuts follow the delivered rate and the first seconds raise faster.
     public private(set) var tiered = false
     public private(set) var skipping = false
+    /// The last report's queueing delay in µs (refinement frames' excluded); nil before the first.
+    public private(set) var lastQueueMicros: Int64?
 
     /// The window's one-way delays, increasing, each with when it came: the first is the window's lowest.
     private var baseline: [(at: UInt64, delay: Int64)] = []
@@ -111,6 +113,7 @@ public struct RateController {
         baseline.removeAll()
         arrivals.removeAll()
         calmSince = nil
+        lastQueueMicros = nil
     }
 
     /// The queueing delay of a report with this one-way delay, in µs, after adding it to the window.
@@ -140,10 +143,27 @@ public struct RateController {
         return Int(bytes * 8 * 1000 / span)
     }
 
-    /// One receiver report, received at `now`.
-    public mutating func receive(_ report: ReceiverReport, now: UInt64) -> Decision {
+    /// The link has no queue to speak of: not skipping, and the last report's queueing under the cut threshold. Idle
+    /// refinement (`Refinement`) sends only then.
+    public var calm: Bool { !skipping && (lastQueueMicros ?? 0) <= Self.cutAboveMicros }
+
+    /// The queueing delay a report shows against the window's floor, without adding it to anything: for a refinement
+    /// frame's report, which says whether that pass queued but must not move the floor or the rate.
+    public func queueing(of report: ReceiverReport) -> Int64? {
+        guard let floor = baseline.first?.delay else { return nil }
+        return Int64(truncatingIfNeeded: report.arrivalMicros) - Int64(truncatingIfNeeded: report.captureMicros) - floor
+    }
+
+    /// One receiver report, received at `now`. A refinement frame's report (`refinement`, idle refinement's passes) asks
+    /// for a keyframe if the phone couldn't decode it and changes nothing else: a large frame sent on purpose, while
+    /// the screen is still, says nothing about the link's rate and must not read as congestion.
+    public mutating func receive(_ report: ReceiverReport, now: UInt64, refinement: Bool = false) -> Decision {
+        guard !refinement else {
+            return Decision(skipping: skipping, keyframe: report.flags.contains(.decodingError))
+        }
         let delay = Int64(truncatingIfNeeded: report.arrivalMicros) - Int64(truncatingIfNeeded: report.captureMicros)
         let queue = queueing(delay: delay, now: now)
+        lastQueueMicros = queue
         arrived(report)
         if firstReport == nil { firstReport = now }
         var decision = Decision(keyframe: report.flags.contains(.decodingError))

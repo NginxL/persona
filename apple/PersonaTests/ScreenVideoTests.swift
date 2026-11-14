@@ -216,6 +216,15 @@ struct ScreenVideoTests {
         link.want(nil)
     }
 
+    /// ⋯ › Quality needs this app's side of the tiers too (#6396): a release can pair a helper with tiers and an app
+    /// without them, and then nothing is offered. The iPhone's tier policy turns `appSupported` on.
+    @Test func qualityAlsoWaitsForThisAppsTiers() {
+        #expect(!ScreenTiers.appSupported, "on with the iPhone's tier policy (#6396), not before")
+        #expect(!ScreenTiers.offered(helperHasTiers: true))
+        #expect(ScreenTiers.offered(helperHasTiers: true, appSupported: true))
+        #expect(!ScreenTiers.offered(helperHasTiers: false, appSupported: true))
+    }
+
     /// Retries that fail as the first drop did keep the same line: it never blinks off and on between them.
     @MainActor @Test func aRetryThatFailsKeepsTheLineSteady() async throws {
         let link = ScreenVideoLink(backoff: .init(first: .milliseconds(40), longest: .milliseconds(80)))

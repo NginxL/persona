@@ -19,9 +19,15 @@ public struct TimingWindow {
 
     /// Frame `number` went out at `now` (µs on the helper's clock), `bytes` long, after capture and encoding took these.
     /// `blockedMicros` is how long writing it to the stream took: the link pushing back when it is more than a moment.
+    /// A refinement pass (`refinement`) counts only its bytes, in what went out: it is no screen change (fps), its
+    /// encode at a boosted bitrate isn't the stream's, and its round trip carries its own size, not the network's.
     public mutating func sent(number: UInt32, at now: UInt64, captureMicros: Int64, encodeMicros: Int64, bytes count: Int,
-                              blockedMicros: Int64 = 0) {
+                              blockedMicros: Int64 = 0, refinement: Bool = false) {
         if since == nil { since = now }
+        guard !refinement else {
+            bytes += count
+            return
+        }
         self.blockedMicros += max(0, blockedMicros)
         if sentAt.updateValue(now, forKey: number) == nil { order.append(number) }
         while order.count > Self.remembered { sentAt[order.removeFirst()] = nil }

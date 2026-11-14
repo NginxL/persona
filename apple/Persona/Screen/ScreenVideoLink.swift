@@ -355,7 +355,13 @@ import UIKit
     /// The hub's relay of the video channel (`…/screen/video/connect?pair=…`), the way RFB's goes.
     static func hubTransport(_ r: Ready) -> RFBTransport? {
         guard let api = AppModel.shared.api(r.group) else { return nil }
-        return RFBWebSocket(api: api, path: "/api/v1/machines/\(r.machine)/screen/video/connect", pair: r.pair)
+        let path = "/api/v1/machines/\(r.machine)/screen/video/connect"
+        // The live screen's session (#6398): the video joins it as a channel when the RFB stream opened one.
+        if ScreenRoutes.enabled, let session = ScreenLinkRegistry.shared.session(for: r.pair) {
+            let ws = RFBWebSocket(api: api, path: path, pair: r.pair, protocols: [ScreenLinkWire.subprotocol, "binary"])
+            return ScreenLinkRFBTransport(ScreenLinkVideoStream(socket: ScreenLinkRelaySocket(ws), session: session))
+        }
+        return RFBWebSocket(api: api, path: path, pair: r.pair)
     }
 }
 
