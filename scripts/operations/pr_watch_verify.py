@@ -1,5 +1,6 @@
 """Repository-specific local verification, selected from the PR's changed paths."""
 import importlib.util
+import os
 import re
 import sys
 import uuid

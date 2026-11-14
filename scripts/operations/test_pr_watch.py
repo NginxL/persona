@@ -482,6 +482,17 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(env["PERSONA_PRIVACY_ROOT"], "/tmp/pr-checkout")
         self.assertNotIn("GH_TOKEN", env)
 
+    def test_production_privacy_scan_uses_maintainer_environment_with_pr_root(self):
+        calls = []
+        def check(name, argv, root, timeout, environ=None, cwd=None):
+            calls.append(environ)
+            return {"name": name, "command": argv, "ok": True, "summary": "", "stdout": "", "stderr": ""}
+        with patch.object(pr_watch_verify, "checked", return_value="server/internal/agents/cache.go\n"), \
+                patch.object(pr_watch_verify, "run_check", side_effect=check):
+            pr_watch_verify.verify("example/one", pr(), ".", {"profile": "persona"}, environ={"HOME": "/isolated-home"})
+        self.assertEqual(calls[-1]["PERSONA_PRIVACY_ROOT"], ".")
+        self.assertNotEqual(calls[-1].get("HOME"), "/isolated-home")
+
     def test_fix_ui_change_runs_checks_without_visual_adapter(self):
         names = "web/src/views/ChatView.tsx\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
