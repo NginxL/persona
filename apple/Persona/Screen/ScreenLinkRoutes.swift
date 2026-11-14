@@ -253,6 +253,7 @@ actor ScreenLinkProber {
     private var interfaces = PhoneInterfaces()
     private var monitors: [NWPathMonitor] = []
     private var latest: [ObjectIdentifier: NWPath] = [:]
+    private let wake = RetryWake()
 
     init(session: ScreenLinkSession, pair: String, group: String, machine: String) {
         self.session = session
@@ -264,7 +265,10 @@ actor ScreenLinkProber {
     /// Runs until the session ends.
     func run() async {
         startMonitors()
-        defer { monitors.forEach { $0.cancel() } }
+        defer {
+            monitors.forEach { $0.cancel() }
+            wake.cancel()
+        }
         for await e in session.events {
             switch e {
             case let .paths(p):
@@ -283,6 +287,7 @@ actor ScreenLinkProber {
                 }
             case let .lost(route):
                 plan.failed(route, now: ScreenLinkSession.monotonic())
+                armWake()
             case let .moved(change):
                 let kind = change.to.kind.rawValue, why = change.reason.rawValue, pair = pair
                 ScreenRoutes.log.info("moved to \(kind, privacy: .public) (\(why, privacy: .public))")
@@ -341,6 +346,7 @@ actor ScreenLinkProber {
         guard let conn else {
             ScreenRoutes.log.info("direct \(kind.rawValue, privacy: .public): no connection")
             plan.failed(route, now: ScreenLinkSession.monotonic())
+            armWake()
             return
         }
         plan.attached(route)
@@ -365,6 +371,14 @@ actor ScreenLinkProber {
                 await self.dialed(conn, route: route, kind: kind, via: via)
             }
         }
+        armWake()
+    }
+
+    /// Probes again when the next candidate waiting after a failure is due (#7791). Without it only new paths or a
+    /// network change dialed again, and a lost direct route stayed lost: the live screen kept the hub's relay.
+    private func armWake() {
+        let now = ScreenLinkSession.monotonic()
+        wake.arm(in: plan.nextRetry(after: now).map { $0 - now }) { [weak self] in await self?.probe() }
     }
 }
 #endif
