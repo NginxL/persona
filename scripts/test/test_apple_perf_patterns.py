@@ -43,7 +43,7 @@ PATTERNS = {
 }
 
 # Test targets and tooling: they run on purpose where they run and ship nothing.
-SKIP_PARTS = {"PersonaTests", "PersonaUITests", "PersonaMacTests", "PersonaWatchTests", "Tests", "verify"}
+SKIP_PARTS = {"PersonaTests", "PersonaUITests", "PersonaWatchTests", "Tests", "verify"}
 
 
 def blank_comments(src):

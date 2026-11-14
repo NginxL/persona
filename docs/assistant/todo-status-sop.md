@@ -147,7 +147,8 @@ to-do with priority `high`, still asks the owner with the card, as before.
 Just finished used to empty itself only by time: a to-do the owner had already looked at stayed there for 24 hours, on
 top of the list (#5707). Now the owner files it:
 
-- **Got it** on a Just finished row (a button under its words, and on iOS a leading swipe action) marks it seen. The row
+- **Got it** on a Just finished row (on the web a small button at the end of its status line, under the time, #6578; on
+  iOS a button under its words, moving to the web's place in #7148, and a leading swipe action) marks it seen. The row
   goes to Done at once, before the hub answers; a toast says so with **Undo**, which takes the mark off. A failed write
   puts the row back and says why.
 - **Opening it** counts too: the iPhone marks it seen when its page opens (the list behind has it in Done on the way
@@ -229,7 +230,7 @@ Every client follows this document with its own copy of the rules, each with the
 | Client | Rules | Tests | Page |
 | :--- | :--- | :--- | :--- |
 | Web | `web/src/lib/todo-triage.ts` | `web/src/lib/todo-triage.test.ts` | `web/src/views/Todos.tsx` |
-| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift`, `apple/Mac/Todos/MacTodosPage.swift` |
+| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift` |
 | Android | `android/core/domain/src/main/kotlin/persona/core/domain/tasks/TodoTriage.kt` | `android/core/domain/src/test/kotlin/persona/core/domain/tasks/TodoTriageTest.kt` | `android/feature/agents/src/main/kotlin/persona/feature/agents/TodosScreen.kt` |
 | Hub | `server/internal/assistant/todo_triage.go` | `server/internal/assistant/todo_triage_test.go` | none: it tells when a leader's task is stuck (#3483) |
 

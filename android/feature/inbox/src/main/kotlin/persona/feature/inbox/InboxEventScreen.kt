@@ -1,6 +1,5 @@
 package persona.feature.inbox
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,9 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -22,17 +19,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import persona.core.contracts.InboxChainEntry
 import persona.core.contracts.InboxSuggestion
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.inbox.InboxTier
 import persona.core.navigation.Navigator
 
 /**
- * An inbox event's page (inbox phase 1): the item's tags and "View original" (its source page as the list opened it before),
- * ✦ Summary, Recap, where the processing stands, the suggestion with its buttons right under them, then the Handling chain (the
- * newest entry, "Expand all (N)") and the items it is Related. Only items with event fields open here ([inboxRowPage]).
+ * An inbox event's page (inbox phase 1): the source-specific meta and "View original", the current state, the suggestion,
+ * ✦ Summary, Recap, then the Handling chain (its three newest entries, all once expanded) and Related. Only items with
+ * event fields open here ([inboxRowPage]). Record lookup and its loading / missing / failed states belong to the history package.
  */
 @Composable
 fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, navigator: Navigator) {
@@ -55,7 +52,30 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
     var markingDone by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var stale by rememberSaveable(route.itemId) { mutableStateOf(false) }
+    var lineageRevision by remember(route.itemId) { mutableIntStateOf(0) }
     val open = LocalLarkLinkOpener.current
+    val clock = LocalInboxClock.current
+    val zone = LocalInboxZone.current
+    val nowText = record?.let { inboxNowForRow(it, res, currentLocale, now = clock(), zone = zone) }
+    val oldMark = record?.let { eventMark(it) }
+    val processingAction: (@Composable () -> Unit)? = record?.let { current ->
+        inboxProcessingSession(current)?.let { session ->
+            {
+                JTextButton(stringResource(R.string.inbox_event_processing_chat), onClick = {
+                    navigator.navigate(inboxConversationRoute(session.machineId, session.sessionId, current.item.id))
+                })
+            }
+        }
+    }
+    val sayAction: (@Composable () -> Unit)? = record?.takeIf { !it.item.isDone && it.event.suggestion == null }?.let { current ->
+        { InboxSayAction(repository, current, oldMark, onStale = { stale = it }) }
+    }
+    val stateActions: (@Composable () -> Unit)? = if (sayAction == null) processingAction else ({
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            processingAction?.invoke()
+            sayAction?.invoke()
+        }
+    })
     fun go(target: ChainTarget) {
         val shown = record ?: return
         when (target) {
@@ -90,6 +110,7 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
                         finally { markingDone = false }
                     }
                 })
+            if (record != null) InboxSameMatterMenu(repository, record, onLinked = { lineageRevision++ })
         },
     ) {
         if (record == null) {
@@ -105,17 +126,45 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
             return@JListPage
         }
         item("event-source") {
-            Row(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                    eventTag(record)?.let { (text, status) -> JTag(text, status = status) }
-                    inboxSourceTags(res, record).forEach { JTag(it) }
+            val translated = rememberItemTranslation(record)
+            val meta = inboxRowThirdLine(record, res, translated?.preview?.ifBlank { null })
+            Column(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (meta.isNotBlank()) Text(meta, Modifier.weight(1f), style = PersonaTheme.type.caption,
+                        color = PersonaTheme.palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    else Spacer(Modifier.weight(1f))
+                    JTextButton(stringResource(R.string.inbox_event_view_source), { navigator.navigate(pages.open(record)) }, icon = PhIcons.ArrowSquareOut)
                 }
-                JTextButton(stringResource(R.string.inbox_event_view_source), { navigator.navigate(pages.open(record)) }, icon = PhIcons.ArrowSquareOut)
+            }
+        }
+        val suggestion = record.event.suggestion
+        if (suggestion == null || record.item.isDone) {
+            if (nowText != null) item("event-state") {
+                EventStateLine(EventMark.Now(nowText, inboxNowStatus(record.event.now), problem = record.event.now == "failed",
+                    key = record.event.now), Modifier.padding(bottom = Tokens.Space.s), stateActions)
+            } else if (oldMark != null) item("event-state") {
+                EventStateLine(oldMark, Modifier.padding(bottom = Tokens.Space.s), stateActions)
+            } else item("event-state") {
+                EventFallbackState(record, Modifier.padding(bottom = Tokens.Space.s), stateActions)
             }
         }
         record.item.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-            item("event-summary") { JNotice(summary, Modifier.padding(bottom = Tokens.Space.s), title = stringResource(R.string.inbox_ai_summary), icon = PhIcons.Sparkle) }
+            item("event-summary") {
+                Row(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                    JIcon(PersonaIcons.ai, null, size = Tokens.Space.m, tint = PersonaTheme.palette.accent, decorative = true)
+                    Text(summary, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink)
+                }
+            }
         }
+        // "Suggestion updated" stays over the new suggestion until the user answers again (the card is drawn anew for it).
+        if (stale && !record.item.isDone) item("event-stale") {
+            JNotice(stringResource(R.string.inbox_suggestion_stale), Modifier.padding(bottom = Tokens.Space.s), icon = PhIcons.ArrowsClockwise)
+        }
+        if (suggestion != null && !record.item.isDone) item("event-suggestion:${suggestion.version}") {
+            SuggestionCard(repository, record.item.id, suggestion, Modifier.padding(bottom = Tokens.Space.s),
+                needsYou = record.item.needsYou, onStale = { stale = it })
+        }
+        error?.let { message -> item("event-error") { StatusText(message, isError = true) } }
         record.event.recap?.let { recap ->
             item("event-recap") {
                 JCard(Modifier.padding(bottom = Tokens.Space.s)) {
@@ -125,20 +174,8 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
                 }
             }
         }
-        if (!record.item.isDone) eventMark(record)?.takeIf { it !is EventMark.Suggests }?.let { mark ->
-            item("event-state") { EventStateLine(mark, Modifier.padding(bottom = Tokens.Space.s)) }
-        }
-        // "Suggestion updated" stays over the new suggestion until the user answers again (the card is drawn anew for it).
-        if (stale && !record.item.isDone) item("event-stale") {
-            JNotice(stringResource(R.string.inbox_suggestion_stale), Modifier.padding(bottom = Tokens.Space.s), icon = PhIcons.ArrowsClockwise)
-        }
-        val suggestion = record.event.suggestion
-        if (suggestion != null && !record.item.isDone) item("event-suggestion:${suggestion.version}") {
-            SuggestionCard(repository, record.item.id, suggestion, Modifier.padding(bottom = Tokens.Space.s),
-                needsYou = record.item.needsYou, onStale = { stale = it })
-        }
-        error?.let { message -> item("event-error") { StatusText(message, isError = true) } }
-        eventChain(record, ::go)
+        eventChain(record, inbox.sessions, inbox.mutes, ::go)
+        item("event-line") { InboxLineSection(repository, record, navigator, reload = lineageRevision) }
         if (record.event.related.isNotEmpty()) {
             item("event-related-header") { JSectionHeader(stringResource(R.string.inbox_event_related), count = record.event.related.size) }
             itemsIndexed(record.event.related, key = { _, it -> "event-related:${it.id}" }) { index, related ->
@@ -168,15 +205,30 @@ private fun eventTag(record: InboxRecord): Pair<String, Status?>? {
     }
 }
 
+/** A state line even for an older hub's suggestion, tier-only or done item: reuse the page's existing words. */
+@Composable
+private fun EventFallbackState(record: InboxRecord, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+    val (word, status) = eventTag(record) ?: return
+    JInlineStatus(word, modifier, tone = when (status) {
+        Status.Working -> InlineTone.Busy
+        Status.NeedsYou -> InlineTone.Caution
+        else -> InlineTone.Done
+    }, action = action)
+}
+
 /** Where the processing stands, as one line: who is on it, "AI is preparing a suggestion", or that it failed. */
 @Composable
-internal fun EventStateLine(mark: EventMark, modifier: Modifier = Modifier) {
+internal fun EventStateLine(mark: EventMark, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     when (mark) {
-        is EventMark.Working -> JInlineStatus(stringResource(mark.word), modifier, tone = InlineTone.Busy)
-        EventMark.Preparing -> JInlineStatus(stringResource(R.string.inbox_handling_preparing), modifier, tone = InlineTone.Busy)
+        is EventMark.Working -> JInlineStatus(stringResource(mark.word), modifier, tone = InlineTone.Busy, action = action)
+        EventMark.Preparing -> JInlineStatus(stringResource(R.string.inbox_handling_preparing), modifier, tone = InlineTone.Busy, action = action)
         is EventMark.Failed -> JInlineStatus(mark.reason?.let { stringResource(R.string.inbox_handling_failed_reason, it) }
-            ?: stringResource(R.string.inbox_handling_failed), modifier, tone = InlineTone.Failed)
+            ?: stringResource(R.string.inbox_handling_failed), modifier, tone = InlineTone.Failed, action = action)
         is EventMark.Suggests -> Unit
+        is EventMark.Now -> {
+            val icon = inboxNowIcon(mark.key)
+            JInlineStatus(mark.text, modifier, tone = icon.tone, icon = icon.icon, action = action)
+        }
     }
 }
 
@@ -193,6 +245,7 @@ internal fun EventRowMark(mark: EventMark) {
         is EventMark.Working -> JStateLabel(stringResource(mark.word), Status.Working)
         EventMark.Preparing -> JStateLabel(stringResource(R.string.inbox_handling_preparing), Status.Working)
         is EventMark.Failed -> JStateLabel(stringResource(R.string.inbox_handling_failed), Status.NeedsYou, problem = true)
+        is EventMark.Now -> Unit
     }
 }
 
@@ -283,53 +336,6 @@ private fun SuggestionEditor(
                 placeholder = stringResource(R.string.inbox_suggestion_say_hint), minLines = 2)
             JButton(stringResource(R.string.inbox_suggestion_say_send), { onInstruct(words) }, Modifier.fillMaxWidth(), kind = JButtonKind.Secondary,
                 size = JButtonSize.Medium, enabled = busy == null && words.isNotBlank(), loading = busy == SuggestionAction.Instruct)
-        }
-    }
-}
-
-/** The Handling chain: a header, the newest entry (all of them once expanded), each tapping where its link goes or opening in place. */
-private fun LazyListScope.eventChain(record: InboxRecord, go: (ChainTarget) -> Unit) {
-    val chain = record.event.chain
-    if (chain.isEmpty()) return
-    item("event-chain-header") { JSectionHeader(stringResource(R.string.inbox_event_chain), count = chain.size) }
-    item("event-chain") {
-        var expanded by rememberSaveable(record.item.id) { mutableStateOf(false) }
-        val shown = shownChain(chain, expanded)
-        Column {
-            shown.forEachIndexed { index, entry ->
-                JGroupItem(GroupPosition.of(index, shown.size)) { ChainRow(entry, record, go) }
-            }
-            if (chain.size > 1) JTextButton(
-                if (expanded) stringResource(R.string.inbox_collapse) else stringResource(R.string.inbox_event_chain_all, chain.size),
-                { expanded = !expanded }, Modifier.padding(top = Tokens.Space.xs))
-        }
-    }
-}
-
-@Composable
-private fun ChainRow(entry: InboxChainEntry, record: InboxRecord, go: (ChainTarget) -> Unit) {
-    val palette = PersonaTheme.palette
-    val target = chainTarget(entry, record)
-    var open by rememberSaveable(record.item.id, entry.id) { mutableStateOf(false) }
-    val time = chainTime(entry.at, currentLocale)
-    JRow(onClick = when (target) {
-        ChainTarget.None -> null
-        ChainTarget.Inline -> ({ open = !open })
-        else -> ({ go(target) })
-    }, chevron = target !is ChainTarget.None && target !is ChainTarget.Inline) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            if (time.isNotEmpty()) Text(time, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1)
-            JIcon(chainIcon(entry.kind, record), null, size = Tokens.Space.l, tint = palette.ink2, decorative = true)
-            Text(entry.text.ifBlank { entry.kind }, Modifier.weight(1f, fill = false), style = PersonaTheme.type.callout, color = palette.ink,
-                maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
-            if (target == ChainTarget.Inline) JIcon(if (open) PhIcons.CaretUp else PhIcons.CaretDown, null, size = Tokens.Space.l, tint = palette.ink3, decorative = true)
-        }
-    }
-    if (open && target == ChainTarget.Inline) Column(Modifier.fillMaxWidth().padding(start = rowPadding, end = rowPadding, bottom = Tokens.Space.m),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        entry.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
-        entry.messages.forEach { message ->
-            Text(stringResource(R.string.inbox_suggestion_row, message.sender, message.text), style = PersonaTheme.type.callout, color = palette.ink2)
         }
     }
 }

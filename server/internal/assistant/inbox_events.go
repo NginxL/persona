@@ -11,8 +11,9 @@ import (
 )
 
 // Inbox events, phase 1 (docs/assistant/inbox.md "Events and handling chain"): an item is an event. Besides what it always had it
-// keeps its handling chain (chain: the key calls in time order, every one recorded by the program where it happens, never
-// written by a model), whether it is urgent, the manager's recap, the processing conversation bound to it (handling),
+// keeps its handling chain (chain: the key calls in time order, recorded by the program where they happen; the sole exception is
+// reported, a processing conversation's unverified statement that it or an Agent did something, drawn as "assistant says"), whether
+// it is urgent, the manager's recap, the processing conversation bound to it (handling),
 // at most one suggestion, and the items it is related to across atoms. Its section (status) is computed from those.
 
 // Item statuses (InboxItem.Status, listed for open items only).
@@ -26,6 +27,7 @@ const (
 // Chain entry kinds (InboxChainEntry.Kind).
 const (
 	ChainReceived    = "received"
+	ChainMerged      = "merged" // rows merged by hand, or split again (inbox_merge.go)
 	ChainTriaged     = "triaged"
 	ChainHandling    = "handling"
 	ChainSent        = "sent"
@@ -68,6 +70,7 @@ const (
 	LinkSource  = "source"
 	LinkSession = "session"
 	LinkItem    = "item"
+	LinkTodo    = "todo" // a to-do the row was turned into (inbox_todo.go, #6480)
 )
 
 // InboxChainEntry is one key call on an event.
@@ -401,7 +404,7 @@ func (b *inboxBook) noteSelfReplied(it *InboxItem, at time.Time) {
 
 // noteSent records a message Persona sent for the item. Under b.mu.
 func (b *inboxBook) noteSent(it *InboxItem, at time.Time) {
-	key := "sent_other"
+	key := "sent_reply"
 	switch {
 	case it.Lark != nil:
 		key = "sent_lark"

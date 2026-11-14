@@ -264,6 +264,14 @@ nonisolated struct KBLogLine: Hashable, Sendable {
     }
 }
 
+/// A deleted project as the trash keeps it (docs/assistant/knowledge.md "Deleting a project"): the trash entry's id
+/// is what restoring names.
+nonisolated struct KBTrashEntry: Decodable, Sendable {
+    var id: String
+    var slug: String?
+    var name: String?
+}
+
 extension APIClient {
     func kbList(_ kind: KBKind, tag: String? = nil) async throws -> KBList {
         try await get("/api/v1/kb/\(kind.rawValue)", query: tag.map { ["tag": $0] } ?? [:])
@@ -288,6 +296,15 @@ extension APIClient {
     }
     func kbUpdate(_ kind: String, id: String, _ u: KBUpdate) async throws {
         _ = try await request("PUT", "/api/v1/kb/\(kind)/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? id)", body: u)
+    }
+    /// Deletes a project softly: it goes to the trash, from where `kbRestore` brings it back.
+    func kbDeleteProject(_ id: String) async throws -> KBTrashEntry {
+        let data = try await request("DELETE", "/api/v1/kb/projects/\(Self.kbID(id))")
+        return try JSON.decoder.decode(KBTrashEntry.self, from: data)
+    }
+    /// 409 when a project with the same slug was made since.
+    func kbRestore(_ trashID: String) async throws {
+        _ = try await request("POST", "/api/v1/kb-trash/\(Self.kbID(trashID))/restore")
     }
     func kbSearch(_ q: String) async throws -> [KBHit] {
         struct R: Decodable { var hits: [KBHit] }

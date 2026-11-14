@@ -133,6 +133,9 @@ func (h *Hub) startConversationOnce() http.HandlerFunc {
 			writeErrCode(w, http.StatusServiceUnavailable, assistantwire.CodeAssistantOffline, errAssistantOffline)
 			return
 		}
+		if !h.checkAssistantStartServiceTier(w, r, id) {
+			return
+		}
 		receipt(w, r)
 	}
 }

@@ -419,7 +419,16 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		}
 	}
 	if err == nil {
+		if t.Queue != nil { // a queued retry made it through the gate and linked: its waiting record is done
+			s.clearAdmissionQueue(context.WithoutCancel(ctx), planID, i, t.TodoID)
+		}
 		s.remedyStarted(context.WithoutCancel(ctx), planID, conversation, i, t) // after an assistant's retry (start_remedy.go)
+		return
+	}
+	// An admission-gate refusal means the machine or direction is briefly full, not that the start failed: park the
+	// task in the admission queue (no failTodo, no failure receipt) and let the queue loop retry it (task_queue.go).
+	if isAdmissionDenied(err) {
+		s.queueAdmissionRefusal(planID, i, t, err)
 		return
 	}
 	s.logf("task %s: start: %v", t.TodoID, err)

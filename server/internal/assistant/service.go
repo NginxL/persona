@@ -617,6 +617,9 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	picks, ok := s.modelPicksSet()
 	snap.Partial = snap.Partial || !ok
 	for id, p := range picks {
+		if id != cfg.Main { // only the main conversation has a per-conversation pick (#6911); older side picks stay in the book, unpublished
+			continue
+		}
 		view(id, p.MachineID).ModelPick = p.wire()
 	}
 	directions, ok := s.directionViews(ctx)

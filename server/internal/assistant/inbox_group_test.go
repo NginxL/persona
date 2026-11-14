@@ -38,6 +38,8 @@ type groupLark struct {
 	count     int            // when set, the count its answers say (the hub does not read it for an event)
 	ruleTier  string         // when set, the rule tier its answers carry (else the chat's fyi)
 	tier      string         // when set, the tier its answers carry (a rule tier the item takes, as a migrated thing does)
+	kind      string         // when set, the conversation kind its append answers carry
+	at        time.Time      // when set, the deterministic activity time its append answers carry
 }
 
 func (*groupLark) ID() string   { return "lark" }
@@ -94,10 +96,15 @@ func (g *groupLark) GroupAppend(_ context.Context, a connector.GroupAppend) (con
 	if g.batch != nil && !slices.ContainsFunc(g.batch.Group.New, func(m string) bool { return !g.placed[m] }) {
 		g.batch = nil
 	}
-	return connector.InboxThing{ID: id, Thread: a.Thread, Kind: KindGroup, Title: "示例兜底标题 " + id, Sender: "丙", Preview: "示例预览",
-		Context: "示例群：" + strings.Join(meta.Messages, "、"), At: time.Now().Add(-time.Minute), Last: last, Meta: raw, Tier: connector.Tier(g.tier),
+	kind := cmp.Or(g.kind, KindGroup)
+	at := g.at
+	if at.IsZero() {
+		at = time.Now().Add(-time.Minute)
+	}
+	return connector.InboxThing{ID: id, Thread: a.Thread, Kind: kind, Title: "示例兜底标题 " + id, Sender: "丙", Preview: "示例预览",
+		Context: "示例群：" + strings.Join(meta.Messages, "、"), At: at, Last: last, Meta: raw, Tier: connector.Tier(g.tier),
 		Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", AccountName: "飞书", Count: cmp.Or(g.count, len(meta.Messages)), RuleTier: cmp.Or(g.ruleTier, TierFYI),
-			Lark: rawJSON(InboxLark{AccountID: 1, FeedID: "F1", IsGroup: true, StartPosition: first})}}, nil
+			Lark: rawJSON(InboxLark{AccountID: 1, FeedID: "F1", IsGroup: kind == KindGroup, StartPosition: first})}}, nil
 }
 func (g *groupLark) GroupFallback(_ context.Context, f connector.GroupFallback) (connector.GroupFallbackResult, error) {
 	g.mu.Lock()
@@ -216,6 +223,33 @@ func groupHub(t *testing.T, g *groupLark, model *ai.Client) (*inboxHub, *inboxMe
 	return h, st
 }
 
+// setGroupConversationKind makes the batch, its candidates and append answers agree on the conversation kind.
+func setGroupConversationKind(g *groupLark, h *inboxHub, kind string) {
+	g.batch.Kind = kind
+	g.kind = kind
+	for _, id := range []string{"lark:F1:1051", "lark:F1:900"} {
+		it := h.inbox.items[id]
+		it.Kind = kind
+		it.Lark.IsGroup = kind == KindGroup
+	}
+}
+
+// groupDMJoinFixture supplies two direct-chat candidates and deterministic append activity times.
+func groupDMJoinFixture(t *testing.T, fallback connector.GroupFallbackResult) (*groupLark, *inboxHub, *InboxItem, *InboxItem) {
+	t.Helper()
+	now := time.Now()
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: fallback, at: now}
+	h, _ := groupHub(t, g, nil)
+	setGroupConversationKind(g, h, KindDM)
+	open, done := h.inbox.items["lark:F1:1051"], h.inbox.items["lark:F1:900"]
+	open.UpdatedAt = now.Add(-time.Hour)
+	done.UpdatedAt = now.Add(-24 * time.Hour)
+	doneAt := done.UpdatedAt
+	done.DoneAt = &doneAt
+	done.Count = 1
+	return g, h, open, done
+}
+
 func (h *inboxHub) waitGrouping() { h.inbox.grouping.wg.Wait() }
 
 const groupAnswerOK = `{"assign":[{"message":"m1060","event":"lark:F1:1051"},{"message":"m1061","event":"new:1"}],
@@ -237,7 +271,10 @@ func TestInboxGroupByTheModel(t *testing.T) {
 		t.Fatalf("%d model calls", len(calls))
 	}
 	sys := calls[0].System
-	for _, want := range []string{"示例 meta 说明：messages 是这件事的消息", "示例来源规则：接口变更都需要我", "noise（噪音）", "最多 4 次"} {
+	quotaClause := "这个会话里还开着的事（最多 " + fmt.Sprint(groupOpenMax) + " 件）和 " +
+		fmt.Sprint(int(groupDoneFor/(24*time.Hour))) + " 天内处理过的事（最多 " + fmt.Sprint(groupDoneMax) +
+		" 件），开着的在前（id、title、summary、tier、version、done、meta）"
+	for _, want := range []string{"示例 meta 说明：messages 是这件事的消息", "示例来源规则：接口变更都需要我", "noise（噪音）", "最多 4 次", quotaClause} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q:\n%s", want, sys)
 		}
@@ -571,6 +608,42 @@ func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 	}
 }
 
+// Only a fallback-new event loses a redundant conversation-name prefix; model titles and existing events stay unchanged.
+func TestInboxGroupTitlePrefixOnlyChangesFallbackNewEvents(t *testing.T) {
+	tests := []struct {
+		name, where, title, want string
+		byModel, existing        bool
+	}{
+		{name: "matching prefix", where: "示例群", title: "示例群：周四评审改期", want: "周四评审改期"},
+		{name: "conversation name only", where: "示例群", title: "示例群", want: "示例群"},
+		{name: "empty remainder", where: "示例群", title: "示例群：", want: "示例群："},
+		{name: "ascii colon", where: "示例群", title: "示例群: 周四评审改期", want: "示例群: 周四评审改期"},
+		{name: "no conversation", title: "示例群：周四评审改期", want: "示例群：周四评审改期"},
+		{name: "other conversation", where: "示例群", title: "别的群：周四评审改期", want: "别的群：周四评审改期"},
+		{name: "model title", where: "示例群", title: "示例群：周四评审改期", want: "示例群：周四评审改期", byModel: true},
+		{name: "existing event", where: "示例群", title: "示例群：兜底标题", want: "示例 A 方案评审", existing: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &groupLark{placed: map[string]bool{}}
+			h, _ := groupHub(t, g, nil)
+			planned := plannedEvent{messages: []string{"m1060"}, title: tc.title, tier: TierFYI}
+			if tc.existing {
+				planned.existing = "lark:F1:1051"
+			}
+			thing, err := g.GroupAppend(context.Background(), connector.GroupAppend{Thread: "chat:F1", Event: planned.existing, Messages: planned.messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			thing.Tags = []connector.Tag{{Key: connector.TagChat, Name: tc.where}}
+			got := h.putEvent(sourceOf(g), "chat:F1", planned, thing, tc.byModel)
+			if got == nil || got.Title != tc.want {
+				t.Fatalf("event %+v, want title %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Fallback appends preserve an existing event's triage whether the model or rules originally sorted it. In particular,
 // noise stays folded and an urgent event stays urgent; only the message count and version advance.
 func TestInboxGroupFallbackKeepsExistingTriage(t *testing.T) {
@@ -887,7 +960,7 @@ func TestInboxGroupAnswerChecks(t *testing.T) {
 }
 
 // The events tool: the conversation's events only (not another chat whose id starts the same), open ones first,
-// done ones within three days, at most ten; a query narrows them.
+// recent done ones included and old done ones excluded; a query narrows them.
 func TestInboxGroupEvents(t *testing.T) {
 	h, _ := admitHub(t, nil)
 	now := time.Now()
@@ -915,11 +988,186 @@ func TestInboxGroupEvents(t *testing.T) {
 	if got := ids(h.groupEvents("lark", "chat:F1", "乙")); !slices.Equal(got, []string{"b"}) {
 		t.Fatalf("query %v", got)
 	}
-	if got := h.groupEvents("lark", "chat:F2", ""); len(got) != groupEventsMax {
+	if got := h.groupEvents("lark", "chat:F2", ""); len(got) != groupOpenMax {
 		t.Fatalf("%d listed", len(got))
 	}
 	if got := h.groupEvents("github", "chat:F1", ""); len(got) != 0 {
 		t.Fatalf("another connector's: %v", ids(got))
+	}
+}
+
+func addGroupCandidate(h *inboxHub, id, title string, at time.Time, done bool) {
+	it := &InboxItem{ID: id, Title: title, Tier: TierFYI, Count: 1, UpdatedAt: at,
+		Group: &InboxGroup{Connector: "lark", Thread: "chat:F1"}}
+	if done {
+		it.DoneAt = &at
+	}
+	h.inbox.items[id] = it
+}
+
+func groupCandidateIDs(events []groupEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, event.ID)
+	}
+	return ids
+}
+
+// Open and recently done events have independent quotas. Each retained group is newest first, with all open events first.
+func TestInboxGroupEventsIndependentQuotas(t *testing.T) {
+	tests := []struct {
+		name               string
+		open, done         int
+		wantOpen, wantDone int
+	}{
+		{name: "open events do not consume the done quota", open: 12, done: 4, wantOpen: groupOpenMax, wantDone: 4},
+		{name: "done events do not consume the open quota", open: 3, done: 9, wantOpen: 3, wantDone: groupDoneMax},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := admitHub(t, nil)
+			now := time.Now()
+			add := func(prefix string, count int, done bool, start time.Time) []string {
+				ids := make([]string, 0, count)
+				for i := range count {
+					id := fmt.Sprintf("%s-%02d", prefix, i)
+					at := start.Add(-time.Duration(i) * time.Minute)
+					addGroupCandidate(h, id, "示例", at, done)
+					ids = append(ids, id)
+				}
+				return ids
+			}
+			open := add("open", tc.open, false, now)
+			done := add("done", tc.done, true, now.Add(-time.Hour))
+			want := slices.Clone(open[:tc.wantOpen])
+			want = append(want, done[:tc.wantDone]...)
+
+			got := h.groupEvents("lark", "chat:F1", "")
+			if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+				t.Fatalf("candidates %v, want %v", ids, want)
+			}
+			for i, event := range got {
+				if wantDone := i >= tc.wantOpen; event.Done != wantDone {
+					t.Errorf("candidate %d %s: done %v, want %v", i, event.ID, event.Done, wantDone)
+				}
+			}
+		})
+	}
+}
+
+// Equal activity times use the same id tie-break as newerItem, so repeated candidate lists keep their exact order.
+func TestInboxGroupEventsEqualActivityOrder(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	for _, id := range []string{"open-a", "open-b"} {
+		addGroupCandidate(h, id, "示例", now, false)
+	}
+	doneAt := now.Add(-time.Hour)
+	for _, id := range []string{"done-a", "done-b"} {
+		addGroupCandidate(h, id, "示例", doneAt, true)
+	}
+	want := []string{"open-b", "open-a", "done-b", "done-a"}
+	for range 20 {
+		if ids := groupCandidateIDs(h.groupEvents("lark", "chat:F1", "")); !slices.Equal(ids, want) {
+			t.Fatalf("candidates %v, want the deterministic order %v", ids, want)
+		}
+	}
+}
+
+// Query filtering happens before either cap: newer non-matches take no slots, and both matching groups still truncate.
+func TestInboxGroupEventsQueryPrecedesIndependentCaps(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	wantOpen := make([]string, 0, groupOpenMax)
+	for i := 0; i < groupOpenMax+2; i++ {
+		id := fmt.Sprintf("open-%02d", i)
+		title := "unrelated"
+		if i > 0 {
+			title = "needle open"
+			if i <= groupOpenMax {
+				wantOpen = append(wantOpen, id)
+			}
+		}
+		addGroupCandidate(h, id, title, now.Add(-time.Duration(i)*time.Minute), false)
+	}
+	wantDone := make([]string, 0, groupDoneMax)
+	for i := 0; i < groupDoneMax+2; i++ {
+		id := fmt.Sprintf("done-%02d", i)
+		title := "unrelated"
+		if i > 0 {
+			title = "needle done"
+			if i <= groupDoneMax {
+				wantDone = append(wantDone, id)
+			}
+		}
+		addGroupCandidate(h, id, title, now.Add(-time.Hour-time.Duration(i)*time.Minute), true)
+	}
+	want := append(wantOpen, wantDone...)
+
+	got := h.groupEvents("lark", "chat:F1", "needle")
+	if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+		t.Fatalf("query candidates %v, want %v", ids, want)
+	}
+	var open, done int
+	for _, event := range got {
+		if event.Done {
+			done++
+		} else {
+			open++
+		}
+	}
+	if open != groupOpenMax || done != groupDoneMax {
+		t.Fatalf("query retained %d open and %d done, want %d and %d", open, done, groupOpenMax, groupDoneMax)
+	}
+}
+
+// The fallback receives the same independently capped candidates as the model, including done events that an aggregate
+// open-first cap would have hidden. IDs, order, done flags and meta all match groupEvents.
+func TestInboxGroupFallbackGetsIndependentCandidates(t *testing.T) {
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, Title: "示例结构分组"}}}}
+	h, _ := groupHub(t, g, nil)
+	now := time.Now()
+	for i := 1; i < groupOpenMax; i++ {
+		addGroupCandidate(h, fmt.Sprintf("open-%02d", i), "示例", now.Add(-time.Duration(i+1)*time.Hour), false)
+	}
+	for i := 1; i <= groupDoneMax; i++ {
+		at := now.Add(-24*time.Hour - time.Duration(i)*time.Hour)
+		addGroupCandidate(h, fmt.Sprintf("done-%02d", i), "示例", at, true)
+	}
+	want := h.groupEvents("lark", "chat:F1", "")
+	var open, done int
+	for _, event := range want {
+		if event.Done {
+			done++
+		} else {
+			open++
+		}
+	}
+	if open != groupOpenMax || done != groupDoneMax {
+		t.Fatalf("fixture retained %d open and %d done, want %d and %d", open, done, groupOpenMax, groupDoneMax)
+	}
+
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.fallbacks) != 1 {
+		t.Fatalf("%d fallback calls", len(g.fallbacks))
+	}
+	got := g.fallbacks[0].Events
+	if len(got) != len(want) {
+		t.Fatalf("fallback received %d candidates, want %d", len(got), len(want))
+	}
+	metaText := func(meta json.RawMessage) string {
+		if len(meta) == 0 {
+			return "null" // JSON carries an absent RawMessage as null across the connector call.
+		}
+		return string(meta)
+	}
+	for i, event := range want {
+		if got[i].ID != event.ID || got[i].Done != event.Done || metaText(got[i].Meta) != metaText(event.Meta) {
+			t.Errorf("fallback candidate %d = %+v, want %+v", i, got[i], event)
+		}
 	}
 }
 
@@ -1618,4 +1866,331 @@ func TestInboxGroupReopenWakesTheTwin(t *testing.T) {
 	waitFor(t, "the new messages told to the conversation", func() bool {
 		return strings.Contains(strings.Join(notesOf(h.f, "s1"), "\n"), "有了新消息")
 	})
+}
+
+// A-8: a fallback-new entry joins the latest direct-chat candidate inside the two-hour activity window. The existing
+// event keeps its words and triager, while a higher rule tier raises its tier and replaces the reason with the rule's.
+func TestInboxGroupDMFallbackNewJoinsLatestOpen(t *testing.T) {
+	g, h, it, _ := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction, Title: "示例结构标题"}},
+	})
+	it.Tier, it.Reason = TierFYI, "示例原理由"
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID ||
+		!slices.Equal(g.appends[0].Messages, []string{"m1060", "m1061"}) {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatalf("the fallback opened another event: %v", h.inbox.items)
+	}
+	if it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" || it.Tier != TierAction || it.Reason != "按规则" ||
+		it.TriagedBy != "model" || it.Count != 3 || it.Last != "1061" || it.TriagedAt != it.Last ||
+		string(it.Meta) != `{"messages":["m1051","m1060","m1061"]}` {
+		t.Fatalf("joined event %+v", it)
+	}
+	kinds := chainKinds(it)
+	if len(kinds) == 0 || kinds[0] != ChainReceived || slices.Contains(kinds, ChainReopened) {
+		t.Fatalf("chain %v", kinds)
+	}
+}
+
+// The latest candidate by activity is done even though the supplied candidate list puts open events first. A direct
+// candidate kind is enough when an older batch has no kind. The join uses the ordinary default reopen path.
+func TestInboxGroupDMFallbackNewReopensLatestDone(t *testing.T) {
+	g, h, open, done := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction}},
+	})
+	g.batch.Kind = ""
+	now := time.Now()
+	open.UpdatedAt = now.Add(-time.Hour)
+	done.UpdatedAt = now.Add(-30 * time.Minute)
+	done.Summary, done.Reason, done.TriagedBy, done.Read = "示例原总结", "示例原理由", "model", true
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.fallbacks) != 1 || len(g.fallbacks[0].Events) != 2 ||
+		g.fallbacks[0].Events[0].ID != open.ID || g.fallbacks[0].Events[0].Done ||
+		g.fallbacks[0].Events[1].ID != done.ID || !g.fallbacks[0].Events[1].Done {
+		t.Fatalf("fallback candidates %+v", g.fallbacks)
+	}
+	if len(g.appends) != 1 || g.appends[0].Event != done.ID {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatalf("the fallback opened another event: %v", h.inbox.items)
+	}
+	if !done.open() || done.DoneBy != "" || done.Read || done.Title != "示例上周的发布" || done.Summary != "示例原总结" ||
+		done.Tier != TierAction || done.Reason != "按规则" || done.TriagedBy != "model" || done.Count != 3 ||
+		done.Last != "1061" || string(done.Meta) != `{"messages":["m900","m1060","m1061"]}` {
+		t.Fatalf("reopened event %+v", done)
+	}
+	kinds := chainKinds(done)
+	if len(kinds) < 2 || kinds[0] != ChainReceived || kinds[1] != ChainReopened {
+		t.Fatalf("chain %v", kinds)
+	}
+}
+
+// Recent candidates outside the activity window do not absorb a fallback-new entry.
+func TestInboxGroupDMFallbackNewOutsideWindowOpensEvent(t *testing.T) {
+	g, h, open, done := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction, Title: "示例独立事件"}},
+	})
+	now := time.Now()
+	open.UpdatedAt = now.Add(-3 * time.Hour)
+	done.UpdatedAt = now.Add(-4 * time.Hour)
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.appends) != 1 || g.appends[0].Event != "" {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	fresh := h.inbox.items["lark:F1:1060"]
+	if fresh == nil || fresh.Title != "示例独立事件" || fresh.Tier != TierAction || fresh.TriagedBy != "rules" || fresh.Count != 2 {
+		t.Fatalf("new event %+v", fresh)
+	}
+	if len(h.inbox.items) != 3 || open.Count != 1 || open.Last != "1051" || done.Count != 1 || done.Last != "900" {
+		t.Fatalf("items %v", h.inbox.items)
+	}
+}
+
+// Group and bot conversations retain the old behavior: fallback-new entries open their own event.
+func TestInboxGroupFallbackNewOnlyJoinsDirectChats(t *testing.T) {
+	for _, kind := range []string{KindGroup, KindBot} {
+		t.Run(kind, func(t *testing.T) {
+			g, h, open, _ := groupDMJoinFixture(t, connector.GroupFallbackResult{
+				New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction, Title: "示例独立事件"}},
+			})
+			setGroupConversationKind(g, h, kind)
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if len(g.appends) != 1 || g.appends[0].Event != "" {
+				t.Fatalf("appends %+v", g.appends)
+			}
+			fresh := h.inbox.items["lark:F1:1060"]
+			if fresh == nil || fresh.Kind != kind || fresh.Title != "示例独立事件" || fresh.Count != 2 {
+				t.Fatalf("new event %+v", fresh)
+			}
+			if len(h.inbox.items) != 3 || open.Count != 1 || open.Last != "1051" {
+				t.Fatalf("items %v", h.inbox.items)
+			}
+		})
+	}
+}
+
+// Several fallback-new entries join the same target in fallback plan order, whether written together or in sequence.
+func TestInboxGroupDMFallbackNewEntriesKeepPlanOrder(t *testing.T) {
+	g, h, it, _ := groupDMJoinFixture(t, connector.GroupFallbackResult{New: []connector.GroupNew{
+		{Key: "k1", Messages: []string{"m1060"}, RuleTier: connector.TierFYI, Title: "示例结构事件一"},
+		{Key: "k2", Messages: []string{"m1061"}, RuleTier: connector.TierAction, Title: "示例结构事件二"},
+	}})
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	var messages []string
+	for _, a := range g.appends {
+		if a.Event != it.ID {
+			t.Fatalf("append to another event: %+v", a)
+		}
+		messages = append(messages, a.Messages...)
+	}
+	if !slices.Equal(messages, []string{"m1060", "m1061"}) {
+		t.Fatalf("appended messages %v", messages)
+	}
+	if len(h.inbox.items) != 2 || it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" ||
+		it.Count != 3 || it.Last != "1061" || string(it.Meta) != `{"messages":["m1051","m1060","m1061"]}` {
+		t.Fatalf("joined event %+v, items %v", it, h.inbox.items)
+	}
+}
+
+// A matching mute keeps a joined done event done and adds no reopened entry.
+func TestInboxGroupDMFallbackNewMutedDoneStaysDone(t *testing.T) {
+	g, h, open, done := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction}},
+	})
+	now := time.Now()
+	open.UpdatedAt = now.Add(-time.Hour)
+	done.UpdatedAt = now.Add(-30 * time.Minute)
+	done.Summary, done.Read = "示例原总结", true
+	h.inbox.mutes = []InboxMute{{ID: "m1", Source: "lark", Tag: connector.TagChat, Value: "F1", Name: "示例对话"}}
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.appends) != 1 || g.appends[0].Event != done.ID {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if done.open() || done.DoneBy != "user" || !done.Read || done.Title != "示例上周的发布" || done.Summary != "示例原总结" ||
+		done.Tier != TierAction || done.Reason != "按规则" || done.Count != 3 || done.Last != "1061" ||
+		string(done.Meta) != `{"messages":["m900","m1060","m1061"]}` {
+		t.Fatalf("muted event %+v", done)
+	}
+	kinds := chainKinds(done)
+	if !slices.Contains(kinds, ChainReceived) || slices.Contains(kinds, ChainReopened) {
+		t.Fatalf("chain %v", kinds)
+	}
+	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatalf("the muted join opened another event: %v", h.inbox.items)
+	}
+}
+
+// Reopening a done target does not mark its handling as looking when the twin is disabled.
+func TestInboxGroupDMFallbackNewReopenLeavesTwinDisabled(t *testing.T) {
+	_, h, open, done := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction}},
+	})
+	now := time.Now()
+	open.UpdatedAt = now.Add(-time.Hour)
+	done.UpdatedAt = now.Add(-30 * time.Minute)
+	h.setConfig(func(cfg *assistantwire.InboxConfig) { cfg.Agent.Enabled = false })
+	done.Context = "示例对话：m900"
+	done.Agent = &InboxAgent{State: AgentRunning, MachineID: "server", SessionID: "s1", Of: done.Last}
+	done.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: "server", SessionID: "s1"}
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if !done.open() || done.DoneBy != "" || !slices.Contains(chainKinds(done), ChainReopened) {
+		t.Fatalf("reopened event %+v", done)
+	}
+	if done.Handling.State == HandlingLooking {
+		t.Fatalf("the disabled twin was woken: %+v", done.Handling)
+	}
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	for _, n := range done.Agent.Pending {
+		if n.Name == prompts.NoteNewMessages {
+			t.Fatalf("new messages queued for the disabled twin: %+v", done.Agent.Pending)
+		}
+	}
+}
+
+// Fallback validation accepts a direct assignment to any supplied done candidate, independently of the direct-chat
+// fallback-new rewrite. Its messages follow the same default reopen path and preserve ordinary fallback triage.
+func TestInboxGroupFallbackAssignsDoneEvent(t *testing.T) {
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, ruleTier: TierAction, fallback: connector.GroupFallbackResult{
+		Assign: []connector.GroupAssign{{Message: "m1060", Event: "lark:F1:900"}, {Message: "m1061", Event: "lark:F1:900"}}}}
+	h, _ := groupHub(t, g, nil)
+	it := h.inbox.items["lark:F1:900"]
+	it.Count, it.Read = 1, true
+	it.Summary, it.Reason, it.TriagedBy = "示例原总结", "示例原理由", "model"
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.fallbacks) != 1 || len(g.fallbacks[0].Events) != 2 ||
+		g.fallbacks[0].Events[0].Done || !g.fallbacks[0].Events[1].Done || g.fallbacks[0].Events[1].ID != it.ID {
+		t.Fatalf("fallback candidates %+v", g.fallbacks)
+	}
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID ||
+		!slices.Equal(g.appends[0].Messages, []string{"m1060", "m1061"}) {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if !it.open() || it.DoneBy != "" || it.Read || it.Title != "示例上周的发布" || it.Summary != "示例原总结" ||
+		it.Tier != TierFYI || it.Reason != "示例原理由" || it.TriagedBy != "model" || it.Count != 3 || it.Last != "1061" {
+		t.Fatalf("reopened event %+v", it)
+	}
+	kinds := chainKinds(it)
+	if len(kinds) < 2 || kinds[0] != ChainReceived || kinds[1] != ChainReopened {
+		t.Fatalf("chain %v", kinds)
+	}
+	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatalf("the assignment opened another event: %v", h.inbox.items)
+	}
+}
+
+// Rewriting never lowers an existing tier. Noise is the lowest tier, so even an action rule leaves a noise target alone;
+// when the tier does not rise, the original reason, triager and urgency all survive.
+func TestInboxGroupDMFallbackNewNeverDowngradesTier(t *testing.T) {
+	for _, tc := range []struct {
+		name, existing, rule string
+		urgent               bool
+	}{
+		{name: "higher existing tier", existing: TierAction, rule: TierFYI, urgent: true},
+		{name: "existing noise", existing: TierNoise, rule: TierAction},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, h, it, _ := groupDMJoinFixture(t, connector.GroupFallbackResult{
+				New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.Tier(tc.rule)}},
+			})
+			it.Tier, it.Reason, it.Urgent = tc.existing, "示例原理由", tc.urgent
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if len(g.appends) != 1 || g.appends[0].Event != it.ID {
+				t.Fatalf("appends %+v", g.appends)
+			}
+			if it.Tier != tc.existing || it.Reason != "示例原理由" || it.TriagedBy != "model" || it.Urgent != tc.urgent ||
+				it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" || it.Count != 3 || it.Last != "1061" {
+				t.Fatalf("joined event %+v", it)
+			}
+			if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+				t.Fatalf("the rewrite opened another event: %v", h.inbox.items)
+			}
+		})
+	}
+}
+
+// A rewritten join still leaves an event's tier to the processing conversation already handling it. The messages join
+// that event, but the rule floor does not retriage it or replace its reason.
+func TestInboxGroupDMFallbackNewHandledKeepsTier(t *testing.T) {
+	g, h, it, _ := groupDMJoinFixture(t, connector.GroupFallbackResult{
+		New: []connector.GroupNew{{Key: "k1", Messages: []string{"m1060", "m1061"}, RuleTier: connector.TierAction}},
+	})
+	it.Tier, it.Reason = TierFYI, "示例原理由"
+	it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingWaiting}
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if len(g.appends) != 1 || g.appends[0].Event != it.ID {
+		t.Fatalf("appends %+v", g.appends)
+	}
+	if it.Tier != TierFYI || it.Reason != "示例原理由" || it.TriagedBy != "model" ||
+		it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" || it.Count != 3 || it.Last != "1061" {
+		t.Fatalf("handled event %+v", it)
+	}
+	if kinds := chainKinds(it); slices.Contains(kinds, ChainTriaged) {
+		t.Fatalf("the rule floor retriaged a handled event: %v", kinds)
+	}
+	if len(h.inbox.items) != 2 || h.inbox.items["lark:F1:1060"] != nil {
+		t.Fatalf("the rewrite opened another event: %v", h.inbox.items)
+	}
+}
+
+// The events tool's quotas never hide an open event: ten open events stay ten when many done ones are eligible too, and
+// the done side fills its own six slots from the newest eligible ones, not from slots the open side left over.
+func TestInboxGroupEventsOpenQuotaSurvivesManyDone(t *testing.T) {
+	h, _ := admitHub(t, nil)
+	now := time.Now()
+	for i := range 10 {
+		addGroupCandidate(h, fmt.Sprintf("open-%02d", i), "示例", now.Add(-time.Duration(i)*time.Minute), false)
+	}
+	for i := range 12 {
+		at := now.Add(-24*time.Hour - time.Duration(i)*time.Minute)
+		addGroupCandidate(h, fmt.Sprintf("done-%02d", i), "示例", at, true)
+	}
+	got := h.groupEvents("lark", "chat:F1", "")
+	want := make([]string, 0, groupOpenMax+groupDoneMax)
+	for i := range groupOpenMax {
+		want = append(want, fmt.Sprintf("open-%02d", i))
+	}
+	for i := range groupDoneMax {
+		want = append(want, fmt.Sprintf("done-%02d", i))
+	}
+	if ids := groupCandidateIDs(got); !slices.Equal(ids, want) {
+		t.Fatalf("candidates %v, want %v", ids, want)
+	}
+}
+
+// The prompt's numbers come from the constants: changing the constant changes the rendered prompt, and rendering zero
+// values (as a caller that forgets them would) shows the numbers unset rather than silently keeping the old sentence.
+func TestInboxGroupPromptNumbersBindToConstants(t *testing.T) {
+	text := prompts.RenderInboxGroup(prompts.InboxGroup{MaxCalls: groupCalls, NewMax: groupNewMax,
+		OpenMax: groupOpenMax, DoneMax: groupDoneMax, DoneDays: int(groupDoneFor / (24 * time.Hour))})
+	want := fmt.Sprintf("还开着的事（最多 %d 件）和 %d 天内处理过的事（最多 %d 件）", groupOpenMax, int(groupDoneFor/(24*time.Hour)), groupDoneMax)
+	if !strings.Contains(text, want) {
+		t.Fatalf("prompt lacks %q:\n%s", want, text)
+	}
+	if strings.Contains(text, "最多 10 件（id") {
+		t.Errorf("the old hard-coded sentence is still in the template:\n%s", text)
+	}
 }

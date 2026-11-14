@@ -14,7 +14,13 @@ extern "C" {
 typedef struct PersonaCore PersonaCore;
 
 // The client's callbacks. `changed` and `run` are called on the core's worker thread; `release` once, when the core
-// is freed. `context` is passed back unchanged.
+// is freed. `context` is passed back unchanged and must be safe to use from that thread. Its ownership transfers to
+// the core on every persona_core_new call, success or failure; release drops it exactly once. Callback pointers are
+// borrowed only for the call and must be copied before returning. Callbacks must not synchronously flush or free the
+// same core: the worker cannot join or wait for itself. A handle has one owner and one free. Calls may run concurrently
+// with that free: each either leases the live runtime or fails closed. Free removes new leases, then existing leases
+// finish outside the registry lock. It is not a synchronous worker-stop barrier while another call owns a lease.
+// Handles are never dereferenced by the implementation and are not reused during this process.
 typedef struct PersonaCoreHost {
     void *context;
     void (*changed)(void *context, uint64_t version);
@@ -36,9 +42,9 @@ bool persona_core_dispatch(PersonaCore *core, const uint8_t *action, size_t leng
 // The chat's encoded ChatPatch since the last drain. `chat` is UTF-8.
 PersonaCoreBytes persona_core_drain(PersonaCore *core, const uint8_t *chat, size_t length);
 void persona_core_bytes_free(PersonaCoreBytes bytes);
-// Waits until queued actions are applied. For tests; never on a main thread.
+// Waits until queued actions are applied. For tests; never on a main thread. Zero checks once without waiting.
 bool persona_core_flush(PersonaCore *core, uint32_t timeout_ms);
-// Stops the worker and frees the core; the host's release runs last.
+// Removes new runtime leases; the last existing lease stops the worker and releases the host outside the registry lock.
 void persona_core_free(PersonaCore *core);
 
 #ifdef __cplusplus

@@ -613,7 +613,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 **Instrumentation that exists**
 
-`PerfTrace` / `PerfCount` (`apple/Persona/App/PerfSignpost.swift`), `MainThreadWatchdog`, `FrameStats`, `apple/Mac/App/MacPerfHarness.swift`, `apple/PersonaUITests/PerfTestCase.swift` (`XCTHitchMetric`, scroll and navigation signpost metrics, `XCTClockMetric`), `RenderBudgetTests`. No `OSSignposter` intervals, no MetricKit.
+`PerfTrace` / `PerfCount` (`apple/Persona/App/PerfSignpost.swift`), `MainThreadWatchdog`, `FrameStats`, `apple/PersonaUITests/PerfTestCase.swift` (`XCTHitchMetric`, scroll and navigation signpost metrics, `XCTClockMetric`), `RenderBudgetTests`. The retired native Mac's instrumentation was removed with that target. No `OSSignposter` intervals, no MetricKit.
 
 ## Sources
 

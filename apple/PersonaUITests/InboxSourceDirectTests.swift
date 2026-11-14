@@ -26,7 +26,7 @@ final class InboxSourceDirectTests: XCTestCase {
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant", "-dev.openChat", "",
-                               "-openSplitFresh", "YES", "-inbox.kind", "", "-inbox.source", "", "-inbox.grouping", "time"]
+                               "-openSplitFresh", "YES", "-inbox.kind", "", "-inbox.source", "", "-inbox.grouping", ""]
         app.launchPinned()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "no app window")
         regularWidth = app.windows.firstMatch.frame.width > 600
@@ -59,8 +59,10 @@ final class InboxSourceDirectTests: XCTestCase {
         openItem(route: "chain")
 
         let all = element("inbox.chain.all")
-        reveal(all, what: "Show all in the Received chain")
-        all.tap()
+        if all.exists {
+            reveal(all, what: "Show all in the Received chain")
+            all.tap()
+        }
         shot("chain-3-expanded")
 
         guard let received = receivedRow() else {

@@ -126,6 +126,7 @@ Triage belongs to the **manager** (currently just one: the assistant process `pe
   Previously (before 2026-11-06), every hub restart removed decision cards (including safety-critical deployment and merge cards): sessions looked "seen" or "on another turn" in the first seconds after reconnection, so the manager forgot the cards, and interaction history had already marked them cancelled.
 
 If a card is answered but the message cannot reach the Agent (its computer just disconnected), recreate the card with a new id and push again so the user can answer again (previously the App's answer attempt returned an error).
+If the computer answers that it no longer has the session (`not_found`: deleted there, or listed under another id since), the card is withdrawn instead: put up again, it could never be answered (#6709).
 If the manager's snapshot still reports a card whose answer was delivered to it (but not accepted), the hub restores the card after 30 seconds.
 
 ## Triage
@@ -272,6 +273,8 @@ A GitHub extension may opt into machine-readable polling with the read tool `git
 - A deferred turn stays quiet after refresh, reconnect, and manager restart; a genuinely new turn can ask a new question. Repeated owner snapshots replay the original terminal outcome instead of registering the same question again. Persistence failures remain retryable rather than acknowledging a durable close.
 - For authorization links (`link`), the auth relay goes first ([auth-relay.md](../operations/auth-relay.md)): when an extension's `auth_relay` contribution names the link and it was printed by the Agent's own command on one of your computers, the extension completes it with the account it is signed in with, the Agent is told to go on and no card goes up. Otherwise the card's first question contains the link and validity period (plus one line on why Persona didn't do it, when it tried), with options "Authorized, continue" / "Not now". Push as soon as triage finishes (15 seconds after the turn stops plus a second or two for the model), not after the 60-second "Completed" push delay.
 - Remove a card (without sending anything) when the Agent resumes work (you replied directly on the computer or in the App), a new turn starts, the session disappears, or 24 hours pass without an answer.
+  - *A new turn* includes a later turn whose start Persona did not hear of: its triage replaces the session's earlier card, so a session has one card at a time.
+  - *The session disappears* means it has been missing from its computer's list for 10 minutes while the computer is online and listing, or its computer refused an answer because it no longer has the session (#6709). The wait covers a node, an engine's bridge or the engine itself coming back and listing the session again. An engine away for longer takes its sessions' cards with it, and the turn's work line stays on the session for when it is back. Before #6709 a Paseo Agent's id moved with each fork Paseo made of its Claude session, and every API error left a card under an id nothing listed any more ([paseo.md](../integrations/paseo.md) "Session IDs").
 
 ## Repeated tool calls
 

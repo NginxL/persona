@@ -64,5 +64,15 @@
   "loading_older": "正在加载…",
   "older_failed": "没加载到更早的：{error}",
   "subscriptions": "订阅来源",
-  "sources": "收件箱来源"
+  "sources": "收件箱来源",
+  "merge": "合并",
+  "merged_from": "由 {count} 行合并",
+  "todo_hour": "1 小时后",
+  "todo_today": "今天，全天",
+  "todo_pick": "选日期和时间",
+  "todo_none": "不设截止",
+  "todo_title": "加入待办（{count} 行）",
+  "todo_add": "添加",
+  "todo_add_short": "加入待办",
+  "todo_due": "截止"
 }

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../i18n";
 import { fromLine, matches, type InboxFilter, type InboxItem } from "./inbox";
 import { nowText, rowMeta } from "./inbox-now";
@@ -38,8 +38,19 @@ const waitingAt = (lang: Lang, time: string) => ({
 })[lang];
 const clock = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
+// The text depends on the machine's region and zone (formatLocale keeps the system's region when it is in the interface
+// language, so an en_AU machine wrote "3 Jan" where the fixtures say "Jan 3", #7061): pin both for every case.
+const realZone = process.env.TZ;
+beforeEach(() => {
+  vi.stubGlobal("navigator", { language: "en-US", languages: ["en-US"] });
+  process.env.TZ = "UTC";
+});
+
 afterEach(async () => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  if (realZone === undefined) delete process.env.TZ;
+  else process.env.TZ = realZone;
   await initI18n("zh-Hans");
 }, 30_000);
 

@@ -955,3 +955,36 @@ struct TickBoxToggleStyle: ToggleStyle {
 extension ToggleStyle where Self == TickBoxToggleStyle {
     static var tickBox: TickBoxToggleStyle { TickBoxToggleStyle() }
 }
+
+/// `TickBoxToggleStyle`'s box with a third state, for a mark that can cover part of an item (#7013: a file whose
+/// changes are partly staged in a session's Git tab): ticked, a dash, or empty. A tap runs `action`; a spinner takes
+/// the box's place while it runs. The box sits in a square as large as a tap; VoiceOver reads it as a toggle, with
+/// `label` saying what a tap does and `value` the state.
+struct TickBox: View {
+    enum Mark { case none, some, all }
+
+    var mark: Mark
+    var label: String
+    var value: String
+    var busy = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    ThemedIcon(mark == .all ? Theme.Icon.checkedBox : mark == .some ? Theme.Icon.partlyCheckedBox : Theme.Icon.uncheckedBox)
+                        .foregroundStyle(mark == .none ? Color.secondary : Theme.positive)
+                }
+            }
+            .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+        .accessibilityAddTraits(.isToggle)
+    }
+}

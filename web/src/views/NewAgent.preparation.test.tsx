@@ -7,6 +7,7 @@ import { applyMachine, getState } from "../lib/store";
 import { credentialOwner, handleUnauthorized, setToken } from "../lib/api";
 import { onOpenNewAgent, openNewAgent, type NewAgentPreset, type WorkspaceTarget } from "../lib/new-agent";
 import { resetManagerChoice, setRosterDefault } from "../lib/manager-choice";
+import { refreshWorkspaceCatalog } from "../lib/workspace-catalog";
 import { NewAgent } from "./NewAgent";
 import { resetModelListsForTests } from "../lib/session-models";
 import { Toasts } from "../ui/atoms";
@@ -25,6 +26,8 @@ let host: HTMLDivElement;
 let closes: number;
 let configured: boolean;
 let unauthorized: ReturnType<typeof vi.fn<() => void>>;
+// the hub's workspace catalog (#7259); empty unless a test lists some
+let catalogRows: Record<string, unknown>[] = [];
 const flush = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
 const tick = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text)!;
@@ -85,7 +88,7 @@ beforeEach(async () => {
   resetModelListsForTests();
   vi.useFakeTimers();
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  calls = []; pending = []; closes = 0; configured = false;
+  calls = []; pending = []; closes = 0; configured = false; catalogRows = [];
   let preview = 0;
   vi.stubGlobal("URL", class extends URL {
     static createObjectURL = vi.fn(() => `blob:synthetic-preview-${++preview}`);
@@ -118,6 +121,7 @@ beforeEach(async () => {
     });
     if (url.endsWith("/sessions")) return json({ session: { machine_id: call.body!.machine_id, session_id: "synthetic-started", title: "Synthetic started", status: "idle" } });
     if (url.includes("/files?")) return json({ path: "/uploads/submitted.txt" });
+    if (url.endsWith("/workspaces")) return json({ workspaces: catalogRows });
     return json({});
   }));
   host = document.createElement("div"); document.body.append(host);
@@ -422,5 +426,74 @@ describe("New Agent exact workspace destinations", () => {
     expect(starts()).toHaveLength(1);
     expect(starts()[0].body).toMatchObject({ workspace_id: "nested-empty", host: "orca", cwd: "/projects/demo" });
     expect(messages()[0].body!.text).toBe("Next task\n/uploads/submitted.txt");
+  });
+});
+
+describe("New Agent workspace list (#7259)", () => {
+  const paseo = (id: string, extra: Record<string, unknown> = {}) => ({
+    id: `computer/paseo/${id}`, machine_id: "computer", source: "paseo", source_id: id, cwd: `/projects/${id}`, title: id,
+    project_id: "demo", project_name: "demo", workspace_kind: "git", ...extra,
+  });
+  async function list(rows: Record<string, unknown>[]) {
+    catalogRows = rows;
+    await act(async () => { await refreshWorkspaceCatalog(); });
+    await flush();
+  }
+  const choices = () => [...document.querySelectorAll<HTMLButtonElement>("[data-workspace-choice]")];
+  afterEach(async () => {
+    catalogRows = [];
+    await act(async () => { await refreshWorkspaceCatalog(); });
+  });
+
+  it("lists the computer's Paseo workspaces by project and starts the Agent in the one chosen", async () => {
+    await list([
+      paseo("fix-login", { branch: "fix-login" }),
+      paseo("demo-main", { title: "demo", branch: "main", is_main: true }),
+      paseo("notes", { project_id: undefined, project_name: undefined, workspace_kind: "folder" }),
+      paseo("elsewhere", { machine_id: "second" }),
+      { ...paseo("space"), source: "herdr" },
+      paseo("gone", { available: false }),
+    ]);
+    const box = document.querySelector('[data-testid="new-agent-workspaces"]')!;
+    expect([...box.querySelectorAll('[role="group"]')].map((g) => g.getAttribute("aria-label"))).toEqual(["demo", t("newagent-workspace.other")]);
+    expect(choices().map((b) => b.textContent)).toEqual([
+      `demo${t("newagent-workspace.kind_main")} · main/projects/demo-main`,
+      `fix-login${t("newagent-workspace.kind_worktree")}/projects/fix-login`,
+      `notes${t("newagent-workspace.kind_folder")}/projects/notes`,
+    ]);
+    expect(box.textContent).not.toContain("paseo");
+    await act(async () => choices()[1].click());
+    const card = document.querySelector('[data-testid="new-agent-workspace"]')!;
+    expect(card.textContent).toContain("fix-login");
+    expect(document.querySelector('[data-testid="new-agent-workspaces"]')).toBeNull();
+    expect(document.querySelector('input[placeholder="' + t("newagent.folder_placeholder") + '"]')).toBeNull();
+    await tick(401);
+    expect(document.querySelector('[data-testid="new-agent-worktree"]')).toBeNull();
+    expect(button("Second computer").disabled).toBe(false);
+    await click(t("newagent.start")); await tick();
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body).toMatchObject({ machine_id: "computer", cwd: "/projects/fix-login", workspace_id: "fix-login", host: "paseo" });
+  });
+
+  it("goes back to a folder, and another computer drops the choice", async () => {
+    await list([paseo("fix-login")]);
+    await act(async () => choices()[0].click());
+    await click(t("newagent-workspace.choose_folder"));
+    expect(document.querySelector('[data-testid="new-agent-workspace"]')).toBeNull();
+    expect(choices()).toHaveLength(1);
+    await act(async () => choices()[0].click());
+    await click("Second computer"); await flush();
+    expect(document.querySelector('[data-testid="new-agent-workspace"]')).toBeNull();
+    expect(document.querySelector('[data-testid="new-agent-workspaces"]')).toBeNull();
+    await click(t("newagent.start")); await tick();
+    expect(starts()[0].body).toMatchObject({ machine_id: "second", cwd: "/projects/other" });
+    expect(starts()[0].body).not.toHaveProperty("workspace_id");
+    expect(starts()[0].body).not.toHaveProperty("host");
+  });
+
+  it("shows no list when the computer has no Orca or Paseo workspace", async () => {
+    await list([{ ...paseo("space"), source: "herdr" }, paseo("offline", { online: false })]);
+    expect(document.querySelector('[data-testid="new-agent-workspaces"]')).toBeNull();
+    expect(document.querySelector('input[placeholder="' + t("newagent.folder_placeholder") + '"]')).not.toBeNull();
   });
 });

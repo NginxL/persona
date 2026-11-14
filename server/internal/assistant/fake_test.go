@@ -60,6 +60,7 @@ type fakeHub struct {
 	devicesOther  []string                   // devices.list's ids kept out of it (pending, leaving, absorbed)
 	sessions      map[string][]proto.Session // by machine: the machines there are
 	sessionsFail  map[string]int             // by machine: sessions.list fails offline this many more times (then recovers)
+	itemsFail     int                        // session.items fails this many more times (then recovers)
 	items         []proto.Item               // session.items answers this
 	pageTurns     bool                       // and only the last n turns of it to "turns": n, as the node does (else all of it)
 	itemsPage     int                        // > 0: session.items with after_seq pages them by seq, this many a page
@@ -218,9 +219,16 @@ func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	f.mu.Lock()
 	f.itemReads++
 	read, hooks := f.itemReads, f.readHooks
+	fail := f.itemsFail > 0
+	if fail {
+		f.itemsFail--
+	}
 	f.mu.Unlock()
 	if hooks.before != nil {
 		hooks.before(read)
+	}
+	if fail {
+		return nil, errors.New("the node did not answer")
 	}
 	result, err := f.deviceCall(ctx, p)
 	if hooks.after != nil {

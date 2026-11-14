@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -141,12 +140,11 @@ func installedHelper(t *testing.T, permission string) string {
 func TestStartScreenHelperJoinsTheStreamAndEndsWithScreenSharing(t *testing.T) {
 	installedHelper(t, "granted")
 	swap(t, &screenLaunch, fakeHelper(t, func(token string) string { return token }, ""))
-	var mu sync.Mutex
-	var sent []string
+	streamClosed := make(chan struct{})
 	n := &Node{screens: newScreenLogins(), streams: streams.New(func(event string, _ any) error {
-		mu.Lock()
-		sent = append(sent, event)
-		mu.Unlock()
+		if event == streams.EventClose {
+			close(streamClosed)
+		}
 		return nil
 	})}
 	// The paired screen-sharing stream, signed in.
@@ -169,11 +167,11 @@ func TestStartScreenHelperJoinsTheStreamAndEndsWithScreenSharing(t *testing.T) {
 	}
 
 	_ = tee.Close() // screen sharing ends: the video ends with it, and its slot is released once
-	deadline := time.Now().Add(2 * time.Second)
-	for released.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-streamClosed: // The stream pump has closed the helper connection again.
+	case <-time.After(2 * time.Second):
+		t.Fatal("the screen-sharing stream ended without closing the video stream")
 	}
-	time.Sleep(50 * time.Millisecond) // the stream pump closing it again must not release twice
 	if got := released.Load(); got != 1 {
 		t.Fatalf("slot released %d times, want 1", got)
 	}

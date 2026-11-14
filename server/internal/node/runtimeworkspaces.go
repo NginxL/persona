@@ -125,7 +125,7 @@ func (h *runtimeConn) makesWorkspaces() bool {
 // setWorkspaces replaces its workspaces (runtime.workspaces).
 func (h *runtimeConn) setWorkspaces(list []runtimeWorkspace) {
 	h.mu.Lock()
-	h.workspaces = list
+	h.workspaces, h.workspacesSaid = list, true
 	h.mu.Unlock()
 }
 
@@ -230,6 +230,7 @@ func (n *Node) runtimeWorkspaceRows(h *runtimeConn) []proto.Workspace {
 		case workspaceCheckout, workspaceWorktree:
 			main := w.Kind == workspaceCheckout
 			row.IsMain, row.WorkspaceKind = &main, "git"
+			row.Owned = w.Kind == workspaceWorktree && w.Owned // the worktrees Delete worktree is offered for (#6297)
 		default:
 			row.WorkspaceKind = workspaceFolder
 		}

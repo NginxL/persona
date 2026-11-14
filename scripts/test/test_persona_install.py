@@ -123,6 +123,8 @@ class PersonaInstallTests(unittest.TestCase):
                     env['PATH'] = f'{uname.parent}:{env["PATH"]}'
                 for key in ('BASH_ENV', 'ENV', 'ZDOTDIR', 'XDG_CONFIG_HOME'):  # nothing of the machine's own setup
                     env.pop(key, None)
+                # Nor its language: install.sh answers in LC_ALL's, then LANG's, and the tests read English (#6938).
+                env.update({'LANG': 'C', 'LC_ALL': ''})
                 env.update(extra or {})
                 if answers is not None:  # with a terminal: install.sh asks, and these answer
                     argv = ['sh', str(script), *args]
@@ -366,8 +368,8 @@ printf 'catalog placeholders preserved in all languages\n'
         # persona-node (it prefers it), and a switch is asked for, which does nothing on a new service.
         pair_link = 'persona://link?url=https%3A%2F%2Fhub.example.com&token=jp_x'
         pair = {'PERSONA_ROLE': 'node', 'PERSONA_PAIR': pair_link}
-        # A Mac's connector is the menu bar app, so install.sh sets up the resident node and pairs it in two calls.
-        for system, paired in (('Darwin', ['node install', 'pair ' + pair_link]), ('Linux', ['install --pair ' + pair_link])):
+        # On both Mac and Linux the same CLI pairs and installs the independent connector and node services.
+        for system, paired in (('Darwin', ['install --pair ' + pair_link]), ('Linux', ['install --pair ' + pair_link])):
             with self.subTest(system=system), tempfile.TemporaryDirectory() as directory:
                 home = Path(directory)
                 result = self.run_install(home, link=LINK_FIXTURE, node=True, extra=pair, system=system)

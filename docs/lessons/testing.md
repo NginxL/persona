@@ -134,6 +134,7 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 - Waiting for one effect does not wait for another made on a different goroutine (2026-11-09, #2152). A source page's tree changes first and its frame is sent later by the delivery goroutine (`ui_page_delivery.go`), so `TestPageNativeFiniteLoadStillStartsWithLoading`, which waited for the tree to say `loaded` and then counted delivered frames, failed only on busy CI. Wait for each effect you assert on (`pageAwait` for the frames too). To reproduce such a gap, slow the receiving side in a scratch copy (a fake `Notify` that sleeps 20 ms failed 10 of 10 runs), or run `go test -cpu 1 -count=60` with every core busy (4 of 60 failed); an idle machine passed 40 of 40.
 - A cancel on a fixed deadline counted from the start races the fake's own startup (2026-11-10, #2674). `TestToolCheckTimeoutStopsItsHelpers` gave the call 300 ms, but its fake had to start a shell and write its helper's pid first; on a busy machine the cancel came before there was a helper, and the test failed (1 of 30 runs with every core busy) without checking what it was about. Cancel once the fake shows it started (the pid file), and time the return from the cancel. Do not lengthen the deadline instead: it only makes the race rarer.
+- A child's `/proc/<pid>/environ` can read empty right after `exec.Cmd.Start` returns (2026-11-14, #7028). `Start` returns once the new program's close-on-exec has run, but the kernel lays out that program's environment later, in the ELF loader; reading it at once came back empty 1835 times in 2000 on the hub machine. `TestCodexTakeoverUsesOnlyTheSelectedWritersTerminalBridge` started `sleep 60` as its stand-in Codex writer and the takeover read the writer's environment a few calls later, so it refused with `codex_takeover_unavailable` about 3% of the time per subtest. A fixture whose code under test reads a child's `/proc` environment (or anything else set up after exec) waits until the child runs its own code: `/bin/sh -c 'echo ready; read -r line'` with stdin held open, then read that line. Keep the blocking step a builtin, since dash execs a last simple command such as `sleep` in place, which opens the same window again. A real process found by a scan has long been running.
 - A recovering assistant conversation's `busy` alone does not mark the end of its turn (2026-11-10, #3815). When recovery moves to the next model, `assistantSend` registers the replacement process (`spawnAssistant`) before it marks it busy and sends the retry, with the context snapshot and the mode sync in between. `sdkFixture.idle` waited for the registered process's `!busy`, so `TestAssistantRecoveryStopsAfterBothModelsAndTheirRetries` counted 2 of its 4 requests (9 of 400 runs on a busy Mac). The node publishes that gap as working (`busy || recovering` in `assistantSessions`); a wait for the end of a turn must use the same rule. To find such a gap, log the internal state at the moment the wait returns in a scratch test: slowing the fake CLI's `initialize`, the first guess, did not widen it.
 
 - Fixtures must use real response shapes (2026-11-06, #2938 / #2017). Assistant-feed `view_actions` is an object indexed by card key, empty as `{}` too. When both web and acceptance drivers mistook it for an array, array fixtures kept unit tests green while the real model lost answered state after reload. Use protocol objects covering empty objects, answered snapshots, and pagination; in a real browser also reload and check latest version, answered state, and no repeat sends.
@@ -150,6 +151,8 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 
 - `-race` reports reads/writes without a happens-before relationship; a test's own lock can hide a race (2026-11-05, #2955). `startAsync` reads the launch record's session after `go func()`; a fast background failure changes it in `finish` under a lock. Existing tests read, then wait through the `startLog` lock; `finish` acquires that lock next, so the detector sees the read before the write. It reports only if the caller is preempted just after `go` (one occasional full-suite `-race` failure). Regression `TestStartAsyncAnswersBeforeAFastFailure` waits only on the record's `done` channel and reports every time before the fix. Race-test result waiting must not share a lock with the code under test.
+
+- Taking a sleep out of a race test can leave the detector with nothing to see: a channel orders two goroutines as a lock does (2026-11-14, #1273). `TestSearchesWhileTheIndexIsUpdatedAndRemoved` (`server/internal/kb`) is there for a data race between a search that reads the index again and an update under way. Its first version without sleeps stopped the update at a hook, removed the directory, waited for a search to run and only then let the update go on: every wait was a channel between the two sides, so the update's read came after the search's write for the detector too. With the race put back in a scratch copy, that moment reported nothing in 30 runs of 4 removals each; the test with the sleeps reported it in 20 of 20. Keep the two sides unordered at the moment under test: let the stopped side go on before the other starts, and make whatever comes next wait instead (here the following update), which reported 40 of 40 runs with one removal each. A test whose assertion is the `-race` run is checked by putting the race back and counting runs, per moment, not by passing.
 
 - A fixture goroutine that reads a shared field when it runs races a test that swaps the field, and a socket orders nothing for the race detector (2026-11-11, #3918). `withFakeHub` started `go func() { _ = n.peer.Serve(…) }()`, which reads `n.peer` whenever the goroutine gets to it; `TestCodexRemoteTurnBegunBeforeJoining` then put its own hub in front with `n.peer = …`. `TestOutsideClaudeSendNotTaken` set the fake inbox's `mode` without its lock after the accept loop had started; the node connecting over the Unix socket afterwards gave the connection's goroutine no happens-before edge to that write. Both failed only under `-race`, which the CI node shard does not use. Have a goroutine serve the value the fixture created (a local variable), and change state a running fake reads through a setter under the fake's own lock (`fakeInbox.setMode`).
 
@@ -715,6 +718,22 @@ Retain allow/deny assertions for data directories, private tmp, and proxy. Negat
 - `swift test` output arrives only after completion. Find hung cases with file traces or `sample <pid>`; Swift Testing `.timeLimit` cannot stop uncancellable waits.
 - System `.alert` buttons cannot be clicked through accessibility activation; `personactl.py tap` falls back to idb (not installed locally). Use XCUITest for alert-click flows (`app.alerts[...].buttons[...]`).
 
+## Home Screen widgets on a simulator (2026-11-14, #6946)
+
+- **A widget can be placed without touching the Home Screen**: with the simulator shut down, add an entry to
+  SpringBoard's `data/Library/SpringBoard/IconState.plist` (a page in `iconLists`: `elementType` `widget`,
+  `widgetIdentifier` the kind, `containerBundleIdentifier` the app, `bundleIdentifier` the widget extension, `gridSize`
+  `small` / `medium` / `large`, `iconType` `custom`, two fresh UUIDs), delete `DesiredIconState.plist`, then boot. A
+  widget with a static configuration draws from the App Group as on a phone (`-showHomeWidgetSample YES` fills it).
+- **Widgets with Edit Widget options (`AppIntentConfiguration`) never draw on the iOS 27 simulators here**, placed that
+  way or opened in Edit Widget, slim or stock: the extension logs "Unable to get LNAction from intent" after
+  `com.apple.siri.VoiceShortcuts.xpc` answers "No such process", WidgetKit gets no views (`CHSErrorDomain` 1101) and
+  keeps the placeholder entry, and the widget's buttons do nothing. The Agents widget shows the same, so it is not the
+  widget's code. Draw those widgets with the app's gallery (`-showHomeWidgets`, docs/apple/home-widgets.md
+  "Screenshots") and check their buttons on a device.
+- The gallery's rows (light and dark side by side) need a screen wider than an iPhone's: an iPad simulator made for
+  the shots and deleted after them.
+
 ## Verify nonempty udid before deleting simulators (2026-11-03)
 
 Reading udid from a file, then `xcrun simctl delete $SIM`: if the file is missing, `$SIM` is empty. This time it only printed usage, but `delete "$SIM" all` could delete everybody's simulators.
@@ -1063,10 +1082,9 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - Under Xcode 26.0 (Swift 6.2), `xcrun swift test` copies `Localizable.xcstrings` into `Bundle.module` as-is
   (`Copying Localizable.xcstrings`) without generating `.lproj` directories, whereas newer toolchains and `xcodebuild`
   (`scripts/app/mac-link.sh`) compile it at build time.
-- SwiftPM tests that point a bundle override at `<language>.lproj`
-  (`apple/PersonaLink/Tests/PersonaLinkTests/LinkTextTests.swift`) fall back to compiling `Localizable.xcstrings` on
-  demand with `/usr/bin/xcrun xcstringstool compile`, and cover that path with a synthetic uncompiled `.bundle` test so
-  newer local Xcode versions still exercise it.
+- SwiftPM tests that point a bundle override at `<language>.lproj` may need to compile `Localizable.xcstrings` on
+  demand with `/usr/bin/xcrun xcstringstool compile`. The retired menu bar's `LinkTextTests.swift` demonstrated this
+  fallback and its synthetic uncompiled-bundle case; its source is preserved in the history of the removed target.
 
 ## A throw-away HOME also hides the login keychain from codesign (2026-11-13, #6368)
 

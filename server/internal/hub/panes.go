@@ -186,7 +186,7 @@ var nodeActions = map[string]nodeAction{
 	// #2431 "New worktree…": the repository of a workspace the host lists, and a Git worktree of it opened as a workspace.
 	// The branch and the path are typed in the dialog; the node refuses a path that holds something and never forces.
 	"worktree/prepare": {method: "worktree.prepare", timeout: 30 * time.Second, required: []string{"workspace_id"}, optional: []string{"kind", "locale"}, flags: []string{"composer"}, strictFlags: []string{"composer"}},
-	"worktree/rename":  {method: "worktree.rename", timeout: 30 * time.Second, required: []string{"workspace_id", "name"}, optional: []string{"kind"}},
+	"worktree/rename":  {method: "worktree.rename", timeout: 30 * time.Second, required: []string{"workspace_id", "name"}, optional: []string{"kind", "locale"}},
 	"worktree/create": {method: "worktree.create", timeout: 150 * time.Second, required: []string{"workspace_id"},
 		optional: []string{"kind", "parent_workspace_id", "branch", "path", "name", "branch_override", "base_ref", "note", "sparse_preset_id", "source_id", "source_url", "locale"}, flags: []string{"auto_name", "composer", "no_parent"}, anyUnless: []string{"composer"}, strictFlags: []string{"composer", "no_parent"}, strictStrings: []string{"name", "branch_override", "base_ref", "parent_workspace_id", "note", "sparse_preset_id", "source_id", "source_url"},
 		requiredUnless: map[string][]string{"auto_name": {"branch", "path"}}},

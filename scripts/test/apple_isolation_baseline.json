@@ -10,21 +10,6 @@
       "main" : 1
     }
   },
-  "apple/Mac/App/MacDemoSnapshotBatch.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
-  "apple/Mac/App/MacExtensionSnapshotBatch.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
-  "apple/Mac/App/MacRichSnapshotBatch.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
   "apple/Persona/App/DemoHub.swift" : {
     "file-read" : {
       "main" : 1
@@ -155,21 +140,6 @@
   },
   "apple/Persona/Views/Settings/StorageView.swift" : {
     "directory-listing" : {
-      "main" : 1
-    }
-  },
-  "apple/PersonaLink/Sources/PersonaLink/LinkModel.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
-  "apple/PersonaLink/Sources/PersonaLink/LinkStatePaths.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
-  "apple/PersonaLink/Sources/PersonaLink/NativeCompatibility.swift" : {
-    "keychain-read" : {
       "main" : 1
     }
   },

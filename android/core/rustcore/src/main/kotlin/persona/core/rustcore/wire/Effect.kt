@@ -11,8 +11,7 @@ sealed class Effect {
             val index = deserializer.deserialize_variant_index()
             return when (index) {
                 0 -> Fetch.load(deserializer)
-                1 -> StartTimer.load(deserializer)
-                2 -> Rejected.load(deserializer)
+                1 -> Rejected.load(deserializer)
                 else -> throw com.novi.serde.DeserializationError("Unknown variant index for Effect: " + index)
             }
         }
@@ -61,32 +60,6 @@ sealed class Effect {
         }
     }
 
-    data class StartTimer(
-        val timer: ULong,
-        val delay_ms: UInt
-    ) : Effect() {
-
-        @Throws(com.novi.serde.SerializationError::class)
-        override fun serialize(serializer: com.novi.serde.Serializer) {
-            serializer.increase_container_depth()
-            serializer.serialize_variant_index(1)
-            serializer.serialize_u64(this.timer)
-            serializer.serialize_u32(this.delay_ms)
-            serializer.decrease_container_depth()
-        }
-
-        companion object {
-            @Throws(com.novi.serde.DeserializationError::class)
-            fun load(deserializer: com.novi.serde.Deserializer): StartTimer {
-                deserializer.increase_container_depth()
-                val timer = deserializer.deserialize_u64()
-                val delay_ms = deserializer.deserialize_u32()
-                deserializer.decrease_container_depth()
-                return StartTimer(timer, delay_ms)
-            }
-        }
-    }
-
     data class Rejected(
         val reason: String
     ) : Effect() {
@@ -94,7 +67,7 @@ sealed class Effect {
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
-            serializer.serialize_variant_index(2)
+            serializer.serialize_variant_index(1)
             serializer.serialize_str(this.reason)
             serializer.decrease_container_depth()
         }

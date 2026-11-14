@@ -53,7 +53,7 @@ class HttpInboxAssistantTransport private constructor(
 
     private fun checkScope() { if (!isCurrent()) throw CancellationException("Pairing changed") }
 
-    private suspend fun json(url: HttpUrl, body: JsonObject? = null, method: String = if (body == null) "GET" else "POST"): JsonObject {
+    private suspend fun json(url: HttpUrl, body: JsonElement? = null, method: String = if (body == null) "GET" else "POST"): JsonObject {
         return withContext(Dispatchers.IO) {
             // Acquire before requesting: queued responses must not occupy the heap either.
             jsonDecodeGate.withPermit {
@@ -156,6 +156,19 @@ class HttpInboxAssistantTransport private constructor(
             val item = e.body?.let { runCatching { JsonCodec.parseToJsonElement(it).jsonObject["item"] as? JsonObject }.getOrNull() }
             throw persona.core.contracts.api.InboxSuggestionStale(item)
         }
+    }
+    override suspend fun tree(kind: String, id: String): JsonObject {
+        require(kind in setOf("inbox", "todo", "session") && id.isNotBlank())
+        val parts = if (kind == "session") id.split('/').also { parts -> require(parts.all { it.isNotBlank() }) } else listOf(id)
+        return json(url("api", "v1", "inbox", "tree", kind, *parts.toTypedArray()))
+    }
+    override suspend fun setParent(itemId: String, parent: persona.core.contracts.api.InboxParentRef?): JsonObject {
+        require(itemId.isNotBlank())
+        val body: JsonElement = parent?.let { ref ->
+            require(ref.kind in setOf("inbox", "todo", "session") && ref.id.isNotBlank())
+            buildJsonObject { put("kind", ref.kind); put("id", ref.id) }
+        } ?: JsonNull
+        return json(url("api", "v1", "inbox", itemId, "parent"), body, method = "PUT")
     }
     override suspend fun replyMail(itemId: String, text: String, clientId: String, target: MailReplyTarget): JsonObject {
         require(text.isNotBlank() && clientId.isNotBlank() && target.uid > 0 && target.version.isNotBlank())

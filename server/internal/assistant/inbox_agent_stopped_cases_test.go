@@ -21,6 +21,7 @@ func oppStoppedHub(t *testing.T) (*inboxHub, *InboxItem) {
 	h.inbox.handing.Lock()
 	t.Cleanup(h.inbox.handing.Unlock)
 	h.inboxAgentStarted(context.Background(), "s1", "box", "s-sub", "check the example")
+	waitNeedsYouIdle(t, h.Service)
 	h.f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s-sub", Status: proto.StatusIdle,
 		LastText: "the example is fixed", UpdatedAt: time.Now().UTC()})
 	return h, it
@@ -178,7 +179,6 @@ func TestOppInboxAgentStopMarkerEvictedByTheChainCapDoesNotRepeat(t *testing.T) 
 	}
 	before := len(h.f.sentToAgents())
 	h.inboxAgentTurnSettled(context.Background(), "box", "s-sub")
-	time.Sleep(50 * time.Millisecond) // a wake goes out from its own goroutine
 	if got := len(h.f.sentToAgents()); got != before {
 		t.Fatalf("a stop whose chain entries were evicted woke the conversation again: %d sends → %d", before, got)
 	}

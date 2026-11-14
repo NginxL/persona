@@ -151,7 +151,7 @@ export function ActiveWorktreeActions({ request, registry, onOpenWorkspace, sess
     } }] : []),
     ...(target.host === "herdr" && (!state.dispatched || state.preview?.close_only) ? [{ key: "close", label: t(state.dispatched ? "worktree-actions.check_status" : "worktree-actions.close_workspace"), icon: "x" as const,
       divider: true, danger: true, keepOpen: true, disabled: state.dispatched ? !context.canReconcile : !context.canClose, onSelect: () => changeView("close") }] : []),
-    ...(["orca", "herdr"].includes(target.host) && !(state.dispatched && state.preview?.close_only) ? [{ key: "delete", label: t(state.dispatched ? "worktree-actions.check_status" : "worktree-actions.delete"), icon: "trash" as const,
+    ...(["orca", "herdr", "paseo"].includes(target.host) && !(state.dispatched && state.preview?.close_only) ? [{ key: "delete", label: t(state.dispatched ? "worktree-actions.check_status" : "worktree-actions.delete"), icon: "trash" as const,
       divider: true, danger: true, keepOpen: true, disabled: state.dispatched ? !context.canReconcile : !context.canDelete, onSelect: () => changeView("delete") }] : []),
     ...(target.host === "herdr" && linkedWorktree === false ? [{ key: "linked-only", label: t("worktree-actions.linked_only"), note: true, onSelect: () => {} }] : []),
     ...(target.host === "herdr" && linkedWorktree === null ? [{ key: "git-unavailable", label: t("worktree-actions.unavailable"), note: true, onSelect: () => {} }] : []),

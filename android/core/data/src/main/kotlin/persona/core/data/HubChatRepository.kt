@@ -494,14 +494,11 @@ class HubChatRepository(
                     action.sinceSeq?.let { put("since_seq", it) }
                 })
             }
-            is Action.ScheduleFill -> synchronized(entries) {
-                // A rev move heard after the fill ended but while this timer still ran was dropped here: read again.
-                if (entry.timer?.isActive != true) entry.timer = entry.scope.launch {
-                    do {
-                        delay(action.delayMillis)
-                        backgroundSlots.withPermit { catchUp(entry) }
-                    } while (entry.lock.withLock { entry.sync.behind })
-                }
+            is Action.FetchAfter -> entry.scope.launch {
+                // Match iOS: no settling delay on a real gap. `requests` and the in-flight gate collapse duplicates.
+                do {
+                    catchUp(entry)
+                } while (entry.lock.withLock { entry.sync.behind })
             }
             is Action.FetchLatest -> entry.scope.launch { latest(entry) }
             else -> error("Unexpected standalone continuity action: $action")
@@ -533,7 +530,7 @@ class HubChatRepository(
     }
 
     private suspend fun catchUp(entry: Entry) = entry.requests.withLock {
-        var actions = entry.lock.withLock { entry.sync.fillTimer() }
+        var actions = entry.lock.withLock { entry.sync.continueFill() }
         try {
             while (actions.isNotEmpty()) {
                 actions = when (val action = actions.single()) {
@@ -548,7 +545,7 @@ class HubChatRepository(
                             val overtaken = entry.reducer.items.any { it.seq > entry.reducer.covered }
                             entry.eventError = null
                             publish(entry, verified = result.gap == ContinuityReducer.Gap.None && !overtaken)
-                            if (result.actions.isEmpty() && overtaken) entry.sync.fillTimer() else result.actions
+                            if (result.actions.isEmpty() && overtaken) entry.sync.continueFill() else result.actions
                         }
                     }
                     is Action.FetchLatest -> {
@@ -562,7 +559,7 @@ class HubChatRepository(
                             val overtaken = entry.reducer.items.any { it.seq > entry.reducer.covered }
                             entry.eventError = null
                             publish(entry, verified = !overtaken)
-                            if (overtaken || entry.sync.behind) entry.sync.fillTimer() else emptyList()
+                            if (overtaken || entry.sync.behind) entry.sync.continueFill() else emptyList()
                         }
                     }
                     else -> error("Unexpected catch-up action: $action")

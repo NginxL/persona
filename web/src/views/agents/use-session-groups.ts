@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
 import { filterQuery, type ListCounts, type ListFilters } from "../../lib/session-list";
-import { catalogGroups, countGroups, validCatalog, type GroupDimension, type SessionCatalog, type SessionGroup } from "../../lib/session-groups";
+import { catalogGroups, countGroups, validCatalog, type GroupDimension, type SessionCatalog, type SessionGroup, type TodoNames } from "../../lib/session-groups";
 import { onHubEvent } from "../../lib/store";
 import { SESSION_LIST_METRICS } from "../../ui/list-metrics";
 
@@ -72,6 +72,8 @@ export interface SessionGroupsQuery {
   /** How many of the scope's sessions need the user, by the state chips' count; undefined while unknown. */
   waiting: number | undefined;
   event: "sessions_list" | "agents";
+  /** By to-do: the to-dos' order and titles (the hub counts them by id). */
+  todos?: TodoNames;
 }
 
 export interface SessionGroups {
@@ -83,7 +85,7 @@ export interface SessionGroups {
   retry: () => void;
 }
 
-export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, waiting, event }: SessionGroupsQuery): SessionGroups {
+export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, waiting, event, todos }: SessionGroupsQuery): SessionGroups {
   const fromCatalog = catalog && (dimension === "project" || dimension === "group");
   const query = useMemo(() => filterQuery(scope), [scope]);
   // the groups' own counts are the parent's facets when no state narrows them: one read serves both
@@ -91,7 +93,7 @@ export function useSessionGroups({ dimension, catalog, countsPath, scope, facets
   const groupsPath = !dimension ? null : fromCatalog ? `${countsPath}${filterQuery(scope, { catalog: "1" })}` : shared ? null : `${countsPath}${query}`;
   // Which of them need the user. Narrowed to a state, a group's count already is of that state: no second number
   // beside it. The catalog says it with the groups; the count maps take a second read, made only while some do.
-  const badge = Boolean(dimension) && !scope.state;
+  const badge = Boolean(dimension) && dimension !== "state" && !scope.state;
   const needsScope = useMemo(() => ({ ...scope, state: "needs_you" }), [scope]);
   const needsPath = badge && !fromCatalog && (waiting ?? 0) > 0 ? `${countsPath}${filterQuery(needsScope)}` : null;
 
@@ -107,9 +109,9 @@ export function useSessionGroups({ dimension, catalog, countsPath, scope, facets
       return { groups, total: c ? c.total : null, error: catalogRead.error ?? "", retry: catalogRead.retry };
     }
     const counts = shared ? facets : countsRead.value ?? null;
-    const groups = counts ? countGroups(counts, dimension, { machine: scope.machine_id, needs: badge ? countsNeeds.value : null }) : null;
+    const groups = counts ? countGroups(counts, dimension, { machine: scope.machine_id, needs: badge ? countsNeeds.value : null, todos }) : null;
     return { groups, total: counts ? counts.total : null, error: shared ? "" : countsRead.error ?? "", retry: countsRead.retry };
     // the retry functions are new on each render and do the same thing
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimension, fromCatalog, shared, badge, facets, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value]);
+  }, [dimension, fromCatalog, shared, badge, facets, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value, todos]);
 }

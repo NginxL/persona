@@ -58,6 +58,7 @@ Optional (for each one present, the SDK declares the capability in `runtime.hell
 | `seen({session_id})` | The user saw the session in Persona (`caps.seen`, #6299): a runtime that keeps an unread mark of its own clears it, so the session is not unread in its own app too. The manager tells the node only while the runtime lists the session as `done` (unread), best effort |
 | `archive({session_id})` / `unarchive({session_id})` | The runtime's own reversible archive (`caps.archive`, declared only when both exist): when the user archives a session in Persona, it is archived in the runtime too, and restored with it. Archive an idle session without stopping or closing anything (Persona refuses busy sessions first) and keep it restorable; both must be idempotent (already archived / restored is success). A runtime whose archive also stops the session, or that has no way back, leaves them out: the archive is then Persona's alone (`docs/protocol/protocol.md`, "Agent session archives") |
 | `createWorkspace({cwd, workspace_id, branch, create_branch, base, name, key})` / `prepareWorkspace({cwd, repo_root})` | Workspaces of its own (`caps.workspaces`, declared only when both exist: the node asks where the worktrees go before each one it has made): a worktree it makes as a workspace of its own / the folder it puts a repository's worktrees in. With them it lists its workspaces through `rt.workspacesChanged(list)`. Only an engine's are used; see "Workspaces" below |
+| `renameWorkspace({workspace_id, title})` / `renameWorkspace({space_id, title})`, `archiveWorkspace({workspace_id})` | With `caps.workspaces`: a workspace's title (resolves to `{workspace}`, its row now) or a space's name (resolves to `{space_name}`, the name it shows now) / the workspace archived, a worktree it made removed from the disk (its branch kept). Without them those requests are `unsupported`; see "Workspaces" below |
 | `watchChanged(id, watching, {transcript})` | The phone starts / stops watching a session (when a new node connects or the runtime stops, all stop): for runtimes that only follow a session while someone is watching (Paseo subscribes to the timeline per session) |
 
 In `createRuntime`'s options, a runtime that runs several Agents can also pass `launchers: [{name, model, agent, models}]`: besides `launcher`, the new-session form then has these entries, one per provider,
@@ -266,6 +267,20 @@ and calls `rt.workspacesChanged(list)` with the whole list whenever it changes (
   150 s), the time `workspace.prepare` took included.
 - **Where** (`workspace.prepare {cwd, repo_root}` → `{checkouts}`): the folder the runtime puts that repository's worktrees
   in. The dialog's path must be in it; only the worktree's own folder name can be chosen.
+- **Deleting one** (`workspace.archive`, #6297): only a worktree the runtime made (`owned`, which the catalog row carries
+  too), and only when nothing could be lost that the user did not confirm: the node refuses while one of the workspace's
+  sessions is at work (starting, working, waiting for the user, a state it does not say) or an Agent of another engine
+  runs in the folder, and checks the changes the preview showed. Archive the workspace and its sessions, remove the
+  folder, keep the branch; answer once it is done. A closed Agent's own worktree (`worktree/remove`) goes the same way,
+  refused while a session in the workspace still runs.
+- **Renaming** (`workspace.rename`, #6297): "Rename" on a catalog row sends `{workspace_id, title}` (its title only), and
+  "Rename space" `{space_id, title}`: the space its sessions are grouped in, also when the apps named it by one of its
+  workspaces. Answer `{workspace}` / `{space_name}`, and list the new names (rows and workspaces) at once.
+- **Deleting** (`workspace.archive {workspace_id}`, #6297): sent only for a worktree the runtime made (`owned`), once the
+  user confirmed the node's preview (the changes it showed, the sessions in it, the checkout's identity). Archive the
+  workspace and its sessions, remove the worktree from the disk and keep its branch; answer once that is done. The node
+  counts it deleted when the workspace has left the list and the folder is gone. Closing a workspace (archiving it and
+  keeping its folder) is not asked of a runtime.
 
 ## Auto-update (optional)
 

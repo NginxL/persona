@@ -13,7 +13,7 @@ sealed class Action {
                 0 -> OpenChat.load(deserializer)
                 1 -> CloseChat.load(deserializer)
                 2 -> Chat.load(deserializer)
-                3 -> TimerFired.load(deserializer)
+                3 -> ContinueFill.load(deserializer)
                 else -> throw com.novi.serde.DeserializationError("Unknown variant index for Action: " + index)
             }
         }
@@ -111,25 +111,25 @@ sealed class Action {
         }
     }
 
-    data class TimerFired(
-        val timer: ULong
+    data class ContinueFill(
+        val chat: String
     ) : Action() {
 
         @Throws(com.novi.serde.SerializationError::class)
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
             serializer.serialize_variant_index(3)
-            serializer.serialize_u64(this.timer)
+            serializer.serialize_str(this.chat)
             serializer.decrease_container_depth()
         }
 
         companion object {
             @Throws(com.novi.serde.DeserializationError::class)
-            fun load(deserializer: com.novi.serde.Deserializer): TimerFired {
+            fun load(deserializer: com.novi.serde.Deserializer): ContinueFill {
                 deserializer.increase_container_depth()
-                val timer = deserializer.deserialize_u64()
+                val chat = deserializer.deserialize_str()
                 deserializer.decrease_container_depth()
-                return TimerFired(timer)
+                return ContinueFill(chat)
             }
         }
     }

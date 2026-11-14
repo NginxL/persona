@@ -68,7 +68,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Persona shares your current location with Claude only when you ask, for example to find what time it is where you are or which office you are in.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Persona records audio when you start a recording or dictate a message, for example a meeting or a spoken note. Recordings are transcribed on your iPhone and only the text is saved to the knowledge base on your hub; the audio stays on your iPhone. In a voice conversation you start — on the phone or in CarPlay — your voice is streamed through your hub to the realtime speech service it is set up with, only while the conversation is open.</string>
+	<string>Persona records audio when you start a recording or dictate a message, for example a meeting or a spoken note. Recordings are transcribed on your iPhone and only the text is saved to the knowledge base on your hub; the audio stays on your iPhone, except while you hold Talk in a meeting: what is said then goes to the voice service. A meeting you choose to transcribe on the hub sends its audio, Talk included, through your hub to the speech service it is set up with, and the hub deletes it once the meeting's minutes are written. In a voice conversation you start — on the phone or in CarPlay — your voice is streamed through your hub to the realtime speech service it is set up with, only while the conversation is open.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Persona saves images Claude produces to your library when you ask, for example a chart it generated.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
