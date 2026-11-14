@@ -13237,29 +13237,6 @@
         }
       }
     },
-    "10K+" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10K+"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1万+"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1万+"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "24 Hours" : {
       "localizations" : {
         "en" : {

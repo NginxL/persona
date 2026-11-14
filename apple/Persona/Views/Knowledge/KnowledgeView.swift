@@ -36,9 +36,6 @@ struct KnowledgeView: View {
     @State private var debugRecording: UUID?
     #endif
     #endif
-    #if os(iOS) || os(visionOS)
-    @State private var recordings = RecordingLibrary.shared
-    #endif
     /// Where entries open beside the list instead of pushing (the Mac's Knowledge section).
     @Environment(\.kbOpenEntry) private var opener
 
@@ -56,16 +53,8 @@ struct KnowledgeView: View {
         #endif
     }
 
-    private var counts: [KBKind: Int] {
-        var out = lists.mapValues { $0.items.count }
-        #if os(iOS) || os(visionOS)
-        out[.recordings] = recordings.entries.count
-        #endif
-        return out
-    }
-
     private var kindBar: some View {
-        KBKindBar(kind: $kind, counts: counts)
+        KBKindBar(kind: $kind)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
     }
@@ -504,26 +493,31 @@ struct KBEntryLink<Label: View>: View {
     }
 }
 
-/// The six kinds as chips with their icon (and how many, once loaded), all in sight: no sideways scroll view (the
-/// navigation stack can take one at the top of a page for the page's own and inset it, docs/lessons/ios.md「`Layout` and components」, and
-/// Events was off the edge). Chips that do not fit drop their icons, then go to a second row.
+/// The kinds as chips with their icon, all in sight: no sideways scroll view (the navigation stack can take one at the
+/// top of a page for the page's own and inset it, docs/lessons/ios.md「`Layout` and components」, and Events was off the
+/// edge). Chips that do not fit drop their icons, then go to a second row.
+///
+/// No chip changes width, so none moves when another kind is picked or a kind's list arrives (#7507, as the web since
+/// #7434): they carry no count (each section under them says how many it holds), and the picked one's heavier title
+/// takes no more room than the others.
 struct KBKindBar: View {
     @Binding var kind: KBKind
-    var counts: [KBKind: Int]
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI { filterChips } else { plain }
     }
 
-    /// The BeautifulUI style: its filter chips, each kind with its count, wrapping to a second row instead of scrolling
-    /// sideways.
+    /// The BeautifulUI style: its filter chips, wrapping to a second row instead of scrolling sideways. No count either: a
+    /// kind's count is known only once its list is read, when it is first picked, so its chip grew then and pushed the
+    /// chips after it along or onto another row.
     private var filterChips: some View {
         LarkFlowLayout(spacing: Theme.Space.xs, lineSpacing: Theme.Space.sm) {
             ForEach(KBKind.allCases) { k in
-                BUIFilterChip(k.title, count: counts[k], isActive: k == kind) {
+                BUIFilterChip(k.title, isActive: k == kind) {
                     Haptics.tap()
                     withAnimation(Theme.Motion.standard) { kind = k }
                 }
+                .accessibilityIdentifier("kb.kind." + k.rawValue)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -548,10 +542,10 @@ struct KBKindBar: View {
             } label: {
                 HStack(spacing: Theme.Space.xs) {
                     if icons { ThemedIcon(k.symbol).font(Theme.Font.captionStrong) }
-                    Text(k.title)
-                    if let n = counts[k], on { Text(Self.count(n)).monospacedDigit().opacity(0.75) }
+                    // Every chip is as wide as its title in the picked weight, so picking one widens nothing.
+                    Text(k.title).font(Theme.Font.secondaryStrong).hidden().accessibilityHidden(true)
+                        .overlay { Text(k.title).font(on ? Theme.Font.secondaryStrong : Theme.Font.secondaryMedium) }
                 }
-                .font(on ? Theme.Font.secondaryStrong : Theme.Font.secondaryMedium)
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.horizontal, padding)
@@ -565,9 +559,6 @@ struct KBKindBar: View {
             .accessibilityAddTraits(on ? .isSelected : [])
         }
     }
-
-    /// 1985 → "1985" (no grouping comma: the chip is narrow), past 9999 → "10K+".
-    static func count(_ n: Int) -> String { n > 9999 ? String(localized: "10K+") : String(n) }
 }
 
 /// One ranked entry: a kind tile carrying the importance, the name, its one-line state, then tags and when it changed.
