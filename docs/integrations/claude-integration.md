@@ -430,6 +430,7 @@ Measured end to end on a throwaway `claude` 2.1.291 in an empty directory (its o
   - "Waits on a question": its status file says `waiting`, and its transcript's latest call is AskUserQuestion. The send reads the transcript as it is at that moment, not as the list read it up to `metaMinInterval` before.
   - Its row's `attention_reason` is `proto.AttentionClaudeAnswer`: a reply is the answer.
   - On a permission prompt, a plan to approve or another dialog, a message still goes at `next` and waits for the computer. At `now` it would decline what only the computer should approve. The row keeps `proto.AttentionClaudeComputer`.
+  - A claude in a tmux pane is the exception: the phone reads and answers the dialog on the pane's screen, so its row's `attention_reason` is that dialog's first line (read from the pane, as for a resting claude), not `proto.AttentionClaudeComputer`. While no dialog is read from the pane (the first read comes after `paneDialogEvery`, or the screen shows one the reader does not recognize), the row keeps the computer-only sentence.
 - **The queue**: a phone message queued behind a running turn (a `queue-operation` with the envelope) shows the user's words, from Persona, without what Persona told the model (`prompts.PeerMessageBody`).
 
 ### The desktop app's sidebar (#3304)
