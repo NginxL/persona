@@ -16,7 +16,8 @@ registerHooks({
     if (url === 'fake-persona-core:') return {format: 'module', shortCircuit: true, source: `
       export default {
         coreConfig() { return new Uint8Array(); },
-        coreCreate(config, changed, effects) { globalThis.coreHost = {changed, effects}; return ++globalThis.handle; },
+        coreCreate(config, changed, effects) { globalThis.coreHost = {changed, effects}; globalThis.createKind = 'legacy'; return ++globalThis.handle; },
+        coreCreateWithChat(config, changed, changedChat, effects) { globalThis.coreHost = {changed, changedChat, effects}; globalThis.createKind = 'targeted'; return ++globalThis.handle; },
         coreDispatch(handle, action) { globalThis.lastAction = action; return handle === globalThis.handle; },
         coreDrain(handle, chat) { return globalThis.patchBytes; },
         coreFlush(handle, timeout) { return handle === globalThis.handle && timeout === 5000; },
@@ -48,5 +49,22 @@ test('the ArkTS adapter owns one NAPI handle, decodes effects and closes idempot
   assert.equal(globalThis.closedHandle, 1);
   assert.equal(core.dispatch({kind: 'continue_fill', chat: 'fixture'}), false);
   assert.equal(core.drain('fixture'), null);
+  assert.equal(globalThis.createKind, 'legacy');
   assert.equal(core.flush(5000), false);
+});
+
+test('the ArkTS adapter selects targeted wake only when supplied', () => {
+  globalThis.handle = 0;
+  globalThis.patchBytes = wire.encodeChatPatch({version: 1, covered: 0, history: null, has_more: null, loaded_once: false, verified: false, acked: null, ops: []});
+  const core = new PersonaCore();
+  const wakes = [];
+  core.open({changed() {}, changedChat(chat, version) { wakes.push([chat, version]); }, run() {}});
+  assert.equal(globalThis.createKind, 'targeted');
+  globalThis.coreHost.changedChat('fixture', 1);
+  assert.deepEqual(wakes, [['fixture', 1]]);
+  core.close();
+  const legacy = new PersonaCore();
+  legacy.open({changed() {}, run() {}});
+  assert.equal(globalThis.createKind, 'legacy');
+  legacy.close();
 });

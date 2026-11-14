@@ -80,7 +80,7 @@ systemctl --user enable --now persona-pr-watch.service
 systemctl --user status persona-pr-watch.service
 ```
 
-Stop or restart only this unit when changing its implementation. Preserve its private state across upgrades. An older state file without version `1` semantic evidence is not treated as approval; affected PRs are reviewed again.
+Stop or restart only this unit when changing its implementation. Preserve its private state across upgrades. An older state file without version `1` semantic evidence is not treated as approval; affected PRs are reviewed again. Verification-policy version `2` retries an incomplete or failed verification recorded by an older policy on the same base/head, while retaining its valid semantic review and repair budget. Completed checks, base-owned failure evidence, published findings, merged results, continuations and exhausted repairs are not reset by this migration.
 
 ## Verification and limitations
 

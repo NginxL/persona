@@ -26,6 +26,10 @@ class RepairIntegrationTests(unittest.TestCase):
                         GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
         self.git("init", "-q", "--bare", str(self.origin), cwd=self.root)
         self.git("init", "-q", "-b", "main")
+        # The helper invokes Git directly, so exercise its configured identity
+        # without inheriting the maintainer's global configuration.
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.com")
         self.git("remote", "add", "origin", str(self.origin))
         (self.repo / "file.txt").write_text("base\n")
         self.git("add", ".")

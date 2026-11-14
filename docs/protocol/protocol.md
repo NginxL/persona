@@ -191,6 +191,22 @@ no model call and changes no title. The text result is a JSON object with the sa
 `{"ok":false,"code":"<the applicable code above>","retryable":true|false,"error":"<localized sentence>"}`. It has
 no URL, header or token parameters and grants no standing permission. iOS uses the HTTP endpoint, not this tool.
 
+`agent_autoname_receipt` is an assistant-only, read-only evidence lookup (`agent_naming_receipt.go`), not a new
+client dependency or an execution receipt for a particular model call. Its input is only an exact machine and full
+session id, plus an optional bounded `since`/`before` window `[since,before)` (both required together, at most 24 hours). It reads
+only the real calling conversation's permission history through the owning manager, never another caller's cards
+or arbitrary transcript text. `confirmation: found` requires one exact target match in the original two-field
+`{"machine","session_id"}` card input, independent of JSON field order or layout, with complete bounded-page
+coverage; the four-field evidence query is not matched against the card. The first history read and every later
+page use the exclusive upper bound and the `(created_at,id)` cursor, so equal timestamps at `since` are not
+mistaken for the window's end. It returns `{id,status,allow?,resolved_at?}` only; multiple matches are `ambiguous`, and no match, a
+read error or partial coverage stays `unknown`. `naming` separately reports the exact target's current
+`{status,requested,title?,named_at?,observed_at}` (`status` `current`, `not_found` or `unknown`). That snapshot is
+not proof this request started or finished a model call and is not associated with its call id. `last_failure` is
+not returned because it can belong to background naming. No `model_started`, execution-ended or `retryable` claim
+is synthesized. The tool invokes no model, writes no settings, resolves no card, renames nothing and publishes no
+session list. Ordinary coding Agents, extensions and work machines cannot call it.
+
 ### Health check and feature flags
 
 `GET /api/v1/health` needs no authentication. Public sources get only:

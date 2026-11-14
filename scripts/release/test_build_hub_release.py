@@ -66,7 +66,8 @@ class ManagerPackageScopeTests(unittest.TestCase):
             if args[:3] == ['go', 'test', '-list']:
                 return 'TestA\nTestB\nTestC\nBenchmarkD\nok  \texample/server/internal/node\t0.1s\n'
             if args[:2] == ['go', 'list']:
-                return 'example/server/internal/hub\nexample/server/internal/node\nexample/server/internal/node/sub\n'
+                return ('example/server/internal/assistant\nexample/server/internal/hub\nexample/server/internal/node\n'
+                        'example/server/internal/node/sub\n')
             if args[:2] == ['go', 'env']:
                 return b'{"GOCACHE":"/example/cache","GOMODCACHE":"/example/mod","GOPATH":"/example/go"}'
             return 'a' * 40 if args[1] == 'rev-parse' else b''
@@ -103,7 +104,7 @@ class ManagerPackageScopeTests(unittest.TestCase):
             'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy')}
         _, calls, _ = self.build(parent_environment=proxies)
         tests = [env for args, env in calls if args[:2] == ['go', 'test']]
-        self.assertEqual(len(tests), 4)  # the other packages, two internal/node partitions, the race run
+        self.assertEqual(len(tests), 7)  # the other packages, three assistant and two node partitions, the race run
         for environment in tests:
             self.assertFalse(set(proxies) & set(environment))
         # Network preparation and production artifact construction retain the
@@ -117,12 +118,15 @@ class ManagerPackageScopeTests(unittest.TestCase):
         preparation = [env for args, env in calls if args[:2] in (['go', 'mod'], ['go', 'vet'])]
         self.assertEqual(preparation, [None, None])
 
-    def test_node_tests_run_in_partitions_beside_the_other_packages(self):
+    def test_node_and_assistant_tests_run_in_partitions_beside_the_other_packages(self):
         _, calls, _ = self.build()
         tests = [args for args, _ in calls if args[:3] == ['go', 'test', '-count=1']]
         self.assertEqual(tests[0], ['go', 'test', '-count=1', 'example/server/internal/hub',
                                     'example/server/internal/node/sub'])
-        self.assertEqual(tests[1:3], [['go', 'test', '-count=1', '-run', '^(TestA|TestC)$', './internal/node'],
+        self.assertEqual(tests[1:6], [['go', 'test', '-count=1', '-run', '^(TestA)$', './internal/assistant'],
+                                      ['go', 'test', '-count=1', '-run', '^(TestB)$', './internal/assistant'],
+                                      ['go', 'test', '-count=1', '-run', '^(TestC)$', './internal/assistant'],
+                                      ['go', 'test', '-count=1', '-run', '^(TestA|TestC)$', './internal/node'],
                                       ['go', 'test', '-count=1', '-run', '^(TestB)$', './internal/node']])
         environments = [env for args, env in calls if args[:2] == ['go', 'test']]
         self.assertTrue(all(env is environments[0] for env in environments))  # one clean test environment

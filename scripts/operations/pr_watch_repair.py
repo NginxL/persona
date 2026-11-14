@@ -1,4 +1,5 @@
 """Maintainer-authorized, bounded repair of PR verification failures."""
+import importlib.util
 import json
 import os
 import re
@@ -15,6 +16,31 @@ from pr_watch_verify import verify
 
 TEST_FIX_TITLE = re.compile(r"^(?:test|fix)(?:\([^)]*\))?:\s+", re.I)
 TEST_PARTS = {"test", "tests", "testdata", "fixtures", "__tests__", "e2e"}
+
+
+def privacy_scanner_environment(worktree):
+    """Load the trusted scanner's config adapters without copying legacy names."""
+    scanner = Path(__file__).resolve().parents[2] / "scripts" / "privacy_check.py"
+    spec = importlib.util.spec_from_file_location("pr_watch_trusted_privacy", scanner)
+    if spec is None or spec.loader is None:
+        raise WatchError("cannot load the trusted privacy scanner")
+    module = importlib.util.module_from_spec(spec)
+    with tempfile.TemporaryDirectory(prefix="pr-watch-privacy-home-") as home:
+        env = {key: value for key, value in os.environ.items()
+               if key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM")}
+        env.update({"HOME": home, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                    "PERSONA_PRIVACY_ROOT": str(worktree)})
+        spec.loader.exec_module(module)
+        names = getattr(module, "CONFIG_ENV", None)
+        if not isinstance(names, tuple) or not names or not all(isinstance(name, str) and name for name in names):
+            raise WatchError("trusted privacy scanner has no valid config adapters")
+        for name in names:
+            if name in os.environ:
+                env[name] = os.environ[name]
+    result = run(["python3", "-I", str(scanner)], cwd=worktree, timeout=180, environ=env)
+    if result.returncode:
+        raise WatchError("trusted privacy scanner rejected the repair checkout: " + bounded(result.stderr, 1000))
+    return env
 
 
 def repair_command(config, arguments):
@@ -304,9 +330,7 @@ def commit_and_push_repair(repo, pr, worktree, base, failure, verify_config=None
         message_path = Path(message_file.name)
     try:
         checked(["python3", "-I", str(scanner), "--staged", "--commit-msg", str(message_path)], cwd=worktree, timeout=180,
-                environ={key: value for key, value in os.environ.items()
-                         if key in ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
-                                    "PERSONA_CONFIG", "JARVIS_CONFIG")} | {"PERSONA_PRIVACY_ROOT": str(worktree)})
+                environ=privacy_scanner_environment(worktree))
         identity = ["-c", "user.name=" + checked(["git", "config", "user.name"], cwd=worktree).strip(),
                 "-c", "user.email=" + checked(["git", "config", "user.email"], cwd=worktree).strip()]
         if checked(["git", "diff", "--cached", "--stat"], cwd=worktree).strip():

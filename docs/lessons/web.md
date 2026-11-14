@@ -1315,3 +1315,12 @@ words come from the catalog's rest, which `main.tsx`'s own imports do not wait f
 - A push can be handed to the service worker without a push service: DevTools' `ServiceWorker.deliverPushMessage` with the registration id from `ServiceWorker.workerRegistrationUpdated` (`web/e2e/web-push.mjs`).
 - FCM now and then answers 410 for a subscription a fresh headless profile made moments before; subscribing again works. A live check retries once that way instead of failing.
 - Vite's dev server registers no service worker (`lib/pwa.ts`): anything that depends on it is checked against the built app under `vite preview`, which keeps the dev server's `/api` proxy.
+
+## An IntersectionObserver says nothing about a jump across its view (audit item 51)
+
+An observer reports a target only when it crosses a threshold. A mark that goes from below a scroller's view to above it
+in one frame (a long scroll, `scrollTop` set by script, a reveal) is "not intersecting" both times, so no entry comes and
+code that tells "above" from "below" by `boundingClientRect.top < rootBounds.top` keeps the old answer. When only "above
+the view" matters, open the view far below the scroller (`rootMargin: "0px 0px 1000000px 0px"`): a mark is then either
+in it or above it, and every change between the two is reported (`watchPin` in `web/src/views/SidebarSection.tsx`, the
+sidebar's pinned headings). Check such code with a jump, not only with a scroll a few pixels at a time.

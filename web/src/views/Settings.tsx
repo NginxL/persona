@@ -40,6 +40,7 @@ import { TranslationSettings } from "./settings/TranslationSettings";
 import { Extensions } from "./settings/Extensions";
 import { ShortcutSettings } from "./settings/ShortcutSettings";
 import { NotificationSettings } from "./settings/NotificationSettings";
+import { DesktopSettings } from "./settings/DesktopSettings";
 import { ChannelList, ChannelPage } from "./settings/Channels";
 import { ConnectDevice } from "./settings/ConnectDevice";
 import { settingsTarget } from "../lib/channels";
@@ -631,6 +632,7 @@ function General({ onModel }: { onModel: () => void }) {
         <RecentChatsRow />
       </Group>
 
+      <DesktopSettings />
       <SidebarPagesGroup />
 
       <section id="settings-translation" className="scroll-mt-4">
