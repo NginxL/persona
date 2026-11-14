@@ -1737,6 +1737,17 @@ private actor SlowPut {
         #expect(focus.scroll == .line(2) && focus.lit == [.line(2), .line(3)], "the minute's hub lines lit")
     }
 
+    /// Build the fixture in steps: the one-line map times out in Xcode 26.6.
+    private func makeFiveMeetingGaps() -> [MeetingGap] {
+        var gaps: [MeetingGap] = []
+        for index in 0..<5 {
+            let start: Double = Double(index * 100)
+            let end: Double = Double(index * 100 + 10)
+            gaps.append(MeetingGap(from: start, to: end))
+        }
+        return gaps
+    }
+
     @Test func theRecordingPageSaysTheModeTheStateAndTheGaps() throws {
         #expect(Words.facts(nil, asked: .hub, gapUpload: .idle) == nil, "no mode decided: nothing")
         #expect(Words.facts(.init(mode: .device), asked: nil, gapUpload: .idle) == nil, "a meeting on the phone as always")
@@ -1756,7 +1767,7 @@ private actor SlowPut {
         let unknown = try #require(Words.facts(.init(mode: .hub, state: "someday"), asked: .hub, gapUpload: .idle))
         #expect(unknown.busy, "a state the app doesn't know reads as still being finished")
 
-        let many = (0..<5).map { MeetingGap(from: Double($0 * 100), to: Double($0 * 100 + 10)) }
+        let many: [MeetingGap] = makeFiveMeetingGaps()
         let spans = Words.spans(many)
         #expect(spans.contains("0:00") && spans.contains("3:30") && !spans.contains("6:40") && spans.contains("2"),
                 "the first three, then how many more")
