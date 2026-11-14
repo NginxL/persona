@@ -47,12 +47,7 @@ func (h *Hub) startDevices(ctx context.Context) {
 		if h.byID[mc.ID] != nil {
 			continue
 		}
-		m := newMachine(h, mc)
-		m.managed, m.peer = true, &busNode{h: h, id: mc.ID, done: make(chan struct{})}
-		m.owner = h.entryOwner(mc.ID)
-		if e, ok := h.reportedEntryOf(m.owner, mc.ID); ok { // as its manager last reported it, until it reports again
-			m.info, m.lastSeen = e.Info, e.LastSeen
-		}
+		m := h.newManagedMachine(mc)
 		m.engine = saved.Engines[mc.ID]
 		if c, ok := saved.EngineHosts[mc.ID]; ok {
 			m.engineHosts = &c
@@ -70,11 +65,74 @@ func (h *Hub) startDevices(ctx context.Context) {
 	h.fleet.mu.Unlock()
 	d.mu.Lock()
 	d.warmUntil = until
+	d.fleetReady = true
 	d.mu.Unlock()
 	if n > 0 {
 		h.logf("warm start: %d machines shown as before while the manager reconnects them", n)
 	}
 	time.AfterFunc(devicesWarmGrace, h.devicesWarmEnded)
+}
+
+// newManagedMachine is a machine the hub lists while its manager has not reported it yet, with what that manager last
+// reported of it.
+func (h *Hub) newManagedMachine(mc MachineConfig) *Machine {
+	m := newMachine(h, mc)
+	m.managed, m.peer = true, &busNode{h: h, id: mc.ID, done: make(chan struct{})}
+	m.owner = h.entryOwner(mc.ID)
+	if e, ok := h.reportedEntryOf(m.owner, mc.ID); ok {
+		m.info, m.lastSeen = e.Info, e.LastSeen
+	}
+	return m
+}
+
+// retryMachineAssignments reads what startDevices could not. The move locks make a recovered read and its handover one
+// move against the managers' moves and removals. False leaves the trust loop retrying at trustRetryEvery.
+func (h *Hub) retryMachineAssignments(ctx context.Context) bool {
+	d := &h.devices
+	d.mu.Lock()
+	ownersRead, keptRead := d.assignRead, d.keptRead
+	d.mu.Unlock()
+	if ownersRead && keptRead {
+		return true
+	}
+	h.moving.managers.RLock()
+	defer h.moving.managers.RUnlock()
+	d.moving.Lock()
+	defer d.moving.Unlock()
+	ownersRead = h.readOwnersMoving(ctx) == nil
+	if !keptRead {
+		d.mu.Lock()
+		keptRead = d.keptRead // another operation may have read it while this one waited for the lock
+		d.mu.Unlock()
+		if !keptRead {
+			if err := h.loadMachinesKept(ctx); err != nil {
+				return false
+			}
+			keptRead = true
+		}
+	}
+	return ownersRead && keptRead
+}
+
+// reconcileKeptMachines lists the machines whose kept records were unread at start. It runs only when those records
+// are first recovered: a manager's later report that drops one must not have it put back by the retry loop.
+func (h *Hub) reconcileKeptMachines() {
+	known := h.knownEntries()
+	added := false
+	h.fleet.mu.Lock()
+	for _, mc := range known {
+		if h.cfgEntry(mc.ID) != nil || h.byID[mc.ID] != nil {
+			continue
+		}
+		m := h.newManagedMachine(mc)
+		h.machines = append(h.machines, m)
+		h.byID[mc.ID] = m
+		added = true
+	}
+	h.fleet.mu.Unlock()
+	if added {
+		h.broadcastMachines()
+	}
 }
 
 // markUnknownLocked shows m's sessions that are not offline as unknown, in a copy of its list: the kept list is never

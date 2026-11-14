@@ -335,6 +335,9 @@ func (h *Hub) machineTrustLoop(ctx context.Context) {
 		} else {
 			h.expirePending(ctx, time.Now())
 		}
+		if !h.retryMachineAssignments(ctx) {
+			wait = trustRetryEvery
+		}
 		select {
 		case <-ctx.Done():
 			return

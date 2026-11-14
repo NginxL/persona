@@ -305,8 +305,8 @@ func runHub(ctx context.Context, b update.Build, cfg *Config, budget *shutdownBu
 	// The machines are the manager's to connect (devices_link.go); until it reports them they show as before a
 	// restart (what it handed over), before the assistant's process starts and takes that hand-over.
 	h.loadMachineTrust(ctx) // before the manager connects them and the assistant asks (machine_trust.go)
-	go h.machineTrustLoop(ctx)
 	h.startDevices(ctx)
+	go h.machineTrustLoop(ctx)
 	h.initMesh(ctx) // before the manager connects: a member leaves its computers to the center (mesh_group.go)
 	go h.terminalKeepalive(ctx)
 	go h.fullKeepalive(ctx)
