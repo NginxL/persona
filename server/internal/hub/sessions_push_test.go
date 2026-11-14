@@ -364,6 +364,9 @@ const sessionAllocationChild = "PERSONA_TEST_SESSION_ALLOCATION_CHILD"
 
 // isolatedSessionAllocation reruns only this test in a fresh process. TotalAlloc counts every goroutine, including
 // asynchronous work left by earlier tests; the child keeps the same fixtures, assertions and allocation ceilings.
+// The child runs with one P (#7933): allocated's GCs empty every sync.Pool, so each pool the measured call uses makes
+// its per-P array again, and with the host's GOMAXPROCS a ceiling depended on the CPU count (TestReindexOneRevAllocation:
+// 104,926 B at 1, 112,615 B at 18, 132,975 B at 64, against 115,200 B).
 func isolatedSessionAllocation(t *testing.T) bool {
 	t.Helper()
 	if os.Getenv(sessionAllocationChild) == t.Name() {
@@ -372,7 +375,7 @@ func isolatedSessionAllocation(t *testing.T) bool {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1", "-test.timeout=50s")
-	cmd.Env = append(os.Environ(), sessionAllocationChild+"="+t.Name())
+	cmd.Env = append(os.Environ(), sessionAllocationChild+"="+t.Name(), "GOMAXPROCS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("isolated session allocation check: %v\n%s", err, output)
 	}
