@@ -10822,6 +10822,7 @@ def _claude_dirs_state(mid):
 KEYS = []  # bodies of …/keys (the terminal's key bar and text field; GET /mock/keys)
 REWINDS = []  # bodies of …/rewind (#2436; GET /mock/rewinds)
 QUEUE_EDITS = []  # bodies of …/queue with the queue they pulled back (GET /mock/queue)
+SEND_NOWS = []  # "machine/session" of every …/queue/send-now, refused ones too (GET /mock/send_nows; #7169: one tap, one)
 UPLOADS = []  # files received (GET /mock/uploads)
 SENT = []  # bodies of sends, one per client_msg_id (GET /mock/sent)
 SENT_TO = []  # where each of them went: machine_id, session_id, client_msg_id, text (GET /mock/sent_to)
@@ -24581,6 +24582,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/rewinds": return self.send_json({"rewinds": REWINDS})
         if p == "/mock/queue": return self.send_json(queue_messages(q.get("text", [None])[0], "clear" in q, int(q.get("photos", ["0"])[0] or 0)))
         if p == "/mock/queue_edits": return self.send_json({"edits": QUEUE_EDITS})
+        if p == "/mock/send_nows": return self.send_json({"send_nows": SEND_NOWS})
         if p == "/mock/terminal_input": return self.send_json({"input": TERMINAL_INPUT})
         if p == "/mock/terminal_node":
             state, mid = q.get("state", [""])[0], q.get("machine", [TERMINAL_NODE["machine"]])[0]
@@ -26832,6 +26834,7 @@ class H(BaseHTTPRequestHandler):
                     return self.send_json({"ok": True})
             return self.send_json({"error": "session not found"}, 404)
         if p.startswith("/api/v1/sessions/") and p.endswith("/queue/send-now"):  # node session.queue.send_now (#6088)
+            SEND_NOWS.append(p.split("/")[4] + "/" + p.split("/")[5])
             s = next((x for x in SESSIONS + ASSISTANT if x["session_id"] == p.split("/")[5]), None)
             if not (s or {}).get("queued"):
                 return self.send_json({"code": "nothing_queued", "error": "Nothing is queued for the agent any more."}, 409)

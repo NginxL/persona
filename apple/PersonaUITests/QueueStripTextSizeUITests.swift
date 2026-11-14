@@ -1,8 +1,8 @@
 import XCTest
 
 /// The queue strip over an agent chat's composer at the largest accessibility text size (#4846): the title has the row's
-/// width and a tap on it opens the strip; Send Now sits on the line under it and still asks before sending. At the
-/// default size the two share one line, as before. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB): the widget agent
+/// width and a tap on it opens the strip without sending; Send Now sits on the line under it and sends at one tap
+/// (#7169). At the default size the two share one line, as before. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB): the widget agent
 /// works, a Claude in a terminal, so its queue has Send Now; `/mock/queue?text=…` queues a message for it.
 /// Each test runs in light and dark (`-ui.scheme`); PERSONA_SHOTS=<dir> keeps each step.
 final class QueueStripTextSizeUITests: XCTestCase {
@@ -15,8 +15,18 @@ final class QueueStripTextSizeUITests: XCTestCase {
             throw XCTSkip("needs scripts/mock/mock_hub.py (PERSONA_MOCK_HUB)")
         }
         hub = h
+    }
+
+    /// One message queued for the widget agent, afresh for each look (Send Now takes it).
+    private func queueOne() {
         _ = mock("queue?clear=1")
         _ = mock("queue?text=" + "Check the widget in dark mode when you are done".addingPercentEncoding(withAllowedCharacters: .alphanumerics)!)
+    }
+
+    /// How many `…/queue/send-now` the mock has had (`GET /mock/send_nows`).
+    private func sendNowCount() -> Int {
+        struct Log: Decodable { var send_nows: [String] }
+        return mock("send_nows").flatMap { try? JSONDecoder().decode(Log.self, from: $0) }?.send_nows.count ?? -1
     }
 
     override func tearDownWithError() throws {
@@ -25,6 +35,8 @@ final class QueueStripTextSizeUITests: XCTestCase {
 
     @MainActor func testTheTitleOpensTheStripAtTheLargestTextSize() throws {
         for look in ["light", "dark"] {
+            queueOne()
+            let before = sendNowCount()
             let app = launch("UICTContentSizeCategoryAccessibilityXXXL", look)
             let (strip, title, send) = parts(app)
             shot(app, "xxxl-queued-\(look)")
@@ -33,18 +45,20 @@ final class QueueStripTextSizeUITests: XCTestCase {
 
             title.tap()
             XCTAssertTrue(app.buttons["queue-item"].firstMatch.waitForExistence(timeout: 5), "\(look): a tap on the title did not open the strip:\n\(app.debugDescription)")
-            XCTAssertFalse(app.buttons["queue-send-now-confirm"].exists, "\(look): a tap on the title asked to send the queue")
+            XCTAssertEqual(sendNowCount(), before, "\(look): a tap on the title sent the queue")
             shot(app, "xxxl-open-\(look)")
 
             send.tap()
-            XCTAssertTrue(app.buttons["queue-send-now-confirm"].firstMatch.waitForExistence(timeout: 5), "\(look): Send Now did not ask first:\n\(app.debugDescription)")
-            shot(app, "xxxl-send-now-\(look)")
+            XCTAssertTrue(strip.waitForNonExistence(timeout: 10), "\(look): one tap on Send Now did not send the queue:\n\(app.debugDescription)")
+            XCTAssertEqual(sendNowCount(), before + 1, "\(look): one tap, one send-now")
+            shot(app, "xxxl-sent-\(look)")
             app.terminate()
         }
     }
 
     @MainActor func testTheTitleAndSendNowShareALineAtTheDefaultSize() throws {
         for look in ["light", "dark"] {
+            queueOne()
             let app = launch("UICTContentSizeCategoryL", look)
             let (_, title, send) = parts(app)
             shot(app, "default-queued-\(look)")

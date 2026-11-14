@@ -10,6 +10,12 @@ final class PersonaQueueUITests: XCTestCase {
         try JSONDecoder().decode(QueueEdits.self, from: Data(contentsOf: URL(string: hub + "/mock/queue_edits")!)).edits
     }
 
+    /// The sessions the mock got a `…/queue/send-now` for, in order (`GET /mock/send_nows`).
+    private func sendNows() throws -> [String] {
+        struct Log: Decodable { var send_nows: [String] }
+        return try JSONDecoder().decode(Log.self, from: Data(contentsOf: URL(string: hub + "/mock/send_nows")!)).send_nows
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else {
@@ -63,7 +69,9 @@ final class PersonaQueueUITests: XCTestCase {
         try shot(app, "strip")
     }
 
-    @MainActor func testPersonaSendNowUsesThePersonaWording() throws {
+    /// The strip names the assistant, and Send Now sends at one tap (#7169): its Persona wording, which a confirmation
+    /// used to show, is the button's VoiceOver hint (`QueueStripHintTests`), never drawn over the chat.
+    @MainActor func testPersonaSendNowSendsAtOneTap() throws {
         let app = launch()
         let strip = app.descendants(matching: .any)["queue-strip"].firstMatch
         XCTAssertTrue(strip.waitForExistence(timeout: 20), app.debugDescription)
@@ -73,11 +81,13 @@ final class PersonaQueueUITests: XCTestCase {
         XCTAssertFalse(named("Claude").exists, "the queue names Claude, not the assistant:\n\(strip.debugDescription)")
         let sendNow = app.buttons["queue-send-now"]
         XCTAssertTrue(sendNow.waitForExistence(timeout: 5), "no Send Now for the user's own queued messages:\n\(app.debugDescription)")
+        let before = try sendNows().count
         sendNow.tap()
+        XCTAssertTrue(sendNow.waitForNonExistence(timeout: 10), "one tap on Send Now did not send:\n\(app.debugDescription)")
+        XCTAssertEqual(Array(try sendNows().dropFirst(before)), ["server/b2e4d6f8-0000-4000-8000-000000000001"], "one tap, one send-now")
         let wording = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "不用等到下一步")).firstMatch
-        XCTAssertTrue(wording.waitForExistence(timeout: 5), "no Persona-specific confirmation:\n\(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "后台")).firstMatch.exists)
-        try shot(app, "confirm")
+        XCTAssertFalse(wording.exists, "a confirmation came up:\n\(app.debugDescription)")
+        try shot(app, "sent")
     }
 
     @MainActor func testRelayedMessagesAreReadOnly() throws {
@@ -185,12 +195,8 @@ final class PersonaQueueUITests: XCTestCase {
 
         let sendNow = app.buttons["queue-send-now"]
         XCTAssertTrue(sendNow.waitForExistence(timeout: 5), app.debugDescription)
-        sendNow.tap()
-        let confirm = app.buttons.matching(identifier: "queue-send-now-confirm").firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
-        confirm.tap()
-        let gone = NSPredicate(format: "exists == false")
-        wait(for: [XCTNSPredicateExpectation(predicate: gone, object: sendNow)], timeout: 10)
+        sendNow.tap() // at one tap (#7169)
+        XCTAssertTrue(sendNow.waitForNonExistence(timeout: 10), "one tap on Send Now did not send:\n\(app.debugDescription)")
         XCTAssertTrue(strip.exists, "the relayed message stays listed")
         let fold = app.buttons["queue-relayed-summary"]
         XCTAssertTrue(fold.waitForExistence(timeout: 5), "the relayed message stays, folded:\n\(app.debugDescription)")

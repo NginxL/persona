@@ -133034,29 +133034,6 @@
       },
       "extractionState" : "manual"
     },
-    "Send the queued messages now? [Queue Strip]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Send the queued messages now?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "送信待ちのメッセージを今すぐ送りますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "现在就发送排队的消息？"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "Send this number to the bot in Lark" : {
       "localizations" : {
         "en" : {
