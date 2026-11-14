@@ -94,7 +94,8 @@ final class InboxJumpToRaceUITests: XCTestCase {
         let back = app.navigationBars.buttons["BackButton"].firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 3), "no Back on the item:\n\(app.debugDescription)")
         back.tap()
-        XCTAssertTrue(app.buttons["inbox.jumpTo"].firstMatch.waitForExistence(timeout: 5), "not back on the list:\n\(app.debugDescription)")
+        // a group's title, not Jump To: Done's title and its Jump To are off screen if the list moved while unseen
+        XCTAssertTrue(app.buttons["inbox.groupTitle"].firstMatch.waitForExistence(timeout: 5), "not back on the list:\n\(app.debugDescription)")
         sleep(1)
         XCTAssertTrue(topGroup()?.hasPrefix(newest) == true,
                       "the Jump To's page came while the list was out of sight and took it to \(topGroup() ?? "none")")
@@ -143,18 +144,19 @@ final class InboxJumpToRaceUITests: XCTestCase {
     /// Opens the first item under `group`'s title (Done's rows have no identifier: a tap just below the title), and
     /// waits for its page over the list.
     @MainActor private func openItem(under group: String) {
-        let title = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", "inbox.groupTitle", group)).firstMatch
-        XCTAssertTrue(onScreen(title), "\(group)'s title is not on screen:\n\(app.debugDescription)")
+        let title = shownDoneGroups().first { Self.title($0.label) == group }
+        XCTAssertNotNil(title, "\(group)'s title is not on screen:\n\(app.debugDescription)")
         let window = app.windows.firstMatch
         window.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: window.frame.midX, dy: title.frame.maxY + 30)).tap()
+            .withOffset(CGVector(dx: window.frame.midX, dy: (title?.frame.maxY ?? 0) + 30)).tap()
         XCTAssertTrue(app.buttons["inbox.jumpTo"].firstMatch.waitForNonExistence(timeout: 5),
                       "the item did not open over the list:\n\(app.debugDescription)")
     }
 
-    /// Picks `group` in Jump To's menu.
+    /// Picks `group` in Jump To's menu: its item reads "<title>, <count>" (a plain prefix would also take the shell's
+    /// Back, "今天要处理的事", for 今天).
     @MainActor private func jump(to group: String) {
-        pick(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", group, "inbox.groupTitle"), "\(group) in Jump To")
+        pick(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", group + ", ", "inbox.groupTitle"), "\(group) in Jump To")
     }
 
     @MainActor private func foldDoneGroups() {
@@ -186,17 +188,24 @@ final class InboxJumpToRaceUITests: XCTestCase {
         return groups.filter { $0.0 >= done.maxY - 1 }.sorted { $0.0 < $1.0 }.map { Self.title($0.1) }
     }
 
-    /// The group whose title is topmost on screen, under the navigation bar (the one stuck there, or the first below it).
+    /// The Done group whose title is topmost on screen, under the navigation bar (the one stuck there, or the first below it).
     @MainActor private func topGroup() -> String? {
-        guard let root = try? app.windows.firstMatch.snapshot() else { return nil }
+        shownDoneGroups().first.map { Self.title($0.label) }
+    }
+
+    /// Done's groups' titles on screen, top first. Needs You and FYI group by time too (a 今天 of their own): a title
+    /// above Done's, while Done's is in the list, is theirs.
+    @MainActor private func shownDoneGroups() -> [(frame: CGRect, label: String)] {
+        guard let root = try? app.windows.firstMatch.snapshot() else { return [] }
         let top = app.navigationBars.firstMatch.frame.maxY, bottom = app.windows.firstMatch.frame.maxY
-        var shown: [(CGFloat, String)] = []
+        var done: CGRect?, shown: [(frame: CGRect, label: String)] = []
         func walk(_ e: XCUIElementSnapshot) {
-            if e.identifier == "inbox.groupTitle", e.frame.maxY > top + 1, e.frame.minY < bottom { shown.append((e.frame.minY, e.label)) }
+            if e.identifier == "inbox.doneTitle" { done = e.frame }
+            if e.identifier == "inbox.groupTitle", e.frame.maxY > top + 1, e.frame.minY < bottom { shown.append((e.frame, e.label)) }
             e.children.forEach(walk)
         }
         walk(root)
-        return shown.min { $0.0 < $1.0 }.map { Self.title($0.1) }
+        return shown.filter { done == nil || $0.frame.minY >= done!.maxY - 1 }.sorted { $0.frame.minY < $1.frame.minY }
     }
 
     /// A group title's label is its title and count ("1 个月前、8", "1+ Month Ago, 8").
