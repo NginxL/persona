@@ -75,4 +75,7 @@ internal object NativeBridge {
     @JvmStatic external fun flush(handle: Long, timeoutMillis: Int): Boolean
 
     @JvmStatic external fun destroy(handle: Long)
+
+    /** Projects the Agents list from a JSON input string. Pure function, no runtime handle needed. */
+    @JvmStatic external fun projectSort(input: String): String
 }

@@ -31,7 +31,7 @@ SUFFIX = """}
 declare const native: PersonaCoreNative;
 export default native;
 """
-FUNCTION = re.compile(r"^function ([A-Za-z_$][\w$]*)\((.*)\): (void|number|boolean|Buffer)$")
+FUNCTION = re.compile(r"^function ([A-Za-z_$][\w$]*)\((.*)\): (void|number|string|boolean|Buffer)$")
 CALLBACK = re.compile(r"^\(\((.*)\) => (void|unknown)\)$")
 PARAM = re.compile(r"^([A-Za-z_$][\w$]*)(\??): (.+)$")
 HOST_CALLBACKS = {"changed", "changedChat", "effects"}
@@ -45,6 +45,7 @@ SIGNATURES = {
     "coreFlush": [("handle", "number"), ("timeoutMillis", "number")],
     "coreClose": [("handle", "number")],
     "coreConfig": [],
+    "coreProjectSort": [("input", "string")],
 }
 
 
@@ -142,9 +143,9 @@ def generate(records):
     names = [name for name, _, _ in definitions]
     if len(names) != len(set(names)):
         raise DefinitionError("napi-derive must emit each function once")
-    if sorted(names) != ["coreClose", "coreConfig", "coreCreate", "coreCreateWithChat", "coreDispatch", "coreDrain", "coreFlush"]:
+    if sorted(names) != ["coreClose", "coreConfig", "coreCreate", "coreCreateWithChat", "coreDispatch", "coreDrain", "coreFlush", "coreProjectSort"]:
         raise DefinitionError(f"unexpected NAPI function set: {', '.join(names)}")
-    order = ["coreCreate", "coreCreateWithChat", "coreDispatch", "coreDrain", "coreFlush", "coreClose", "coreConfig"]
+    order = ["coreCreate", "coreCreateWithChat", "coreDispatch", "coreDrain", "coreFlush", "coreClose", "coreConfig", "coreProjectSort"]
     lines = []
     for name, parameters, return_type in sorted(definitions, key=lambda definition: order.index(definition[0])):
         arguments = []
@@ -154,7 +155,8 @@ def generate(records):
             arguments.append((parameter, kind))
         if arguments != SIGNATURES[name]:
             raise DefinitionError(f"{name} has an incomplete or changed positional parameter contract")
-        if return_type != ("void" if name == "coreClose" else "Buffer" if name in ("coreDrain", "coreConfig")
+        if return_type != ("void" if name == "coreClose" else "string" if name == "coreProjectSort"
+                           else "Buffer" if name in ("coreDrain", "coreConfig")
                            else "number" if name.startswith("coreCreate") else "boolean"):
             raise DefinitionError(f"{name} has the wrong return type")
         lines.append(f"  {name}({', '.join(parameter + ': ' + kind for parameter, kind in arguments)}): {ts_type(return_type)};")

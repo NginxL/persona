@@ -285,3 +285,28 @@ pub unsafe extern "C" fn persona_core_free(core: *mut PersonaCore) {
         let _ = catch_unwind(AssertUnwindSafe(|| close(core)));
     }
 }
+
+/// Projects the Agents list from a JSON input. The input is a UTF-8 JSON document matching `persona_core::sort::Input`;
+/// the returned bytes are a UTF-8 JSON document matching `persona_core::sort::Projection`. This is a pure function: no
+/// core handle, no dispatch, no drain. The caller frees the result with `persona_core_bytes_free`.
+///
+/// # Safety
+/// `input` is valid for `length` bytes of UTF-8 JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn persona_core_project_sort(input: *const u8, length: usize) -> PersonaCoreBytes {
+    catch_unwind(AssertUnwindSafe(|| {
+        let input = unsafe { slice(input, length) };
+        let Ok(input_str) = std::str::from_utf8(input) else {
+            return PersonaCoreBytes::empty();
+        };
+        let Ok(input) = serde_json::from_str::<persona_core_domain::sort::Input>(input_str) else {
+            return PersonaCoreBytes::empty();
+        };
+        let projection = persona_core_domain::sort::project(&input);
+        let Ok(json) = serde_json::to_string(&projection) else {
+            return PersonaCoreBytes::empty();
+        };
+        PersonaCoreBytes::from_vec(json.into_bytes())
+    }))
+    .unwrap_or_else(|_| PersonaCoreBytes::empty())
+}

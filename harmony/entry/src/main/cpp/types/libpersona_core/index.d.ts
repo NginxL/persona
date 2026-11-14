@@ -12,6 +12,7 @@ export interface PersonaCoreNative {
   coreFlush(handle: number, timeoutMillis: number): boolean;
   coreClose(handle: number): void;
   coreConfig(): Uint8Array;
+  coreProjectSort(input: string): string;
 }
 
 declare const native: PersonaCoreNative;

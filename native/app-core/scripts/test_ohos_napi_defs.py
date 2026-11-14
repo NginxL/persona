@@ -22,6 +22,7 @@ RECORDS = [
     "function coreFlush(handle: number, timeoutMillis: number): boolean",
     "function coreClose(handle: number): void",
     "function coreConfig(): Buffer",
+    "function coreProjectSort(input: string): string",
 ]
 
 
