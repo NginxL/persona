@@ -252,10 +252,33 @@ Checkup reports are usually PDFs dozens of pages long. If only the chat history 
 ## Automatic workout reports (iOS)
 
 Settings → Health → Automatic workout reports is off by default. Enabling it requests
-HealthKit workout and heart-rate read access and records a consent timestamp. Opening
-or foregrounding the app uploads completed workouts lasting at least ten minutes
-whose start is after that timestamp. This version does not provide background
-HealthKit delivery. The device must reconnect to the same paired hub.
+HealthKit workout, heart-rate and distance read access and records a consent timestamp.
+Opening or foregrounding the app uploads completed workouts lasting at least ten minutes
+whose start is after that timestamp. The device must reconnect to the same paired hub.
+
+**Right after a workout (opt-in build, #2526).** A build made with config.json
+`app.health_background_delivery: true` (`docs/operations/config.md`) is signed with the
+HealthKit background delivery entitlement, and sets Info.plist
+`PersonaHealthBackgroundDelivery`. The switch is off by default, because an App ID whose
+provisioning profile doesn't allow the entitlement fails to sign, or a cloud-signed export
+drops it silently. Turn it on only after a signed build shows the profile allows it.
+`scripts/release/entitlements.py check` then reports a release that lacks it.
+
+In such a build:
+
+- `WorkoutReports.observe()` runs from `application(_:didFinishLaunchingWithOptions:)`,
+  where HealthKit wants it for a background wake, and again when reports are turned on.
+- It sets up an `HKObserverQuery` on workouts and `enableBackgroundDelivery(frequency:
+  .immediate)`.
+- A new workout wakes the app, even while Persona is closed. The app runs the same
+  `refresh`, then calls HealthKit's completion whatever happened, since HealthKit retries
+  a wake that never completes.
+- Turning reports off stops the query and disables delivery.
+- The Settings footer says which mode is active (`WorkoutReports.immediate`): right after
+  a workout, or when Persona is opened. If HealthKit refuses delivery at run time, the
+  footer falls back to the second.
+
+Only such a build reads the reports' small state file at launch; other builds do as before.
 
 Reports appear in the Health space using existing persona-card measurement cards,
 a minute-average heart-rate chart when available, and a brief interpretation. Missing

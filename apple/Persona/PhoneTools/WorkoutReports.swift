@@ -6,16 +6,30 @@ import os
 
 /// Consent and the HealthKit cursor are committed together. Failed uploads leave the cursor in place for retry.
 /// A report the hub rejects as invalid is dropped instead: the same data gets the same answer.
+/// A build with HealthKit background delivery (`deliversInBackground`, #2526) also reports right after a workout is saved,
+/// while Persona is closed: an observer query set up at launch wakes the app, which runs the same `refresh`.
 @Observable
 final class WorkoutReports {
     static let shared = WorkoutReports()
-    private static let log = Logger(subsystem: "persona", category: "workout-reports")
+    private nonisolated static let log = Logger(subsystem: "persona", category: "workout-reports") // also from HealthKit's queue
     private let health = HKHealthStore()
     private let file: URL
     private var state: State
     private(set) var busy = false
     private(set) var error: String?
     var enabled: Bool { state.enabledAt != nil }
+    /// HealthKit turned background delivery down although the build has it: reports wait for Persona to open.
+    private(set) var backgroundRefused = false
+    private var observer: HKObserverQuery?
+
+    /// The build is signed with HealthKit background delivery (config.json app.health_background_delivery, Info.plist
+    /// `PersonaHealthBackgroundDelivery`; docs/assistant/health.md).
+    static var deliversInBackground: Bool {
+        (Bundle.main.object(forInfoDictionaryKey: "PersonaHealthBackgroundDelivery") as? String)?.uppercased() == "YES"
+    }
+
+    /// Reports come right after a workout, not when Persona is next opened (what Settings says).
+    var immediate: Bool { Self.deliversInBackground && !backgroundRefused }
 
     nonisolated struct State: Codable {
         var enabledAt: Date?
@@ -70,11 +84,41 @@ final class WorkoutReports {
                 guard let hub = model.hub, !hub.isDemo, HKHealthStore.isHealthDataAvailable() else { return }
                 try await health.requestAuthorization(toShare: [], read: WorkoutReader.readTypes)
                 try save(State(enabledAt: Date(), group: hub.group))
+                observe()
             } else {
                 try save(State())
+                stopObserving()
             }
             error = nil
         } catch { self.error = error.localizedDescription }
+    }
+
+    /// Called at launch (`application(_:didFinishLaunchingWithOptions:)`, where HealthKit wants it for a background
+    /// wake) and when reports are turned on: in a build with background delivery, a new workout wakes the app and runs
+    /// `refresh`. HealthKit retries a wake whose completion is never called, so it is called whatever `refresh` did.
+    func observe() {
+        guard Self.deliversInBackground, enabled, observer == nil, HKHealthStore.isHealthDataAvailable() else { return }
+        let query = HKObserverQuery(sampleType: HKObjectType.workoutType(), predicate: nil) { @Sendable _, completion, failure in
+            let done = WakeDone(completion)
+            if let failure { Self.log.error("workout observer failed: \(failure.localizedDescription, privacy: .public)") }
+            Task { @MainActor in
+                await WorkoutReports.shared.refresh(model: AppModel.shared)
+                done.call()
+            }
+        }
+        observer = query
+        health.execute(query)
+        health.enableBackgroundDelivery(for: HKObjectType.workoutType(), frequency: .immediate) { @Sendable ok, failure in
+            if !ok { Self.log.error("background delivery refused: \(failure?.localizedDescription ?? "no reason", privacy: .public)") }
+            Task { @MainActor in WorkoutReports.shared.backgroundRefused = !ok }
+        }
+    }
+
+    private func stopObserving() {
+        guard let observer else { return }
+        health.stop(observer)
+        self.observer = nil
+        health.disableBackgroundDelivery(for: HKObjectType.workoutType()) { @Sendable _, _ in }
     }
 
     func refresh(model: AppModel) async {
@@ -128,6 +172,13 @@ final class WorkoutReports {
             try save(next)
         }
         return skipped
+    }
+
+    /// HealthKit's completion for one background wake, carried to the main actor that calls it.
+    private nonisolated final class WakeDone: @unchecked Sendable {
+        private let completion: () -> Void
+        init(_ completion: @escaping () -> Void) { self.completion = completion }
+        func call() { completion() }
     }
 
     private func read(since: Date, anchor: HKQueryAnchor?) async throws -> ([HKWorkout], HKQueryAnchor?) {
