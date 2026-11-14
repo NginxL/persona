@@ -1,4 +1,4 @@
-package node
+package iphone
 
 import (
 	"context"
@@ -148,7 +148,7 @@ func TestIPhoneReadyWithoutElementTree(t *testing.T) {
 	}}
 	useIPhones(t, f, nil)
 	byID := map[string]proto.IPhoneDevice{}
-	for _, d := range iphoneStatus(context.Background()).Devices {
+	for _, d := range Status(context.Background()).Devices {
 		byID[d.ID] = d
 	}
 	if d := byID["real"]; !d.Ready || d.Note != "" || !d.Connected || d.Capabilities["ax_tree"] || !d.Capabilities["input"] {
@@ -165,11 +165,11 @@ func TestIPhoneReadyWithoutElementTree(t *testing.T) {
 func TestIPhoneStatusSaysWhatIsMissing(t *testing.T) {
 	ctx := context.Background()
 	useIPhones(t, &fakeIPhones{}, nil)
-	if p := iphoneStatus(ctx); p.Installed || p.Note != iphoneNoteNoBridge || p.Devices == nil || p.Checked.IsZero() {
+	if p := Status(ctx); p.Installed || p.Note != iphoneNoteNoBridge || p.Devices == nil || p.Checked.IsZero() {
 		t.Fatalf("no bridge: %+v", p)
 	}
 	useIPhones(t, &fakeIPhones{installed: true, links: []iphoneLink{{ID: "u1", Name: "Phone", USB: true}}}, nil)
-	if p := iphoneStatus(ctx); p.Note != iphoneNoteNonePaired || len(p.Devices) != 1 || p.Devices[0].Note != iphoneNoteUSB || p.Version != "0.1.0" {
+	if p := Status(ctx); p.Note != iphoneNoteNonePaired || len(p.Devices) != 1 || p.Devices[0].Note != iphoneNoteUSB || p.Version != "0.1.0" {
 		t.Fatalf("plugged in, nothing paired: %+v", p)
 	}
 
@@ -186,7 +186,7 @@ func TestIPhoneStatusSaysWhatIsMissing(t *testing.T) {
 		"devmode": `{"locked":false,"capabilities":{"screenshot":true,"ax_tree":true,"input":false},"notes":{"input":"developer_mode_off"}}`,
 	}}
 	useIPhones(t, f, nil)
-	p := iphoneStatus(ctx)
+	p := Status(ctx)
 	if p.Note != "" || len(p.Devices) != 6 {
 		t.Fatalf("paired: %+v", p)
 	}
@@ -219,10 +219,10 @@ func TestIPhoneStatusSaysWhatIsMissing(t *testing.T) {
 	f = &fakeIPhones{installed: true, links: []iphoneLink{{ID: "a", Paired: true, State: "connected", Info: json.RawMessage(readyInfo)}},
 		info: map[string]string{"a": strings.Replace(readyInfo, `"locked":false`, `"locked":true`, 1)}}
 	useIPhones(t, f, nil)
-	if d := iphoneStatus(ctx).Devices[0]; !d.Ready || len(f.calls) != 0 {
+	if d := Status(ctx).Devices[0]; !d.Ready || len(f.calls) != 0 {
 		t.Fatalf("the session's device_info: %+v %v", d, f.calls)
 	}
-	res, err := iphoneCall(ctx, json.RawMessage(`{"op":"status"}`))
+	res, err := Call(ctx, json.RawMessage(`{"op":"status"}`))
 	var fresh proto.IPhoneDevice
 	if err != nil || json.Unmarshal(res.Output, &fresh) != nil || !fresh.Locked || len(f.calls) != 1 {
 		t.Fatalf("asked again: %+v %v %v", fresh, err, f.calls)
@@ -230,12 +230,12 @@ func TestIPhoneStatusSaysWhatIsMissing(t *testing.T) {
 
 	useIPhones(t, &fakeIPhones{installed: true, links: []iphoneLink{{ID: "a", Paired: true, State: "connected"}},
 		infoErr: &rpc.Error{Code: "ddi_not_mounted", Message: "x"}}, nil)
-	if d := iphoneStatus(ctx).Devices[0]; d.Connected || d.Ready || d.Note != iphoneNotes["ddi_not_mounted"] {
+	if d := Status(ctx).Devices[0]; d.Connected || d.Ready || d.Note != iphoneNotes["ddi_not_mounted"] {
 		t.Fatalf("the probe failed: %+v", d)
 	}
 	useIPhones(t, &fakeIPhones{installed: true, links: []iphoneLink{{ID: "a", Paired: true, State: "connected"}},
 		infoErr: errors.New("odd")}, nil)
-	if d := iphoneStatus(ctx).Devices[0]; d.Note != iphoneNoteFailed {
+	if d := Status(ctx).Devices[0]; d.Note != iphoneNoteFailed {
 		t.Fatalf("an error without a code: %+v", d)
 	}
 }
@@ -257,11 +257,11 @@ func TestIPhoneCallLookGoesToTheCoreOnTheOnlyPairedDevice(t *testing.T) {
 	c := &fakeCore{ops: []string{"tap"}, out: iphoneOutcome{Output: json.RawMessage(`{"elements":[]}`), NeedsApproval: true, Approval: &proto.IPhoneApproval{Step: 1, Action: "tap", Needs: []string{"payment"}}, ApprovalID: "a1"}, shot: "full"}
 	useIPhones(t, f, c)
 	params := `{"session":"s1","op":"do","args":{"tap":3},"approved":"a0","confirm":true}`
-	res, err := builtinCall(context.Background(), "iphone", "call", json.RawMessage(params), nil)
+	res, err := Call(context.Background(), json.RawMessage(params))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := res.(*proto.IPhoneResult)
+	r := res
 	if string(r.Output) != `{"elements":[]}` || !r.NeedsApproval || r.Approval == nil || r.Approval.Needs[0] != "payment" || r.ApprovalID != "a1" {
 		t.Fatalf("result %+v", r)
 	}
@@ -281,7 +281,7 @@ func TestIPhoneCallLookGoesToTheCoreOnTheOnlyPairedDevice(t *testing.T) {
 	// A screenshot named by its file name alone is the one in the call's directory.
 	c = &fakeCore{shot: "shot.png"}
 	useIPhones(t, f, c)
-	if res, err := iphoneCall(context.Background(), json.RawMessage(`{"device":"d1","op":"look"}`)); err != nil || res.Image == nil {
+	if res, err := Call(context.Background(), json.RawMessage(`{"device":"d1","op":"look"}`)); err != nil || res.Image == nil {
 		t.Fatalf("by name: %+v %v", res, err)
 	}
 }
@@ -292,7 +292,7 @@ func TestIPhoneCallKeepsOnlyItsOwnScreenshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	useIPhones(t, &fakeIPhones{installed: true, links: []iphoneLink{{ID: "d1", Paired: true}}}, &fakeCore{out: iphoneOutcome{ImageFile: outside}})
-	res, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"look"}`))
+	res, err := Call(context.Background(), json.RawMessage(`{"op":"look"}`))
 	if err != nil || res.Image != nil {
 		t.Fatalf("a file outside the call's directory is not read: %+v %v", res, err)
 	}
@@ -302,7 +302,7 @@ func TestIPhoneCallStatusAnswersHere(t *testing.T) {
 	f := &fakeIPhones{installed: true, links: []iphoneLink{{ID: "d1", Paired: true, State: "connected"}}, info: map[string]string{"d1": readyInfo}}
 	c := &fakeCore{}
 	useIPhones(t, f, c)
-	res, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"status"}`))
+	res, err := Call(context.Background(), json.RawMessage(`{"op":"status"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestIPhoneCallRefusalsAreNotSent(t *testing.T) {
 			core = &fakeCore{}
 		}
 		useIPhones(t, c.phones, core)
-		_, err := iphoneCall(ctx, json.RawMessage(c.params))
+		_, err := Call(ctx, json.RawMessage(c.params))
 		if code, sent := iphoneCallErr(t, err); code != c.code || sent != proto.IPhoneNotSent {
 			t.Errorf("%s: %s %s (%v)", c.name, code, sent, err)
 		}
@@ -360,7 +360,7 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 		{"no code", &rpc.Error{Message: "x", Data: json.RawMessage(`{"sent":"unknown"}`)}, "failed", proto.IPhoneMaybeSent},
 	} {
 		useIPhones(t, &fakeIPhones{installed: true, links: links}, &fakeCore{err: c.err})
-		_, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"do"}`))
+		_, err := Call(context.Background(), json.RawMessage(`{"op":"do"}`))
 		if code, sent := iphoneCallErr(t, err); code != c.code || sent != c.sent || strings.Contains(err.Error(), "more") {
 			t.Errorf("%s: %s %s %v", c.name, code, sent, err)
 		}
@@ -368,7 +368,7 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 
 	// A tap went through, then a refusal: the step as a whole may have been done.
 	useIPhones(t, &fakeIPhones{installed: true, links: links}, &fakeCore{ops: []string{"tap"}, err: &rpc.Error{Code: "locked", Data: json.RawMessage(`{"sent":"no"}`)}})
-	_, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"do"}`))
+	_, err := Call(context.Background(), json.RawMessage(`{"op":"do"}`))
 	if code, sent := iphoneCallErr(t, err); code != "locked" || sent != proto.IPhoneMaybeSent {
 		t.Fatalf("after acting: %s %s", code, sent)
 	}
@@ -376,7 +376,7 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 	core := &fakeCore{block: true}
 	useIPhones(t, &fakeIPhones{installed: true, links: links}, core)
 	start := time.Now()
-	_, err = iphoneCall(context.Background(), json.RawMessage(`{"op":"do","timeout_ms":1}`)) // clamped up to a second
+	_, err = Call(context.Background(), json.RawMessage(`{"op":"do","timeout_ms":1}`)) // clamped up to a second
 	if code, sent := iphoneCallErr(t, err); code != "timeout" || sent != proto.IPhoneMaybeSent {
 		t.Fatalf("timeout: %s %s %v", code, sent, err)
 	}
@@ -387,7 +387,7 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 	// A huge timeout is the most, not an overflow.
 	core = &fakeCore{}
 	useIPhones(t, &fakeIPhones{installed: true, links: links}, core)
-	if _, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"look","timeout_ms":9000000000000000}`)); err != nil || core.wait < iphoneCallMost-5*time.Second {
+	if _, err := Call(context.Background(), json.RawMessage(`{"op":"look","timeout_ms":9000000000000000}`)); err != nil || core.wait < iphoneCallMost-5*time.Second {
 		t.Fatalf("waits %v (%v)", core.wait, err)
 	}
 
@@ -395,7 +395,7 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 	useIPhones(t, &fakeIPhones{installed: true, links: links}, core)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
-	_, err = iphoneCall(ctx, json.RawMessage(`{"op":"do"}`))
+	_, err = Call(ctx, json.RawMessage(`{"op":"do"}`))
 	if code, sent := iphoneCallErr(t, err); code != "cancelled" || sent != proto.IPhoneMaybeSent {
 		t.Fatalf("the manager gave up: %s %s %v", code, sent, err)
 	}
@@ -404,26 +404,24 @@ func TestIPhoneCallFailuresMayHaveBeenSent(t *testing.T) {
 func TestIPhonePairStartsAJob(t *testing.T) {
 	f := &fakeIPhones{installed: true}
 	useIPhones(t, f, nil)
-	out, err := builtinCall(context.Background(), "iphone", "pair", json.RawMessage(`{"device":"u1"}`), nil)
+	out, err := Pair(context.Background(), "pair", json.RawMessage(`{"device":"u1"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := out.(proto.IPhone); p.Job == nil || p.Job.Kind != "pair" || p.Job.Error != iphoneNotes["trust_pending"] {
+	if p := out; p.Job == nil || p.Job.Kind != "pair" || p.Job.Error != iphoneNotes["trust_pending"] {
 		t.Fatalf("status %+v", p.Job)
 	}
-	if _, err := builtinCall(context.Background(), "iphone", "forget", json.RawMessage(`{"device":"u1"}`), nil); err != nil {
+	if _, err := Pair(context.Background(), "forget", json.RawMessage(`{"device":"u1"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := builtinCall(context.Background(), "iphone", "pair", json.RawMessage(`{}`), nil); err == nil {
+	if _, err := Pair(context.Background(), "pair", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("pair without a device")
 	}
-	if out, _ := builtinCall(context.Background(), "iphone", "cancel", nil, nil); out.(proto.IPhone).Job != nil {
+	Cancel()
+	if out := Status(context.Background()); out.Job != nil {
 		t.Fatal("cancel kept the job")
 	}
 	if strings.Join(f.jobs, ",") != "pair u1,forget u1" {
 		t.Fatalf("jobs %v", f.jobs)
-	}
-	if _, err := callBuiltin(context.Background(), "iphone", "files", nil, nil); err == nil || !strings.Contains(err.Error(), "unknown method") {
-		t.Fatalf("unknown method: %v", err)
 	}
 }

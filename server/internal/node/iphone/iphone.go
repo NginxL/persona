@@ -1,4 +1,4 @@
-package node
+package iphone
 
 // Operating the iPhones this computer reaches over RemotePairing, for the assistant (the built-in extension iphone,
 // docs/extensions/iphone.md). The built-in program iphone answers the manager: status (which iPhones there are and
@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/node/nodekit"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -174,8 +175,8 @@ const (
 	iphoneProbe       = 5 * time.Second
 )
 
-// iphoneStatus is what this computer has of iPhones now (proto.IPhone; Enabled and each Allowed are the manager's).
-func iphoneStatus(ctx context.Context) proto.IPhone {
+// Status is what this computer has of iPhones now (proto.IPhone; Enabled and each Allowed are the manager's).
+func Status(ctx context.Context) proto.IPhone {
 	p := proto.IPhone{Devices: []proto.IPhoneDevice{}}
 	p.Installed, p.Version = iphones.Bridge(ctx)
 	if !p.Installed {
@@ -282,9 +283,9 @@ func iphoneProbeDevice(ctx context.Context, l iphoneLink, fresh bool) proto.IPho
 	return d
 }
 
-// iphoneCall runs one call of the iphone program: status answers here, look and do go to the driver with the bridge
+// Call runs one call of the iphone program: status answers here, look and do go to the driver with the bridge
 // on that iPhone. Its errors carry whether the step may have reached the iPhone (proto.IPhoneErrorData).
-func iphoneCall(ctx context.Context, params json.RawMessage) (*proto.IPhoneResult, error) {
+func Call(ctx context.Context, params json.RawMessage) (*proto.IPhoneResult, error) {
 	var p proto.IPhoneCall
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, iphoneErr("bad_args", "iphone.call: "+err.Error(), proto.IPhoneNotSent)
@@ -340,7 +341,7 @@ func iphoneCall(ctx context.Context, params json.RawMessage) (*proto.IPhoneResul
 	res := &proto.IPhoneResult{Output: out.Output, Text: out.Text, NeedsApproval: out.NeedsApproval,
 		Approval: out.Approval, ApprovalID: out.ApprovalID}
 	if f := iphoneImageIn(dir, out.ImageFile); f != "" {
-		res.Image = screenshotImage(f)
+		res.Image = nodekit.ScreenshotImage(f)
 	}
 	return res, nil
 }
@@ -454,7 +455,7 @@ func iphoneStepErr(ctx, cctx context.Context, op string, err error, timeout time
 	if code == "" {
 		code = "failed"
 	}
-	return iphoneErr(code, "iPhone "+op+": "+firstLine(msg), sent)
+	return iphoneErr(code, "iPhone "+op+": "+nodekit.FirstLine(msg), sent)
 }
 
 func iphoneErr(code, msg, sent string) error {
@@ -462,8 +463,8 @@ func iphoneErr(code, msg, sent string) error {
 	return &rpc.Error{Code: code, Message: msg, Data: data}
 }
 
-// iphonePair starts pairing or forgetting an iPhone (the iphone program's pair and forget), then answers the status.
-func iphonePair(ctx context.Context, method string, params json.RawMessage) (proto.IPhone, error) {
+// Pair starts pairing or forgetting an iPhone (the iphone program's pair and forget), then answers the status.
+func Pair(ctx context.Context, method string, params json.RawMessage) (proto.IPhone, error) {
 	var p struct {
 		Device string `json:"device"`
 	}
@@ -477,5 +478,8 @@ func iphonePair(ctx context.Context, method string, params json.RawMessage) (pro
 	if err := start(p.Device); err != nil {
 		return proto.IPhone{}, err
 	}
-	return iphoneStatus(ctx), nil
+	return Status(ctx), nil
 }
+
+// Cancel stops the running pair or forget job.
+func Cancel() { iphones.Cancel() }

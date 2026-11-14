@@ -11,7 +11,7 @@ import (
 // nodeMaxLines is the ceiling for the non-test Go lines directly in internal/node. It only goes down: the zero-coupling
 // clusters move into subpackages (#7891, #7894), and every PR that moves one lowers it to the new size. Lower it after
 // shrinking the package; never raise it, put new code in a subpackage instead.
-const nodeMaxLines = 106493
+const nodeMaxLines = 105698
 
 func TestNodePackageDoesNotGrow(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "node", "*.go"))

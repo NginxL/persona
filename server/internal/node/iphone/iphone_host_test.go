@@ -1,4 +1,4 @@
-package node
+package iphone
 
 import (
 	"context"
@@ -70,14 +70,14 @@ esac
 	iphoneBridgeSeen.at = time.Time{}
 	t.Cleanup(func() { iphoneBridgeSeen.at = time.Time{} })
 
-	p := iphoneStatus(context.Background())
+	p := Status(context.Background())
 	if !p.Installed || p.Version != "0.1.0" || p.Note != iphoneNoteNonePaired || len(p.Devices) != 1 {
 		t.Fatalf("status %+v", p)
 	}
 	if d := p.Devices[0]; d.ID != "00008110-000A1B2C3D4E5F60" || !d.USB || d.Paired || d.ProductType != "iPhone16,2" || d.IOS != "18.1" || d.Note != iphoneNoteUSB {
 		t.Fatalf("the phone on USB %+v", d)
 	}
-	_, err := iphoneCall(context.Background(), json.RawMessage(`{"op":"look"}`))
+	_, err := Call(context.Background(), json.RawMessage(`{"op":"look"}`))
 	if code, sent := iphoneCallErr(t, err); code != "not_paired" || sent != proto.IPhoneNotSent {
 		t.Fatalf("nothing paired: %s %s", code, sent)
 	}

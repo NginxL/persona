@@ -1,4 +1,4 @@
-package node
+package iphone
 
 // The iphone program's host on a real computer: the pairing records and the bridge's sessions of internal/iphone
 // (docs/extensions/iphone.md), seen through iphoneHost.

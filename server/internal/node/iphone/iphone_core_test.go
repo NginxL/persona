@@ -1,4 +1,4 @@
-package node
+package iphone
 
 import (
 	"cmp"
@@ -128,7 +128,7 @@ func TestIPhoneCoreLooksThroughTheBridge(t *testing.T) {
 		b := newBridgePhone()
 		b.inline = inline
 		useCore(t, b)
-		res, err := iphoneCall(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":true}}`))
+		res, err := Call(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":true}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,11 +148,11 @@ func TestIPhoneCoreAsksBeforeAPaymentAndResumesWithTheApproval(t *testing.T) {
 	b := newBridgePhone()
 	useCore(t, b)
 	ctx := context.Background()
-	if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+	if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 		t.Fatal(err)
 	}
 	do := `{"session":"s1","op":"do","args":{"steps":[{"action":"tap","target":{"label":"Pay"}}]}}`
-	res, err := iphoneCall(ctx, json.RawMessage(do))
+	res, err := Call(ctx, json.RawMessage(do))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestIPhoneCoreAsksBeforeAPaymentAndResumesWithTheApproval(t *testing.T) {
 
 	// The manager comes back once the owner approved, with only the id: the step is sent, once.
 	resume := json.RawMessage(`{"device":"d1","session":"s1","op":"do","approved":"` + res.ApprovalID + `"}`)
-	res, err = iphoneCall(ctx, resume)
+	res, err = Call(ctx, resume)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,13 +180,13 @@ func TestIPhoneCoreAsksBeforeAPaymentAndResumesWithTheApproval(t *testing.T) {
 		t.Fatalf("after approval: %+v, inputs %v", res, b.inputs())
 	}
 	// The id is spent: nothing is sent, and the error says so in the core's words.
-	_, err = iphoneCall(ctx, resume)
+	_, err = Call(ctx, resume)
 	if code, sent := iphoneCallErr(t, err); code != "not_pending" || sent != proto.IPhoneNotSent ||
 		!strings.Contains(err.Error(), "not pending") || strings.Join(b.inputs(), ",") != "tap" {
 		t.Fatalf("approved twice: %s %s %v, inputs %v", code, sent, err, b.inputs())
 	}
 	// So are steps the core can't read.
-	_, err = iphoneCall(ctx, json.RawMessage(`{"device":"d1","session":"s1","op":"do","args":{"steps":[{"action":"fly"}]}}`))
+	_, err = Call(ctx, json.RawMessage(`{"device":"d1","session":"s1","op":"do","args":{"steps":[{"action":"fly"}]}}`))
 	if code, sent := iphoneCallErr(t, err); code != "bad_args" || sent != proto.IPhoneNotSent {
 		t.Fatalf("bad steps: %s %s %v", code, sent, err)
 	}
@@ -197,7 +197,7 @@ func TestIPhoneCoreNeverOperatesPersonasOwnApp(t *testing.T) {
 	useCore(t, b)
 	ctx := context.Background()
 	self := `"self_apps":["com.example.shop"],"self_names":["Shop"]`
-	if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false},`+self+`}`)); err != nil {
+	if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false},`+self+`}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, params := range []string{
@@ -206,7 +206,7 @@ func TestIPhoneCoreNeverOperatesPersonasOwnApp(t *testing.T) {
 		`{"session":"s1","op":"do","args":{"steps":[{"action":"tap","target":{"label":"Search"}}]}}`,
 		`{"session":"s1","op":"do","args":{"steps":[{"action":"launch","app":"com.example.shop"}]}}`,
 	} {
-		res, err := iphoneCall(ctx, json.RawMessage(params))
+		res, err := Call(ctx, json.RawMessage(params))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,10 +283,10 @@ func TestIPhoneCoreConfirmAsksBeforeAnyInput(t *testing.T) {
 	b := newBridgePhone()
 	useCore(t, b)
 	ctx := context.Background()
-	if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+	if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 		t.Fatal(err)
 	}
-	res, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"do","confirm":true,
+	res, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"do","confirm":true,
 		"args":{"steps":[{"action":"tap","target":{"label":"Search"}},{"action":"type","text":"hello"}]}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -317,10 +317,10 @@ func TestIPhoneCoreKeepsWhetherAnInputWasSent(t *testing.T) {
 		b := newBridgePhone()
 		b.fail = map[string]error{"tap": c.err}
 		useCore(t, b)
-		if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+		if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 			t.Fatal(err)
 		}
-		res, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"do","args":{"steps":[{"action":"tap","target":{"label":"Search"}},{"action":"type","text":"hi"}]}}`))
+		res, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"do","args":{"steps":[{"action":"tap","target":{"label":"Search"}},{"action":"type","text":"hi"}]}}`))
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -359,7 +359,7 @@ func TestIPhoneWireCallKeepsTheCode(t *testing.T) {
 // doSteps runs one do and returns its steps' results.
 func doSteps(t *testing.T, params string) []iphonectl.StepResult {
 	t.Helper()
-	res, err := iphoneCall(context.Background(), json.RawMessage(params))
+	res, err := Call(context.Background(), json.RawMessage(params))
 	if err != nil {
 		t.Fatalf("%s: %v", params, err)
 	}
@@ -381,7 +381,7 @@ func TestIPhoneCoreKeepsOutOfAnAppNamedPersonaWithNoBundleID(t *testing.T) {
 	b.tree = strings.Replace(bridgePhoneTree, `{"bundle_id": "com.example.shop", "name": "Shop"}`, `{"bundle_id": "com.example.unknown", "name": "Persona"}`, 1)
 	b.fail = map[string]error{"list_apps": &rpc.Error{Code: "unsupported", Message: "no apps"}}
 	useCore(t, b)
-	if _, err := iphoneCall(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+	if _, err := Call(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []string{`{"action":"tap","target":{"label":"Search"}}`, `{"action":"type","text":"x"}`,
@@ -400,7 +400,7 @@ func TestIPhoneCoreKeepsOutOfAnAppNamedPersonaWithNoBundleID(t *testing.T) {
 func TestIPhoneCoreLearnsPersonasBundleIDFromTheDevice(t *testing.T) {
 	b := newBridgePhone()
 	useCore(t, b)
-	if _, err := iphoneCall(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+	if _, err := Call(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if s := doSteps(t, `{"session":"s1","op":"do","args":{"steps":[{"action":"launch","app":"com.example.persona-build"}]}}`); !refusedAsPersonas(s) {
@@ -421,7 +421,7 @@ func TestIPhoneCoreLearnsPersonasBundleIDFromTheDevice(t *testing.T) {
 	b.fail = map[string]error{"list_apps": &rpc.Error{Code: "timeout", Message: "slow"}}
 	useCore(t, b)
 	for range 2 {
-		if _, err := iphoneCall(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+		if _, err := Call(context.Background(), json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -435,7 +435,7 @@ func TestIPhoneCoreAddsTheCallsSelfApps(t *testing.T) {
 	b := newBridgePhone()
 	useCore(t, b)
 	ctx := context.Background()
-	if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false},"self_names":["Persona Notes"]}`)); err != nil {
+	if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false},"self_names":["Persona Notes"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if s := doSteps(t, `{"session":"s1","op":"do","args":{"steps":[{"action":"launch","app":"com.example.notes"}]}}`); !refusedAsPersonas(s) {
@@ -470,12 +470,12 @@ func TestIPhoneCoreNeverWritesTheTypedText(t *testing.T) {
 			b.fail = map[string]error{"keys": c.fail}
 		}
 		useCore(t, b)
-		if _, err := iphoneCall(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
+		if _, err := Call(ctx, json.RawMessage(`{"session":"s1","op":"look","args":{"screenshot":false}}`)); err != nil {
 			t.Fatal(err)
 		}
 		params, _ := json.Marshal(map[string]any{"session": "s1", "op": "do", "args": map[string]any{
 			"steps": []map[string]any{{"action": "type", "text": c.text, "target": map[string]any{"label": "Search"}}}}})
-		res, err := iphoneCall(ctx, params)
+		res, err := Call(ctx, params)
 		seen := logs.String()
 		if err != nil {
 			seen += err.Error()

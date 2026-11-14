@@ -1,6 +1,6 @@
 //go:build iphonesimlive
 
-package node
+package iphone
 
 import (
 	"context"
@@ -35,17 +35,17 @@ func TestLiveIPhoneSimulator(t *testing.T) {
 		t.Helper()
 		c.Device, c.Session, c.TimeoutMS = udid, "live", 120_000
 		raw, _ := json.Marshal(c)
-		out, err := builtinCall(ctx, "iphone", "call", raw, nil)
+		out, err := Call(ctx, raw)
 		if err != nil {
 			t.Fatalf("%s: %v", c.Op, err)
 		}
-		return out.(*proto.IPhoneResult)
+		return out
 	}
 
 	// The session starts when asked about; wait until the simulator answers.
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		s := iphoneStatus(ctx)
+		s := Status(ctx)
 		var d *proto.IPhoneDevice
 		for i := range s.Devices {
 			if s.Devices[i].ID == udid {
@@ -120,7 +120,7 @@ func TestLiveIPhoneSimulator(t *testing.T) {
 	}
 	call(proto.IPhoneCall{Op: "do", Args: json.RawMessage(`{"steps":[{"action":"wait","ms":100}]}`)})
 	raw, _ := json.Marshal(proto.IPhoneCall{Device: udid, Session: "live", Op: "do", Approved: waiting.ApprovalID, TimeoutMS: 120_000})
-	_, err := builtinCall(ctx, "iphone", "call", raw, nil)
+	_, err := Call(ctx, raw)
 	code, sent := "", ""
 	var rerr *rpc.Error
 	if errors.As(err, &rerr) {
