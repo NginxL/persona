@@ -157,6 +157,16 @@ class TasksStore(
     val cards = AssistantViewStore()
     val cardActions = AssistantCardActions(api, cards, reload = { load(it, whole = true) })
 
+    private val _lnModeEnabled = MutableStateFlow(false)
+    val lnModeEnabled: StateFlow<Boolean> = _lnModeEnabled.asStateFlow()
+    private val _heldPushes = MutableStateFlow(HeldPushGroups())
+    val heldPushes: StateFlow<HeldPushGroups> = _heldPushes.asStateFlow()
+    private val _heldPushesLoading = MutableStateFlow(false)
+    val heldPushesLoading: StateFlow<Boolean> = _heldPushesLoading.asStateFlow()
+    private val _heldPushesFailed = MutableStateFlow(false)
+    val heldPushesFailed: StateFlow<Boolean> = _heldPushesFailed.asStateFlow()
+    private val heldPushesRevision = java.util.concurrent.atomic.AtomicLong(0L)
+
     init {
         if (cache != null) scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val cached = try { cache.read() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
@@ -179,7 +189,52 @@ class TasksStore(
             }
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            connection.state.collect { if (it == ConnectionState.Online) { reloadTodos(); agentLookup.refresh(); loaded.value.forEach(::load) } }
+            connection.state.collect {
+                if (it == ConnectionState.Online) {
+                    reloadTodos()
+                    agentLookup.refresh()
+                    loaded.value.forEach(::load)
+                    refreshPushIntercepts()
+                } else {
+                    heldPushesRevision.incrementAndGet()
+                    _heldPushesLoading.value = false
+                }
+            }
+        }
+    }
+
+    /** Refresh only while the main Assistant page is visible or a hub reconnects; older responses cannot land late. */
+    fun refreshPushIntercepts() {
+        scope.launch {
+            val ticket = heldPushesRevision.incrementAndGet()
+            _heldPushesLoading.value = true
+            try {
+                val mode = api.lnMode()
+                if (ticket != heldPushesRevision.get()) return@launch
+                _lnModeEnabled.value = mode.enabled
+                if (!mode.enabled) {
+                    _heldPushes.value = HeldPushGroups()
+                    _heldPushesFailed.value = false
+                    return@launch
+                }
+                val response = api.pushIntercepts()
+                if (ticket != heldPushesRevision.get()) return@launch
+                val groups = heldPushGroups(response.intercepts, clock)
+                if (groups != _heldPushes.value) _heldPushes.value = groups
+                _heldPushesFailed.value = false
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (ticket != heldPushesRevision.get()) return@launch
+                _heldPushesFailed.value = true
+                val status = error::class.java.methods.firstOrNull { it.name == "getStatus" }?.invoke(error) as? Int
+                if (status == 404 || error.message?.contains("404") == true) {
+                    _lnModeEnabled.value = false
+                    _heldPushes.value = HeldPushGroups()
+                }
+            } finally {
+                if (ticket == heldPushesRevision.get()) _heldPushesLoading.value = false
+            }
         }
     }
 

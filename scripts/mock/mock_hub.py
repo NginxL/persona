@@ -24223,6 +24223,20 @@ class H(BaseHTTPRequestHandler):
         if self.token_refused(): return
         if CASE and case_route(self, "GET", p, q, b""): return
         if preview_route and preview_route(self, "GET", p, q): return
+        if p == "/api/v1/push/ln-mode":
+            return self.send_json({"enabled": bool(os.environ.get("MOCK_LN"))})
+        if p == "/api/v1/push/intercepts":
+            if not os.environ.get("MOCK_LN"):
+                return self.send_json({"intercepts": []})
+            return self.send_json({"intercepts": [
+                {"at": ago(hours=3), "level": "P1", "reason": "ln_p1_held",
+                 "title": "发布结果等你核对", "body": "网页和手机的构建都完成了",
+                 "related_key": "demo-subject", "manager": "assistant", "also": ["请检查最后的发布说明"]},
+                {"at": ago(hours=4), "level": "P1", "reason": "ln_dedup_12h", "title": "同一任务还有一次补充汇报", "manager": "assistant"},
+                {"at": ago(hours=5), "level": "P2", "reason": "ln_p2_silent", "title": "后台检查已完成",
+                 "body": "没有需要你处理的事项", "manager": "assistant"},
+                {"at": ago(days=1), "level": "P1", "reason": "ln_p1_held", "title": "昨天的记录不应出现"},
+            ]})
         if p == "/api/v1/assistant/conversations/" + ASK1 + "/always":
             return self.send_json({"grants": ALWAYS_GRANTS})
         if p == "/api/v1/subscriptions/-/graph": return self.send_json(SOURCES_GRAPH)
