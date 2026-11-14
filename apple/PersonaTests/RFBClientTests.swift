@@ -188,6 +188,27 @@ struct RFBClientTests {
         #expect(!t.sent.contains { $0.first == 5 }, "no PointerEvent sent for the resize")
     }
 
+    /// #7775: the wheel sends every notch it is given, each pressed and let go where it was asked (it once dropped any
+    /// past 20 in a call; VNCWheel now sends a few each display frame).
+    @MainActor @Test func sessionScrollsEveryNotch() async throws {
+        func u16(_ v: Int) -> [UInt8] { [UInt8(v >> 8), UInt8(v & 0xff)] }
+        var server: [UInt8] = u16(300) + u16(200); server += [UInt8](repeating: 0, count: 16); server += RFBAuth.be32(0)
+        let t = ScriptedTransport([Array("RFB 003.889\n".utf8), [1, 1], RFBAuth.be32(0), server], holds: true)
+        let session = RFBSession(ref: MachineRef(id: "mac"))
+        defer { session.close() }
+        session.run(RFBClient(transport: t) { nil })
+        for _ in 0..<300 where session.phase != .live { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(session.phase == .live)
+        session.scroll(notches: -30, at: CGPoint(x: 10, y: 20))
+        session.scroll(notches: 2, at: CGPoint(x: 10, y: 20))
+        func pointer() -> [[UInt8]] { t.sent.filter { $0.first == 5 } }
+        for _ in 0..<300 where pointer().count < 64 { try await Task.sleep(for: .milliseconds(10)) }
+        var down: [UInt8] = []
+        for _ in 0..<30 { down += [16, 0] }
+        #expect(pointer().map { $0[1] } == down + [8, 0, 8, 0], "30 down and 2 up, each pressed and let go")
+        #expect(pointer().allSatisfy { Array($0[2...]) == [0, 10, 0, 20] })
+    }
+
     /// ExtendedDesktopSize (-308, #80): asked for; the server's screens come with the first update, in framebuffer pixels,
     /// before the rectangles drawn after them; a later one at another size resizes first; one whose status is not 0 (an
     /// answer to a resize request, which this client never makes) changes nothing.
