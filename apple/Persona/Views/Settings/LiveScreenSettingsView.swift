@@ -5,7 +5,9 @@ import SwiftUI
 /// the route (`ScreenRoutePrefs`: choose the fastest route automatically) and the picture's quality on mobile data
 /// (`ScreenMobileData`). Both are this iPhone's, for every computer.
 struct LiveScreenSettingsView: View {
-    @AppStorage(ScreenMobileData.key) private var mobileData: String?
+    /// Nothing is written until a choice is made here: an absent key still reads as Data Saver and keeps the page's
+    /// one-time question (`ScreenMobileData.shouldAsk`).
+    @StoredValue(ScreenMobileData.key) private var mobileData: ScreenMobileData = .saver
     @StoredValue(ScreenRoutePrefs.automaticKey) private var automatic = true
 
     /// Settings shows the page only when it can change something for a computer here: with direct routes offered, one
@@ -30,9 +32,7 @@ struct LiveScreenSettingsView: View {
                 }
             }
             Section {
-                Picker(String(localized: "Quality on Mobile Data"), selection: Binding(
-                    get: { mobileData.flatMap(ScreenMobileData.init(rawValue:)) ?? .saver },
-                    set: { mobileData = $0.rawValue })) {
+                Picker(String(localized: "Quality on Mobile Data"), selection: $mobileData) {
                     ForEach(ScreenMobileData.allCases, id: \.self) { m in
                         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                             Text(m.title)
