@@ -302,6 +302,8 @@ type Node struct {
 	restores      restoreMarks // "back to the configured model" asked, until newer model evidence (model_restore.go)
 	hookFlights   hookFlights  // hook calls in progress by session: their process waits on them (model_restore.go)
 
+	// dialogWait: first messages waiting for the dialog that kept them out to be answered (firstprompt.go).
+	dialogWait sync.WaitGroup
 	// screens: live-screen hardware video channel (#3954). Login binding per `pair` and the busy count (screen.go).
 	// screenStart starts the capture/encode helper (Persona Screen.app) for a stream: startScreenHelper on a Mac
 	// (screenhelper.go), nil elsewhere, where screen.dial returns video_unavailable and the screen stays RFB only.
