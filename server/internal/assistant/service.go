@@ -290,6 +290,7 @@ func New(o Options) *Service {
 	s.scheduleRoutes()
 	s.placeRoutes()
 	s.savedPromptRoutes()
+	s.savedAgentSearchRoutes()
 	s.repositoryRoutes()
 	s.taskRoutes()
 	s.viewActionRoutes()

@@ -1314,6 +1314,61 @@ The new fields are stored in the existing interaction JSON payload; no database 
 
 <a id="工作区看板"></a>
 
+## Saved Agent searches
+
+The default manager owns reusable runtime-Agent query definitions in its Postgres setting `agents.saved_searches`.
+The hub forwards these routes unchanged; explicit `X-Persona-Manager` pins a captured owner, otherwise the default
+manager is used. The web deliberately uses the default rather than the sidebar's current Assistant. These routes
+do not execute or interpret a search, start sessions, run commands or send messages. Applying a query remains a
+client action through the existing palette. No new migration or browser-local persistence is required.
+
+| Method and path | Body | Response |
+| --- | --- | --- |
+| `GET /api/v1/saved-agent-searches` | none | `SavedAgentSearches` |
+| `POST /api/v1/saved-agent-searches` | `{revision: decimal string, action, ...fields}` | full confirmed `SavedAgentSearches` |
+
+```text
+SavedAgentSearches { revision: decimal string, searches: SavedAgentSearch[], can_write: bool }
+SavedAgentSearch { id, name, query, created_at: RFC3339, updated_at: RFC3339 }
+```
+
+The revision is a canonical nonnegative int64 decimal string on the wire (no leading zeros except `"0"`), preserving
+identity in JavaScript. It is stored as int64 in Settings. An absent key starts at revision `"0"` with `searches: []`;
+a failed read is never an empty success. GET and POST require a real store with both `Setting` and `CompareSetting`.
+Full-role connections may write; answer-role connections and extension tokens with `agents.read` may only read.
+No extension write scope is granted. `can_write` reflects the request role, not a promise that the next write succeeds.
+
+| Action | Fields beyond revision/action |
+| --- | --- |
+| `add` | `name`, `query`; server creates `search_` + 24 lowercase hex ID and UTC timestamps |
+| `update` | `id`, `name`, `query`; preserves identity, creation time and position |
+| `delete` | `id`; removes that entry without resetting collection revision |
+| `move` | `id`, optional `before_id`; absent/empty appends, an existing different anchor inserts before it |
+| `restore` | full captured `item`, optional `before_id`; restores a deleted identity only when ID/name are absent |
+
+Every action has an exact field set; unknown, duplicate, differently cased or mixed-action members are rejected.
+The body limit is 16 KiB. Names are trimmed, control-free, 1–64 Unicode code points, unique by Unicode case-fold.
+Queries are trimmed, valid UTF-8, control-free and 1–1,024 bytes; a leading `>` is rejected because the palette treats
+it as command mode. Relative-time expressions stay relative. At most 50 records are retained. Restored timestamps
+must be valid, nonzero and ordered; restore preserves the captured metadata. IDs and anchors must use the generated
+ID syntax. A missing anchor or self-move is invalid.
+
+A mutation checks the supplied revision against the read document, then atomically replaces it using
+`CompareSetting`. A successful mutation increments revision exactly once, including a valid no-op; int64 overflow
+is refused. Only after success does the manager broadcast `saved_agent_searches` with `{revision: decimal string}`;
+its normal manager stamp identifies the owner. No query text or names are included in the event. The client reloads
+that owner while its view is open, and never retries a conflicting write automatically.
+
+Errors: 400 `invalid_request` / `limit_reached`, 403 `forbidden`, 404 `search_not_found` for a missing entry,
+409 `conflict` for stale/CAS revisions, 409 `duplicate_name` for conflicting names/restore IDs, 503 `not_supported`
+when durable CAS is unavailable, and 503 `storage_unavailable` for read/write failure or corrupt stored data.
+A missing route on an older manager is 404. Clients distinguish missing entries from an unsupported endpoint and
+name validation from revision conflict. Failed actions emit no event and change no persisted collection.
+
+Undo is a `restore` using the revision acknowledged by the delete, never a blind overwrite of the whole collection.
+Another write invalidates that Undo. The visible entry order is the stored array order. Newer reads must not replace
+a dirty editor's draft or retarget an in-flight request after credential/default-manager changes.
+
 ## Workspace board
 
 Workflow, upgrades and persistence are covered in [Workspace board](../web/workspace-board.md). The APIs below belong to the manager (the hub forwards them unchanged over the bus `http.request`, see "Forwarding App requests"; `503 assistant_offline` when the manager isn't there), and the two events are sent by the manager via `ws.broadcast` and pushed unchanged by the hub. The APIs use the hub machine's Postgres as the only persistent state, with no fallback to in-memory or JSON file writes. `answer` may GET the board and the list; POST requires `full`. `can_write` says whether the current request's role can edit; it grants no extra file, Git or Agent permissions.
@@ -1917,6 +1972,7 @@ Server → client:
 | `machines` | `machines` (also after a rename: the whole list, with the new `name`) |
 | `file_transfer` | `transfer` (`FileTransfer`): a computer-to-computer transfer started, progressed (at most once a second) or ended; `manager` identifies a non-default manager. Only full devices that declared `file_transfer` receive it; not in the event log, so clients `GET` the current transfers after reconnecting ([file-transfer.md](file-transfer.md)) |
 | `managers` | No payload: the manager roster changed (created, renamed, connected, disconnected, deleted, new reported bot identities); clients re-read `GET /api/v1/managers` ("Bus" below, [managers.md](../assistant/managers.md) "Clients"). Only sent to connections that asked for feature `managers` (`?features=` or `client_hello.features`), not in the event log |
+| `saved_agent_searches` | `revision` (decimal string): the default manager committed a saved-query mutation; re-read the collection while its view is open, respecting the message's manager stamp. No query/name payload; see "Saved Agent searches" |
 | `workspace_board` | `revision`: a board change was saved; the client re-reads the full state; doesn't indicate an Agent state change |
 | `workspace_board_settings` | `enabled`: the board switch changed (`PUT /api/v1/workspace-board/settings`); clients show or hide the entry accordingly |
 | `kb_selection` | —: the knowledge base's selection was saved (`PUT /api/v1/kb/selection`, or a per-item change from the assistant); clients re-read `GET /api/v1/kb/selection` |

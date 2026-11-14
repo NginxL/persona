@@ -65,6 +65,7 @@ var RouteScopes = map[string]string{
 	"GET /api/v1/agents/sessions/{id}/messages":          ScopeAgentsRead,
 	"GET /api/v1/agents/sessions/{id}/avatar":            ScopeAgentsRead,
 	"GET /api/v1/workspaces":                             ScopeAgentsRead,
+	"GET /api/v1/saved-agent-searches":                   ScopeAgentsRead,
 	"GET /api/v1/workspace-board":                        ScopeAgentsRead,
 	"GET /api/v1/workspace-board/activity":               ScopeAgentsRead,
 	"GET /api/v1/workspace-board/activity/{revision}":    ScopeAgentsRead,
