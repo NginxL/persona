@@ -66,16 +66,25 @@ final class ComposerKeyboardTests: XCTestCase {
         app.buttons["shell-composer-dismiss-keyboard"].firstMatch
     }
 
-    @MainActor private func headerButtons() -> Set<String> {
+    /// The buttons over the composer within `column`: the chat's header and the bar above it. An iPad's split shows the
+    /// session list beside the chat, whose rows end in a relative time ("35 分钟前") that moves on during the test
+    /// (#7479); only buttons overlapping the chat's column count, so the list is left out.
+    @MainActor private func headerButtons(in column: CGRect) -> Set<String> {
         let limit = field.frame.minY - 120
-        return Set(app.buttons.allElementsBoundByIndex.filter { $0.isHittable && $0.frame.maxY < limit && $0.frame.minY > 40 }.map(\.label))
+        return Set(app.buttons.allElementsBoundByIndex.filter {
+            $0.isHittable && $0.frame.maxY < limit && $0.frame.minY > 40 && $0.frame.maxX > column.minX && $0.frame.minX < column.maxX
+        }.map(\.label))
     }
 
     @MainActor private func typeAndDismiss(_ name: String, shell: Bool, sideBars: Bool = false) {
         if shell {
             XCTAssertFalse(dismissButton.exists, "dismiss-keyboard button should not appear before typing")
         }
-        let before = headerButtons()
+        // The chat's column, from the open header's title: the composer's own width changes as the draft grows.
+        let title = app.buttons["chat.title"].firstMatch
+        if sideBars { XCTAssertTrue(title.exists, "side-bars: no header before typing") }
+        let column = title.exists ? title.frame : app.frame
+        let before = headerButtons(in: column)
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no software keyboard")
         let existing = field.value as? String ?? ""
@@ -110,7 +119,7 @@ final class ComposerKeyboardTests: XCTestCase {
         }
         shot("\(name)-keyboard-up")
         if sideBars {
-            XCTAssertFalse(before.subtracting(headerButtons()).isEmpty, "side-bars header did not fold")
+            XCTAssertFalse(before.subtracting(headerButtons(in: column)).isEmpty, "side-bars header did not fold")
             // Only the fog, the header has no title meanwhile: the system bar's names the session.
             XCTAssertTrue(app.navigationBars.staticTexts.allElementsBoundByIndex.contains { !$0.label.isEmpty },
                           "side-bars: no title while typing")
@@ -147,7 +156,7 @@ final class ComposerKeyboardTests: XCTestCase {
             }
         }
         shot("\(name)-keyboard-down")
-        if sideBars { XCTAssertEqual(headerButtons(), before, "side-bars header did not return") }
+        if sideBars { XCTAssertEqual(headerButtons(in: column), before, "side-bars header did not return") }
 
         // Sending still works after dismissal; only the local mock receives this synthetic draft.
         send.tapCenter()
