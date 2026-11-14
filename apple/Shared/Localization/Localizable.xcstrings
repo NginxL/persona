@@ -24952,6 +24952,29 @@
         }
       }
     },
+    "Ask for the Status Afterwards" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask for the Status Afterwards"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あとから状況を聞く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "事后问一次进展"
+          }
+        }
+      }
+    },
     "Ask privately. Answers stay on this screen and in the main chat." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25227,6 +25250,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "问刚才说的内容"
+          }
+        }
+      }
+    },
+    "Asks an unsupervised agent once for status when work stops without a closeout or clear finish; costs one model turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks an unsupervised agent once for status when work stops without a closeout or clear finish; costs one model turn"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "誰も監督していないエージェントが作業後にクローズアウトも完了の確証もなく止まったとき、状況を一度だけ尋ねます。モデルで1ターンを使います"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没人督办的 Agent 干了活，没交收尾记录、也看不出做完没有就停下时，问一次进展；会花它自己模型的一轮"
           }
         }
       }
@@ -111930,6 +111976,29 @@
         }
       }
     },
+    "Persona asks once for status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona asks once for status"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaが状況を一度だけ尋ねます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 问一次进展"
+          }
+        }
+      }
+    },
     "Persona asks you before it merges, pushes, deploys, sends messages, deletes data or spends money. When you tell it in a chat to always go ahead somewhere, that go-ahead is listed here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -144726,6 +144795,29 @@
         }
       }
     },
+    "Stopped after work, no closeout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped after work, no closeout"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作業後、クローズアウトなく停止"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "干了活，没交收尾记录就停下"
+          }
+        }
+      }
+    },
     "Stopped at “%@”" : {
       "localizations" : {
         "en" : {
@@ -151205,6 +151297,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "The agent reports back" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The agent reports back"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントが状況を報告します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 回报进展"
+          }
+        }
+      }
     },
     "The agent stopped and is waiting for you." : {
       "localizations" : {

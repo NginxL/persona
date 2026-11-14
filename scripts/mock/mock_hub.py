@@ -1303,9 +1303,12 @@ if os.environ.get("MOCK_WORK"):
 # found the pull request open (the hub cannot call the turn finished: no phase, no line); blocked on someone, nothing
 # checked; not done, with a reply that is only the block. Each one's last reply carries the raw block (CLOSEOUT_REPLIES,
 # put in ITEMS below). Session lists with summary=1 leave `did` and `verified` out, as the hub's do. Settings › Session
-# triage has the `closeout` switch either way.
+# triage has the `closeout` and `closeout_ask` switches either way. MOCK_TRIAGE_NO_CLOSEOUT_ASK=1 is the older hub
+# that names closeout but not closeout_ask, for the iOS row's missing-field case (#3616).
 MOCK_CLOSEOUT = os.environ.get("MOCK_CLOSEOUT") == "1"
 TRIAGE["closeout"] = False
+if os.environ.get("MOCK_TRIAGE_NO_CLOSEOUT_ASK") != "1":
+    TRIAGE["closeout_ask"] = False
 if MOCK_CLOSEOUT:
     TRIAGE["enabled"] = True
 CLOSEOUT_DONE = "a9c00000-0000-4000-8000-000000000001"

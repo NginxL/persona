@@ -22,6 +22,9 @@ import Observation
 
     init(deps: Deps) { self.deps = deps }
 
+    /// The status-afterwards row exists when the hub names its optional switch, including an explicit false.
+    var showsCloseoutAsk: Bool { switches?.closeoutAsk != nil }
+
     func load() async {
         do {
             switches = try await deps.load()
