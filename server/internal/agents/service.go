@@ -495,7 +495,11 @@ func (s *Service) Outbox(ctx context.Context, id string, limit int) []OutboxEntr
 
 // Updated is a source reporting that these sessions changed (agent-bridge.updated, a send, the poll): drop
 // their cache and tell the apps. No keys means "something changed": only the list is dropped.
-func (s *Service) Updated(source string, keys []string) {
+func (s *Service) Updated(source string, keys []string) { s.report(source, keys, 0, nil) }
+
+// report drops what changed of source from the cache and tells the apps. The poll passes the list it found the
+// change in (asked at gen), which stays cached (cache.putChanged).
+func (s *Service) report(source string, keys []string, gen int, list []Session) {
 	if !s.has(source) {
 		return // gone (its plugin stopped) since: a send's follow-up has nothing left to tell
 	}
@@ -503,7 +507,11 @@ func (s *Service) Updated(source string, keys []string) {
 	for _, k := range keys {
 		ids = append(ids, source+":"+k)
 	}
-	s.cache.invalidate(source, ids)
+	if list != nil {
+		s.cache.putChanged(source, gen, list, ids)
+	} else {
+		s.cache.invalidate(source, ids)
+	}
 	s.onChange(ids)
 }
 
@@ -536,11 +544,12 @@ func (s *Service) PollOnce(ctx context.Context) {
 			continue // the next tick tries again; the routes report errors themselves
 		}
 		changed := s.mark(n, marks[i], list)
-		s.cache.putSessions(n, gen, list)
-		s.noteListing(src, nil)
 		if len(changed) > 0 {
-			s.Updated(n, changed)
+			s.report(n, changed, gen, list)
+		} else {
+			s.cache.putSessions(n, gen, list)
 		}
+		s.noteListing(src, nil)
 	}
 }
 
