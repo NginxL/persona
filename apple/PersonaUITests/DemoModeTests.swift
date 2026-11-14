@@ -187,7 +187,8 @@ final class DemoModeTests: XCTestCase {
         app.swipeDown() // the keyboard away
         sleep(1)
         // The page's own bar: the compact copy that shows once the chat scrolled (the full one sits under the clock).
-        // The terminal is in the header's ··· menu; a folded header (the slim bar) has no ···: a tap on its place opens it.
+        // The terminal is in the header's ··· menu, which the slim bar has too (#7962); not hittable yet, a tap on the
+        // slim bar's title opens the header.
         let more = app.buttons["更多"].firstMatch
         let unfold = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "显示标题和标签")).firstMatch
         for _ in 0..<3 where !more.isHittable {

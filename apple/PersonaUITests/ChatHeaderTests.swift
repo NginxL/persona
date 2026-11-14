@@ -89,6 +89,51 @@ final class ChatHeaderTests: XCTestCase {
         checkSideBars("shell side bars")
     }
 
+    /// Folded, the slim bar keeps the open header's ⋯ (#7962): one of it, a finger's square, across from ‹ with the
+    /// capsule still in the middle, and the same items as the open header's ⋯ (one menu for both, `ChatView.moreMenu`).
+    @MainActor func testFoldedHeaderHasTheOpenMenu() {
+        openChat(folded: true)
+        let place = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "显示标题和标签")).firstMatch
+        XCTAssertTrue(place.exists, "no folded bar")
+        let mores = app.buttons.matching(identifier: "chat.more").allElementsBoundByIndex
+        XCTAssertEqual(mores.count, 1, "\(mores.count) ⋯ in the accessibility tree with the header folded: \(mores.map(\.frame))")
+        guard let more = mores.first else { return }
+        XCTAssertTrue(more.isHittable, "the folded ⋯ is not hittable")
+        XCTAssertGreaterThanOrEqual(min(more.frame.width, more.frame.height), 44, "the folded ⋯ is smaller than a finger: \(more.frame)")
+        XCTAssertGreaterThanOrEqual(more.frame.midY, statusBarBottom, "the folded ⋯ at \(more.frame) is in the status bar")
+        XCTAssertEqual(more.frame.midY, place.frame.midY, accuracy: 1, "the folded ⋯ is off the capsule's line")
+        let window = app.windows.firstMatch.frame
+        let back = app.buttons.matching(NSPredicate(format: "label == %@", "返回")).firstMatch
+        if back.exists { // across from ‹ (a split's first page has none); ‹ reports its glyph's frame, so by the middles
+            XCTAssertEqual(window.maxX - more.frame.midX, back.frame.midX - window.minX, accuracy: 2, "⋯ \(more.frame) and ‹ \(back.frame) are not mirrored")
+            XCTAssertEqual(place.frame.midX, window.midX, accuracy: 1, "the capsule \(place.frame) is off the middle")
+        }
+        let folded = menuItems(more, "folded")
+
+        // The open header: held open, and opened from the capsule when the chat lands folded (an unread one does).
+        openChat(folded: false)
+        let slim = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "显示标题和标签")).firstMatch
+        if slim.exists, slim.isHittable { slim.tap(); sleep(2) }
+        XCTAssertFalse(slim.exists, "the slim bar still shows with the header opened")
+        let open = app.buttons.matching(identifier: "chat.more").firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5), "no ⋯ in the open header")
+        XCTAssertEqual(menuItems(open, "open"), folded, "the folded ⋯ lists other items than the open header's")
+    }
+
+    /// The items ⋯ opens, by label: the buttons there with its menu up and not before. The menu stays up (the next
+    /// launch closes it).
+    @MainActor private func menuItems(_ more: XCUIElement, _ what: String) -> [String] {
+        let before = Set(app.buttons.allElementsBoundByIndex.map(\.label))
+        more.tap()
+        let rename = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "重命名")).firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 5), "\(what): ⋯ did not open its menu")
+        sleep(1)
+        shot("\(what) menu")
+        let items = app.buttons.allElementsBoundByIndex.map(\.label).filter { !before.contains($0) }
+        XCTAssertTrue(items.contains { $0.hasPrefix("重命名") }, "\(what): the menu's items not found: \(items)")
+        return items
+    }
+
     /// The session's name once, in the header (`chat.title`): the system draws its bar's title over the content, not in
     /// the side column, so it showed a second time right above the header's (2026-11-08, TestFlight).
     @MainActor private func checkOneTitle(_ what: String) {

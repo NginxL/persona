@@ -3307,8 +3307,8 @@ struct ChatView: View {
         withAnimation(.smooth(duration: 0.35)) { chrome.collapse = 0 }
     }
 
-    /// The chrome folded away: back, and the session's name as the open header says it — tap it for everything again,
-    /// where it runs included.
+    /// The chrome folded away: back, the session's name as the open header says it — tap it for everything again,
+    /// where it runs included — and the open header's ⋯.
     private var compactChrome: some View {
         HStack(spacing: 0) {
             Button { back() } label: {
@@ -3345,11 +3345,15 @@ struct ChatView: View {
             .accessibilityIdentifier("chat.compactTitle")
             .titleSaysLink() // the slim bar says Connecting… too: the shell's floating pill does not say it again
             Spacer(minLength: 0)
-            // Nothing on the right (#3719, the user's call): a spot as wide as ‹, so the capsule sits in the middle. The
-            // goal, the loop and background work and the mode are in the open header, a tap away.
-            Color.clear
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.wellM)
-                .accessibilityHidden(true)
+            // The open header's ⋯ and its menu (#7962, the user's call; #3719 had left this spot empty). As wide as ‹,
+            // so the capsule stays in the middle and no narrower; the open ⋯'s square to hit. Drawn bare like ‹: the
+            // bar is 40 pt, no room for the open header's 44 pt glass. The goal, the loop and background work and the
+            // mode are in the open header, a tap away.
+            moreMenu {
+                ThemedIcon(Theme.Icon.more).font(Theme.Font.secondaryStrong).dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                    .contentShape(.rect)
+            }
         }
         .padding(.horizontal, Theme.Space.xs)
         .frame(height: ChatChrome.compactHeight)
@@ -3412,6 +3416,15 @@ struct ChatView: View {
             .presentationSizing(.page) // the iPad's too: room for the diffs, not the small form
     }
     #endif
+
+    /// ⋯ and its menu, in the open header and in the folded slim bar (#7962): one menu, so an item added to
+    /// `moreMenuItems` shows in both. `label` is how each draws the button (the open one in glass, the slim bar's bare).
+    private func moreMenu<Look: View>(@ViewBuilder label: () -> Look) -> some View {
+        Menu(content: { moreMenuItems }, label: label)
+            .labelOnlyMenu()
+            .accessibilityLabel("More")
+            .accessibilityIdentifier("chat.more")
+    }
 
     @ViewBuilder private var moreMenuItems: some View {
             if style == .dev, let host { hostedMenuItems(host) }
@@ -3689,13 +3702,11 @@ struct ChatView: View {
                         if host != nil { hostedMarks }
                         // Files (a swipe to the left now quotes a message, #1058), the terminal (it comes up from the
                         // bottom, TerminalCover) and Git are in ···: one button there (#1205).
-                        Menu { moreMenuItems } label: {
+                        moreMenu {
                             ThemedIcon(Theme.Icon.more).font(Theme.Font.heading).dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
                                 .contentShape(.circle)
                         }
-                        .labelOnlyMenu()
                         .surface(interactive: true, in: .circle)
-                        .accessibilityLabel("More")
                     }
                 }
                 .padding(.horizontal, Theme.Space.l)
