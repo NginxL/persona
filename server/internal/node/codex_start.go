@@ -148,16 +148,30 @@ func (n *Node) codexBypassArgv(launcher string, argv []string) []string {
 	return codexBypassArgs(argv)
 }
 
+// insertBeforeDashDash puts extra in the option region of args, leaving the separator and prompt suffix in place.
+func insertBeforeDashDash(args, extra []string) []string {
+	end := slices.Index(args, "--")
+	if end < 0 {
+		end = len(args)
+	}
+	out := make([]string, 0, len(args)+len(extra))
+	out = append(out, args[:end]...)
+	out = append(out, extra...)
+	return append(out, args[end:]...)
+}
+
 // codexExecutionArgs is a Codex launcher's words argv running model execution e: its model in place of any the words
 // name, and its effort, which as the purpose's explicit choice takes precedence over the launcher's defaults.
 func codexExecutionArgs(argv []string, e modelExecution) []string {
+	var extra []string
 	if e.Model != "" {
-		argv = append(withoutModelArgs(argv), "--model", e.Model)
+		argv = withoutModelArgs(argv)
+		extra = append(extra, "--model", e.Model)
 	}
 	if e.Effort != "" {
-		argv = append(argv, "-c", "model_reasoning_effort="+e.Effort)
+		extra = append(extra, "-c", "model_reasoning_effort="+e.Effort)
 	}
-	return argv
+	return insertBeforeDashDash(argv, extra)
 }
 
 // startCodex starts a Codex launcher in a new tab with the first message and returns its session once the thread is

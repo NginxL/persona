@@ -154,6 +154,14 @@ func TestCodexStartUsesThePurposeModel(t *testing.T) {
 	}
 }
 
+func TestCodexExecutionArgsBeforePromptSeparator(t *testing.T) {
+	got := codexExecutionArgs([]string{"codex", "--"}, modelExecution{Model: "purpose", Effort: "high"})
+	want := []string{"codex", "--model", "purpose", "-c", "model_reasoning_effort=high", "--"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}
+
 func TestCodexStartPermissionModes(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode string

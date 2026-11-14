@@ -304,3 +304,14 @@ func TestLaunchArgsCodexGateway(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunchArgsCodexBeforePromptSeparator(t *testing.T) {
+	got := launchArgv("codex", nil, []string{"--"}, "", "gpt-x", nil)
+	if want := []string{"codex", "-m", "gpt-x", "--"}; !slices.Equal(got, want) {
+		t.Fatalf("managed separator: got %v, want %v", got, want)
+	}
+	got = launchArgv("codex", nil, []string{"--", "--model", "prompt-word"}, "", "gpt-x", nil)
+	if want := []string{"codex", "-m", "gpt-x", "--", "--model", "prompt-word"}; !slices.Equal(got, want) {
+		t.Fatalf("prompt model text: got %v, want %v", got, want)
+	}
+}
