@@ -16,6 +16,15 @@ const record = entry => appendFileSync(join(directory, "update-test.jsonl"), `${
 app.isDefaultProtocolClient = () => true;
 app.setAsDefaultProtocolClient = () => false;
 
+// Keep the production updater implementation, but expose the arguments it actually gives its NSIS install operation.
+if (process.platform === "win32") {
+  const install = autoUpdater.install.bind(autoUpdater);
+  autoUpdater.install = options => {
+    record({ event: "nsis-install", options, installDirectory: autoUpdater.installDirectory ?? null });
+    return install(options);
+  };
+}
+
 record({ event: "start", version: app.getVersion(), platform: process.platform, packaged: app.isPackaged });
 autoUpdater.on("checking-for-update", () => record({ event: "checking" }));
 autoUpdater.on("update-available", info => record({ event: "available", version: info.version }));
