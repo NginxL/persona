@@ -79,3 +79,50 @@ func TestWorkSessionRuntimeDoesNotAcceptModelOverride(t *testing.T) {
 		t.Fatalf("override reached the runtime: %s", got)
 	}
 }
+
+// #7425: a computer whose shell has another Claude launcher leaves plain claude out of its list (mergeLaunchers), yet
+// the pickers offer it (the manager adds it back while the node reports a Claude Code version, #5908) and an Agent
+// start runs it. A new work session's options and start take it too, as session.start (what agent_start asks for)
+// does; once the shell has no claude they refuse it, as the manager no longer offers it then.
+func TestWorkSessionOffersPlainClaudeTheListLeavesOut(t *testing.T) {
+	home := fakeCLIHome(t) // the shell's list is its wrappers, mine and fixed: no plain claude
+	n, herdr, cwd := herdrNode(t)
+	startHerdr(herdr, "w1:p2", proto.StatusUnknown)
+	ctx := context.Background()
+	options := func() (any, error) {
+		raw, _ := json.Marshal(map[string]any{"name": "claude"})
+		return n.handle(ctx, "session.start.options", raw)
+	}
+	start := func(method string) error {
+		raw, _ := json.Marshal(map[string]any{"cwd": cwd, "workspace_id": "w1", "launcher": "claude", "agent_type": "claude", "async": true})
+		_, err := n.handle(ctx, method, raw)
+		return err
+	}
+	out, err := options()
+	if opts, _ := out.(workStartOptions); err != nil || opts.AgentType != "claude" || !opts.Attachments {
+		t.Fatalf("plain claude's options: %+v: %v", out, err)
+	}
+	for i, method := range []string{"session.start.work", "session.start"} {
+		if err := start(method); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		waitCalls(t, herdr, "pane.send_input", i+1)
+	}
+	if got := strings.Join(herdr.trace("pane.send_input"), "\n"); !strings.Contains(got, "claude") {
+		t.Fatalf("claude was not what started: %s", got)
+	}
+
+	if err := os.Remove(filepath.Join(home, "bin", "claude")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = options()
+	if code, data := refusalOf(t, err); code != "work_launcher_unavailable" || data["delivered"] != "none" {
+		t.Fatalf("options without claude: %q %v", code, data)
+	}
+	if code, _ := refusalOf(t, start("session.start.work")); code != "work_launcher_unavailable" {
+		t.Fatalf("work start without claude: %q", code)
+	}
+	if calls := herdr.trace("pane.send_input"); len(calls) != 2 {
+		t.Fatalf("a refused start reached the terminal: %v", calls)
+	}
+}

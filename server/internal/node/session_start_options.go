@@ -66,7 +66,12 @@ func (n *Node) workSessionOptions(ctx context.Context, name, configuredAgent, ho
 	}
 	list, err := n.launchers(ctx)
 	found := slices.IndexFunc(list, func(l proto.Launcher) bool { return l.Name == name })
-	if !configured && !isManaged && (err != nil || found < 0) {
+	// Plain claude is offered wherever the shell runs it, listed or not: the list leaves it out when the shell has
+	// another Claude launcher (mergeLaunchers), yet the pickers add it back (assistant machineLaunchers, #5908), an
+	// Agent start runs it, and the other launcher methods know it (knownLauncher). The command check below says whether
+	// this shell has it (#7425).
+	plainClaude := name == "claude"
+	if !configured && !isManaged && !plainClaude && (err != nil || found < 0) {
 		return opts, workStartRefused("work_launcher_unavailable", "This computer does not offer that launcher.")
 	}
 
