@@ -2673,8 +2673,9 @@ Used to connect directly to a personal Agent service (e.g. one with real-time pu
 - **Extension event to the hub** `agentsrc.updated {contribution?, session_keys?}`: these sessions changed (new messages, unread state, title); omitting `session_keys` means the list changed.
   The hub clears caches and pushes `{"type":"agents","session_ids":[…]}`, and the app refetches immediately. Only this extension's own sources are accepted. The hub also pushes after its own sends, then again at 4 / 15 / 45 seconds;
   every 60 seconds it relists all sources as a fallback.
+  The hub keeps each source's list for 20 seconds; reads that miss it at the same time (the Agents page's sections, groups and counts after a change, other open apps) share one `sessions` call, and one that comes after a change does not share a call made before it (#7204).
 - Implementation: `server/internal/extmgr/extension_agents.go`; tests `TestExtensionAgentSource` (`extension_agents_test.go`, fake extension exercises the protocol),
-  `agents.TestAddAndRemoveSources`.
+  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`).
 
 ## Events
 

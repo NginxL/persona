@@ -842,6 +842,12 @@ describe("sending in order, and with no row yet", () => {
       await flush();
       expect(host.querySelector("[data-chat-title]")?.textContent).toBe(t("chat-chatview.not_found_title"));
       expect(host.textContent).not.toContain("nope-0000");
+      // The notice is a React.lazy chunk: it suspends once on its first render even when the module is in, so it is
+      // drawn a little after flush() returns, as late as the machine is slow. Each poll runs in act so React's retry can flush.
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+        expect(host.querySelector("[data-chat-not-found]")).not.toBeNull();
+      }, { timeout: 5000, interval: 20 });
       const notice = host.querySelector("[data-chat-not-found]");
       expect(notice?.textContent).toContain(t("chat-notfoundnotice.body"));
       expect(host.textContent).not.toContain(t("runtime-session.missing"));

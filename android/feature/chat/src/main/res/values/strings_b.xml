@@ -359,7 +359,6 @@
     <string name="chat_queue_move_up">Move up</string>
     <string name="chat_queue_move_down">Move down</string>
     <string name="chat_queue_send_now">Send now</string>
-    <string name="chat_queue_send_now_title">Send the queued messages now?</string>
     <string name="chat_queue_send_now_message">Sends the queued messages to the agent now. A command it is running keeps running in the background; a reply it is writing starts again with your message.</string>
     <string name="chat_queue_send_now_message_persona">%1$s gets them right away instead of at its next step. What it is doing now stops, or goes on in the background when it can, and it starts again with your messages.</string>
     <string name="chat_queue_relayed_note">Arrives when this chat is free</string>

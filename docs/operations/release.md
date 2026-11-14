@@ -198,6 +198,12 @@ The App Group ID itself has no team prefix, so the Info.plist writes `$(PERSONA_
 - **Check after export**: `python3 scripts/release/entitlements.py check <ipa>` lists every problem and exits non-zero; it reports 9 issues on build 92's ipa.
   App Groups are checked the same way: every bundle's signature has its target's group, and the Info.plist's `PersonaAppGroup` is one of them.
   In the exported ipa / pkg, the push entitlement (`aps-environment`; on Mac `com.apple.developer.aps-environment`) must be `production`. A Mac .pkg can be checked too.
+- **HealthKit background delivery** (`com.apple.developer.healthkit.background-delivery`, #2526): signed in only with config.json
+  `app.health_background_delivery: true`, so that workout reports come right after a workout (`docs/assistant/health.md`,
+  "Automatic workout reports (iOS)"). The App ID's HealthKit capability covers it. If the profiles predate it, rerun
+  `asc_signing.py` before turning the switch on. `entitlements.py check` errors if an exported App built with the switch lacks
+  it, because the Settings page would promise reports that wait for Persona to open. Check the first such build on a device:
+  finish a workout on the Watch with Persona closed, and the report should arrive.
 - **Time-sensitive notifications** (`com.apple.developer.usernotifications.time-sensitive`, #1572): the hub's "Needs you" pushes and plugins' urgent alerts carry `interruption-level: time-sensitive`.
   If the App's signature lacks this entitlement, the system shows them all as `active`: they don't break through Focus, so with Focus on the phone doesn't ring and the watch doesn't get them either, and nothing reports an error. The App ID must first enable `USERNOTIFICATIONS_TIMESENSITIVE`
   (`asc_signing.py` enables it; afterwards the old profiles are invalid and need one rerun to rebuild); `entitlements.py check` errors if the exported App lacks it.

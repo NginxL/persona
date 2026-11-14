@@ -39,8 +39,10 @@ func (h *Hub) notifyDone(owner, kind, machineID, machine, sessionID, title, text
 }
 
 // notifyDoneUnder is notifyDone with the push's apns-collapse-id ("": one of its own) and the recording it is about
-// ("": none; assistantwire.Notification.RecordingID), which the push and the notify carry as `recording_id`.
-func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string, policy pushPolicy) {
+// ("": none; assistantwire.Notification.RecordingID), which the push and the notify carry as `recording_id`. It returns
+// the ln-mode reason the push was held ("" when it went out), so the assistant can tell the model a notify_user notice
+// reached the briefing instead of the phone.
+func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string, policy pushPolicy) string {
 	build := func(l i18n.Lang) map[string]any {
 		p := donePayloadIn(l, machineID, machine, sessionID, title, text)
 		if recordingID != "" {
@@ -50,8 +52,9 @@ func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title,
 	}
 	h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
 	policy.manager, policy.title, policy.body = owner, title, text
-	h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, nil)
+	_, _, heldReason := h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, nil)
 	h.notifyWSFrom(owner, kind, build, wants.fn(), wants.quiet())
+	return heldReason
 }
 
 // managerPushCollapseID is the apns-collapse-id of manager's push with notification id (assistantwire.Notification.ID;

@@ -76,6 +76,8 @@ struct PhoneToolsTests {
             "phone_location_search",
             "phone_health_summary",
             "phone_health_write_sample",
+            "phone_workouts_recent",
+            "phone_workout_detail",
             "phone_photos_recent",
             "phone_photo_get",
             "phone_device_info",

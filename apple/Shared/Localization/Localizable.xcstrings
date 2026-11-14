@@ -102559,6 +102559,29 @@
       },
       "extractionState" : "manual"
     },
+    "Off by default. After you enable this, a workout of at least 10 minutes is reported right after it is saved to Health, even while Persona is closed: its measurements go to your hub to create a report. Older workouts are not imported. Reports already submitted may finish after you turn this off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off by default. After you enable this, a workout of at least 10 minutes is reported right after it is saved to Health, even while Persona is closed: its measurements go to your hub to create a report. Older workouts are not imported. Reports already submitted may finish after you turn this off."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "初期設定はオフです。有効にすると、10分以上のワークアウトがヘルスケアに保存された直後に、Persona を開いていなくてもレポートを作成します。測定データは hub に送信されます。有効にする前の運動は取り込みません。オフにしても、送信済みのレポートは完了する場合があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认关闭。开启后，至少持续 10 分钟的运动一存进「健康」就会生成报告，Persona 没打开也一样：运动数据会发送到你的 hub 生成报告。不导入开启前的运动。关闭后，已提交的报告仍可能完成。"
+          }
+        }
+      }
+    },
     "Off by default. After you enable this, opening Persona checks for new workouts of at least 10 minutes and sends their measurements to your hub to create a report. Older workouts are not imported. Reports already submitted may finish after you turn this off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -117920,6 +117943,29 @@
       },
       "extractionState" : "manual"
     },
+    "Reports contain measurement cards, heart-rate and pace charts when data is available, a comparison with your recent workouts of the same kind, and a brief summary. Health read permissions are managed in iOS Settings; an empty result can also mean access was not granted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reports contain measurement cards, heart-rate and pace charts when data is available, a comparison with your recent workouts of the same kind, and a brief summary. Health read permissions are managed in iOS Settings; an empty result can also mean access was not granted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "レポートには測定値カード、データがある場合は心拍数とペースのグラフ、最近の同じ種類のワークアウトとの比較、簡潔なまとめが含まれます。ヘルスケアの読み取り権限は iOS の設定で管理できます。結果が空の場合、権限が許可されていない可能性もあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "报告包含数据卡片、有数据时的心率图和配速图、与最近同类运动的对比，以及简短总结。健康数据读取权限可在 iOS 设置中管理；没有读取到运动也可能是未授予权限。"
+          }
+        }
+      }
+    },
     "Route [Screen Stats]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -124490,29 +124536,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "実行中のプロセスが報告したバージョン"
-          }
-        }
-      }
-    },
-    "Reports contain measurement cards and a heart-rate chart when data is available, followed by a brief summary. Health read permissions are managed in iOS Settings; an empty result can also mean access was not granted." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reports contain measurement cards and a heart-rate chart when data is available, followed by a brief summary. Health read permissions are managed in iOS Settings; an empty result can also mean access was not granted."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "レポートには測定値カード、データがある場合は心拍数グラフ、簡潔なまとめが含まれます。ヘルスケアの読み取り権限は iOS の設定で管理できます。結果が空の場合、権限が許可されていない可能性もあります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "报告包含数据卡片、有数据时的心率图，以及简短总结。健康数据读取权限可在 iOS 设置中管理；没有读取到运动也可能是未授予权限。"
           }
         }
       }
