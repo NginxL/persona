@@ -155,6 +155,10 @@ type SharingConfig struct {
 type Config struct {
 	// AutoUpdateNodes explicitly opts into fleet upgrades after Hub updates and node reconnects.
 	AutoUpdateNodes bool `json:"auto_update_nodes,omitempty"`
+	// ScreenLinkOff: the hub never selects the live screen's session subprotocol (#6398, askScreenLink), so every live
+	// screen stays on the plain relay whatever the apps and nodes support: a switch for the hub's operator, read at
+	// start, for when direct routes misbehave and an app release would take too long.
+	ScreenLinkOff bool `json:"screen_link_off,omitempty"`
 	// Name is what people see this hub as (hubName); empty: its machine's host name.
 	Name string `json:"name,omitempty"`
 	// InitialLocale is the user's language until a device says one (locale.go, #5519): the language the installer ran

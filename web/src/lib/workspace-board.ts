@@ -83,10 +83,12 @@ export function optimisticBoard(board: BoardState, m: BoardMutation): BoardState
 
 export interface BoardSnapshot {
   board: BoardState | null; discovery: WorkspaceList; loading: boolean; busy: boolean; readonly: boolean; error: string; discoveryError: string;
+  /** The last read said this hub has no board (boardUnsupported): Retry can't help, updating the hub does. */
+  unsupported: boolean;
 }
 type Transport = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 export class BoardModel {
-  private state: BoardSnapshot = { board: null, discovery: { workspaces: [] }, loading: true, busy: false, readonly: false, error: "", discoveryError: "" };
+  private state: BoardSnapshot = { board: null, discovery: { workspaces: [] }, loading: true, busy: false, readonly: false, error: "", discoveryError: "", unsupported: false };
   private listeners = new Set<() => void>();
   private reads = 0;
   constructor(private request: Transport = api) {}
@@ -104,11 +106,11 @@ export class BoardModel {
         if (read !== this.reads || this.state.busy) return;
         if (!this.state.board || board.revision >= this.state.board.revision) this.set({
           board: sameValue(board, this.state.board) ? this.state.board : board,
-          readonly: board.can_write === undefined ? this.state.readonly : !board.can_write, error: "",
+          readonly: board.can_write === undefined ? this.state.readonly : !board.can_write, error: "", unsupported: false,
         });
       }).catch((e) => {
         if (read !== this.reads) return;
-        this.set({ error: boardError(e), ...(e instanceof ApiError && e.status === 403 ? { readonly: true } : {}) });
+        this.set({ error: boardError(e), unsupported: boardUnsupported(e), ...(e instanceof ApiError && e.status === 403 ? { readonly: true } : {}) });
       }),
       this.request<WorkspaceList>("/workspaces").then((discovery) => {
         if (read === this.reads) this.set({ discovery: sameValue(discovery, this.state.discovery) ? this.state.discovery : discovery, discoveryError: "" });
@@ -139,11 +141,16 @@ export class BoardModel {
     }
   }
 }
+/** The hub has no board: an older one answers 404, one without board storage 503 not_supported. A 503 for anything
+ *  else (assistant_offline while the manager restarts, a proxy in front of the hub) passes: Retry or the next read helps. */
+export function boardUnsupported(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 404 || (e.status === 503 && e.code === "not_supported"));
+}
 export function boardError(e: unknown): string {
   if (e instanceof ApiError) {
     if (e.status === 403) return t("lib-workspace-board.read_only");
     if (e.status === 409) return t("lib-workspace-board.conflict_reloading");
-    if (e.status === 404 || e.status === 503) return t("lib-workspace-board.unsupported");
+    if (boardUnsupported(e)) return t("lib-workspace-board.unsupported");
   }
   return errorText(e);
 }

@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // queuedStart builds a supervised todo and a started one-task plan on machine, then runs its start synchronously.
@@ -123,6 +126,29 @@ func TestAdmissionQueueRetryStartsWhenGateOpens(t *testing.T) {
 	}
 }
 
+// admissionHubOn is admissionHub with a real database, for the SQL-only queue-selection cases.
+func admissionHubOn(t *testing.T, st *db.DB) (*Service, *fakeHub, *resourceDevs) {
+	t.Helper()
+	f := newFakeHub().withMachine()
+	f.devices = []Device{
+		{ID: "busy", Name: "Busy", Home: "/home/me", Online: true, Reachable: true},
+		{ID: "idle", Name: "Idle", Home: "/home/me", Online: true, Reachable: true},
+	}
+	f.sessions["busy"], f.sessions["idle"] = nil, nil
+	f.launcherList = []proto.Launcher{{Name: "work"}}
+	s := newServiceOn(t, f, st)
+	d := &resourceDevs{fleetDevs: newFleetDevs(), machines: map[string]*proto.Machine{}, samples: map[string]*proto.MetricSample{}, versions: map[string]*bool{}}
+	d.add("busy", "Busy")
+	d.add("idle", "Idle")
+	s.devs = d
+	on := true
+	s.admission.cached = &AdmissionSettings{Enabled: &on}
+	s.admission.at = time.Now()
+	s.admission.machineClaims = map[string]int{}
+	s.admission.directionClaims = map[string]int{}
+	return s, f, d
+}
+
 // A task still refused after the queue bounds fails for good, with the ordinary failure receipt.
 func TestAdmissionQueueTimeoutFailsWithReceipt(t *testing.T) {
 	s, _, d := admissionHub(t)
@@ -223,4 +249,38 @@ func TestIsAdmissionDenied(t *testing.T) {
 
 func i18nArgsLoad() i18n.Args {
 	return i18n.Args{"load": "99.0", "cores": 8, "multiplier": 4.0}
+}
+
+// An old started plan with a current queue record must still be a retry candidate (#7405).
+func TestAdmissionQueueRetryStartsWhenGateOpensOnOlderPlan(t *testing.T) {
+	url := newDatabase(t)
+	database, err := db.Open(context.Background(), url, db.ManagerSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	s, f, d := admissionHubOn(t, database)
+	busyOverloaded(d)
+	p, _ := queuedStart(t, s, "busy")
+	conn, err := pgx.Connect(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	if _, err := conn.Exec(context.Background(), `UPDATE task_plans SET created_at = $1 WHERE id = $2`, time.Now().Add(-2*time.Hour), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	busyHealthy(d)
+	if err := s.patchPlanTask(context.Background(), p.ID, 0, func(pt *PlanTask) { pt.Queue.NextAt = time.Now().Add(-time.Second) }); err != nil {
+		t.Fatal(err)
+	}
+	s.sweepAdmissionQueue(context.Background())
+	waitFor(t, "the old plan's queued task to start", func() bool { return len(taskStartMachines(f)) == 1 })
+	waitFor(t, "the old plan's queue to clear", func() bool {
+		loaded, err := s.loadPlan(context.Background(), p.ID)
+		return err == nil && loaded.Tasks[0].Queue == nil
+	})
+	if starts := taskStartMachines(f); len(starts) != 1 || starts[0] != "busy" {
+		t.Fatalf("the old plan must start exactly once on its machine: %v", starts)
+	}
 }

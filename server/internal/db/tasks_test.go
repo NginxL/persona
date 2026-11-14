@@ -293,4 +293,20 @@ func TestTaskPlansMadeSince(t *testing.T) {
 			t.Fatalf("row = %+v", r)
 		}
 	}
+
+	// The queue uses the update window: the first plan was created before base but updated inside it. The open plan is
+	// still excluded, and MadeSince above retains its independent creation-window result.
+	rows, err = d.TaskPlansQueued(ctx, base.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	for _, r := range rows {
+		if r.Conversation == prefix {
+			got = append(got, strings.TrimPrefix(r.ID, prefix+"_")+":"+r.State)
+		}
+	}
+	if strings.Join(got, ",") != "0:started,1:started,3:dismissed,4:started" {
+		t.Fatalf("queue candidates = %v", got)
+	}
 }
