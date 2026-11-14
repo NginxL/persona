@@ -797,7 +797,7 @@ private fun ChatPage(
             try { repository.loadOlder(key) } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
         })
-    ChatSearchNavigation(search, chatList, lines)
+    ChatSearchNavigation(search, chatList, lines, foldErrors.keys)
     ChatMessageJump(key, repository, chatList, lines, snapshot.hasOlder, snapshot.loading || snapshot.loadingOlder, search,
         onItem = { jumpItem = it }, onNotice = { notice = it })
     LaunchedEffect(list, chrome.covered, search.visible, search.pending, search.returning, chatList.restored, chatList.programmaticScroll, overlay, chromeOverlay, fullText, linkVisible, statusSheet, terminalHelp, taskPageVisible, lifecycle, snapshot.verified) {
@@ -1263,7 +1263,7 @@ private fun ChatPage(
                 }
             }
             if (search.visible) ChatSearchScreen(search, searchableItems, projection.turns.size, snapshot.hasOlder,
-                repository, key, onClose = { search.close(chatList) })
+                repository, key, snapshot.history, onClose = { search.close(chatList) })
             if (terminalHelp) TerminalHelpDialog { terminalHelp = false }
             if (activitySheet) session?.takeIf(ChatActivity::shown)?.let { s ->
                 ChatActivitySheet(s, onStop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),

@@ -1,9 +1,10 @@
 import XCTest
 
 /// Settings › This Device › Live Screen (#6398, #6396) against scripts/mock/mock_hub.py (TEST_RUNNER_PERSONA_SCREEN_HUB,
-/// MOCK_SCREEN_VIDEO=1): the route switch is there only while direct routes are offered (here a DEBUG launch with
-/// -showScreenRoutes), first, above the quality on mobile data; it is on by default and stays as set, and the page reads in light and dark, at the default size and at xxxLarge (where interface
-/// text stops growing), in English and Chinese. Screenshots are attachments (PERSONA_SHOTS also writes them out).
+/// MOCK_SCREEN_VIDEO=1): the route switch, first, above the quality on mobile data (which computers get the row:
+/// PersonaTests' LiveScreenRowTests); it is on by default and stays as set, and the page reads in light and dark, at the
+/// default size and at xxxLarge (where interface text stops growing), in English and Chinese. Screenshots are
+/// attachments (PERSONA_SHOTS also writes them out).
 final class LiveScreenSettingsTests: XCTestCase {
     private var hub: String? { ProcessInfo.processInfo.environment["PERSONA_SCREEN_HUB"] }
 
@@ -38,15 +39,6 @@ final class LiveScreenSettingsTests: XCTestCase {
         XCTAssertEqual(kept.value as? String, "0", "kept off")
         kept.switches.firstMatch.exists ? kept.switches.firstMatch.tap() : kept.tap() // back on for the next test
         XCTAssertEqual(kept.value as? String, "1")
-    }
-
-    /// Without direct routes offered (a release build until acceptance) the page has no route switch; the quality section
-    /// (#6396) is there for a computer with video, as the mock's MacBook is.
-    @MainActor func testNoRouteSwitchWithoutDirectRoutes() throws {
-        let app = try launch(["-openLiveScreenSettings", "YES"])
-        XCTAssertTrue(app.descendants(matching: .any)["settings-live-screen-mobile-data"].firstMatch.waitForExistence(timeout: 15),
-                      "the quality section:\n\(app.debugDescription)")
-        XCTAssertFalse(app.switches["settings-live-screen-routes"].exists, "no route switch while direct routes aren't offered")
     }
 
     /// The page and the row for review: light and dark, default size and xxxLarge, English and Chinese. The page is

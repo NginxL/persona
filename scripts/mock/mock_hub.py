@@ -20508,7 +20508,8 @@ def zrle_rect(px, W, x, y, w, h, z):
 # with `hello`, `format` and the keyframe. Once a second while frames go out it sends `timing` as the helper does: capture
 # 0 and encode 4.8 ms (made up: nothing is encoded here), the network as half the real round trip from a frame going out
 # to the phone's report on it. MOCK_SCREEN_VIDEO_TIERS=1: the hello says the helper has quality tiers (`features`,
-# #6396); GET /mock/screen-video also lists the `update`s the client sent (#6558: a new data budget).
+# #6396) on a 14-inch MacBook Pro's display (`points`, `pixels`; the fixture plays at its own size whatever the tier);
+# GET /mock/screen-video also lists the `update`s the client sent (#6558: a new data budget, the tier it picked).
 SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
                 "updates": [], "refuse": False, "tiers": os.environ.get("MOCK_SCREEN_VIDEO_TIERS") == "1"}
 _SCREEN_VIDEO_FIXTURE = {}
@@ -20576,7 +20577,8 @@ def screen_video_connect(h, mid):
         if not st["started"].wait(10): st["open"] = False; return
         msgs = screen_video_fixture(screen_video_codec(st.get("codecs")))
         hello, fmt, frames = msgs[0], msgs[1], msgs[2:]
-        if SCREEN_VIDEO["tiers"]: hello = (hello[0], json.dumps({**json.loads(hello[1]), "features": ["tiers"]}).encode())
+        if SCREEN_VIDEO["tiers"]:  # as the helper says it: the display's points and pixels (a 14-inch MacBook Pro's) for the tiers
+            hello = (hello[0], json.dumps({**json.loads(hello[1]), "features": ["tiers"], "points": [1512, 982], "pixels": [3024, 1964]}).encode())
         number, i, restart = 0, 0, True
         second, count, size = time.monotonic(), 0, 0
         try:

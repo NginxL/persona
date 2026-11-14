@@ -8,13 +8,14 @@ struct LiveScreenSettingsView: View {
     @AppStorage(ScreenMobileData.key) private var mobileData: String?
     @StoredValue(ScreenRoutePrefs.automaticKey) private var automatic = true
 
-    /// Settings shows the page only when it can change something: direct routes are offered (the route's section), or
-    /// some computer offers the live screen's video channel (quality on mobile data applies to it).
-    static func isShown(machines: [Machine]) -> Bool {
+    /// Settings shows the page only when it can change something for a computer here: with direct routes offered, one
+    /// that shows its live screen (the route's section); else one that offers the live screen's video channel (quality on
+    /// mobile data applies to it). No computer, no page: someone using only the assistant never sees it.
+    static func isShown(machines: [Machine], routesOffered: Bool = ScreenRoutes.offered) -> Bool {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
         #endif
-        return ScreenRoutes.offered || machines.contains(where: AppModel.advertisesVideo)
+        return machines.contains(where: routesOffered ? AppModel.showsScreen : AppModel.advertisesVideo)
     }
 
     var body: some View {
