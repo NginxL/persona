@@ -339,10 +339,15 @@ Picture in Picture (`AVSampleBufferDisplayLayer`) needs access to each frame, wh
 - **Connection**: hub's 5900 forwarding (`RFBWebSocket`), a binary WebSocket over the same route as the App's hub connection (`APIClient.url`: via SSH tunnel when used; `APIClient.session`: pinning for public TLS), with device token (`Authorization`).
 - **Login** (`RFBAuth`):
   - macOS Screen Sharing offers 30 (Apple Remote Desktop), 33, 35, 36. This uses 30:
-    1. Server sends the generator, prime and its public key.
-    2. Client calculates the DH shared secret, using its MD5 as the AES-128 key (ECB).
+    1. Server sends the generator, prime and its public key: macOS 26 a 4096-bit prime with generator 5, older macOS 1024 bits.
+    2. Client calculates the DH shared secret, using its MD5 as the AES-128 key (ECB). This needs no account or password,
+       so `RFBAuth.exchange` runs as soon as the server's numbers arrive, while the sign-in form waits (#7809).
     3. Account and password each occupy 64 bytes, NUL-terminated and padded with random bytes. Send the encrypted 128 bytes first, then the client's public key.
-  - Large-number arithmetic is a custom Montgomery modular exponentiation (`RFBBigUInt`), checked against Python `pow`.
+  - Large-number arithmetic is a custom Montgomery modular exponentiation (`RFBBigUInt`: 64-bit limbs on raw buffers,
+    a 4-bit window, the two exponentiations side by side), checked against Python `pow`. With a 4096-bit prime the old
+    32-bit-limb array version took 48 s in a Debug build after Connect (0.6 s optimized); this takes 0.65 s and 0.03 s.
+    A shared Rust implementation in PersonaCore was weighed and not taken: a new big-number crate and entry points on
+    three clients for one function the Swift fix makes fast enough.
   - Mock Screen Sharing also offers VeNCrypt Plain (19 → 256) for tests; no authentication (1) is accepted too.
   - Account/password come from saved credentials (`ScreenCredentials`, #1322).
 - **Frames** (`RFBFramebuffer`):
