@@ -860,6 +860,43 @@ iPhone's side comes next.
   again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
   or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.
 
+### Pixel scrolling (#7775)
+
+Two-finger scrolling over RFB sends wheel notches, and macOS's Screen Sharing scrolls a notch one point: a page follows
+the fingers, but Screen Sharing falls behind past about 2000 notches a second, a terminal moves a whole line per event
+(notches that come together merge), and a page stops dead at its ends. Continuous scroll events posted on the Mac
+itself, as a trackpad's are, scroll by the point with no such ceiling, with the app's own momentum and rubber-banding.
+Approved on #7775: a helper of its own posts them, with the Accessibility permission asked for once; without it,
+scrolling stays on RFB's notches.
+
+- **Persona Input** (`apple/PersonaLink/Input`, a package of its own; bundle `Persona Link.app/Contents/Helpers/Persona
+  Input.app`, bundle id `<link id>.input`): started by the node through LaunchServices as Persona Screen is, on a 0600
+  Unix socket whose first line is a token. It then says `granted` or `missing` (`CGPreflightPostEventAccess()`; missing
+  ends it) and posts every scroll record that comes as `CGEvent(scrollWheelEvent2Source:units: .pixel, …)` with
+  `scrollWheelEventIsContinuous`, the scroll phase and the momentum phase, at the pointer (RFB has just put it there),
+  carrying fractions of a point to the next event. Scroll events only: no clicks, no keys. `--preflight` prints
+  `post_event: granted|missing`, asking nothing; `--request-permission` asks macOS once (`CGRequestPostEventAccess()`),
+  whose window only the user answers. Persona Screen is not touched: its package, binary and Screen Recording grant stay
+  as they were, and the two share no code.
+- **Same bits from build to build**: macOS ties the permission to the helper's code. The package builds in Swift 6 mode
+  (`#file` is the module and file name) and links no debug map, so a build does not depend on its path:
+  `scripts/app/mac-link.sh verify-input` builds it twice from clean copies at two paths and compares the executable and
+  the signed bundle's cdhash (the same on 2026-11-15: executable `659dc1e66ff90a6f`, cdhash `da868531…`). On top of that,
+  `mac-link.sh` keeps the built executable in `~/.persona/cache/persona-input/<key>` (`PERSONA_INPUT_CACHE`), the key a
+  hash of the helper's and `PersonaInputKit`'s sources and the architectures, and reuses it byte for byte: a Persona Link
+  update that leaves those sources alone never changes the helper, whatever checkout or Xcode builds it.
+- **The record** (`PersonaInputKit`'s `ScrollRecord`, the helper and the iOS app; the node's codec in Go, both checked
+  against `spec/fixtures/screen-input`): 16 bytes, big-endian. Byte 0 is **200**, an RFB client message type that IANA's
+  registry leaves unassigned (151–244 are, checked 2026-11-15); the phone sends it inside the RFB stream and the node
+  takes it out, so Screen Sharing never sees it. Then the version (1), the kind (0 hello: the phone can scroll by pixels;
+  1 scroll), the scroll phase (CGScrollPhase: 0 none, 1 began, 2 changed, 4 ended, 8 cancelled), the momentum phase
+  (CGMomentumScrollPhase: 0 none, 1 begin, 2 continue, 3 end), three reserved bytes, then dy and dx as `f32` Mac points
+  (> 0 shows what is above or to the left, as the RFB wheel's up and CGEvent's axes). Another version is refused, never
+  guessed at. The node hands the helper the same 16 bytes.
+- Still to come on #7775: the node reading the phone's messages after the login and taking the record out, its status
+  `screen_input {version, permission, asked}`, asking once on first use, and falling back to wheel notches; then the
+  phone sending the record.
+
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 
 Reference: Computer Use settings in the Codex desktop app. The main session read only the UI strings in its package, took no code, and found:
