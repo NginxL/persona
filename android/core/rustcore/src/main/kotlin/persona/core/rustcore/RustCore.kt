@@ -14,6 +14,9 @@ interface CoreHost {
     /** Something changed at [version]: pull patches with [RustCore.drain] on the next frame. */
     fun changed(version: Long)
 
+    /** Targeted wake for adapters; existing version-only hosts keep the old callback. */
+    fun changedChat(chat: String, version: Long) = changed(version)
+
     /** A request or timer for the client to run. */
     fun run(effect: Effect)
 }
@@ -50,6 +53,8 @@ class RustCore(config: Config, host: CoreHost) : AutoCloseable {
 /** What the JNI side calls, by these exact names and signatures (native/app-core/crates/persona-core-ffi/src/jni.rs). */
 internal class HostBridge(private val host: CoreHost) {
     fun changed(version: Long) = host.changed(version)
+
+    fun changedChat(chat: String, version: Long) = host.changedChat(chat, version)
 
     fun run(effect: ByteArray) = host.run(Effect.bincodeDeserialize(effect))
 }

@@ -9,7 +9,7 @@ use persona_core_runtime::wire::{self, Config};
 use persona_core_runtime::{Host, Runtime};
 
 #[cfg(feature = "ohos")]
-use napi_ohos::bindgen_prelude::{Error, Result, Status};
+use napi_ohos::bindgen_prelude::{Error, FnArgs, Result, Status};
 #[cfg(feature = "ohos")]
 use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 
@@ -93,8 +93,12 @@ pub fn config() -> Vec<u8> {
 }
 
 #[cfg(feature = "ohos")]
+type ChangedChatCallback = ThreadsafeFunction<FnArgs<(String, i64)>>;
+
+#[cfg(feature = "ohos")]
 pub struct CoreHost {
     changed: Arc<ThreadsafeFunction<i64>>,
+    changed_chat: Option<Arc<ChangedChatCallback>>,
     effects: Arc<ThreadsafeFunction<Vec<u8>>>,
 }
 
@@ -103,6 +107,19 @@ impl CoreHost {
     pub fn new(changed: ThreadsafeFunction<i64>, effects: ThreadsafeFunction<Vec<u8>>) -> Arc<Self> {
         Arc::new(CoreHost {
             changed: Arc::new(changed),
+            changed_chat: None,
+            effects: Arc::new(effects),
+        })
+    }
+
+    pub fn with_changed_chat(
+        changed: ThreadsafeFunction<i64>,
+        changed_chat: ChangedChatCallback,
+        effects: ThreadsafeFunction<Vec<u8>>,
+    ) -> Arc<Self> {
+        Arc::new(CoreHost {
+            changed: Arc::new(changed),
+            changed_chat: Some(Arc::new(changed_chat)),
             effects: Arc::new(effects),
         })
     }
@@ -114,6 +131,18 @@ impl Host for CoreHost {
         // This is a wake-up only. The patch's u64 version stays in bincode; do not silently wrap a NAPI number.
         let Ok(version) = i64::try_from(version) else { return };
         let _ = self.changed.call(Ok(version), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+
+    fn changed_chat(&self, chat: &str, version: u64) {
+        let Some(callback) = &self.changed_chat else {
+            self.changed(version);
+            return;
+        };
+        let Ok(version) = i64::try_from(version) else { return };
+        let _ = callback.call(
+            Ok(FnArgs::from((chat.to_owned(), version))),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
     }
 
     fn run(&self, effect: &[u8]) {

@@ -30,6 +30,7 @@ from pr_watch_review import review as semantic_review
 from pr_watch_verify import verify
 
 FORMAT_VERSION = 1
+VERIFICATION_POLICY_VERSION = 2
 
 
 def load_config(path):
@@ -440,6 +441,23 @@ class Watcher:
         if old.get("evidence_key") != evidence_key:
             previous = old
             old = {"repair_rounds": int(previous.get("repair_rounds", 0))}
+        if (old.get("head") == head and old.get("format") == FORMAT_VERSION
+                and old.get("verification_policy") != VERIFICATION_POLICY_VERSION
+                and old.get("verification") not in ("passed", "base_failure")
+                and not old.get("repair_exhausted")
+                and old.get("outcome") not in ("merged", "continuation", "findings")):
+            # A prerequisite failure is not evidence against this exact head.
+            # Retry only its verification under the new policy. Completed gates,
+            # published findings and exhausted repair budgets keep their meaning.
+            old = self.state.put(repo, number, head, evidence_key=evidence_key,
+                                 verification_policy=VERIFICATION_POLICY_VERSION,
+                                 outcome="retry", retry_after=0,
+                                 repair_rounds=int(old.get("repair_rounds", 0)),
+                                 repair_attempts=0, review_attempts=0,
+                                 semantic=old.get("semantic"), findings=old.get("findings", []),
+                                 review_fingerprint=old.get("review_fingerprint"),
+                                 review_posted=old.get("review_posted", False),
+                                 base=pr["baseRefOid"], format=FORMAT_VERSION)
         if old.get("head") == head and old.get("retry_after", 0) > time.time():
             return
         if old.get("outcome") == "continuation":
@@ -539,6 +557,7 @@ class Watcher:
                 rounds = int(self.state.get(repo, number).get("repair_rounds", 0))
                 current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                          base=pr["baseRefOid"], format=FORMAT_VERSION, outcome="reviewing",
+                                         verification_policy=VERIFICATION_POLICY_VERSION,
                                          repair_rounds=rounds)
             if current.get("semantic") != "passed" and current.get("semantic") != "findings":
                 self.phase(key, "independent semantic review")
@@ -577,10 +596,12 @@ class Watcher:
                     base_evidence = current.get("base_failures")
                     current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                              verification="base_failure", checks=error.checks,
+                                             verification_policy=VERIFICATION_POLICY_VERSION,
                                              base_failures=base_evidence)
                 else:
                     current = self.state.put(repo, number, head, evidence_key=evidence_key,
-                                             verification="passed", checks=results)
+                                             verification="passed", checks=results,
+                                             verification_policy=VERIFICATION_POLICY_VERSION)
             if current.get("verification") == "base_failure":
                 self.phase(key, "continuing after a clean-main failure")
             with self.merging(repo):

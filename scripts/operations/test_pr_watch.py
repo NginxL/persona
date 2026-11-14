@@ -256,8 +256,6 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(pr_watch_repair.test_or_fix(pr(title="feat(ios): a new view"), ["apple/Persona/Views/ChatView.swift"]))
         self.assertTrue(pr_watch_repair.test_or_fix(pr(title="feat(web): refine a test"),
                                                      ["web/src/views/chat/ContextGroup.test.tsx"]))
-        self.assertTrue(pr_watch_repair.test_or_fix(pr(title="feat(web): refine a test"),
-                                                     ["web/src/views/chat/ContextGroup.test.tsx"]))
         self.assertFalse(pr_watch_repair.test_or_fix(pr(title="chore: change a view"),
                                                       ["web/src/views/ChatView.tsx"]))
 
@@ -277,6 +275,47 @@ class WatcherTests(unittest.TestCase):
             selector.return_value.select.return_value = {"web": True, "scripts": True}
             with self.assertRaises(pr_watch_common.WatchError):
                 pr_watch_verify.persona_checks(".", pr(title="feat(web): a new view"), 1, {})
+
+    def test_superseded_prerequisite_failure_retries_only_verification(self):
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                               format=1, base=SHA_BASE, semantic="passed", findings=[],
+                               review_fingerprint="reviewed", outcome="failed", failure_posted=True,
+                               retry_after=10**12, repair_rounds=1, repair_attempts=3,
+                               failure="UI changes need visual evidence")
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch, "semantic_review") as review, \
+                patch.object(pr_watch, "verify", return_value=[{"name": "test", "ok": True}]), \
+                patch.object(self.watcher, "merge", return_value=True) as merge:
+            self.watcher.process("example/one", 7)
+        state = self.watcher.state.get("example/one", 7)
+        review.assert_not_called()
+        merge.assert_called_once()
+        self.assertEqual(state["outcome"], "merged")
+        self.assertEqual(state["repair_rounds"], 1)
+        self.assertEqual(state["verification_policy"], pr_watch.VERIFICATION_POLICY_VERSION)
+
+    def test_policy_migration_preserves_completed_gates_and_terminal_repairs(self):
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        for outcome, fields in (
+                ("merged", {"verification_policy": 1, "merged": True}),
+                ("passed", {"verification": "passed", "verification_policy": 1, "review_posted": True}),
+                ("passed_with_base_failures", {"verification": "base_failure", "verification_policy": 1, "review_posted": True}),
+                ("findings", {"semantic": "findings", "review_posted": True}),
+                ("repair_exhausted", {"repair_exhausted": True, "repair_rounds": 2}),
+        ):
+            with self.subTest(outcome=outcome):
+                self.watcher.state.data["prs"].pop("example/one#7", None)
+                self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                                       format=1, base=SHA_BASE, outcome=outcome, **fields)
+                with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                        patch.object(pr_watch, "semantic_review") as review, \
+                        patch.object(pr_watch, "verify") as verify, \
+                        patch.object(self.watcher, "merge") as merge:
+                    self.watcher.process("example/one", 7)
+                review.assert_not_called()
+                verify.assert_not_called()
+                merge.assert_not_called()
 
     def test_verification_failure_uses_bounded_repair(self):
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
@@ -345,6 +384,7 @@ class WatcherTests(unittest.TestCase):
             with patch.object(pr_watch_repair, "pr_snapshot", return_value=pr()), \
                     patch.object(pr_watch_repair, "verify", side_effect=fake_verify), \
                     patch.object(pr_watch_repair, "checked", side_effect=fake_checked), \
+                    patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}), \
                     patch.object(pr_watch_repair, "repair_repository_copy", return_value=nullcontext(directory)):
                 pr_watch_repair.commit_and_push_repair("example/one", pr(), directory, SHA_BASE, "failure", {"profile": "commands", "commands": [["true"]]})
         self.assertIn(SHA_B, calls)
@@ -428,6 +468,25 @@ class WatcherTests(unittest.TestCase):
             with self.assertRaises(pr_watch_common.VerificationError):
                 pr_watch_verify.verify("example/one", pr(), ".", config)
         self.assertEqual(check.call_count, 2)
+
+    def test_repair_scanner_preserves_all_trusted_config_adapters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+            config = root / "config.json"
+            config.write_text(json.dumps({"hub": {"url": "https://synthetic-private-host.internal"}}))
+            marker = "JA" + "RVIS_CONFIG"
+            (root / "fixture.txt").write_text("synthetic-private-host.internal\n")
+            subprocess.run(["git", "add", "fixture.txt"], cwd=root, check=True, capture_output=True)
+            with patch.dict(os.environ, {marker: str(config), "GH_TOKEN": "not-for-scanner"}):
+                with self.assertRaises(pr_watch_common.WatchError):
+                    pr_watch_repair.privacy_scanner_environment(root)
+                (root / "fixture.txt").unlink()
+                subprocess.run(["git", "rm", "--cached", "-q", "fixture.txt"], cwd=root, check=True, capture_output=True)
+                env = pr_watch_repair.privacy_scanner_environment(root)
+            self.assertEqual(env[marker], str(config))
+            self.assertNotIn("GH_TOKEN", env)
+            self.assertNotEqual(env["HOME"], os.environ["HOME"])
 
     def test_repair_worker_has_no_github_credentials(self):
         calls = []
