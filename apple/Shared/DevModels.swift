@@ -274,9 +274,11 @@ nonisolated struct FileInfo: Codable, Hashable, Sendable {
     var linkTarget: String?
     var linkReal: String?
     var linkBroken: Bool?
+    /// A file's type as the file page opens it, read from its first bytes where the name cannot tell (#7974).
+    var mime: String?
 
     enum CodingKeys: String, CodingKey {
-        case path, kind, size, mode, owner, group, mtime, ctime, birthtime, items, symlink
+        case path, kind, size, mode, owner, group, mtime, ctime, birthtime, items, symlink, mime
         case itemsMore = "items_more", linkTarget = "link_target", linkReal = "link_real", linkBroken = "link_broken"
     }
 

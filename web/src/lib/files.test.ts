@@ -156,6 +156,9 @@ describe("viewer", () => {
     expect(viewKind(file("old.doc", { stream: true }))).toBe("office");
     expect(viewKind(file("notes.rtf", { text: "{\\rtf1 hi}" }))).toBe("office");
     expect(viewKind(file("id.key", { text: "-----BEGIN PRIVATE KEY-----" }))).toBe("code"); // a PEM key, not Keynote
+    // A .ts is what the hub read in it (#7974): TypeScript is code, an MPEG transport stream a video.
+    expect(viewKind(file("app.ts", { text: "export const n: number = 1;\n", mime: "text/typescript" }))).toBe("code");
+    expect(viewKind(file("clip.ts", { stream: true, mime: "video/mp2t" }))).toBe("video");
     expect(viewKind(file("Talk.key", { stream: true }))).toBe("office");
     expect(viewKind(file("docs", { is_dir: true, entries: ["icon.png"] }))).toBe("directory");
     expect(glyphOf("icon.png")).toBe("image");

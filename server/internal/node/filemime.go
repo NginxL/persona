@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // sniffBytes is how much of a file's start decides its type (what http.DetectContentType looks at).
@@ -40,6 +42,12 @@ var previewMimes = map[string]string{
 // fileMime is a file's type from its name, else from its first bytes (head; may be empty).
 func fileMime(name string, head []byte) string {
 	ext := strings.ToLower(filepath.Ext(name))
+	if proto.ScriptOrStreamExt(ext) { // TypeScript or video: only the bytes tell (#7974)
+		if m := proto.ScriptOrStream(head); m != "" {
+			return m
+		}
+		return sniff(head)
+	}
 	if m, ok := previewMimes[ext]; ok {
 		// .key is also a PEM key: a Keynote document is a zip.
 		if ext == ".key" && len(head) > 0 && !bytes.HasPrefix(head, []byte("PK\x03\x04")) {
@@ -50,6 +58,11 @@ func fileMime(name string, head []byte) string {
 	if m := mime.TypeByExtension(ext); m != "" {
 		return m
 	}
+	return sniff(head)
+}
+
+// sniff is a type from a file's first bytes; "" for none.
+func sniff(head []byte) string {
 	if len(head) == 0 {
 		return ""
 	}
@@ -85,6 +98,21 @@ func readHead(f *os.File) []byte {
 		return nil
 	}
 	return buf[:n]
+}
+
+// mimeAt is the type of the regular file at path, named name (a link's own name), from the name and its first
+// bytes; "" when it cannot be read.
+func mimeAt(name, path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	head := readHead(f)
+	if head == nil {
+		return ""
+	}
+	return fileMime(name, head)
 }
 
 // streamedMime: a type whose bytes are never shown as text, so file.read with stream skips reading a page of it.

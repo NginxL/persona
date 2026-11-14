@@ -73,3 +73,51 @@ func TestDownloadSniffsWhatTheNameDoesNotSay(t *testing.T) {
 		t.Fatalf("%+v, %v", info, err)
 	}
 }
+
+// A .ts file is TypeScript or an MPEG transport stream, and only its bytes tell (#7974): every way a client gets at a
+// file (the viewer's file.read with and without stream, the download's type, the Info sheet) says the same.
+func TestTypeScriptAndTransportStreamByTheirBytes(t *testing.T) {
+	dir := t.TempDir()
+	n := &Node{home: dir}
+	fixtures := filepath.Join("..", "..", "..", "spec", "fixtures", "file-types")
+	script, err := os.ReadFile(filepath.Join(fixtures, "typescript.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment, err := os.ReadFile(filepath.Join(fixtures, "segment.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"app.ts": script, "esm.mts": script, "cjs.cts": script, "clip.ts": segment,
+		"camera.mts": segment, "empty.ts": nil} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"app.ts", "esm.mts", "cjs.cts", "empty.ts"} {
+		for _, stream := range []bool{true, false} {
+			fc, err := n.readFile("~/"+name, "", 0, stream)
+			if err != nil || fc.Stream || fc.Text != string(script[:len(fc.Text)]) || fc.Mime != proto.MimeTypeScript {
+				t.Fatalf("%s (stream %v) = %+v, %v", name, stream, fc, err)
+			}
+		}
+	}
+	for _, name := range []string{"clip.ts", "camera.mts"} {
+		fc, err := n.readFile("~/"+name, "", 0, true)
+		if err != nil || !fc.Stream || fc.Text != "" || fc.Data != "" || fc.Mime != proto.MimeTransportStream || fc.Revision == "" {
+			t.Fatalf("%s = %+v, %v", name, fc, err)
+		}
+	}
+	for name, want := range map[string]string{"app.ts": proto.MimeTypeScript, "clip.ts": proto.MimeTransportStream} {
+		chunk, err := n.readFileChunk(proto.FileChunkRequest{Path: "~/" + name})
+		if err != nil || chunk.Mime != want {
+			t.Fatalf("download %s = %+v, %v", name, chunk, err)
+		}
+		if info := n.statDetail("~/"+name, ""); info.Kind != "file" || info.Mime != want {
+			t.Fatalf("Info %s = %+v", name, info)
+		}
+	}
+	if info := n.statDetail("~", ""); info.Kind != "dir" || info.Mime != "" {
+		t.Fatalf("a folder has no type: %+v", info)
+	}
+}
