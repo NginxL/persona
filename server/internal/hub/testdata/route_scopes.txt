@@ -282,6 +282,8 @@ machines.read        GET /api/v1/machines/{mid}/stat
 -                    GET /api/v1/personas/{id}/{file...}
 -                    GET /api/v1/phone/write-queue
 -                    GET /api/v1/pins
+notify               GET /api/v1/push/intercepts
+-                    GET /api/v1/push/ln-mode
 -                    GET /api/v1/push/web
 -                    GET /api/v1/push/web/{device}
 -                    GET /api/v1/recordings
@@ -650,6 +652,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/model-profiles/{id}
 -                    PUT /api/v1/mutes
 -                    PUT /api/v1/pins
+-                    PUT /api/v1/push/ln-mode
 -                    PUT /api/v1/push/web/{device}
 -                    PUT /api/v1/recordings/{id}
 -                    PUT /api/v1/recordings/{id}/audio

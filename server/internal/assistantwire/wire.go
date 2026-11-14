@@ -250,7 +250,20 @@ type Notification struct {
 	// RecordingID is the recording a NotifyPush push is about (a meeting's minutes, #3862 phase 6): the push carries it
 	// as `recording_id`, and apps that know it open the meeting's thread instead of the session. Older hubs drop it.
 	RecordingID string `json:"recording_id,omitempty"`
+	// Level is how urgent the push is for the hub's low-distraction (ln) mode: "P0", "P1" or "P2". "" lets the hub
+	// derive one from the kind. Hubs from before the field derive the level, so older and newer managers interoperate.
+	Level string `json:"level,omitempty"`
+	// RelatedKey links the push to what it is about (a to-do id, a PR URL, a subject): in ln mode the same key pushes
+	// at most once in 12 hours, and same-minute P1 conclusion pushes with it merge into one intercepted entry.
+	RelatedKey string `json:"related_key,omitempty"`
 }
+
+// Push levels a Notification may carry (hub low-distraction mode, docs/server/server.md "Push policy").
+const (
+	LevelP0 = "P0" // must interrupt: a decision or a card that needs the owner now
+	LevelP1 = "P1" // worth knowing: a conclusion, an explicit notify_user; held for the briefing in ln mode
+	LevelP2 = "P2" // background news: silent in ln mode
+)
 
 // NotifyTodo is the to-do a NotifyDecide push asks about: its id, when the decision now waiting was asked (what
 // POST /api/v1/todos/{id}/accept takes, so an OK from an earlier round takes nothing) and the option it recommends.

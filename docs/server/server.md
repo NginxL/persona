@@ -537,6 +537,16 @@ Pairing: hub `~/.persona/bin/personad hub pair` calls running hub via loopback H
   - Hidden Agents and assistant turns already pushed by `notify_user` are skipped. Hub restart measures ongoing turns from first post-restart observation.
 - Extension notifications (`POST /api/v1/notify`, `hub/notify_api.go`): extension picks active / `time-sensitive`, filtered by device input and hidden status. Decision / rate limits belong to extension; `docs/extensions/extensions.md` (“Sending notifications”).
 
+### Low-distraction (ln) mode (`hub/lnmode.go`)
+
+A hub-side switch (`hub_settings` key `hub.ln_mode`, default off; `GET`/`PUT /api/v1/push/ln-mode`, full credentials only for the write). With it off every push behaves exactly as above. With it on, alerts are delivered by urgency instead of all alerting:
+
+- Every alert push carries a level and a related key. A manager notification may name them (`assistantwire.Notification.Level` / `RelatedKey`, omitempty; older managers let the hub derive them): `NotifyInput` / `NotifyDecide` / `NotifyReply` and other cards derive **P0**, `NotifyPush` (incl. `notify_user`) **P1**, `NotifyDone` **P2**. `POST /api/v1/notify` accepts `push_level` (`P0` / `P1` / `P2`, default `P1`).
+- P0 still alerts; P1 is held for the “Needs you” list / briefings; P2 stays silent. The WebSocket `notify` event is never filtered, so app lists and briefings keep updating; only the APNs alert is withheld.
+- One related key alerts at most once in 12 hours (`ln_dedup_12h`); the check and the note happen under one lock. Decisions are keyed by to-do and round (`todo:<id>@<asked_at>`), so a decision asked again rings again; `POST /api/v1/notify` keys by manager, extension and `id`; `notify_user` takes an optional `related_key` (a PR link, a to-do id). Held P1 entries of one manager merge when they arrive in the same minute or share a related key within 12 hours, so several conclusion notices, or three about one PR, are one entry.
+- The switch is read at startup, written through the API and refreshed in the background, so pushes never wait on the database; with it off the push path is unchanged. Held entries are saved by one background writer that coalesces bursts and never writes out of order.
+- Every held push is recorded with its reason (`ln_p1_held`, `ln_p2_silent`, `ln_dedup_12h`), in memory and under `hub_settings` key `hub.ln_intercepts` (bounded to 500 entries and 14 days), and read through `GET /api/v1/push/intercepts` (full credentials read all managers; an extension token with `notify` scope reads its own manager's entries only). The hub's own pairing / join alerts are P0 and always pass.
+
 <a id="关停hubshutdowngo"></a>
 
 ## Shutdown (`hub/shutdown.go`)
