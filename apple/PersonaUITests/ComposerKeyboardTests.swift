@@ -91,7 +91,7 @@ final class ComposerKeyboardTests: XCTestCase {
             XCTAssertTrue(dismissButton.exists && dismissButton.isHittable, "missing dismiss-keyboard button while typing")
         }
         XCTAssertEqual(field.value as? String, "first line\nsecond line", "return should insert a newline, not send")
-        // By id: the dictation bar's ↑ stays in the tree while the bar is off (#7586), and it is 发送 too.
+        // By id: the dictation bar's ↑ stays in the tree while the bar is off (#7586), with the same Send label.
         let send = app.buttons["shell-composer-send"].firstMatch
         XCTAssertTrue(send.exists && send.isEnabled && send.isHittable)
         var frames: [String: CGRect] = [:]
