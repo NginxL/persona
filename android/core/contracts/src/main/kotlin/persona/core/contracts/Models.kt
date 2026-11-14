@@ -666,6 +666,39 @@ data class ImagePayload(
     val size: Int? = null,
 )
 
+/**
+ * What one model request used (`proto.TokenUsage`, docs/protocol/protocol.md "Token usage on items"). Counts are tokens;
+ * [cacheWrite1h] is the part of [cacheWrite] kept for an hour. [id] (`agent:<id>`) marks one subagent's report, counted
+ * once per model and speed. Older nodes omit the list.
+ */
+@Serializable
+data class TokenUsage(
+    val id: String? = null,
+    val model: String? = null,
+    @SerialName("in") val input: Long = 0,
+    @SerialName("out") val output: Long = 0,
+    @SerialName("cache_read") val cacheRead: Long = 0,
+    @SerialName("cache_write") val cacheWrite: Long = 0,
+    @SerialName("cache_write_1h") val cacheWrite1h: Long = 0,
+    val fast: Boolean = false,
+) {
+    /** A subagent's or workflow agent's report. Entries with the same id, model and speed are one report. */
+    val report: Boolean get() = !id.isNullOrBlank()
+}
+
+/**
+ * The built-in catalog's reference price in USD per one million tokens (`proto.ModelPrice`). A missing kind is unknown,
+ * not free. Input and output are present whenever the catalog has a price.
+ */
+@Serializable
+data class ModelPrice(
+    val input: Double? = null,
+    val output: Double? = null,
+    @SerialName("cache_read") val cacheRead: Double? = null,
+    @SerialName("cache_write") val cacheWrite: Double? = null,
+    @SerialName("cache_write_1h") val cacheWrite1h: Double? = null,
+)
+
 @KeepGeneratedSerializer
 @Serializable(with = ItemSerializer::class)
 data class Item(
@@ -707,6 +740,8 @@ data class Item(
      * model); null where it does not say (user items, older hubs). The chat marks where the replies' model changes by it.
      */
     val model: String? = null,
+    /** What the model requests this item stands for used (#5426). Older hubs omit it. */
+    val usage: List<TokenUsage> = emptyList(),
 )
 
 /**

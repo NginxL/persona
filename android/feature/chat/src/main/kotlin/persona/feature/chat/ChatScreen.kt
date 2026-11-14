@@ -837,11 +837,17 @@ private fun ChatPage(
     val callJumps = pageLinks.callJumps
     val toolNames = pageLinks.toolNames
     val linkManager = pageLinks.linkManager
+    // The live turn's reply says nothing about cost until the turn stops, unless it is waiting on you (its reply is in).
+    val liveAnswerId = if (live && !waitingOnYou) projection.liveTurnId?.let { id ->
+        projection.turns.firstOrNull { it.id == id }?.answer?.item?.id
+    } else null
+    val replyUsage = rememberReplyUsage(snapshot.items, projection.lines,
+        persona = renderStyle == ChatRenderStyle.Assistant, hideAnswerId = liveAnswerId, catalog = actionsService)
     CompositionLocalProvider(LocalChatMarkdownCache provides markdownCache, LocalChatRowActions provides rowActions,
         LocalContentColor provides PersonaTheme.palette.ink, LocalChatPorts provides chatPorts,
         persona.core.designsystem.LocalAssistantCards provides cardsHost, LocalChatSubagents provides subagentLinks, LocalSubagentFolds provides subagentFolds, LocalChatWorkflows provides workflowCards,
         LocalChatTaskIndex provides projection.tasks, LocalChatJumpToCall provides callJumps::jump, LocalToolNames provides toolNames,
-        LocalChatChildren provides childCards) {
+        LocalReplyUsage provides replyUsage, LocalChatChildren provides childCards) {
         // Under the files pane or the terminal's cover: hidden from screen readers too.
         ChatLinkHost(Modifier.fillMaxSize().background(PersonaTheme.palette.background)
             .then(if (embedded) Modifier else Modifier.imePadding())

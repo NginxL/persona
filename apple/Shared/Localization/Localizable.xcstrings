@@ -12058,6 +12058,29 @@
       },
       "extractionState" : "manual"
     },
+    "%lldd %lldh %lldm" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 天 %2$lld 小时 %3$lld 分"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lldd %2$lldh %3$lldm"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld日%2$lld時間%3$lld分"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%lldd ago" : {
       "localizations" : {
         "en" : {
@@ -12076,6 +12099,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld 天前"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "%lldh %lldm" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 小时 %2$lld 分"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lldh %2$lldm"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld時間%2$lld分"
           }
         }
       },
@@ -15508,6 +15554,29 @@
           }
         }
       }
+    },
+    "About %@ for this reply, estimated at list prices" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %1$@ for this reply, estimated at list prices"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この返信は約 %1$@（公開価格での概算）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条回复约 %1$@，按公开价格估算"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "About %@ h" : {
       "extractionState" : "manual",
@@ -29870,6 +29939,29 @@
       },
       "extractionState" : "manual"
     },
+    "By model:" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By model:"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデル別:"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按模型拆分："
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Choose the Fastest Route Automatically" : {
       "localizations" : {
         "en" : {
@@ -30096,6 +30188,75 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "缓存写"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Cache breakdown: read %@ · write %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache breakdown: read %1$@ · write %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャッシュ内訳: 読み取り %1$@ · 書き込み %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存拆分：读取 %1$@ · 写入 %2$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Cache breakdown: read %@ · write %@ · hit rate %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache breakdown: read %1$@ · write %2$@ · hit rate %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャッシュ内訳: 読み取り %1$@ · 書き込み %2$@ · ヒット率 %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存拆分：读取 %1$@ · 写入 %2$@ · 命中率 %3$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Cache hit rate is low; more context was billed again this turn" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache hit rate is low; more context was billed again this turn"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャッシュヒット率が低く、このターンでは多くのコンテキストが再課金されています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存命中率偏低，本轮较多上下文重新计费"
           }
         }
       },
@@ -44890,6 +45051,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "核心"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Cost unavailable for this turn; showing usage only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cost unavailable for this turn; showing usage only"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターンの料金は現在取得できないため、使用量のみ表示しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本轮费用暂不可用，仅显示用量"
           }
         }
       },
@@ -60768,6 +60952,29 @@
           }
         }
       }
+    },
+    "Estimated cost of this reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated cost of this reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この返信の概算費用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条回复的估算费用"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Evening" : {
       "extractionState" : "manual",
@@ -87764,6 +87971,64 @@
           }
         }
       }
+    },
+    "Model: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデル: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Model: %lld models" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Model: %1$lld model"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Model: %1$lld models"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデル: %1$lld 個のモデル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型：%1$lld 个模型"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Models" : {
       "extractionState" : "manual",
@@ -125034,6 +125299,29 @@
       },
       "extractionState" : "manual"
     },
+    "Request details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request details"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リクエストの明細"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本轮明细"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Requesting…" : {
       "localizations" : {
         "en" : {
@@ -145597,6 +145885,29 @@
       },
       "extractionState" : "manual"
     },
+    "Suggestion: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestion: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提案: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Summaries of steps, heart rate, sleep, and more; saves once you confirm" : {
       "localizations" : {
         "en" : {
@@ -165054,6 +165365,29 @@
       },
       "extractionState" : "manual"
     },
+    "Time %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "時間 %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗时 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Time Range" : {
       "localizations" : {
         "en" : {
@@ -166502,6 +166836,29 @@
       },
       "extractionState" : "manual"
     },
+    "Token value this turn: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token value this turn: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターンの token 価値: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本轮 token 价值：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Tokens" : {
       "localizations" : {
         "en" : {
@@ -166589,6 +166946,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每分钟 token"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Tokens: %@ total · input %@ · output %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tokens: %1$@ total · input %2$@ · output %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "トークン: 合計 %1$@ · 入力 %2$@ · 出力 %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tokens：共 %1$@ · 输入 %2$@ · 输出 %3$@"
           }
         }
       },
@@ -190592,6 +190972,29 @@
         }
       }
     },
+    "· %@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %1$@ %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %1$@ %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %1$@ %2$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "· %lld agents" : {
       "localizations" : {
         "en" : {
@@ -191727,6 +192130,29 @@
         }
       }
     },
+    "≈ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "≈ %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "約 %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "⌘+ / ⌘− / ⌘0 or pinching on the trackpad also change the text size. Chinese and other wide characters use the system font, two cells each." : {
       "localizations" : {
         "en" : {
@@ -192005,6 +192431,29 @@
           }
         }
       }
+    },
+    "Worth %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Worth %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "価値 %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "价值 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Worth a Look" : {
       "extractionState" : "manual",

@@ -1,6 +1,7 @@
 package persona.core.contracts.api
 
 import persona.core.contracts.CoreText
+import persona.core.contracts.ModelPrice
 import persona.core.contracts.QueueEdit
 import persona.core.contracts.Session
 import persona.core.contracts.SessionInfo
@@ -103,6 +104,13 @@ interface ChatActions {
      * restore_nothing, restore_unknown, restore_gone, node_outdated). Not retried.
      */
     suspend fun restoreModel(session: Session): Unit = throw UnsupportedOperationException("Restore model unavailable")
+
+    /**
+     * Reference prices for model ids (`POST /api/v1/launchers/catalog`, at most 100 ids). A model the catalog answers
+     * without a price is present and null; a model it leaves out is absent. Throws when the hub cannot be asked.
+     */
+    suspend fun catalogPrices(ids: List<String>): Map<String, ModelPrice?> =
+        throw UnsupportedOperationException("Catalog unavailable")
 }
 
 /** What "Rewind to here" restores: the conversation alone, or the files changed after the message too. */

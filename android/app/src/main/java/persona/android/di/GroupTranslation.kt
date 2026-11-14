@@ -186,6 +186,7 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun interactionHistory(session: Session) = source.interactionHistory(names.rawSession(session))
             .map { it.copy(interaction = names.interaction(it.interaction)) }
         override suspend fun restoreModel(session: Session) = source.restoreModel(names.rawSession(session))
+        override suspend fun catalogPrices(ids: List<String>) = source.catalogPrices(ids)
         override suspend fun fork(session: Session, atItemId: String) = source.fork(names.rawSession(session), atItemId)
         override suspend fun rewind(session: Session, target: RewindTarget, restore: RewindRestore) = source.rewind(names.rawSession(session), target, restore)
     }

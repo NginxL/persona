@@ -150,6 +150,24 @@ class HttpChatActions internal constructor(
         }
     }
 
+    override suspend fun catalogPrices(ids: List<String>): Map<String, ModelPrice?> {
+        if (ids.isEmpty()) return emptyMap()
+        val body = buildJsonObject { put("ids", JsonArray(ids.map(::JsonPrimitive))) }
+        return request(api("launchers", "catalog"), "POST",
+            body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).use { response ->
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            val models = (JsonCodec.parseToJsonElement(response.body!!.string()).jsonObject["models"] as? JsonArray).orEmpty()
+            buildMap {
+                for (row in models) {
+                    val obj = row as? JsonObject ?: continue
+                    val id = (obj["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() } ?: continue
+                    val price = obj["price"]
+                    put(id, if (price == null || price is JsonNull) null else JsonCodec.decodeFromJsonElement<ModelPrice>(price))
+                }
+            }
+        }
+    }
+
     override suspend fun info(session: Session): SessionInfo =
         request(api("sessions", session.machineId, session.sessionId, "info"), "GET", null).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
