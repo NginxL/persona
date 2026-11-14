@@ -177,6 +177,10 @@ final class DemoModeTests: XCTestCase {
         noErrors("claude chat")
         shot("claude")
         let field = see(app.descendants(matching: .any)["shell-composer-field"].firstMatch, "the message field")
+        // One element for the field (#8002): the placeholder drawn over it is not a second `shell-composer-field`. It was,
+        // listed first, so typing went to text that takes none.
+        let named = app.descendants(matching: .any).matching(identifier: "shell-composer-field").allElementsBoundByIndex
+        XCTAssertEqual(named.count, 1, "\(named.count) shell-composer-field elements: \(named.map { "\($0.elementType.rawValue) \($0.frame)" })")
         field.tap()
         field.typeText("看一下进度")
         see(app.buttons["发送"], "send").tap()
@@ -289,13 +293,16 @@ final class DemoModeTests: XCTestCase {
         shot("mail")
         back()
 
-        // Settings says it is the demo; leaving it is the pairing page again, and stays so after a relaunch.
+        // Settings says it is the demo: its Hub section offers Connect My Hub and Exit Demo Mode. (The line under its
+        // title, 「体验模式 · 数据都是编造的」, went when Settings was organized by assistant, device and Hub, e479c5bda3.)
+        // Leaving it is the pairing page again, and stays so after a relaunch.
         tab("设置")
-        see(text("体验模式 · 数据都是编造的"), "体验模式 in 设置")
-        shot("settings")
         let leave = app.buttons["settings.leaveDemo"]
         for _ in 0..<3 where !(leave.exists && leave.isHittable) { app.swipeUp() }
-        see(leave, "退出体验模式").tap()
+        see(leave, "退出体验模式 in 设置")
+        see(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "连接我的")).firstMatch, "连接我的 hub in 设置")
+        shot("settings")
+        leave.tap()
         see(app.buttons["welcome.demo"], "the pairing page after leaving")
         app.terminate()
         app.launchArguments = ["-dev.openChat", "", "-probes", "YES"]

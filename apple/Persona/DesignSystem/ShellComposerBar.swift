@@ -313,6 +313,11 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     /// The draft's field: one view in both shapes, so focus and the IME's marked text survive the change.
     private var field: some View {
         TextField("", text: $text, selection: fieldSelection, axis: .vertical)
+            // The field's name and identifier on the field itself, before the placeholder drawn over it: applied after the
+            // overlay, they also went to the placeholder, a second `shell-composer-field` element in the tree, listed
+            // first (#8002).
+            .accessibilityLabel(placeholder)
+            .accessibilityIdentifier("shell-composer-field")
             .readingContent() // what is typed grows past the interface's cap, as in Messages
             .font(Theme.Font.body)
             .overlay(alignment: .leading) {
@@ -322,7 +327,6 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                         .lineLimit(1).minimumScaleFactor(0.5).allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
-            .accessibilityLabel(placeholder)
             .lineLimit(expanded ? 1...maximumLines : 1...1)
             #if os(iOS) || os(visionOS)
             // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
@@ -344,7 +348,6 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             .padding(.trailing, fieldRightInset)
             .padding(.top, expanded ? Theme.Space.l : 0)
             .scaledFrame(minHeight: fieldMinimumHeight)
-            .accessibilityIdentifier("shell-composer-field")
             #if os(iOS)
             // Measure at full width, before the button's reserved inset, not the field's capped height.
             // Not while the page is up: it has its own lines, and the box measures again as it comes back.
