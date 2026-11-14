@@ -806,6 +806,29 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(self.comments), 1)
         self.assertIn("worker unavailable", self.comments[0])
 
+    def test_terminal_verification_failure_is_published_once(self):
+        clock = [1000.0]
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch, "semantic_review", return_value=[]) as review, \
+                patch.object(pr_watch, "verify", side_effect=pr_watch_common.WatchError("infrastructure unavailable")) as verify, \
+                patch.object(pr_watch.time, "time", side_effect=lambda: clock[0]):
+            for now in (1000.0, 1301.0, 1602.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+            self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "failed")
+            self.assertEqual(len(self.comments), 3)
+
+            for now in (1903.0, 1904.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+
+        terminal = [body for body in self.comments if "did not pass" in body]
+        self.assertEqual(1, len(terminal), "an already-published terminal failure was posted again")
+        self.assertEqual(len(self.comments), 4)
+        self.assertTrue(self.watcher.state.get("example/one", 7)["failure_posted"])
+        self.assertEqual(verify.call_count, 3)
+        self.assertEqual(review.call_count, 1)
+
     def test_semantic_failure_retries_with_backoff_without_comment_spam(self):
         for attempt in range(3):
             with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
