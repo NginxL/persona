@@ -613,6 +613,13 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   heartbeat's kind of ping) and shows the median of the last 5 from the last 20 s (`HubRoundTrips`). It is the same leg
   the web overlay times ("Connection stats on the web"), and like it never sits on the first line. Bitrates have two
   decimals under 1 Mbps, one above, as on the web.
+- **Browser** (#6558, in progress; nothing on the page uses it yet): `web/src/screen/video-wire.ts` frames the wire as
+  `PersonaScreenKit` does, both replaying `spec/fixtures/screen-video` (written from Swift's own messages by
+  `ScreenVideoFixtureTests`), and `video-bitstream.ts` turns `format` into what WebCodecs' `VideoDecoder` takes: the
+  codec string (`hvc1.1.6.L93.B0`, `avc1.64001F`) and the HEVC or AVC decoder configuration record, for the 4-byte NAL
+  lengths every `frame` carries. `node web/e2e/screen-video-decode.mjs <web URL>` decodes the mock's HEVC and H.264
+  fixtures, every frame, in a real browser. The mock plays `fixture.bin` (HEVC) or `fixture-h264.bin` as the helper picks
+  its codec: the first of `start.codecs` it has, else H.264, which is what a browser without HEVC gets.
 - **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
   the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
