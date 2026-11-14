@@ -2616,12 +2616,14 @@ iOS 27.0 only Japanese failed, on 27.2 zh-Hans already did.
   screen holds a different row in each language and text size.
 - Not the trailing edge: the chat list's edge navigator lives there (#2615). A quick vertical drag from the leading edge
   starts neither the back swipe nor the drawer.
-- A test that must not change what it reads (the mock's to-dos are shared by the whole run) can check that: here the
-  to-do's `due_at` in `GET /api/v1/todos/todo_weather` before and after the run.
+- A test that must not change what it reads (the mock's to-dos are shared by the whole run) checks that itself:
+  `TodoStageBarUITests` reads the to-do's `due_at` (`GET /api/v1/todos/todo_weather`) in `setUpWithError` and compares
+  it in `tearDownWithError`, which runs after a failure too.
 - A launch at `UICTContentSizeCategoryAccessibilityXXXL` no longer reaches the accessibility layouts of interface views
   (`dynamicTypeSize.isAccessibilitySize` is false under the cap); a UI test that expects one fails on `main`. A view that
   still needs another form at the largest size picks it by measured width (`ViewThatFits`, as `TodoStageBar` since
   #7268), so its test accepts either form there.
 - A fixed band (the window less 15% at each end) is not the part of a page nothing covers: the to-do page's bottom
   buttons stack at the largest size (#6151) and covered the stage bar in Japanese while the test, checking only the
-  window, passed with a screenshot that didn't show it. Take the bottom from the buttons' own frames.
+  window, passed with a screenshot that didn't show it. Take the bottom from the frames of each page's own bottom
+  controls (on the chat, the action bar's entries, which also reach above the band at the largest size).

@@ -4,13 +4,35 @@ import XCTest
 /// MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 (PERSONA_MOCK_HUB): on the chat's task card (the widget task, on Develop) and on
 /// the detail page of the to-do 「天气 App 发 1.3 版」 (on Develop), in zh-Hans, English and Japanese, light and dark. At the
 /// default size the bar is one element; at the largest it is that, or the six dots with a line under them when the
-/// names do not fit (by width), and it lies within the window, clear of the to-do page's buttons. The page is scrolled by
-/// its margin (#6783). `TEST_RUNNER_PERSONA_SHOTS=<dir>` keeps the screenshots
+/// names do not fit (by width), and it lies within the window, clear of the controls at the bottom of the page. The page is
+/// scrolled by its margin, and the run must leave the mock to-do's due date as it found it (#6783).
+/// `TEST_RUNNER_PERSONA_SHOTS=<dir>` keeps the screenshots
 /// (`stagebar-<place>-<language>-<size>-<scheme>.png`); `TEST_RUNNER_PERSONA_PHASE=before` takes them on an older build,
 /// checking nothing.
 final class TodoStageBarUITests: XCTestCase {
     private var env: [String: String] { ProcessInfo.processInfo.environment }
     private var before: Bool { env["PERSONA_PHASE"] == "before" }
+    /// The mock to-do's due date when the run began.
+    private var dueBefore: String?
+
+    /// The run reads the mock's to-dos and must not change them: a drag that lands on a date wheel turns it, and the
+    /// to-do's due date moves (#6783).
+    override func setUpWithError() throws {
+        if let hub = env["PERSONA_MOCK_HUB"] { dueBefore = try dueAt(hub) }
+    }
+
+    override func tearDownWithError() throws {
+        if let hub = env["PERSONA_MOCK_HUB"], let dueBefore, !before {
+            XCTAssertEqual(try dueAt(hub), dueBefore, "the run changed the mock to-do's due date")
+        }
+    }
+
+    /// `due_at` of the mock's to-do 「天气 App 发 1.3 版」 (`GET /api/v1/todos/todo_weather`).
+    private func dueAt(_ hub: String) throws -> String {
+        let data = try Data(contentsOf: URL(string: hub + "/api/v1/todos/todo_weather")!)
+        let todo = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["todo"] as? [String: Any]
+        return try XCTUnwrap(todo?["due_at"] as? String, "no due_at in \(String(decoding: data, as: UTF8.self))")
+    }
 
     @MainActor func testStageBarAtEveryTextSize() throws {
         guard let hub = env["PERSONA_MOCK_HUB"] else {
@@ -23,16 +45,20 @@ final class TodoStageBarUITests: XCTestCase {
             ("en", ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]),
             ("ja", ["-AppleLanguages", "(ja)", "-AppleLocale", "ja_JP"]),
         ]
-        let places: [(String, [String])] = [
-            ("chat", ["-tab", "assistant", "-dev.openChat", "", "-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001"]),
-            ("todo", ["-tab", "assistant", "-openAssistantPage", "todos", "-openTodoTitled", "天气 App 发 1.3 版"]), // i18n-ignore: the mock's to-do
+        // Each place with the controls at its bottom that can cover the bar: the chat's action bar entries and composer,
+        // the to-do page's buttons.
+        let places: [(String, [String], [String])] = [
+            ("chat", ["-tab", "assistant", "-dev.openChat", "", "-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001"],
+             ["action-bar.needs-you", "action-bar.running", "shell-composer-field"]),
+            ("todo", ["-tab", "assistant", "-openAssistantPage", "todos", "-openTodoTitled", "天气 App 发 1.3 版"], // i18n-ignore: the mock's to-do
+             ["todo.handToAgent", "todo.toggleDone"]),
         ]
         // The look outermost: the app icon follows it, and the system's alert about that comes only when it changes.
         var first = true, lastScheme = ""
         for scheme in ["light", "dark"] {
             for (language, languageArgs) in languages {
                 for size in ["default", "largest"] {
-                    for (place, placeArgs) in places {
+                    for (place, placeArgs, bottomControls) in places {
                         let name = "\(place)-\(language)-\(size)-\(scheme)"
                         let largest = size == "largest" ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
                         let app = XCUIApplication()
@@ -56,8 +82,8 @@ final class TodoStageBarUITests: XCTestCase {
                         }
                         XCTAssertTrue(found, "\(name): no stage bar:\n\(app.debugDescription)")
                         sleep(2) // the page settles
-                        // The bar into the middle of the screen, clear of the navigation bar and the buttons at the bottom.
-                        let clear = clearPart(app, window)
+                        // The bar into the middle of the screen, clear of the navigation bar and the controls at the bottom.
+                        let clear = clearPart(app, window, below: bottomControls)
                         for _ in 0..<4 where !clear.contains(bar.frame) {
                             scroll(app, by: max(-window.height * 0.35, min(window.height * 0.35, bar.frame.midY - clear.midY)))
                             sleep(1)
@@ -92,14 +118,15 @@ final class TodoStageBarUITests: XCTestCase {
                      thenHoldForDuration: 0.3)
     }
 
-    /// The part of the window clear of the navigation bar and the buttons at the bottom: the window less 15% at each end,
-    /// and above the to-do page's buttons where they reach higher (one above the other at the largest size, #6151, they
-    /// covered the bar in Japanese).
-    @MainActor private func clearPart(_ app: XCUIApplication, _ window: CGRect) -> CGRect {
+    /// The part of the window clear of the navigation bar and the controls at the bottom: the window less 15% at each end,
+    /// and above the page's bottom controls where they reach higher. At the largest size the to-do page's buttons stand
+    /// one above the other (#6151) and covered the bar in Japanese; the chat's action bar entries reach above the band too.
+    @MainActor private func clearPart(_ app: XCUIApplication, _ window: CGRect, below controls: [String]) -> CGRect {
         let top = window.minY + window.height * 0.15
         var bottom = window.maxY - window.height * 0.15
-        for id in ["todo.handToAgent", "todo.toggleDone"] where app.buttons[id].exists {
-            bottom = min(bottom, app.buttons[id].frame.minY)
+        for id in controls {
+            let control = app.descendants(matching: .any)[id].firstMatch
+            if control.exists { bottom = min(bottom, control.frame.minY) }
         }
         return CGRect(x: window.minX, y: top, width: window.width, height: bottom - top)
     }
