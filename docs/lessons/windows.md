@@ -33,6 +33,9 @@ Read this before changing the Windows node (#1090), or developing or testing `pe
 
 - **A Windows node's paths reach a hub that may not be Windows**: the node reports directories as `C:\Users\…`, and on a Linux or macOS hub `filepath` splits only at `/`, so `filepath.Base` returns the whole path. `identity`'s directory checks (`IsAssistantDir`, `IsAssistantDirOf`, `SpaceOf`, `InHealthSpace`) missed the computer's assistant and health directories, and its main chat conversations never reached the Persona tab (#6419). `filepath.ToSlash` does not help there: it converts nothing off Windows.
   Code on the hub or a manager that takes apart a directory a node sent reads it through `identity.NodePath` first: a path with a drive letter or a `\\server\` prefix gets forward slashes on a hub that is not Windows, and anything else stays as it is. Test such code with Windows paths and run the test on Linux, not only on the computer you develop on.
+- **`path` is not a node's syntax either**: it knows only `/` on every system, Windows included. Task workspaces checked the node's answers with `path.IsAbs`, so a Windows computer's `C:\…` was never absolute, and every writable task in a Git directory there failed with "Workspace C:\… is not an available absolute directory" (#7106).
+  A path that is checked or joined and then sent back to its node goes through `proto.NodeAbs`, `proto.NodeClean` and `proto.NodeJoin`. They keep the node's own syntax (backslashes, an upper-case drive letter, a root of `C:\` or `\\server\share` that `..` cannot climb out of), so the node reads the result as its own path.
+  Two of a node's paths compare by `proto.NodeKey`, which also ignores case for a Windows path: `C:\Code\App` and `c:\code\app` are one directory there. Keys are for comparing only; never send one to the node.
 
 ## Scheduled tasks (automatic startup)
 

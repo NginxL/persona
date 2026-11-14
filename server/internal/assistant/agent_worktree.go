@@ -2,7 +2,6 @@ package assistant
 
 import (
 	"context"
-	"path/filepath"
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -19,6 +18,6 @@ func (s *Service) newWorktree(ctx context.Context, mid, cwd, branch string) (pro
 	}
 	var res proto.WorktreeCreateResult
 	err := s.call(ctx, mid, DeviceWorktreeCreate, map[string]any{"cwd": cwd, "branch": branch,
-		"path": filepath.Join(prep.Path, herdr.WorktreeDirName(branch))}, &res)
+		"path": proto.NodeJoin(prep.Path, herdr.WorktreeDirName(branch))}, &res)
 	return res, err
 }
