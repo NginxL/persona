@@ -539,8 +539,8 @@ A pane terminal is a full shell on that computer, stricter than an Agent-session
 
 ### Not implemented
 
-- iOS: **Agents › ⋯ (list menu) › Terminals**, and **Terminals** on a computer's page (#4754, `apple/Persona/Views/Chats/TerminalsView.swift`): every pane of each computer, the Agents' under their titles, plain ones labelled Terminal with their `foreground` program and folder, a stopped Agent's left behind as "Finished: <title>". A plain pane opens in the existing terminal cover by its `pane:` address (watch and type); an Agent's, and a stopped Agent's, by its session, whose terminal page offers Resume (#4328). Each computer's header menu has New Terminal per workspace and Close Finished Terminals (preview, then confirm); a plain pane closes by swipe or long press, after a confirmation. Android has it too (#2972): Terminal in Agents List Settings, see `docs/android/android.md` ("App shell and direct page entry").
-- Close panes/tabs, rename, split: outside this version, do it on the computer when needed.
+- iOS: **Agents › ⋯ (list menu) › Terminals**, and **Terminals** on a computer's page (#4754, `apple/Persona/Views/Chats/TerminalsView.swift`): every pane of each computer, the Agents' under their titles, plain ones labelled Terminal with their `foreground` program and folder, a stopped Agent's left behind as "Finished: <title>". A plain pane opens in the existing terminal cover by its `pane:` address (watch and type); an Agent's, and a stopped Agent's, by its session, whose terminal page offers Resume (#4328). Each computer's header menu has New Terminal per workspace and Close Finished Terminals (preview, then confirm); a plain pane closes by swipe or long press, after a confirmation. A plain pane on herdr or Tern renames its tab from its long press and its terminal page's ⋯ (#6996, `tabs/rename`, as the web's node menu; `docs/apple/ios.md`, "Information architecture"), and the page reads the panes again every 8 seconds while it is in front. Android has it too (#2972): Terminal in Agents List Settings, see `docs/android/android.md` ("App shell and direct page entry").
+- Close tabs and split on iOS: outside this version, do it on the computer when needed (iOS closes a pane and renames a plain pane's tab, above).
 - Hosts without sessions or herdr (Paseo, botmux): no panes, empty list.
 - ⌘K palette now searches panes too (#2330, `docs/web/web.md`, "Pages"): reads each online computer's `panes.list` once on opening, lists ordinary shells and sessionless panes (Agent panes with sessions already appear as session results); terminal page Jump To unchanged.
 
@@ -887,8 +887,7 @@ Like Moshi (full herdr client sends mouse to herdr first, which decides whether 
 
 ### Mac (#3336)
 
-Same routes/messages as web: `apple/Mac/Terminal/MacTerminalMouse.swift` (pure button/routing/modifier/cell-throttle/edge-clamping logic); `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release in
-`TerminalView+Mac.swift` first call `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
+Same routes/messages as web: the retired native Mac terminal used a pure button/routing/modifier/cell-throttle/edge-clamping helper; its `mouseDown` / `rightMouseDown` / `otherMouseDown` and corresponding drag/release handlers first called `forwardDown` / `forwardDrag` / `forwardUp`, then `AppModel.terminalMouse` (`terminal_input.mouse`).
 
 - Forward only under control with hub `terminal_mouse`; old hub/View Only retains drag selection, context menu, single `terminal_input.click`.
 - Terminal Settings › Mouse (`terminalMouseMode`, Mac only): To Program default / Select Locally; Shift routes, not modifier; ⌘ always local (⌘-click links). Ctrl/Option modifiers 2/4.

@@ -440,6 +440,7 @@ export const LARK_FEATURE = "lark";
 export const SESSION_LIVE_FEATURE = "session_live";
 /** The hub answers a client's {"type":"ping","id"} with a pong carrying the id (docs/protocol/protocol.md). */
 export const APP_PING_FEATURE = "app_ping";
+export const DESKTOP_UNREGISTER_FEATURE = "desktop_unregister";
 
 export function larkOn(s: Pick<State, "features"> = state): boolean {
   return hubHas(s.features, LARK_FEATURE, true);
@@ -738,7 +739,7 @@ export function onHello(f: () => void): () => void {
 }
 
 // The assistant's live updates about the page itself rather than one conversation: only the shown manager's count.
-const PAGE_EVENTS = new Set(["assistant_schedule"]);
+const PAGE_EVENTS = new Set(["assistant_schedule", "assistant_saved_prompts"]);
 
 function onMessage(msg: Record<string, unknown>) {
   cursor = msg.type === "hello" ? afterHello(cursor, msg) : afterEvent(cursor, msg);

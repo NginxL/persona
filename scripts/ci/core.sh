@@ -10,4 +10,5 @@ ci_run 'Rust formatting' 300 cargo fmt --all --check
 ci_run 'Rust lints' 1200 cargo clippy --locked --all-targets -- -D warnings
 ci_run 'Rust tests and shared fixtures' 1200 cargo test --locked
 ci_run 'Generated codecs up to date' 900 cargo run --locked --quiet -p persona-core-typegen -- --check
+ci_run 'HarmonyOS core licenses' 300 python3 -I scripts/android-licenses.py --workspace . --registry-src "${CARGO_HOME:-$HOME/.cargo}/registry/src" --output "$CI_ROOT/harmony/build/core-licenses" --crate persona-core-ohos --target aarch64-unknown-linux-ohos --features ohos --label HarmonyOS --check
 ci_run 'Release library' 1200 cargo build --locked --release -p persona-core-ffi

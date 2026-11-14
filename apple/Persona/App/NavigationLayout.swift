@@ -35,11 +35,11 @@ enum NavigationLayout: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Where the sidebar layout is built so far (#6332): the iPad's regular width first; elsewhere the choice waits.
-    /// The Navigation row shows only where it does something.
+    /// Where the Sidebar layout is built (#6332): the iPhone (the drawer) and the iPad (the column). The Navigation row
+    /// shows only where it does something.
     static var offered: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad
+        true
         #else
         false
         #endif

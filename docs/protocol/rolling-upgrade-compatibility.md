@@ -74,6 +74,10 @@ a provider or transcript error. Historical recognition remains independent of re
 worker supervision accept both `mcp__persona__report_to_supervisor` and its legacy name. Generated assistant instructions
 tell the model to translate old `mcp__jarvis__X` references in stored routines to `mcp__persona__X`.
 
+The Antigravity companion registers only `persona` whatever the hub: `agy` names the tools after its own label for the
+server and `personad mcp` sends the hub bare tool names, so a second namespace would only count every tool twice against
+`agy`'s tool budget (#7333).
+
 Only `persona_settings` is listed in the assistant's tool schemas. `jarvis_settings` remains accepted by the call path
 and normalized to `persona_settings`, so an old direct call still runs without publishing a second identical schema.
 

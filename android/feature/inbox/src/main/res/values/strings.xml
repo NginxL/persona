@@ -280,7 +280,7 @@
     <string name="inbox_suggestion_say_send">Tell AI</string>
     <string name="inbox_suggestion_stale">The suggestion was updated</string>
     <string name="inbox_event_recap">Recap</string>
-    <string name="inbox_event_chain">What happened</string>
+    <string name="inbox_event_chain">Timeline</string>
     <string name="inbox_event_chain_all">Show all (%1$d)</string>
     <string name="inbox_event_view_source">View original</string>
     <string name="inbox_done_by_manager">Handled by the assistant</string>

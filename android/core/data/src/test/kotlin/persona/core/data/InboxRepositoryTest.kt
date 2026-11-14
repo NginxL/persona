@@ -1137,6 +1137,32 @@ class InboxRepositoryTest {
         }
     }
 
+    @Test fun followUpFieldsReachTheListedRecord() = runBlocking {
+        val directory = Files.createTempDirectory("inbox-follow-test").toFile()
+        val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val transport = FakeTransport().apply {
+                items = JsonArray(listOf(buildJsonObject {
+                    put("id", "chat:1"); put("source", "chat"); put("kind", "group"); put("title", "Launch")
+                    put("where", "Launch group"); put("now", "waiting")
+                    putJsonObject("follow") {
+                        put("who", "Alex"); put("next", "Ask about Friday"); put("check_at", "2026-01-02T09:00:00Z")
+                    }
+                }))
+            }
+            val repository = repository(transport, directory, owner, FakeHub())
+            withTimeout(5_000) { repository.snapshot.first { it.contentSource != null } }
+            repository.refresh()
+            val listed = repository.snapshot.value.records.single()
+            assertEquals("Launch group", listed.item.where)
+            assertEquals(InboxFollow("Alex", "Ask about Friday", "2026-01-02T09:00:00Z"), listed.event.follow)
+            assertEquals("waiting", listed.event.now)
+        } finally {
+            owner.coroutineContext[Job]!!.cancelAndJoin()
+            directory.deleteRecursively()
+        }
+    }
+
     // Inbox phase 1: an item's event fields are read with it, and answering its suggestion puts the item the hub answers
     // with in the list, also when the suggestion was stale (409 suggestion_stale carries the current item).
     @Test fun aSuggestionAnswerRedrawsTheItemTheHubAnswersWith() = runBlocking {

@@ -11,9 +11,9 @@ groups whose bundle id was empty (2026-11-02).
   scripts/release/entitlements.py sign <unsigned .xcarchive>      # ad hoc, inside out, each bundle with its target's file
   scripts/release/entitlements.py check <.ipa | .pkg | .xcarchive | .app>  # every target's groups are in its signature
 
-The Mac app (PersonaMac, the same bundle id, a .pkg for the store) the same way. In an exported .ipa / .pkg the push
-entitlement (`aps-environment`, on a Mac `com.apple.developer.aps-environment`) must also say production: the archive
-says development, and only the App Store export changes it.
+In an exported .ipa / .pkg the push entitlement (`aps-environment`, on a Mac
+`com.apple.developer.aps-environment`) must also say production: the archive says development, and only the App Store
+export changes it.
 
 Both read the targets from the Xcode project (`xcodebuild -showBuildSettings`, after xcodegen) and expand the build
 settings in each entitlements file; `$(AppIdentifierPrefix)` is the team's (the signature's own, when checking). A

@@ -105,6 +105,7 @@ func (s *Service) triage(ctx context.Context, it *InboxItem) *inboxWrite {
 		it.Tier, it.Reason = fallback, b.byRules()
 	}
 	b.applyPolicyTier(it) // the user's policy has the last word on the tier (inbox_policies.go)
+	b.liftMerged(it)      // a merged row stays at its rows' highest tier (inbox_merge.go, #7230)
 	it.TriagedAt = last
 	b.noteTriaged(it)
 	// Triage can settle an item read elsewhere while it was still untriaged (not one filed while the model thought).
@@ -445,6 +446,9 @@ func (s *Service) replyInboxDoMode(ctx context.Context, id, text, clientID strin
 	kept := !file && it.open() || it.open() && it.Last != c.Last
 	// A direct reply with a processing conversation waits for the other side instead of filing the matter. Old-App
 	// card sends keep filing. If new messages arrived while the reply was out, the existing kept-open path is unchanged.
+	if followDirect && !fromCard && file {
+		resetInboxFollowChecks(it)
+	}
 	wait := followDirect && !fromCard && file && !kept && it.open() && it.Agent != nil && it.Agent.SessionID != ""
 	kept = kept || wait
 	once.keptOpen = kept

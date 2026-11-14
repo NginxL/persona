@@ -89,7 +89,7 @@
     <string name="inbox_empty_text">hub 配好飞书（飞书网关）或在设置里加了邮箱后，需要你看的消息和邮件会出现在这里。</string>
     <string name="inbox_empty_filtered_title">都看完了</string>
     <string name="inbox_empty_filtered_text">这个筛选下没有东西。</string>
-    <string name="inbox_group_fyi">看看就好</string>
+    <string name="inbox_group_fyi">知悉即可</string>
     <string name="inbox_mark_all_seen">全部看过</string>
     <string name="inbox_clear_all">全部清除</string>
     <string name="inbox_translated">已翻译</string>

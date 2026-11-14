@@ -2,7 +2,7 @@
 
 When a machine connects to the hub actively through Persona Link (`kind: link`), or the hub connects to the computer (`kind: service`), the resident personad is updated over the existing node RPC. Link still only forwards byte streams: no new listening port, no SSH required, and it is not responsible for installing anything.
 
-This updates the executable used by the resident node; it does not update the connector persona-link or the Mac menu bar App itself. Implementation: `server/internal/devices/deploy_rpc.go`, `server/internal/node/update.go`, `server/internal/nodeupdate/`. The old SSH / tailcat deploy entry points stay.
+This updates the executable used by the resident node; it does not update the connector persona-link or its independent Mac helper package. Implementation: `server/internal/devices/deploy_rpc.go`, `server/internal/node/update.go`, `server/internal/nodeupdate/`. The old SSH / tailcat deploy entry points stay.
 
 ## Usage
 
@@ -43,7 +43,7 @@ A new protocol cannot make an old node that does not know it update itself. When
 3. Replace that binary through the original install or deploy channel, then restart the corresponding resident node service. On Linux the standard user service is `personad-node`; on Mac the standard LaunchAgent label is `com.persona.node`.
 4. Go back to the Machines page and confirm the node is connected and supports remote updates; later upgrades can then be done from the client.
 
-Reinstalling the Persona Link App on Mac currently does not replace an installed resident node automatically; upgrading the menu bar App does not count as doing this step. The first migration should use a node artifact that includes this capability.
+Reinstalling the independent Persona Link helpers on Mac does not replace an installed resident node automatically; upgrading the connector does not count as doing this step. The first migration should use a node artifact that includes this capability.
 
 Updates are offered only for resident nodes with a supported way to recover the process: systemd or launchd, recognized by the environment they set (`INVOCATION_ID`, `XPC_SERVICE_NAME`), or another supervisor that starts the node again whenever it exits and says so by running it as `node --attach --supervised` (a container's entry script, supervisord, runit, s6; Linux and macOS; [link.md](link.md) "Without systemd"). A stdio node run directly, or a resident process started by hand with nothing to restart it (nohup, cron `@reboot`), shows why it cannot be updated remotely. An old hub lacks the new orchestration logic and must also first be upgraded through its original channel.
 

@@ -1,14 +1,11 @@
 package persona.core.rustcore.wire
 
 
-data class Config(
-    val manual_timers: Boolean
-) {
+class Config {
 
     @Throws(com.novi.serde.SerializationError::class)
     fun serialize(serializer: com.novi.serde.Serializer) {
         serializer.increase_container_depth()
-        serializer.serialize_bool(this.manual_timers)
         serializer.decrease_container_depth()
     }
 
@@ -23,9 +20,8 @@ data class Config(
         @Throws(com.novi.serde.DeserializationError::class)
         fun deserialize(deserializer: com.novi.serde.Deserializer): Config {
             deserializer.increase_container_depth()
-            val manual_timers = deserializer.deserialize_bool()
             deserializer.decrease_container_depth()
-            return Config(manual_timers)
+            return Config()
         }
 
         @Throws(com.novi.serde.DeserializationError::class)
@@ -37,5 +33,13 @@ data class Config(
             }
             return value
         }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        return other is Config
+    }
+
+    override fun hashCode(): Int {
+        return 7
     }
 }

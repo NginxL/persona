@@ -2,6 +2,35 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## What a switch between the shell's pages redraws, and what a UI test adds to it (#5438)
+
+Both pages stay built, so a switch should only move them. Measured with `-perfCounts YES`, one switch ran the composer
+bar's body about 30 times, the Agents list's 3–4 times and the chat page's 2–3 times. Four causes, each a general trap:
+
+- **A window frame in `@State`.** `frame(in: .global)` changes on every frame a page slides. Kept in `@State` (the
+  composer's 「+」, for the panel it opens), it redraws its view on each of them, menus and text field included. Keep a
+  frame only an action reads in an unobserved object, or go by sizes that a slide leaves alone (the row's width, the
+  page's). A named coordinate space set on a `List` is not seen from its rows: they fall back to the window's.
+- **`@Environment(\.dismiss)` on a page.** SwiftUI makes a new `DismissAction` when the presentation around the view
+  changes, and a page going behind or coming back counts. Declare it in a small view that stores it (`DismissReader`).
+- **Observed values read for a side effect.** The Agents list read the app's tab, the strip's `moving` and the chat on
+  screen in its body to decide whether it is out of sight. A clear view in its background reads them now.
+- **An `@State` initial value that reads observed state.** It is evaluated in the parent's body, so the parent follows
+  it: `ShellView`'s read of the app's tab made `RootView` run on every switch.
+
+`let _ = Self._printChanges()` in a local build, with the app's console from `xcrun simctl launch --console-pty`, names
+what changed for each run of a body. It is only sometimes exact about which observed key path it was; the counts are.
+
+A list row has a view graph of its own, which works its size out again on each frame the row moves on screen. A
+`ViewThatFits` in a row measures every candidate each time: wrap the candidates in `MeasuredOnce`.
+
+**XCTest costs the app main-thread time.** `element.tap()` and every `waitForExistence` take an accessibility snapshot
+of the app on its main thread: 55–70 ms each with the `assistant` perf suite's data. In
+`PerfAssistantTests/testTabSwitchAssistantAgents` they were about three quarters of the main thread's busy time
+(`sample` during the test), and several of the test's hitches came while nothing moved. Measure an animation with the
+app switching on a cue (`FrameProbe.switchPages`, `testTabSwitchAssistantAgentsByCue`) and the test only sleeping; keep
+the tapping test for the tap's own path.
+
 ## A Debug build on an iPhone has a 1 MB main-thread stack (#6735)
 
 A Debug build installed on an iPhone crashed every time it opened on Agents: `EXC_BAD_ACCESS` in the main thread's stack
@@ -11,8 +40,8 @@ page's own frames. Unoptimized, a function reserves a stack slot on entry for ev
 modifier chain, and each intermediate holds everything before it, so the slots add up like a triangle: `observedAgentList`
 reserved 422 KB on entry for its ~45 modifiers. The device's main thread has 1008 KB (the crash report's
 `vmRegionInfo`); the simulator's has 8 MB, and Release specializes and reuses the storage, so neither the simulator, CI
-nor TestFlight showed it. Measured with `AgentsListStackTests` in the simulator: the page's first render reached 941 KB
-before the fix and 448 KB after.
+nor TestFlight showed it. Measured with `StackPeak` in the simulator: the page's first render reached 941 KB before
+the fix and 448 KB after; the Assistant page went from 906 to 573 KB and a conversation from 665 to 467 KB (#7309).
 
 - Erase a long chain in a few places (`AnyView(...)` at the stage boundaries): each segment then starts small. An erased
   type is the same on every update, so identity and state stay. The same tool as the Mac's cold-start split
@@ -21,8 +50,44 @@ before the fix and 448 KB after.
 - A crash in the stack guard with runtime frames on top: count the frames before reading it as recursion. Few frames
   mean big frames; look for the app's functions underneath, and measure where the stack goes (record the stack address
   at a few points) rather than guessing.
-- `StackPeak.measure` (in `AgentsListStackTests`) paints the unused stack, runs the render, and finds the lowest word
-  overwritten. Keep a page under half the device's stack (512 KB).
+- `StackPeak.measure` (`apple/PersonaTests/StackPeak.swift`) paints the unused stack, runs the render, and finds the
+  lowest word overwritten. Keep a page under half the device's stack (512 KB). Measure a page cold (alone in its test
+  process): the first render also builds the Swift runtime's type metadata, ~100 KB more than a warm one.
+- Where the stack goes, exactly: put a guard page at a set depth below the render (`mprotect`) and a SIGSEGV handler on
+  its own stack (`sigaltstack`) that walks the frame pointers and prints each frame's size with `dladdr`'s name. The
+  deepest path is often not the one a crash report shows (#7309: the conversation's footer, not its page getters).
+- Two checks keep it there. `MainPagesStackTests` renders every main page in the simulator (Debug) and fails one over
+  512 KB, naming the page and the depth; pages over it today have a ceiling there that may only go down.
+  `scripts/ci/apple_stack_frames.py`, in the apple lane after the Debug device build, fails a view function whose fixed
+  frame is over 64 KB (baseline `scripts/ci/apple_stack_frames_baseline.json`, only down). The second cannot see slots
+  sized at run time, which caused this crash; the first can.
+- A check failed: measure where the stack goes (above), then cut the chain that holds it with `stackSegment()` or
+  `AnyView` at its stage boundaries, and lift heavy members (a big struct, a binding to a big value) out of the chain
+  into a view or modifier of their own. Lower the ceiling or the baseline in the same change when a page or function
+  improves; never raise one.
+
+## Keep a control's accessibility identifier off its surrounding container (#7033)
+
+A SwiftUI container's `accessibilityIdentifier` can replace the identifiers on a nested `Menu` and `ScrollView`, while the buttons inside the scroll view keep theirs. The Agents capsule looked correct and its filters remained queryable, but its grouping icon was exposed under the capsule's identifier instead of `agents.grouping`. Put identifiers on the actionable controls, not on their surrounding capsule, and test both the menu's identity and its fixed frame after a horizontal drag.
+
+## Words cut off by a clip still take touches, over the rows below them (2026-11-13, #6645)
+
+- `.clipped()`, `.clipShape` and `.mask` hide what is drawn, not what takes touches. A long message folded with
+  `.frame(height:)` + `.clipped()` still lays all of its words out, and the ones past the fold kept taking touches.
+  The chat's list is drawn upside down (newest first, flipped back), so an older row is drawn over the newer rows under
+  it: the message from another session folded to three lines (`LineFold`) took the taps meant for the work line right
+  under it, which never opened, and its long-press recognizer took the long presses on the answer under that, so the
+  card lifted instead. A message of about 2 KB can hide a screen of words.
+- Anything that cuts its content off by a clip takes `.contentShape(.rect)` right after the clip (`BubbleFold`,
+  `CardFold`, `LineFold`, `ReplyQuote`). Leave the words' accessibility alone while doing it: wrapping them in
+  `.accessibilityElement(children: .contain)` made the lifted copy of an open card (`MessageLift` combines a short
+  message's elements) read only its sender and Collapse, without its words.
+- Prove it with a touch at the row's own spot, not by its element: `WorkLineUnderFoldUITests` taps and long-presses
+  each row under a folded message (mock `MOCK_PEER_FOLD=1`). An element-based tap can't tell what lies on top.
+- Reproduce with the reported shape. Hidden words take touches only where their text lies: a fixture whose folded
+  message hid a bulleted list let the taps through between its items, and the work line opened on the unfixed build;
+  one English paragraph, as reported, took every tap. Get the shape from the real session (kinds, order, sizes; never
+  its words) before deciding a report does not reproduce.
 
 ## An edit menu needs the selection's rect, not just a point (#6005)
 
@@ -66,6 +131,15 @@ before the fix and 448 KB after.
   exactly as large as its words inside a SwiftUI view, a touch on the knob lands outside it and the handle can't be
   dragged. Make the text view reach past the words (`Theme.Lift.handleReach`), with a matching
   `textContainerInset` that keeps the words where they are.
+- A UIKit copy of MarkdownUI's text must use MarkdownUI's sizes, not the text style's. MarkdownUI scales its size like
+  `@ScaledMetric` relative to body and rounds it to a whole point: 22 pt at xxxLarge, where
+  `UIFont.preferredFont(forTextStyle: .body)` is 23, and 48 at AX5, where body is 53. Its list markers take at least
+  1.5 em, plus the `Label`'s 8 pt gap. At the default size both match, so only a large text size shows the copy
+  wrapping onto more lines than the chat (#6552, `ReplyText.Look.replySize`, `ReplyMetrics.markerRoom`). Compare the
+  line counts in `-showLiftLines` at xxxLarge and AX5.
+- The place between characters nearest a press can be after the pressed character. Looking the word up forward from
+  there takes the next word, and Chinese has no space to stop it. Look it up on the side the press is on
+  (`LiftUITextView.place(nearest:)`, #6552).
 
 ## A lazy grid never makes what it does not show (#4073)
 
@@ -1043,6 +1117,8 @@ Use an invalidation revision as the task key and handle the flag after completio
 - With class-valued dictionaries (`CGMutablePath`), `dict[k, default: X].method()` only reads and never inserts the default; modifications are lost (entire terminal border lines disappeared).
 - Trailing closures match the first closure parameter positionally. With two optional closures (`SpaceMenuItems.rename`, `open`),
   inserting a new one first silently reroutes existing `SpaceMenuItems(group:) { rename }` calls. Add optional closures last and label call sites.
+  For a public component with older single and multiple trailing-closure callers, keep its original initializer and add a separate,
+  explicitly labeled overload; `ApprovalCardTests.legacyTrailingClosuresStayOnSubmit` checks both forms.
 - In Chinese locale, SwiftUI `.dateTime.hour(.twoDigits(amPM: .omitted))` uses 12-hour time, showing 17:00 as 05:00; for 24-hour times use fixed `HH:mm` (`AssistantScheduleText.hm`).
 - Types in `apple/Shared` default to MainActor isolation; new pure-data enums used by `nonisolated` structs need `nonisolated`, otherwise isolated-conformance errors result.
   PersonaTests has no default isolation: mark test structs using app static methods, properties or key paths `@MainActor` (like `ChatStoreTests`),
@@ -1822,6 +1898,12 @@ avoidance moves; the points on `Keyboard.dismiss()` and XCUITest's `typeText` be
 - Binary confirmations use `alert` with Cancel / Enable and object name ("Enable this computer?"). Save name separately in `@State` and do not clear on dismissal or disappearing title becomes empty.
 - Reserve `confirmationDialog` for choosing among several options; explicit-cancel confirmations use `alert`. Assert and tap Cancel in UI tests.
 
+## Two questions at once, and a scene change is not leaving the page (2026-11-14, #6113)
+
+- A remote copy and a serial upload can both meet a taken name at once. With one stored `conflict` holding its continuation, the second question replaced the first, whose continuation never resumed: the copy hung, and a stranded upload also blocked the serial queue. Keep a queue with one continuation per question, keyed by the question's id and removed before it is resumed (answered once); a row's Cancel answers only its own transfer's question, leaving the page answers all of them.
+- UIKit presents one modal at a time. When a question was answered without its alert's buttons, SwiftUI began closing the alert about 0.3 s later and took another 0.5 s (iOS 27 simulator); an alert for the next question asked for in that window was dropped and SwiftUI wrote `false` to its `isPresented` binding (a setter that turned that into Cancel silently cancelled the second transfer), or it was shown late and then never closed when its binding turned false. An alert's own button runs after UIKit has closed it, and the alert is modal, so: the setter answers nothing, answers come from the buttons (or Cancel on leaving the page), a following question waits `Theme.Motion.alertHandoff`, and when SwiftUI writes `false` while the question is still waiting (its alert was dropped behind another alert, sheet or picker) the alert asks again. Keep the title's name in its own state so it does not go blank on the way out.
+- `scenePhase` leaving `.active` (Control Center, a call, the app switcher) is not a page departure: pause polling only (`onTabVisibility(sceneAware: true)`), and keep the full stop on the tab-only `onTabVisibility`. A full stop there cancelled downloads and removed the file an open Save to Files (`.fileMover`) was about to move. `FilesPaneLifecycleTests` drives `scenePhase` through the environment on a hosted window and checks the presented `UIDocumentPickerViewController` / `UIAlertController`.
+
 ## Time-sensitive pushes treated as ordinary: missing entitlement (2026-11-04, #1572)
 
 - Needs-you pushes always carried `interruption-level: time-sensitive` and NSE set `interruptionLevel`, yet Focus suppressed banners (also synced to watch).
@@ -2057,7 +2139,7 @@ DEBUG 的代码可能在 `Persona.debug.dylib` 中，40 KiB 的 `Persona` 只是
 - **`WorkStepView` compares only its item and `first`**: a value handed down from the chat (a workflow run's progress) never reaches a step that is already drawn, because the hub's pushes do not change the item. A card that changes on its own reads its data itself, by a key in the item: `WorkflowCallCard` reads `AppModel.workflow(_:call:)`, one observable cell per (session, Workflow call) set only when that run changes, so a push about another run or the rest of the session draws nothing.
 - **A decision `ChatLines` makes from outside the items belongs in `LinesKey`**: `foldsIntoRun` / `showsFolded` now depend on which runs the hub lists; the lines are memoized by the store's version, so without `workflowCalls` in the key a run that appeared (or went) left the call folded into the chips (or out of the fold) until something else changed.
 - **`fold_work` hides the step a card hangs on** (as on the web, `docs/lessons/web.md`): a chat opened while a run goes on has the launching turn as one fold item. Fetch the fold whose `[ts, until]` holds the run's `started_at` (`WorkflowRun.foldsHoldingCalls`). A fetch can fail (the hub redeployed, the phone offline, not connected yet: `AppModel.unfold` then returns without throwing), so judge by whether the fold left the items, and ask again after a wait that doubles from 5 s to a minute (`WorkflowCallCard.fetchFolds`). Marking it "asked" before the fetch and swallowing the error left the card buried for the whole visit.
-- **A second-by-second clock per row is not free on the Mac**: `Text(timerInterval:)` needs no body, but 60 of them (a run's listed agents, all running) kept the idle Mac chat at 7.8% CPU (Debug build, `ps` over 20 s) against 0.5% without. One clock for the run, the rows to the minute (`TimelineView(.periodic(by: 60))`, all rows on one shared anchor so they turn in one update, not 60 wake-ups a minute). Measured again over 90 s (30–120 s after launch, so at least one minute tick; process CPU time from `ps -o cputime`; Debug, Mac locked): a plain chat 0.25–0.30%, the run's card with 16 running rows 0.84%, with 61 running rows 0.82%. So many agents add nothing; what remains over a plain chat (about 6 ms a second, `sample`: SwiftUI layout in `NSHostingView.layout`) is the run's one second clock. FrameStats could not run: display links do not fire while the Mac is locked (`docs/apple/mac.md`). Measure an idle card with many live rows, against the same card with few, before giving each row its own clock.
+- **A second-by-second clock per row is not free on the Mac**: `Text(timerInterval:)` needs no body, but 60 of them (a run's listed agents, all running) kept the idle Mac chat at 7.8% CPU (Debug build, `ps` over 20 s) against 0.5% without. One clock for the run, the rows to the minute (`TimelineView(.periodic(by: 60))`, all rows on one shared anchor so they turn in one update, not 60 wake-ups a minute). Measured again over 90 s (30–120 s after launch, so at least one minute tick; process CPU time from `ps -o cputime`; Debug, Mac locked): a plain chat 0.25–0.30%, the run's card with 16 running rows 0.84%, with 61 running rows 0.82%. So many agents add nothing; what remains over a plain chat (about 6 ms a second, `sample`: SwiftUI layout in `NSHostingView.layout`) is the run's one second clock. FrameStats could not run: display links do not fire while the Mac is locked (`docs/archive/apple/mac.md`). Measure an idle card with many live rows, against the same card with few, before giving each row its own clock.
 - **A UI test that drags the chat to bring a card into view**: a plain `press(forDuration:thenDragTo:)` flings the flipped list well past it. Drag slowly and hold at the end (`withVelocity: .slow, thenHoldForDuration:`), check the target's frame between drags, and assert it is hittable before tapping it; "a row is gone" alone is no proof that a block folded (the lazy list may simply have dropped the line).
 - **Every expander inside a chat row needs the pin, nested ones too**: the phase blocks inside the run's card first toggled with a plain `withAnimation`; in the upside-down list a phase opening 12 rows (or 「n more」 opening 43) pushed its head and everything above it up, under the top bar. Route each one through `toggleInPlace(pin, key, …)` with `.chatPinned(key)` on what was tapped (or the head above it, for 「n more」 / Show Fewer), as the card's own head does; outside the list (`chatPin` nil: the chat's header) it animates as before, so check Reduce Motion there yourself (`toggleInPlace` falls back to `withAnimation` unconditionally).
 - **Don't middle-truncate a line that ends in numbers**: the Agents row's 「后台 workflow「parity-audit」 · Verify 2/2 · 169/185+」 cut in the middle read 「…9/185+」, a wrong count. Cut only the name (`WorkflowLine`: name and details as two texts, the details laid out first).
@@ -2444,3 +2526,27 @@ that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder 
 - On an iPad simulator the hardware keyboard takes over once XCUITest types, hiding the on-screen keyboard: a form
   that rose above it slides down, and a tap aimed at its button lands on whatever moved there. Submit with `"\n"` (the
   field's `onSubmit`), or wait for the layout to settle before tapping.
+
+## A disabled alert button is not drawn disabled (2026-11-14, #6996)
+
+- Rename Terminal (`RenameTerminalAlert` in `apple/Persona/Views/Chats/TerminalsView.swift`) first had
+  `Button("Save") { … }.disabled(!TabRename.canSave(name, …))`. On the iOS 27 simulator the accessibility tree called
+  Save disabled for the starting name, but the alert drew it in the same blue as Cancel: a button that looks ready and
+  does nothing. Check in the action instead (an empty or unchanged name saves nothing, as Rename Space and Rename Agent
+  do), and limit the length with `.onChange` on the field's text.
+- UI tests: a tap on an alert's button 0.75 s after `typeText` into its field was lost on every save on an iPhone
+  simulator (iOS 27) and on some on an iPad one; a second tap a few seconds later always went through. Turning
+  autocorrection off did not change it. `FilesActionsTests`, which takes a screenshot between typing and tapping, saw it
+  once. Tap again while the alert stays up, then check what reached the mock; a single tap reads as an app bug.
+
+## A row opened at the oldest end jumped 100 pt: the pin let go too early (2026-11-14, #7237)
+
+- At the oldest end of the chat the list rests about 100 pt past the end its own arithmetic gives (`within`), and UIKit sets
+  it back to that end once the content size follows a pass after the row grew. A held row was clamped to `within`, so it went
+  up by the difference, and the hold ended on SwiftUI's first report of the row, which still said it had not moved (SwiftUI
+  reports the position its own layout gives, ahead of the scroll view). Your own long message and a work line both did it.
+- `ChatPin` now remembers how far past the end the list was when the hold began (`Held.slack`) and allows it, and a hold
+  does not end until the row has said its content grew and the list is where the hold wants it. Evidence: per-frame row top
+  (`UnfoldTrace`) constant on opening and folding at the oldest end; `UnfoldTests.testWorkLineAtTheOldestEnd` with
+  `MOCK_LONG_HISTORY=oldest` and `-showOldest`. A stale report is not proof the list is there: also read the offset
+  (`-scrollTrace`, the `why` column of the pin says how the last hold ended).

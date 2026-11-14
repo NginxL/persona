@@ -20,6 +20,10 @@ import SwiftUI
 
     func needsAppeared() { needsOnScreen += 1 }
     func needsGone() { needsOnScreen = max(0, needsOnScreen - 1) }
+    #if os(iOS)
+    /// The phone's drawer the column slides in from (#6332's iPhone layout; the iPad's column has none). Lazy (P3).
+    @ObservationIgnored lazy var drawer = AssistantDrawer()
+    #endif
     /// Scrolls the list to the Agents' Needs You section, or to the Agents' heading (the Agents list sets them).
     @ObservationIgnored var scrollToNeeds: (() -> Void)?
     @ObservationIgnored var scrollToAgents: (() -> Void)?
@@ -86,6 +90,10 @@ extension ShellPage {
 struct UnifiedSidebarColumn<Agents: View>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.padRouter) private var router
+    /// A phone's width: the column is the drawer's (`UnifiedSidebar.drawer`), which a pick closes. The split says so
+    /// (`SplitDetail.drawer`): an iPad's sidebar column can read compact by its own width.
+    @Environment(\.splitDetail) private var split
+    private var inDrawer: Bool { split?.drawer == true }
     let state: UnifiedSidebar
     /// The Agents list, given the Persona rows to hold above its own.
     @ViewBuilder var list: (AssistantSidebar) -> Agents
@@ -116,8 +124,8 @@ struct UnifiedSidebarColumn<Agents: View>: View {
                          openProfile: { show(.profile) },
                          openRoutines: { show(.routines) },
                          openKnowledge: { show(.knowledge) },
-                         openSettings: { model.shellSettings = true },
-                         drawer: nil,
+                         openSettings: { state.drawer.close(); model.shellSettings = true },
+                         drawer: inDrawer ? state.drawer : nil,
                          openInbox: { show(.inbox) },
                          openTodos: { show(.todos) },
                          onMachines: { show(.machines) },
@@ -136,6 +144,7 @@ struct UnifiedSidebarColumn<Agents: View>: View {
     private func show(_ page: ShellPage) {
         state.shownPlace = page.isSidebarPlace ? page : nil
         router?.show(page)
+        if inDrawer { state.drawer.close() }
     }
 }
 

@@ -75,9 +75,17 @@ it never overrides a disabled setting or retries a marked bad build.
 The worker holds a local lock for the whole cycle, and publication holds a remote
 lock through confirmation. Build numbers must increase and new source must contain
 the previous source. Files have immutable checksum names. Interrupted attempts
-reuse the same build and artifact, with a 15-minute failure backoff; they cannot
-turn a rolled-back build into a new version just by retrying. Recent local attempts
-and remote artifacts have bounded retention. Failure leaves the updater in charge
+reuse the same build and artifact, with a failure backoff; they cannot
+turn a rolled-back build into a new version just by retrying. The backoff applies to
+every new head of the followed branch, not only the failed commit, so a red `main`
+is not rebuilt in full at every timer firing: 15 minutes after the first failure in a row,
+doubling with each further failure up to 2 hours; `last.json` keeps the `failures` count
+and a success resets it. `--retry` and a pinned `--commit` run immediately. Recent local attempts
+(the last five, failed ones included) and remote artifacts have bounded retention. After each
+attempt the worker runs `go clean -cache` when `go env GOCACHE` is larger than
+`go_cache_limit_gib` from the worker config (default 20): Go itself only drops entries
+unused for five days, which a worker validating every new head outgrows by tens of GB a day.
+Failure leaves the updater in charge
 of rollback; the publisher never restarts the host or the Hub service.
 
 Bootstrap once with a verified binary containing the private update source, set
@@ -227,7 +235,7 @@ releases retain their separate publishing workflow.
 ## Current state (verified 2026-11-02)
 
 - Version: `personad version` is a string written in with `-X main.version`.
-  - `deploy.sh`, `publish.sh`: `git describe --always --dirty` plus a minute-resolution timestamp, like `v0.1.1-23-gabc1234-202611021530`;
+  - `deploy.sh`, `publish.sh`: `git describe --tags --match 'v[0-9]*' --always --dirty` plus a minute-resolution timestamp, like `v0.1.1-23-gabc1234-202611021530`. The nearest `vX.Y.Z` tag names it, a lightweight one too (a GitHub release's tag is one; plain `git describe` skipped v0.4.0, #7201), and `testflight/<build>` never does;
   - Docker image: built by CI when a `v*` tag is pushed; the version is the tag without `v`.
 - hub:
   - `GET /api/v1/health` returns `{ok, version, features}`; the WebSocket `hello` carries `server_version`;

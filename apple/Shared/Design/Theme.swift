@@ -143,6 +143,9 @@ nonisolated enum Theme {
     #endif
     /// A line picked out for a moment in the accent's soft ground (the transcript line a minutes item's time jumped to).
     static var accentTint: Color { accent.opacity(aiTintStrength) }
+    /// Any color's soft ground at the AI tint's strength: behind a mark drawn in that color (a minutes topic's icon tile,
+    /// #6563), so the mark reads at 3:1 or better on it (`StyleSpecTests`).
+    static func softTint(_ color: Color) -> Color { color.opacity(aiTintStrength) }
     /// The AI color at half strength: a mark of the AI's that is at work but not the lit one (a workflow phase with
     /// agents running that the run has moved past), apart from a ring (not started) and the full dot (lit).
     static var aiMuted: Color { ai.opacity(0.5) }
@@ -620,6 +623,9 @@ nonisolated enum Theme {
         static let sidebarMinPhone: CGFloat = 200
         /// What a split's page keeps beside its list column when the list is dragged wider (#2624).
         static let splitDetailMin: CGFloat = 300
+        /// The knowledge map's outline and detail column side by side from this width (#7251): any iPad in landscape,
+        /// a 13-inch one upright beside its sidebar, a large iPhone turned; narrower, the outline alone.
+        static let knowledgeMapTwoColumns: CGFloat = 540
         static let sidebar: CGFloat = 400
         static let sidebarMax: CGFloat = 480
         /// The narrowest column of a card grid (Machines' cards): two side by side in an iPad's detail column.
@@ -693,6 +699,12 @@ nonisolated enum Theme {
     /// the persona's dot in the Persona tab's top bar (docs/apple/persona.md), the dot of a held mic (`DictationHold`) and,
     /// when it is turned on, the composer's glow while a reply is generating (`ComposerGlow`); those stop with Reduce Motion
     /// (the spinner is the system's).
+    /// The Agents' owner-requested single capsule: filter choices and a fixed grouping menu.
+    enum FilterCapsule {
+        static let separatorHeight: CGFloat = 22
+        static var selection: Color { Theme.accent.opacity(0.12) }
+    }
+
     enum Motion {
         static let state = Animation.snappy(duration: 0.25)
         static let layout = Animation.smooth(duration: 0.3)
@@ -701,6 +713,10 @@ nonisolated enum Theme {
         static let standard = state
         /// Task-draft dismissal uses the same six-second Undo window as the web.
         static let draftUndo: Duration = .seconds(6)
+        /// How long an alert that follows another waits before asking: UIKit drops a presentation made while another is
+        /// still going away, and SwiftUI took up to about 0.8 s to close one answered elsewhere (queued "already exists"
+        /// questions, #6113).
+        static let alertHandoff: Duration = .seconds(1)
         /// A block of content unfolding in place, its height growing (the Feishu pinned shelf's rows): slower than a
         /// state change so the eye can follow the rows coming in. `standard` read faster than Feishu's own (2026-11-04).
         static let expand = Animation.smooth(duration: 0.4)
@@ -890,6 +906,11 @@ nonisolated enum Theme {
         static let amber = Color(light: 0xB7791F, dark: 0xF5B342)
         static let yellow = Color(light: 0x9A7B00, dark: 0xFFD60A)
         static let teal = Color(light: 0x0F7C80, dark: 0x40C8C8)
+        /// A blue-gray that reads as a mark on a card (the system gray is under 3:1 there in both modes).
+        static let slate = Color(light: 0x5E6B7D, dark: 0x9AA7B8)
+        /// A meeting's summary card (#6563): the four topic tints a group's cards share, by the group's place (the first
+        /// group the first). They only tell groups apart: never a state's color (red, orange, green, yellow) or the AI's.
+        static let minutesGroups: [Color] = [blue, teal, pink, slate]
     }
 
     /// A permission mode's tone where the Agents header shows it (#3719), by how much the agent does without asking.

@@ -171,13 +171,17 @@ func RenderInboxAgent(a InboxAgent) string { return render("inbox/agent", a) }
 
 // InboxHandlingNote is what the program tells an event's processing conversation (inbox/handling/<name>): new
 // messages (Context), the user's confirmation, rejection or words (Text, Edited), the Agent it started (Machine,
-// Session), or that the event is closed (Text says how: self_replied, replied, dismissed, read, user).
+// Session), a due follow-up check (Who, Next and Checks), or that the event is closed (Text says how: self_replied,
+// replied, dismissed, read, user).
 type InboxHandlingNote struct {
 	Owner            string
 	Text             string
 	Edited           bool
 	Failed           bool
 	Context          string
+	Who              string // who or what a due check waits on; "" means the other side's reply
+	Next             string // the next step to consider on a due check
+	Checks           int    // the consecutive due check's number, starting at 1
 	Machine, Session string
 	Handoff          bool // the note goes to a conversation the event was handed to (wrapped by inbox/handoff_note)
 }
@@ -186,6 +190,7 @@ type InboxHandlingNote struct {
 const (
 	NoteNewMessages  = "inbox/handling/new_messages"
 	NoteSent         = "inbox/handling/sent"
+	NoteCheck        = "inbox/handling/check"
 	NoteAgentStarted = "inbox/handling/agent_started"
 	NoteAgentStopped = "inbox/handling/agent_stopped"
 	NoteHandback     = "inbox/handling/handback"
@@ -253,6 +258,24 @@ type InboxFolderItem struct {
 }
 
 func RenderInboxFoldersInput(in InboxFoldersInput) string { return render("inbox/folders_input", in) }
+
+// InboxMergeTitle is the system prompt that writes one title for rows the user merged (inbox/merge_title, #7229).
+type InboxMergeTitle struct {
+	Owner string // "" is the Chinese "you"
+	// Language is the title's language by its own name; "" leaves it to the language of the titles.
+	Language string
+}
+
+func RenderInboxMergeTitle(m InboxMergeTitle) string { return render("inbox/merge_title", m) }
+
+// InboxMergeTitleInput is the rows that were merged, newest first (inbox/merge_title_input).
+type InboxMergeTitleInput struct {
+	Items []InboxFolderItem
+}
+
+func RenderInboxMergeTitleInput(in InboxMergeTitleInput) string {
+	return render("inbox/merge_title_input", in)
+}
 
 // SubscriptionKind is a source subscription's kind of Inbox item (#2039, inbox/kinds/subscription): what its items'
 // type line says (InboxItem.Described, through the round's kinds).

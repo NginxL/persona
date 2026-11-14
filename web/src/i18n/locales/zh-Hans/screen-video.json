@@ -6,5 +6,12 @@
   "quality_auto": "自动",
   "quality_sharper": "清晰优先",
   "quality_smoother": "流畅优先",
-  "picture_current": "画面：{current}"
+  "picture_current": "画面：{current}",
+  "stats": "连接数值",
+  "stats_hide": "隐藏连接数值",
+  "stats_vnc": "VNC",
+  "stats_via_hub": "经 hub 中转",
+  "stats_mbps": "{mbps} Mbps",
+  "stats_fps": "{fps} fps",
+  "stats_hub_round_trip": "到 hub 往返 {ms} ms"
 }

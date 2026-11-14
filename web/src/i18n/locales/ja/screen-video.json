@@ -6,5 +6,12 @@
   "quality_auto": "自動",
   "quality_sharper": "高精細優先",
   "quality_smoother": "滑らかさ優先",
-  "picture_current": "映像：{current}"
+  "picture_current": "映像：{current}",
+  "stats": "接続の統計",
+  "stats_hide": "接続の統計を隠す",
+  "stats_vnc": "VNC",
+  "stats_via_hub": "ハブ経由",
+  "stats_mbps": "{mbps} Mbps",
+  "stats_fps": "{fps} fps",
+  "stats_hub_round_trip": "ハブまでの往復 {ms} ms"
 }

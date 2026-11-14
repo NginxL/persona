@@ -371,6 +371,9 @@ internal fun AgentCreationService.inGroup(names: GroupNames): AgentCreationServi
             source.addWorktree(names.rawMachine(machineId), cwd, nameHint, branch, kind)
         override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean, kind: String?) =
             source.removeWorktree(names.rawMachine(machineId), path, deleteBranch, force, kind)
+        // Rows name the hub's own machine id: back in the merged one, so the form's filter by machine keeps them.
+        override suspend fun workspaces(machineId: String) =
+            source.workspaces(names.rawMachine(machineId)).map { it.copy(machineId = names.machineId(it.machineId)) }
     }
 }
 

@@ -6,5 +6,12 @@
   "quality_auto": "Auto",
   "quality_sharper": "Sharper",
   "quality_smoother": "Smoother",
-  "picture_current": "Picture: {current}"
+  "picture_current": "Picture: {current}",
+  "stats": "Connection stats",
+  "stats_hide": "Hide connection stats",
+  "stats_vnc": "VNC",
+  "stats_via_hub": "Via hub",
+  "stats_mbps": "{mbps} Mbps",
+  "stats_fps": "{fps} fps",
+  "stats_hub_round_trip": "Round trip to the hub {ms} ms"
 }

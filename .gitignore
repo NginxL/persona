@@ -26,6 +26,8 @@ florak/
 /CLAUDE.local.md
 /apple/PersonaLink/.build/
 # swift test in a local package (apple/Packages/PersonaKit, #2095): its build output, never committed.
+/apple/Packages/PersonaCore/build/
+/apple/Packages/PersonaCore/Inputs.stamp
 /apple/Packages/*/.build/
 # The isolation lint is built into /build/isolation-lint (scripts/test/isolation-lint.sh); an editor's index lands here.
 /scripts/test/isolation-lint/.build/

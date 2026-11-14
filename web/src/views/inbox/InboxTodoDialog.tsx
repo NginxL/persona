@@ -63,7 +63,7 @@ export function TodoDialog({ items, onDone, onClose }: { items: InboxItem[]; onD
       <div role="radiogroup" aria-label={t("inbox-inboxlist.todo_due")} className="flex flex-col gap-1" data-todo-due>
         {options.map((o) => (
           <button key={o.key} type="button" role="radio" aria-checked={pick === o.key} onClick={() => setPick(o.key)}
-            className={cx("flex h-9 items-center gap-2.5 rounded-control px-2.5 text-left text-[13px] whitespace-nowrap transition-colors", pick === o.key ? "bg-accent-tint font-medium text-ink" : "text-ink-2 hover:bg-hover")}>
+            className={cx("flex h-9 items-center gap-2.5 rounded-control px-2.5 text-left text-meta whitespace-nowrap transition-colors", pick === o.key ? "bg-accent-tint font-medium text-ink" : "text-ink-2 hover:bg-hover")}>
             <span aria-hidden className={cx("size-3.5 shrink-0 rounded-full", pick === o.key ? "bg-accent shadow-[inset_0_0_0_3px_var(--accent-tint)]" : "shadow-[inset_0_0_0_1.5px_var(--line)]")} />
             {o.label}
           </button>
@@ -71,7 +71,7 @@ export function TodoDialog({ items, onDone, onClose }: { items: InboxItem[]; onD
       </div>
       {pick === "at" && (
         <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label={t("inbox-inboxlist.todo_pick")} data-todo-at
-          className="mt-2 h-9 w-full rounded-control bg-field px-2.5 text-[13px] text-ink outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]" />
+          className="mt-2 h-9 w-full rounded-control bg-field px-2.5 text-meta text-ink outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]" />
       )}
     </Dialog>
   );

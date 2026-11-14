@@ -67,6 +67,10 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityAssistantStartServiceTier: the manager forwards a new conversation's native service_tier to the node,
+	// which acknowledges it before the first turn (#6240). The hub lists the feature only for the default manager and
+	// refuses an explicit tier sent to a manager that does not name this capability.
+	CapabilityAssistantStartServiceTier = "assistant_start_service_tier"
 	// CapabilityHTTPBodyStream: the manager takes MethodHTTPStreamed, a forwarded request whose body comes on a relay
 	// stream of its own instead of inside the bus message (#6574). The hub sends a large body that way only to a
 	// manager that names it; any other gets MethodHTTP as before.
@@ -231,6 +235,11 @@ var Routes = []string{
 	"POST /api/v1/assistant/places",
 	"PUT /api/v1/assistant/places/{id}",
 	"DELETE /api/v1/assistant/places/{id}",
+	"GET /api/v1/assistant/saved-prompts",
+	"POST /api/v1/assistant/saved-prompts",
+	"PUT /api/v1/assistant/saved-prompts/order",
+	"PUT /api/v1/assistant/saved-prompts/{id}",
+	"DELETE /api/v1/assistant/saved-prompts/{id}",
 	"GET /api/v1/assistant/runs",
 	"GET /api/v1/assistant/routines",
 	"PUT /api/v1/assistant/routines",

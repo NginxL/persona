@@ -1,13 +1,12 @@
 //! Replays `spec/fixtures/continuity` the way a client sees the core: encoded actions in, effects through the host,
 //! and the list rebuilt from drained patches. The clients' binding tests do the same through their own codecs.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use persona_core_runtime::wire::{
-    self, Action, ChatEvent, ChatPatch, ChatSnapshot, Config, Effect, ListOp, Request, WireBatch,
+    self, Action, ChatEvent, ChatPatch, ChatSnapshot, Effect, ListOp, Request, WireBatch,
 };
 use persona_core_runtime::{Host, Runtime};
 use serde_json::{Map, Value, json};
@@ -15,10 +14,13 @@ use serde_json::{Map, Value, json};
 #[derive(Default)]
 struct Recorder {
     effects: Mutex<Vec<Effect>>,
+    changes: Mutex<Vec<u64>>,
 }
 
 impl Host for Recorder {
-    fn changed(&self, _version: u64) {}
+    fn changed(&self, version: u64) {
+        self.changes.lock().unwrap().push(version);
+    }
     fn run(&self, effect: &[u8]) {
         self.effects
             .lock()
@@ -56,7 +58,6 @@ fn batch(event: &Map<String, Value>) -> WireBatch {
 
 fn request_json(request: &Request) -> Value {
     match request {
-        Request::ScheduleFill { delay_ms } => json!({"kind": "schedule_fill", "delay_ms": delay_ms}),
         Request::FetchAfter { after_seq } => json!({"kind": "fetch_after", "after_seq": after_seq}),
         Request::FetchLatest { fold_work } => json!({"kind": "fetch_latest", "fold_work": fold_work}),
         Request::Subscribe {
@@ -90,12 +91,14 @@ fn continuity_fixtures_through_runtime() {
         .collect();
     files.sort();
     let mut steps = 0;
+    let mut cases = 0;
     for file in files {
         let document: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         for case in document["cases"].as_array().unwrap() {
+            cases += 1;
             let name = case["name"].as_str().unwrap();
             let host = Arc::new(Recorder::default());
-            let runtime = Runtime::new(Config { manual_timers: true }, host.clone());
+            let runtime = Runtime::new(host.clone());
             let initial = case["input"]["initial"].as_object().unwrap();
             let snapshot = ChatSnapshot {
                 items_json: items_json(initial),
@@ -109,7 +112,6 @@ fn continuity_fixtures_through_runtime() {
                 snapshot
             })));
             let mut list: Vec<String> = Vec::new();
-            let mut timers: VecDeque<u64> = VecDeque::new();
             let drain = |runtime: &Runtime, list: &mut Vec<String>| -> ChatPatch {
                 assert!(
                     runtime.flush(Duration::from_secs(5)),
@@ -122,6 +124,7 @@ fn continuity_fixtures_through_runtime() {
                             list.remove(*index as usize);
                         }
                         ListOp::Insert { index, json, .. } => list.insert(*index as usize, json.clone()),
+                        ListOp::Update { index, json, .. } => list[*index as usize] = json.clone(),
                     }
                 }
                 patch
@@ -155,7 +158,7 @@ fn continuity_fixtures_through_runtime() {
                     "open_fold" => Some(ChatEvent::OpenFold {
                         fold_id: text(event, "fold_id").unwrap(),
                     }),
-                    "fill_timer" => None,
+                    "continue_fill" => None,
                     other => panic!("{label}: unknown event {other}"),
                 };
                 let action = match chat_event {
@@ -163,9 +166,7 @@ fn continuity_fixtures_through_runtime() {
                         chat: CHAT.into(),
                         event,
                     },
-                    None => Action::TimerFired {
-                        timer: timers.pop_front().expect("a started timer"),
-                    },
+                    None => Action::ContinueFill { chat: CHAT.into() },
                 };
                 assert!(runtime.dispatch(&wire::encode(&action)));
                 let patch = drain(&runtime, &mut list);
@@ -176,10 +177,6 @@ fn continuity_fixtures_through_runtime() {
                         Effect::Fetch { chat, request } => {
                             assert_eq!(chat, CHAT);
                             requests.push(request_json(&request));
-                        }
-                        Effect::StartTimer { timer, delay_ms } => {
-                            timers.push_back(timer);
-                            requests.push(request_json(&Request::ScheduleFill { delay_ms }));
                         }
                         Effect::Rejected { reason } => panic!("{label}: rejected: {reason}"),
                     }
@@ -195,13 +192,47 @@ fn continuity_fixtures_through_runtime() {
             }
         }
     }
-    assert_eq!(steps, 70, "every continuity step replays");
+    assert_eq!((cases, steps), (38, 94), "every continuity case and step replays");
+}
+
+#[test]
+fn one_chats_drain_does_not_consume_another_chats_wakeup() {
+    let host = Arc::new(Recorder::default());
+    let runtime = Runtime::new(host.clone());
+    for chat in ["a", "b"] {
+        assert!(runtime.dispatch(&wire::encode(&Action::OpenChat {
+            chat: chat.into(),
+            snapshot: ChatSnapshot::default(),
+        })));
+    }
+    assert!(runtime.flush(Duration::from_secs(5)));
+    assert_eq!(host.changes.lock().unwrap().len(), 2);
+    let _ = runtime.drain("a");
+    let batch = WireBatch {
+        items_json: r#"[{"id":"1#0","seq":1,"role":"assistant","kind":"text","text":"new"}]"#.into(),
+        history: Some("h".into()),
+        from_seq: Some(0),
+        to_seq: Some(1),
+        ..WireBatch::default()
+    };
+    assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+        chat: "b".into(),
+        event: ChatEvent::Pushed { batch },
+    })));
+    assert!(runtime.flush(Duration::from_secs(5)));
+    assert_eq!(
+        host.changes.lock().unwrap().len(),
+        3,
+        "b must be woken again after a is drained"
+    );
+    let patch: ChatPatch = wire::decode(&runtime.drain("b")).unwrap();
+    assert_eq!(patch.ops.len(), 1);
 }
 
 #[test]
 fn rejects_garbage_and_unknown_chats() {
     let host = Arc::new(Recorder::default());
-    let runtime = Runtime::new(Config::default(), host.clone());
+    let runtime = Runtime::new(host.clone());
     assert!(runtime.dispatch(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]));
     let event = Action::Chat {
         chat: "nowhere".into(),

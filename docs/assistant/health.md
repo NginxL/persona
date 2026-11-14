@@ -117,6 +117,24 @@ Entering Health goes straight back to the latest health chat, with its context, 
 | iOS / Mac | the sidebar's **Health** runs `AssistantView.enterHealth` (`HealthModel.entry`); the top bar's **New Chat** in a health chat pushes the Health page (`HealthModel.newOpensHealth`). `-openAssistantPage health` / `-openShellPage health` still show the page itself. Tests: `HealthModelTests` |
 | Android | the assistant sidebar's **Health** (`HealthEntry.resolve`), see "Android entry point" below |
 
+## Dietary intake and resting energy
+
+The Health space uses `phone_health_summary` for system health data, including dietary intake written by apps such as 薄荷健康. Its requested metrics are:
+
+| Metric | Meaning | Unit | Daily aggregation |
+| --- | --- | --- | --- |
+| `dietary_energy` | Energy consumed | kcal | Sum |
+| `protein` | Protein consumed | g | Sum |
+| `carbs` | Carbohydrates consumed | g | Sum |
+| `fat` | Total fat consumed | g | Sum |
+| `resting_energy` | Resting energy burned | kcal | Sum |
+
+Activity energy remains `active_energy` (kcal), separate from resting energy and intake. The summary contains daily totals, so meals and food details need their own source. Use the metrics advertised by the connected phone's tool schema.
+
+For today's intake, call `phone_health_summary` with `{"metrics":["dietary_energy","protein","carbs","fat","resting_energy"],"days":1}`. Days start at the phone's local midnight; today's values end at the query time. Missing data or denied read access must not be presented as zero intake. The Health space's generated instructions include these names, units, day boundaries and limitations.
+
+On iOS, `HealthTool` reads the corresponding HealthKit quantity types and requests their read permissions alongside the existing metrics. An existing installation may need authorization for these newly added categories. Open Persona, grant access, and reconnect it to the hub so the registered tool description and schema refresh (`docs/apple/phone-tools.md`, "Daily health summaries").
+
 ## Web entry point
 
 - A separate **Health** item in the sidebar opens `/health`, which resumes the latest health chat ("Entering Health" above).
@@ -224,6 +242,12 @@ Checkup reports are usually PDFs dozens of pages long. If only the chat history 
   After changing `health_claude_md.md`, update the golden and review the diff (`docs/assistant/prompts.md`). Charts: `go test ./internal/assistant -run HealthClaudeMDTeachesCharts`, `go test ./internal/feishubot -run PersonaCards`.
 - Web: `cd web && npm test && npm run build`.
 - iOS / Mac: `PersonaTests/HealthModelTests` (lists and memory carry `space`, merging pushes, sidebar does not list health chats, new chats carry `space`); build `Persona` and `PersonaMac`.
+- iPhone dietary intake acceptance (real device; not covered by server or simulator tests):
+  1. In 薄荷健康, enable writing dietary energy, protein, carbohydrates and total fat to Apple Health, record today's intake, and confirm the resulting entries in the Health app. Note the totals actually present there.
+  2. Install/open the updated Persona app, enable Health under Settings › Connectors › This iPhone, and allow the new categories in the system Health authorization sheet. For a previously denied category, enable its read permission in Health's data-access settings. Keep Persona connected to the hub.
+  3. In the Health space, request today's intake, or call `phone_health_summary` with `{"metrics":["dietary_energy","protein","carbs","fat","resting_energy"],"days":1}`. Verify that the hub's advertised metric enum includes all five names and the returned `date` is today in the phone's time zone.
+  4. Compare the four dietary values against the entries written to Health (kcal / g, rounded to one decimal). If other sources also wrote entries, compare with the relevant Health totals. `resting_energy` should match available basal-energy data; it may be absent when no source recorded it. A missing value stays absent, rather than becoming zero.
+  5. Add another food entry in 薄荷健康, wait until it is visible in Health, and query again. The day's total should include both entries; no previous-day entry should enter today's total. This check verifies the source app → Health → Persona → hub path.
 
 ## Automatic workout reports (iOS)
 

@@ -438,6 +438,8 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
             creation(of(machineId)).addWorktree(machineId, cwd, nameHint, branch, kind)
         override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean, kind: String?) =
             creation(of(machineId)).removeWorktree(machineId, path, deleteBranch, force, kind)
+        // A computer's catalog workspaces come from the hub that owns it; none when no hub does.
+        override suspend fun workspaces(machineId: String) = of(machineId)?.let { creations[it] }?.workspaces(machineId).orEmpty()
     }
     return AgentsWiringState(
         scope = scope,

@@ -675,8 +675,8 @@ func TestInboxReplyWithoutAConversationStillFiles(t *testing.T) {
 	}
 }
 
-// Rewriting the wait from the conversation (or by a confirmed or direct reply) keeps how many looks found nothing
-// (only new messages reset that) and clears the "nobody to look" mark, and takes the new who, next and time.
+// Rewriting the wait from the conversation keeps how many looks found nothing and clears the "nobody to look" mark,
+// and takes the new who, next and time. Confirmed and direct replies start that count over.
 func TestInboxRewritingTheWaitKeepsTheLooks(t *testing.T) {
 	h, _, it := handledHub(t)
 	old := time.Now().UTC().Add(time.Hour)
@@ -697,30 +697,30 @@ func TestInboxRewritingTheWaitKeepsTheLooks(t *testing.T) {
 	}
 	wantCheckIn(t, h, it, 4*time.Hour, "rewritten from the conversation")
 
-	// A confirmed reply's default wait keeps them too.
+	// A confirmed reply's default wait starts them over.
 	if _, err := suggestTool(t, h, `{"kind":"reply","text":"可以，周四给你"}`); err != nil {
 		t.Fatal(err)
 	}
 	if code, out := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm"}`); code != 200 {
 		t.Fatalf("confirm: %d %v", code, out)
 	}
-	if f := followOf(h, it); f == nil || f.Checks != 2 || f.Due {
+	if f := followOf(h, it); f == nil || f.Checks != 0 || f.Due {
 		t.Fatalf("after a confirmed reply: %+v", f)
 	}
 	wantCheckIn(t, h, it, 24*time.Hour, "confirmed reply after looks")
 
-	// And so does a direct reply's.
+	// A direct reply starts them over too.
 	h.inbox.mu.Lock()
 	it.Follow.Checks, it.Follow.Due = 2, true
 	h.inbox.mu.Unlock()
 	if code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/"+it.ID+"/reply", `{"text":"再补一句"}`); code != 200 {
 		t.Fatalf("direct reply: %d %v", code, out)
 	}
-	if f := followOf(h, it); f == nil || f.Checks != 2 || f.Due {
+	if f := followOf(h, it); f == nil || f.Checks != 0 || f.Due {
 		t.Fatalf("after a direct reply: %+v", f)
 	}
 
-	// New messages are the one thing that starts the count over.
+	// New messages start the count over too.
 	h.inbox.mu.Lock()
 	it.Last, it.Context, it.UpdatedAt = "102", "飞书私聊（张三）的新消息：\n[11-05 12:00] 张三：好的", time.Now()
 	h.inbox.mu.Unlock()

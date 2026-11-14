@@ -100,6 +100,11 @@ type InboxItem struct {
 	MergedFrom   []InboxMergeRef `json:"merged_from,omitempty"`
 	MergedInto   string          `json:"merged_into,omitempty"`
 	PreMergeTier string          `json:"pre_merge_tier,omitempty"`
+	// PreMergeTitle and PreMergeTitleBy are the title this row had before the model wrote one for the merged row
+	// (MergeTitle), so Undo puts it back (inbox_merge_title.go, #7229). Kept, not listed.
+	PreMergeTitle   string `json:"pre_merge_title,omitempty"`
+	PreMergeTitleBy string `json:"pre_merge_title_by,omitempty"`
+	MergeTitle      string `json:"merge_title,omitempty"`
 	// Parent is what the item grew out of: another item, a todo or an agent session (inbox_parent.go, #2128).
 	Parent *InboxParent `json:"parent,omitempty"`
 	// Folder is the "/"-separated folder path the item is filed under ("" none); FolderBy says who filed it, "model"
@@ -211,6 +216,7 @@ func (it *InboxItem) listed() InboxItem {
 	c.ChainSeq, c.SuggestSeq = 0, 0
 	c.Status = it.status()
 	c.Now, c.TitleBy = it.nowKey(), ""
+	c.PreMergeTitle, c.PreMergeTitleBy, c.MergeTitle = "", "", ""
 	if it.Follow != nil {
 		f := *it.Follow
 		c.Follow = &f

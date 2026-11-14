@@ -11,7 +11,7 @@
   "say_placeholder": "Tell the AI what to change, e.g. \"ask for a time first\"",
   "reject": "Reject",
   "edit": "Edit",
-  "chain": "Handling",
+  "chain": "Timeline",
   "chain_collapse": "Collapse",
   "chain_expand": "Show all ({count})",
   "entry_expand": "Expand",

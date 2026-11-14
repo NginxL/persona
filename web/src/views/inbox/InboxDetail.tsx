@@ -4,7 +4,8 @@
 // An event (a hub that sends this phase's fields, lib/inbox-events.ts) opens on its event body instead (InboxEvent.tsx:
 // summary, recap, the suggestion, the handling chain); "Original" and the chain's source entries open the thing itself,
 // "Handling" goes back, and browser Back follows the same step. A chat item's event sits above its chat and a mail event
-// above its message instead, the chain's entries focusing that source in place (#3262, #5471).
+// above its message instead. Their original starts collapsed and unmounted so merely opening the event cannot report it
+// read; Original expands it, and the chain's source entries expand it before focusing a message (#3262, #5471).
 import { useEffect, useState } from "react";
 import { ItemManager, useKnownDefault } from "../../lib/manager-choice";
 import { hasEvent, itemAtUid } from "../../lib/inbox-events";
@@ -17,6 +18,7 @@ import { useInboxItemPlace } from "../../lib/extension-slots";
 import { PHONE, useMedia } from "../../lib/viewport";
 import { backToInboxList } from "../../lib/inbox-nav";
 import { useCloseOnBack } from "../../lib/back-close";
+import { useInboxView } from "../../lib/inbox-view-memory";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
 import { t } from "../../i18n";
 import { Button, cx, IconButton, Loading, Menu, useMenu, type MenuItem } from "../../ui/atoms";
@@ -54,6 +56,18 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   const [pins, setPins] = useState(false);
   // an event's own page (the chat, the mail) when "Original" or a source entry opened it; null: the event body
   const [source, setSource] = useState<SourceAt | null>(null);
+  const view = useInboxView();
+  const originalKey = item ? itemKey(item) : "";
+  const revision = view.revision;
+  const [originalOpen, setOriginalOpen] = useState(() => Boolean(item && view.originalOpen(originalKey)));
+  const [originalSeen, setOriginalSeen] = useState({ key: originalKey, revision });
+  if (originalSeen.key !== originalKey || originalSeen.revision !== revision) {
+    setOriginalSeen({ key: originalKey, revision });
+    setOriginalOpen(view.originalOpen(originalKey));
+  }
+  useEffect(() => {
+    if (originalKey) view.setOriginalOpen(originalKey, originalOpen);
+  }, [view, originalKey, originalOpen]);
   useEffect(() => {
     setPins(false);
     setSource(null);
@@ -90,7 +104,18 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   const translated = hubTranslation(item, prefs);
   const time = shortTime(item.updated_at);
   const detailMeta = item.where ? rowMeta(item) : sourceLine(item);
-  const canPin = Boolean(item.lark) && (embed || !place || ownShown) && (!showEvent || embed);
+  const canPin = Boolean(item.lark) && (!embed || originalOpen) && (embed || !place || ownShown) && (!showEvent || embed);
+  const toggleOriginal = () => {
+    setOriginalOpen(!originalOpen);
+    if (originalOpen) setSource(null);
+  };
+  const sourceToggle = event ? (
+    <Button tone="quiet" size="sm" className="-my-1 shrink-0" testId="inbox-original-toggle" expanded={embed ? originalOpen : undefined}
+      icon={embed ? (originalOpen ? "list" : item.mail ? "mail" : "chat") : showEvent ? (item.mail ? "mail" : "chat") : "list"}
+      onClick={embed ? toggleOriginal : () => setSource(showEvent ? {} : null)}>
+      {embed ? t(originalOpen ? "inbox-inboxdetail.hide_source" : "inbox-inboxdetail.view_source") : t(showEvent ? "inbox-inboxdetail.view_source" : "inbox-inboxdetail.view_event")}
+    </Button>
+  ) : null;
   const muteRows: MenuItem[] = [
     ...(item.mutes ?? []).map((m): MenuItem => ({ key: `${m.tag}:${m.value}`, label: muteTitle(m), detail: muteShortName(m), icon: "bellOff", onSelect: () => void muteItem(item, m) })),
     // and a rule for each (docs/assistant/inbox.md "Policies"), under a divider
@@ -99,6 +124,10 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   // the item's own body: the chat, the mail, the document's rows, the post, a connector's thread
   // (a chain entry opens the chat at its message, the mail at its uid)
   const at = source ?? {};
+  const openSource = (at: SourceAt) => {
+    if (embed && !originalOpen) setOriginalOpen(true);
+    setSource(at);
+  };
   const own = () => (
     <div className={cx("min-h-0 flex-1", item.lark || item.connector ? "flex flex-col overflow-hidden" : "overflow-y-auto")}>
       {item.doc ? <DocBody item={item} /> : item.moment ? <MomentBody item={item} /> : item.lark ? <LarkThread chat={at.position ? { ...chatOfItem(item), focus: at.position } : chatOfItem(item)} pinsOpen={pins} onPinsOpen={setPins} /> : item.connector ? <ConnectorBody item={item} /> : item.mail ? <MailBody key={at.uid ?? ""} item={itemAtUid(item, at.uid)} onLatest={at.uid !== undefined && at.uid !== item.mail.uids[item.mail.uids.length - 1] ? () => setSource(null) : undefined} /> : (
@@ -120,10 +149,11 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                   <span className={item.source === "larkcli" ? "min-w-0 max-w-full break-words sm:truncate" : "truncate"} title={translated?.subject ? item.title : undefined}>{translated?.subject || item.title}</span>
                   {label && <Tag urgent={labelIsUrgent(item)}>{label}</Tag>}
                 </h2>
-                {/* the source line gives way first, so the time stays whole */}
-                <p className="mt-0.5 flex min-w-0 text-[12px] text-ink-3" data-detail-meta>
-                  <span className="truncate">{detailMeta}</span>
-                  {time && <span className="shrink-0 whitespace-pre">{detailMeta ? ` · ${time}` : time}</span>}
+                {/* with a place, the small line gives way to Original / Handling; an older item keeps its time */}
+                <p className="mt-0.5 flex min-w-0 items-center text-[12px] text-ink-3" data-detail-meta>
+                  <span className="min-w-0 flex-1 truncate">{detailMeta}</span>
+                  {!item.where && time && <span className="shrink-0 whitespace-pre">{detailMeta ? ` · ${time}` : time}</span>}
+                  {sourceToggle}
                 </p>
               </div>
               {phone ? (
@@ -185,18 +215,22 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                 </Button>
               )}
               {item.source !== "assistant" && <Button tone="secondary" icon="spark" onClick={() => setDialog("handoff")}>{t("inbox-inboxdetail.hand_to_ai")}</Button>}
-              {event && !embed && (showEvent ? (
-                <Button tone="quiet" icon={item.mail ? "mail" : "chat"} onClick={() => setSource({})}>{t("inbox-inboxdetail.view_source")}</Button>
-              ) : (
-                <Button tone="quiet" icon="list" onClick={() => setSource(null)}>{t("inbox-inboxdetail.view_event")}</Button>
-              ))}
             </div>
           </div>
         </div>
         {embed ? (
           <>
-            <EventBody item={item} onSource={setSource} embedded />
-            {own()}
+            <EventBody item={item} onSource={openSource} embedded={originalOpen} />
+            {!originalOpen && (
+              <div className="shrink-0 border-b border-line px-4 py-1 sm:px-6">
+                <div className="mx-auto max-w-[760px]">
+                  <Button tone="quiet" size="sm" testId="inbox-original-row-toggle" expanded={false} icon={item.mail ? "mail" : "chat"} onClick={toggleOriginal}>
+                    {t("inbox-inboxdetail.view_source")}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {originalOpen && own()}
           </>
         ) : showEvent ? <EventBody item={item} onSource={setSource} /> : !event && place ? <InboxExtensionBody key={`${itemKey(item)}/${place.extension}/${place.id}`} item={item} place={place} own={own} onOwn={setOwnShown} /> : own()}
         {dialog === "draft" && <DraftDialog item={item} onClose={() => setDialog("")} />}

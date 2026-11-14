@@ -24,6 +24,8 @@ pub struct Item {
     pub role: String,
     pub tool_use_id: Option<String>,
     pub fold: Option<FoldRange>,
+    pub supervision_user: bool,
+    fold_supervision_user: bool,
     /// The item's JSON as the hub sent it.
     raw: Box<RawValue>,
 }
@@ -42,6 +44,8 @@ struct Head<'a> {
     tool_use_id: Option<std::borrow::Cow<'a, str>>,
     #[serde(default)]
     fold: Option<serde_json::Value>,
+    #[serde(default)]
+    supervision_user: bool,
 }
 
 #[derive(Debug)]
@@ -59,6 +63,10 @@ impl Item {
     /// Reads one item from its JSON object.
     pub fn from_raw(raw: Box<RawValue>) -> Result<Item, ItemError> {
         let head: Head<'_> = serde_json::from_str(raw.get()).map_err(|e| ItemError(format!("item: {e}")))?;
+        let fold_supervision_user = head
+            .fold
+            .as_ref()
+            .is_some_and(|value| value.get("supervision_user").and_then(serde_json::Value::as_bool) == Some(true));
         let fold = match head.fold {
             Some(serde_json::Value::Null) | None => None,
             Some(value) => Some(FoldRange {
@@ -81,6 +89,8 @@ impl Item {
             role: head.role.map(|r| r.into_owned()).unwrap_or_default(),
             tool_use_id: head.tool_use_id.map(|t| t.into_owned()),
             fold,
+            supervision_user: head.supervision_user,
+            fold_supervision_user,
             raw,
         })
     }
@@ -94,6 +104,26 @@ impl Item {
     /// The item's JSON exactly as the hub sent it.
     pub fn json(&self) -> &str {
         self.raw.get()
+    }
+
+    /// Authoritative visibility evidence survives a later copy that omits it, as iOS's merge requires.
+    pub fn has_supervision_evidence(&self) -> bool {
+        self.supervision_user || self.fold_supervision_user
+    }
+
+    pub fn with_supervision(mut self) -> Self {
+        self.supervision_user = true;
+        self.fold_supervision_user = true;
+        if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(self.raw.get()) {
+            value["supervision_user"] = serde_json::Value::Bool(true);
+            if let Some(fold) = value.get_mut("fold").filter(|fold| fold.is_object()) {
+                fold["supervision_user"] = serde_json::Value::Bool(true);
+            }
+            if let Ok(raw) = serde_json::value::to_raw_value(&value) {
+                self.raw = raw;
+            }
+        }
+        self
     }
 
     /// The number after the last `#` of the id: the block within one transcript line. Ids without one count as 0.
@@ -116,8 +146,9 @@ impl Item {
     /// included, comparing the seq and then the block number.
     pub fn folds(&self, other: &Item) -> bool {
         let Some(range) = &self.fold else { return false };
+        let start_part = part(&self.id);
         let other_part = other.part();
-        (other.seq > self.seq || other.seq == self.seq && other_part >= self.part())
+        (other.seq > self.seq || other.seq == self.seq && other_part >= start_part)
             && (other.seq < range.through_seq
                 || other.seq == range.through_seq && other_part <= part(&range.through_id))
     }

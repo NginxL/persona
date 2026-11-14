@@ -18,7 +18,7 @@ import { sendDraft, type QuotedTask } from "../../lib/drafts";
 import type { ForwardPick } from "../../lib/forward";
 import { addContext, newContext } from "../../lib/links";
 import type { Item } from "../../lib/types";
-import { Button, copyText, cx, Dialog, Menu, type MenuItem } from "../../ui/atoms";
+import { Button, copyText, cx, Dialog, Menu, toast, type MenuItem } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import type { RewindRestore } from "../../lib/rewind";
 import { isNoHover, NO_HOVER, useMedia } from "../../ui/media-query";
@@ -83,6 +83,19 @@ export function messageContextActions(text: string, chat: ChatActions | null, fo
 export function moreActions(itemId: string | undefined, fork: ((itemId: string) => void) | undefined, chat?: boolean): Action[] {
   if (!itemId || !fork || itemId.startsWith("line") || !itemId.includes("#")) return [];
   return [{ key: "fork", label: t(chat ? "chat-messageactions.fork_chat" : "chat-messageactions.fork"), icon: "fork", onSelect: () => fork(itemId) }];
+}
+
+/** "Save as Prompt…" on a message of yours (#7329): the saved prompt editor over the page, filled with its words (a chunk of
+ *  its own, settings/SavedPromptDialog). */
+export function savePromptActions(text: string): Action[] {
+  if (!text.trim()) return [];
+  return [{
+    key: "save-prompt", label: t("chat-messageactions.save_as_prompt"), icon: "book",
+    onSelect: () => import("../settings/SavedPromptDialog").then(
+      (m) => m.openSavedPromptDialog(text),
+      (e: unknown) => toast(e instanceof Error ? e.message : String(e), "error"), // the chunk would not load
+    ),
+  }];
 }
 
 /** "Delete", last and in red, on a message only on this device (#4626, the apps' long press): in the right-click / long-press
@@ -191,6 +204,7 @@ export function MessageActions({
   const extras = [
     ...moreActions(itemId, chat?.fork, chat?.assistant),
     ...rewindActions(messageId, editText ?? text, rewind && { block: rewindBlock, code: rewind.code, run: rewind.run }),
+    ...(isUser && chat?.canCompose ? savePromptActions(text) : []), // where you write messages: not a read-only chat
     ...deleteActions(onDelete),
   ];
   const contextActions = side ? actions.filter((a) => a.key === "forward" || a.key === "context") : [];

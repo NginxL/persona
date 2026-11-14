@@ -200,7 +200,7 @@ DSM pitfalls: full path `sudo /usr/local/bin/docker`, absent from noninteractive
 ```sh
 git worktree add --detach /tmp/persona-build <commit>
 (cd /tmp/persona-build/server && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags "$(cat build-tags.txt)" -trimpath \
-  -ldflags "-s -w -X main.version=$(git describe --always)-$(date +%Y%m%d%H%M)" -o /tmp/personad-linux-amd64 ./cmd/personad)
+  -ldflags "-s -w -X main.version=$(git describe --tags --match 'v[0-9]*' --always)-$(date +%Y%m%d%H%M)" -o /tmp/personad-linux-amd64 ./cmd/personad)
 git worktree remove /tmp/persona-build
 ssh <nas> 'umask 077; mkdir -p ~/.persona/bin && cat > ~/.persona/bin/personad.new && chmod 755 ~/.persona/bin/personad.new' < /tmp/personad-linux-amd64
 ```

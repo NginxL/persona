@@ -1,5 +1,9 @@
 # Lessons: Android
 
+## Verify intermittent test failures with the whole module
+
+An intermittent test is not verified by repeatedly running only its own class. In the hand-off recording tests, background work wrote the reply journal on `Dispatchers.IO` while the test deleted its directory, and the race appeared only under whole-module concurrency; `advanceUntilIdle()` drains the test scheduler but not those IO threads, so `cancelAndJoin()` the repository's scope before cleanup and run the whole module.
+
 ## Selecting a message's words in place: what `SelectionContainer` leaves to you (#4210 T5)
 
 `rememberSelectionState()` and `SelectionContainer(state, …)` are public in Compose Foundation 1.12: `selectAll()`, `clear()`

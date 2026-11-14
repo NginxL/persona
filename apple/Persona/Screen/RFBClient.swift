@@ -18,8 +18,13 @@ nonisolated final class RFBWebSocket: RFBTransport, @unchecked Sendable {
     /// - Parameter pair: ties this screen-sharing stream to a later video stream of the same Mac (#3954): the node follows
     ///   Screen Sharing's sign-in on it, and opens video only for a pair that signed in. Hubs and nodes from before the
     ///   video channel ignore it.
-    init(api: APIClient, machine: String, pair: String? = nil) {
-        var req = URLRequest(url: Self.url(api.url("/api/v1/machines/\(machine)/ports/5900/connect"), pair: pair))
+    convenience init(api: APIClient, machine: String, pair: String? = nil) {
+        self.init(api: api, path: "/api/v1/machines/\(machine)/ports/5900/connect", pair: pair)
+    }
+
+    /// Another of the hub's binary relays the same way: the live screen's video channel (`…/screen/video/connect`, #3954).
+    init(api: APIClient, path: String, pair: String?) {
+        var req = URLRequest(url: Self.url(api.url(path), pair: pair))
         api.config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
         req.timeoutInterval = 15
@@ -230,6 +235,10 @@ nonisolated final class RFBClient: @unchecked Sendable {
     let outbox = RFBOutbox()
     /// Bytes that came from the Mac so far (the page's numbers in DEBUG builds).
     var received: Int { reader.received }
+    /// holdUpdates: whether updates are held, and whether one came while they were (its next request owed).
+    private let updateLock = NSLock()
+    private var held = false
+    private var updateOwed = false
 
     var onState: @Sendable (State) -> Void = { _ in }
     /// After each update: the framebuffer, and the part of it that changed.
@@ -299,6 +308,18 @@ nonisolated final class RFBClient: @unchecked Sendable {
     /// Asks for the whole screen again (a non-incremental update): the Mac answers even when nothing changed, so a
     /// connection that went away without saying so shows up as no frame (#4380).
     func refresh() { send(requestBytes(incremental: false)) }
+
+    /// While held, an update that comes in asks for no next one (#3954: the video channel shows the picture, so Screen
+    /// Sharing encodes nothing meanwhile); released, the request that was held goes out, and the Mac sends what changed
+    /// since its last update. Input, the clipboard and `refresh` go on either way.
+    func holdUpdates(_ on: Bool) {
+        let owed = updateLock.withLock { () -> Bool in
+            held = on
+            defer { if !on { updateOwed = false } }
+            return !on && updateOwed
+        }
+        if owed { send(requestBytes(incremental: true)) }
+    }
 
     /// A FramebufferUpdateRequest for the whole framebuffer as it is now. Never a part of it, even when the views show
     /// less (#3067): macOS's Screen Sharing leaves a request narrower than the screen, or one not starting at its top,
@@ -456,7 +477,11 @@ nonisolated final class RFBClient: @unchecked Sendable {
             framebufferLock.withLock { damage.add(r) }
         }
         if !dirty.isNull { onFrame(framebuffer, dirty) }
-        try await request(incremental: true)
+        let ask = updateLock.withLock { () -> Bool in
+            if held { updateOwed = true }
+            return !held
+        }
+        if ask { try await request(incremental: true) }
     }
 
     private func resize(width: Int, height: Int) {

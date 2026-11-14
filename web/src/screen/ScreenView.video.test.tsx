@@ -54,8 +54,13 @@ const connect = async () => {
 };
 const button = () => host.querySelector<HTMLButtonElement>('[data-testid="screen-video"]');
 const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+const menuAppears = () => vi.waitFor(async () => {
+  await act(async () => {});
+  expect(button()).not.toBeNull();
+}, { timeout: 3000 });
 
-// The picture menu is a chunk of its own: loaded once here, its lazy import resolves within a flush however busy the run.
+// Preload the chunk; each mounted page still commits its own import callback.
+// Positive cases therefore wait for the actual button rather than another fixed flush.
 beforeAll(async () => {
   await import("./ScreenMenu");
 });
@@ -79,6 +84,7 @@ describe("the picture switcher when the Mac advertises video", () => {
   it("offers Video / VNC, adds Quality for video, and keeps the choice per Mac", async () => {
     await open();
     await connect();
+    await menuAppears();
     expect(button()?.getAttribute("aria-label")).toBe(t("screen-video.picture_current", { current: t("screen-video.picture_vnc") }));
 
     act(() => button()!.click());
@@ -110,6 +116,7 @@ describe("the picture switcher when the Mac advertises video", () => {
     localStorage.setItem("persona.screen.picture.macbook", "video");
     await open();
     await connect();
+    await menuAppears();
     expect(button()?.getAttribute("aria-label")).toBe(t("screen-video.picture_current", { current: t("screen-video.picture_video") }));
     act(() => button()!.click());
     expect(rows(), "Video, VNC, and the three quality biases").toHaveLength(5);

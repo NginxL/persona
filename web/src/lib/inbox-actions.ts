@@ -1,4 +1,4 @@
-// Merge and "Add to to-dos" on the Inbox (#6480; docs/assistant/inbox.md "Merging rows", "Adding to to-dos"): the requests, the due
+// Merge and "Add to to-dos" on the Inbox (#6480; docs/assistant/inbox.md "Merge rows and Add to to-dos"): the requests, the due
 // choices, the toasts with Undo. A merge and a to-do each go to one manager (the hub sends them to the manager named); rows of
 // several managers cannot be merged, but each manager's rows make their own to-dos.
 import { api, errorText } from "./api";

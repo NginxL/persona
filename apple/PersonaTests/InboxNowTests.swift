@@ -103,11 +103,46 @@ struct InboxNowTests {
         #expect(InboxNow.text(item, lang: "en") == nil)
     }
 
-    @Test func followUpTimeHasAFixedClockAndLocalizedShortDate() throws {
-        let checkAt = try #require(JSON.parseDate("2026-01-02T09:00:00Z"))
+    @Test func followUpTimeMatchesWebInEveryLanguage() throws {
+        struct Case {
+            var timestamp: String
+            var expected: [String: String]
+        }
+        let cases = [
+            Case(timestamp: "2026-01-01T09:05:00Z", expected: [
+                "en": "09:05", "zh-Hans": "09:05", "ja": "09:05",
+            ]),
+            Case(timestamp: "2026-01-02T09:05:00Z", expected: [
+                "en": "tomorrow 09:05", "zh-Hans": "明天 09:05", "ja": "明日 09:05",
+            ]),
+            Case(timestamp: "2026-01-03T09:05:00Z", expected: [
+                "en": "Jan 3 09:05", "zh-Hans": "1月3日 09:05", "ja": "1月3日 09:05",
+            ]),
+            Case(timestamp: "2027-01-02T09:05:00Z", expected: [
+                "en": "Jan 2, 2027 09:05", "zh-Hans": "2027年1月2日 09:05", "ja": "2027年1月2日 09:05",
+            ]),
+        ]
+        for c in cases {
+            let checkAt = try #require(JSON.parseDate(c.timestamp))
+            for lang in Self.languages {
+                let expected = try #require(c.expected[lang])
+                #expect(
+                    InboxNow.time(checkAt, lang: lang, now: Self.referenceNow, calendar: Self.utc) == expected,
+                    "\(c.timestamp)/\(lang)"
+                )
+            }
+        }
+    }
+
+    @Test func followUpTimeMemoSeparatesBranchesForTheSameMoment() throws {
+        let checkAt = try #require(JSON.parseDate("2026-01-02T09:05:00Z"))
+        let later = try #require(JSON.parseDate("2026-01-03T12:00:00Z"))
+        #expect(InboxNow.time(checkAt, lang: "en", now: later, calendar: Self.utc) == "Jan 2 09:05")
+        #expect(InboxNow.time(checkAt, lang: "en", now: Self.referenceNow, calendar: Self.utc) == "tomorrow 09:05")
         let sameDay = try #require(JSON.parseDate("2026-01-02T08:00:00Z"))
-        #expect(InboxNow.time(checkAt, lang: "en", now: sameDay, calendar: Self.utc) == "09:00")
-        #expect(InboxNow.time(checkAt, lang: "en", now: Self.referenceNow, calendar: Self.utc) == "Jan 2, 09:00")
+        #expect(InboxNow.time(checkAt, lang: "en", now: sameDay, calendar: Self.utc) == "09:05")
+        let anotherYear = try #require(JSON.parseDate("2025-01-01T12:00:00Z"))
+        #expect(InboxNow.time(checkAt, lang: "en", now: anotherYear, calendar: Self.utc) == "Jan 2, 2026 09:05")
     }
 
     @MainActor @Test func searchIncludesWhereWithoutSearchingOtherItemText() {

@@ -12,6 +12,7 @@ sealed class ListOp {
             return when (index) {
                 0 -> Remove.load(deserializer)
                 1 -> Insert.load(deserializer)
+                2 -> Update.load(deserializer)
                 else -> throw com.novi.serde.DeserializationError("Unknown variant index for ListOp: " + index)
             }
         }
@@ -82,6 +83,35 @@ sealed class ListOp {
                 val json = deserializer.deserialize_str()
                 deserializer.decrease_container_depth()
                 return Insert(index, id, json)
+            }
+        }
+    }
+
+    data class Update(
+        val index: UInt,
+        val id: String,
+        val json: String
+    ) : ListOp() {
+
+        @Throws(com.novi.serde.SerializationError::class)
+        override fun serialize(serializer: com.novi.serde.Serializer) {
+            serializer.increase_container_depth()
+            serializer.serialize_variant_index(2)
+            serializer.serialize_u32(this.index)
+            serializer.serialize_str(this.id)
+            serializer.serialize_str(this.json)
+            serializer.decrease_container_depth()
+        }
+
+        companion object {
+            @Throws(com.novi.serde.DeserializationError::class)
+            fun load(deserializer: com.novi.serde.Deserializer): Update {
+                deserializer.increase_container_depth()
+                val index = deserializer.deserialize_u32()
+                val id = deserializer.deserialize_str()
+                val json = deserializer.deserialize_str()
+                deserializer.decrease_container_depth()
+                return Update(index, id, json)
             }
         }
     }

@@ -125,6 +125,11 @@ extension Theme {
         static let fillOpacity = 0.12
         /// The band left on the message a quote led back to, as it starts to fade.
         static let flashOpacity = 0.18
+        /// How long the band stays before it fades (`Theme.Motion.layout`): a quote's tap, where you just looked.
+        static let flashHold: Duration = .milliseconds(700)
+        /// The band on a message a chat opened at (a search result, a hub link, #6284): the chat has just appeared, so
+        /// it stays long enough to find, as the web's ring does (#6446).
+        static let landingHold: Duration = .milliseconds(1600)
     }
 
     /// The user's own bubble as it is drawn, and the colors of what sits in it (#5204). Persona's main conversation
@@ -457,13 +462,14 @@ struct ForwardGroupBlock: View {
 
 /// The band a quote's tap leaves on the message it led back to, fading on its own.
 struct QuoteFlash: View {
+    var hold: Duration = Theme.Quote.flashHold
     @State private var on = true
 
     var body: some View {
         Rectangle().fill(Theme.accent.opacity(on ? Theme.Quote.flashOpacity : 0))
             .allowsHitTesting(false)
             .task {
-                try? await Task.sleep(for: .milliseconds(700))
+                try? await Task.sleep(for: hold)
                 withAnimation(Theme.Motion.layout) { on = false }
             }
     }
@@ -569,6 +575,8 @@ struct UserBubbleBody: View {
 struct QuoteFlashMark: Equatable {
     var line: String
     var id = UUID()
+    /// How long it stays lit before fading: `Theme.Quote.flashHold`, or `landingHold` where a chat opened at it.
+    var hold: Duration = Theme.Quote.flashHold
 }
 
 /// Plain text (a message you sent) with the paths that are there on the conversation's machine as underlined links

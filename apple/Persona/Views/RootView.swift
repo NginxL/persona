@@ -57,17 +57,21 @@ struct RootView: View {
     @StoredValue(NavigationLayout.key) private var navigation: NavigationLayout = .separate
     #endif
 
-    /// The Sidebar layout instead of the tabs at regular width (#6332): where it is built (`NavigationLayout.offered`).
-    /// The iPhone-width shell stays the shell for now.
+    /// The Sidebar layout instead of the shell or the tabs (#6332): one root at every width, the drawer on a phone's
+    /// width and the column beside the page at regular width (`ChatsView` under `\.unifiedSidebar`).
     private var usesSidebar: Bool {
         #if os(iOS)
-        navigation == .sidebar && NavigationLayout.offered && !usesShell
+        navigation == .sidebar && NavigationLayout.offered
         #else
         false
         #endif
     }
 
-    /// The iPhone-width shell; regular-width and other platforms keep their own navigation.
+    /// The shell is the root: the iPhone's width in the Separate layout.
+    private var showsShell: Bool { usesShell && !usesSidebar }
+
+    /// The iPhone-width shell; regular-width and other platforms keep their own navigation. In the Sidebar layout the
+    /// same width is its drawer's (`showsShell`).
     private var usesShell: Bool {
         #if os(visionOS)
         // Apple Vision Pro keeps the tabs, as the system's ornament (VisionShell), whatever the window's width.
@@ -101,13 +105,13 @@ struct RootView: View {
 
     /// The shell is on screen, and with it its toast window (`ToastWindow`): not on the welcome page, the engine step or
     /// the checklist after pairing (the same branches as `body`).
-    private var shellShown: Bool { usesShell && model.isPaired && model.pairingEngineMachine == nil && !model.showsChecklist }
+    private var shellShown: Bool { showsShell && model.isPaired && model.pairingEngineMachine == nil && !model.showsChecklist }
 
     /// The tabs are on screen at regular width (iPad, iPhone Duo open), with a toast window of
     /// their own (`ToastWindowHook`): the same branches as `body`, with no extension page in the app's place.
     private var tabsToastWindow: Bool {
         #if os(iOS)
-        !usesShell && model.isPaired && model.pairingEngineMachine == nil && !model.showsChecklist && model.extensionOpen == nil
+        !showsShell && model.isPaired && model.pairingEngineMachine == nil && !model.showsChecklist && model.extensionOpen == nil
         #else
         false
         #endif
@@ -131,8 +135,8 @@ struct RootView: View {
                 #if os(visionOS)
                 RootTabs().visionShell()
                 #elseif os(iOS)
-                if usesShell { ShellView().modifier(BuiltTreeRoot()) }
-                else if usesSidebar { SidebarRoot().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
+                if usesSidebar { SidebarRoot().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
+                else if usesShell { ShellView().modifier(BuiltTreeRoot()) }
                 else { RootTabs().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
                 #else
                 RootTabs()
@@ -204,7 +208,7 @@ struct RootView: View {
             }
             swaps.count += 1
         }
-        .onChange(of: usesShell) { swaps.rebuilt += 1 }
+        .onChange(of: showsShell) { swaps.rebuilt += 1 }
         .screenProbe("tree", swaps)
         // LookBlink drives UIWindowScene overrides, so it only exists on iOS and visionOS.
         #if os(iOS) || os(visionOS)
@@ -228,7 +232,12 @@ struct RootView: View {
         .overlay(alignment: .top) { if overlayToasts { ToastOverlay().padding(.top, toastClearance) } }
         #if os(iOS) || os(visionOS)
         // Settings › Appearance › Light & Dark on this scene's window (and any other open one) as it first shows.
-        .onAppear { model.colorScheme.apply() }
+        .onAppear {
+            model.colorScheme.apply()
+            #if DEBUG || PERF_SIGNPOST
+            PerfTrace.firstFrame()
+            #endif
+        }
         #if os(iOS)
         // The interface's cap on the windows' text size, so sheets and covers are capped too (`WindowTextSize`).
         .onAppear { WindowTextSize.apply(); systemSize = WindowTextSize.system }
@@ -252,6 +261,11 @@ struct RootView: View {
             }
         }
         .screenProbe("connection", ConnectionShown(shown: "\(model.connection.shown)", network: model.connection.networkUp))
+        #if os(iOS)
+        // Hub transcription's store (#3862 phase 5): the mode, the socket, the hub's lines and the fallback, for UI tests;
+        // a view of its own, so its changes redraw only it.
+        .overlay(alignment: .topLeading) { if ScreenProbe.enabled { MeetingTranscriptionProbe() } }
+        #endif
         .htmlCardSample()
         .voiceOrbSample()
         .closeoutSample()
@@ -389,18 +403,21 @@ struct RootView: View {
 }
 
 /// The iPad's routes (`PadRouter`) and its Settings, on the tabs: a sheet on the iPad; on a phone (iPhone Duo open) the
-/// whole window, one column across, as ChatGPT shows its account page there, not a sheet over half of it (#3701).
+/// whole window, one column across, as ChatGPT shows its account page there, not a sheet over half of it (#3701). At a
+/// phone's own width (the Sidebar layout's drawer, #6332) the sheet the shell shows it in.
 private struct PadRoutes: ViewModifier {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var width
     let router: PadRouter
     private let phone = UIDevice.current.userInterfaceIdiom == .phone
+    private var cover: Bool { phone && width == .regular }
 
     func body(content: Content) -> some View {
         @Bindable var model = model
         content
             .environment(\.padRouter, router)
-            .sheet(isPresented: phone ? .constant(false) : $model.shellSettings) { settings.presentationSizing(.page) }
-            .fullScreenCover(isPresented: phone ? $model.shellSettings : .constant(false)) {
+            .sheet(isPresented: cover ? .constant(false) : $model.shellSettings) { settings.presentationSizing(.page) }
+            .fullScreenCover(isPresented: cover ? $model.shellSettings : .constant(false)) {
                 settings
                     .environment(\.horizontalSizeClass, .compact)
                     .accessibilityAction(.escape) { model.shellSettings = false } // VoiceOver's scrub, as on a sheet

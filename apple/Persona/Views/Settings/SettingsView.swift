@@ -126,7 +126,7 @@ struct SettingsView: View {
             #endif
             #if os(macOS) && DEBUG
             // `-tab settings -openPairSheet YES` (Demo Mode, or paired: Pair Again): the Connect Hub sheet, for screenshots
-            // (scripts/app/mac_shot.sh; with `-openPairSSH YES` its SSH Tunnel sheet over it).
+            // (scripts/app/sim.sh; with `-openPairSSH YES` its SSH Tunnel sheet over it).
             .onAppear { if UserDefaults.standard.bool(forKey: "openPairSheet") { showPair = true } }
             #endif
         } empty: {
@@ -406,6 +406,10 @@ enum SettingsPage: Hashable {
     case models, agents, appearance, about, pairing, computers
     /// Settings › Session Triage (docs/assistant/agent-work.md「开关」).
     case triage
+    /// Assistant Profile › Standing Authorizations (#7002): the go-aheads Persona answers for the owner, each revocable.
+    case standingAuthorizations
+    /// Assistant Profile › Agent Follow-Up (#7005): how Persona starts and follows up the work it hands out.
+    case agentFollowUp
     /// Settings › Appearance › Layout (#2530): how the Agents list draws its agents.
     case layout
     /// Settings › Appearance › Navigation (#6332): Separate or Sidebar (`NavigationLayout`).
@@ -539,6 +543,8 @@ private struct SettingsDestinations: ViewModifier {
         case .storage: StorageView()
         case .translation: TranslationSettingsView()
         case .triage: TriageSettingsView()
+        case .standingAuthorizations: StandingAuthorizationsView()
+        case .agentFollowUp: AgentFollowUpView()
         case .modelConfiguration: ModelConfigurationView()
         case .hubs: HubsView()
         case .sshTunnel(let id): HubSSHTunnelPage(hubID: id)
@@ -920,7 +926,7 @@ struct WelcomeView: View {
         .sheet(item: $guide) { LinkSheet(target: $0) }
         .onAppear { withAnimation(.spring(duration: 0.8, bounce: 0.35)) { appear = true } }
         #if DEBUG
-        // `-openPairSheet YES` (or `other`): the pairing sheet, for screenshots (scripts/app/mac_shot.sh).
+        // `-openPairSheet YES` (or `other`): the pairing sheet, for screenshots (scripts/app/sim.sh).
         .onAppear {
             switch UserDefaults.standard.string(forKey: "openPairSheet") {
             case "other": pair = .other

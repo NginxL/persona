@@ -11,9 +11,15 @@ publish.workspace = true
 name = "persona_core"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[features]
+test-support = ["persona-core-runtime/test-support"]
+
 [dependencies]
 persona-core-runtime.workspace = true
 jni = { version = "=0.21.1", default-features = false }
+
+[dev-dependencies]
+persona-core-ffi = { path = ".", features = ["test-support"] }
 
 [lints]
 workspace = true

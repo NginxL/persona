@@ -311,7 +311,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         RecordingDayCatchUp.register()
         #endif
         #if DEBUG
-        RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending`
+        RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending|overview`
         #if os(iOS)
         Task { await RecordingSamples.installDaySampleIfAsked() } // `-showDaySample today|paused|recap|pending|failed`
         #endif
