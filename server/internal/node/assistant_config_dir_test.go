@@ -164,6 +164,105 @@ func TestAssistantProfileSelectionBoundaries(t *testing.T) {
 	})
 }
 
+// The hub warms the spare in the main chat's profile choice for new conversations, and sends a start that profile, or
+// none for Persona's own (#4633). When the choice changes between the two, either way, or a start names this computer's
+// profile itself (a meeting's follow-up, a scheduled task), the spare from before is not adopted: the conversation
+// starts in its own profile. Through the RPC boundary, as the hub calls it.
+func TestAssistantSpareIsAdoptedOnlyInTheStartsProfile(t *testing.T) {
+	// Answers each control request, as an adopted spare is told the start's permission mode, and each message.
+	const cli = `echo '{"type":"system","subtype":"init"}'
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"control_request"'*)
+      rid=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+      printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{}}}\n' "$rid" ;;
+    *'"type":"user"'*) echo '{"type":"result","subtype":"success"}' ;;
+  esac
+done
+`
+	for _, tc := range []struct {
+		name, warm, start string
+		adopted           bool
+	}{
+		{"changed to Persona's own", "legacy", "", false},
+		{"changed to this computer's", "", "legacy", false},
+		{"Persona's own both times", "", "", true},
+		{"this computer's both times", "legacy", "legacy", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := sdkTest(t)
+			if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+cli), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			n := f.n
+			n.home = os.Getenv("HOME")
+			n.dir = filepath.Join(n.home, ".persona")
+			n.cdirs = newClaudeDirs()
+			n.cdirs.scan = func() map[int]procEnv { return nil }
+			service := t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", service) // this computer's profile: what "legacy" resolves to
+			profile := map[string]string{"": filepath.Join(n.dir, "profiles", "claude"), "legacy": service}
+			cwd := filepath.Join(n.dir, "assistant")
+			params := func(dir string) map[string]any {
+				p := map[string]any{"launcher": "claude", "cwd": cwd, "model_fingerprint": "spare-profile-test"}
+				if dir != "" {
+					p["config_dir"] = dir
+				}
+				return p
+			}
+			if _, err := nodeCall(t, n, "assistant.warm", params(tc.warm)); err != nil {
+				t.Fatal(err)
+			}
+			n.mu.Lock()
+			spare := n.spare
+			n.mu.Unlock()
+			if spare == nil {
+				t.Fatal("nothing warmed")
+			}
+			t.Cleanup(spare.stop)
+			if got := envValue(spare.cmd.Environ(), "CLAUDE_CONFIG_DIR"); got != profile[tc.warm] {
+				t.Fatalf("warmed in %q, want %q", got, profile[tc.warm])
+			}
+			send := params(tc.start)
+			send["text"], send["permission_mode"] = "hello", "default" // a bypass start never takes a Claude spare
+			answer, err := nodeCall(t, n, "assistant.send", send)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var res struct {
+				SessionID string `json:"session_id"`
+			}
+			if err := json.Unmarshal(answer, &res); err != nil {
+				t.Fatal(err)
+			}
+			if adopted := res.SessionID == spare.id; adopted != tc.adopted {
+				t.Fatalf("adopted the spare: %v, want %v", adopted, tc.adopted)
+			}
+			if got := envValue(f.proc(res.SessionID).cmd.Environ(), "CLAUDE_CONFIG_DIR"); got != profile[tc.start] {
+				t.Fatalf("the conversation runs in %q, want %q", got, profile[tc.start])
+			}
+			if st, _ := n.state.get(res.SessionID); !sameAssistantProfile(st.ConfigDir, profile[tc.start]) {
+				t.Fatalf("recorded profile %q, want %q", st.ConfigDir, profile[tc.start])
+			}
+			f.idle(t, res.SessionID)
+		})
+	}
+	t.Run("a start naming no profile adopts no Claude spare in one", func(t *testing.T) {
+		f := sdkTest(t)
+		cwd := t.TempDir()
+		if err := f.n.assistantWarm(cwd, "claude", modelExecution{ConfigDir: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		f.n.mu.Lock()
+		p := f.n.spare
+		f.n.mu.Unlock()
+		t.Cleanup(p.stop)
+		if got := f.n.adoptSpare(cwd, "claude"); got != nil {
+			t.Fatal("a start with no resolved profile adopted a profiled spare")
+		}
+	})
+}
+
 func TestAssistantProfileCannotMoveExistingConversation(t *testing.T) {
 	f := sdkTest(t)
 	first, second := t.TempDir(), t.TempDir()
