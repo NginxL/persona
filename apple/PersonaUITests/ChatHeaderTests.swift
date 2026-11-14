@@ -196,7 +196,8 @@ final class ChatHeaderPresentationTests: XCTestCase {
         let tabs = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "同一空间的")).firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 5), "no ⋯ for the space's tabs")
         tabs.tap()
-        // Its title, "6 个 Agent" (it said "N 个标签页" before b81594a005, 2026-11-05).
+        // Its title counts the agents ("6 agents"; the tests run in Chinese, hence the pattern). It counted tabs
+        // ("N tabs") before b81594a005, 2026-11-05.
         let sheet = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ 个 Agent")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "the tabs sheet did not open")
         sleep(6) // past the 3 s the header waits before folding
