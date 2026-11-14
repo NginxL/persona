@@ -315,6 +315,8 @@ todos.read           GET /api/v1/todos/{id}/decisions
 -                    GET /api/v1/usage
 -                    GET /api/v1/usage/windows
 agents.read          GET /api/v1/workspace-board
+agents.read          GET /api/v1/workspace-board/activity
+agents.read          GET /api/v1/workspace-board/activity/{revision}
 -                    GET /api/v1/workspace-board/settings
 agents.read          GET /api/v1/workspaces
 -                    GET /api/v1/ws

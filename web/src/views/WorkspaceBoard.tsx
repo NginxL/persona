@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../lib/api";
 import { sessionTitle, stateOf } from "../lib/format";
 import { stateName } from "../lib/state-labels";
@@ -16,6 +16,10 @@ import { Icon } from "../ui/icons";
 import { t } from "../i18n";
 import { useKnownDefault } from "../lib/manager-choice";
 import { BulkControls, useBoardSelection } from "./workspace-board/BulkControls";
+import { lazyPage } from "../lib/lazy-page";
+import { lazyOverlay } from "./LazyOverlay";
+const ActivityDialog = lazyOverlay(() => import("./workspace-board/Activity").then((module) => module.ActivityDialog));
+const CardActivity = lazyPage(() => import("./workspace-board/Activity").then((module) => module.CardActivity));
 import { navigate } from "../lib/router";
 import { openAgent } from "../lib/handoff";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
@@ -33,7 +37,7 @@ export function WorkspaceBoard({ onToggleSidebar }: { onToggleSidebar?: () => vo
   const [retrying, setRetrying] = useState(false);
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
   const manager = useKnownDefault();
-  if (enabled) return <Board key={`${owner}:${manager}`} onToggleSidebar={onToggleSidebar} />;
+  if (enabled) return <Board key={JSON.stringify([owner, manager])} onToggleSidebar={onToggleSidebar} />;
   const retry = () => {
     setRetrying(true);
     void readAgain().finally(() => setRetrying(false));
@@ -86,6 +90,7 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   const dragging = useRef<string | null>(null);
   const refreshing = useRef(false);
   const [drop, setDrop] = useState("");
+  const [activityOpen, setActivityOpen] = useState(false);
   const [columnSelection, setColumnSelection] = useState("");
   // Manual is the default and unchanged; the auto view is a per-browser choice (#2648).
   const [view, setView] = useState<"manual" | "auto">(() => (localStorage.getItem(VIEW_KEY) === "auto" ? "auto" : "manual"));
@@ -176,14 +181,20 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   </BoardPage>;
   return <div ref={selection.containerRef} className="@container flex h-full flex-col bg-page">
     <span data-board-wide aria-hidden="true" className="pointer-events-none invisible absolute hidden @3xl:block" />
-    <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-3">
-      {onToggleSidebar && <IconButton icon="sidebar" label={t("agents-agentsview.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />}
-      <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-ink">{t("workspaceboard.title")}</h1><p className="truncate text-xs text-ink-3">{t("workspaceboard.subtitle")}</p></div>
-      <div className="flex shrink-0 items-center gap-1 rounded-control bg-field p-1" role="group" aria-label={t("workspaceboard.view_label")}>
-        <Button tone={view === "manual" ? "primary" : "quiet"} className="!px-2 !py-1 text-xs" disabled={state.busy} onClick={() => changeView("manual")}>{t("workspaceboard.view_manual")}</Button>
-        <Button tone={view === "auto" ? "primary" : "quiet"} className="!px-2 !py-1 text-xs" disabled={state.busy} onClick={() => changeView("auto")}>{t("workspaceboard.view_auto")}</Button>
+    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-3 @lg:flex-nowrap">
+      <div className="flex min-w-0 basis-full flex-1 items-center gap-3 @lg:basis-auto">
+        {onToggleSidebar && <IconButton icon="sidebar" label={t("agents-agentsview.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />}
+        <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-ink">{t("workspaceboard.title")}</h1><p className="truncate text-xs text-ink-3">{t("workspaceboard.subtitle")}</p></div>
       </div>
-      {view === "manual" && <Button icon="plus" disabled={!board || disabled || selection.active} onClick={() => setEdit({ kind: "column", title: "" })}><span className="sr-only @3xl:not-sr-only">{t("workspaceboard.add_column")}</span></Button>}
+      <div className="flex w-full shrink-0 items-center gap-3 @lg:w-auto">
+        <div className="flex shrink-0 items-center gap-1 rounded-control bg-field p-1" role="group" aria-label={t("workspaceboard.view_label")}>
+          <Button tone={view === "manual" ? "primary" : "quiet"} className="!px-2 !py-1 text-xs" disabled={state.busy} onClick={() => changeView("manual")}>{t("workspaceboard.view_manual")}</Button>
+          <Button tone={view === "auto" ? "primary" : "quiet"} className="!px-2 !py-1 text-xs" disabled={state.busy} onClick={() => changeView("auto")}>{t("workspaceboard.view_auto")}</Button>
+        </div>
+        <span className="flex-1 @lg:hidden" />
+        {board?.activity === true && <IconButton icon="history" label={t("workspaceboard.activity")} onClick={() => setActivityOpen(true)} />}
+        {view === "manual" && <Button icon="plus" disabled={!board || disabled || selection.active} onClick={() => setEdit({ kind: "column", title: "" })}><span className="sr-only @lg:not-sr-only">{t("workspaceboard.add_column")}</span></Button>}
+      </div>
     </header>
     <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-3">
       <label className="flex min-w-0 basis-full flex-1 items-center gap-2 rounded-control bg-field px-3 py-2 @lg:basis-0"><Icon name="search" size={14} className="text-ink-3" /><input aria-label={t("workspaceboard.search_label")} placeholder={t("workspaceboard.search_placeholder")} className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none" disabled={state.busy} value={search} onChange={(e) => setSearch(e.target.value)} /></label>
@@ -229,7 +240,8 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       <div className="mt-4 flex justify-end gap-2"><Button onClick={() => setDeleting(null)}>{t("common.cancel")}</Button><Button tone="danger" disabled={disabled || Boolean(board?.cards.some((c) => c.column_id === deleting?.id) && !moveTo)} busy={state.busy} onClick={() => void mutate({ action: "delete_column", id: deleting?.id, move_to: moveTo || undefined }).then((ok) => { if (ok) setDeleting(null); })}>{t("workspaceboard.delete_column")}</Button></div>
     </Dialog>
     {adding && board && <BindWorkspace column={adding} board={board} workspaces={state.discovery.workspaces} machines={machines} busy={state.busy} disabled={state.readonly} onClose={() => setAdding(undefined)} onBind={mutate} />}
-    {card && <WorkspaceDetail card={card} column={board!.columns.find((c) => c.id === card.column_id)?.title ?? ""} machine={machineOf(card.machine_id)} sessions={sessionsOf(card)} readonly={state.readonly} onClose={() => setSelected(undefined)} />}
+    {board?.activity === true && activityOpen && <ActivityDialog currentCards={board.cards} onClose={() => setActivityOpen(false)} onOpenCard={(id) => { setActivityOpen(false); setSelected(id); }} />}
+    {card && <WorkspaceDetail key={card.id} activity={board?.activity === true} card={card} column={board!.columns.find((c) => c.id === card.column_id)?.title ?? ""} machine={machineOf(card.machine_id)} sessions={sessionsOf(card)} readonly={state.readonly} onClose={() => setSelected(undefined)} />}
   </div>;
 }
 
@@ -311,11 +323,17 @@ export const WorkspaceCard = memo(function WorkspaceCard({ card, machine, worksp
     <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-xs text-ink-2">{sessions.length ? t("workspaceboard.agent_count", { count: sessions.length }) : t("workspaceboard.no_agents")}</span>{availability && <span className="rounded-full bg-field px-2 py-1 text-xs text-ink-3">{availability}</span>}{sessions.some((s) => stateOf(s) === "needs_you") && <StatePill state="needs_you" />}{!sessions.some((s) => stateOf(s) === "needs_you") && sessions.some((s) => stateOf(s) === "working") && <StatePill state="working" />}</div>
   </article>;
 });
-function WorkspaceDetail({ card, column, machine, sessions, readonly, onClose }: { card: BoardCard; column: string; machine?: Machine; sessions: readonly Session[]; readonly: boolean; onClose: () => void }) {
+function WorkspaceDetail({ card, column, machine, sessions, readonly, activity, onClose }: { card: BoardCard; column: string; machine?: Machine; sessions: readonly Session[]; readonly: boolean; activity: boolean; onClose: () => void }) {
+  const [showActivity, setShowActivity] = useState(false);
   const open = (kind: "files" | "git") => { onClose(); openPanel({ kind, mid: card.machine_id, sid: sessions[0]?.session_id ?? "", cwd: card.cwd }); };
   return <Dialog open title={card.title} onClose={onClose}><div className="space-y-4"><p className="text-xs text-ink-3">{[column, card.archived && t("workspaceboard.archived"), machine?.name || card.machine_id, machine?.online === false && t("workspaceboard.offline")].filter(Boolean).join(" · ")}</p><p className="break-all rounded-control bg-inset p-3 font-mono text-xs text-ink-2">{card.cwd}</p>{card.branch && <p className="text-xs text-ink-2">{t("workspaceboard.branch", { branch: card.branch })}</p>}
     <div className="flex flex-wrap gap-2"><Button icon="folder" disabled={!machine?.online} onClick={() => open("files")}>{t("workspaceboard.files")}</Button><Button icon="git" disabled={!machine?.online} onClick={() => open("git")}>Git</Button><Button icon="plus" disabled={readonly || !machine?.online} onClick={() => { onClose(); openNewAgent({ machineId: card.machine_id, cwd: card.cwd }); }}>{t("workspaceboard.new_agent")}</Button></div>
-    <div className="border-t border-line pt-3"><h3 className="mb-2 text-xs font-medium text-ink-3">{t("workspaceboard.agents_here")}</h3>{sessions.length ? <div className="space-y-1">{sessions.map((s) => <button type="button" key={s.session_id} className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-hover" onClick={() => { onClose(); openAgent(s.machine_id, s.session_id); }}><Icon name="agent" size={14} className="text-ink-3" /><span className="min-w-0 flex-1 truncate text-sm text-ink">{sessionTitle(s)}</span><StatePill state={stateOf(s)} /></button>)}</div> : <p className="text-sm text-ink-3">{t("workspaceboard.no_agents_detail")}</p>}</div></div></Dialog>;
+    <div className="border-t border-line pt-3"><h3 className="mb-2 text-xs font-medium text-ink-3">{t("workspaceboard.agents_here")}</h3>{sessions.length ? <div className="space-y-1">{sessions.map((s) => <button type="button" key={s.session_id} className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-hover" onClick={() => { onClose(); openAgent(s.machine_id, s.session_id); }}><Icon name="agent" size={14} className="text-ink-3" /><span className="min-w-0 flex-1 truncate text-sm text-ink">{sessionTitle(s)}</span><StatePill state={stateOf(s)} /></button>)}</div> : <p className="text-sm text-ink-3">{t("workspaceboard.no_agents_detail")}</p>}</div>
+    {activity && <section className="min-w-0 border-t border-line pt-3">
+      <Button icon="history" expanded={showActivity} onClick={() => setShowActivity(!showActivity)}>{t("workspaceboard.activity")}</Button>
+      {showActivity && <div className="mt-3 min-w-0"><Suspense fallback={<Loading label={t("workspaceboard-activity.loading")} />}><CardActivity cardID={card.id} /></Suspense></div>}
+    </section>}
+  </div></Dialog>;
 }
 interface Dirs { path: string; parent?: string; entries: { name: string; path: string }[] }
 function BindWorkspace({ column, board, workspaces, machines, busy, disabled, onClose, onBind }: {

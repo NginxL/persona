@@ -1319,7 +1319,7 @@ The new fields are stored in the existing interaction JSON payload; no database 
 Workflow, upgrades and persistence are covered in [Workspace board](../web/workspace-board.md). The APIs below belong to the manager (the hub forwards them unchanged over the bus `http.request`, see "Forwarding App requests"; `503 assistant_offline` when the manager isn't there), and the two events are sent by the manager via `ws.broadcast` and pushed unchanged by the hub. The APIs use the hub machine's Postgres as the only persistent state, with no fallback to in-memory or JSON file writes. `answer` may GET the board and the list; POST requires `full`. `can_write` says whether the current request's role can edit; it grants no extra file, Git or Agent permissions.
 
 ```text
-BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool, batch_cards?: bool }
+BoardState { revision: int64, columns: Column[], cards: Card[], can_write: bool, batch_cards?: bool, activity?: bool }
 Column { id, title }
 Card { id, machine_id, workspace_id, title, cwd, source, source_id?, branch?,
        column_id, pinned: bool, archived: bool }
@@ -1367,6 +1367,52 @@ Session gains optional `workspace_cwd`: the physical directory verified by the n
 The board is off by default (#2475): `GET /api/v1/workspace-board/settings` returns `{enabled,can_write}`. The value lives in Postgres's `settings` table (key `workspace_board.settings`, `{"enabled":bool}`), one per hub, the same for all browsers and devices. If it was never set, it counts as on when `workspace_board`'s `revision > 0` (the board has been edited), otherwise off; the inferred value isn't written back, and only the first PUT stores it. PUT `{enabled}` requires `full`; on success WS pushes `{"type":"workspace_board_settings","enabled":bool}`. The toggle only decides whether clients show it: when off, the board and list APIs still work and no data is deleted. Old hubs without this API return 404; clients then treat it as on (the old version showed it to everyone) and hide the toggle.
 
 Board edits such as move and archive don't trigger Agent or Git operations. On success WS pushes `{"type":"workspace_board","revision":<new version>}`, and clients re-read. While the board is visible the web client also refreshes discovery every 10 seconds, and immediately when it comes back to the foreground, to catch changes in directories and connection state.
+
+### Board activity
+
+The optional `activity: true` capability means the manager's store journals board saves. These routes are read-only
+manager APIs relayed by the hub. Full and answer-role device tokens may read them; extension tokens need `agents.read`.
+A manager without the store capability returns 503 `not_supported`. No new event type is introduced: the existing
+`workspace_board` revision push can notify an open activity reader that newer history is available.
+
+| Method and path | Query | Response |
+| --- | --- | --- |
+| `GET /api/v1/workspace-board/activity` | `limit` (1–50, default 20), optional positive decimal `before` revision (exclusive), optional `card_id` | `ActivityPage` |
+| `GET /api/v1/workspace-board/activity/{revision}` | `offset` (default 0), `limit` (1–100, default 30) | `ActivityDetail`; 404 `activity_not_found` for a revision not retained |
+
+```text
+ActivitySummary { revision: decimal string, at: RFC3339, change_count, card_count, kinds: string[] }
+ActivityPage { entries: ActivitySummary[], next_cursor?: decimal string, latest_revision: decimal string,
+               oldest_revision?: decimal string, retention_limit: 500 }
+ActivityDetail { revision: decimal string, at: RFC3339, changes: ActivityChange[], total, next_offset?: integer }
+ActivityChange { kind, id?, title?, fields?: string[], before?: ActivityValue, after?: ActivityValue, card_ids?: string[] }
+ActivityValue { title, column_id?, column_title?, pinned?: bool, archived?: bool }
+```
+
+Activity revision strings preserve int64 identity in JavaScript. `next_cursor` is the last returned revision, passed
+as `before` for the next list page; absence ends pagination. New commits cannot duplicate older pages. Page rows,
+latest board revision and oldest retained revision share a repeatable-read snapshot. Retention can advance between
+pages, so a later page may be empty even when the earlier one had a cursor. `oldest_revision` describes all retained
+history, not just the requested card. An empty history returns `entries: []`, no oldest revision and the board's
+current revision (or `"0"` before it exists).
+
+`card_id` filters revisions by affected card IDs, including deleted/archived cards and surviving cards whose relative
+order changed. Summary counts and detail pages always describe the complete grouped revision, not only that card.
+`change_count` counts change records; `card_count` counts distinct affected card IDs. Expanding a large update reads
+only its requested detail page; `next_offset` is exclusive of changes already returned. Unknown future `kind` values
+must have a generic display rather than crashing the client.
+
+Kinds: `card_added`, `card_removed`, `card_updated`, `column_added`, `column_removed`, `column_renamed`,
+`cards_reordered`, `columns_reordered`. A `card_updated` record's fields are any of `title`, `column`, `pinned`,
+`archived`. Add/remove records omit the absent side. Reorder records are group-level facts, not actor attribution;
+card reorder records carry the column ID/title and affected surviving `card_ids`. Full snapshots, paths, machine IDs
+and transcripts are not journaled. A committed no-op has an empty change list but still advances revision once.
+
+The migration starts recording future writes, with no backfill. Save, journal insert and retention run in the same
+transaction under the board row lock. Keep the most recent 500 entries and at most 16 MiB encoded change details,
+always retaining the newest complete entry. A conflict, failed validation, failed journal insertion or failed commit
+leaves the prior board and history unchanged. Invalid query ranges, duplicate numeric query parameters and malformed
+card IDs return 400; storage errors return 503. No POST/PUT/DELETE activity route exists.
 
 ## Main chat readiness (`assistant_readiness`, #3710)
 

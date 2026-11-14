@@ -111,5 +111,6 @@
   "bulk_updated": "Workspaces updated",
   "bulk_undo": "Undo last change",
   "selection_hint": "Only visible workspaces are selected. Agents keep running.",
-  "bulk_saving": "Updating workspaces…"
+  "bulk_saving": "Updating workspaces…",
+  "activity": "Activity"
 }

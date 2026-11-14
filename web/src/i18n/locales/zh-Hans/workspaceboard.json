@@ -111,5 +111,6 @@
   "bulk_updated": "工作空间已更新",
   "bulk_undo": "撤销上次修改",
   "selection_hint": "只选择当前可见的工作空间，Agent 会继续运行。",
-  "bulk_saving": "正在更新工作空间…"
+  "bulk_saving": "正在更新工作空间…",
+  "activity": "活动记录"
 }

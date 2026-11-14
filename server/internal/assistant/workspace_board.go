@@ -42,6 +42,8 @@ type boardBook struct {
 func (s *Service) workspaceBoardRoutes() {
 	s.handle("GET /api/v1/workspace-board", s.getWorkspaceBoard)
 	s.handle("POST /api/v1/workspace-board", s.mutateWorkspaceBoard)
+	s.handle("GET /api/v1/workspace-board/activity", s.getWorkspaceBoardActivity)
+	s.handle("GET /api/v1/workspace-board/activity/{revision}", s.getWorkspaceBoardActivityDetail)
 	s.handle("GET /api/v1/workspaces", s.getWorkspaces)
 	s.workspaceBoardSettingsRoutes()
 }
@@ -115,11 +117,13 @@ func (s *Service) presentBoard(state workspaceboard.State) workspaceboard.State 
 }
 
 func (s *Service) writeBoard(w http.ResponseWriter, r *http.Request, state workspaceboard.State) {
+	_, activity := s.store().(workspaceBoardActivityStore)
 	apierr.WriteJSON(w, struct {
 		workspaceboard.State
 		CanWrite   bool `json:"can_write"`
 		BatchCards bool `json:"batch_cards"`
-	}{s.presentBoard(state), fullRole(r), true})
+		Activity   bool `json:"activity"`
+	}{s.presentBoard(state), fullRole(r), true, activity})
 }
 
 func (s *Service) getWorkspaceBoard(w http.ResponseWriter, r *http.Request) {

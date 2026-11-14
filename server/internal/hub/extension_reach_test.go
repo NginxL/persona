@@ -200,6 +200,7 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/agents/sessions/{id}": "manager", "GET /api/v1/agents/sessions/{id}/messages": "manager",
 		"GET /api/v1/agents/sessions/{id}/avatar": "manager",
 		"GET /api/v1/workspaces":                  "manager", "GET /api/v1/workspace-board": "manager",
+		"GET /api/v1/workspace-board/activity": "manager", "GET /api/v1/workspace-board/activity/{revision}": "manager",
 		"POST /api/v1/sessions":                            "body", // machine_id, resume_session_id: its manager's (startSession)
 		"POST /api/v1/sessions/{mid}/{sid}/messages":       "path",
 		"POST /api/v1/sessions/{mid}/{sid}/interrupt":      "path",
