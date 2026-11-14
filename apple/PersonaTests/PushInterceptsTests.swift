@@ -134,8 +134,12 @@ struct PushInterceptsTests {
     }
 
     @Test func lateResponseCannotOverwriteNewerRead() async {
-        let old = response([record("2026-11-14T02:00:00Z", title: "Old")])
-        let new = response([record("2026-11-14T03:00:00Z", title: "New")])
+        // The model keeps only records from the local day of `.now` (#7953): both sit on today, whenever this runs.
+        let today = { (hour: Int) in
+            ISO8601DateFormatter().string(from: Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: .now)!)
+        }
+        let old = response([record(today(11), title: "Old")])
+        let new = response([record(today(12), title: "New")])
         let counter = LockedCounter()
         let model = PushInterceptsModel(mode: { LnModeResponse(enabled: true) }, intercepts: {
             if counter.next() == 1 {
