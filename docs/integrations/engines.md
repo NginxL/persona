@@ -367,6 +367,7 @@ for Claude Code plain `claude --resume <id>`. Persona-created Claude uses launch
 
 Persona therefore reports its own recovery command for each Claude pane (`resume_argv`, only this pane):
 `eval "<Persona's original launch command, --resume <id>>"`. herdr types it into the pane shell during restore, retaining ~/.zshrc launchers.
+On Windows, where herdr restores into PowerShell unless `[terminal] default_shell` names another shell, a PowerShell pane gets the same command handed to Git Bash instead (#9853, "herdr" in [windows.md](../operations/windows.md)).
 
 - User-started terminal claude is not reported; herdr restores normally; user `config.toml` untouched.
 - Older Persona sessions / sessions predating node restart (launcher in node session records): report once on refresh if running in herdr.

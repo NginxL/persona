@@ -179,6 +179,7 @@ herdr has a native Windows build since 0.9.5 (ConPTY panes, [official notes](htt
 | Live terminal (`terminal session observe`) | ❌ | herdr has no direct terminal attach on Windows; falls back to reading the screen |
 | Codex in a herdr tab: list, send, answer cards | ✅ (tests) | The terminal route as elsewhere ([codex.md](../integrations/codex.md)); not run against a real herdr on Windows |
 | Resume an exited Codex thread from the phone | ✅ (tests) | `codex resume <id>` in a new tab through `personad codex-start`, which runs the `codex.exe` behind npm's `codex.cmd` ("Codex" below); not run against a real herdr on Windows |
+| Resume Persona's Agents when herdr itself restarts | ✅ (tests) | Git Bash pane: the `eval` line as elsewhere; PowerShell pane: handed to Git Bash ("herdr's own restore" below, #9853); not run against a real herdr on Windows |
 | Claude in the desktop app or in a terminal Persona does not drive | ✅ | As in the Orca table above |
 
 - **socket**: herdr's API on Windows is a named pipe, named `\\.\pipe\` plus the socket path (`\\.\pipe\C:\Users\<you>\AppData\Roaming\herdr\herdr.sock`);
@@ -197,7 +198,19 @@ herdr has a native Windows build since 0.9.5 (ConPTY panes, [official notes](htt
 
   Which of the two a start uses depends on the shell that will read the typed line. A host that says its new pane runs PowerShell or pwsh gets the handoff; a host that names any other shell is taken at its word. A new pane of classic herdr, which does not say, is asked once for its foreground program; when that is no known shell, `[terminal] default_shell` decides (found the way herdr finds its config: `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, `%APPDATA%\herdr`), and without either it is PowerShell. Git Bash or another POSIX shell gets the command typed directly, with no start file. `cmd.exe` is refused before anything is written or typed, with a message asking for PowerShell or Git Bash.
   Launcher sync's `"shell": "bash"` and `"rc_file": "~/.bashrc"` describe the Git Bash that reads launcher definitions, not the shell in herdr's pane.
-  **Not covered by the handoff**: a pane of Orca, Tern or herdr-core that names no shell (Orca opens Git Bash itself when it can, #9810); Run Agent Here in a pane that already runs PowerShell; and classic herdr's own restore after it restarts, whose `resume_argv` is still a POSIX `eval` command that PowerShell cannot run. After a herdr restart, use the app's ordinary Resume, which opens a new pane.
+  **Not covered by the handoff**: a pane of Orca, Tern or herdr-core that names no shell (Orca opens Git Bash itself when it can, #9810), and Run Agent Here in a pane that already runs PowerShell.
+- **herdr's own restore after it restarts** (#9853): herdr opens each restored pane with `[terminal] default_shell`, else its default (`pwsh.exe` from `PATH`, else `powershell.exe`), and types the `resume_argv` the node registered for the Agent there. The node reads the same key when it registers the command:
+  - Git Bash, `cmd.exe` (which can run neither line) and any other shell keep `eval "<the start command with --resume <id>>"`, exactly as before.
+  - PowerShell, pwsh, or no key at all (a config the node cannot read counts as none) get the Agent's POSIX command, with the start file's `PERSONA_HOME` / `unset` prefix, handed to Git Bash. herdr types:
+
+    ```powershell
+    . '<Git Bash>' -ic '. <(base64 -d <<< <the command in base64>)'
+    ```
+
+    herdr accepts only a plain command name as the first element, so the line uses PowerShell's other invocation operator, `.`, which runs a program as `&` does. The command crosses in base64 because every POSIX quoting of a Windows path needs an apostrophe, a double quote or a backslash: herdr refuses apostrophes, a double quote does not survive Windows PowerShell 5.1's rebuilding of native arguments, and PowerShell 7 escapes quotes and backslashes differently from Git Bash. Git Bash sources the decoded command as it sources a start file, so `~/.bashrc` launchers work, and a path with an apostrophe, which the `eval` line cannot say, resumes here.
+  - No command is registered when Git Bash cannot be found, when its path has an apostrophe or another of PowerShell's single quotes, or when the line would exceed herdr's 8192 bytes; herdr then resumes Claude with its own bare `claude --resume`.
+
+  The line is chosen when the node registers it (an Agent's start, a new session in its pane, the node's first look at a herdr server), so the first restart after `default_shell` changes between Git Bash and PowerShell can still type the old line. **Not confirmed on a real Windows machine yet**: the choice, the argv and herdr's quoting of it are covered by tests on other systems and the Windows build compiles. If a restored pane shows an error instead of the Agent, use the app's ordinary Resume, which opens a new pane, and report what the pane showed in #9853.
 - **herdr has to stay resident in the user's desktop session**: a `herdr server` started from an ssh session exits with that session. Run `herdr.exe server` from a scheduled task that starts at logon (current user,
   `Interactive`, no time limit); it's the same kind as the `persona-link install` task.
 - **`syscall.Exec`**: `personad launch` (managed launchers) and `codex-start` / `tab-start` replace themselves with claude / codex. Windows has no exec, so `osproc.Exec` starts a child in the same

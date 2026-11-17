@@ -18,6 +18,10 @@ func lockHerdrDir(string) (func(), error) { return func() {}, nil }
 // herdrPaneShell: herdr on Windows does not read HERDR_AGENT, so nothing types it (hostherdr.go). A var for tests.
 var herdrPaneShell = func() string { return "" }
 
+// herdrRestoreShells are the shells that read a resume_argv after herdr restarts (herdrresume.go): herdr's configured
+// or default pane shell (windowsRestoreShells). A var for tests.
+var herdrRestoreShells = windowsRestoreShells
+
 // freshPaneShells resolves a new pane. Only classic herdr gets foreground/config detection and a PowerShell default.
 // Every unnamed nonclassic pane returns main's empty fallback; a host-named non-PowerShell shell stays as reported.
 func (n *Node) freshPaneShells(ctx context.Context, launch host.Launcher, created *host.Created) []string {

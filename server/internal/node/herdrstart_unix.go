@@ -128,6 +128,10 @@ func systemdRun() (string, bool) {
 // [terminal] default_shell in herdr's config is not looked at). A var for tests.
 var herdrPaneShell = sync.OnceValue(userShell)
 
+// herdrRestoreShells are the shells that read a resume_argv after herdr restarts (herdrresume.go): herdrPaneShell, as
+// for a new pane. A var for tests.
+var herdrRestoreShells = func(string) []string { return []string{herdrPaneShell()} }
+
 // userShell is the user's login shell: $SHELL, else the account's (launchd does not set SHELL), else zsh / sh.
 func userShell() string {
 	if s := os.Getenv("SHELL"); strings.HasPrefix(s, "/") {

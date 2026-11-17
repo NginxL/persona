@@ -2,12 +2,14 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
 )
 
@@ -22,7 +24,8 @@ import (
 // attach resume_argv, and herdr runs that instead of its built-in one, only for that pane — without holding lifecycle
 // authority on panes herdr detects itself, so herdr's screen and OSC detection still decides agent_status (#4657).
 // Every Agent Persona starts in herdr gets `eval "<the command Persona starts it with, --resume <id>>"`, typed into
-// the restored pane's shell like herdr's own (so ~/.zshrc launchers work). Agents that the user starts in a terminal
+// the restored pane's shell like herdr's own (so ~/.zshrc launchers work); a PowerShell pane on Windows gets the same
+// command handed to Git Bash instead (powerShellResumeArgv). Agents that the user starts in a terminal
 // are never touched: herdr resumes them as before. The user's herdr config is not changed. herdr keeps the command
 // across later session reports with another id (checked against v0.9.5), so a Claude that moved to a new session
 // (/clear) is reported again from its SessionStart hook.
@@ -81,17 +84,72 @@ func dquote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
-// claudeResumeArgv is the resume_argv of a Claude Persona started: eval of its start command with --resume id, herdr
-// told it is Claude as at the start (resumeHerdrAgent), with the node's directory and without the assistant's
-// environment (agentenv.go). ok is false when the command cannot be said without an apostrophe (a path with one in
-// it): herdr would refuse it.
+// claudeResumeArgv is the resume_argv of a Claude Persona started: its start command with --resume id (resumeArgv),
+// herdr told it is Claude as at the start (resumeHerdrAgent), with the node's directory and without the assistant's
+// environment (agentenv.go). ok is false when herdr would refuse the command (a path with an apostrophe in the eval
+// line, resumeSayable).
 func (n *Node) claudeResumeArgv(spec claudeLaunch, id string) (argv []string, ok bool) {
-	cmd := withHerdrAgent(resumeHerdrAgent("claude"), n.claudeCommandLine(spec, "--resume "+id, dquote))
-	cmd = n.agentCommand(cmd, dquote, herdrPaneShell())
-	if !resumeSayable(cmd) || !validID(id) {
+	if !validID(id) {
+		return nil, false
+	}
+	return n.resumeArgv(func(q func(string) string) string {
+		return withHerdrAgent(resumeHerdrAgent("claude"), n.claudeCommandLine(spec, "--resume "+id, q))
+	})
+}
+
+// resumeArgv is the resume_argv that runs command, quoted with the q it is given, in the shell herdr opens the
+// restored pane with (herdrRestoreShells). A PowerShell pane on Windows gets powerShellResumeArgv; every other shell
+// gets `eval "<command>"` (dquote), exactly the line it got before.
+func (n *Node) resumeArgv(command func(q func(string) string) string) (argv []string, ok bool) {
+	if shells := herdrRestoreShells(n.home); powerShellPane(shells...) {
+		return powerShellResumeArgv(n.agentCommand(command(shellQuote), shellQuote, startCommandShells(shells)...))
+	}
+	cmd := n.agentCommand(command(dquote), dquote, herdrPaneShell())
+	if !resumeSayable(cmd) {
 		return nil, false
 	}
 	return []string{"eval", cmd}, true
+}
+
+// windowsRestoreShells are the shells for the resume_argv of classic herdr on Windows. herdr opens a restored pane
+// with `[terminal] default_shell`, else pwsh.exe from PATH, else powershell.exe (pane.rs, v0.9.5), whatever the pane
+// ran before, so this is the config half of a new pane's decision (windowsPaneShellDecision): PowerShell, pwsh and no
+// answer are a PowerShell pane; Git Bash, cmd.exe (which can run neither line) and other shells keep the eval line.
+func windowsRestoreShells(home string) []string {
+	return windowsPaneShellDecision(true, "", nil, herdr.TerminalDefaultShell(home))
+}
+
+// powerShellResumeArgv is the resume_argv for a restored pane that runs PowerShell (Windows PowerShell 5.1 or
+// PowerShell 7), which has no eval and reads the eval line's quotes differently (#9853). It hands cmd, the Agent's
+// POSIX command, to Git Bash as a start in such a pane does (powerShellStartLine); herdr types
+//
+//	. '<Git Bash>' -ic '. <(base64 -d <<< <cmd in base64>)'
+//
+// herdr takes only a plain command name first (agent_resume.rs), so the invocation operator is PowerShell's `.`,
+// which runs a program as `&` does. herdr quotes the other elements in apostrophes, which PowerShell reads as its own
+// verbatim strings while none of its single-quote characters is inside. cmd crosses in base64 because every POSIX
+// quoting of a Windows path needs an apostrophe, a double quote or a backslash: herdr refuses apostrophes, a double
+// quote does not survive Windows PowerShell 5.1's rebuilding of native arguments, and PowerShell 7's escaping of
+// quotes and backslashes is not Git Bash's (powerShellSourceCommand). Git Bash sources the decoded command as it
+// sources a start file, so ~/.bashrc launchers apply. ok is false without Git Bash, for a Git Bash path herdr or
+// PowerShell cannot take, and over herdr's length limit.
+func powerShellResumeArgv(cmd string) (argv []string, ok bool) {
+	bash, err := powerShellStartShell()
+	if err != nil {
+		return nil, false
+	}
+	argv = []string{".", bash, "-ic", ". <(base64 -d <<< " + base64.StdEncoding.EncodeToString([]byte(cmd)) + ")"}
+	size := 0
+	for _, a := range argv {
+		if strings.ContainsAny(a, "'\u2018\u2019\u201a\u201b") || strings.IndexFunc(a, unicode.IsControl) >= 0 {
+			return nil, false
+		}
+		size += len(a)
+	}
+	if size > maxResumeArgv {
+		return nil, false
+	}
+	return argv, true
 }
 
 // maxResumeArgv is herdr's limit on a resume_argv's total length (agent_resume.rs, v0.9.5).
@@ -112,15 +170,15 @@ func (n *Node) agentResumeArgv(spec agentLaunch, id string) (argv []string, ok b
 	if kind == "" || kind == "claude" {
 		return n.claudeResumeArgv(spec, id)
 	}
-	cmd := withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, dquote)+" resume "+id)
-	if _, program, ok := workAgent(kind); ok {
-		cmd = withHerdrAgent(resumeHerdrAgent(kind), workAgentResume(kind, workAgentCommand(spec.Launcher, program, spec.Model), id))
-	}
-	cmd = n.agentCommand(cmd, dquote, herdrPaneShell())
-	if !resumeSayable(cmd) || (!validID(id) && !runtimeIDRe.MatchString(id)) {
+	if !validID(id) && !runtimeIDRe.MatchString(id) {
 		return nil, false
 	}
-	return []string{"eval", cmd}, true
+	return n.resumeArgv(func(q func(string) string) string {
+		if _, program, ok := workAgent(kind); ok {
+			return withHerdrAgent(resumeHerdrAgent(kind), workAgentResume(kind, workAgentCommand(spec.Launcher, program, spec.Model), id))
+		}
+		return withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, q)+" resume "+id)
+	})
 }
 
 // resumeHerdrAgent is the HERDR_AGENT in front of a resume_argv (hostherdr.go): herdr types the argv into the shell it
@@ -166,7 +224,7 @@ func (n *Node) reportResume(ctx context.Context, h *herdrHost, pane string, spec
 	n.mu.Unlock()
 	argv, ok := n.agentResumeArgv(spec, spec.ID)
 	if !ok {
-		n.logf("herdr resume: %s (%s) not given a resume command (herdr would refuse it: an apostrophe, a control character or too long)", pane, spec.ID)
+		n.logf("herdr resume: %s (%s) not given a resume command (herdr would refuse it: an apostrophe, a control character or too long; or no Git Bash for a PowerShell pane)", pane, spec.ID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
