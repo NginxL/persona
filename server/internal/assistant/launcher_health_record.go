@@ -99,6 +99,9 @@ type healthResult struct {
 	// resetsAt: a usage limit's reset as the outcome's source knew it (an agent's own record of the limit); nil: read
 	// off err's words when they name a time zone.
 	resetsAt *time.Time
+	// at: when the outcome happened, when that was before it is recorded (an agent's turn whose usage limit has no
+	// known reset: its transcript's time, launcherLimitTurnSettled); zero: now. The record's evidence is that old.
+	at time.Time
 	// observed is the record as read before a probe (nil: not a probe's result); a later version of it (another check
 	// time or rev) makes that probe's result obsolete.
 	observed *LauncherHealth
@@ -108,8 +111,8 @@ type healthResult struct {
 const (
 	healthSourceCheck = "check" // launchers.check, in the node's login shell
 	healthSourceStart = "start" // an agent's start, in a terminal tab
-	// healthSourceSession: an agent's own turn with the launcher ended on the subscription's usage limit, its reset
-	// known (launcherLimitTurnEnded). Nothing was run for it: no check, no repair.
+	// healthSourceSession: an agent's own turn with the launcher ended on the subscription's usage limit
+	// (launcherLimitTurnEnded). Nothing was run for it: no check, no repair.
 	healthSourceSession = "session"
 )
 
@@ -150,6 +153,10 @@ func (s *Service) recordHealth(ctx context.Context, machine, launcher string, r 
 		return out
 	}
 	now := time.Now().UTC()
+	at := now // when r happened (healthResult.at)
+	if !r.at.IsZero() && r.at.Before(now) {
+		at = r.at.UTC()
+	}
 	if o := r.observed; o != nil && (rec == nil && !o.CheckedAt.IsZero() || rec != nil && (!rec.CheckedAt.Equal(o.CheckedAt) || rec.rev != o.rev)) {
 		return keep(limited && kind == errKindUsageLimit && foldLimit(rec, limitFamilies(r.err), limitResetOf(r, now)))
 	}
@@ -181,7 +188,10 @@ func (s *Service) recordHealth(ctx context.Context, machine, launcher string, r 
 		// start says otherwise (#1642): a session already running says nothing of a new terminal tab.
 		return keep(false)
 	}
-	rec.CheckedAt, rec.Source, rec.Millis = now, r.source, r.millis
+	rec.CheckedAt, rec.Source, rec.Millis = at, r.source, r.millis
+	if limited && old.CheckedAt.After(at) {
+		rec.CheckedAt = old.CheckedAt // folded into a limit with newer evidence: its evidence is still that new
+	}
 	if r.agent != "" {
 		rec.Agent = r.agent
 	}
@@ -210,7 +220,7 @@ func (s *Service) recordHealth(ctx context.Context, machine, launcher string, r 
 			if limited {
 				merged = old
 			}
-			foldLimit(&merged, limitFamilies(r.err), limitResetOf(r, now))
+			foldLimit(&merged, limitFamilies(r.err), limitResetOf(r, at))
 			rec.LimitModels, rec.LimitResets, rec.ResetsAt = merged.LimitModels, merged.LimitResets, merged.ResetsAt
 		case rec.State == "" || rec.State == healthOK:
 			rec.State = healthFailing
@@ -387,10 +397,11 @@ func limitResetOf(r healthResult, at time.Time) *time.Time {
 }
 
 // launcherLimitTurnEnded: a turn of machine's session sid ended. When it ended on the subscription's usage limit,
-// with a reset still ahead, the launcher the session names counts as usage-limited on machine until then (source
-// healthSourceSession): an agent started with it there would be refused at once too. Nothing runs for it, no check
-// (it would spend a request to be refused) and no repair. The assistant's conversations count as well: the main
-// chat runs the machine's launcher under the same sign-in, so its limit is the launcher's.
+// the launcher the session names counts as usage-limited on machine (source healthSourceSession): until the reset
+// when it is known and still ahead, else until healthStale after the turn (#9646). An agent started with it there
+// would be refused at once too. Nothing runs for it, no check (it would spend a request to be refused) and no repair.
+// The assistant's conversations count as well: the main chat runs the machine's launcher under the same sign-in, so
+// its limit is the launcher's.
 func (s *Service) launcherLimitTurnEnded(ctx context.Context, machine, sid string) {
 	// Once the turn stayed still, as a task's end is judged (settleDelay): right after a write the node's list may not
 	// have read the transcript yet (its meta is read again at most every few seconds), and says no error meanwhile.
@@ -411,17 +422,38 @@ func (s *Service) launcherLimitTurnSettled(ctx context.Context, machine, sid str
 		return
 	}
 	lim := limitOfTurn(sess)
-	reset, ok := usageLimitReset(lim)
-	if now := time.Now(); !ok || !reset.After(now) || reset.Sub(now) > healthLimitMax {
+	if lim.TurnErrorKind != proto.TurnErrorUsageLimit || lim.TurnError == "" {
 		return
+	}
+	now := time.Now()
+	res := healthResult{err: lim.TurnError, source: healthSourceSession, kind: errKindUsageLimit}
+	if reset, ok := usageLimitReset(lim); ok && reset.Sub(now) <= healthLimitMax {
+		if !reset.After(now) {
+			return // the limit it met is over
+		}
+		res.resetsAt = &reset
+	} else {
+		// No reset known, or one too far off to be read right (limitResetOf): the turn's families are limited with an
+		// unknown reset (#9646), and its evidence is as old as the turn. It goes stale as any failure without a reset
+		// does, healthStale after the turn: a turn the hub reads late says that much less of the quota now, and one
+		// older than that says nothing.
+		res.at = lim.UpdatedAt
+		if res.at.IsZero() || res.at.After(now) {
+			res.at = now
+		}
+		if now.Sub(res.at) >= healthStale {
+			return
+		}
 	}
 	// Nothing new for the limit in force (foldLimit changes nothing on the families the turn names): each turn a
-	// background task wakes meets it again, and refreshing the evidence would hold off the next probe.
+	// background task wakes meets it again, and refreshing the evidence would hold off the next probe. A turn with no
+	// reset known is new while the record's evidence is stale (another family's known reset holds it,
+	// familyResetAhead): the turn's families hold on that evidence alone.
 	if r, found := s.launcherHealth(ctx, machine, sess.Launcher); found && r.Kind == errKindUsageLimit && r.unusable() &&
-		!foldLimit(&r, limitFamilies(lim.TurnError), &reset) {
+		!foldLimit(&r, limitFamilies(lim.TurnError), res.resetsAt) && (res.resetsAt != nil || time.Since(r.CheckedAt) < healthStale) {
 		return
 	}
-	s.recordHealth(ctx, machine, sess.Launcher, healthResult{err: lim.TurnError, source: healthSourceSession, kind: errKindUsageLimit, resetsAt: &reset})
+	s.recordHealth(ctx, machine, sess.Launcher, res)
 }
 
 // limitOfTurn is sess's latest turn error decorated with what it says of a usage limit (decorateLimit): the node's

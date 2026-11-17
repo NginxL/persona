@@ -20,7 +20,6 @@ import {
   level,
   load as loadText,
   loadAxis,
-  localOffset,
   memPercent,
   percent,
   RANGE_KEYS,
@@ -220,7 +219,6 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
   const hub = hubLabel(m, machines);
   const route = routeText(m, machines);
   const system = data?.metrics.system ?? m?.system;
-  const tz = useMemo(() => localOffset(), []);
   // a hub that renames computers, and one of its own (a linked hub's is renamed there)
   const canRename = useStore((s) => s.features.includes(MACHINE_RENAME_FEATURE)) && m?.kind !== "hub" && (!m?.hub_id || !selfHub || m.hub_id === selfHub);
   const [renaming, setRenaming] = useState(false);
@@ -412,7 +410,7 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
             </div>
           )
         ) : (
-          <Monitor data={data} range={range} online={online} system={system} tz={tz} onRange={setRange} />
+          <Monitor data={data} range={range} online={online} system={system} onRange={setRange} />
         )}
         {data && failure && <p className="mt-2 px-1 text-[11.5px] text-red">{t("machines-machinedetail.refresh_failed", { error: failure })}</p>}
         <p className="mt-2 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("machines-machinedetail.metrics_note")}</p>
@@ -526,14 +524,12 @@ function Monitor({
   range,
   online,
   system,
-  tz,
   onRange,
 }: {
   data: { metrics: DetailMetrics; range: MetricRange; at: number };
   range: MetricRange;
   online: boolean;
   system: DetailMachine["system"];
-  tz: number;
   onRange: (r: MetricRange) => void;
 }) {
   const { metrics } = data;
@@ -562,7 +558,7 @@ function Monitor({
   return (
     <>
       {live && <NowTiles s={live} cores={system?.cores} />}
-      <Charts data={data} range={range} live={live} system={system} tz={tz} />
+      <Charts data={data} range={range} live={live} system={system} />
       {perCore && <CoreBars cores={perCore} />}
     </>
   );
@@ -577,13 +573,11 @@ function Charts({
   range,
   live,
   system,
-  tz,
 }: {
   data: { metrics: DetailMetrics; range: MetricRange; at: number };
   range: MetricRange;
   live: NonNullable<DetailMetrics["latest"]> | undefined;
   system: DetailMachine["system"];
-  tz: number;
 }) {
   const { metrics } = data;
   const r = RANGES[data.range];
@@ -611,7 +605,7 @@ function Charts({
     setHoverRange(range);
     setHover(null);
   }
-  const common = { points: metrics.points, t0, t1, step: r.step, hover, onHover: setHover, tz };
+  const common = { points: metrics.points, t0, t1, step: r.step, hover, onHover: setHover };
 
   return (
     <div className={cx("grid grid-cols-1 gap-3 transition-opacity duration-200 md:grid-cols-2", data.range !== range && "opacity-60")}>

@@ -379,3 +379,28 @@ describe("Machines in a hidden tab", () => {
     expect(metricsReads()).toBe(1);
   });
 });
+
+describe("Machines today's tokens", () => {
+  const usage = (machine_id: string, tokens: number): MachineMetrics => ({ machine_id, online: true, points: [], usage: { today: { in: tokens }, per_minute: 0, recent: [] } });
+  // the share legend's rows, each its name and count, and the bar's segments
+  const rows = () => [...host.querySelectorAll('[data-testid="machines-tokens"] .whitespace-nowrap')].map((r) => r.textContent);
+  const segments = () => host.querySelector('[data-testid="machines-tokens"] div[aria-hidden]')!.children.length;
+
+  it("keeps one row per computer when two share a name and the ranking changes", async () => {
+    fake.machines = [
+      { id: "a", name: "Mac", online: true },
+      { id: "b", name: "Linux", online: true },
+      { id: "c", name: "Mac", online: true },
+    ];
+    metricsReplies = { "/api/v1/metrics": [usage("a", 300), usage("b", 200), usage("c", 100)] };
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    expect(rows()).toEqual(["Mac300", "Linux200", "Mac100"]);
+
+    metricsReplies = { "/api/v1/metrics": [usage("a", 300), usage("b", 500), usage("c", 100)] };
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await flush();
+    expect(rows()).toEqual(["Linux500", "Mac300", "Mac100"]);
+    expect(segments()).toBe(3);
+  });
+});

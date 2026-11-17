@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { MachineUsage, UsageRange } from "../../lib/tokens";
 import { UsageSection } from "./UsageSection";
@@ -373,5 +373,47 @@ describe("launchers by their display names (#5029)", () => {
     await choose(1, "launcher-a");
     await answer(reads.at(-1)!, report({ launchers: [], total: {} }));
     expect(select(1).selectedOptions[0].textContent).toBe("我的中转 站 (launcher-a)");
+  });
+});
+
+describe("a week across a daylight-saving change", () => {
+  // America/New_York: clocks went back on 2026-11-01 and go forward on 2027-03-14. A week of hourly steps from a local
+  // midnight, read after the change: each time reads as the clock did then, not with today's offset.
+  const savedTZ = process.env.TZ;
+  beforeAll(() => { process.env.TZ = "America/New_York"; });
+  afterAll(() => { if (savedTZ === undefined) delete process.env.TZ; else process.env.TZ = savedTZ; });
+
+  const W = 640 - 52; // the chart's width less its axis
+  const step = 3600;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clock = (tSec: number) => { const d = new Date(tSec * 1000); return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const weekday = (tSec: number) => new Date(tSec * 1000).toLocaleDateString(undefined, { weekday: "short" });
+
+  it.each([
+    ["back", "2026-10-29T04:00:00Z", ["10-29", "10-30", "10-31", "11-01", "11-02", "11-03", "11-04"]],
+    ["forward", "2027-03-10T05:00:00Z", ["03-10", "03-11", "03-12", "03-13", "03-14", "03-15", "03-16", "03-17"]],
+  ])("puts the day ticks on local midnights and the held time on its own clock (clocks go %s)", async (_, start, days) => {
+    const t0 = Date.parse(start) / 1000;
+    const t1 = t0 + 168 * step;
+    vi.setSystemTime((t1 + 1800) * 1000);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: W, bottom: 170, width: W, height: 170, x: 0, y: 0, toJSON() {} } as DOMRect);
+    const points = Array.from({ length: 168 }, (_, i) => ({ t: t0 + i * step, in: 1000 + i, req: 4 }));
+    await render();
+    await answer(reads[0], report({ range: "7d", step, points, total: { in: 200_000, req: 672 } }));
+    const chart = host.querySelector<SVGSVGElement>('svg[role="img"]')!;
+
+    // the x axis: each day's tick at that day's midnight, named by that day
+    const ticks = [...chart.querySelectorAll(":scope > g")].filter((g) => g.querySelector("line")?.getAttribute("y1") !== g.querySelector("line")?.getAttribute("y2"));
+    const at = (g: Element) => Math.round((t0 + (Number(g.querySelector("line")!.getAttribute("x1")) / W) * (t1 - t0)) / 60) * 60;
+    expect(ticks.map((g) => clock(at(g)))).toEqual(days.map((d) => `${d} 00:00`));
+    expect(ticks.map((g) => g.querySelector("text")!.textContent)).toEqual(ticks.map((g) => weekday(at(g))));
+
+    // the held step: noon on the second day, before the change
+    const noon = t0 + 36 * step;
+    act(() => {
+      chart.querySelector(':scope > rect[fill="transparent"]')!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: ((noon + step / 2 - t0) / (t1 - t0)) * W }));
+    });
+    expect(clock(noon)).toBe(`${days[1]} 12:00`);
+    expect(chart.querySelector(':scope > g[pointer-events="none"] text')?.textContent).toBe(`${weekday(noon)} 12:00`);
   });
 });

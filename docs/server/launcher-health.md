@@ -42,8 +42,8 @@ runtime errors. Shell launchers, managed launchers and older runtimes keep their
   The record keeps what is known of the limit per model family and changes only by the rules in "Usage-limit record rules" below.
   A probe for a family limit requests that family; an older node or runtime that ignores the model answers with another family and clears nothing. A probe's result counts as current only against the version of the record it read, compared under the record's lock. Admission rereads the published record rather than trusting the raw probe answer.
   `not_in_terminal` is not rechecked this way: the probe's login shell cannot reproduce the terminal's failure; only a real successful start clears it.
-- An Agent's own usage limit is recorded too (#1710, source `session`): when a turn ends on the subscription's usage limit (`docs/assistant/agent-work.md` "Usage limits") with a reset still ahead,
-  and the session names its launcher, that launcher on that computer is marked `usage_limit` until the reset. Nothing runs for it: no check (it would spend a request to be refused) and no repair.
+- An Agent's own usage limit is recorded too (#1710, source `session`): when a turn ends on the subscription's usage limit (`docs/assistant/agent-work.md` "Usage limits")
+  and the session names its launcher, that launcher on that computer is marked `usage_limit`: until the reset when it is known and still ahead; with no reset known, the families the limit names are limited with an unknown reset for at most 6 hours after the turn (#9646, "Usage-limit record rules" below). Nothing runs for it: no check (it would spend a request to be refused) and no repair.
   The main chat's conversations count as well (they run the computer's launcher under the same sign-in). Each turn a background task wakes meets the same limit again; it is recorded once.
 - Stored in the settings key `launchers.health` (Postgres), one entry per computer × launcher: success / failure, error text (redacted, truncated), error category,
   check time, consecutive failure count, repair log, state. It survives hub restarts.
@@ -57,11 +57,11 @@ A `usage_limit` record (#9386) keeps what is known of the subscription's limit p
 | State | Stored as | Effect |
 | --- | --- | --- |
 | Limited, reset known and ahead | in `limit_models`; `limit_resets[f]` = t > now | Holds until t, unless a probe of that family passes first |
-| Limited, reset unknown | in `limit_models`; no `limit_resets[f]` | Holds until a probe of that family passes |
+| Limited, reset unknown | in `limit_models`; no `limit_resets[f]` | Holds until a probe of that family passes, or the record's evidence is 6 hours old (below) |
 | Limited, reset known and past | in `limit_models`; `limit_resets[f]` ≤ now | Over as far as the record's reset goes. A new failure naming it is a new limit: the old reset is dropped first |
 | A limit that names no family | `limit_models` empty; `resets_at` known or not | Any model's answer clears it |
 
-**The record.** `resets_at` is the latest of the families' resets, and unknown while any family's reset is unknown; with no family, it is the limit's own reset. A limit with a known `resets_at` holds until then; with an unknown one, until 6 hours (`healthStale`) after the latest evidence. Either way an on-demand probe can clear it early, at most once per 30 seconds (`healthRecheckThrottle`) after the latest evidence. A probe asks for the first limited family.
+**The record.** `resets_at` is the latest of the families' resets, and unknown while any family's reset is unknown; with no family, it is the limit's own reset. A limit with a known `resets_at` holds until then; with an unknown one, until 6 hours (`healthStale`) after the latest evidence, and in any case until each family's known reset still ahead (`familyResetAhead`): a family whose reset is unknown makes `resets_at` unknown but never shortens another family's limit. The latest evidence is `checked_at`, which an Agent's turn whose reset is unknown sets to the turn's own time, not to when the hub read it (events below). Either way an on-demand probe can clear it early, at most once per 30 seconds (`healthRecheckThrottle`) after the latest evidence. A probe asks for the first limited family.
 
 **Events.** "Fold" is the merge in the next table.
 
@@ -70,7 +70,9 @@ A `usage_limit` record (#9386) keeps what is known of the subscription's limit p
 | A usage-limit failure: probe (current), start, an Agent's turn with a reset ahead | no | The record becomes this limit: the families named, each with the failure's reset when known; no family: `resets_at` is the failure's reset | advance, now |
 | A usage-limit failure: probe (current), start | yes | Fold; error text, source and failure count updated (a fresh refusal is new evidence even when the fold changes nothing) | advance, now |
 | A usage-limit failure: an Agent's turn with a reset ahead | yes | Fold; when the fold changes nothing, **nothing**. This is the dedupe: the turn is judged by the families it names, not by unrelated families | advance and now only on a change |
-| An Agent's turn on a usage limit whose reset is unknown, past, or further than `healthLimitMax` | any | Not recorded: the family it names is not added (current behavior, unchanged from `main`; the gap is #9646) | none |
+| A usage-limit failure: an Agent's turn whose reset is unknown (or further than `healthLimitMax`, taken as misread), less than 6 hours old | no | The record becomes this limit: the families named, each with an unknown reset; no family: no `resets_at` | advance; check time: the turn's time |
+| The same | yes | Fold with an unknown reset; when the fold changes nothing, **nothing** (the same dedupe), unless the record's evidence is 6 hours old (only another family's known reset holds it): then the turn renews it | advance on a change or renewal; check time: the later of the record's and the turn's |
+| An Agent's turn on a usage limit whose reset is past, or with no reset known and 6 hours old or older | any | Not recorded: the limit it met is over, or its evidence is stale | none |
 | A usage-limit failure: probe that read an older version | yes | Fold only (error text and check time kept) | advance on a change; check time kept |
 | The same | no | Dropped | none |
 | A pass: probe (current) or the apps' Test | yes | Removes the families the answering model belongs to, with their resets; for a limit that names no family, everything. Nothing left: the record is `ok`. Covering no limited family: nothing | advance, now (on a change) |
@@ -88,6 +90,11 @@ A `usage_limit` record (#9386) keeps what is known of the subscription's limit p
 | F empty; the limit names none | `resets_at` becomes the later of the two. An unknown one becomes R; an unknown R changes nothing |
 
 Nothing is ever taken away by a failure. "No new information" means the fold changes neither the families, nor any family's reset, nor `resets_at`. It is compared as read (`limitModels`, `limitResets`), so loading an older format counts as no change.
+
+**An Agent's turn with no known reset** (#9646). The turn is the same evidence a failed probe would be: a real request the subscription refused. So it is folded the same way, with an unknown reset, and ages by the same rule as every failure without a reset: 6 hours (`healthStale`), counted from the turn's time (`updated_at` of its session, the time its words are read against; never later than now). A turn the hub reads only later, a transcript an Agent is woken on long after it stopped, has that much less to say of the quota now, and one 6 hours old or older says nothing.
+- No shorter fixed window: nothing says when a limit with no reset ends, and a family's limit can last days (a weekly one), so a short window would let through starts the limit refuses again. Holding the record costs little: any start probes it from 30 seconds after the evidence (on-demand recheck above), and a pass of the family clears it.
+- A turn that repeats a limit in force changes nothing (no rev, no check time), so an Agent a background task keeps waking neither extends the limit nor holds off the next probe. After the limit ends (its 6 hours, or a pass), the next such turn is a new limit, as for a turn with a known reset.
+- The record keeps one evidence time for all its families: an older turn never moves it back, and a pass that leaves a family moves it forward (as every pass does). When it goes stale, a family whose known reset is still ahead holds until that reset (`familyResetAhead`), so a Sonnet turn with no reset cannot end an Opus weekly limit after 6 hours. While only such a reset holds the record, a new turn with no reset is fresh evidence its families need, and renews the check time (once: the next repeat finds it fresh).
 
 **Versions.** `rev` is a counter in the hub's memory. Every `recordHealth` write that changes a record advances it: every write in the events table marked "advance". It is not stored, so a restart starts again at 0, and probes in flight end with the process. A probe keeps the record it read. Its result is current only when both the check time and `rev` still match; otherwise it is an "older version" row. Deleting a record (a launcher's setup changed) is caught by the check time. `setHealthState` changes only records that are not usage limits.
 
@@ -129,7 +136,7 @@ Its reset (`resets_at`) is read off the words when they name a time zone (`reset
 With a reset, the launcher is unavailable until then unless a passing check proves quota recovered earlier (not bounded by the 6 hours; a reset more than 8 days off is taken as misread, as if there were none), and available again from that moment. A successful `session.start` alone does not prove the subscription can answer a model request and does not clear this record.
 The periodic rounds spend no check on it before the reset (it would be refused too), nor does a forced check of all launchers; the first round from a minute after the reset checks it whatever the interval, and a passing check clears it.
 A check asked for by hand of that launcher (`POST /api/v1/launchers/health/check?machine=&launcher=`, or the apps' Test availability) still runs.
-Without a reset it follows the usual rules: unavailable for 6 hours, checked at the interval. Until the reset it counts in the main chat's readiness as a rate limit that passes by itself (`rate_limited`), and not at all after it.
+Without a reset it follows the usual rules: unavailable for 6 hours (an Agent's turn: 6 hours from the turn), checked at the interval; a family of it whose reset is known holds until that reset ("Usage-limit record rules"). Until the reset it counts in the main chat's readiness as a rate limit that passes by itself (`rate_limited`), and not at all after it.
 
 - `agents_list`: gets an extra "unavailable launchers" section at the end, one line each: computer / launcher / state / category / error; a usage limit adds `resets_at=<RFC 3339>, in …`.
 - The launcher list for creating an Agent and the main chat's menu (`GET /api/v1/machines/{mid}/launchers`) leave out a launcher whose latest check failed, and carry `health` (`{state, error, kind, checked_at, resets_at?}`) on the ones they keep — a `not_in_terminal` entry stays and is grayed out ("In the App" below).

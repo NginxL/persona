@@ -446,8 +446,8 @@ function openFromCard(e: React.MouseEvent<HTMLElement>, to: Route) {
 // computer's share in shades of the text ink (the four kinds' colors are the charts').
 function TodayTokens({ machines, metrics }: { machines: Machine[]; metrics: MachineMetrics[] | null }) {
   const shares = machines
-    .map((m) => ({ name: m.name, usage: metrics?.find((x) => x.machine_id === m.id)?.usage }))
-    .filter((s): s is { name: string; usage: NonNullable<MachineMetrics["usage"]> } => !!s.usage);
+    .map((m) => ({ id: m.id, name: m.name, usage: metrics?.find((x) => x.machine_id === m.id)?.usage }))
+    .filter((s): s is { id: string; name: string; usage: NonNullable<MachineMetrics["usage"]> } => !!s.usage);
   if (!shares.length) return null;
   const today = shares.reduce<UsageTokens>((a, s) => addTokens(a, s.usage.today), {});
   const all = totalTokens(today);
@@ -464,12 +464,12 @@ function TodayTokens({ machines, metrics }: { machines: Machine[]; metrics: Mach
           <div className="min-w-[220px] flex-1 pb-1">
             <div className="flex h-2 gap-0.5 overflow-hidden rounded-full" aria-hidden>
               {ranked.map((s, i) => (
-                <div key={s.name} className="h-2 bg-ink" style={{ flexGrow: totalTokens(s.usage.today), opacity: shade(i) }} />
+                <div key={s.id} className="h-2 bg-ink" style={{ flexGrow: totalTokens(s.usage.today), opacity: shade(i) }} />
               ))}
             </div>
             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px]">
               {ranked.map((s, i) => (
-                <span key={s.name} className="flex items-center gap-1 whitespace-nowrap">
+                <span key={s.id} className="flex items-center gap-1 whitespace-nowrap">
                   <span aria-hidden className="inline-block size-2 rounded-full bg-ink" style={{ opacity: shade(i) }} />
                   <span className="text-ink-2">{s.name}</span>
                   <span className="text-ink-3 tabular-nums">{formatTokens(totalTokens(s.usage.today))}</span>

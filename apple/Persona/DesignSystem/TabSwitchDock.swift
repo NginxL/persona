@@ -7,7 +7,8 @@ import SwiftUI
 ///
 /// - Where the system puts its bars down the side (the outer display, the inner one on its side) it stands in that column,
 ///   centred on the status bar, in its lower middle (`ShellSideRail`): on the outer display in the shell's rail, on the
-///   inner one over the tabs (`TabSwitchOverlay`), in the place of the system's tab bar.
+///   inner one over the tabs (`TabSwitchOverlay`), in the place of the system's tab bar. The same rail on both, at the same
+///   text size and the same height above the column's foot, so folding or unfolding leaves it where it was.
 /// - Where the bars run across the top (the inner display upright) there is no side column: it runs along the foot of the
 ///   window, centred, where iOS puts a tab bar there, and the pages keep its room at their foot, as for the system's tab
 ///   bar (`PhoneTabBarHidden`), so it covers nothing and the composer keeps the whole width.
@@ -54,9 +55,13 @@ nonisolated enum TabSwitchLayout {
     /// strip at the screen's edge (`Theme.Shell.sideColumnEdge`), never narrower than the tab bar.
     static func sideColumn(inset: CGFloat) -> CGFloat { max(inset - Theme.Shell.sideColumnEdge, sideWidth) }
 
-    /// The room under the side tab bar's foot in a column `height` tall (the safe area's): `Theme.Shell.sideTabBarFoot` of
-    /// it, so the bar stands in the column's lower middle; at least `Theme.Space.l`.
-    static func sideFoot(height: CGFloat) -> CGFloat { max(height * Theme.Shell.sideTabBarFoot, Theme.Space.l) }
+    /// The room under the side tab bar's foot, down to the column's (the safe area's) foot, with rail buttons `button`
+    /// pt square: the face and the page's action on the outer display, their empty room on the open Duo
+    /// (`ShellRailButtonRoom`), so the bar stands as high on both (`Theme.Shell.sideRailFoot`, `sideRailSpacing`,
+    /// `sideTabBarGap`). 144 pt at the default text size.
+    static func sideFoot(button: CGFloat) -> CGFloat {
+        Theme.Shell.sideTabBarGap + Theme.Shell.sideRailSpacing * 2 + button * 2 + Theme.Shell.sideRailFoot
+    }
 
     /// How many items the tab bar has: Assistant and Agents, and Messages when it is on (`LarkHomePreference.shows`).
     static func items(messages: Bool) -> Int { messages ? 3 : 2 }
@@ -176,19 +181,45 @@ private struct TabSwitchStand: View {
         @Bindable var model = model
         switch placement {
         case .rail(let edge):
-            ShellSideRail(edge: edge) { EmptyView() } switcher: {
+            TabSwitchSideRail(edge: edge) {
                 ShellSwitch(tab: $model.selectedTab, axis: .vertical) { EmptyView() } workMenu: { EmptyView() }
                     .accessibilityIdentifier("tab-switch")
             }
+        case .bottom:
+            TabSwitchFootBar {
+                ShellSwitch(tab: $model.selectedTab, bottomBar: true) { EmptyView() } workMenu: { EmptyView() }
+                    .accessibilityIdentifier("tab-switch")
+            }
+        }
+    }
+}
+
+/// The tab bar down the open Duo's side column: the outer display's rail (`ShellSideRail`) at the shell's text size, as the
+/// pages' rails are (`shellTopBarScaled`), with its buttons' room left empty, so the bar is the same size, at the same
+/// text size and as high above the column's foot as on the outer display (`DuoTabBarAlignmentTests`).
+struct TabSwitchSideRail<Switcher: View>: View {
+    let edge: HorizontalEdge
+    @ViewBuilder var switcher: Switcher
+
+    var body: some View {
+        ShellSideRail(edge: edge) { EmptyView() } switcher: { switcher }
+            .shellTopBarScaled()
             .environment(\.shellRailEdge, edge)
             .ignoresSafeArea(.keyboard)
-        case .bottom:
-            ShellSwitch(tab: $model.selectedTab, bottomBar: true) { EmptyView() } workMenu: { EmptyView() }
-                .accessibilityIdentifier("tab-switch")
-                .padding(.bottom, TabSwitchLayout.bottomGap)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .ignoresSafeArea(.keyboard)
-        }
+    }
+}
+
+/// The tab bar along the open Duo's foot, upright: centred, `TabSwitchLayout.bottomGap` above the safe area's foot, at
+/// the shell's text size as down the side, so its names are the same size in every posture.
+struct TabSwitchFootBar<Switcher: View>: View {
+    @ViewBuilder var switcher: Switcher
+
+    var body: some View {
+        switcher
+            .shellTopBarScaled()
+            .padding(.bottom, TabSwitchLayout.bottomGap)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(.keyboard)
     }
 }
 

@@ -33,7 +33,7 @@ const REFERENCE = { value: 2, label: "2 cores" };
 
 function Charts() {
   const [hover, setHover] = useState<number | null>(null);
-  const common = { points: POINTS, t0: T0, t1: T1, step: STEP, hover, onHover: setHover, tz: 0 };
+  const common = { points: POINTS, t0: T0, t1: T1, step: STEP, hover, onHover: setHover };
   return (
     <>
       <MetricChart title="CPU" series={CPU} percent format={percent} axisFormat={PERCENT_AXIS} {...common} />

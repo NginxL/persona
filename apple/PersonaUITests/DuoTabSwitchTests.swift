@@ -44,6 +44,17 @@ final class DuoTabSwitchTests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant", "-dev.openChat", "",
                                "-integrations.lark.enabled", "YES"] + extra
         app.launchPinned(navigation: layoutPinned)
+        dismissSystemAlerts()
+    }
+
+    /// A fresh simulator's notification prompt can come up over the app (and its tab bar) after an install.
+    private func dismissSystemAlerts() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        guard springboard.alerts.firstMatch.waitForExistence(timeout: 3) else { return }
+        for label in ["允许", "Allow", "好", "OK"] {
+            let button = springboard.alerts.buttons[label].firstMatch
+            if button.exists { button.tap(); return }
+        }
     }
 
     @MainActor private func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
@@ -85,6 +96,11 @@ final class DuoTabSwitchTests: XCTestCase {
             XCTAssertLessThan(segments[1].frame.maxY, segments[2].frame.minY + 1, "Messages is not under Agents")
             XCTAssertGreaterThan(segments[1].frame.midY, window.height * 0.4, "the bar is not low in the column: \(segments[1].frame)")
             XCTAssertLessThan(segments[2].frame.maxY, window.maxY - window.height * 0.15, "the bar is a block at the foot: \(segments[2].frame)")
+            // As high above the screen's foot folded and open, so it stays put as the Duo folds: the home indicator's 34 pt,
+            // the face and the page's action under it on the outer display (their room on the open Duo, 144.5 pt at the
+            // default text size, `TabSwitchLayout.sideFoot`) and the capsule's 8 pt under its last item.
+            XCTAssertEqual(window.maxY - segments[2].frame.maxY, 186.7, accuracy: 1,
+                           "the bar's foot is not where it is on the other display: \(segments[2].frame) in \(window)")
         }
         if posture != .outer {
             let narrow = NSPredicate { item, _ in ((item as? XCUIElementAttributes)?.frame.width ?? .infinity) <= 60 }

@@ -522,3 +522,156 @@ func TestUsageLimitRuleEventRevisions(t *testing.T) {
 		t.Fatalf("after the last family's pass: %+v", r)
 	}
 }
+
+// #9646: an Agent's turn whose limit has no known reset.
+
+// familyLimitTurn is an Agent's turn with launcher work that ended on text's usage limit, its transcript last written at.
+func familyLimitTurn(sid, text string, at time.Time, reset *time.Time) proto.Session {
+	return proto.Session{SessionID: sid, Launcher: "work", Status: proto.StatusIdle, State: proto.StateUnread, UpdatedAt: at,
+		TurnError: text, TurnErrorKind: proto.TurnErrorUsageLimit, TurnErrorResetsAt: reset}
+}
+
+// The issue's reproduction: Opus is limited with a known reset, an Agent's turn then meets the Sonnet limit with no
+// reset known, and the apps' Test answers with Opus. Sonnet's limit is recorded and outlives the Opus pass, so a
+// fixed-machine Sonnet task is refused.
+func TestUsageLimitRuleUnknownResetTurnOutlivesOtherFamilysPass(t *testing.T) {
+	s, f := launcherHealthHub(t)
+	ctx := context.Background()
+	reset := time.Now().UTC().Add(time.Hour)
+	seedUsageLimit(t, s, "l4", "You've hit your Opus limit", &reset)
+	before := healthState(s, "l4", "work")
+	f.setSessions("l4", familyLimitTurn("s1", "You've hit your Sonnet limit", time.Now(), nil))
+	s.launcherLimitTurnSettled(ctx, "l4", "s1")
+	rec := healthState(s, "l4", "work")
+	if rec.rev == before.rev || !slices.Equal(rec.limitModels(), []string{"opus", "sonnet"}) || rec.ResetsAt != nil || !rec.LimitResets["opus"].Equal(reset) {
+		t.Errorf("the Sonnet turn was not recorded: rev %d → %d, %+v", before.rev, rec.rev, rec)
+	}
+	f.checks["l4/work"] = proto.LauncherCheck{OK: true, Agent: "claude", Model: "claude-opus-4-1"}
+	postJSON(t, s, "/api/v1/launchers/work/check?machine=l4")
+	if rec := healthState(s, "l4", "work"); !slices.Equal(rec.limitModels(), []string{"sonnet"}) || !rec.unusable() {
+		t.Errorf("the Opus pass took Sonnet's limit: %+v", rec)
+	}
+	if mid, _, err := s.startTaskAgent(ctx, &PlanTask{Machine: "l4", Cwd: "/work", Launcher: "work", Model: "sonnet", MachinePolicy: machineFixed}, false); err == nil {
+		t.Fatalf("an Opus pass admitted limited Sonnet: machine=%q starts=%v record=%+v", mid, taskStartMachines(f), healthState(s, "l4", "work"))
+	}
+}
+
+// A background task wakes the same Agent again and again, and each turn ends on the same limit: once recorded, a turn
+// that adds nothing neither advances the record nor refreshes its evidence, so the next probe is not held off.
+func TestUsageLimitRuleRepeatedUnknownResetTurn(t *testing.T) {
+	for name, opus := range map[string]bool{"alone": false, "beside a known reset": true} {
+		t.Run(name, func(t *testing.T) {
+			s, f := launcherHealthHubOn(t, newStorelessService)
+			ctx := context.Background()
+			if opus {
+				reset := time.Now().Add(time.Hour)
+				seedUsageLimit(t, s, "l4", "You've hit your Opus limit", &reset)
+			}
+			f.setSessions("l4", familyLimitTurn("s1", "You've hit your Sonnet limit", time.Now().Add(-time.Minute), nil))
+			s.launcherLimitTurnSettled(ctx, "l4", "s1")
+			first := healthState(s, "l4", "work")
+			if !slices.Contains(first.limitModels(), "sonnet") || !first.unusable() {
+				t.Fatalf("the first turn was not recorded: %+v", first)
+			}
+			for _, at := range []time.Time{time.Now().Add(-time.Minute), time.Now()} {
+				f.setSessions("l4", familyLimitTurn("s1", "You've hit your Sonnet limit", at, nil))
+				s.launcherLimitTurnSettled(ctx, "l4", "s1")
+			}
+			if again := healthState(s, "l4", "work"); again.rev != first.rev || !again.CheckedAt.Equal(first.CheckedAt) {
+				t.Fatalf("a repeated turn changed the record: rev %d → %d, checked %v → %v", first.rev, again.rev, first.CheckedAt, again.CheckedAt)
+			}
+			// Its evidence still from the first turn, the next start probes it at once.
+			f.checks["l4/work"] = proto.LauncherCheck{Error: "You've hit your Sonnet limit"}
+			if _, bad := s.launcherUnusableNow(ctx, "l4", "work"); !bad || checkedCount(f, "l4/work") != 1 {
+				t.Fatalf("after repeated turns: bad=%v probes=%d", bad, checkedCount(f, "l4/work"))
+			}
+		})
+	}
+}
+
+// A turn's limit with no known reset counts from the turn's own time, not from when the hub read it: it holds until
+// healthStale after the turn, and a turn older than that is not recorded. A reset further off than healthLimitMax is
+// misread and counts as none; a turn's time ahead of the hub's clock counts as now.
+func TestUsageLimitRuleUnknownResetTurnLifetime(t *testing.T) {
+	s, f := launcherHealthHubOn(t, newStorelessService)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Now()
+		misread := now.Add(healthLimitMax + 24*time.Hour)
+		f.setSessions("l4",
+			familyLimitTurn("fresh", "You've hit your Sonnet limit", now, nil),
+			familyLimitTurn("old", "You've hit your Sonnet limit", now.Add(-healthStale+time.Hour), nil),
+			familyLimitTurn("stale", "You've hit your Sonnet limit", now.Add(-healthStale-time.Minute), nil),
+			familyLimitTurn("misread", "You've hit your Sonnet limit", now.Add(-healthStale+2*time.Hour), &misread),
+			familyLimitTurn("ahead", "You've hit your Sonnet limit", now.Add(time.Hour), nil))
+		settle := func(sid string) LauncherHealth {
+			t.Helper()
+			s.health.mu.Lock()
+			if r := s.health.recs[healthKey("l4", "work")]; r != nil {
+				r.State = healthOK // the limit before is over: the turn starts a record of its own
+			}
+			s.health.mu.Unlock()
+			s.launcherLimitTurnSettled(ctx, "l4", sid)
+			return healthState(s, "l4", "work")
+		}
+		if r := settle("stale"); r.State != "" {
+			t.Fatalf("a turn older than healthStale was recorded: %+v", r)
+		}
+		for _, c := range []struct {
+			sid  string
+			want time.Time
+		}{
+			{"fresh", now}, {"old", now.Add(-healthStale + time.Hour)}, {"misread", now.Add(-healthStale + 2*time.Hour)}, {"ahead", now},
+		} {
+			r := settle(c.sid)
+			if r.Kind != errKindUsageLimit || r.Source != healthSourceSession || !slices.Equal(r.limitModels(), []string{"sonnet"}) || r.ResetsAt != nil ||
+				!r.CheckedAt.Equal(c.want) || !r.unusable() {
+				t.Fatalf("%s: %+v, want checked at %v", c.sid, r, c.want)
+			}
+		}
+		settle("old")
+		time.Sleep(time.Hour - time.Minute) // sleep-ok: the fake clock of a synctest bubble, no wall time
+		if _, bad := s.launcherUnusable(ctx, "l4", "work"); !bad {
+			t.Fatal("the old turn's limit ended before healthStale after the turn")
+		}
+		time.Sleep(2 * time.Minute) // sleep-ok: the fake clock of a synctest bubble, no wall time
+		if r, bad := s.launcherUnusable(ctx, "l4", "work"); bad {
+			t.Fatalf("the old turn's limit outlived healthStale after the turn: %+v", r)
+		}
+	})
+}
+
+// A family whose reset is unknown makes the record's reset unknown, but takes nothing from another family's known
+// reset: once the unknown family's evidence is stale, Opus's weekly limit still holds until its own reset.
+func TestUsageLimitRuleUnknownFamilyKeepsOtherFamilysReset(t *testing.T) {
+	s, f := launcherHealthHubOn(t, newStorelessService)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		week := time.Now().UTC().Add(7 * 24 * time.Hour)
+		s.recordHealth(ctx, "l4", "work", healthResult{err: "You've hit your Opus limit", resetsAt: &week, source: healthSourceSession, kind: errKindUsageLimit})
+		f.setSessions("l4", familyLimitTurn("s1", "You've hit your Sonnet limit", time.Now(), nil))
+		s.launcherLimitTurnSettled(ctx, "l4", "s1")
+		if r := healthState(s, "l4", "work"); !slices.Equal(r.limitModels(), []string{"opus", "sonnet"}) || r.ResetsAt != nil {
+			t.Fatalf("the Sonnet turn was not added: %+v", r)
+		}
+		time.Sleep(healthStale + time.Hour) // sleep-ok: the fake clock of a synctest bubble, no wall time
+		if r, bad := s.launcherUnusable(ctx, "l4", "work"); !bad || !r.LimitResets["opus"].Equal(week) {
+			t.Fatalf("Opus's weekly limit ended with Sonnet's evidence: bad=%v %+v", bad, r)
+		}
+		// Held by Opus's reset alone, the record's evidence is stale: a new Sonnet turn renews it, once.
+		for range 2 {
+			before := healthState(s, "l4", "work")
+			f.setSessions("l4", familyLimitTurn("s1", "You've hit your Sonnet limit", time.Now(), nil))
+			s.launcherLimitTurnSettled(ctx, "l4", "s1")
+			after := healthState(s, "l4", "work")
+			if renewed := before.CheckedAt.Before(time.Now().Add(-healthStale)); (after.rev != before.rev) != renewed ||
+				renewed && !after.CheckedAt.Equal(time.Now()) {
+				t.Fatalf("a Sonnet turn on stale evidence: renewed=%v, rev %d → %d, checked %v → %v", renewed, before.rev, after.rev, before.CheckedAt, after.CheckedAt)
+			}
+		}
+		time.Sleep(time.Until(week.Add(time.Minute))) // sleep-ok: the fake clock of a synctest bubble, no wall time
+		if r, bad := s.launcherUnusable(ctx, "l4", "work"); bad {
+			t.Fatalf("held past every known reset with stale evidence: %+v", r)
+		}
+	})
+}

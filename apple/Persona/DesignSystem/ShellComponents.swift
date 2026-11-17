@@ -413,10 +413,10 @@ private struct TabBarPersonaFace: View {
     }
 }
 
-/// A page's count on iPhone Duo's tab bar (#4231): white on red at its symbol's top trailing corner, hanging half off it,
-/// as the system's tab bar badges its items (the iPad's too). The tabs' numbers: what waits on the user among the Agents
-/// (`agentsWaiting`) and in Persona's own conversations (`TabBadges.assistant`); Messages has none, as its tab had none.
-/// Its own view, as `WaitingBadge`: only it is drawn again when the count changes. `shell-agents-count`,
+/// A page's count on iPhone Duo's tab bar (#4231): white on red on the rim of its symbol's well, at the top trailing
+/// corner, as the system's tab bar badges its items (the iPad's too). The tabs' numbers: what waits on the user among the
+/// Agents (`agentsWaiting`) and in Persona's own conversations (`TabBadges.assistant`); Messages has none, as its tab had
+/// none. Its own view, as `WaitingBadge`: only it is drawn again when the count changes. `shell-agents-count`,
 /// `shell-assistant-count` for the UI tests.
 private struct TabBarBadge: View {
     @Environment(AppModel.self) private var model
@@ -429,12 +429,48 @@ private struct TabBarBadge: View {
         default: 0
         }
         if waiting > 0 {
-            CountBadge(count: waiting, look: .solid(Theme.tabBarBadge), label: StateName.count(.needsYou, waiting))
-                .alignmentGuide(.top) { $0[VerticalAlignment.center] }
-                .alignmentGuide(.trailing) { $0[HorizontalAlignment.center] }
+            TabBarCount(count: waiting, label: StateName.count(.needsYou, waiting))
+                .tabBarBadgeSpot()
                 .allowsHitTesting(false)
                 .accessibilityIdentifier(tab == .assistant ? "shell-assistant-count" : "shell-agents-count")
         }
+    }
+}
+
+/// The count iPhone Duo's tab bar draws (#4231), the system's tab bar badge: `Theme.Size.badge` (18 pt) tall, round for one
+/// digit and a capsule for more, its number `Theme.Font.labelHeavy` (12 pt) white on the system's red (`Theme.tabBarBadge`),
+/// ringed `Theme.Shell.tabBarBadgeRing` in the page's color so it stands apart from the chosen item's circle and the
+/// symbol under it. The same view on both displays (`DuoTabBarAlignmentTests`).
+struct TabBarCount: View {
+    let count: Int
+    /// What VoiceOver says for it ("3 need you"); by default the exact number.
+    var label: String? = nil
+
+    var body: some View {
+        if let text = CountBadge.text(count) {
+            Text(text)
+                .font(Theme.Font.labelHeavy.monospacedDigit())
+                .contentTransition(.numericText(value: Double(count)))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .padding(.horizontal, Theme.Space.xs)
+                .frame(minWidth: Theme.Size.badge, minHeight: Theme.Size.badge)
+                .background(Theme.tabBarBadge, in: .capsule)
+                .padding(Theme.Shell.tabBarBadgeRing)
+                .background(Theme.pageBackground, in: .capsule)
+                .fixedSize()
+                .accessibilityLabel(label ?? String(count))
+                .accessibilityShowsLargeContentViewer()
+        }
+    }
+}
+
+extension View {
+    /// A tab bar item's count, in an overlay at the top trailing corner of its symbol's well: centred
+    /// `Theme.Shell.tabBarBadgeInset` inside that corner, so it rests on the circle's rim and covers its edge only, not
+    /// the symbol, at any width (a zero-sized anchor at the corner, the count centred on it).
+    func tabBarBadgeSpot() -> some View {
+        frame(width: 0, height: 0).offset(x: -Theme.Shell.tabBarBadgeInset, y: Theme.Shell.tabBarBadgeInset)
     }
 }
 

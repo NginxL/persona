@@ -422,8 +422,10 @@ const KEYS: Record<string, ReviewCommand> = {
 };
 
 /** What a key pressed on a page of diffs does; nothing while typing, or with a modifier (the browser's own). */
-export function reviewCommand(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target?: EventTarget | null }): ReviewCommand | null {
-  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+export function reviewCommand(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target?: EventTarget | null; getModifierState?: (key: string) => boolean }): ReviewCommand | null {
+  // AltGr (reported as Ctrl+Alt on Windows) types the character: "[" and "]" on a German or French keyboard
+  const altGr = e.getModifierState?.("AltGraph") ?? false;
+  if (e.metaKey || (!altGr && (e.ctrlKey || e.altKey))) return null;
   const el = e.target as HTMLElement | null;
   if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? ""))) return null;
   return KEYS[e.key] ?? null;

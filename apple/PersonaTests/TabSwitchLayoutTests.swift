@@ -46,14 +46,17 @@ struct TabSwitchLayoutTests {
         #expect(centreFromEdge == 49)
     }
 
-    /// In the lower middle of the column, not a small block at its foot: a quarter of the column under it.
+    /// In the lower middle of the column, not a small block at its foot: on both displays the room of the outer
+    /// display's face and page's action under it (144 pt at the default text size), so it stands as high when the Duo
+    /// folds or unfolds (`DuoTabBarAlignmentTests` lays both out).
     @Test func theSideBarStandsInTheLowerMiddle() {
-        let height: CGFloat = 644 // the outer display's 678 pt less its 34 pt foot
-        let foot = TabSwitchLayout.sideFoot(height: height)
-        #expect(foot == height * Theme.Shell.sideTabBarFoot)
-        let top = height - foot - TabSwitchLayout.sideHeight(items: 3)
-        #expect(top > height * 0.4 && height - foot < height * 0.8) // its middle in the column's lower half
-        #expect(TabSwitchLayout.sideFoot(height: 0) == Theme.Space.l) // never on the foot itself
+        let button = Theme.Size.tapTarget * Theme.sizeScale(.xLarge) // the rail's buttons, a size up at the default size
+        let foot = TabSwitchLayout.sideFoot(button: button)
+        #expect(abs(foot - 144) < 1)
+        for height: CGFloat in [644, 635] { // the outer display's 678 pt and the inner one's 669 pt, less their 34 pt foot
+            let top = height - foot - TabSwitchLayout.sideHeight(items: 3)
+            #expect(top > height * 0.4 && height - foot < height * 0.8) // its middle in the column's lower half
+        }
     }
 
     /// Along the foot upright the pages keep the bar's room, as the system's tab bar makes them keep; with the keyboard up

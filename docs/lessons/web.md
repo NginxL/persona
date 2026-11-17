@@ -28,6 +28,8 @@ when no usable timestamp was returned; a file that stopped safely must not look 
 
 Do not format a past event with the UTC offset at page load: daylight-saving changes can shift the displayed time
 and date. Resolve the browser's local offset at the event's instant, and test both seasonal directions across midnight.
+Chart axes too (#9863): a step added to one offset-shifted start drifts an hour off midnight across a change; lay each
+day's round times out with `Date`'s local fields (`clockTicks` in `web/src/lib/machine-detail.ts`).
 
 ## ZIP preview limits must check actual bytes (#9384)
 

@@ -58,7 +58,7 @@ var (
 	// hub's restarts would otherwise check everything each time).
 	healthOnlineRecheck = 10 * time.Minute
 	// healthStale: a failure older than this no longer keeps a launcher from being used (a usage limit with a known
-	// reset: until the reset instead).
+	// reset, its own or one of its families': until the reset instead). An agent's turn counts from its own time.
 	healthStale = 6 * time.Hour
 	// healthLimitMax: a usage limit said to reset further ahead than this was misread (a weekly limit resets within 7
 	// days): the record counts as one without a reset.
@@ -308,7 +308,8 @@ func (s *Service) launcherHealth(ctx context.Context, machine, launcher string) 
 }
 
 // unusable: the record says the launcher does not work (its latest result, failed within healthStale). A usage limit
-// whose reset is known holds until that reset, however far off, and no longer.
+// whose reset is known holds until that reset, however far off, and no longer. One whose reset is unknown holds
+// within healthStale, and until any of its families' known resets (familyResetAhead).
 func (r LauncherHealth) unusable() bool {
 	if r.State == "" || r.State == healthOK {
 		return false
@@ -316,7 +317,24 @@ func (r LauncherHealth) unusable() bool {
 	if reset, ok := r.limitReset(); ok {
 		return time.Now().Before(reset)
 	}
-	return time.Since(r.CheckedAt) < healthStale
+	return time.Since(r.CheckedAt) < healthStale || r.familyResetAhead()
+}
+
+// familyResetAhead: r's usage limit has a family whose own reset is known and still ahead (and not past
+// healthLimitMax from the record's evidence). Another family whose reset is unknown makes the limit's reset unknown
+// (familiesReset), and that family's evidence goes stale, but it takes nothing from this one: nothing a failure adds
+// shortens a limit (foldLimit, #9646).
+func (r LauncherHealth) familyResetAhead() bool {
+	if r.Kind != errKindUsageLimit {
+		return false
+	}
+	now := time.Now()
+	for _, t := range r.LimitResets {
+		if now.Before(t) && t.Sub(r.CheckedAt) <= healthLimitMax {
+			return true
+		}
+	}
+	return false
 }
 
 // limitReset is when the usage limit r records resets: r failed on the subscription's usage limit, and its reset is

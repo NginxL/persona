@@ -1095,11 +1095,20 @@ nonisolated enum Theme {
         /// inset): the strip at the screen's edge the system's bars keep clear of. The status bar is centred on the rest of
         /// the column (its clock 49 pt from the edge on both displays), and so is the side tab bar.
         static let sideColumnEdge: CGFloat = 14
-        /// Where the side tab bar's foot stands where nothing is under it in the column (the open Duo's tabs): this share of
-        /// the column's height (the safe area's) above its foot, so the bar is in the lower middle of the column, as a tab
-        /// bar down the side of the outer display stands (the owner's reference, #4231), not a small block at the foot. On
-        /// the outer display's rail the face and the page's action are under it.
-        static let sideTabBarFoot: CGFloat = 0.25
+        /// The side column from its foot up (`ShellSideRail`), one set of values on both displays, so the side tab bar stands
+        /// at the same height when the Duo folds or unfolds: the column's foot (the safe area's) to the lowest button, then
+        /// the face and the page's action a `sideRailSpacing` apart, then the tab bar a `sideTabBarGap` more above them. On
+        /// the open Duo, where nothing is under the bar, their room stays empty (`ShellRailButtonRoom`), so the bar's foot is
+        /// as far above the column's foot as on the outer display: the bar in the column's lower middle there too, as a tab
+        /// bar down the side of the outer display stands (the owner's reference, #4231), not a small block at the foot.
+        static let sideRailFoot: CGFloat = Space.l
+        static let sideRailSpacing: CGFloat = Space.m
+        static let sideTabBarGap: CGFloat = Space.s
+        /// A tab bar item's count there (`TabBarCount`, the system's tab bar badge: `Size.badge` tall, its number
+        /// `Font.labelHeavy`): ringed this wide in the page's color, apart from the chosen item's circle and the symbol, and
+        /// centred this far inside the top trailing corner of the symbol's `Size.well`, so it rests on the circle's rim.
+        static let tabBarBadgeRing: CGFloat = Size.lineMedium
+        static let tabBarBadgeInset: CGFloat = Space.xxs
         /// The system's own items down that column (a page's bar items, a search at its foot), measured on iOS 27.2 on both
         /// displays (#9837): each a 48 pt glass, Back alone, 12 pt over the rest in one glass, 4 pt apart in it; at every text
         /// size. The first one's top is 174 pt below the safe area's on the outer display (its camera is over the status

@@ -37,7 +37,6 @@ export function MetricChart({
   axisFormat,
   hover,
   onHover,
-  tz,
   reference,
   className,
 }: {
@@ -53,7 +52,6 @@ export function MetricChart({
   axisFormat: (v: number) => string;
   hover: number | null;
   onHover: (t: number | null) => void;
-  tz: number;
   /** A level to mark with a dashed line and its label (the load chart's core count); the y axis reaches it. */
   reference?: { value: number; label: string };
   className?: string;
@@ -65,7 +63,7 @@ export function MetricChart({
   const axis = useMemo(() => yAxis(Math.max(max, reference?.value ?? 0), { percent, binary }), [max, reference?.value, percent, binary]);
   const x = scale(t0, t1, 0, W);
   const y = scale(0, axis.top, H, TOP);
-  const ticks = useMemo(() => timeTicks(t0, t1, W < 280 ? 3 : 4, tz), [t0, t1, W, tz]);
+  const ticks = useMemo(() => timeTicks(t0, t1, W < 280 ? 3 : 4), [t0, t1, W]);
   const picked = hover !== null ? nearest(points, hover, step) : undefined;
   const hoverX = picked ? x(picked.t) : hover !== null ? x(hover) : null;
   const clip = `clip-${title.replace(/\W/g, "") || "c"}-${series.length}`;
@@ -100,7 +98,7 @@ export function MetricChart({
       <div className="flex items-baseline gap-2">
         <h3 className="truncate text-[12.5px] font-medium text-ink-2">{title}</h3>
         <span className="flex-1" />
-        <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums">{hover !== null ? hm(picked?.t ?? hover, tz) : t("machines-metricchart.now")}</span>
+        <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums">{hover !== null ? hm(picked?.t ?? hover) : t("machines-metricchart.now")}</span>
       </div>
       <div className="mt-0.5 flex min-h-7 flex-wrap items-baseline gap-x-4 gap-y-0.5">
         {series.map((s, i) => (
@@ -144,7 +142,7 @@ export function MetricChart({
                   <line x1={tx} x2={tx} y1={TOP} y2={H} stroke="var(--line)" strokeWidth={1} shapeRendering="crispEdges" />
                   {!hidden && (
                     <text x={anchor === "start" ? 0 : anchor === "end" ? W : tx} y={H + 14} textAnchor={anchor} fontSize={10.5} fill="var(--ink-3)" className="tabular-nums">
-                      {hm(t, tz)}
+                      {hm(t)}
                     </text>
                   )}
                 </g>
@@ -161,7 +159,7 @@ export function MetricChart({
                   })}
                 <rect x={Math.min(Math.max(0, hoverX - 21), W - 42)} y={H + 2} width={42} height={16} rx={4} fill="var(--tooltip-bg)" />
                 <text x={Math.min(Math.max(21, hoverX), W - 21)} y={H + 14} textAnchor="middle" fontSize={10.5} fill="var(--tooltip-fg)" className="tabular-nums">
-                  {hm(picked?.t ?? hover ?? t1, tz)}
+                  {hm(picked?.t ?? hover ?? t1)}
                 </text>
               </g>
             )}

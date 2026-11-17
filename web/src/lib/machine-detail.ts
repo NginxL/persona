@@ -173,13 +173,25 @@ export function yAxis(max: number, opts: { percent?: boolean; binary?: boolean }
 const MIN = 60;
 const TICK_STEPS = [5 * MIN, 10 * MIN, 15 * MIN, 30 * MIN, 3600, 2 * 3600, 3 * 3600, 6 * 3600, 12 * 3600];
 
-/** At most `max` round times inside [t0, t1] (every 15 minutes, every 2 hours…), on the local clock: `tz` is the
- * local offset east of UTC in seconds (-new Date().getTimezoneOffset() * 60). */
-export function timeTicks(t0: number, t1: number, max = 4, tz = 0): number[] {
-  const step = TICK_STEPS.find((s) => (t1 - t0) / s <= max) ?? 24 * 3600;
-  const out: number[] = [];
-  for (let t = Math.ceil((t0 + tz) / step) * step - tz; t <= t1; t += step) out.push(t);
-  return out;
+/** At most `max` round times inside [t0, t1] (every 15 minutes, every 2 hours…), on the local clock. */
+export function timeTicks(t0: number, t1: number, max = 4): number[] {
+  return clockTicks(t0, t1, TICK_STEPS.find((s) => (t1 - t0) / s <= max) ?? 24 * 3600);
+}
+
+/** The times inside [t0, t1] that are a whole number of `step` seconds (a divisor of a day) after a local midnight.
+ * Each day is laid out on its own clock, so the ticks before and after a daylight-saving change stay on round local
+ * times (#9863). */
+export function clockTicks(t0: number, t1: number, step: number): number[] {
+  const out = new Set<number>();
+  const first = new Date(t0 * 1000);
+  for (let d = new Date(first.getFullYear(), first.getMonth(), first.getDate()); d.getTime() <= t1 * 1000; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    for (let s = 0; s < 86400; s += step) {
+      // A time the clocks skip lands on the next one, hence the set.
+      const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, s).getTime() / 1000;
+      if (at >= t0 && at <= t1) out.add(at);
+    }
+  }
+  return [...out];
 }
 
 // ── formats (the same as the app's MetricFormat) ──
@@ -255,8 +267,9 @@ export function uptime(bootSec: number, nowSec: number): string {
   return t("lib-machine-detail.uptime_minutes", { m });
 }
 
-/** "14:05" on the local clock (`tz` as in timeTicks). */
-export function hm(tSec: number, tz = 0): string {
+/** "14:05" on the local clock, with the offset of that moment (a time before a daylight-saving change reads as the
+ * clock did then, #9863); `tz` fixes the offset east of UTC in seconds instead. */
+export function hm(tSec: number, tz = localOffset(tSec * 1000)): string {
   const local = (((Math.floor(tSec + tz) % 86400) + 86400) % 86400) / 60;
   return `${String(Math.floor(local / 60)).padStart(2, "0")}:${String(Math.floor(local % 60)).padStart(2, "0")}`;
 }

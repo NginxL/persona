@@ -192,6 +192,18 @@ describe("keys", () => {
     expect(reviewCommand({ key: "q" })).toBeNull();
   });
 
+  it("takes a key typed with AltGr (Ctrl+Alt on Windows) as the character it types", () => {
+    // a German layout on Windows: AltGr+9 types "]", AltGr+8 "["
+    const altGr = (k: string) => k === "AltGraph";
+    expect(reviewCommand({ key: "]", ctrlKey: true, altKey: true, getModifierState: altGr })).toBe("next-thread");
+    expect(reviewCommand({ key: "[", ctrlKey: true, altKey: true, getModifierState: altGr })).toBe("prev-thread");
+    // Ctrl+Alt without AltGr is still a chord, and AltGr does not make ⌘ a typed key
+    expect(reviewCommand({ key: "]", ctrlKey: true, altKey: true, getModifierState: () => false })).toBeNull();
+    expect(reviewCommand({ key: "]", ctrlKey: true, altKey: true, metaKey: true, getModifierState: altGr })).toBeNull();
+    const input = document.createElement("input");
+    expect(reviewCommand({ key: "]", ctrlKey: true, altKey: true, getModifierState: altGr, target: input })).toBeNull();
+  });
+
   it("finds the next and the previous one from the top of the screen", () => {
     const tops = [0, 500, 1200];
     expect(nextOf(tops, 0, true)).toBe(1);

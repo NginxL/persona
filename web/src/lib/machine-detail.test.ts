@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   coresNow,
   loadAxis,
@@ -109,13 +109,35 @@ describe("scales", () => {
 
   it("put at most four round times on the local clock", () => {
     const t1 = 1_790_000_000;
-    const hour = timeTicks(t1 - 3600, t1, 4, 0);
+    const hour = timeTicks(t1 - 3600, t1, 4);
     expect(hour.length).toBeLessThanOrEqual(4);
     expect(hour.every((t) => t % (15 * 60) === 0)).toBe(true);
-    const day = timeTicks(t1 - 86400, t1, 4, 8 * 3600);
+    const day = timeTicks(t1 - 86400, t1, 4);
     expect(day.length).toBeLessThanOrEqual(4);
-    expect(day.every((t) => (t + 8 * 3600) % (6 * 3600) === 0)).toBe(true); // 00:00, 06:00… local
-    expect(hm(day[0], 8 * 3600)).toMatch(/^(00|06|12|18):00$/);
+    for (const t of day) expect(hm(t)).toMatch(/^(00|06|12|18):00$/); // 00:00, 06:00… local
+  });
+
+  describe("across a daylight-saving change (#9863)", () => {
+    // America/New_York: 02:00 EDT became 01:00 EST on 2026-11-01; 02:00 EST becomes 03:00 EDT on 2027-03-14.
+    const savedTZ = process.env.TZ;
+    beforeAll(() => { process.env.TZ = "America/New_York"; });
+    afterAll(() => { if (savedTZ === undefined) delete process.env.TZ; else process.env.TZ = savedTZ; });
+    const at = (iso: string) => Date.parse(iso) / 1000;
+
+    it("read each time with the offset it had", () => {
+      expect(hm(at("2026-10-31T16:00:00Z"))).toBe("12:00");
+      expect(hm(at("2026-11-02T17:00:00Z"))).toBe("12:00");
+      expect(hm(at("2027-03-13T17:00:00Z"))).toBe("12:00");
+      expect(hm(at("2027-03-15T16:00:00Z"))).toBe("12:00");
+    });
+
+    it("keep the ticks on round local times on both sides", () => {
+      expect(timeTicks(at("2026-10-31T16:00:00Z"), at("2026-11-01T16:00:00Z"), 4).map((t) => hm(t))).toEqual(["12:00", "18:00", "00:00", "06:00"]);
+      expect(timeTicks(at("2027-03-13T17:00:00Z"), at("2027-03-14T15:00:00Z"), 4).map((t) => hm(t))).toEqual(["12:00", "18:00", "00:00", "06:00"]);
+      // the hour the clocks repeat gets one tick, the hour they skip none
+      expect(timeTicks(at("2026-11-01T04:00:00Z"), at("2026-11-01T08:00:00Z"), 4).map((t) => hm(t))).toEqual(["00:00", "01:00", "02:00", "03:00"]);
+      expect(timeTicks(at("2027-03-14T05:00:00Z"), at("2027-03-14T09:00:00Z"), 4).map((t) => hm(t))).toEqual(["00:00", "01:00", "03:00", "04:00", "05:00"]);
+    });
   });
 });
 
@@ -164,7 +186,7 @@ describe("formats", () => {
     expect(uptime(0, 3 * 86400 + 4 * 3600 + 60)).toBe("3 天 4 小时");
     expect(uptime(0, 5 * 3600 + 12 * 60)).toBe("5 小时 12 分钟");
     expect(uptime(0, 8 * 60 + 5)).toBe("8 分钟");
-    expect(hm(13 * 3600 + 5 * 60)).toBe("13:05");
+    expect(hm(13 * 3600 + 5 * 60, 0)).toBe("13:05");
     expect(hm(23 * 3600, 2 * 3600)).toBe("01:00");
   });
 
