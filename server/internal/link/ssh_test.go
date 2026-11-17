@@ -689,52 +689,71 @@ func TestSSHRoutingOrderFallbackStickyReconnectAndDirectRecovery(t *testing.T) {
 	cancel1()
 	<-done1
 
-	// Phase 2: direct is down, Always is false -> tries direct first, falls back to SSH; reconnect goes straight to SSH
-	// without trying direct first; once direct comes back, periodic DirectRetryEvery switches back to direct and closes ssh.
-	direct.allowed.Store(false)
-	direct.attempts.Store(0)
-	ch2 := make(chan Status, 128)
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	done2 := make(chan struct{})
-	go func() {
-		defer close(done2)
-		_ = Run(ctx2, Options{
-			Path:             path,
-			SSHBin:           ssh.bin,
-			PairCheck:        30 * time.Millisecond,
-			DirectRetryEvery: 300 * time.Millisecond,
-			Status: func(s Status) {
-				select {
-				case ch2 <- s:
-				default:
-				}
-			},
+	// Phases 2 and 3 start with direct down and Always off, each in a run of its own: direct is tried first, SSH takes
+	// over, and when the hub drops that working SSH link the reconnect goes straight to SSH.
+	startRun := func(directRetryEvery time.Duration) (chan Status, func()) {
+		ch := make(chan Status, 128)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = Run(ctx, Options{
+				Path:             path,
+				SSHBin:           ssh.bin,
+				PairCheck:        30 * time.Millisecond,
+				DirectRetryEvery: directRetryEvery,
+				Status: func(s Status) {
+					select {
+					case ch <- s:
+					default:
+					}
+				},
+			})
+		}()
+		var once sync.Once
+		stop := func() { once.Do(func() { cancel(); <-done }) }
+		t.Cleanup(stop)
+		return ch, stop
+	}
+	// fallBackThenReconnect returns direct's attempts once the run fell back to SSH, then drops that SSH link from the
+	// hub's side and waits for the reconnect over SSH.
+	fallBackThenReconnect := func(ch chan Status) int32 {
+		t.Helper()
+		stFallback := waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH })
+		firstSSHLink := <-hub.links
+		afterFallback := direct.attempts.Load()
+		if afterFallback < 1 {
+			t.Fatalf("direct was not tried before falling back to SSH (attempts = %d)", afterFallback)
+		}
+		_ = firstSSHLink.conn.Close(websocket.StatusGoingAway, "restart")
+		waitFor(t, ch, func(s Status) bool {
+			return s.State == "connected" && s.Kind == KindSSH && s.Conn > stFallback.Conn
 		})
-	}()
-	t.Cleanup(func() { cancel2(); <-done2 })
-
-	stFallback := waitFor(t, ch2, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH })
-	firstSSHLink := <-hub.links
-	afterFallbackAttempts := direct.attempts.Load()
-	if afterFallbackAttempts < 1 {
-		t.Fatalf("direct was not tried before falling back to SSH (attempts = %d)", afterFallbackAttempts)
+		<-hub.links
+		return afterFallback
 	}
 
-	// Drop the hub's WebSocket immediately (before DirectRetryEvery fires) while direct is still down: reconnect must go
-	// straight to SSH without dialing direct first.
-	_ = firstSSHLink.conn.Close(websocket.StatusGoingAway, "restart")
-	waitFor(t, ch2, func(s Status) bool {
-		return s.State == "connected" && s.Kind == KindSSH && s.Conn > stFallback.Conn
-	})
-	_ = <-hub.links
+	// Phase 2: the reconnect after the working SSH link dials no direct candidate. Direct's listener counts every dial,
+	// and a link up over SSH probes direct every DirectRetryEvery: with the probe an hour away, nothing but the reconnect
+	// can reach the listener here. (With a 300ms probe, one that fired while the test goroutine was slow was counted as
+	// the reconnect's, #10095.)
+	direct.allowed.Store(false)
+	direct.attempts.Store(0)
+	ch2, stop2 := startRun(time.Hour)
+	afterFallbackAttempts := fallBackThenReconnect(ch2)
 	if got := direct.attempts.Load(); got != afterFallbackAttempts {
 		t.Fatalf("reconnect after working SSH tried direct first: attempts went from %d to %d", afterFallbackAttempts, got)
 	}
-	stickyPID := ssh.runs()[len(ssh.runs())-1].PID
+	stop2()
 
-	// Bring direct back: DirectRetryEvery probes direct, reconnects over LAN, and closes the SSH tunnel.
+	// Phase 3: the same, probing direct every 300ms (those probes may land anywhere above, so attempts are not compared).
+	// Bring direct back: the sticky SSH link's probe reaches it, reconnects over LAN, and closes the SSH tunnel.
+	direct.attempts.Store(0)
+	ch3, _ := startRun(300 * time.Millisecond)
+	fallBackThenReconnect(ch3)
+	stickyPID := ssh.runs()[len(ssh.runs())-1].PID
 	direct.allowed.Store(true)
-	stRecovered := waitFor(t, ch2, func(s Status) bool { return s.State == "connected" && s.Kind == "lan" })
+	stRecovered := waitFor(t, ch3, func(s Status) bool { return s.State == "connected" && s.Kind == "lan" })
 	if stRecovered.Address != direct.url {
 		t.Fatalf("recovered direct address = %q, want %q", stRecovered.Address, direct.url)
 	}
