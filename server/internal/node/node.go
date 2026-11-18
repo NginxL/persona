@@ -95,7 +95,12 @@ type Node struct {
 	// Program is what bin is (nodeproto.ProgramPersonad / ProgramPersonaNode), for node.info; "" says nothing.
 	Program string
 	// managed: launchers kept by the hub (managed.go)
-	managed  managedLaunchers
+	managed managedLaunchers
+	// external is registered only by this node's trusted local configuration.
+	external *externalAdapterRegistry
+	// externalStarts contains cancelable initialization only, never the lifetime of an established conversation.
+	externalStarts externalStarts
+
 	hosts    *host.Registry // the terminal hosts, by kind (hosts.go): the one of the machine's engine
 	eng      engineState    // which engine, and its change stream (engine.go)
 	owners   ownership      // which host owns a session seen live in two (ownership.go)
@@ -180,6 +185,7 @@ type Node struct {
 	live      liveReplies                // the replies Claude is showing, from its MessageDisplay hook (livereply.go)
 	bgWait    bgWatch                    // whether background commands only wait (bgwait.go)
 	codices   *codexRegistry
+	oldMisses map[string]oldCodexMiss // negative opaque-id lookups, bounded by directory stamps and a one-minute TTL
 	takeovers codexTakeovers
 	usageWin  usageWindowsState // subscription rate-limit windows (usagewindows.go, #2432)
 	machineID string
@@ -391,6 +397,9 @@ func New(version string) (*Node, error) {
 		screens:  newScreenLogins(),
 	}
 	n.sessionScope = scope
+	if n.external, err = loadExternalAdapterRegistry(); err != nil {
+		n.logger.Printf("external adapter: configuration unavailable")
+	}
 	if n.uid, err = LoadMachineUID(dir); err != nil {
 		n.logger.Printf("machine uid: %v", err) // the hubs then treat this computer as theirs alone
 	}
@@ -439,6 +448,11 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 		w = &updateResponseWriter{Writer: w, responseWritten: n.updater.ResponseWritten}
 	}
 	n.peer = rpc.New("n", w)
+	if n.external != nil {
+		peer := n.peer
+		n.external.SetOnChange(func() { _ = peer.Notify("launchers.changed", map[string]any{}) })
+		defer n.external.Close()
+	}
 	n.peer.TrackReplies = n.reload != nil
 	n.reload.peer(n.peer, func() {
 		cancel()
@@ -782,14 +796,16 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		NewSessionID   string          `json:"new_session_id"` // assistant.send: start the new conversation under this id
 		Raw            json.RawMessage `json:"-"`
 
-		ConfiguredAgent string `json:"configured_agent"` // strict work-session options: hub.json specifies the harness
+		Runtime         string                   `json:"runtime"` // external admission only; never selects a native runtime
+		External        *proto.ExternalExecution `json:"external"`
+		ConfiguredAgent string                   `json:"configured_agent"` // strict work-session options: hub.json specifies the harness
 
 		// SuperviseRound: assistant.send of a round of the background supervisor, resumed at the end of its first turn
 		// (assistant_round.go); the answer says whether it was (context, why).
 		SuperviseRound bool `json:"supervise_round"`
 	}
-	// The "runtime" an older hub sends with assistant.send, assistant.warm and session.send is not read: every assistant
-	// conversation runs on Claude Code's CLI.
+	// Ordinary conversations ignore legacy runtime selections and always use the CLI. External selections keep the
+	// raw value only to refuse unsupported requests before normalization or process start.
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("bad params: %w", err)
@@ -1104,6 +1120,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "usage.windows": // subscription rate-limit windows read from local files (usagewindows.go, #2432)
 		return n.usageSnapshot(false), nil
 	case "launchers.list":
+		if p.Source == proto.ExternalLauncherSource {
+			return n.externalLauncherList(ctx, p.Refresh)
+		}
 		if p.Host != "" {
 			// What a start in that host can run (the manager's New Agent and its starts, #8140): where it is an engine
 			// runtime that runs only its own launchers, its providers and what starts elsewhere whatever the host.
@@ -1181,6 +1200,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		return map[string]any{"detail": n.launcherProbeCached(ctx, p.Name)}, nil
 	case "launchers.models":
+		if proto.IsExternalLauncher(p.Name) {
+			return n.externalLauncherModels(ctx, p.Name, p.Refresh)
+		}
 		if !p.Configured && p.AgentType == "" && !n.knownLauncher(ctx, p.Name) { // either: the hub vouches, from hub.json
 			return nil, fmt.Errorf("unknown launcher %q", p.Name)
 		}
@@ -1415,7 +1437,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		_ = json.Unmarshal(params, &opts)
 		sctx = withClientMsgID(sctx, opts.ClientMsgID) // a runtime's message goes under it (assistant_runtime.go)
 		send := func() (string, error) {
-			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, ServiceTier: p.ServiceTier, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
+			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, ServiceTier: p.ServiceTier, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
 		}
 		if p.NewSessionID == "" && p.SessionID == "" && opts.ClientMsgID != "" {
 			// A new conversation's first message with its client_msg_id (one a person's own app opened, the manager's
@@ -1505,7 +1527,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 			return n.sendEchoed(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, func() error { // echo.go
 				if n.isAssistantSession(p.SessionID) {
-					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
+					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
 					return err
 				}
 				return n.send(ctx, p.SessionID, p.Text, p.Images, opts)

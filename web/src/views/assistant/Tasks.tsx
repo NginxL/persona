@@ -27,6 +27,7 @@ import {
   startFailure,
   startInFlight,
   setRoute,
+  askRow,
   startPlan,
   todayFailedRow,
   useFeed,
@@ -921,8 +922,23 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
   const ref = useRef<HTMLDivElement>(null);
   const opened = useRef(open);
   useEffect(() => {
-    if (open && !opened.current) ref.current?.scrollIntoView?.({ block: "nearest" });
+    const row = ref.current;
+    const first = open && !opened.current;
     opened.current = open;
+    if (!first || !row) return;
+    // A card taller than the list shows its top: "nearest" would leave its question and buttons below the fold.
+    const reveal = () => {
+      const list = row.closest("[data-tray-list]");
+      row.scrollIntoView?.({ block: list && row.offsetHeight > list.clientHeight ? "start" : "nearest" });
+    };
+    reveal();
+    // The card's body loads after the row opens (a lazy chunk): align again as the row grows, for a moment, so the
+    // finished card is what ends up in view and not the placeholder.
+    if (typeof ResizeObserver === "undefined") return;
+    const growing = new ResizeObserver(reveal);
+    growing.observe(row);
+    const stop = window.setTimeout(() => growing.disconnect(), 1000);
+    return () => { window.clearTimeout(stop); growing.disconnect(); };
   }, [open]);
   const folded = foldedRow(item);
   // Whether the To-dos page counts this to-do as open (#3331): no attribute on rows that are no to-do. The chip badge
@@ -968,7 +984,7 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
   );
   if (!open) return head;
   return (
-    <div ref={ref} data-needs-row={item.key} data-needs-open {...countsOpenAttr} className="flex flex-col gap-1">
+    <div ref={ref} data-needs-row={item.key} data-needs-open {...countsOpenAttr} className="flex scroll-m-2 flex-col gap-1">
       {head}
       <NeedsYouBody item={item} nested />
     </div>
@@ -1009,7 +1025,7 @@ export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nes
         <NeedsYouPart key={todo.id + (todo.supervision?.reviews?.at(-1)?.at || todo.decision_review?.review_at || ask?.asked_at)} rowKey={rowKey} hideTitle={nested} decision={todo} />
       </Suspense>
     );
-  if (ask) return <div data-needs-row={rowKey} {...taskOpenAttr}><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} /></div>;
+  if (ask) return <div data-needs-row={rowKey} {...taskOpenAttr} className="min-w-0 rounded-control bg-field px-3 py-2.5"><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={askRow(todo, ask)} /></div>;
   if (status === "failed") return <FailedTaskRow rowKey={item.key} todo={todo} countsOpenAttr={taskOpenAttr} />;
   return <WaitingTaskRow rowKey={rowKey} todo={todo} status={status} countsOpenAttr={taskOpenAttr} />;
 }

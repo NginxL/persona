@@ -222,6 +222,9 @@ func (n *Node) startAsync(id, cwd, launcher, prompt, workspaceID, mode, effort, 
 
 // startAsyncIn is startAsync in host kind ("" : the default host, withStartHost).
 func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, effort, tabName string, options ...modelExecution) (*proto.Session, error) {
+	if proto.IsExternalLauncher(launcher) {
+		return nil, externalRefusal(context.Background(), "adapter_purpose_unsupported")
+	}
 	execution := executionOption(options)
 	if err := execution.check(launcher); err != nil {
 		return nil, err

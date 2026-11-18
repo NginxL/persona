@@ -66,6 +66,10 @@ struct MeetingPage: View {
     @State private var mapFull = false
     /// The imported meeting's notes open in this app (#8872, CLAUDE.md「Links open inside the app」).
     @State private var link: LinkTarget?
+    /// Hand to Agent (#8852): its sheet (with the failed hand-off tried again, from the row's Retry), and the try made
+    /// here, shown before the minutes are read again.
+    @State private var handing: MeetingHandoffAsk?
+    @State private var handed: MeetingHandoff?
     @State private var minutesCards: RecordingMinutesCards.Summary?
     @State private var transcriptItems: [RecordingTimeline.Item] = []
     /// The composer's field has the keyboard: the top of the page steps aside as the bar's controls do, so the thread
@@ -573,6 +577,9 @@ struct MeetingPage: View {
         .sheet(item: $link) { t in
             if let key = model.assistantMain ?? model.assistantCurrent { LinkSheet(target: t, key: key) }
         }
+        .sheet(item: $handing) { ask in
+            MeetingHandoffSheet(recording: id, transcriptOffered: !minutes.trimmed, again: ask.again) { handed = $0 }
+        }
         // Typing goes to the conversation: it is where the answer comes.
         .onChange(of: writing) { _, now in if now { afterPart = .conversation } }
         .onChange(of: minutes.ready, initial: true) { _, ready in cardsFollow(ready, entry: entry) }
@@ -612,6 +619,12 @@ struct MeetingPage: View {
                     .accessibilityIdentifier("meeting-capture-error")
             }
             MeetingAfterHeader(entry: entry)
+            // Its latest hand-off to an Agent (#8852): where it went, or why it didn't.
+            if let h = MeetingHandoff.newer(handed, minutes.handoff) {
+                MeetingHandoffRow(handoff: h, mayRetry: handoffMaterial(entry), open: { openHandedAgent(h) }) {
+                    handing = MeetingHandoffAsk(again: h)
+                }
+            }
             // A meeting imported from a connected app too (#8872): its own notes there, one tap away.
             if let imported = minutes.imported {
                 KBImportedNotesButton(imported: imported) { url in
@@ -667,18 +680,33 @@ struct MeetingPage: View {
         }
     }
 
-    /// The page's menu after the meeting: Rename, and the recording's own page (its audio, sharing and deleting).
+    /// The page's menu after the meeting: Rename, the recording's own page (its audio, sharing and deleting), and Hand to
+    /// Agent (#8852) for someone with an Agent to take it.
     private func afterMenu(_ entry: RecordingEntry) -> some View {
         Menu {
             Button { renaming = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
             Button { opening = true } label: { Label("Recording Details", systemImage: Theme.Icon.recording) }
                 .accessibilityIdentifier("meeting-after-details")
+            MeetingHandoffMenuItem(material: handoffMaterial(entry)) { handing = MeetingHandoffAsk(again: nil) }
         } label: {
             ThemedIcon(Theme.Icon.more).font(Theme.Font.heading)
                 .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
         }
         .accessibilityLabel(Text("More"))
         .accessibilityIdentifier("meeting-after-menu")
+    }
+
+    /// The meeting has something the hub can hand over (#8852): its minutes, or its text on the hub; never in Demo Mode.
+    private func handoffMaterial(_ entry: RecordingEntry) -> Bool {
+        guard !entry.active, let api = model.api, !api.config.isDemo else { return false }
+        return minutes.ready != nil || sync.status(entry) == .synced
+    }
+
+    /// The Agent a hand-off went to, its conversation opened over the page's sheet (closed first) or from the page.
+    private func openHandedAgent(_ h: MeetingHandoff) {
+        let key = SessionKey(group: model.hub?.group ?? "", machineID: h.machineID, sessionID: h.sessionID)
+        close?()
+        model.open(key)
     }
 
     /// The whole map full screen: the meeting room's Map page.
@@ -741,7 +769,7 @@ struct MeetingPage: View {
     private func voiceStart(_ key: SessionKey?, entry: RecordingEntry) -> (() -> Void)? {
         guard let key, capture.state == .idle, conversation.followupHold(entry) == nil,
               VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
-        return { voiceNote = VoiceEntry.start(key, model: model) }
+        return { voiceNote = VoiceEntry.start(key, model: model) { voiceNote = $0 } }
     }
 
     /// The card's one-line form: where the minutes are (when the meeting ran, before the hub says), and Open as an icon.

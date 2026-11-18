@@ -324,6 +324,17 @@ func (s *Service) snapshotStale() {
 	cs.mu.Unlock()
 }
 
+// snapshotOld makes the next message take a new snapshot, waiting for it no longer than for any snapshot past
+// snapshotFresh: what changed (a scheduled run's outcome) is news, but the snapshot held is not wrong to read meanwhile.
+func (s *Service) snapshotOld() {
+	cs := &s.live
+	cs.mu.Lock()
+	if old := time.Now().Add(-snapshotFresh); cs.at.After(old) {
+		cs.at = old
+	}
+	cs.mu.Unlock()
+}
+
 // ProfileChanged makes the next message take a new snapshot (the time zone changed), and the settings be read again
 // (the hub's defaults for them changed, or someone changed them behind the assistant's back).
 func (s *Service) ProfileChanged(context.Context) {
@@ -592,8 +603,8 @@ func (s *Service) snapshotSchedule(ctx context.Context, loc *time.Location, now 
 			routinesTotal++
 			if len(routines) < 8 {
 				r := prompts.SnapshotRoutine{Label: clip(t.label(), 30), Rule: ruleText(t, loc)}
-				if !t.LastRun.IsZero() {
-					r.LastAt, r.LastStatus = t.LastRun.In(loc), t.LastStatus
+				if at := t.lastShown(); !at.IsZero() { // the outcome's own run, not one still starting (#10182)
+					r.LastAt, r.LastStatus = at.In(loc), t.LastStatus
 					if t.LastStatus == runFailed || t.LastStatus == runSkipped {
 						r.LastWhy = clip(oneLine(t.LastError), 60)
 					}

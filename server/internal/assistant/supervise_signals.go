@@ -19,6 +19,7 @@ const (
 	sigUnjudged      = "unjudged"       // its agents stopped, and the judge could not say whether the work is finished
 	sigNeedsYou      = "needs_you"      // an agent waits for an answer
 	sigStalled       = "stalled"        // working, but nothing moved for long
+	sigNoProgress    = "no_progress"    // working, its session moves, but only waits and repeats: no real progress (supervise_progress.go)
 	sigAllStopped    = "all_stopped"    // every current participant stopped with nothing scheduled to resume it
 	sigInterrupted   = "interrupted"    // the model service cut its turn off
 	sigFailed        = "failed"         // its agent did not start
@@ -74,6 +75,8 @@ type superviseSignal struct {
 	Report      string
 	Evidence    []string
 	Step, Steps int
+	// no_progress: the tool calls the hub saw in the stretch, and how many were waits or repeats (supervise_progress.go).
+	Calls, Waits int
 	// Orphan: why nobody works on it (sigOrphaned): orphanError, orphanClosed or orphanOffline.
 	Orphan string
 	// To is the conversation it goes to when that is not digestTo's to say: a card's rung (sigAsk), the main
@@ -433,12 +436,21 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		agents := s.taskAgentsIn(ctx, t, lists)
 		group := s.allStoppedGroup(ctx, t, groups[t.ID], lists)
 		allStopped := false
+		stalled := map[string]bool{}
 		for _, g := range watchSignals(t, agents, now, group) {
 			allStopped = allStopped || g.Kind == sigAllStopped
+			stalled[g.Session] = stalled[g.Session] || g.Kind == sigStalled
 			if g.Kind == sigNeedsYou && routed[[2]string{g.Machine, g.Session}] {
 				continue // its card is with the supervisor as an ask already
 			}
 			s.signal(g)
+		}
+		if !allStopped && t.Supervision.state(t) == "" { // going on: neither parked nor with the owner nor waiting for review
+			for _, c := range currentTaskAgents(agents, supersededAgents(t, agents)) {
+				if g, ok := s.noProgressSignal(t, c, now); ok && !stalled[c.SessionID] {
+					s.signal(g)
+				}
+			}
 		}
 		if g, ok := s.orphanSignal(t); ok && !allStopped { // a fresh complete group outranks the minute pass's orphan snapshot
 			s.signal(g)

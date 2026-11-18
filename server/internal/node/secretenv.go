@@ -669,8 +669,12 @@ func (n *Node) withSecretTicket(line, launcher, ticket string, q func(string) st
 // process outlives a connection, so the values it hides stay hidden when its manager reconnects. A node that serves
 // one connection (--stdio) would forget them while its Agents still run.
 func (n *Node) capabilities() []string {
-	if n.keeper != nil {
-		return nodeproto.Announced
+	capabilities := slices.Clone(nodeproto.Announced)
+	if n.keeper == nil {
+		capabilities = slices.DeleteFunc(capabilities, func(c string) bool { return c == nodeproto.SecretEnv })
 	}
-	return slices.DeleteFunc(slices.Clone(nodeproto.Announced), func(c string) bool { return c == nodeproto.SecretEnv })
+	if n.external != nil {
+		capabilities = append(capabilities, nodeproto.ExternalLauncherInventory)
+	}
+	return capabilities
 }

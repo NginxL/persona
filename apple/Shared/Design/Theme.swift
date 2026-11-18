@@ -357,8 +357,6 @@ nonisolated enum Theme {
         }
         /// The home page's greeting, the welcome page (24 bold).
         static var display: SwiftUI.Font { sized(.display, .bold) }
-        /// The display level unemphasized: "(Persona)" after the name in a screenshot's banner (#9508, 24 regular).
-        static var displayPlain: SwiftUI.Font { sized(.display) }
         /// A detail page's or a sheet's title (18 semibold).
         static var title: SwiftUI.Font { sized(.title, .semibold) }
         /// Titles of rows, cards, panels and Markdown headings below the first (13 semibold).
@@ -421,8 +419,6 @@ nonisolated enum Theme {
         static let labelStrong = label.weight(.semibold)
         static let labelMedium = label.weight(.medium)
         static let labelHeavy = label.weight(.bold)
-        /// The display level unemphasized: "(Persona)" after the name in a screenshot's banner (#9508, 28 regular).
-        static let displayPlain = display.weight(.regular)
 
         #if os(iOS) || os(visionOS)
         /// `body` for a UIKit control inside a SwiftUI page (the hidden `SecretField`): the same text style, so it

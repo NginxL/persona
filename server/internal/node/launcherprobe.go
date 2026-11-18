@@ -163,6 +163,9 @@ var probeCache = struct {
 // that fetches a token), so opening its page again should not repeat that. Past that it reads the kept probe
 // (keptProbe), which a message or a start has usually taken already.
 func (n *Node) launcherProbeCached(ctx context.Context, name string) proto.LauncherDetail {
+	if proto.IsExternalLauncher(name) {
+		return proto.LauncherDetail{Agent: "claude", Error: externalRefusal(ctx, "adapter_probe_unsupported").Error()}
+	}
 	probeCache.Lock()
 	if at, ok := probeCache.at[name]; ok && time.Since(at) < 10*time.Minute {
 		d := probeCache.got[name]
@@ -189,6 +192,9 @@ func (n *Node) launcherProbeCached(ctx context.Context, name string) proto.Launc
 
 // launcherProbe runs the probe on this machine (a login shell, so ~/.zshrc defines the launcher).
 func (n *Node) launcherProbe(ctx context.Context, name string, args ...string) (Probe, error) {
+	if proto.IsExternalLauncher(name) {
+		return Probe{}, externalRefusal(ctx, "adapter_probe_unsupported")
+	}
 	if !shellcmd.NameRe.MatchString(name) {
 		return Probe{}, fmt.Errorf("invalid launcher %q", name)
 	}

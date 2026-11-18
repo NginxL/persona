@@ -37,6 +37,11 @@ struct TalkToPersonaIntent: AppIntent {
         // Connected is not enough: the voice screen must be the one in the car while the microphone is on. And no scene of
         // Persona's is not no car: the audio route says whether the phone is in one (`talkNow`).
         let talk = await CarPlayVoicePresence.talkNow()
+        // A call to Persona already on the phone goes on: in the car, the car's voice chat would end it, so the car is
+        // told where it is (#9290 follow-up); without a car, the call screen shows it (`callPersona` shows a live call).
+        if !talk.callsOnThePhone, let onPhone = await MainActor.run(body: { CarPlayVoiceSession.onPhoneCall() }) {
+            return .result(dialog: IntentSupport.dialog(onPhone))
+        }
         if talk.callsOnThePhone {
             // The system takes a call's Start only from an app in front; the call's page shows there.
             try await continueInForeground(alwaysConfirm: false)

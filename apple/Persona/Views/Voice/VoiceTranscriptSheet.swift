@@ -10,29 +10,8 @@ struct VoiceTranscriptSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("Captions last only for this call and aren’t saved. Instructions and answers stay in the chat as usual.")
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(call.captions) { caption in
-                        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                            Text(caption.isUser ? String(localized: "You") : persona)
-                                .font(Theme.Font.labelStrong)
-                                .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
-                            Text(caption.text)
-                                .font(Theme.Font.body)
-                                .foregroundStyle(caption.final ? Color.primary : Color.secondary)
-                                .textSelection(.enabled)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityElement(children: .combine)
-                    }
-                    if call.captions.isEmpty {
-                        EmptyStateView(symbol: Theme.Icon.voiceCaptions, title: String(localized: "No Captions Yet"),
-                                       message: String(localized: "Say something and captions will appear here."))
-                    }
-                }
-                .padding(Theme.Space.page)
+                VoiceCaptionList(captions: call.captions, persona: persona)
+                    .padding(Theme.Space.page)
             }
             .defaultScrollAnchor(.bottom)
             .themedPage()
@@ -49,5 +28,37 @@ struct VoiceTranscriptSheet: View {
             #endif
         }
         .accessibilityIdentifier("voice-transcript")
+    }
+}
+
+/// A call's captions in full, oldest first, under the note that they last only for this call: All Captions' list, and
+/// the system call's details (`CallDetailsSheet`, #9887 polish).
+struct VoiceCaptionList: View {
+    let captions: [VoiceCaption]
+    let persona: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text("Captions last only for this call and aren’t saved. Instructions and answers stay in the chat as usual.")
+                .font(Theme.Font.caption)
+                .foregroundStyle(.secondary)
+            ForEach(captions) { caption in
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text(caption.isUser ? String(localized: "You") : persona)
+                        .font(Theme.Font.labelStrong)
+                        .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
+                    Text(caption.text)
+                        .font(Theme.Font.body)
+                        .foregroundStyle(caption.final ? Color.primary : Color.secondary)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+            if captions.isEmpty {
+                EmptyStateView(symbol: Theme.Icon.voiceCaptions, title: String(localized: "No Captions Yet"),
+                               message: String(localized: "Say something and captions will appear here."))
+            }
+        }
     }
 }

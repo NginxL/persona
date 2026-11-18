@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -43,6 +44,10 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 	params := p.Params
 	if params == nil {
 		params = map[string]any{}
+	}
+	delete(params, "external")
+	if launcher, _ := params["launcher"].(string); proto.IsExternalLauncher(launcher) {
+		return nil, badRequest(i18n.Err("external-adapter.purpose_unsupported"), s.appLang(ctx, p.Lang))
 	}
 	if resume, _ := params["resume_session_id"].(string); resume == "" {
 		own := pickOf(params)
@@ -86,6 +91,10 @@ func (s *Service) AgentResumeParams(ctx context.Context, p AgentResumeParams) (m
 	params := p.Params
 	if params == nil {
 		params = map[string]any{}
+	}
+	delete(params, "external")
+	if launcher, _ := params["launcher"].(string); proto.IsExternalLauncher(launcher) {
+		return nil, badRequest(i18n.Err("external-adapter.purpose_unsupported"), s.requestCtxLang(ctx))
 	}
 	q := map[string]any{}
 	if err := s.applyModel(ctx, "agent.new", q); err != nil {

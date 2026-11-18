@@ -302,6 +302,9 @@ func onlyHost(list, host string) bool {
 }
 
 func (in launcherInput) check() error {
+	if proto.IsExternalLauncher(in.Name) {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if in.Kind != "" && in.Kind != "api" && in.Kind != "launcher" {
 		return i18n.Err("assistant-models_launchers.err_kind")
 	}
@@ -413,6 +416,9 @@ func errViaMachine(id string) error {
 
 // saveLauncher stores in (over old on an update) and tells the nodes.
 func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *storedLauncher) (storedLauncher, error) {
+	if proto.IsExternalLauncher(in.Name) {
+		return storedLauncher{}, i18n.Err("external-adapter.purpose_unsupported")
+	}
 	s.models.mu.Lock()
 	defer s.models.mu.Unlock()
 	list, err := s.readStoredLaunchers(ctx)

@@ -326,6 +326,9 @@ func (n *Node) claudeProcessEnv(base []string, dir string) []string {
 // Terminal Agents keep launcherCommand unchanged; only this assistant start
 // overrides a shell's default after startup, using its saved selection.
 func (n *Node) launcherCommandIn(name, dir string, q func(string) string) string {
+	if proto.IsExternalLauncher(name) {
+		return "false" // external starts bypass shell command construction entirely
+	}
 	cmd := name
 	if _, managed := n.managedLauncher(name); managed {
 		cmd = q(n.bin) + " launch " + name

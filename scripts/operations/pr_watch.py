@@ -31,9 +31,14 @@ from pr_watch_verify import verify
 
 FORMAT_VERSION = 1
 VERIFICATION_POLICY_VERSION = 2
-REVIEW_POLICY_VERSION = 2
+REVIEW_POLICY_VERSION = 3
 REPAIR_LIMIT = 3
 INFRASTRUCTURE_ATTEMPT_LIMIT = 3
+
+
+def blocking_findings(findings):
+    """Only P0 is a semantic merge gate; P1/P2 remain published notes."""
+    return [finding for finding in findings or [] if finding.get("severity") == "P0"]
 
 
 def load_config(path):
@@ -269,8 +274,7 @@ class Watcher:
                 if item.get("outcome") in ("reviewing", "repairing", "base_updated", "repair_published"):
                     item["outcome"] = "retry"
                     item["retry_after"] = 0
-                elif item.get("outcome") == "findings" and any(
-                        finding.get("severity") in ("P0", "P1") for finding in item.get("findings", [])):
+                elif item.get("outcome") == "findings" and blocking_findings(item.get("findings", [])):
                     item["outcome"] = "retry"
                     item["retry_after"] = 0
                 elif item.get("outcome") == "findings":
@@ -496,15 +500,15 @@ class Watcher:
         head = pr.get("headRefOid") or pr.get("head")
         if not isinstance(head, str) or not pr_watch_common.SHA.fullmatch(head):
             raise WatchError("findings publication requires an exact head")
-        blocking = any(finding["severity"] in ("P0", "P1") for finding in findings)
+        blocking = bool(blocking_findings(findings))
         if not self.repositories[repo]["merge"]:
-            action = "Review-only mode: no automatic repair or merge will be attempted. Please correct the findings in a new head."
+            action = "Review-only mode: no automatic repair or merge will be attempted. P1/P2 findings are notes; only P0 blocks."
         elif blocking:
-            action = "P0/P1 findings block this head; the watcher will use its bounded repair flow."
+            action = "P0 findings block this head; the watcher will use its bounded repair flow. P1/P2 findings are non-blocking notes."
         elif self.dry_run:
-            action = "Dry run: findings are recorded locally; no automatic verification publication or merge will be attempted."
+            action = "Dry run: P1/P2 findings are non-blocking notes; no automatic verification publication or merge will be attempted."
         else:
-            action = "These P2 findings are non-blocking under the maintainer-approved policy. Verification and exact-head merging continue."
+            action = "P1/P2 findings are non-blocking notes. Verification and exact-head merging continue."
         if not inline:
             body = "Findings from the previous head; this is not a review of the current head.\n\n%s" % action
         else:
@@ -626,7 +630,7 @@ class Watcher:
         return False
 
     def repair_findings(self, config, pr, worktree, findings):
-        """Repair P0/P1 findings with the same sandbox, publication and budget as test failures."""
+        """Repair P0 findings with the same sandbox, publication and budget as test failures."""
         repo, number = config["name"], pr["number"]
         old = self.state.get(repo, number)
         evidence_key = old.get("evidence_key")
@@ -684,7 +688,7 @@ class Watcher:
         self.publication_comment(repo, number,
                                  published_head if new_number == number else pr["headRefOid"],
                                  published_key if new_number == number else evidence_key,
-                                 "The watcher pushed an automated repair for the P0/P1 semantic findings. The new head will receive a fresh semantic review and verification.")
+                                 "The watcher pushed an automated repair for the P0 semantic findings. The new head will receive a fresh semantic review and verification.")
         if new_number != number:
             self.publication_comment(repo, number, pr["headRefOid"], evidence_key,
                                      "A continuation PR was opened for the fork branch: #%d." % new_number)
@@ -1010,7 +1014,7 @@ class Watcher:
                 self.remove_worktree(repo, worktree)
         if (old.get("head") == head and old.get("evidence_key") == evidence_key
                 and old.get("outcome") == "findings" and old.get("semantic") == "findings" and old.get("review_posted")
-                and any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", []))
+                and blocking_findings(old.get("findings", []))
                 and not config["merge"]):
             return
         if old.get("outcome") == "repair_comment_pending":
@@ -1083,7 +1087,7 @@ class Watcher:
                 and old.get("format") == FORMAT_VERSION and old.get("outcome") == "retry"
                 and old.get("semantic") == "passed" and old.get("retry_reason") != "verification_repair"
                 and old.get("verification") in ("passed", "base_failure")
-                and not any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", []))):
+                and not blocking_findings(old.get("findings", []))):
             # A completed retry retains valid exact-head evidence. Normalize
             # it into the existing publication path instead of verifying in a
             # loop merely because an infrastructure retry once set `retry`.
@@ -1098,7 +1102,7 @@ class Watcher:
                 and (old.get("outcome") != "retry" or old.get("semantic") == "passed" and old.get("verification") in ("passed", "base_failure") and old.get("retry_reason") != "verification_repair") \
                 and (old.get("outcome") not in ("passed", "passed_with_base_failures", "passed_with_findings")
                      or old.get("verification") in ("passed", "base_failure")) \
-                and not any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", [])):
+                and not blocking_findings(old.get("findings", [])):
             if old.get("outcome") == "merged":
                 return
             if self.dry_run:
@@ -1112,13 +1116,13 @@ class Watcher:
                     and not (old.get("outcome") == "findings" and old.get("semantic") == "findings" and config["merge"]) \
                     and old.get("outcome") != "repairing" \
                     and not (old.get("outcome") == "passed_with_findings" and old.get("verification") in ("passed", "base_failure")
-                             and not any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", []))) \
+                             and not blocking_findings(old.get("findings", []))) \
                     and not (old.get("outcome") == "passed_with_findings" and old.get("merge_attempts", 0) > 0
                              and not old.get("success_posted")):
                 return
             if old.get("outcome") in ("passed", "passed_with_base_failures", "passed_with_findings") \
                     and old.get("format") == FORMAT_VERSION and old.get("semantic") == "passed" \
-                    and not any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", [])) \
+                    and not blocking_findings(old.get("findings", [])) \
                     and old.get("verification") in ("passed", "base_failure") and old.get("success_posted") and config["merge"]:
                 if old.get("merge_attempts", 0) > 0 and old.get("retry_after", 0) > time.time():
                     return
@@ -1133,7 +1137,7 @@ class Watcher:
                 return
             if old.get("outcome") in ("passed", "passed_with_base_failures", "passed_with_findings") \
                     and old.get("format") == FORMAT_VERSION and old.get("semantic") == "passed" \
-                    and not any(finding.get("severity") in ("P0", "P1") for finding in old.get("findings", [])) \
+                    and not blocking_findings(old.get("findings", [])) \
                     and old.get("verification") in ("passed", "base_failure") and not old.get("success_posted") and config["merge"]:
                 if old.get("findings") and not old.get("review_posted"):
                     published = old.get("published_findings", [])
@@ -1162,12 +1166,11 @@ class Watcher:
                 return
             # A dry run keeps semantic/test evidence but has no external side
             # effects. A live run resumes publication and the merge gate.
-            if old.get("semantic") == "findings" and not any(
-                    finding.get("severity") in ("P0", "P1") for finding in old.get("findings", [])):
+            if not blocking_findings(old.get("findings", [])):
                 if not old.get("review_posted"):
                     self.comment_findings(repo, number, pr, old.get("findings", []))
                     self.state.put(repo, number, head, evidence_key=evidence_key, review_posted=True)
-                # P2 comments do not invalidate a passing verification or turn
+                # a completed exact-head gate into a new review every poll.
                 # a completed exact-head gate into a new review every poll.
                 if old.get("verification") not in ("passed", "base_failure"):
                     return
@@ -1313,7 +1316,7 @@ class Watcher:
                             repo, number, bounded(error, 500)))
                 if findings is None:
                     raise WatchError(current.get("failure") or "semantic review exhausted its attempts without a valid answer")
-                blocking = [finding for finding in findings if finding["severity"] in ("P0", "P1")]
+                blocking = blocking_findings(findings)
                 semantic = "findings" if blocking else "passed"
                 review_fingerprint = fingerprint(repo, number, head, "semantic", findings)
                 published = current.get("published_findings", [])
@@ -1340,16 +1343,14 @@ class Watcher:
                                          review_posted=not self.dry_run,
                                          published_findings=findings if not self.dry_run else current.get("published_findings", []),
                                          published_fingerprint=current.get("review_fingerprint"))
-            if current.get("semantic") == "findings" or any(
-                    finding.get("severity") in ("P0", "P1") for finding in findings):
+            if blocking_findings(findings):
                 if self.dry_run or not config["merge"]:
                     current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                              outcome="findings")
                     self.log("%s#%s has blocking semantic findings; repair is not enabled" % (repo, number))
                     return False
                 phase = "semantic_repair"
-                return self.repair_findings(config, pr, worktree, [finding for finding in findings
-                                                            if finding["severity"] in ("P0", "P1")])
+                return self.repair_findings(config, pr, worktree, blocking_findings(findings))
             if current.get("findings"):
                 current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                          outcome="passed_with_findings")
@@ -1448,7 +1449,7 @@ class Watcher:
             if phase == "publication":
                 # A completed semantic verdict stays valid. Only its GitHub
                 # publication failed; never consume the reviewer retry budget
-                # or postpone the already-required P0/P1 repair.
+                # or postpone the already-required P0 repair.
                 latest = self.state.get(repo, number)
                 attempts = int(latest.get("publication_attempts", 0)) + 1
                 self.state.put(repo, number, head, evidence_key=evidence_key,

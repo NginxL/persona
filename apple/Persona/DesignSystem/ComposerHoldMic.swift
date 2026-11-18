@@ -23,6 +23,11 @@ final class ComposerHold {
     /// The finger has held long enough: dictation starts, what it hears kept aside until the finger decides. `hints`
     /// tell it the language spoken (`Dictation.start`), after the draft.
     func begin(_ dictation: Dictation, text: Binding<String>, hints: [String] = [], reduceMotion: Bool) {
+        // A live system call: a note, and no hold begins (dictation would cut the call's microphone).
+        if let refusal = dictation.callRefusal {
+            AppModel.shared.toast = Toast(refusal)
+            return
+        }
         draft = text.wrappedValue
         heard = ""
         translation = .zero

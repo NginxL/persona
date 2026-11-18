@@ -23,8 +23,8 @@ nonisolated enum VoiceAudioEvent: Equatable, Sendable {
     case outputLevel(Float)
     /// A phone call, or another app, took the audio session (docs/assistant/voice.md 6.5「来电」).
     case interrupted
-    /// The interruption is over (`shouldResume`: the system says the audio may go on). Only audio the system owns says
-    /// it (a call to Persona, #9290): an in-app call ended at `interrupted`.
+    /// The interruption is over (`shouldResume`: the system says the audio may go on): a call to Persona's (#9290) and the
+    /// phone's voice chat's, which paused at `interrupted` (#9887).
     case interruptionEnded(shouldResume: Bool)
     /// The system's media services restarted: every audio object is gone.
     case reset
@@ -107,9 +107,17 @@ nonisolated enum VoiceCapture: Equatable, Sendable {
     /// Drops everything queued and not yet played.
     func clear()
     func stop()
+    /// After an interruption that may go on (`interruptionEnded(shouldResume: true)`): the session active again and the
+    /// microphone and the player running again (the phone's voice chat, #9887). Throws when the session will not come back.
+    func resume() throws
     /// The microphone records with echo cancellation: what the speaker plays is taken out of it. Without it the voice
     /// can come back as the user's caption, which the `start` frame tells the extension (docs/assistant/voice.md 3.2).
     var cancelsEcho: Bool { get }
+}
+
+extension VoiceAudio {
+    /// Nothing to bring back by default (the Mac's, a meeting's on the recorder's capture, the samples).
+    func resume() throws {}
 }
 
 /// A system call's audio (#9290, a call to Persona): the system owns the audio session. It activates it for the call

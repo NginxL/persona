@@ -915,8 +915,16 @@ A meeting Persona is not in still gets its live view. Since #8731 a meeting star
 - **Who:** full device credentials only (an extension token gets `403`).
 - **The Agent:** held to attending's rules ("Sessions that never attend"). One of this manager's computers, not a work computer, reachable, listed there, taking messages, not `bypassPermissions`, not closed. A Persona conversation is not an Agent (the follow-up is its way). A busy Agent takes it as it takes any of the owner's messages. A refusal is kept as `failed` with `problem`: `not_agent`, `not_allowed`, `unavailable`, or `send_failed` when the computer didn't take it.
 - **When:** `409 meeting_running` while the meeting goes on (as the follow-up); `409 no_material` with neither minutes nor (asked for) a transcript.
-- **Kept:** each try in `meeting.json`'s `handoffs`, oldest first, the last 20, and as `detail.meta.handoffs`, for the meeting's page to show the last one ("Handed to …", or why not, with Retry: the same call again). No part of the live protocol: the apps read them with the detail and from the call's answer.
+- **Kept:** each try in `meeting.json`'s `handoffs`, oldest first, the last 20, and as `detail.meta.handoffs`, for the meeting's page to show the last one ("Handed to …", or why not, with Retry). No part of the live protocol: the apps read them with the detail and from the call's answer.
 - **`title`** is the name the app showed for the Agent (at most 120 characters), kept only for that row.
+
+In the apps (web and iPhone; Android: its own issue):
+
+- **Where:** the recording's page on the web (**Hand to Agent…** beside Ask Persona and Rename); on the iPhone the meeting's page after it, in its **⋯**. Only once the meeting is over and has something to hand (its minutes, or its text on the hub), and only for someone with an Agent that can take it: someone who only uses the assistant never sees it.
+- **The Agents:** the Inbox's Hand to AI list (not Persona's own, taking messages, live, on a computer online now), less those the hub refuses outright: a subagent, one cut off by a restart, one in Allow All; the iPhone also leaves out what "Sessions that never attend" keeps out by what it can see (a work computer, another manager's). The latest is picked.
+- **The sheet:** the Agent, an optional line, **Include the transcript** (off; offered while the transcript is kept), and what it gets ("the summary, decisions, to-dos and open questions"). A try kept as `failed` says why in the sheet, where another Agent can be picked.
+- **The row:** at the top of the page, the latest hand-off: **Handed to "…"** with **Open** (its conversation), or **Couldn't hand to "…"** with the reason and **Retry**, which opens the sheet again with that Agent and transcript choice picked (the line is not kept). A try made on the page shows at once, before the detail is read again.
+- **Mock hub:** `POST …/handoff` as the hub has it, kept in `detail.meta.handoffs`; `MOCK_HANDOFF_FAIL=<problem>` or `POST /mock/meeting_handoff {"fail": "<problem>"}` keeps every try as failed (`scripts/mock/test_meeting_handoff_mock.py`).
 
 #### One thread
 

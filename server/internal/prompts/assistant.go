@@ -788,7 +788,8 @@ type SuperviseEntry struct {
 	ID, Title, Kind string
 	AgentReply      *DecisionAgentReply // decision_reply: a pending decision's owner message, not an inferred choice
 	Detail          string              // why: the judge's reason, the step it is stuck on, the model service's error, why it did not start
-	Minutes         int                 // how long it has waited (needs_you) or not moved (stalled)
+	Minutes         int                 // how long it has waited (needs_you), not moved (stalled) or not progressed (no_progress)
+	Calls, Waits    int                 // no_progress: the tool calls the hub saw since the last progress, and how many were waits or repeats
 	Ask             string              // needs_you: what it asks
 	Recommend       string              // escalated: the option the leader recommends
 	LeaderGone      bool                // decide: its task leader agent cannot be reached, so the supervisor takes the task over
@@ -958,6 +959,16 @@ type Relay struct {
 	Tool              string // conversation_send | conversation_new
 	Hop, MaxHops      int
 	Text              string
+	// Quote: the owner's own message the sender carried, as the hub verified it (#3822); nil sends none.
+	Quote *RelayQuote
+}
+
+// RelayQuote is the owner's message a relay carries: its id, when and in which conversation they wrote it, the
+// conversations that passed it on after that one (oldest first), and the text verbatim. ParseRelayQuoteID reads the id back.
+type RelayQuote struct {
+	ID, At, Conversation string
+	Via                  []string
+	Text                 string
 }
 
 // RenderRelay is the message the other conversation gets (assistant/relay).

@@ -1,7 +1,11 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { UsageAccount } from "../lib/usage-windows";
-import { UsageBars, UsagePopover } from "./UsageBars";
+import { UsageBars } from "./UsageBars";
+import { UsagePopover } from "./UsagePopover";
 
 const NOW = new Date(2026, 10, 5, 10, 0, 0).getTime();
 const H = 3600_000;
@@ -33,6 +37,25 @@ describe("the sidebar's usage strip", () => {
     expect(html).toMatch(/bg-orange[^>]*style="width:85%/);
     expect(html).toMatch(/bg-accent[^>]*style="width:60%/);
     expect(html).toContain('aria-expanded="false"');
+  });
+  it("opens its details on intent, including the gateway's retained-number warning", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsageBars accounts={[account("a", 10, 20, { problem: "unreachable" })]} now={NOW} />));
+      expect(host.querySelector("[role=dialog]")).toBeNull();
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
+      await act(async () => {});
+      const dialog = host.querySelector("[role=dialog]");
+      expect(dialog?.textContent).toContain("5h");
+      expect(dialog?.textContent).toContain("网关暂时读不到，显示的是上次的数字");
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
+      expect(host.querySelector("[role=dialog]")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
   });
   it("marks a stale account", () => {
     expect(renderToStaticMarkup(<UsageBars accounts={[account("a", 10, 20, { stale: true })]} now={NOW} />)).toContain("数据已过期");

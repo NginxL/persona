@@ -1,0 +1,10 @@
+<persona-context kind="context" title="来自对话「Persona」" url="">
+这条消息不是用户本人发的，是 Persona 的另一段对话（b2e4d6f8-0000-4000-8000-000000000001）用 conversation_send 发来的，第 1 跳（最多 3 跳）。
+按里面说的做。要把结果告诉那段对话就用 conversation_send 发回 b2e4d6f8-0000-4000-8000-000000000001；只是确认收到就不要回，免得两段对话来回发。
+</persona-context>
+<persona-context kind="owner-request" message_id="msg-1">
+下面是用户本人的原话，hub 按消息核对过，一字未改（2026-11-17 04:52 UTC，在对话 b2e4d6f8-0000-4000-8000-000000000001 里说的，经 b2e4d6f8-0000-4000-8000-000000000003 转来）。
+据此派活（task_plan、agent_start 等）时，任务简报会自动记下这段原话和出处，不用再抄一遍；要转给别的对话，conversation_send 带 quote="msg-1"。
+示例原话：周五前把导出修好
+</persona-context>
+示例消息：这件交给你

@@ -135,6 +135,9 @@ func profileIDs(ps []ModelProfile) string {
 // runs as a launcher, or one a computer lists (as last seen, and asked again before saying no: one just added to an
 // rc file is not refused).
 func (s *Service) tierLauncherCheck(ctx context.Context, name string) error {
+	if proto.IsExternalLauncher(name) {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if name == "" || name == "claude" {
 		return nil // "" is checkModelTiers' to refuse
 	}

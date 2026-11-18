@@ -46,7 +46,7 @@ struct CallMachineTests {
         _ = m.handle(.known, at: at(0))
         let effects = m.handle(.startAction, at: at(1))
         #expect(effects.first == .fulfil)
-        #expect(reports(effects) == [.startedConnecting(at(1)), .pausable])
+        #expect(reports(effects) == [.members, .startedConnecting(at(1))], "who the call is with first (#9887), then connecting")
         #expect(effects.contains(.begin), "the voice starts with the call")
         #expect(effects.contains(.schedule(.activation)))
         #expect(!effects.contains(.audioOn), "no audio before the system activates it")
@@ -58,7 +58,7 @@ struct CallMachineTests {
         let effects = m.handle(.startAction, at: at(1))
         #expect(effects.first == .fulfil)
         #expect(reports(effects).isEmpty, "the system drops events for a conversation it does not have yet")
-        #expect(reports(m.handle(.known, at: at(1.1))) == [.startedConnecting(at(1)), .pausable])
+        #expect(reports(m.handle(.known, at: at(1.1))) == [.members, .startedConnecting(at(1))], "in the same order once known")
         #expect(reports(m.handle(.known, at: at(1.2))).isEmpty, "said once")
     }
 
@@ -249,7 +249,7 @@ struct CallMachineTests {
         #expect(m.muted)
         _ = m.handle(.startAction, at: at(1))
         let known = m.handle(.known, at: at(1.1))
-        #expect(reports(known) == [.startedConnecting(at(1)), .pausable] && known.last == .performMute(true))
+        #expect(reports(known) == [.members, .startedConnecting(at(1))] && known.last == .performMute(true))
         #expect(m.handle(.muteAction(true), at: at(1.12)) == [.fulfil], "its echo")
         #expect(m.muted && m.requestedMute == nil)
         #expect(m.handle(.known, at: at(1.2)).isEmpty, "said once")

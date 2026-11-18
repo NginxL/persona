@@ -50,6 +50,14 @@ function safeRoute(route: string): boolean {
   } catch { return false; }
 }
 
+/** The path with only the query keys a page reads, or undefined when it is no route to hand on. */
+function pageRoute(path: string, query: URLSearchParams): string | undefined {
+  const kept = new URLSearchParams();
+  for (const [key, value] of query) if (ROUTE_KEYS.has(key) && value) kept.append(key, value);
+  const route = path + (kept.size ? `?${kept}` : "");
+  return safeRoute(route) ? route : undefined;
+}
+
 /** Deep links are data, never automatic pairing or navigation to an arbitrary web origin. A page link is
  *  persona://open<path> (the route table's app link: the hub's web path after persona://open) or the first form,
  *  persona://open?route=<path>; the web app in the window opens the path (and refuses what is no page of it). */
@@ -62,14 +70,17 @@ export function parseDeepLink(raw: string): DesktopDeepLink | undefined {
   if (url.host === "pair") return { kind: "pair-app", url: raw };
   if (url.host !== "open" || url.hash) return undefined;
   if (url.pathname) {
-    const kept = new URLSearchParams();
-    for (const [key, value] of url.searchParams) if (ROUTE_KEYS.has(key) && value) kept.append(key, value);
-    const route = url.pathname + (kept.size ? `?${kept}` : "");
-    return safeRoute(route) ? { kind: "open", url: raw, route } : undefined;
+    const route = pageRoute(url.pathname, url.searchParams);
+    return route ? { kind: "open", url: raw, route } : undefined;
   }
   if (url.searchParams.size !== 1) return undefined;
-  const route = url.searchParams.get("route");
-  return route && safeRoute(route) ? { kind: "open", url: raw, route } : undefined;
+  // The first form carries a whole path with its query: the same keys go on as from the path form, so no `add=1`
+  // or token gets through it either (#10281). Its fragment is ignored, as the web's reading of it does.
+  const carried = url.searchParams.get("route");
+  if (!carried || !safeRoute(carried)) return undefined;
+  const inner = new URL(carried, "https://desktop.invalid/");
+  const route = pageRoute(inner.pathname, inner.searchParams);
+  return route ? { kind: "open", url: raw, route } : undefined;
 }
 
 export function hubRoute(hub: HubAddress, route: string): string {

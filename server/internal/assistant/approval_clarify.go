@@ -28,6 +28,7 @@ type preparedApproval struct {
 	reportStatus string
 
 	clarified  bool
+	waiting    bool // its decision window ended unanswered and it was kept for the owner (keepWaiting)
 	release    chan struct{}
 	attempt    *clarifyAttempt
 	terminal   bool
@@ -78,6 +79,8 @@ var (
 	// clarificationPauseBudget is cumulative per card, not per question.
 	clarificationPauseBudget = 24 * time.Hour
 	clarifyQuestionRunes     = 1000
+	// approvalWaitingWindow is how long a prepared card stays pending after its decision window ended unanswered.
+	approvalWaitingWindow = 24 * time.Hour
 )
 
 // waitPreparedCard registers an authoritative prepared approval. The original
@@ -91,6 +94,12 @@ func (s *Service) waitPreparedCard(ctx context.Context, ix proto.Interaction, op
 	ix.CanClarify = true
 	_, err := s.waitInteractionPrepared(ctx, s.ownCard(ctx, ix), state)
 	if errors.Is(err, errApprovalClarifying) {
+		s.fleet.mu.Lock()
+		waiting := state.waiting
+		s.fleet.mu.Unlock()
+		if waiting {
+			return approvalops.Outcome{Clarifying: true, Text: approvalops.WaitingText}, nil
+		}
 		return approvalops.Outcome{Clarifying: true, Text: approvalops.ClarifyingText}, nil
 	}
 	if err != nil {
@@ -130,7 +139,90 @@ func (s *Service) startPreparedTimer(p *pending) {
 }
 
 func (s *Service) expirePrepared(p *pending) {
+	if s.keepWaiting(p) {
+		return
+	}
 	s.endPreparedIf(p, "expired", "", func(a *preparedApproval) bool { return !a.paused })
+}
+
+// keepWaiting is the end of an unanswered card's first decision window. The card is not taken off the apps: the
+// owner may have had no notification at all (no working push, the app in the background) and only sees it when they
+// open the Persona app or the web. Its original tool call returns a non-final result (approvalops.WaitingText), the
+// card stays pending for approvalWaitingWindow more with its new deadline told to the apps (no second push), and its
+// final outcome reaches the conversation through the approval journal, as after a question. It keeps nothing waiting
+// when the caller already went away, once the card has clarified (its own timing applies) or ended. False: expire.
+func (s *Service) keepWaiting(p *pending) bool {
+	for {
+		s.fleet.mu.Lock()
+		a := p.prepared
+		if a == nil || a.terminal || p.claimed || s.fleet.interactions[p.ix.ID] != p || a.clarified || a.paused ||
+			a.caller.Err() != nil {
+			s.fleet.mu.Unlock()
+			return false
+		}
+		if attempt := a.attempt; attempt != nil {
+			s.fleet.mu.Unlock()
+			<-attempt.done
+			continue
+		}
+		// Taken like a first question: no other attempt starts until this one ends.
+		attempt := &clarifyAttempt{done: make(chan struct{}), first: true}
+		a.attempt = attempt
+		ix := p.ix
+		s.fleet.mu.Unlock()
+
+		err := s.approvalJournalStarted(context.Background(), ix)
+		s.fleet.mu.Lock()
+		a.attempt = nil
+		close(attempt.done)
+		ended := a.terminal || p.claimed || s.fleet.interactions[p.ix.ID] != p
+		if err != nil || ended || a.caller.Err() != nil {
+			s.fleet.mu.Unlock()
+			if err != nil {
+				s.logf("approval %s: could not keep the unanswered card waiting, it expires: %v", ix.ID, err)
+				return false
+			}
+			s.approvalJournalAborted(context.Background(), ix.ID)
+			return ended // ended meanwhile: nothing more to do; its caller gone: it expires as before
+		}
+		a.clarified, a.waiting = true, true
+		p.ix.ExpiresAt = time.Now().Add(approvalWaitingWindow).UTC()
+		ix = p.ix
+		if a.decisionTimer != nil {
+			a.decisionTimer.Stop()
+		}
+		a.decisionTimer = time.AfterFunc(approvalWaitingWindow, func() { s.expirePrepared(p) })
+		s.fleet.mu.Unlock()
+		s.show(ix) // the apps keep the card, with its new deadline
+		close(a.release)
+		return true
+	}
+}
+
+// approvalNudgeDeadline returns the live effective deadline for a card the Lark
+// sweep is about to nudge. A question pauses that deadline; completed pauses move
+// it by their cumulative duration. Reading the prepared interaction here also
+// follows an implementation that extends its window without changing this sweep.
+func (s *Service) approvalNudgeDeadline(ix proto.Interaction) (time.Time, bool) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	p := s.fleet.interactions[ix.ID]
+	if p == nil {
+		// The hub lookup immediately before this check is authoritative for an
+		// ordinary interaction that has no process-local prepared approval.
+		return ix.ExpiresAt, true
+	}
+	if p.claimed || p.resolution != nil {
+		return time.Time{}, false
+	}
+	a := p.prepared
+	if a == nil {
+		return p.ix.ExpiresAt, true
+	}
+	if a.terminal || a.paused {
+		return time.Time{}, false
+	}
+	return p.ix.ExpiresAt.Add(a.pausedTotal), true
 }
 
 // pausePreparedLocked preserves the remaining decision time and starts the one

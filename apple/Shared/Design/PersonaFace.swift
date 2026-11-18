@@ -34,6 +34,11 @@ struct PersonaFace: View {
     var moving = false
     /// The idle blink every few seconds (`Theme.Motion.blink`); nil: eyes stay open.
     var blink: Animation?
+    /// A call's own expressions (#9887, the call screen only; `CallAvatarLook`): the mouth open by the voice's level while
+    /// the assistant speaks (0 closed … 1 wide), and the eyes shut while the call is on hold. The defaults (no mouth, eyes
+    /// as the state has them) draw Mochi exactly as everywhere else: nothing is added to the picture.
+    var mouth: Double? = nil
+    var eyesShut = false
 
     /// Needs You's ring: this share of the face's side, never thinner than `ringMin`. A package's picture with no frame for
     /// the state gets the same ring on the activity (FleetFace), and offline makes it gray at this opacity.
@@ -63,7 +68,13 @@ struct PersonaFace: View {
             if state == .working { mochiArc(t) }
             ZStack {
                 Canvas { ctx, box in Mochi.draw(&ctx, side: box.width, ink: ink, compact: compact, lines: mochiLines(t)) }
-                if state != .offline { mochiEyes(t, ink: ink, compact: compact) }
+                if state != .offline && !eyesShut { mochiEyes(t, ink: ink, compact: compact) }
+                if eyesShut && state != .offline {
+                    Canvas { ctx, box in Mochi.closedEyes(&ctx, side: box.width, ink: ink, compact: compact) }
+                }
+                if let mouth, state != .offline {
+                    Canvas { ctx, box in Mochi.mouth(&ctx, side: box.width, ink: ink, compact: compact, open: mouth) }
+                }
             }
             .rotationEffect(.degrees(mochiRock(t)), anchor: UnitPoint(x: Mochi.pivot.x, y: Mochi.pivot.y))
             .offset(y: mochiBob(t))
@@ -285,16 +296,59 @@ nonisolated enum Mochi {
                 ctx.stroke(l, with: .color(ink.motion.opacity(lines[i])), style: StrokeStyle(lineWidth: lw * 0.85, lineCap: .round))
             }
         }
-        if ink.offline {
-            // Closed eyes, two short curves.
-            for e in eyes {
-                var l = Path()
-                let half = eyeRadius * k * w
-                l.move(to: CGPoint(x: e.x * w - half, y: e.y * w))
-                l.addQuadCurve(to: CGPoint(x: e.x * w + half, y: e.y * w), control: CGPoint(x: e.x * w, y: e.y * w + half * 0.7))
-                ctx.stroke(l, with: .color(ink.line), style: StrokeStyle(lineWidth: lw * 0.8, lineCap: .round))
-            }
+        if ink.offline { closedEyes(&ctx, side: w, ink: ink, compact: compact) }
+    }
+
+    /// Closed eyes, two short curves: asleep (offline), and shut on a call that is on hold (`PersonaFace.eyesShut`).
+    static func closedEyes(_ ctx: inout GraphicsContext, side w: CGFloat, ink: MochiInk, compact: Bool) {
+        let lw = max(strokeMin, w * stroke)
+        let k: CGFloat = compact ? compactFeatures : 1
+        for e in eyes {
+            var l = Path()
+            let half = eyeRadius * k * w
+            l.move(to: CGPoint(x: e.x * w - half, y: e.y * w))
+            l.addQuadCurve(to: CGPoint(x: e.x * w + half, y: e.y * w), control: CGPoint(x: e.x * w, y: e.y * w + half * 0.7))
+            ctx.stroke(l, with: .color(ink.line), style: StrokeStyle(lineWidth: lw * 0.8, lineCap: .round))
         }
+    }
+
+    /// Where the mouth sits (a call only, `PersonaFace.mouth`): under the eyes, as the face tilts with them; its width
+    /// and how far it opens at a full voice, in icon pixels.
+    static let mouthCenter = p(484, 562)
+    static let mouthWidth: CGFloat = 56 / 1024 * scale
+    static let mouthDepth: CGFloat = 44 / 1024 * scale
+    /// The eyes' tilt (the right one sits higher): the mouth follows it.
+    static var tilt: Angle { .radians(atan2(eyes[1].y - eyes[0].y, eyes[1].x - eyes[0].x)) }
+
+    /// The mouth while the assistant speaks on a call: a small smile when `open` is 0, opening into a rounded mouth (ink,
+    /// its tongue in the cheek's orange) as the voice gets louder. Drawn only when a call asks for it.
+    static func mouth(_ ctx: inout GraphicsContext, side w: CGFloat, ink: MochiInk, compact: Bool, open: Double) {
+        let lw = max(strokeMin, w * stroke)
+        let k: CGFloat = compact ? compactFeatures : 1
+        let half = mouthWidth * k * w / 2
+        let depth = mouthDepth * k * w * CGFloat(min(max(open, 0), 1))
+        var face = ctx
+        face.translateBy(x: mouthCenter.x * w, y: mouthCenter.y * w)
+        face.rotate(by: tilt)
+        var lip = Path()
+        lip.move(to: CGPoint(x: -half, y: 0))
+        lip.addQuadCurve(to: CGPoint(x: half, y: 0), control: CGPoint(x: 0, y: half * 0.35))
+        guard depth > lw * 0.5 else {
+            face.stroke(lip, with: .color(ink.line), style: StrokeStyle(lineWidth: lw * 0.8, lineCap: .round))
+            return
+        }
+        // The upper lip a gentle smile, the lower one a round U as deep as the voice is loud.
+        var mouth = Path()
+        mouth.move(to: CGPoint(x: -half, y: 0))
+        mouth.addQuadCurve(to: CGPoint(x: half, y: 0), control: CGPoint(x: 0, y: half * 0.2))
+        mouth.addCurve(to: CGPoint(x: -half, y: 0), control1: CGPoint(x: half * 0.95, y: depth * 1.33),
+                       control2: CGPoint(x: -half * 0.95, y: depth * 1.33))
+        mouth.closeSubpath()
+        face.fill(mouth, with: .color(ink.line))
+        var tongue = face
+        tongue.clip(to: mouth)
+        tongue.fill(Path(ellipseIn: CGRect(x: -half * 0.6, y: depth * 0.55, width: half * 1.2, height: depth)), with: .color(ink.cheek))
+        face.stroke(mouth, with: .color(ink.line), style: StrokeStyle(lineWidth: lw * 0.6, lineJoin: .round))
     }
 }
 

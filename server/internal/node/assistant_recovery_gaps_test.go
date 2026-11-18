@@ -231,7 +231,7 @@ func TestAssistantFallbackMarksTheResolvedDefaultUsed(t *testing.T) {
 	if selected != "opus" {
 		t.Fatalf("selected %q, want opus", selected)
 	}
-	if next, ok := nextAssistantModel(list, "opus", r.used); ok {
+	if next, ok := nextAssistantModel(list, "opus", r.used, assistantFit{}); ok {
 		t.Fatalf("the failed default is selected again as %q", next)
 	}
 }

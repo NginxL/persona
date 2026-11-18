@@ -294,6 +294,12 @@ func (n *Node) registerCodexAppThreads(home string, pass *codexListPass) {
 		if t.RolloutPath != "" {
 			if _, err := pass.stat(t.RolloutPath); err == nil {
 				path = t.RolloutPath
+				if !pathWithin(path, canonical) {
+					// The App names the rollout as it reached its home, which may be through a link (macOS's /var, a
+					// linked ~/.codex). The rollout scan registers the same file under the resolved home, so register
+					// it resolved too, or the two spellings of one file contend for the chat's path.
+					path = realPath(path)
+				}
 			}
 		}
 		n.registerCanonicalCodex(canonical, t.ID, path)

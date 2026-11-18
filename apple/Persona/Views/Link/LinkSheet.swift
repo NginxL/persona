@@ -361,6 +361,9 @@ final class WebViewPool {
         v.scrollView.showsHorizontalScrollIndicator = false
         #endif
         v.allowsBackForwardNavigationGestures = true
+        #if os(iOS)
+        CallMediaGuard.shared.register(v) // a page's media stays still while a system call is live
+        #endif
         v.load(Self.request(url))
         views[key] = v
         touch(key)

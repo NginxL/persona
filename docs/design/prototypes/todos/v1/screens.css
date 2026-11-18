@@ -1,0 +1,348 @@
+/*
+ * Variant V1 (Paper and Pane): styles. Every rule is scoped to [data-variant="V1"] so variants never leak into each
+ * other. Colors, type, spacing and radii come from kit/tokens.css; shadows follow the kit's own.
+ */
+
+/*
+ * Variant-wide adjustments (kit requests, worked around here): glass carries no drop shadow (§3.0.2: a 0.5-pt stroke
+ * only), and secondary text in light reads at 4.5:1 or more (§2.10), so --ink-2 takes the solid gray there.
+ */
+[data-variant="V1"] { --glass-shadow: 0 0 0 0 transparent; }
+html:not([data-theme=dark]) [data-variant="V1"] { --ink-2: var(--ink-2-solid); }
+
+/* ---------- list ---------- */
+[data-variant="V1"] .v1-bar { margin-top: 6px; }
+/* All, the chip To-dos lands on, is pinned after the scrolling chips and before the grouping symbol */
+/* the web's 360 column fits every chip at the desktop scale with 6-px chip padding */
+[data-variant="V1"].k-web .k-sbar-pill { padding: 0 6px; }
+[data-variant="V1"].k-web .k-sbar-trail { gap: 2px; }
+/* the list's title sits on the content edge when no button leads it */
+[data-variant="V1"] .k-nav.is-leading .k-nav-lead:empty + .k-nav-mid .k-tm-btn { margin-left: -6px; }
+/* the fade at a cut edge is a fixed 24 pt, so a chosen chip scrolled into view is never washed out */
+[data-variant="V1"] .k-sbar-in.is-overflowing { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
+[data-variant="V1"] .k-sbar-in.is-scrolled { -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px); mask-image: linear-gradient(90deg, transparent, #000 24px); }
+[data-variant="V1"] .k-sbar-in.is-scrolled.is-overflowing { -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+/* CapsuleFilterBar's own metrics: 4 between a chip's name and its count; the grouping symbol inside the capsule's
+   trailing end, after a 22-pt hairline (E2) */
+[data-variant="V1"] .v1-group { cursor: pointer; }
+/* the swipe actions are 74 wide each, as iOS draws them; Someday on indigo, white text at 4.5:1 in both themes */
+[data-variant="V1"] .k-tr-sw.is-later { background: var(--hue-indigo); }
+[data-variant="V1"] .k-tr-swipe { width: calc(148px + var(--page-margin)); }
+[data-variant="V1"] .k-tr.is-swiped .k-tr-slide { transform: translateX(-148px); }
+/* the empty tick keeps a 3:1 boundary on black */
+[data-theme=dark] [data-variant="V1"] .k-tick:not(.is-done) { box-shadow: inset 0 0 0 1.6px color-mix(in srgb, var(--ink-2-solid) 62%, transparent); }
+[data-theme=dark] [data-variant="V1"].k-web .k-tick:not(.is-done) { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink-2-solid) 62%, transparent); }
+/* the ask card unfolded under its row: the row's line 2 is its title, drawn once */
+[data-variant="V1"] .v1-below { margin-top: 10px; }
+[data-variant="V1"] .v1-below .k-ac-title { display: none; }
+[data-variant="V1"] .v1-below .k-ac-body { margin-top: 0; }
+[data-variant="V1"] .k-tr-ans + .v1-below { margin-top: 10px; }
+[data-variant="V1"] .v1-below + .v1-l3-after { margin-top: 10px; }
+/* a list or a paper scrolled to its end: the last row sits clear of the pill or above the composer */
+[data-variant="V1"] .v1-end { position: absolute; left: var(--page-margin); right: var(--page-margin); bottom: 0; }
+[data-variant="V1"] .v1-end--pill { padding-bottom: 116px; }
+[data-variant="V1"] .v1-empty { padding-top: 96px; }
+[data-variant="V1"] .v1-saving { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); }
+[data-variant="V1"] .v1-folded-rows .k-tr-main { padding-top: 12px; }
+
+/* ---------- the paper ---------- */
+[data-variant="V1"] .v1-paper { display: flex; flex-direction: column; padding: 6px 0 28px; }
+[data-variant="V1"] .v1-paper > * { flex: none; min-width: 0; }
+[data-variant="V1"] .v1-paper > * + * { margin-top: 12px; }
+[data-variant="V1"] .v1-paper > .k-stl { margin-top: 6px; }
+[data-variant="V1"] .v1-paper > .k-recap { margin-top: 4px; }
+[data-variant="V1"] .v1-paper > .k-ac,
+[data-variant="V1"] .v1-paper > .k-ap,
+[data-variant="V1"] .v1-paper > .k-tch,
+[data-variant="V1"] .v1-paper > .k-help { margin-top: 16px; }
+[data-variant="V1"] .v1-paper > .k-ac + .k-tch,
+[data-variant="V1"] .v1-paper > .k-ap + .k-tch { margin-top: 14px; }
+[data-variant="V1"] .v1-paper > .k-brief-line,
+[data-variant="V1"] .v1-paper > .k-ss,
+[data-variant="V1"] .v1-paper > .k-wd,
+[data-variant="V1"] .v1-paper > .v1-scope { margin-top: 4px; }
+[data-variant="V1"] .v1-paper > .k-steps2 { margin-top: 8px; }
+[data-variant="V1"] .v1-paper > .k-notes + .k-steps2 { margin-top: 20px; }
+[data-variant="V1"] .v1-paper > .k-res { margin-top: 10px; }
+/* on the iPhone the results strip runs to the screen edge (its chips scroll under the edge), its content on the 16-pt
+   inset; in a pane (and next to the Duo's crease) it keeps the pane's margin */
+[data-variant="V1"].dev--iphone .v1-paper > .k-res { margin-right: calc(-1 * var(--page-margin)); }
+[data-variant="V1"].dev--iphone .v1-paper > .k-res .k-res-in { padding-right: var(--page-margin); }
+/* Work details: every mark in one 20-pt column 8 pt before its text; a row may take two lines */
+[data-variant="V1"] .k-wd-r.v1-wd-r { align-items: center; padding: 5px 0; white-space: normal; }
+[data-variant="V1"] .v1-wd-ic { width: 20px; flex: none; display: grid; place-items: center; }
+[data-variant="V1"] .v1-wd-ic > .k-ic { color: var(--ink-3); }
+[data-variant="V1"] .k-wd-r.v1-wd-r > .v1-wd-t { flex: 1; min-width: 0; white-space: normal; line-height: 18px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+[data-variant="V1"] .v1-paper > .k-cb { margin-top: 14px; }
+[data-variant="V1"] .v1-paper > .k-brief-line + .v1-scope { margin-top: -6px; }
+[data-variant="V1"] .v1-scope { padding-bottom: 4px; }
+[data-variant="V1"] .v1-readable { max-width: 680px; margin-left: auto; margin-right: auto; }
+[data-variant="V1"] .v1-faint { color: var(--ink-2); }
+[data-variant="V1"] .v1-nw { white-space: nowrap; }
+[data-variant="V1"] .k-stl, [data-variant="V1"] .k-psum-sub { text-wrap: pretty; }
+[data-variant="V1"] .v1-bar-t { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* prices are part of the decision: they may take a second line rather than lose an option */
+[data-variant="V1"] .k-ac-prices { -webkit-line-clamp: 2; }
+/* header links read at their header's size, so a header line is one unit */
+[data-variant="V1"] .k-cb-all { font-size: var(--fs-caption); }
+[data-variant="V1"] .k-blk-tr { font-size: var(--fs-caption); }
+[data-variant="V1"] .v1-cb-when { margin-left: 6px; }
+/* Undo is the accent everywhere, the scope line's too */
+[data-variant="V1"] .k-rl--scope .k-rl-undo { color: var(--accent); font-weight: 600; }
+/* a lone reply on the paper may take two lines (the block's one-line rule is for two rounds) */
+[data-variant="V1"] .k-cb-sub span:has(> .v1-two) { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* every sub-line of a round starts at one indent: the status, the “└” reply, the relay and run lines
+   (a 12-pt glyph column, then the text at one indent) */
+[data-variant="V1"] .k-cb-sub i { width: 12px; text-align: center; }
+[data-variant="V1"] .k-cb-st { padding-left: 22px; }
+[data-variant="V1"] .v1-cb-x { padding-left: 4px; margin-top: 3px; }
+[data-variant="V1"] .v1-cb-x .k-rl { padding-left: 0; }
+[data-variant="V1"] .v1-cb-x .k-rl > .k-ic { width: 12px; }
+[data-variant="V1"] .v1-cb-x .k-rl > .k-spin { margin: 0 .5px; }
+/* a relay line keeps its words whole: Send Now drops under them when the line is too narrow */
+[data-variant="V1"] .k-rl--relay { flex-wrap: wrap; row-gap: 4px; }
+[data-variant="V1"] .k-rl--relay > span:not(.k-rl-btn) { flex: 0 1 auto; }
+[data-variant="V1"] .k-cb-sub .k-spin, [data-variant="V1"] .k-cb-sub .k-ic { vertical-align: -1px; margin-right: 2px; }
+[data-variant="V1"] .v1-duo-top { height: 14px; flex: none; }
+[data-variant="V1"] .v1-tap { position: relative; }
+[data-variant="V1"] .v1-tap-all { position: absolute; inset: 0; }
+
+/* the paper folded above the keyboard: the title with the state under it inside the bar (17 over 13), ending before
+   the trailing group; the request on one line under the bar */
+[data-variant="V1"] .v1-fold-nav { box-shadow: inset 0 -.5px 0 var(--separator); padding-bottom: 0; }
+[data-variant="V1"] .v1-fold-nav.is-bare { padding-bottom: 8px; }
+[data-variant="V1"] .v1-fold-tt { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-right: 4px; }
+[data-variant="V1"] .v1-fold-title { font-size: var(--fs-heading); font-weight: 600; line-height: 21px; letter-spacing: -.022em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-fold-sub { min-width: 0; }
+[data-variant="V1"] .v1-fold-sub .k-stl { display: block; font-size: var(--fs-caption); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-askbar { margin-top: 2px; }
+[data-variant="V1"] .v1-ans-line { padding: 0; background: none; min-height: 44px; border-radius: 0; }
+[data-variant="V1"] .v1-anchor-bottom {
+  position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  padding: 2px var(--page-margin) 20px;
+  /* the scroll-edge effect: what passes under the bar fades out instead of being cut */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 14px); mask-image: linear-gradient(180deg, transparent 0, #000 14px);
+}
+[data-variant="V1"] .v1-anchor-bottom > * { flex: none; min-width: 0; }
+[data-variant="V1"] .v1-anchor-bottom > * + * { margin-top: 6px; }
+[data-variant="V1"] .v1-anchor-bottom > .k-cb { margin-top: 2px; }
+[data-variant="V1"] .v1-fold-head { margin-bottom: auto; padding: 14px 0 4px; }
+[data-variant="V1"] .v1-fold-head > .k-recap { padding-bottom: 4px; }
+[data-variant="V1"] .v1-fold-head > .k-notes { -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+[data-variant="V1"] .v1-fold-head > .k-steps2 { margin-top: 4px; }
+[data-variant="V1"] .v1-fold-head > .k-tch + * { margin-top: 6px; }
+[data-variant="V1"] .v1-fold-head > * + * { margin-top: 2px; }
+[data-variant="V1"] .v1-fold-head > .k-notes { margin-top: 10px; }
+[data-variant="V1"] .v1-fold-head > .k-ss, [data-variant="V1"] .v1-fold-head > .k-brief-line { min-height: 36px; }
+[data-variant="V1"] .v1-fold-head > .v1-scope { padding-bottom: 2px; }
+/* the capture sheet floats above the keyboard: the list behind dims a little more, so nothing reads through the gap */
+[data-variant="V1"] .v1-scrim-more { z-index: 50; }
+[data-theme=dark] [data-variant="V1"] .v1-scrim-more { display: none; }
+[data-variant="V1"] .v1-fold-head > .v1-question { margin-top: 14px; }
+[data-variant="V1"] .v1-anchor-bottom > .v1-fold-head + * { margin-top: 0; }
+[data-variant="V1"] .v1-question { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r-card); background: var(--box-persona); }
+[data-variant="V1"] .v1-question-w { font-size: var(--fs-caption); font-weight: 600; color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V1"] .v1-question-t { margin-top: 2px; font-size: var(--fs-body); line-height: 1.38; letter-spacing: -.022em; }
+
+/* ---------- conversation and run session ---------- */
+[data-variant="V1"] .v1-bg-open { padding-left: 16px; font-size: var(--fs-caption); line-height: 18px; color: var(--ink-2); letter-spacing: -.004em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-sess { display: flex; flex-direction: column; gap: 8px; }
+[data-variant="V1"] .v1-sess-h { font-size: var(--fs-caption); font-weight: 600; color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V1"] .v1-sess-t { font-size: var(--fs-body); line-height: 1.38; letter-spacing: -.022em; }
+[data-variant="V1"] .v1-sess-t .k-spin { vertical-align: -1px; }
+[data-variant="V1"] .v1-sess .k-fold { margin-top: 2px; }
+[data-variant="V1"] .v1-pending { margin: 0 4px 10px; }
+[data-variant="V1"] .v1-pending .k-ac { box-shadow: inset 0 0 0 .5px var(--card-stroke); }
+[data-variant="V1"] .v1-run-st { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-secondary); letter-spacing: -.012em; white-space: nowrap; overflow: hidden; }
+[data-variant="V1"] .v1-run-st b { font-weight: 600; }
+[data-variant="V1"] .v1-run-st .k-sep { margin: 0; }
+[data-variant="V1"] .v1-run-st > span:last-of-type { overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-run-st > .k-ic { color: var(--ink-2); flex: none; }
+[data-variant="V1"] .v1-w-needs { color: var(--needs-text); font-weight: 600; flex: none; }
+[data-variant="V1"] .v1-w-working { color: var(--working-text); font-weight: 600; flex: none; }
+[data-variant="V1"] .k-ph-r2 .k-stl { -webkit-line-clamp: 1; }
+/* the ask's name reads in the needs tone, as on the rows and the folded ask line */
+[data-variant="V1"] .k-ph-q { color: var(--needs-text); }
+/* the thread passes under the pinned header with the scroll-edge fade the bars have */
+[data-variant="V1"] .k-ph::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px; pointer-events: none; background: linear-gradient(var(--pg-bg, var(--dev-bg)), transparent); }
+/* the pane's header keeps the scroll-edge fade the page bars have, so the thread passes under it */
+[data-variant="V1"] .k-pnh::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px; pointer-events: none; background: linear-gradient(var(--pg-bg, var(--dev-bg)), transparent); }
+/* a thread scrolled to its latest round fades out under its header (iOS 26's scroll-edge effect), so no line is sliced */
+[data-variant="V1"] .k-thread.is-bottom { -webkit-mask-image: linear-gradient(180deg, transparent 0, transparent 6px, #000 30px); mask-image: linear-gradient(180deg, transparent 0, transparent 6px, #000 30px); }
+/* the pane's ⋯ and ✕ end on the pane's 16-pt content edge; a run's Working reads orange, as everywhere else */
+[data-variant="V1"] .k-pnh { padding-right: 16px; }
+[data-variant="V1"] .k-pnh-st.v1-pnh-working { color: var(--working-text); }
+/* “Options ⌃” where OK stood, at the leading edge */
+[data-variant="V1"] .k-ph-r3.v1-r3-open .k-ans-opt { margin-left: 0; padding-left: 0; }
+
+/* Options ⌄ from the pinned header: the card drops over the dimmed thread */
+[data-variant="V1"] .v1-dim { position: absolute; left: 0; right: 0; top: 184px; bottom: 0; z-index: 40; background: var(--scrim); }
+[data-variant="V1"] .v1-drop { position: absolute; left: var(--page-margin); right: var(--page-margin); top: 192px; z-index: 41; }
+[data-variant="V1"] .v1-drop .k-ac { background: var(--cell); box-shadow: inset 0 0 0 .5px var(--card-stroke), 0 12px 40px rgba(0, 0, 0, .18); }
+
+/* ---------- menus, alerts, overlays ---------- */
+/* a menu row with a subtitle: 11 pt above and below, 2 pt between the title and the subtitle */
+[data-variant="V1"] .k-menu-item:has(small) { min-height: 52px; padding-top: 11px; padding-bottom: 11px; }
+[data-variant="V1"] .k-menu-label small { margin-top: 2px; }
+[data-variant="V1"] .v1-anchor { position: absolute; z-index: 70; width: 0; height: 0; }
+[data-variant="V1"] .v1-anchor.is-up .k-menu { top: auto; bottom: 8px; }
+[data-variant="V1"] .v1-catch { position: absolute; inset: 0; z-index: 60; }
+[data-variant="V1"] .v1-alert {
+  position: absolute; z-index: 51; left: 50%; top: 50%; width: 300px; transform: translate(-50%, -50%);
+  padding: 22px 16px 16px; border-radius: var(--r-sheet); text-align: center;
+  background: var(--sheet-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), 0 12px 40px rgba(0, 0, 0, .18);
+}
+[data-variant="V1"] .v1-alert-t { font-size: var(--fs-heading); font-weight: 600; line-height: 1.3; letter-spacing: -.022em; }
+[data-variant="V1"] .v1-alert-b { margin-top: 4px; font-size: var(--fs-secondary); line-height: 1.38; color: var(--ink-2); letter-spacing: -.012em; }
+[data-variant="V1"] .v1-alert-acts { display: flex; gap: 8px; margin-top: 18px; }
+[data-variant="V1"] .v1-alert-a {
+  flex: 1 1 0; min-width: 0; height: 44px; border-radius: 22px; display: grid; place-items: center; white-space: nowrap;
+  background: var(--fill-chip); color: var(--ink); font-size: var(--fs-body); font-weight: 500; letter-spacing: -.022em;
+}
+[data-variant="V1"] .v1-alert-a.is-bold { background: var(--accent); color: #fff; font-weight: 600; }
+[data-variant="V1"] .v1-over-scrim { position: absolute; inset: 0; z-index: 50; background: var(--scrim); }
+[data-variant="V1"] .v1-over { position: absolute; top: 0; bottom: 0; left: 0; width: 320px; z-index: 52; overflow: hidden; background: var(--page); box-shadow: 0 0 40px rgba(0, 0, 0, .2); }
+/* on the Duo the list covers the whole left half, up to the crease */
+[data-variant="V1"] .v1-over--half { width: 334px; box-shadow: none; }
+
+/* ---------- the Assistant (V1-09) ---------- */
+[data-variant="V1"] .v1-shell { display: inline-flex; padding: 3px; border-radius: 20px; background: var(--fill-chip); }
+[data-variant="V1"] .v1-shell > span {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 17px; white-space: nowrap;
+  font-size: var(--fs-secondary); font-weight: 600; letter-spacing: -.012em;
+}
+[data-variant="V1"] .v1-shell > span.is-on { background: var(--raised); box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 .5px rgba(0, 0, 0, .04); }
+[data-variant="V1"] .v1-chat { display: flex; flex-direction: column; gap: 14px; padding-top: 10px; }
+[data-variant="V1"] .v1-chat.is-dim { opacity: .3; }
+[data-variant="V1"] .v1-entries { display: flex; gap: 8px; padding: 0 4px 10px; }
+[data-variant="V1"] .v1-entry {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 18px; white-space: nowrap;
+  font-size: var(--fs-secondary); font-weight: 600; letter-spacing: -.012em; color: var(--ink);
+  background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), var(--glass-shadow);
+}
+[data-variant="V1"] .v1-entry.is-on { background: var(--shell-ink); color: var(--page); box-shadow: none; }
+[data-variant="V1"] .v1-entry.is-on .k-badge--needs { background: var(--needs-dot); color: #fff; }
+[data-variant="V1"] .v1-entry-n { color: var(--ink-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+[data-variant="V1"] .v1-entry.is-on .v1-entry-n { color: color-mix(in srgb, var(--page) 72%, transparent); }
+[data-variant="V1"] .v1-tray { position: absolute; left: 12px; right: 12px; bottom: 148px; z-index: 20; }
+[data-variant="V1"] .v1-tray .k-nt {
+  background: var(--sheet-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), 0 10px 36px rgba(0, 0, 0, .14);
+}
+[data-variant="V1"] .v1-tray .k-nt-l { flex-wrap: wrap; row-gap: 6px; }
+[data-variant="V1"] .v1-tray .k-nt-q { flex: 1 0 auto; max-width: 100%; }
+[data-variant="V1"] .v1-tray .k-nt-bs { margin-left: auto; }
+[data-variant="V1"] .v1-tray .k-nt-bs:empty { display: none; }
+[data-variant="V1"] .v1-tray .k-nt-q.k-tone--positive { font-weight: 600; }
+[data-variant="V1"] .v1-tray .k-nt-q .k-sep { margin: 0 4px; }
+[data-variant="V1"] .v1-undo { color: var(--accent); font-weight: 600; }
+/* a tray row's line reads as the list's line 2: the mark, the request in its tone, the rest in --ink-2 */
+[data-variant="V1"] .v1-nt-line { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; vertical-align: top; }
+[data-variant="V1"] .v1-nt-line > .k-sep { margin: 0; }
+[data-variant="V1"] .v1-nt-line > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-nt-lead.is-toned { color: var(--tone); font-weight: 500; }
+
+/* ---------- lock screen ---------- */
+/* an expanded notification: the platter, then its actions in their own rounded list under it */
+[data-variant="V1"] .v1-noti { display: flex; flex-direction: column; gap: 8px; }
+[data-variant="V1"] .v1-noti-acts {
+  border-radius: 20px; overflow: hidden; color: var(--ink);
+  background: color-mix(in srgb, var(--page) 70%, transparent); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke);
+}
+/* one material for the platter and its actions in dark too */
+[data-theme=dark] [data-variant="V1"] .v1-noti-acts { background: color-mix(in srgb, var(--cell) 62%, transparent); }
+[data-variant="V1"] .v1-noti-a { height: 44px; display: flex; align-items: center; padding: 0 16px; font-size: var(--fs-body); letter-spacing: -.022em; }
+[data-variant="V1"] .v1-noti-a + .v1-noti-a { border-top: .5px solid var(--separator); }
+[data-variant="V1"] .v1-noti-a.is-rec { font-weight: 600; }
+[data-variant="V1"] .v1-fleet .k-fleet-b + .k-fleet-b { margin-left: 6px; }
+[data-variant="V1"] .v1-fleet .k-fleet-more { font-weight: 600; }
+
+/* ---------- iPhone Duo ---------- */
+/* E4: Back alone (a 48-pt glass circle), the page's other items 12 pt below it as 48-pt symbol-only circles sharing one
+   glass, 4 pt apart. V1 draws them itself; the kit's column only places them. */
+[data-variant="V1"] .dev-side-actions { display: flex; flex-direction: column; align-items: center; gap: 12px; width: auto; padding: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+[data-variant="V1"] .v1-sb, [data-variant="V1"] .v1-sg {
+  background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), var(--glass-shadow);
+}
+[data-variant="V1"] .v1-sb { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
+[data-variant="V1"] .v1-sg { display: flex; flex-direction: column; gap: 4px; width: 48px; border-radius: 24px; }
+[data-variant="V1"] .v1-si { position: relative; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
+[data-variant="V1"] .v1-si.is-active { color: var(--accent); background: var(--accent-tint); }
+[data-variant="V1"] .v1-si-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--needs-dot); box-shadow: 0 0 0 1.5px var(--glass-solid, var(--page)); }
+/* the chosen Duo tab: the accent symbol and name on a light well, as iOS 26 tab bars draw the selection */
+[data-variant="V1"] .dev-tab-item.is-on { background: var(--accent-tint); color: var(--accent); }
+[data-variant="V1"] .dev-tab-item.is-on .dev-tab-name { color: var(--accent); }
+/* E4: the Duo tab bar stands 8 pt above the shell rail at the foot (foot 16, New Chat and the face 44 each, 12 apart) */
+[data-variant="V1"] .dev-side-tabs { bottom: 124px !important; }
+[data-variant="V1"] .dev-tab-item { gap: 3px; }
+/* the outer display's home indicator runs vertically on its right edge (§3.0.2) */
+[data-variant="V1"].dev--duo-outer .dev-home { left: auto; right: 5px; top: 50%; bottom: auto; width: 5px; height: 134px; margin: -67px 0 0; }
+/* the inner portrait keyboard in two blocks with a 12-pt gutter on the crease (the device's one-piece keyboard hidden) */
+[data-variant="V1"].v1-splitkb .dev-kb { display: none; }
+[data-variant="V1"] .v1-kb2 { position: absolute; left: 0; right: 0; bottom: 0; height: var(--kb-h); z-index: 60; display: flex; justify-content: space-between; pointer-events: none; }
+[data-variant="V1"] .v1-kb-half { width: calc(50% - 6px); height: 100%; }
+[data-variant="V1"] .v1-kb-half .k-kb-rows { padding: 2px 6px 0; }
+[data-variant="V1"] .v1-kb-half .k-kb-sugg span.k-kb-label { flex: none; }
+[data-variant="V1"] .v1-kb-half.is-l .k-kb-row.v1-kb-mid { padding-left: 26px; }
+[data-variant="V1"] .v1-kb-half.is-r .k-kb-row.v1-kb-mid { padding-left: 26px; padding-right: 64px; }
+[data-variant="V1"] .v1-kb-half .k-kb-foot { padding: 12px 28px 0; }
+[data-variant="V1"] .v1-kb-half.is-r .k-kb-foot { justify-content: flex-end; }
+/* the tabletop fold is a dashed hint (§3.0.2); it shows in the 14-pt margins at each pane edge and across the side
+   column, so it never runs through a line of text like a strikethrough */
+[data-variant="V1"] .dev-crease--h { background: repeating-linear-gradient(90deg, var(--separator) 0 6px, transparent 6px 12px); box-shadow: none; }
+[data-variant="V1"].v1-fold-467 .dev-crease--h { -webkit-mask-image: linear-gradient(90deg, #000 0 14px, transparent 14px 453px, #000 453px 481px, transparent 481px 853px, #000 853px); mask-image: linear-gradient(90deg, #000 0 14px, transparent 14px 453px, #000 453px 481px, transparent 481px 853px, #000 853px); }
+[data-variant="V1"].v1-fold-320 .dev-crease--h { -webkit-mask-image: linear-gradient(90deg, #000 0 14px, transparent 14px 306px, #000 306px 334px, transparent 334px 853px, #000 853px); mask-image: linear-gradient(90deg, #000 0 14px, transparent 14px 306px, #000 306px 334px, transparent 334px 853px, #000 853px); }
+
+/* ---------- web (E6: card 10, control 8, chip 6; chat body 15) ---------- */
+[data-variant="V1"].k-web { --r-card: 10px; --r-bubble: 14px; }
+[data-variant="V1"].k-web .k-ac { border-radius: 10px; }
+[data-variant="V1"].k-web .k-ac-btn, [data-variant="V1"].k-web .k-ans, [data-variant="V1"].k-web .k-btn:not(.is-icon), [data-variant="V1"].k-web .k-tc-cap { border-radius: 8px; }
+[data-variant="V1"].k-web .k-tch-c, [data-variant="V1"].k-web .k-tch-add, [data-variant="V1"].k-web .k-res-c, [data-variant="V1"].k-web .k-ach, [data-variant="V1"].k-web .k-badge { border-radius: 6px; }
+[data-variant="V1"].k-web .k-rd-bubble, [data-variant="V1"].k-web .k-rd-reply { font-size: 15px; }
+[data-variant="V1"] .v1-rail { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0; background: var(--sidebar); }
+[data-variant="V1"] .v1-rail-face { margin-bottom: 10px; display: flex; }
+[data-variant="V1"] .v1-rail-i { position: relative; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-2-solid); }
+[data-variant="V1"] .v1-rail-i.is-on { background: var(--fill-well); color: var(--accent); }
+[data-variant="V1"] .v1-rail-b { position: absolute; top: -5px; right: -9px; }
+[data-variant="V1"] .v1-rail-b .k-badge { box-shadow: 0 0 0 1.5px var(--sidebar); }
+[data-variant="V1"] .v1-kbd { margin-left: 2px; font-size: var(--fs-label); font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+
+/* ---------- Android ---------- */
+[data-variant="V1"] .v1-alist { flex: none; position: relative; z-index: 4; }
+[data-variant="V1"] .v1-alist > .v1-bar { margin: 0 16px 8px; }
+[data-variant="V1"] .v1-abar-menu { display: inline-flex; align-items: center; gap: 6px; }
+[data-variant="V1"] .v1-abar-menu .k-ic { color: var(--ink-2); }
+[data-variant="V1"] .v1-abar { flex: none; display: flex; align-items: center; gap: 2px; min-height: 56px; padding: calc(var(--safe-top) + 4px) 4px 4px; }
+[data-variant="V1"] .v1-abar-t { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--fs-heading); font-weight: 600; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V1"] .v1-abar-b { width: 48px; height: 48px; border-radius: 50%; flex: none; display: grid; place-items: center; color: var(--ink); }
+[data-variant="V1"] .v1-abar-b.is-back .k-ic { transform: scaleX(-1); }
+[data-variant="V1"] .v1-abar-b.is-vert .k-ic { transform: rotate(90deg); }
+/* the Conversation toggle shows its state: the selected icon button's tonal fill while the pane shows */
+[data-variant="V1"] .v1-abar-b.is-on { background: var(--accent-tint); color: var(--accent); }
+
+/* ---------- the composer ---------- */
+/* typed text wraps and the field grows up to 3 lines, as Messages' does; the chip, mic and send stay on the last line */
+[data-variant="V1"] .k-tc-cap:has(.k-tc-f.has-text) { align-items: flex-end; padding-top: 10px; padding-bottom: 10px; }
+[data-variant="V1"] .k-tc-cap:has(.k-tc-f.has-text) > .k-ach { margin-bottom: 2px; }
+[data-variant="V1"] .k-tc-f.has-text {
+  direction: ltr; white-space: normal; text-overflow: clip; overflow: hidden; padding: 6px 4px; line-height: 20px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
+[data-variant="V1"] .k-tc-f.has-text .k-tc-in { display: inline; white-space: normal; }
+[data-variant="V1"].k-web .k-tc-cap:has(.k-tc-f.has-text) { padding-top: 6px; padding-bottom: 6px; }
+/* a chip above the field keeps its look: the fill, purple for a run, the blue tint for an answer */
+[data-variant="V1"] .k-tc-lbl { padding: 0 4px; }
+[data-variant="V1"] .k-tc-lbl .k-ach { padding: 0 10px; background: var(--fill-chip); color: var(--ink); }
+[data-variant="V1"] .k-tc-lbl .k-ach > .k-ic { color: var(--ink-2); }
+[data-variant="V1"] .k-tc-lbl .k-ach.is-run { background: var(--ai-tint); color: var(--ai); }
+[data-variant="V1"] .k-tc-lbl .k-ach.is-run > .k-ic { color: inherit; }
+[data-variant="V1"] .k-tc-lbl .k-ach.is-answer { background: var(--needs-tint); color: var(--needs-text); }
+[data-variant="V1"] .k-tc-lbl .k-ach.is-answer > .k-ic { color: inherit; }
+/* the capture sheet sits flush on the keyboard (its fill runs under the keyboard's rounded top), so nothing shows between */
+[data-variant="V1"] .k-cs { left: 0; right: 0; bottom: calc(var(--kb-h, 0px) - 26px); padding-bottom: 40px; border-radius: 28px 28px 0 0; }
+/* a focused empty field shows its caret before the placeholder */
+[data-variant="V1"] .k-tc-f.v1-tc-focus .k-caret { margin: 0 2px 0 0; }

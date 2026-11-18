@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -20,6 +21,7 @@ const launcherRepairUpgrade = "upgrade_cli"
 
 // repairMachine starts a repair round for d's launchers that failed and are due one.
 func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig) {
+	external := s.externalLauncherSet(d.ID)
 	b := &s.health
 	b.mu.Lock()
 	s.healthLoadLocked(ctx)
@@ -29,7 +31,8 @@ func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig)
 	}
 	var due []LauncherHealth
 	for _, r := range b.recs {
-		if r.Machine == d.ID && r.State == healthFailing && r.repairNow() {
+		if r.Machine == d.ID && r.State == healthFailing && r.repairNow() &&
+			!proto.IsExternalLauncher(r.Launcher) && !external[r.Launcher] {
 			due = append(due, *r)
 		}
 	}
@@ -115,10 +118,14 @@ func (s *Service) startRepairAgent(ctx context.Context, broken Device, left []La
 		return fmt.Errorf("the machine to repair from (%s) is not reachable", where)
 	}
 	launcher := s.startLauncher(ctx, cfg.repair.Launcher)
+	external := s.externalLauncherSet(am.ID)
+	if proto.IsExternalLauncher(launcher) || external[launcher] {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if _, bad := s.launcherUnusable(ctx, am.ID, launcher); bad {
 		launcher = ""
 		for _, r := range s.healthRecords(ctx, healthOK, am.ID) {
-			if r.Agent == "" || r.Agent == "claude" {
+			if !proto.IsExternalLauncher(r.Launcher) && !external[r.Launcher] && (r.Agent == "" || r.Agent == "claude") {
 				launcher = r.Launcher
 				break
 			}

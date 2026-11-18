@@ -63,6 +63,9 @@ type fleetBook struct {
 	// never reads what this one writes (#4554).
 	upgradeEvery, upgradeFor time.Duration
 	upgrades                 sync.WaitGroup // active screen-upgrade loops; database-backed fixtures wait during teardown
+	completionRuns           sync.WaitGroup // delayed turn completions already running when a fixture tears down
+	completionTimers         map[*time.Timer]struct{}
+	completionStopped        bool // test teardown only: no new delayed completion after the drain starts
 	// hooked: Persona's hooks run in the session (a hook event came since the manager started).
 	hooked map[[2]string]bool
 	// stopSig: the signature of the reply each session's latest Stop ended its turn with; pushedSig: the one a

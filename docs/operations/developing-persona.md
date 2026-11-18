@@ -18,7 +18,10 @@ hub or anyone else unless the owner sends the file, and then only as an ordinary
 
 - Settings › About, under Version. Stored on the device (iOS `UserDefaults` `devMode.on`, `devMode.since`), never
   synced. Footer: what it records, that the data stays on the device, that turning it off deletes it.
-- While on, the group adds **Recorded** (since when, how much) and **Export Diagnostics…**.
+- While on, the group adds **Recorded** (since when, how much) and **Export Diagnostics…**, and on iOS **Call Handle**
+  (**Generic**, the default, or **Email**, `devMode.callHandle`): the kind of handle a call to Persona carries to the
+  system, an on-device experiment for the Phone app's Recents (#9887, `docs/apple/calls.md` "Recents and intents"). It
+  counts only while the switch is on; turned off, calls carry the generic handle again.
 - Turning it off deletes everything recorded. When something is recorded it asks first: **Export First…** opens the
   export page, **Turn Off and Delete** goes ahead.
 

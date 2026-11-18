@@ -32193,6 +32193,52 @@
         }
       }
     },
+    "Call Details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Details"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話の詳細"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话详情"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Call Handle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Handle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話の識別子"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话标识"
+          }
+        }
+      }
+    },
     "Call Hierarchy" : {
       "localizations" : {
         "en" : {
@@ -32284,6 +32330,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Call This Conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call This Conversation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会話に電話"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "呼叫这段对话"
+          }
+        }
+      }
     },
     "Call ended" : {
       "localizations" : {
@@ -49363,6 +49432,28 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn't hand to “%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't hand to “%1$@”"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」に任せられませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能交给「%1$@」"
+          }
+        }
+      }
+    },
     "Couldn't import: %@" : {
       "localizations" : {
         "en" : {
@@ -63086,6 +63177,29 @@
         }
       }
     },
+    "Email [Call handle]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Email"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メール"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邮箱"
+          }
+        }
+      }
+    },
     "Email address" : {
       "localizations" : {
         "en" : {
@@ -63478,6 +63592,29 @@
         }
       }
     },
+    "End Call and Start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End Call and Start"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を終了して開始"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束通话并开始"
+          }
+        }
+      }
+    },
     "End Conversation" : {
       "localizations" : {
         "en" : {
@@ -63519,6 +63656,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "结束"
+          }
+        }
+      }
+    },
+    "End and Call" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End and Call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終了して発信"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束并呼叫"
+          }
+        }
+      }
+    },
+    "End and Start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End and Start"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終了して開始"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束并开始"
           }
         }
       }
@@ -63586,6 +63769,144 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "结束会议？"
+          }
+        }
+      }
+    },
+    "End the call first" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the call first"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先に通話を終了してください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先结束通话"
+          }
+        }
+      }
+    },
+    "End the call first, then start a voice chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the call first, then start a voice chat."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を終了してから音声チャットを始めてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先结束通话，再开始语音对话。"
+          }
+        }
+      }
+    },
+    "End the call with %@ and call %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the call with %1$@ and call %2$@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ との通話を終了して「%2$@」に発信しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束与 %1$@ 的通话，改为呼叫「%2$@」？"
+          }
+        }
+      }
+    },
+    "End the call with %@ and start a voice chat here?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the call with %1$@ and start a voice chat here?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ との通話を終了して、ここで音声チャットを始めますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束与 %1$@ 的通话，在这里开始语音对话？"
+          }
+        }
+      }
+    },
+    "End the voice chat with %@ and call %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the voice chat with %1$@ and call %2$@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ との音声チャットを終了して「%2$@」に発信しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束与 %1$@ 的语音对话，改为呼叫「%2$@」？"
+          }
+        }
+      }
+    },
+    "End the voice chat with %@ and start one here?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the voice chat with %@ and start one here?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ との音声チャットを終了して、ここで開始しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束与 %@ 的语音对话，在这里开始新的？"
           }
         }
       }
@@ -71207,6 +71528,29 @@
         }
       }
     },
+    "Generic [Call handle]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generic"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "汎用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通用"
+          }
+        }
+      }
+    },
     "Gestures" : {
       "localizations" : {
         "en" : {
@@ -73158,6 +73502,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Hand to Agent…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hand to Agent…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントに任せる…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "交给 Agent…"
+          }
+        }
+      }
     },
     "Hand to Persona" : {
       "localizations" : {
@@ -78160,6 +78526,28 @@
         }
       }
     },
+    "Include the Transcript" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Include the Transcript"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字起こしも付ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附上逐字稿"
+          }
+        }
+      }
+    },
     "Includes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -80447,6 +80835,28 @@
       },
       "extractionState" : "manual"
     },
+    "It gets this meeting's minutes: the summary, decisions, to-dos and open questions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It gets this meeting's minutes: the summary, decisions, to-dos and open questions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会議の議事録（要約、決定事項、ToDo、未決事項）が届きます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它会收到这场会的纪要：总结、结论、待办和没定的事。"
+          }
+        }
+      }
+    },
     "It goes to the computer’s Trash. You can undo right after, or put it back from the Trash there." : {
       "localizations" : {
         "en" : {
@@ -81445,6 +81855,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "它的助手「%@」离线，助手回来后这台电脑会恢复在线。"
+          }
+        }
+      }
+    },
+    "Its computer isn't reachable, or the chat is closed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its computer isn't reachable, or the chat is closed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータに接続できないか、会話が閉じています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的电脑连不上，或者对话已关闭。"
           }
         }
       }
@@ -111346,6 +111778,75 @@
         }
       }
     },
+    "On a call with %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On a call with %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ と通話中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在与 %1$@ 通话"
+          }
+        }
+      }
+    },
+    "On a call with %@. End the call before disconnecting." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On a call with %1$@. End the call before disconnecting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ と通話中です。通話を終了してから接続を解除してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在与 %1$@ 通话。请先结束通话，再断开连接。"
+          }
+        }
+      }
+    },
+    "On a call — dictation is off until it ends" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On a call — dictation is off until it ends"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話中は音声入力を使えません。通話が終わると使えます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话中，通话结束后才能听写"
+          }
+        }
+      }
+    },
     "On by default: only clearly unusable names are fixed, once per session, with your information sorting model. Names you set are never replaced. Regular updates come only after new output and count toward the limit." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -123025,6 +123526,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Pick an Agent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick an Agent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントを選ぶ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选一个 Agent"
+          }
+        }
+      }
     },
     "Pick an Item" : {
       "localizations" : {
@@ -135848,6 +136371,29 @@
       },
       "extractionState" : "manual"
     },
+    "Returns to the voice chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Returns to the voice chat"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声チャットに戻ります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到语音对话"
+          }
+        }
+      }
+    },
     "Review" : {
       "localizations" : {
         "en" : {
@@ -147081,6 +147627,29 @@
         }
       }
     },
+    "Show Call" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示通话"
+          }
+        }
+      }
+    },
     "Show Call [Voice Bar]" : {
       "localizations" : {
         "en" : {
@@ -152167,6 +152736,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Start Voice Chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Voice Chat"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声チャットを開始"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始语音对话"
+          }
+        }
+      }
     },
     "Start What I Ask Right Away" : {
       "extractionState" : "manual",
@@ -161617,6 +162209,28 @@
         }
       }
     },
+    "That's a Persona chat, not an Agent." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That's a Persona chat, not an Agent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは Persona の会話で、エージェントではありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是 Persona 的对话，不是 Agent。"
+          }
+        }
+      }
+    },
     "That's too large to send. Try fewer or smaller photos." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -163140,6 +163754,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "The call ends, and a new call starts with this conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call ends, and a new call starts with this conversation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在の通話が終了し、この会話に新しく発信します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前通话会结束，然后呼叫这个对话。"
+          }
+        }
+      }
+    },
+    "The call ends, and the voice chat starts in this conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call ends, and the voice chat starts in this conversation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話は終了し、この会話で音声チャットが始まります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话会结束，语音对话在这个对话里开始。"
+          }
+        }
+      }
     },
     "The call goes on; the bar at the top returns to it" : {
       "localizations" : {
@@ -167022,6 +167682,28 @@
         }
       }
     },
+    "The meeting is still going. Hand it over once it ends." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The meeting is still going. Hand it over once it ends."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議はまだ続いています。終わってから任せてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会还在开，结束后再交。"
+          }
+        }
+      }
+    },
     "The meeting's material" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -167067,6 +167749,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "The message didn't go through." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The message didn't go through."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージを送れませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "消息没发出去。"
+          }
+        }
+      }
     },
     "The message source can't send encrypted messages right now" : {
       "localizations" : {
@@ -170320,6 +171024,52 @@
       },
       "extractionState" : "manual"
     },
+    "The voice chat ends, and a call starts with this conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The voice chat ends, and a call starts with this conversation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在の音声チャットが終了し、この会話に発信します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前语音对话会结束，然后呼叫这个对话。"
+          }
+        }
+      }
+    },
+    "The voice chat ends, and a new one starts in this conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The voice chat ends, and a new one starts in this conversation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在の音声チャットが終了し、この会話で新しく開始します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前语音对话会结束，然后在这个对话里开始新的。"
+          }
+        }
+      }
+    },
     "The voice extension's protocol doesn't match. Upgrade the voice extension on the hub" : {
       "localizations" : {
         "en" : {
@@ -171009,6 +171759,29 @@
       },
       "extractionState" : "manual"
     },
+    "Thinking [Call Screen]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "考え中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在思考"
+          }
+        }
+      }
+    },
     "Thinking [Message Views 8cf010]" : {
       "comment" : "Composer button title when no model is known: thinking effort follows",
       "localizations" : {
@@ -171239,6 +172012,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This Agent can't take meetings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Agent can't take meetings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このエージェントには会議を任せられません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Agent 不能接收会议内容。"
+          }
+        }
+      }
     },
     "This Agent has stopped. Its conversation and terminal stay; it doesn't take messages." : {
       "extractionState" : "manual",
@@ -176103,6 +176898,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "この会議にはまだ話題にできる文字起こしや議事録がありません。"
+          }
+        }
+      }
+    },
+    "This meeting has nothing to hand over yet: no minutes or transcript." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This meeting has nothing to hand over yet: no minutes or transcript."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会議にはまだ任せられる内容がありません（議事録も文字起こしもありません）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这场会还没有可交的内容：没有纪要，也没有逐字稿。"
           }
         }
       }
@@ -191753,6 +192570,29 @@
       },
       "extractionState" : "manual"
     },
+    "Waiting for your decision [Call Screen]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your decision"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの判断待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你拿主意"
+          }
+        }
+      }
+    },
     "Waiting for your decision [Inbox Now]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -193081,6 +193921,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要怎么改？"
+          }
+        }
+      }
+    },
+    "What should it do? (optional)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should it do? (optional)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "何をしてほしいか（任意）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要它做什么（可选）"
           }
         }
       }
@@ -196058,6 +196920,29 @@
       },
       "extractionState" : "manual"
     },
+    "Working [Call Screen]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Working"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作業中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在工作"
+          }
+        }
+      }
+    },
     "Working [Car Play Voice Screen 694b71]" : {
       "localizations" : {
         "en" : {
@@ -198180,6 +199065,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你在说话"
+          }
+        }
+      }
+    },
+    "You're on a call with %@ on the phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're on a call with %1$@ on the phone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマートフォンで %1$@ と通話中です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你正在手机上与 %1$@ 通话"
           }
         }
       }

@@ -50,10 +50,14 @@ func newTodoEventEnv(t *testing.T, st Store) *todoEventEnv {
 	if st != nil {
 		opts.Store = func() Store { return st }
 	}
-	s := withSettings(t, f.fakeHub, New(opts))
+	s := New(opts)
 	clock := newFakeClock()
 	clock.install(s)
 	s.tevents.after = clock.After
+	// Install before settings publish: a wall-clock callback left from setup can otherwise
+	// re-arm the direction tree in the middle of a fake-clock scheduling assertion.
+	s.directions.after, s.dtree.after = clock.After, clock.After
+	s = withSettings(t, f.fakeHub, s)
 	return &todoEventEnv{todoEnv: &todoEnv{t: t, s: s, f: f.fakeHub}, hub: f, clock: clock}
 }
 

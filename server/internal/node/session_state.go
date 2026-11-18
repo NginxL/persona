@@ -46,6 +46,9 @@ type sessionState struct {
 	StartedAt               time.Time       `json:"started_at"`
 	StopCause               proto.StopCause `json:"stop_cause,omitempty"`
 	StopCauseAt             int64           `json:"stop_cause_at,omitempty"`
+	// AwaitingFirstMessage: an empty start reserved this conversation without sending
+	// a model input. Runtime instructions and the idle state wait for actual delivery.
+	AwaitingFirstMessage bool `json:"awaiting_first_message,omitempty"`
 	// MainCompactWindow: the window the main conversation last ran with (modelExecution.MainCompactWindow), kept like
 	// IsMain (the hub's copy keeps neither, so until the node restarts) for a start that carries no execution: a manual
 	// compaction with no process running (assistant_compact.go).

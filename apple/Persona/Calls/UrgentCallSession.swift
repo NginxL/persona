@@ -176,9 +176,11 @@ import os
     }
 
     #if DEBUG
-    /// `-showUrgentCallSample YES`: the page as it looks a little into a call, read from the mock hub, with no audio.
-    func sample() async {
+    /// `-showUrgentCallSample YES`: the page as it looks a little into a call, read from the mock hub, with no audio;
+    /// `title` in the place of the hub's.
+    func sample(title: String? = nil) async {
         await prepare()
+        if let title { info?.title = title }
         answeredAt = .now.addingTimeInterval(-42)
         add(.persona, introduction())
         phase = .listening

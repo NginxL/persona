@@ -304,8 +304,11 @@ func TestClarifiedApprovalPauseHasAbsoluteBudget(t *testing.T) {
 		awaitPreparedTest(t, done)
 		elapse(180 * time.Millisecond)
 		ft.waitPending(0)
-		if result := waitApprovalResult(t, ft, "ix_pause_budget"); !strings.Contains(result, "expired") {
-			t.Fatalf("terminal result = %q", result)
+		result := waitApprovalResult(t, ft, "ix_pause_budget")
+		for _, want := range []string{"ix_pause_budget", "expired", "nothing was executed"} {
+			if !strings.Contains(result, want) {
+				t.Errorf("terminal result = %q, want it to contain %q", result, want)
+			}
 		}
 	})
 }
@@ -360,8 +363,11 @@ func TestClarifiedApprovalAnswerEndRestoresRemainingDecisionTime(t *testing.T) {
 		ft.s.approvalAnswerTurnStarted(ref)
 		ft.s.approvalAnswerTurnEnded(ref)
 		ft.waitPending(0)
-		if result := waitApprovalResult(t, ft, "ix_pause_resume"); !strings.Contains(result, "expired") {
-			t.Fatalf("terminal result = %q", result)
+		result := waitApprovalResult(t, ft, "ix_pause_resume")
+		for _, want := range []string{"ix_pause_resume", "expired", "nothing was executed"} {
+			if !strings.Contains(result, want) {
+				t.Errorf("terminal result = %q, want it to contain %q", result, want)
+			}
 		}
 	})
 }

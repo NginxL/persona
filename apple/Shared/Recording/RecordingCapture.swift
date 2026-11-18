@@ -41,6 +41,17 @@ final class RecordingCapture {
     /// The system ended an interruption but the microphone could not be opened again (the app was in the background): the
     /// phone tells the user to come back (a notification), since nothing else will resume it.
     @ObservationIgnored var onInterruptionNotResumed: (() -> Void)?
+    /// Why nothing may record now: the iPhone's system call is live (`LiveCallGate`), and a recording's audio session
+    /// would cut the call's microphone. A start fails with it and a paused recording stays paused, the call untouched;
+    /// asked again after every wait (the microphone prompt, the Bluetooth microphone's search, the resume's turn) and
+    /// just before the session is set up or the engine starts. While it says no, a recording that stops or changes
+    /// (Stop, the system's stop, Persona no longer speaking) leaves the session as the call has it: only the
+    /// recording's own microphone goes back. The tests' own stands in for the gate.
+    @ObservationIgnored var callGate: () -> String? = { LiveCallGate.recordingRefusal }
+    /// The audio session as the recording sets it up and lets it go (the tests' own notes what was asked).
+    @ObservationIgnored var session = RecordingSession.app
+    /// Stands in for asking the person for the microphone (tests hold a start inside that wait); nil asks the system.
+    @ObservationIgnored var permission: (() async -> Bool)?
 
     // MARK: All-day hooks
 
@@ -167,38 +178,49 @@ final class RecordingCapture {
         #endif
     }
 
+    /// The session set up for the microphone. Throws `CallHasTheSession` when a system call is live, before anything is
+    /// set and again after the Bluetooth microphone's search (the only wait in it), so nothing is set under the call.
     private func configureSession(token: UUID) async throws {
-        let session = AVAudioSession.sharedInstance()
+        let session = session
         guard generation == token else { return }
+        try checkCall()
         notice = nil
         #if os(iOS) || os(visionOS)
         #if os(iOS)
         if input == .bluetooth {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP])
-            try session.setActive(true)
-            if let port = await bluetoothInput(session, token: token) {
-                guard generation == token else { return }
+            try session.setCategory(.playAndRecord, .default, [.allowBluetoothHFP])
+            try session.activate()
+            let port = await bluetoothInput(token: token)
+            guard generation == token else { return }
+            try checkCall()
+            if let port {
                 try session.setPreferredInput(port)
                 return
             }
-            guard generation == token else { return }
             notice = String(localized: "No glasses or Bluetooth headset microphone found; using the phone's microphone")
         }
         #endif
-        try session.setCategory(.playAndRecord, mode: .default, options: Self.phoneOptions(playsAloud: playsAloud))
-        try session.setActive(true)
+        try session.setCategory(.playAndRecord, .default, Self.phoneOptions(playsAloud: playsAloud))
+        try session.activate()
         #if os(iOS)
-        let ports = session.availableInputs ?? []
+        let ports = session.availableInputs()
         if let index = RecordingInput.preferredIndex(ports.map(\.portType), for: .phone) {
             try session.setPreferredInput(ports[index])
         }
         #else
-        if let mic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) { try session.setPreferredInput(mic) }
+        if let mic = session.availableInputs().first(where: { $0.portType == .builtInMic }) { try session.setPreferredInput(mic) }
         #endif
         #else
-        try session.setCategory(.record, mode: .default)
-        try session.setActive(true)
+        try session.setCategory(.record, .default, [])
+        try session.activate()
         #endif
+    }
+
+    /// A system call is live (`callGate`): the recording sets up nothing and opens nothing.
+    private struct CallHasTheSession: Error {}
+
+    private func checkCall() throws {
+        if callGate() != nil { throw CallHasTheSession() }
     }
 
     #if os(iOS) || os(visionOS)
@@ -214,11 +236,13 @@ final class RecordingCapture {
 
     /// Persona started or stopped taking part while recording: the same session, with or without the headset for
     /// listening. A Bluetooth microphone's session plays through that headset already.
+    /// During a live system call (a recording it paused) the session is the call's: the change waits for the resume,
+    /// which sets the category with it (`configureSession`).
     func setPlaysAloud(_ on: Bool) {
         guard playsAloud != on else { return }
         playsAloud = on
-        guard writer != nil, input == .phone else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: Self.phoneOptions(playsAloud: on))
+        guard writer != nil, input == .phone, callGate() == nil else { return }
+        try? session.setCategory(.playAndRecord, .default, Self.phoneOptions(playsAloud: on))
     }
     #endif
 
@@ -228,7 +252,8 @@ final class RecordingCapture {
     /// (`RecordingSegmentWriter.turnOnVoiceProcessing`); the microphone stops for a moment. Nothing when it is on already
     /// or this is no room meeting; an engine that won't start again pauses the recording, as a route change does.
     func turnOnEchoCancellation() {
-        guard meetingCall, !cancelsEcho, let writer, state == .recording || state == .paused else { return }
+        // Not under a live system call (a recording it paused): voice processing would change the call's session.
+        guard meetingCall, !cancelsEcho, let writer, state == .recording || state == .paused, callGate() == nil else { return }
         do { cancelsEcho = try writer.turnOnVoiceProcessing(running: state == .recording) }
         catch { microphoneChangeFailed() }
     }
@@ -245,11 +270,12 @@ final class RecordingCapture {
     }
 
     #if os(iOS)
-    /// The Bluetooth HFP input appears only after the route settles, so poll for up to two seconds.
-    private func bluetoothInput(_ session: AVAudioSession, token: UUID) async -> AVAudioSessionPortDescription? {
+    /// The Bluetooth HFP input appears only after the route settles, so poll for up to two seconds; a system call going
+    /// live ends the search (the caller asks the gate after it).
+    private func bluetoothInput(token: UUID) async -> AVAudioSessionPortDescription? {
         var waited = 0
-        while generation == token, !Task.isCancelled {
-            let ports = session.availableInputs ?? []
+        while generation == token, !Task.isCancelled, callGate() == nil {
+            let ports = session.availableInputs()
             if let index = RecordingInput.preferredIndex(ports.map(\.portType), for: .bluetooth) { return ports[index] }
             guard waited < 10 else { return nil }
             do { try await Task.sleep(for: .milliseconds(200)) } catch { return nil }
@@ -264,6 +290,11 @@ final class RecordingCapture {
         return AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName
     }
     #endif
+
+    private func askPermission() async -> Bool {
+        if let permission { return await permission() }
+        return await Self.permission()
+    }
 
     private static func permission() async -> Bool {
         if #available(iOS 17.0, watchOS 10.0, *) { return await AVAudioApplication.requestRecordPermission() }
@@ -285,6 +316,8 @@ final class RecordingCapture {
                playsAloud: Bool = false, shortSegments: Bool = false, meetingCall: Bool = false, echoCancellation: Bool = false,
                day: Bool = false) async {
         guard state == .idle else { return }
+        // Before anything is asked or opened: a live system call keeps its audio session (docs/apple/calls.md).
+        if let refusal = callGate() { error = refusal; return }
         generation = UUID(); let token = generation
         // One mode at a time: an all-day recording is never also a rolling one.
         let rolling = rolling && !day
@@ -298,11 +331,13 @@ final class RecordingCapture {
         // An audio file in place of the microphone (`-openMeetingAudio`, #9417): the microphone isn't asked for. Never for
         // an all-day recording.
         let fileInput = day ? nil : RecordingFileInput.requested()
-        let allowed = fileInput != nil ? true : await Self.permission()
+        let allowed = fileInput != nil ? true : await askPermission()
         #else
-        let allowed = await Self.permission()
+        let allowed = await askPermission()
         #endif
         guard generation == token, state == .starting else { return }
+        // A system call that went live during the prompt: refused, nothing claimed or set up.
+        if let refusal = callGate() { failStarting(refusal); return }
         guard allowed else { failStarting(String(localized: "Allow Persona to use the microphone in Settings")); return }
         if let problem = Self.resourceProblem(starting: true) { failStarting(problem.message); return }
         let micOwner = UUID()
@@ -338,6 +373,8 @@ final class RecordingCapture {
             connect(writer)
             // Before the first buffer, so a start a moment before midnight still cuts on the exact sample.
             if day { planBoundary(for: entry.id, writer: writer) }
+            // Just before the microphone opens.
+            try checkCall()
             let opening = Date.now
             try writer.start()
             self.writer = writer
@@ -353,8 +390,10 @@ final class RecordingCapture {
                 RecordingLibrary.shared.change(id) { $0.active = false; $0.expectedSegments = 0 }
             }
             recordingID = nil; state = .idle; self.rolling = false; dayPlan = nil
+            // Under a call that went live meanwhile only the microphone goes back (`releaseAudioSession`).
             releaseAudioSession()
-            self.error = String(localized: "Can't open the microphone. Try again later.")
+            self.error = error is CallHasTheSession ? callGate() ?? LiveCallGate.recordingLine
+                : String(localized: "Can't open the microphone. Try again later.")
         }
     }
 
@@ -496,11 +535,15 @@ final class RecordingCapture {
 
     private func resume(_ writer: RecordingSegmentWriter) {
         guard resumeTask == nil else { return }
+        // A live system call keeps its audio session: the recording stays paused and says why.
+        if let refusal = callGate() { error = refusal; return }
         let token = generation
         resumeTask = Task { @MainActor [weak self] in
             defer { self?.resumeTask = nil }
             guard let self else { return }
             do {
+                // Asked again on this turn (a call may have gone live since the tap) and in the session's set-up.
+                try self.checkCall()
                 try await self.configureSession(token: token)
                 guard self.generation == token, self.writer === writer, self.state == .paused else { return }
                 // Just before the microphone opens, after whatever the session took: a day over by now gives way to today's.
@@ -508,10 +551,15 @@ final class RecordingCapture {
                     self.onDayHalted?(.writeFailed)
                     return
                 }
+                try self.checkCall()
                 let opening = Date.now
                 try writer.resume()
                 self.state = .recording; self.interrupted = false; self.error = nil
                 if self.allDay { self.dayResumed(at: opening) }
+            } catch is CallHasTheSession {
+                // Stays paused, the call's session untouched; the call's end (or coming back to the app) tries again.
+                guard self.generation == token else { return }
+                self.error = self.callGate() ?? LiveCallGate.recordingLine
             } catch {
                 guard self.generation == token else { return }
                 self.error = String(localized: "Can't open the microphone; the recording is still saved")
@@ -637,11 +685,16 @@ final class RecordingCapture {
         return haltedOnLaunch
     }
 
+    /// The recording's microphone goes back, and the session is let go (no preferred input, deactivated) unless a system
+    /// call is live: then the session is the call's, and a recording that stops (Stop on its Live Activity, the system's
+    /// stop) or never started leaves it as the call has it (docs/apple/calls.md, "Nothing in the app ends a call").
     private func releaseAudioSession() {
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setPreferredInput(nil)
-        #endif
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if callGate() == nil {
+            #if os(iOS)
+            try? session.setPreferredInput(nil)
+            #endif
+            session.deactivate()
+        }
         if let owner = activeMicOwner {
             activeMicOwner = nil
             RecordingMicrophone.shared.release(owner)
@@ -1501,6 +1554,34 @@ final class RecordingCapture {
         if device.batteryState == .unplugged, device.batteryLevel >= 0, device.batteryLevel < 0.05 { return .battery }
         #endif
         return nil
+    }
+}
+
+/// The audio session calls a recording makes (`RecordingCapture.session`), in one place: the app's shared session, or
+/// the tests' own, which notes what was asked.
+struct RecordingSession {
+    var setCategory: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions) throws -> Void
+    var activate: () throws -> Void
+    /// Deactivated, telling the others (music) they may go on.
+    var deactivate: () -> Void
+    #if os(iOS) || os(visionOS)
+    var availableInputs: () -> [AVAudioSessionPortDescription]
+    var setPreferredInput: (AVAudioSessionPortDescription?) throws -> Void
+    #endif
+
+    /// The app's shared session.
+    static var app: RecordingSession {
+        #if os(iOS) || os(visionOS)
+        RecordingSession(setCategory: { try AVAudioSession.sharedInstance().setCategory($0, mode: $1, options: $2) },
+                         activate: { try AVAudioSession.sharedInstance().setActive(true) },
+                         deactivate: { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) },
+                         availableInputs: { AVAudioSession.sharedInstance().availableInputs ?? [] },
+                         setPreferredInput: { try AVAudioSession.sharedInstance().setPreferredInput($0) })
+        #else
+        RecordingSession(setCategory: { try AVAudioSession.sharedInstance().setCategory($0, mode: $1, options: $2) },
+                         activate: { try AVAudioSession.sharedInstance().setActive(true) },
+                         deactivate: { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) })
+        #endif
     }
 }
 #endif

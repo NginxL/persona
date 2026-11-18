@@ -133,7 +133,8 @@ checks; none of them is ever written by the hub's link builder.
 - **Web**: links to its own hub go through the router's own `parse` and open in place; app links and older forms in
   messages and cards open the same pages (#9930).
 - **Desktop**: the packaged app registers `persona://`. An app link's path is handed to the web app in the window,
-  which applies the table; the desktop app itself only refuses malformed links and drops query keys no row lists (#9931).
+  which applies the table; the desktop app itself only refuses malformed links and drops query keys no row lists, in
+  both app-link forms (`persona://open<path>` and `persona://open?route=`; #9931, #10281).
 - **Android**: `core/navigation` `HubLinks` reads paired hubs' web links; app links and the rows it lacks are #9932.
 - **The hub**: one builder writes every path in the table, and the web link from `public_url` (#9927). Push payloads
   keep their typed keys (`machine_id`, `session_id`, `todo`, …), which each app maps to the same pages.

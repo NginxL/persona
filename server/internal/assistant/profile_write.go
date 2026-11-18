@@ -312,6 +312,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 // can (its launcher has assistant: docs/integrations/runtimes.md "Assistant"); anything else would fail every message. One that can't
 // be probed now goes.
 func (s *Service) checkLauncher(ctx context.Context, machine, launcher string) error {
+	if proto.IsExternalLauncher(launcher) {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if launcher == "claude" {
 		return nil
 	}

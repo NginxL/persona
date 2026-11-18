@@ -10,6 +10,8 @@ import { t } from "../i18n";
 import { tRich } from "../i18n/rich";
 import type { PasswordState } from "../lib/password";
 
+import { BrowserLoginQR } from "./BrowserLoginQR";
+
 const PasswordLogin = lazy(() => import("./PasswordLogin").then((m) => ({ default: m.PasswordLogin })));
 
 const code = "whitespace-nowrap rounded-[5px] bg-field px-1 py-0.5 font-mono text-[11.5px] text-ink-2 shadow-hairline";
@@ -36,6 +38,7 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
   const [masterError, setMasterError] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [noHub, setNoHub] = useState(false);
+  const [otherWays, setOtherWays] = useState(false);
   useEffect(() => void rememberHub(here()), []);
 
   const submit = (from: "link" | "master") => async (e: React.FormEvent) => {
@@ -73,10 +76,8 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
           </div>
         </div>
 
-        <section className="rounded-card bg-surface p-4 shadow-card" aria-labelledby="login-phone">
-          <h2 id="login-phone" className="text-[13.5px] font-semibold text-ink">
-            {t("login.phone_title")}
-          </h2>
+        <BrowserLoginQR onDone={onDone} />
+        <div className="mt-3"><Disclosure open={otherWays} onToggle={() => setOtherWays((v) => !v)} label={t("login.qr_alternatives")} id="login-phone">
           <ol className="mt-2.5 space-y-2 text-[12.5px] leading-relaxed text-ink-2">
             {[
               tRich("login.phone_step_open", { path: <span className="font-medium text-ink">{t("login.phone_path")}</span> }),
@@ -91,13 +92,12 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
               </li>
             ))}
           </ol>
-        </section>
+        </Disclosure></div>
 
         <form onSubmit={submit("link")} className="mt-3 rounded-card bg-surface p-1.5 shadow-card">
           <label className={field}>
             <Icon name="link" size={14} className="text-ink-3" />
             <input
-              autoFocus
               type="text"
               value={link}
               onChange={(e) => {

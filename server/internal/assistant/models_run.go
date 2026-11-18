@@ -32,6 +32,9 @@ func (s *Service) runClient(c ai.Config) *ai.Client {
 
 // modelRun answers r with one model.run on c's computer.
 func (s *Service) modelRun(ctx context.Context, c ai.Config, r ai.Request) (ai.Reply, error) {
+	if proto.IsExternalLauncher(c.RunLauncher) {
+		return ai.Reply{}, i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, modelRunTimeout)

@@ -701,6 +701,20 @@ func TestCodexSharesTheAssistantMemory(t *testing.T) {
 	}
 }
 
+// The ChatGPT apps of the machine's Codex sign-in are declared in full in every request (#10275): the assistant's
+// Codex starts without them, whichever MCP namespaces and compaction window it gets.
+func TestCodexAssistantStartsWithoutChatGPTApps(t *testing.T) {
+	for _, args := range [][]string{
+		codexArgs("/bin/personad", "k"),
+		codexArgs("/bin/personad", "k", 400000),
+		codexArgsForHome("/bin/personad", "k", "/home/me/.persona", false),
+	} {
+		if !slices.Contains(args, "features.apps=false") {
+			t.Fatalf("ChatGPT apps not turned off: %q", args)
+		}
+	}
+}
+
 func TestReadsOnlyMemory(t *testing.T) {
 	const mem = "/home/me/.claude/projects/-home-me--persona-assistant/memory"
 	const cwd = "/home/me/.persona/assistant"

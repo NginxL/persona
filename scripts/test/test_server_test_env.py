@@ -153,6 +153,38 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             self.assertEqual(len(homes), 1)
             self.assertFalse(homes[0].exists())
 
+    def test_go_test_runs_without_group_write_under_a_permissive_umask(self):
+        # A host whose umask is 002 (Ubuntu's default with a user's own group) must not hand it to go test: Go makes
+        # t.TempDir()'s directories and the test binary with it, and the external adapter tests refuse them (#10280).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "hub.json"
+            config.write_text(json.dumps({"database_url": "postgres://user:synthetic@localhost/persona"}))
+            caches = {key: str(root / key.lower()) for key in ("GOCACHE", "GOMODCACHE", "GOPATH")}
+            seen = {}
+
+            def run(command, **kwargs):
+                if command[:2] == ["go", "env"]:
+                    return subprocess.CompletedProcess(command, 0, json.dumps(caches))
+                current = os.umask(0)
+                os.umask(current)
+                seen["umask"] = current  # what the test command inherits
+                for key in ("HOME", "TMPDIR", "GOTMPDIR"):
+                    seen[key] = os.stat(kwargs["env"][key]).st_mode & 0o777
+                return subprocess.CompletedProcess(command, 0)
+
+            previous = os.umask(0o002)
+            try:
+                with mock.patch.object(ISOLATION.subprocess, "run", side_effect=run):
+                    self.assertEqual(ISOLATION.run_tests(config, ["go", "test"], {"PATH": "/usr/bin"}), 0)
+                after = os.umask(0o002)
+            finally:
+                os.umask(previous)
+            self.assertEqual(seen["umask"], 0o022)
+            for key in ("HOME", "TMPDIR", "GOTMPDIR"):
+                self.assertEqual(seen[key] & 0o022, 0, f"{key} is {seen[key]:o}")
+            self.assertEqual(after, 0o002, "the runner's own umask is restored")
+
     def test_cache_failure_never_starts_the_test_command(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "hub.json"

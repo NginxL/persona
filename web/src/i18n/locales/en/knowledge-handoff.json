@@ -1,0 +1,21 @@
+{
+  "title": "Hand to Agent",
+  "open_dialog": "Hand to Agent…",
+  "pick": "Pick an Agent",
+  "ask_label": "What should it do?",
+  "ask_placeholder": "What should it do? (optional)",
+  "transcript": "Include the transcript",
+  "gets": "It gets this meeting's minutes: the summary, decisions, to-dos and open questions.",
+  "send": "Send",
+  "running": "The meeting is still going. Hand it over once it ends.",
+  "no_material": "This meeting has nothing to hand over yet: no minutes or transcript.",
+  "problem_not_agent": "That's a Persona chat, not an Agent.",
+  "problem_not_allowed": "This Agent can't take meetings.",
+  "problem_unavailable": "Its computer isn't reachable, or the chat is closed.",
+  "problem_send_failed": "The message didn't go through.",
+  "agent": "Agent",
+  "row_sent": "Handed to \"{name}\"",
+  "row_failed": "Couldn't hand to \"{name}\"",
+  "retry": "Retry",
+  "open": "Open"
+}

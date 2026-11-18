@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fake = vi.hoisted(() => ({ pair: vi.fn<(tok: string) => Promise<void>>() }));
 vi.mock("../lib/auth", () => ({ pair: (tok: string) => fake.pair(tok) }));
 vi.mock("../lib/hubs", () => ({ here: () => "", rememberHub: () => {} }));
+vi.mock("./BrowserLoginQR", () => ({ BrowserLoginQR: () => null }));
 vi.mock("./Hubs", () => ({ OtherHubs: () => null }));
 
 import { t } from "../i18n";

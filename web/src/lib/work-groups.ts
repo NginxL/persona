@@ -127,8 +127,8 @@ function createGroup(run: Step[], next: Step | undefined, live: boolean, prevBou
  *  each maximal run of other steps between two pieces of it an inner group (its clock from the narration before it, or
  *  the turn's start, to the narration after it, else its latest end). Null without narration: the steps stay direct.
  *  A trailing answer stays in the slot and ends the last run. Interleaved progress also appears here at its original
- *  position so the following run starts at that boundary. */
-function timeline(work: Step[], answer: Step | undefined, turnStart: number | null, live: boolean): WorkNode[] | null {
+ *  position as a clock boundary, but stays only in the latest-text slot until newer words supersede it. */
+function timeline(work: Step[], answer: Step | undefined, turnStart: number | null, live: boolean, latestText?: Step): WorkNode[] | null {
   if (!work.some(isAnswer)) return null;
   const out: WorkNode[] = [];
   let run: Step[] = [];
@@ -145,7 +145,7 @@ function timeline(work: Step[], answer: Step | undefined, turnStart: number | nu
       continue;
     }
     flush(s, false);
-    out.push({ kind: "step", step: s });
+    if (s !== latestText) out.push({ kind: "step", step: s });
     prev = stepStart(s);
   }
   flush(answer, live && !answer);
@@ -171,7 +171,7 @@ function groupTurn(items: Step[], turnStart: number | null, live: boolean, strea
   if (group) {
     // the latest text ends the last run when nothing but words came after it
     const answered = interleaved ? undefined : answer;
-    const children = timeline(work, answered, turnStart, live);
+    const children = timeline(work, answered, turnStart, live, answer);
     if (identity) group.id = `work-turn-${identity}`;
     if (children) {
       group.children = children;

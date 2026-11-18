@@ -156,9 +156,10 @@ import UserNotifications
     /// `-showUrgentCallSample YES`: the call page for the mock hub's call `call_mock`, without ringing or audio.
     /// `held`: the system call behind it on hold after an interruption its audio did not come back from, so the page offers
     /// Resume beside Mute and Speaker (`PersonaCalls.showUrgentSample`, a sample too: nothing reaches the system).
-    func showSample(held: Bool = false) {
+    /// `title` stands in for the call's title (`-showUrgentCallSampleTitle`: a long one, for the screenshots).
+    func showSample(held: Bool = false, title: String? = nil) {
         guard let group = AppModel.shared.hub?.group else { return }
-        let ring = UrgentCallRing(id: "call_mock", title: "", manager: "", conversationID: "", attempt: 1, group: group)
+        let ring = UrgentCallRing(id: "call_mock", title: title ?? "", manager: "", conversationID: "", attempt: 1, group: group)
         let s = UrgentCallSession(ring: ring) { [weak self] _ in self?.session = nil }
         session = s
         if held {
@@ -166,7 +167,7 @@ import UserNotifications
             ringing[uuid] = Ringing(ring: ring, session: s, answered: true)
             PersonaCalls.shared.showUrgentSample(uuid, callID: ring.id)
         }
-        Task { await s.sample() }
+        Task { await s.sample(title: title) }
     }
     #endif
 

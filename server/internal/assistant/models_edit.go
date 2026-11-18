@@ -57,6 +57,9 @@ func patchModel(b ModelBinding, in modelPatch) (ModelBinding, error) {
 		}
 		*f.dst = v
 	}
+	if err := checkExternalPurpose(b); err != nil {
+		return b, err
+	}
 	if b.ConfigDir != "" && !slices.Contains(assistantConfigDirs, b.ConfigDir) {
 		return b, i18n.Err("assistant-models.err_config_dir_invalid")
 	}
@@ -68,6 +71,9 @@ func patchModel(b ModelBinding, in modelPatch) (ModelBinding, error) {
 
 // modelProviderCompatible is the shared purpose and machine scope used by model settings and launcher pickers.
 func (s *Service) modelProviderCompatible(p ModelPurpose, v ModelProvider, stored []storedLauncher) bool {
+	if externalProvider(v.ID) {
+		return false // a persisted main-chat pick is not a purpose configuration
+	}
 	compatible := v.Kind == p.Kind
 	if p.Kind == "launcher" && v.Kind == "api" { // a direct Messages API provider starts Claude on its gateway (#2455)
 		compatible = messagesAPI(v.API)
@@ -115,6 +121,9 @@ func (s *Service) modelProviderCompatible(p ModelPurpose, v ModelProvider, store
 // modelLauncherCompatible applies the shared provider rule to the current, merged launcher on one machine. Unlike
 // the global discovery table, this includes new shell launchers, hub.json wrappers and a runtime's current caps.
 func (s *Service) modelLauncherCompatible(p ModelPurpose, l ConfiguredLauncher, stored []storedLauncher) bool {
+	if proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource {
+		return p.ID == "assistant" && p.MachineID != "" && externalLauncherError(l.Launcher) == nil
+	}
 	v := ModelProvider{ID: "launcher." + l.Name, Kind: "launcher", Agent: cmp.Or(l.AgentType, l.Agent), Model: l.Model}
 	for _, managed := range stored {
 		if managed.Name == l.Name {
@@ -147,6 +156,9 @@ func effortLevelsForKind(kind string) []string {
 }
 
 func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBinding, providers []ModelProvider) error {
+	if err := checkExternalPurpose(b); err != nil {
+		return err
+	}
 	var provider *ModelProvider
 	for i := range providers {
 		if providers[i].ID == b.Provider {

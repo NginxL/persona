@@ -204,7 +204,16 @@ class HubWays(
                     HubTunnel.baseUrl(tunnel.hubAddress, reuse.ssh?.localPort ?: reuse.forward!!.localPort)
                 }
             }
-            val ssh = tunnel.ssh?.let { SshTunnel(it, identity(), sshTimings) }
+            val ssh = tunnel.ssh?.let {
+                SshTunnel(it, identity(), sshTimings) { problem ->
+                    // The rejection is a fact about these settings even if the waiting start was cancelled. Keep it
+                    // until the user changes them, without overwriting the state of a newer attempt (#10101).
+                    synchronized(lock) {
+                        if (blocked[key]?.first?.sameWay(tunnel) != true) blocked[key] = tunnel to problem
+                        if (running[key]?.tunnel?.sameWay(tunnel) == true) setState(key, TunnelState.Down(problem))
+                    }
+                }
+            }
             val forward = tunnel.proxy?.let { LocalProxyForward(LocalProxyForward.Dial.of(it, tunnel.hubAddress)) }
             val handle = Running(tunnel, ssh, forward)
             made = handle

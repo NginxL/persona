@@ -203,3 +203,25 @@ For people comfortable with the command line. The commands and files behind each
 - A freshly installed hub only opens its TLS port on LAN IPv4; to connect directly from outside too, rerun `personad hub setup --outside`, see [network.md](network.md).
 - If you already run claude through aliases or functions in `~/.zshrc` or `~/.bashrc`, they're still discovered and selectable, and **Import** beside **Add provider** in **Settings › Model Providers** turns a computer's aliases into providers, keeping their settings; see [launchers.md](../integrations/launchers.md).
 - The APIs for main chat readiness and error codes are in [protocol.md](../protocol/protocol.md) ("Main chat readiness"); design and future plans are in [onboarding.md](../assistant/onboarding.md).
+
+### Sign in to a browser with an Android phone
+
+On the browser sign-in page, scan the displayed code from the signed-in Android app's
+**Settings › Devices › Scan browser sign-in code**. Check the browser name on the phone
+and tap **Allow sign-in**. The browser signs in automatically with its own revocable device
+credential. Cancel refuses that request; refresh the browser code when its five-minute
+lifetime ends. Existing pairing links and password sign-in remain available.
+
+This flow requires a hub and Android client that support browser sign-in requests.
+The QR contains only a request identifier and hub identity, never the browser's polling
+secret or a login credential. Approval uses the phone's already-paired connection and
+checks the hub identity. The browser can redeem only with its separate secret; retrying
+a lost reply returns the same credential. Revoking the approving device before redemption
+prevents issuance. Pending handshakes are bounded and expire in memory, like password
+handshakes; a hub restart invalidates them. Issued device credentials remain in Postgres.
+
+Browser sign-in approval opens only from the Android app's Devices scanner; links
+received in a browser, chat or email do not open an authorization dialog. Check the
+request source and age on the phone before approving. The hub rejects multiline or
+non-printable browser names. Expiry is decided by the hub, so a browser clock difference
+does not shorten the code lifetime. Temporary poll failures retry the original request.

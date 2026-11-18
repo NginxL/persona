@@ -353,8 +353,13 @@ func TestConversationSendAnswerKeepsHop(t *testing.T) {
 			t.Fatalf("message %d: %s works at hop %d, want %d", i+1, to, got, want)
 		}
 	}
-	if out, isErr := tool(t, h, n, "main-0001", "conversation_send", `{"id":"trip-0002","text":"第 7 条"}`); !isErr || !strings.Contains(out, "hop 4") {
-		t.Fatalf("the fourth request: %s", out)
+	// main-0001 is the main conversation: its fourth request is not refused for the hop (#10099); the per-pair rate
+	// still stops it. The other side is cut at the last hop as before.
+	if out, isErr := tool(t, h, n, "main-0001", "conversation_send", `{"id":"trip-0002","text":"第 7 条"}`); !isErr || strings.Contains(out, "hop") || !strings.Contains(out, "messages to that conversation") {
+		t.Fatalf("the main conversation's fourth request: %s", out)
+	}
+	if out, isErr := tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"第 8 条"}`); !isErr || !strings.Contains(out, "hop 4") {
+		t.Fatalf("the other side's fourth request: %s", out)
 	}
 }
 

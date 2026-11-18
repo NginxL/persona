@@ -25,6 +25,16 @@ struct DevModeSection: View {
                     Text("Export Diagnostics…").lineLimit(1)
                 }
                 .accessibilityIdentifier("dev-mode-export")
+                #if os(iOS)
+                // An on-device experiment for Phone › Recents (#9887): the kind of handle a call to Persona carries.
+                Picker(selection: Binding(get: { dev.callHandle }, set: { dev.setCallHandle($0) })) {
+                    Text("Generic [Call handle]").tag(CallHandleKind.generic)
+                    Text("Email [Call handle]").tag(CallHandleKind.email)
+                } label: {
+                    Text("Call Handle").lineLimit(1)
+                }
+                .accessibilityIdentifier("dev-mode-call-handle")
+                #endif
             }
         } footer: {
             Text("When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it.")

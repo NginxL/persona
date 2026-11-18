@@ -44,10 +44,13 @@ import (
 // same way, under its newest run, as it draws a side session (linkSideSessions, #8314).
 //
 // A session another one started (a side chat, a /btw question, a session spawned for a task) names that one in
-// spawnedFrom.sessionId (its local_<id>), and the app's sidebar nests it there. The list draws it the same way (#5935):
-// its row names the parent's current transcript in parent_agent_id while both are listed (linkSideSessions), and stays a
-// session of its own. An entry without that id, or whose parent is archived or not in the index, links nothing; so does
-// one the user moved to the top level (lineageDetached, which keeps the old spawnedFrom, #8522).
+// spawnedFrom.sessionId (its local_<id>); a fork made with the app's Fork names the session it came from in
+// forkedFromSessionId alone (#9376; a session split off with start_session writes both, naming the same session). The
+// app's sidebar nests a session under spawnedFrom.sessionId, else forkedFromSessionId, and the list draws it the same
+// way (#5935): its row names the parent's current transcript in parent_agent_id while both are listed
+// (linkSideSessions), and stays a session of its own. An entry with neither id, or whose parent is archived or not in
+// the index, links nothing; so does one the user moved to the top level (lineageDetached, which keeps the old ids,
+// #8522).
 
 // claudeDesktopDirs are the desktop apps' data directories under home (a variable: tests use their own).
 var claudeDesktopDirs = func(home string) []string { return desktopDataDirs(runtime.GOOS, home) }
@@ -81,7 +84,7 @@ type claudeDesktopEntry struct {
 	title, cwd string   // as the sidebar shows it, and where it runs
 	origin     string   // originCwd: the folder the session was started in (a worktree's main checkout), "" when not absolute
 	local      string   // the app's own id of the session (sessionId, local_<uuid>): its link opens it (claudedesktop_open.go)
-	parent     string   // the local_<uuid> of the session that started this one (spawnedFrom.sessionId), or ""
+	parent     string   // the local_<uuid> this one came from (spawnedFrom.sessionId, else forkedFromSessionId), or ""
 	task       string   // the scheduled task this session is a run of (scheduledTaskId), or ""
 	created    int64    // when the app made the session (createdAt, ms; 0 unknown): the newest run of a task heads it
 
@@ -125,7 +128,7 @@ type claudeDesktopIndex struct {
 	earlier map[string][]claudeDesktopNow // an earlier transcript → the sessions that ran it before
 	about   map[string]claudeDesktopAbout // an unarchived session's current transcript → its title and directory
 	// parents: an unarchived session's current transcript → the current transcript of the unarchived session that
-	// started it (spawnedFrom), for linkSideSessions.
+	// started it or that it was forked from (spawnedFrom, forkedFromSessionId), for linkSideSessions.
 	parents map[string]string
 	// origins: an unarchived session's current transcript → the folder it was started in (originCwd), for
 	// placeClaudeDesktop.
@@ -177,7 +180,7 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	}
 	current := make(map[string]bool, len(paths))
 	byLocal := map[string]claudeDesktopEntry{} // the readable entries by the app's own id, to find a side session's parent
-	var started []claudeDesktopEntry           // the unarchived entries another session started
+	var started []claudeDesktopEntry           // the unarchived entries another session started or forked
 	runs := map[string][]claudeDesktopEntry{}  // a scheduled task → its unarchived runs no session started
 	for _, p := range paths {
 		st, err := os.Stat(p)
@@ -356,22 +359,34 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		Cwd        string   `json:"cwd"`
 		Origin     string   `json:"originCwd"`
 		Local      string   `json:"sessionId"`
-		// Read on its own: a spawnedFrom of another shape leaves the entry readable, with no parent.
+		// Read on their own: a spawnedFrom or forkedFromSessionId of another shape leaves the entry readable, with no
+		// parent from it.
 		SpawnedFrom json.RawMessage `json:"spawnedFrom"`
+		ForkedFrom  json.RawMessage `json:"forkedFromSessionId"`
 		Focused     float64         `json:"lastFocusedAt"`
 		TurnEdge    float64         `json:"lastTurnEdgeAt"`
 		Task        string          `json:"scheduledTaskId"`
 		Created     float64         `json:"createdAt"`
-		Detached    bool            `json:"lineageDetached"` // moved to the sidebar's top level: spawnedFrom stays, unnested
+		Detached    bool            `json:"lineageDetached"` // moved to the sidebar's top level: the old lineage stays, unnested
 	}
 	if json.Unmarshal(b, &raw) != nil || !validID(raw.Transcript) {
 		return claudeDesktopEntry{}
 	}
+	// The session this one came from, as the app's sidebar finds it: spawnedFrom.sessionId, else forkedFromSessionId
+	// (a fork made with the app's Fork writes only that); none once the user moved it to the top level.
 	var spawned struct {
 		Local string `json:"sessionId"`
 	}
-	if raw.Detached || len(raw.SpawnedFrom) > 0 && json.Unmarshal(raw.SpawnedFrom, &spawned) != nil {
+	var forked string
+	if len(raw.SpawnedFrom) > 0 && json.Unmarshal(raw.SpawnedFrom, &spawned) != nil {
 		spawned.Local = ""
+	}
+	if len(raw.ForkedFrom) > 0 && json.Unmarshal(raw.ForkedFrom, &forked) != nil {
+		forked = ""
+	}
+	parent := cmp.Or(spawned.Local, forked)
+	if raw.Detached {
+		parent = ""
 	}
 	cwd, origin := raw.Cwd, raw.Origin
 	if !filepath.IsAbs(cwd) {
@@ -381,7 +396,7 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		origin = ""
 	}
 	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd, origin: origin,
-		local: localID(raw.Local), parent: localID(spawned.Local), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge),
+		local: localID(raw.Local), parent: localID(parent), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge),
 		task: raw.Task, created: int64(raw.Created)}
 }
 

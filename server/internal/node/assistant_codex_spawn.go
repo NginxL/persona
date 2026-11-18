@@ -50,6 +50,10 @@ func codexArgsForHome(bin, key, home string, legacyMCP bool, windows ...int) []s
 		// The assistant's memory is the one the app's "Memory" page shows, shared with Claude (codexMemoryPrompt); Codex's
 		// own (~/.codex/memories) is one store for every Codex on the machine, so it stays off here.
 		"-c", "features.memories=false",
+		// The ChatGPT apps of a ChatGPT sign-in (codex_apps: every connector of that account) are declared in full in
+		// every request, inside code mode's exec tool: measured at ~140k tokens of a ~195k request on one install, for
+		// tools the assistant never calls (it has Persona's own). Off here; the machine's own Codex keeps them (#10275).
+		"-c", "features.apps=false",
 	}
 	if len(windows) > 0 && windows[0] > 0 {
 		args = append(args, "-c", fmt.Sprintf("model_auto_compact_token_limit=%d", windows[0]))
@@ -63,9 +67,13 @@ func codexArgsForHome(bin, key, home string, legacyMCP bool, windows ...int) []s
 // codexShell runs the launcher with `codex` turned into `codex <its flags> app-server <ours>`: the launcher's
 // function sets what it sets (env, -c model_provider, -m …) exactly as when it starts the TUI.
 // Use alias-safe definitions and calls: zsh expands aliases while parsing the script.
-func codexShell(launcher string) string {
+func codexShell(launcher string) string { return codexShellWith(launcher, "app-server") }
+
+// codexShellWith is codexShell for another subcommand of the launcher's codex (`debug models`,
+// assistant_fallback_window.go).
+func codexShellWith(launcher, sub string) string {
 	return `__persona_args=("$@")
-function __persona_codex { builtin command codex "$@" app-server "${__persona_args[@]}"; }
+function __persona_codex { builtin command codex "$@" ` + sub + ` "${__persona_args[@]}"; }
 if [[ -n "${ZSH_VERSION-}" ]] && (( $+functions[codex] )); then
   # Keep a user-defined codex() launcher intact while routing its final command through the app-server wrapper.
   # Copy it through the functions table: functions -c needs zsh 5.8, and a subscript never expands aliases.

@@ -32,15 +32,17 @@ final class AttachMenuTests: XCTestCase {
         hub = h
     }
 
-    /// Persona's conversation: the calls, the camera and Mention, no Quick Commands; Mention types "@" and opens the list.
+    /// Persona's conversation: the camera and Mention, no Quick Commands, no voice row (#9887: the composer's phone icon is
+    /// the one voice entry); Mention types "@" and opens the list.
     @MainActor func testPersonaMenu() {
         for style in styles {
             for scheme in schemes {
                 let app = launch(Self.persona, scheme: scheme, style: style)
                 openMenu(app)
-                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention", "composer-menu-voice", "composer-menu-meeting"] {
+                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention", "composer-menu-meeting"] {
                     XCTAssertTrue(item(app, id).waitForExistence(timeout: 5), "no \(id) in the menu:\n\(app.debugDescription)")
                 }
+                XCTAssertFalse(item(app, "composer-menu-voice").exists, "Voice Chat in the menu")
                 XCTAssertFalse(commands(app).exists, "Quick Commands in Persona's conversation")
                 XCTAssertTrue(addContext(app).exists, "no Add as Context in Persona's menu:\n\(app.debugDescription)")
                 photosAndFiles(app)
@@ -142,7 +144,7 @@ final class AttachMenuTests: XCTestCase {
             XCTAssertTrue(item(app, "composer-menu-mention").exists, "no Mention:\n\(app.debugDescription)")
             XCTAssertTrue(item(app, "composer-menu-scan").exists, "no Scan Document:\n\(app.debugDescription)")
             XCTAssertTrue(addContext(app).exists, "no Add as Context in an Agent's menu:\n\(app.debugDescription)")
-            XCTAssertTrue(item(app, "composer-menu-voice").exists, "no Voice Chat in an Agent's menu")
+            XCTAssertFalse(item(app, "composer-menu-voice").exists, "Voice Chat in an Agent's menu: the phone icon is the one entry")
             XCTAssertFalse(item(app, "composer-menu-meeting").exists, "Meeting Recording in an Agent's menu")
             XCTAssertFalse(item(app, "attach-clear").exists, "the commands are not folded")
             shot("attach-menu-agent", scheme)
@@ -174,7 +176,7 @@ final class AttachMenuTests: XCTestCase {
                 for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention"] {
                     XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "no \(id) in More (\(name)):\n\(app.debugDescription)")
                 }
-                XCTAssertEqual(app.buttons["composer-menu-voice"].exists, name != "new" && name != "health", "Voice Chat in More (\(name))")
+                XCTAssertFalse(app.buttons["composer-menu-voice"].exists || app.buttons["composer-menu-call"].exists, "a voice row in More (\(name))")
                 XCTAssertEqual(app.buttons["composer-menu-meeting"].exists, name == "persona", "Meeting Recording in More (\(name))")
                 // The list draws what is on screen: the first command, not /clear at the bottom. An Agent's list is
                 // longer than the resting sheet: tapping the tab shown opens it all the way.
@@ -230,14 +232,14 @@ final class AttachMenuTests: XCTestCase {
         let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         let app = launch(Self.persona + largest, scheme: "light")
         openMenu(app)
-        XCTAssertTrue(item(app, "composer-menu-voice").waitForExistence(timeout: 5), "no menu:\n\(app.debugDescription)")
+        XCTAssertTrue(item(app, "composer-menu-camera").waitForExistence(timeout: 5), "no menu:\n\(app.debugDescription)")
         shot("attach-menu-persona-largest-text", "light")
         XCTAssertTrue(scrolledTo(app, item(app, "composer-menu-mention")), "Mention can't be scrolled to:\n\(app.debugDescription)")
         shot("attach-menu-persona-largest-text-top", "light")
         app.terminate()
         let agent = launch(Self.agent + largest, scheme: "light")
         openMenu(agent)
-        XCTAssertTrue(item(agent, "composer-menu-voice").waitForExistence(timeout: 5), "no menu:\n\(agent.debugDescription)")
+        XCTAssertTrue(item(agent, "composer-menu-camera").waitForExistence(timeout: 5), "no menu:\n\(agent.debugDescription)")
         let quick = commands(agent)
         XCTAssertTrue(scrolledTo(agent, quick), "no Quick Commands:\n\(agent.debugDescription)")
         quick.tap()

@@ -1,0 +1,12 @@
+<resources>
+    <string name="settings_browser_login_scan">扫描网页登录码</string>
+    <string name="settings_browser_login_invalid">请扫描电脑网页登录页上的二维码。</string>
+
+    <string name="settings_browser_login_title">允许此浏览器登录？</string>
+    <string name="settings_browser_login_loading">正在检查登录请求…</string>
+    <string name="settings_browser_login_failed">二维码已过期或不属于当前 Persona，请在电脑上刷新。</string>
+    <string name="settings_browser_login_details">允许 %1$s 访问你的 Persona？仅确认你本人正在使用的浏览器，可在设备中撤销。</string>
+    <string name="settings_browser_login_allow">允许登录</string>
+    <string name="settings_browser_login_cancel">取消</string>
+    <string name="settings_browser_login_source">来源 %1$s · %2$d 秒前发起</string>
+</resources>

@@ -7,6 +7,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -56,7 +57,16 @@ func (s *Service) otherKindPick(ctx context.Context, machine, sid, launcher stri
 	if !known || conv == "" {
 		return nil
 	}
-	picked := assistantKind(s.launcherAgent(ctx, machine, launcher))
+	var picked string
+	if proto.IsExternalLauncher(launcher) {
+		agent, err := s.externalLauncherAgent(ctx, machine, launcher)
+		if err != nil {
+			return err
+		}
+		picked = assistantKind(agent)
+	} else {
+		picked = assistantKind(s.launcherAgent(ctx, machine, launcher))
+	}
 	if picked == "" || picked == conv {
 		return nil
 	}
@@ -66,6 +76,10 @@ func (s *Service) otherKindPick(ctx context.Context, machine, sid, launcher stri
 // launcherAgent is the agent launcher name runs on machine: plain claude, a managed launcher's type, or the machine's
 // picker entry; "" when it can't tell.
 func (s *Service) launcherAgent(ctx context.Context, machine, name string) string {
+	if proto.IsExternalLauncher(name) {
+		agent, _ := s.externalLauncherAgent(ctx, machine, name)
+		return agent
+	}
 	if name == "claude" || name == "codex" {
 		return name
 	}

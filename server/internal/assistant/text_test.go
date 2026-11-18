@@ -57,6 +57,14 @@ func TestTranscriptTextTruncatesAtRuneBoundary(t *testing.T) {
 	}
 }
 
+func TestTranscriptTextLabelsThinkingAsProgressSummary(t *testing.T) {
+	got := transcriptText("head", "", []proto.Item{{Role: "assistant", Kind: proto.KindThinking, Text: "Summary, not verbatim"}})
+	want := "head\n\n(agent, progress summary) Summary, not verbatim\n"
+	if got != want {
+		t.Fatalf("thinking label: got %q, want %q", got, want)
+	}
+}
+
 // With the conversation's page known, each message carries its own link (?at=<item id>, #2194); without it the text
 // is as before.
 func TestTranscriptTextLinksEachMessage(t *testing.T) {

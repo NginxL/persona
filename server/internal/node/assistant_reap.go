@@ -19,6 +19,7 @@ const assistantTaskMaxIdle = 12 * time.Hour
 func (n *Node) assistantInterrupt(id string) error {
 	// An explicit Stop wins over any queued same-model or fallback continuation: cancelled before the session lock, a
 	// recovery send that has not started gives up at once instead of holding Stop behind it (#3495).
+	n.cancelExternalStartups(id)
 	n.cancelAssistantRecovery(id)
 	if n.stopAwaited(id) { // a message waits for the round's turn, holding the lock: it goes in now (assistant_round.go)
 		return nil

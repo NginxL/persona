@@ -22,8 +22,21 @@ Immediately before Apply, the operation re-reads current state and verifies that
 
 Before the first question, the card keeps its original decision deadline. While an accepted question is being answered, that remaining decision time is paused. The pause has a cumulative 24-hour budget per card; repeated questions do not reset it. The turn that produced the card does not count as its answer turn, and a question accepted during an answer turn waits for the next turn before timing resumes.
 
+### Unanswered cards keep waiting (#10096)
+
+A notification is only a way to tell the owner that a card is waiting; the card itself must still be there when they open the Persona app or the web. When no notification reaches their devices (no working push route, the app in the background), they may only look after the decision window ended. So when a prepared card's first decision window ends unanswered while its caller still waits, the coordinator keeps it (`keepWaiting` in `server/internal/assistant/approval_clarify.go`) instead of expiring it:
+
+- it is recorded in the approval journal, as on a first question, so its final outcome reaches the original conversation;
+- its deadline moves to the end of a 24-hour waiting window, and the apps are told the card again with that deadline, without a second push; the app and the web already load pending cards when they reconnect (`GET /api/v1/interactions`);
+- the original tool call returns the non-final `approval.WaitingText`: nothing changed, the card is still pending, do not retry or create another card, a later message reports the outcome;
+- a later owner Allow applies once (the operation still re-checks current state), Deny changes nothing, and the end of the waiting window expires it without changing anything; each is reported in the conversation. A question on a waiting card pauses the remaining waiting time as on any clarified card.
+
+A card whose caller already went away (a caller that bounds its own wait, such as the scheduled-check probe) is not kept: it expires at its decision window as before.
+
 The coordinator makes one final claim under the fleet mutex. An in-flight question and a final Allow, Deny, expiry, or replacement are explicitly arbitrated. Allow executes at most once, Deny executes nothing, and a proxy-attributed Allow executes nothing.
 
 Once a card has clarified, every terminal path sends exactly one result containing the literal interaction ID to the original conversation, including Allow, Deny, expiry, replacement, stale cancellation, and restart cancellation. Delivery uses the stable ID `approval-result-<interaction-id>` and the durable relay queue. The journal stores only the ID, original target, delivery state, status, and result text—never field values, callbacks, or executable closures.
+
+Before the first question, a card whose caller still waits is normally kept waiting when its window ends ("Unanswered cards keep waiting" above). When it cannot be (its journal entry could not be written) or its caller already went away, an unanswered expiry returns through the original tool result instead of starting a second delivery. It contains the literal interaction ID, says the approval expired, and explicitly says nothing was executed. Expiry remains distinct from the owner's Deny: it never becomes a user refusal.
 
 An unfinished Clarifying card fails closed on restart without executing. If the process stops after recording `applying`, recovery reports the execution outcome as uncertain rather than claiming success or reapplying it.

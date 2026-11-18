@@ -1,0 +1,12 @@
+<resources>
+    <string name="settings_browser_login_scan">Scan browser sign-in code</string>
+    <string name="settings_browser_login_invalid">Scan the sign-in code on your computer.</string>
+
+    <string name="settings_browser_login_title">Sign in on this browser?</string>
+    <string name="settings_browser_login_loading">Checking sign-in request…</string>
+    <string name="settings_browser_login_failed">This code has expired or belongs to another Persona. Refresh it on the computer.</string>
+    <string name="settings_browser_login_details">Allow %1$s to access your Persona? Only approve a browser you are signing in to. You can revoke it in Devices.</string>
+    <string name="settings_browser_login_allow">Allow sign-in</string>
+    <string name="settings_browser_login_cancel">Cancel</string>
+    <string name="settings_browser_login_source">Source: %1$s · Requested %2$d seconds ago</string>
+</resources>

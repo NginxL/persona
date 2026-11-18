@@ -93,12 +93,13 @@ def connection_report(sessions, since, until, identity=None):
     for s in selected:
         start = timestamp(s["start"])
         end = timestamp(s["end"]) if s.get("end") else until
-        if start >= until or end <= since:
+        if start >= until or end < since:
             continue
         heartbeat = s.get("heartbeat_interval", 0)
         if not isinstance(heartbeat, int) or not 0 <= heartbeat <= 900:
             heartbeat = 0
-        heartbeats[str(heartbeat)] += 1
+        if end > since:
+            heartbeats[str(heartbeat)] += 1
         if since <= start < until:
             hours[iso(start.replace(minute=0, second=0, microsecond=0))]["opens"] += 1
             if s.get("end") and end < until:
@@ -133,7 +134,7 @@ def read_connections(args, since, until):
         container = matches[0]
     sql = """BEGIN READ ONLY; SET LOCAL statement_timeout='15s';
 SELECT coalesce(json_agg(json_build_object('identity',left(encode(sha256(convert_to('persona-traffic','UTF8')||decode('00','hex')||convert_to(device_id,'UTF8')),'hex'),16), 'start',connected_at,'end',disconnected_at,'reason',reason,'heartbeat_interval',heartbeat_interval)), '[]'::json)
-FROM device_sessions WHERE connected_at < '%s' AND (disconnected_at IS NULL OR disconnected_at > '%s'); COMMIT;""" % (iso(until), iso(since))
+FROM device_sessions WHERE connected_at < '%s' AND (disconnected_at IS NULL OR disconnected_at >= '%s'); COMMIT;""" % (iso(until), iso(since))
     cmd = ["docker", "exec", "-i", container, "sh", "-c", 'exec psql -X -U "${POSTGRES_USER:-persona}" -d "${POSTGRES_DB:-$POSTGRES_USER}" -At -v ON_ERROR_STOP=1']
     out = subprocess.run(cmd, input=sql, capture_output=True, text=True, timeout=30)
     if out.returncode:

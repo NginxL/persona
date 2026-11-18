@@ -1,5 +1,13 @@
 # Lessons: hub / node and networking
 
+## Empty assistant creation must not become a model turn
+
+Android allocates an assistant conversation before sending its queued message. The manager passed an empty prompt
+correctly, but the node appended its live snapshot and delivered a context-only turn. Check for text or images before
+requesting context or submitting model input, and keep the new conversation idle. Preserve deferred runtime instructions
+in the session record until the first successful delivery. A manager test with a fake node cannot catch this: exercise
+the real node against a recording CLI and runtime, including prewarmed sessions, whitespace, images and node restart.
+
 ## Journal recovery before changing live update files (#6921)
 
 A fence saying an update started cannot restore a Web directory renamed before `pending.json`

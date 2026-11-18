@@ -81,6 +81,13 @@ import UserNotifications
     /// typed on the quick start (#8731), kept over the calendar's.
     func startMeeting(inForeground: Bool, openPage: Bool? = nil, attendance: RecordingAttendance? = nil,
                       event: RecordingMeeting? = nil, title: String? = nil) async -> Outcome {
+        // A live system call keeps its audio session (docs/apple/calls.md): refused with a note, nothing opens, the call
+        // goes on. The + list, the home screen's menu, Siri and the Control land here; the Recordings page's own start
+        // says it under its button (`RecordingCapture.callGate`).
+        if let refusal = capture.callGate() {
+            if inForeground { AppModel.shared.toast = Toast(refusal) }
+            return .failed(refusal)
+        }
         if openPage ?? inForeground { Self.openRecordings() }
         guard capture.state == .idle else { return .alreadyRecording }
         var meeting: RecordingMeeting

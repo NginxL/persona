@@ -89,6 +89,7 @@ func noticeKeyOf(s string) noticeKey {
 }
 
 func userText(mk func(int, string, string) proto.Item, s string, meta *Meta) []proto.Item {
+	s = StripInterject(s)
 	s = dropTagged(caveatRe, "<local-command-caveat>", dropTagged(pastedRe, "pasted_content", dropTagged(ContextRe, "-context>", dropTagged(ViewErrorsRe, "<persona-view-errors", s))))
 	trimmed := legacyLarkAgent(strings.TrimSpace(s))
 	if trimmed == "" {

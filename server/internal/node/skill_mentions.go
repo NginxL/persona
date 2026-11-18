@@ -101,13 +101,7 @@ func (n *Node) skillCatalog(ctx context.Context, in skillCatalogRequest) (assist
 func visibleClaudeSkills(entries []assistantskills.Entry, profile, cwd string, launcherSettings ...map[string]any) ([]assistantskills.Entry, error) {
 	// A bounded local adapter cannot establish the effective managed policy. Check presence only:
 	// never execute a policy helper or read a server-policy cache that may contain credentials.
-	policies := append([]string{filepath.Join(profile, "remote-settings.json"),
-		"/etc/claude-code/managed-settings.json", "/etc/claude-code/managed-settings.d"}, claudeManagedSettings...)
-	policies = append(policies, claudeManagedSettingsDirs...)
-	if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
-		policies = append(policies, filepath.Join(programFiles, "ClaudeCode", "managed-settings.json"),
-			filepath.Join(programFiles, "ClaudeCode", "managed-settings.d"))
-	}
+	policies := claudePolicyPaths(profile)
 	for _, file := range policies {
 		if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 			return nil, errors.New("skill catalog is unavailable while a managed policy may apply")

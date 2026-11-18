@@ -182,6 +182,9 @@ func (n *Node) launcherCommand(name string) string { return n.launcherCommandQ(n
 
 // launcherCommandQ is launcherCommand quoting with q (herdrresume.go quotes without apostrophes).
 func (n *Node) launcherCommandQ(name string, q func(string) string) string {
+	if proto.IsExternalLauncher(name) {
+		return "false" // only externalCLICommand may execute a locally registered adapter
+	}
 	if _, ok := n.managedLauncher(name); ok {
 		return q(n.bin) + " launch " + name
 	}
@@ -653,6 +656,9 @@ var secretValue = lazyre.New(`(?i)((?:key|token|secret|password|passwd|auth)[A-Z
 // launcherDefinition is a ~/.zshrc launcher's function body (a wrapper script's text, pathlaunchers.go), for its page
 // in "Settings › Model", with anything that looks like a key or token replaced by •••.
 func (n *Node) launcherDefinition(ctx context.Context, name string) (string, error) {
+	if proto.IsExternalLauncher(name) {
+		return "", externalRefusal(ctx, "adapter_probe_unsupported")
+	}
 	if !shellcmd.NameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid launcher %q", name)
 	}

@@ -72,7 +72,12 @@ data class QuietHours(
 }
 
 /** Bound to one pairing; preferenceDeviceId is the ID used by notification registration. */
+data class BrowserLoginDetails(val name: String, val source: String, val ageSeconds: Int)
+
 interface DeviceSettings {
+    suspend fun browserLogin(id: String, hub: String, allow: Boolean? = null): BrowserLoginDetails =
+        throw UnsupportedOperationException("browser-login")
+
     suspend fun devices(): PairedDevices
     suspend fun revoke(credentialId: String)
     suspend fun preferences(): DeviceNotificationPreferences

@@ -123,7 +123,7 @@ func TestCodexAppChatsAreListedLikeTheSidebar(t *testing.T) {
 	if o := rows[appOld]; !strings.HasPrefix(o.SpaceID, "codex-chats:") || o.SpaceName != "Codex 对话" { // i18n-ignore: the node's space name
 		t.Fatalf("the chat in no project is placed in %q %q", o.SpaceID, o.SpaceName)
 	}
-	if src, _ := n.codexSource(rows[appOld].SessionID); src.path != old {
+	if src, _ := n.codexSource(rows[appOld].SessionID); src.path != resolved(t, old) { // the node names it resolved (#9138)
 		t.Fatalf("the old chat reads %q, want its rollout", src.path)
 	}
 }

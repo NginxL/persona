@@ -427,6 +427,7 @@ struct VoiceConversationTests {
         let (call, socket) = await live(rig)
         socket.deliver(#"{"type":"run","id":"r1","task":"跑测试","state":"working","msg_ids":["r1"],"base_seq":10}"#)
         rig.audio.emit(.interrupted)
+        rig.audio.emit(.interruptionEnded(shouldResume: false))
         #expect(call.phase == .ended(.interrupted))
         await call.restart()
         let resumed = try #require(rig.socket)
@@ -464,10 +465,15 @@ struct VoiceConversationTests {
         #expect(car.idleTimer.changes.isEmpty)
     }
 
-    @Test func aPhoneCallEndsItAndFreesTheMicrophone() async {
+    /// A phone call pauses the phone's voice chat (#9887: on hold, the socket and the microphone kept); one the system
+    /// says not to resume from ends it and frees the microphone.
+    @Test func aPhoneCallPausesItAndOneThatMayNotResumeEndsIt() async {
         let rig = VoiceRig()
         let (call, socket) = await live(rig)
         rig.audio.emit(.interrupted)
+        #expect(call.held && !call.phase.isEnded && !socket.closed && rig.audio.stops == 0)
+        #expect(!socket.texts.contains { $0.contains(#""type":"hold""#) }, "an extension without `hold` hears nothing of it")
+        rig.audio.emit(.interruptionEnded(shouldResume: false))
         #expect(call.phase == .ended(.interrupted))
         #expect(socket.closed && rig.audio.stops == 1)
         #expect(rig.microphone.claim(UUID()))

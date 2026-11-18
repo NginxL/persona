@@ -34,6 +34,13 @@ const (
 )
 
 func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainChatFit, error) {
+	if proto.IsExternalLauncher(name) {
+		_, err := s.externalTarget(ctx, machine, name)
+		if err != nil {
+			return mainChatRefused, err
+		}
+		return mainChatFits, nil
+	}
 	if name == "" || name == "claude" {
 		return mainChatFits, nil
 	}
@@ -78,6 +85,13 @@ func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainCh
 // user's language.
 func (s *Service) finishMainChatModel(ctx context.Context, machine, purpose string, params map[string]any, picked bool) (note string, err error) {
 	name, _ := params["launcher"].(string)
+	if proto.IsExternalLauncher(name) {
+		if _, ok := ctx.Value(externalPickKey{}).(externalPickScope); !ok {
+			return "", i18n.Err("external-adapter.scope_required")
+		}
+		_, err := s.externalTarget(ctx, machine, name)
+		return "", err // never swap an explicit external selection
+	}
 	fit, refusal := s.mainChatFit(ctx, machine, name)
 	if fit == mainChatFits {
 		return "", nil
@@ -149,7 +163,8 @@ func (s *Service) mainChatInstead(ctx context.Context, d Device, name, kind stri
 		names = append(names, "claude")
 	}
 	for _, l := range launchers {
-		if agentKind(cmp.Or(l.AgentType, l.Agent)) == kind && !slices.Contains(names, l.Name) {
+		if !proto.IsExternalLauncher(l.Name) && l.Source != proto.ExternalLauncherSource &&
+			agentKind(cmp.Or(l.AgentType, l.Agent)) == kind && !slices.Contains(names, l.Name) {
 			names = append(names, l.Name)
 		}
 	}
@@ -247,6 +262,14 @@ func (s *Service) mainChatUnavailable(ctx context.Context, machine string, picke
 		// named as the picker names it: a runtime's provider by the runtime's name for it (#8261)
 		u := unavailableLauncher{Name: l.Name, DisplayName: l.DisplayName, Kind: "launcher", Agent: cmp.Or(l.AgentType, l.Agent), Code: unavailableNotMainChat,
 			Reason: notMainChat}
+		if proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource {
+			if l.External != nil {
+				u.DisplayName = cmp.Or(l.External.Name, l.DisplayName)
+			}
+			if err := s.externalLauncherRefusal(ctx, l.Launcher); err != nil {
+				u.Reason = i18n.Localize(err, lang)
+			}
+		}
 		if m, ok := managed(l.Name); ok {
 			u.DisplayName = m.DisplayName
 		} else if f, ok := assistantFor(fits, l.Name); ok { // the launcher set up to run the assistant for this one

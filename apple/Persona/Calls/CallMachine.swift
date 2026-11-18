@@ -7,8 +7,10 @@ import Foundation
 
 /// Who the call is with and what it is about.
 nonisolated enum CallKind: Equatable, Hashable, Sendable {
-    /// The owner calls Persona: the main conversation of the group's hub (empty: the hub selected when it started).
-    case owner(group: String)
+    /// The owner calls a conversation (#9887 one button): `key`, the conversation the phone icon was in (the main
+    /// conversation, another assistant conversation, an Agent session), or nil for the main conversation of the group's
+    /// hub, found as the call is placed (Recents, Siri, CarPlay; empty group: the hub selected when it started).
+    case owner(group: String, key: SessionKey? = nil)
     /// Persona's urgent call (`UrgentCallCenter`), by the manager's call id.
     case urgent(callID: String)
 
@@ -82,9 +84,22 @@ nonisolated enum CallPhase: Equatable, Sendable {
 nonisolated enum CallReport: Equatable, Sendable {
     case startedConnecting(Date)
     case connected(Date)
-    /// `conversationUpdated(capabilities: [.pausing])`: the system may hold it (a long press on Mute, Hold & Accept).
-    case pausable
+    /// An outgoing call's `conversationUpdated`: its members (the owner as the local member, the call's handle as the
+    /// remote one, active; #9887: with no remote member the system has nobody to write into Recents) and
+    /// `capabilities: [.pausing]` (the system may hold it: a long press on Mute, Hold & Accept). Before
+    /// `startedConnecting`.
+    case members
     case ended(Date, CallEndedReport)
+
+    /// What the log says (public: no dates).
+    var logName: String {
+        switch self {
+        case .startedConnecting: "startedConnecting"
+        case .connected: "connected"
+        case .members: "members"
+        case .ended(_, let why): "ended(\(why))"
+        }
+    }
 }
 
 /// A wait the machine asks for: `PersonaCalls` feeds `.timer` back when it is up.
@@ -248,8 +263,9 @@ nonisolated struct CallMachine: Equatable, Sendable {
             guard phase == .dialing else { return [phase.isEnded ? .fail : .fulfil] }
             out.append(.fulfil)
             phase = .connecting
+            // Who the call is with first (#9887), then that it connects: in this order, once the system has the conversation.
+            out += report(.members)
             out += report(.startedConnecting(now))
-            out += report(.pausable)
             out.append(.begin)
             if !everActive { out.append(.schedule(.activation)) }
 

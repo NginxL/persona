@@ -12,6 +12,8 @@ import { MeetingPrivate, RecordingConversation, useRecordingMeeting } from "./Re
 import { RecordingPhotos } from "./RecordingPhotos";
 import { RecordingLiveView } from "./RecordingLiveView";
 import { namedBy, RecordingRenameDialog } from "./RecordingRename";
+import { RecordingHandoffDialog, RecordingHandoffRow, useRecordingHandoff, type MeetingHandoff } from "./RecordingHandoff";
+import { hasMaterial, meetingRunning } from "../../lib/meeting-thread";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Relationships } from "./Relationships";
 import { TopicPoints } from "./TopicPoints";
@@ -123,6 +125,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const [retry, setRetry] = useState(0);
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  // Hand to Agent (#8852): open, with the failed hand-off tried again when it came from its row.
+  const [handing, setHanding] = useState<{ again?: MeetingHandoff } | null>(null);
   const [asking, setAsking] = useState(false);
   const [allLog, setAllLog] = useState(false);
   const [allMatches, setAllMatches] = useState(false);
@@ -212,6 +216,10 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   // photo's items or be made again: read them, and again on the next poll, reconnect or event if that read fails).
   const reloadDetail = useCallback(() => load(), [load]);
   const meeting = useRecordingMeeting(d, rec, auth, current, manager, reloadDetail);
+  // Hand to Agent (#8852): a meeting or note that is over and has something to hand, for someone with an Agent to take
+  // it; its latest hand-off shows at the top of the page whether or not another can be made now.
+  const handoff = useRecordingHandoff(d?.meta);
+  const canHand = !!d && !!rec && !rec.allDay && handoff.hasAgents && !meetingRunning(d.meta, meeting.room) && hasMaterial(d);
   const log = timeline(d?.log);
   // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves. An
   // all-day recording's is its recap's summary, which the recap shows.
@@ -287,6 +295,11 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
                   {t("knowledge-kbdetail.rename")}
                 </Button>
               )}
+              {canHand && (
+                <Button tone="secondary" icon="send" onClick={() => setHanding({})} testId="handoff-open">
+                  {t("knowledge-handoff.open_dialog")}
+                </Button>
+              )}
               {kind === "projects" && (
                 <Button
                   tone="secondary"
@@ -314,6 +327,12 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
 
           {d && (
             <div className="mt-7 flex flex-col gap-6" style={{ animation: "fade-in 200ms ease-out both" }}>
+              {rec && handoff.latest && (
+                <RecordingHandoffRow
+                  handoff={handoff.latest}
+                  onRetry={canHand ? () => setHanding({ again: handoff.latest ?? undefined }) : undefined}
+                />
+              )}
               {facts && (
                 <section>
                   <Card>
@@ -563,6 +582,19 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
       </div>
 
       {d && <TagEditor entry={e} auth={auth} open={editing} onClose={() => setEditing(false)} onSaved={onSaved} />}
+      {handing && d && rec && (
+        <RecordingHandoffDialog
+          id={d.id}
+          hasTranscript={!rec.trimmedAt && rec.lines.some((l) => !l.bookmark)}
+          auth={auth}
+          again={handing.again}
+          onClose={() => setHanding(null)}
+          onDone={(h) => {
+            handoff.setMade(h);
+            void load().catch(() => {});
+          }}
+        />
+      )}
       {renaming && d && (
         <RecordingRenameDialog
           id={id}

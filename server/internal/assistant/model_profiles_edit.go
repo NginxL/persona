@@ -32,6 +32,9 @@ func checkModelProfile(p *ModelProfile, stored []storedLauncher) error {
 		return i18n.Err("assistant-model_profiles.err_description", i18n.Args{"max": modelProfileAbout})
 	}
 	for id, b := range p.Purposes {
+		if err := checkExternalPurpose(b); err != nil {
+			return err
+		}
 		if !slices.Contains(modelCategoryIDs, id) {
 			return i18n.Err("assistant-model_profiles.err_purpose", i18n.Args{"purpose": id, "purposes": strings.Join(modelCategoryIDs, ", ")})
 		}
@@ -55,6 +58,9 @@ func checkModelProfile(p *ModelProfile, stored []storedLauncher) error {
 		}
 	}
 	for name, m := range p.Launchers {
+		if proto.IsExternalLauncher(name) {
+			return i18n.Err("external-adapter.purpose_unsupported")
+		}
 		i := slices.IndexFunc(stored, func(l storedLauncher) bool { return l.Name == name })
 		if i < 0 {
 			return i18n.Err("assistant-model_profiles.err_launcher_missing", i18n.Args{"launcher": name})
@@ -106,6 +112,9 @@ func checkModelTiers(tiers map[string]ModelTier) error {
 		return i18n.Err("assistant-model_profiles.err_tiers", i18n.Args{"max": maxModelTiers})
 	}
 	for name, t := range tiers {
+		if proto.IsExternalLauncher(t.Launcher) {
+			return i18n.Err("external-adapter.purpose_unsupported")
+		}
 		if !modelTierName.MatchString(name) {
 			return i18n.Err("assistant-model_profiles.err_tier_name", i18n.Args{"tier": name})
 		}

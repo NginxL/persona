@@ -161,9 +161,11 @@ type Service struct {
 	origins    originBook           // origins.go
 	guests     guestBook            // guest.go
 	relays     relayBook            // conversations.go
+	quotes     quoteBook            // relay_quote.go: the owner's messages relays carried, verified
 	avail      availBook            // availability.go
 	quiet      quietBook            // quiet.go
 	supervise  superviseBook        // supervise_signals.go
+	progress   progressBook         // supervise_progress.go
 	preempt    preemptBook          // owner_preempt.go
 	tbriefs    taskBriefBook        // task_brief.go
 	search     searchIndex          // search_index.go
@@ -786,6 +788,7 @@ func (s *Service) userSpokeText(ctx context.Context, r SessionRef, text string) 
 	s.agentDecisionSpoke(ctx, r, time.Now(), text)
 	s.ownerHeard(r.SessionID)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopUserInput)
+	s.progressMade(r.MachineID, r.SessionID, time.Now()) // told something: a new stretch (supervise_progress.go)
 	// A meeting's turn under way is the user's from here on (meeting_turns.go).
 	s.meetingTurnUserSpoke(r.MachineID, r.SessionID)
 	s.releasePushes(ctx, r.SessionID) // the user speaks: its turns are pushed as ever (supervise_digest.go)
@@ -884,6 +887,7 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 		f(d)
 	}
 	s.toolLoopsChanged(d)
+	s.progressSessions(d, time.Now()) // what the working agents do, for no_progress (supervise_progress.go)
 	s.drainRelays(d.MachineID, d.Sessions)
 	s.originsChanged(d.MachineID, d.Sessions) // conversations from before origins were noted (origins.go)
 	s.todosSessionsChanged(ctx, d)

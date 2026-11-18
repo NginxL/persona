@@ -442,8 +442,24 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(merge.call_count, 1)
         self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "merged")
 
-    def test_p1_findings_are_published_then_repaired_instead_of_merging(self):
+    def test_p1_findings_are_notes_and_do_not_block_verification_or_merge(self):
         findings = [{"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"}]
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch, "semantic_review", return_value=findings), \
+                patch.object(pr_watch, "verify", return_value=[{"name": "test", "command": ["true"], "ok": True, "summary": ""}]) as verify, \
+                patch.object(self.watcher, "repair_findings") as repair, \
+                patch.object(pr_watch, "run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as api, \
+                patch.object(self.watcher, "merge", return_value=True) as merge:
+            self.watcher.process("example/one", 7)
+        verify.assert_called_once()
+        repair.assert_not_called()
+        merge.assert_called_once()
+        self.assertIn("P1/P2 findings are non-blocking notes", api.call_args_list[0].kwargs["input_text"])
+        self.assertEqual(self.watcher.state.get("example/one", 7)["findings"], findings)
+        self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "merged")
+
+    def test_p0_findings_are_published_then_repaired_instead_of_merging(self):
+        findings = [{"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"}]
         with patch.object(pr_watch, "pr_snapshot", side_effect=[pr(), pr()] + [pr(head=SHA_B)] * 4), \
                 patch.object(pr_watch, "semantic_review", return_value=findings) as review, \
                 patch.object(pr_watch, "verify") as verify, \
@@ -481,7 +497,7 @@ class WatcherTests(unittest.TestCase):
         verify.assert_called_once()
         merge.assert_called_once()
         self.assertEqual(api.call_count, 2)
-        self.assertIn("P2 findings are non-blocking", api.call_args_list[0].kwargs["input_text"])
+        self.assertIn("P1/P2 findings are non-blocking", api.call_args_list[0].kwargs["input_text"])
         self.assertIn("Automated independent semantic review", api.call_args_list[1].args[0][-1])
         self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "merged")
 
@@ -555,7 +571,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_mixed_findings_are_fully_published_before_blocking_repair(self):
         findings = [
-            {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"},
+            {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"},
             {"path": "x.py", "line": 4, "severity": "P2", "summary": "note", "suggestion": "consider it"},
         ]
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
@@ -572,7 +588,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_superseded_unpublished_findings_are_grouped_once_before_new_review(self):
         findings = [
-            {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"},
+            {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"},
             {"path": "x.py", "line": 4, "severity": "P2", "summary": "note", "suggestion": "consider it"},
         ]
         self.watcher.state.put("example/one", 7, SHA_A,
@@ -607,7 +623,7 @@ class WatcherTests(unittest.TestCase):
     def test_mixed_findings_keep_p2_evidence_in_review_only_mode(self):
         self.watcher.config["repositories"][0]["merge"] = False
         findings = [
-            {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"},
+            {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"},
             {"path": "x.py", "line": 4, "severity": "P2", "summary": "note", "suggestion": "consider it"},
         ]
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
@@ -618,8 +634,8 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.watcher.state.get("example/one", 7)["findings"], findings)
         self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "findings")
 
-    def test_p0_and_p1_findings_enter_the_authorized_repair_flow(self):
-        for severity in ("P0", "P1"):
+    def test_p0_findings_enter_the_authorized_repair_flow(self):
+        for severity in ("P0",):
             with self.subTest(severity=severity):
                 self.watcher.state.data["prs"].clear()
                 findings = [{"path": "x.py", "line": 2, "severity": severity, "summary": "wrong", "suggestion": "fix it"}]
@@ -659,7 +675,7 @@ class WatcherTests(unittest.TestCase):
                 patch.object(pr_watch_repair, "repair_with_model") as worker, \
                 patch.object(pr_watch_repair, "commit_and_push_repair", return_value=(7, [])) as publish:
             self.watcher.repair_findings(self.config["repositories"][0], pr(), self.root,
-                                         [{"path": "x.py", "line": 1, "severity": "P1",
+                                         [{"path": "x.py", "line": 1, "severity": "P0",
                                            "summary": "wrong", "suggestion": "fix"}])
         worker.assert_called_once()
         publish.assert_called_once()
@@ -776,7 +792,7 @@ class WatcherTests(unittest.TestCase):
                 patch.object(pr_watch_repair, "commit_and_push_repair", return_value=(7, [])), \
                 patch.object(self.watcher, "comment", side_effect=pr_watch_common.WatchError("comment unavailable")):
             self.watcher.repair_findings(self.config["repositories"][0], pr(), self.root,
-                                         [{"path": "x.py", "line": 1, "severity": "P1",
+                                         [{"path": "x.py", "line": 1, "severity": "P0",
                                            "summary": "wrong", "suggestion": "fix"}])
         state = self.watcher.state.get("example/one", 7)
         self.assertEqual(state["head"], SHA_B)
@@ -794,7 +810,7 @@ class WatcherTests(unittest.TestCase):
         update.assert_called_once()
 
     def test_no_patch_attempts_exhaust_the_code_repair_budget(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=[finding]), \
                 patch.object(pr_watch_repair, "repair_with_model", side_effect=pr_watch_common.RepairAttemptError("no change")), \
@@ -809,7 +825,7 @@ class WatcherTests(unittest.TestCase):
         self.assertIn("no change", state["failure"])
 
     def test_semantic_repair_infrastructure_exhaustion_preserves_code_repair_budget(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=[finding]), \
                 patch.object(pr_watch_repair, "repair_with_model", side_effect=pr_watch_common.WatchError("offline")), \
@@ -826,8 +842,8 @@ class WatcherTests(unittest.TestCase):
 
     def test_changed_blocking_findings_are_published_before_repair(self):
         evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
-        old = {"path": "x.py", "line": 2, "severity": "P1", "summary": "old", "suggestion": "fix"}
-        new = {"path": "x.py", "line": 4, "severity": "P1", "summary": "new", "suggestion": "fix differently"}
+        old = {"path": "x.py", "line": 2, "severity": "P0", "summary": "old", "suggestion": "fix"}
+        new = {"path": "x.py", "line": 4, "severity": "P0", "summary": "new", "suggestion": "fix differently"}
         self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
                                base=SHA_BASE, format=1, outcome="retry", semantic="findings",
                                findings=[old], published_findings=[], review_posted=True,
@@ -860,10 +876,12 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(state["published_fingerprint"], state["review_fingerprint"])
 
     def test_semantic_repair_failure_does_not_consume_a_review_attempt(self):
-        findings = [{"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"}]
+        findings = [{"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"}]
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch_common, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=findings), \
                 patch.object(pr_watch_repair, "repair_with_model", side_effect=pr_watch_common.WatchError("worker timeout")), \
+                patch.object(pr_watch, "run", return_value=subprocess.CompletedProcess([], 0, "{}", "")), \
                 patch.object(pr_watch, "checked", return_value=""):
             self.watcher.process("example/one", 7)
         state = self.watcher.state.get("example/one", 7)
@@ -961,7 +979,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_saved_blocking_findings_resume_repair_when_merge_is_enabled(self):
         evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
                                base=SHA_BASE, format=1, outcome="findings", semantic="findings",
                                findings=[finding], review_posted=True)
@@ -1011,7 +1029,7 @@ class WatcherTests(unittest.TestCase):
     def test_retry_blocking_findings_never_repair_in_review_only_mode(self):
         self.watcher.config["repositories"][0]["merge"] = False
         evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
                                base=SHA_BASE, format=1, outcome="retry", semantic="findings",
                                findings=[finding], review_posted=True)
@@ -1022,7 +1040,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_interrupted_repairing_record_resumes_instead_of_stopping(self):
         evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
                                base=SHA_BASE, format=1, outcome="repairing", semantic="findings",
                                findings=[finding], review_posted=True, repair_rounds=1)
@@ -1046,7 +1064,7 @@ class WatcherTests(unittest.TestCase):
                 patch.object(pr_watch_repair, "repair_with_model", side_effect=pr_watch_common.RepairAttemptError("no change")):
             with self.assertRaises(pr_watch_common.RepairAttemptError):
                 self.watcher.repair_findings(self.config["repositories"][0], pr(), self.root,
-                                             [{"path": "x.py", "line": 1, "severity": "P1",
+                                             [{"path": "x.py", "line": 1, "severity": "P0",
                                                "summary": "wrong", "suggestion": "fix"}])
         self.assertEqual(self.watcher.state.get("example/one", 7)["repair_rounds"], 2)
 
@@ -1137,7 +1155,7 @@ class WatcherTests(unittest.TestCase):
         self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
                                base=SHA_BASE, format=1, outcome="passed_with_findings",
                                verification="passed", success_posted=True, review_posted=True,
-                               findings=[{"path": "x.py", "line": 2, "severity": "P1",
+                               findings=[{"path": "x.py", "line": 2, "severity": "P0",
                                           "summary": "wrong", "suggestion": "fix"}])
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=[]) as review, \
@@ -1241,12 +1259,13 @@ class WatcherTests(unittest.TestCase):
         findings = [{"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix it"}]
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=findings), \
+                patch.object(pr_watch, "verify", return_value=[]), \
                 patch.object(self.watcher, "repair_findings") as repair, \
                 patch.object(pr_watch_repair, "commit_and_push_repair") as publish:
             self.watcher.process("example/one", 7)
         repair.assert_not_called()
         publish.assert_not_called()
-        self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "findings")
+        self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "passed")
 
     def test_snapshot_failure_does_not_mark_head_failed(self):
         with patch.object(pr_watch, "pr_snapshot", side_effect=pr_watch_common.WatchError("closed")), \
@@ -1745,7 +1764,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_review_only_published_blocking_findings_stop_without_a_worktree(self):
         self.watcher.repositories["example/one"]["merge"] = False
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A,
                                evidence_key="example/one#7@" + SHA_BASE + ".." + SHA_A,
                                base=SHA_BASE, format=1, outcome="findings", semantic="findings",
@@ -1784,7 +1803,7 @@ class WatcherTests(unittest.TestCase):
                 merge.assert_not_called()
 
     def test_findings_publication_failure_preserves_review_and_retries_repair(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=[finding]) as review, \
                 patch.object(self.watcher, "comment_findings", side_effect=pr_watch_common.WatchError("offline")), \
@@ -1831,7 +1850,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_review_only_publication_retry_reuses_completed_review(self):
         self.watcher.repositories["example/one"]["merge"] = False
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A,
                                evidence_key="example/one#7@" + SHA_BASE + ".." + SHA_A,
                                base=SHA_BASE, format=1, outcome="reviewed", semantic="findings",
@@ -1876,7 +1895,7 @@ class WatcherTests(unittest.TestCase):
         verify.assert_called_once()
 
     def test_publication_history_is_independent_per_head(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.record_review_publication("example/one", 7, pr(SHA_A), [finding], True)
         self.watcher.record_review_publication("example/one", 7, pr(SHA_B), [finding], False)
         history = self.watcher.state.data["finding_publications"]["example/one#7"]
@@ -1901,7 +1920,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "merged")
 
     def test_infrastructure_retry_never_skips_saved_blocking_findings(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A,
                                evidence_key="example/one#7@" + SHA_BASE + ".." + SHA_A,
                                base=SHA_BASE, format=1, outcome="retry", semantic="findings",
@@ -2003,7 +2022,7 @@ class WatcherTests(unittest.TestCase):
         review.assert_called_once()
 
     def test_semantic_repair_infrastructure_failure_preserves_round(self):
-        finding = {"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}
+        finding = {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}
         self.watcher.state.put("example/one", 7, SHA_A,
                                evidence_key="example/one#7@" + SHA_BASE + ".." + SHA_A,
                                base=SHA_BASE, repair_rounds=1)
@@ -2089,6 +2108,25 @@ class WatcherTests(unittest.TestCase):
         pr_output = "--- FAIL: TestBase\n--- FAIL: TestPR\nAssertionError: PR defect"
         base_output = "--- FAIL: TestBase\nAssertionError: base defect"
         self.assertNotEqual(pr_watch_repair.failure_test_ids(pr_output), pr_watch_repair.failure_test_ids(base_output))
+
+    def test_main_comparison_matches_infrastructure_failure_without_test_names(self):
+        failure = "CI server failed:\nFAIL Browser runner resources (0.2s, exit 133)"
+        base = "CI server failed:\nFAIL Browser runner resources (1.4s, exit 133)"
+        with patch.object(pr_watch_repair, "checked", return_value=""), \
+                patch.object(pr_watch_repair, "run", return_value=subprocess.CompletedProcess([], 133, "", base)):
+            comparison = pr_watch_repair.main_failure_comparison(
+                "example/one", pr(), ".", failure, command=["scripts/ci/server.sh"])
+        self.assertTrue(comparison["reproduced"])
+        with patch.object(pr_watch_repair, "checked", return_value=""), \
+                patch.object(pr_watch_repair, "run", return_value=subprocess.CompletedProcess([], 1, "", "FAIL Web tests (exit 1)")):
+            comparison = pr_watch_repair.main_failure_comparison(
+                "example/one", pr(), ".", failure, command=["scripts/ci/server.sh"])
+        self.assertFalse(comparison["reproduced"])
+        with patch.object(pr_watch_repair, "checked", return_value=""), \
+                patch.object(pr_watch_repair, "run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            comparison = pr_watch_repair.main_failure_comparison(
+                "example/one", pr(), ".", failure, command=["scripts/ci/server.sh"])
+        self.assertFalse(comparison["reproduced"])
 
     def test_gh_json_passes_a_continuation_payload_to_stdin(self):
         payload = '{"title":"fix: continuation","head":"owner:branch"}'
@@ -2468,7 +2506,7 @@ class WatcherTests(unittest.TestCase):
         review.assert_called_once()
 
     def test_inline_review_uses_stdin_payload_and_falls_back(self):
-        findings = [{"path": "x.py", "line": 2, "severity": "P1", "summary": "wrong", "suggestion": "fix"}]
+        findings = [{"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix"}]
         requests = []
         def fake_run(argv, **kwargs):
             requests.append((argv, kwargs))

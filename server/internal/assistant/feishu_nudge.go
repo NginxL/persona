@@ -37,6 +37,67 @@ const (
 	nudgeRetryWindow = time.Hour
 )
 
+// A deadline nudge is independent of the ordinary nudge_after nudge. Half the
+// remaining card lifetime usually gives the owner more time than the fixed
+// margin; very short cards use the margin but never nudge in their first two
+// minutes. A lifetime too short for that lower bound gets no deadline nudge.
+const (
+	deadlineNudgeMargin = 5 * time.Minute
+	deadlineNudgeMinAge = 2 * time.Minute
+)
+
+func deadlineNudgeAt(created, expires time.Time) (time.Time, bool) {
+	if created.IsZero() || expires.IsZero() {
+		return time.Time{}, false
+	}
+	half := created.Add(expires.Sub(created) / 2)
+	at := half
+	if margin := expires.Add(-deadlineNudgeMargin); margin.Before(at) {
+		at = margin
+	}
+	if youngest := created.Add(deadlineNudgeMinAge); youngest.After(at) {
+		at = youngest
+	}
+	return at, at.Before(expires)
+}
+
+type nudgeKind int
+
+const (
+	ordinaryNudge nudgeKind = iota
+	deadlineNudge
+)
+
+type dueNudge struct {
+	id   string
+	kind nudgeKind
+}
+
+func (c botCard) progress(kind nudgeKind) nudgeProgress {
+	if kind == deadlineNudge {
+		return c.DeadlineNudge
+	}
+	return nudgeProgress{NudgedAt: c.NudgedAt, SkippedAt: c.SkippedAt, Tries: c.Tries, TriedAt: c.TriedAt}
+}
+
+func (c *botCard) setProgress(kind nudgeKind, p nudgeProgress) {
+	if kind == deadlineNudge {
+		c.DeadlineNudge = p
+		return
+	}
+	c.NudgedAt, c.SkippedAt, c.Tries, c.TriedAt = p.NudgedAt, p.SkippedAt, p.Tries, p.TriedAt
+}
+
+func deadlineNudgeDue(c botCard, now time.Time) bool {
+	if c.DeadlineNudge.settled() {
+		return false
+	}
+	at, ok := deadlineNudgeAt(c.At, c.Ix.ExpiresAt)
+	// Do not exclude an expired stored deadline here. A paused prepared card
+	// can resume with a later effective deadline; nudgeCard rechecks it live.
+	return ok && !now.Before(at)
+}
+
 // nudgeAfterOf is the setting in the status, in minutes: the default when the hub did not say, 0 off.
 func nudgeAfterOf(st FeishuStatus) time.Duration {
 	n := assistantwire.NudgeAfterDefault
@@ -96,20 +157,32 @@ func (s *Service) nudgeTick(ctx context.Context) {
 		b.st.NudgeOffAt = time.Time{}
 		s.saveBotStateLocked()
 	}
-	var due []string
+	var due []dueNudge
 	for id, c := range b.cards {
-		// A card left more than a day past its wait is let go (the user left it).
-		if c.MessageID == "" || c.nudgeSettled() || now.Sub(c.At) < after || now.Sub(c.At) > after+nudgeOldest {
+		if c.MessageID == "" {
 			continue
 		}
-		due = append(due, id)
+		if deadlineNudgeDue(c, now) {
+			due = append(due, dueNudge{id: id, kind: deadlineNudge})
+		}
+		// A card left more than a day past its ordinary wait is let go (the user left it).
+		if !c.nudgeSettled() && now.Sub(c.At) >= after && now.Sub(c.At) <= after+nudgeOldest {
+			due = append(due, dueNudge{id: id, kind: ordinaryNudge})
+		}
 	}
-	slices.SortFunc(due, func(x, y string) int { return b.cards[x].At.Compare(b.cards[y].At) })
+	slices.SortFunc(due, func(x, y dueNudge) int {
+		if order := b.cards[x.id].At.Compare(b.cards[y.id].At); order != 0 {
+			return order
+		}
+		return int(x.kind - y.kind)
+	})
 	if turnedOn {
-		for _, id := range due {
-			c := b.cards[id]
-			c.SkippedAt = now
-			s.keepBotCardLocked(id, &c)
+		for _, d := range due {
+			c := b.cards[d.id]
+			p := c.progress(d.kind)
+			p.SkippedAt = now
+			c.setProgress(d.kind, p)
+			s.keepBotCardLocked(d.id, &c)
 		}
 		b.mu.Unlock()
 		return
@@ -126,8 +199,8 @@ func (s *Service) nudgeTick(ctx context.Context) {
 	if quiet {
 		return // still due after them: the first sweep outside them nudges
 	}
-	for _, id := range due {
-		s.nudgeCard(ctx, id, st.Owner)
+	for _, d := range due {
+		s.nudgeCard(ctx, d.id, st.Owner, d.kind)
 	}
 }
 
@@ -142,35 +215,55 @@ func (s *Service) nudgeQuiet(ctx context.Context) (bool, error) {
 	return res.Quiet, nil
 }
 
-// nudgeCard nudges under the card of interaction id if it still waits and has not been nudged.
-func (s *Service) nudgeCard(ctx context.Context, id, owner string) {
+// nudgeCard nudges under the card of interaction id if it still waits and this
+// kind of nudge has not settled. Every send re-reads the live card, so an answer,
+// withdrawal, pause, replacement or extended deadline during the sweep wins.
+func (s *Service) nudgeCard(ctx context.Context, id, owner string, kind nudgeKind) {
 	ix, end := s.botCardLook(ctx, id)
-	if end != cardWaiting || s.agentGone(ix) { // answered or ended elsewhere, not restored yet, or its agent went away
+	if end != cardWaiting || ix.Private || s.agentGone(ix) { // ended, private, or its agent went away
 		return
+	}
+	expires := ix.ExpiresAt
+	if kind == deadlineNudge {
+		var waiting bool
+		expires, waiting = s.approvalNudgeDeadline(ix)
+		if !waiting {
+			return
+		}
 	}
 	b := &s.fbot
 	b.mu.Lock()
 	c, ok := b.cards[id] // read again: it may have been answered while the hub was asked
-	if !ok || c.MessageID == "" || c.nudgeSettled() {
+	if !ok || c.MessageID == "" || c.progress(kind).settled() {
 		b.mu.Unlock()
 		return
 	}
 	now := b.clock()
-	if !c.TriedAt.IsZero() && now.Sub(c.TriedAt) > nudgeRetryWindow {
+	if kind == deadlineNudge {
+		at, ok := deadlineNudgeAt(c.At, expires)
+		if !ok || now.Before(at) || !now.Before(expires) {
+			b.mu.Unlock()
+			return
+		}
+	}
+	p := c.progress(kind)
+	if !p.TriedAt.IsZero() && now.Sub(p.TriedAt) > nudgeRetryWindow {
 		// Feishu drops a repeated key only for about an hour: a send tried again later could land twice.
-		c.SkippedAt = now
+		p.SkippedAt = now
+		c.setProgress(kind, p)
 		s.keepBotCardLocked(id, &c)
 		b.mu.Unlock()
 		return
 	}
-	if c.TriedAt.IsZero() {
-		c.TriedAt = now
+	if p.TriedAt.IsZero() {
+		p.TriedAt = now
 	}
-	c.Tries++
-	c.NudgedAt = now
+	p.Tries++
+	p.NudgedAt = now
+	c.setProgress(kind, p)
 	s.keepBotCardLocked(id, &c) // marked before it is sent: a restart in between loses a nudge, never doubles one
 	b.mu.Unlock()
-	err := s.botNudge(ctx, c, ix, owner)
+	err := s.botNudge(ctx, c, ix, owner, kind)
 	if err == nil {
 		s.boardChanged() // its line on the waiting-for-you board says it was nudged
 		return
@@ -178,13 +271,15 @@ func (s *Service) nudgeCard(ctx context.Context, id, owner string) {
 	s.logf("bots: nudge under card %s: %v", id, err)
 	// Refused (the card or its chat is gone): nothing to nudge under. Otherwise it may not have gone out, and the next
 	// sweep tries again under the same key, so one that did go out lands once, up to nudgeMaxTries and nudgeRetryWindow.
-	giveUp := chatRefused(err) || feishubot.MessageGone(err) || c.Tries >= nudgeMaxTries
+	giveUp := chatRefused(err) || feishubot.MessageGone(err) || p.Tries >= nudgeMaxTries
 	b.mu.Lock()
 	if cur, still := b.cards[id]; still && cur.MessageID == c.MessageID {
-		cur.NudgedAt = time.Time{}
+		p := cur.progress(kind)
+		p.NudgedAt = time.Time{}
 		if giveUp {
-			cur.SkippedAt = b.clock()
+			p.SkippedAt = b.clock()
 		}
+		cur.setProgress(kind, p)
 		s.keepBotCardLocked(id, &cur)
 	}
 	b.mu.Unlock()
@@ -203,14 +298,14 @@ func (s *Service) agentGone(ix proto.Interaction) bool {
 
 // botNudge replies under c with the nudge: in a topic group in the topic, @-mentioning the owner, which is what makes
 // it reach them there; in the owner's private chat a plain reply, which notifies by itself.
-func (s *Service) botNudge(ctx context.Context, c botCard, ix proto.Interaction, owner string) error {
+func (s *Service) botNudge(ctx context.Context, c botCard, ix proto.Interaction, owner string, kind nudgeKind) error {
 	text := s.nudgeText(ctx, ix)
 	to := feishuTarget{NoDetour: true} // under the card or nowhere: a card that was withdrawn is not nudged
 	if c.ChatID != "" {
 		to.ChatID, to.InThread = c.ChatID, true
 		text = feishuMention(owner) + " " + text
 	}
-	p := to.params(map[string]any{"reply_to": c.MessageID, "text": text, "uuid": nudgeKey(ix.ID)})
+	p := to.params(map[string]any{"reply_to": c.MessageID, "text": text, "uuid": nudgeKey(ix.ID, kind)})
 	return s.appCall(ctx, AppFeishu, FeishuText, p, nil)
 }
 
@@ -220,9 +315,15 @@ func feishuMention(openID string) string {
 	return `<at user_id="` + strings.NewReplacer(`"`, "", "<", "", ">", "").Replace(openID) + `"></at>`
 }
 
-// nudgeKey is the key a card's nudge goes out under, so one sent twice (a retry after an error) lands once.
-func nudgeKey(id string) string {
-	sum := sha256.Sum256([]byte("nudge:" + id))
+// nudgeKey is the key one kind of card nudge goes out under, so a retry after an
+// error lands once. Keep the ordinary key compatible with cards sent before the
+// deadline nudge existed; the two kinds must not deduplicate each other.
+func nudgeKey(id string, kind nudgeKind) string {
+	what := "nudge:" + id
+	if kind == deadlineNudge {
+		what = "deadline-nudge:" + id
+	}
+	sum := sha256.Sum256([]byte(what))
 	return "nudge-" + hex.EncodeToString(sum[:12])
 }
 
@@ -260,5 +361,5 @@ func (s *Service) cardNudged(id string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s.loadBotLocked(context.Background())
-	return !b.cards[id].NudgedAt.IsZero()
+	return !b.cards[id].NudgedAt.IsZero() || !b.cards[id].DeadlineNudge.NudgedAt.IsZero()
 }

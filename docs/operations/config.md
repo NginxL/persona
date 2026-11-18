@@ -566,6 +566,40 @@ activation, verify the installed binary's version, checksum and `personad manage
 environment values, durable ownership and the actual derived directory. After activation, verify a reply and a harmless
 Persona tool call through the dedicated node, then switch between both assistants and inspect both histories.
 
+## A local external model adapter
+
+An advanced, optional node integration can reuse connections managed by a local program. Set
+`PERSONA_LAUNCHER_ADAPTER_CONFIG` only in that node service's startup environment to the absolute path of a private
+JSON configuration file. With no value, no adapter file or executable is searched for. This is local configuration,
+not hub state: the hub, manager configuration messages and clients cannot register executable commands.
+
+```json
+{
+  "version": 1,
+  "id": "example",
+  "command": ["/absolute/path/to/interpreter", "/absolute/path/to/adapter-entry", "integration"],
+  "native_program": "/absolute/path/to/claude"
+}
+```
+
+Use a stable `id`. `command` is an argument array, not a shell command; the first entry and `native_program` must be
+trusted absolute executable paths. A compiled adapter can use a one-element command array. Interpreter-based tools
+must name their interpreter explicitly rather than depend on a service finding it through an `env` shebang.
+Keep the configuration 0600 in a directory other users cannot modify; symlink configuration files and unsafe owners
+or write permissions are rejected. The command and native executable are validated on this computer, never supplied
+by a model inventory or request. Restart that node to load a changed registry; no installer or production service
+configuration is changed automatically.
+
+The first supported use is an explicit main-chat model pick on POSIX using the Claude Code CLI without a required
+agent sandbox. Unsupported execution methods and sandbox combinations fail before the agent starts, without
+changing the policy. This source cannot become a global default, profile/tier, background-task model or coding Agent
+launcher. Existing connections and their defaults are unchanged. If a saved pick names a disabled adapter, restore
+that local configuration or reset the main chat's pick; Persona does not choose another connection silently.
+
+The inventory is sanitized metadata. Connection credentials stay on the executing computer; a bootstrap may use a
+0600 temporary settings file in a 0700 directory, removed at process exit or forced stop. Full protocol, cache and
+lifecycle rules: `docs/integrations/launchers.md` ("External model adapters").
+
 ## DDNS (public.ddns)
 
 Use a fixed domain to find the hub after reconnecting changes its IPv6 prefix (`docs/operations/network.md`). Omit `public.ddns` to leave it disabled.

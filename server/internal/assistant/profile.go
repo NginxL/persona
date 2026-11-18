@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -230,6 +231,9 @@ func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) 
 	}
 	if err := fn(&v); err != nil {
 		return Settings{}, err
+	}
+	if proto.IsExternalLauncher(v.Launcher) {
+		return Settings{}, i18n.Err("external-adapter.purpose_unsupported")
 	}
 	if st := s.store(); st != nil {
 		if err := st.PutSetting(ctx, settingsKey, v); err != nil {
@@ -709,6 +713,9 @@ func (s *Service) warm(launcher string) {
 		if h := s.loadHandoff(ctx); h.Pick != nil {
 			pick, picked = *h.Pick, true
 		}
+	}
+	if proto.IsExternalLauncher(launcher) || picked && proto.IsExternalLauncher(pick.Launcher) {
+		return // no real session exists for a prewarm's external scope
 	}
 	if launcher == "" && !picked {
 		launcher = s.launcherNow(ctx)

@@ -22,6 +22,7 @@ var Features = []string{
 	"assistant_main_clear",     // POST /api/v1/assistant/main/clear: clear the main conversation's context in place (closed, archived, nothing carried)
 	"assistant_start_ops",      // POST /api/v1/assistant/conversations takes X-Persona-Op-Id: one start per op id (#1349)
 	"assistant_readiness",      // GET /api/v1/assistant/readiness, …/readiness/dismiss, warm's readiness (docs/assistant/onboarding.md 5.1)
+	"browser_qr_login",         // browser sign-in requests approved by an existing full device
 	"android_update",           // authenticated Android release metadata and APK downloads
 	"error_codes",              // stable HTTP error codes and optional delivery information
 	"client_hello",             // client platform, version and capabilities

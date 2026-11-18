@@ -1442,10 +1442,10 @@ struct StarterComposer: View {
     }
 
     #if os(iOS)
-    /// What + offers besides photos and files, as in a conversation (`AttachMoreSection.common`): no voice call before
-    /// the conversation exists, and an agent's quick commands are not Persona's.
+    /// What + offers besides photos and files, as in a conversation (`AttachMoreSection.common`): an agent's quick
+    /// commands are not Persona's.
     private var moreSections: [AttachMoreSection] {
-        var sections = AttachMoreSection.common(voice: nil, camera: CameraPicker.isAvailable ? { showCamera = true } : nil,
+        var sections = AttachMoreSection.common(camera: CameraPicker.isAvailable ? { showCamera = true } : nil,
                                                 scan: DocumentScanner.isAvailable ? { showScan = true } : nil,
                                                 glasses: MetaGlasses.isBuiltIn ? { showGlasses = true } : nil, mention: { typeMention() },
                                                 context: { contextPick = $0 })

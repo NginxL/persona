@@ -100,13 +100,21 @@ def run_tests(config_file, command, environment=None):
             raise ValueError("invalid Go build cache locations")
         environment[key] = value
     temp_dir = "/tmp" if os.path.isdir("/tmp") else None
-    with tempfile.TemporaryDirectory(prefix="pst-", dir=temp_dir) as directory:
-        home = Path(directory).resolve()
-        temporary = home / "tmp"
-        temporary.mkdir()
-        environment.update(HOME=str(home), TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary),
-                           GOTMPDIR=str(temporary), PERSONA_TEST_DATABASE_URL=database, JARVIS_TEST_DATABASE_URL=database)
-        return subprocess.run(command, env=environment).returncode
+    # Go makes t.TempDir()'s directories, its build directory and the test binary with the process's umask. Under 002
+    # (Ubuntu's default for a user with their own group) they are group-writable, and node's external adapter refuses
+    # its own test fixtures there (external_adapter_unix.go). The tests run as on a 022 host (#10280).
+    previous = os.umask(0o022)
+    os.umask(previous | 0o022)
+    try:
+        with tempfile.TemporaryDirectory(prefix="pst-", dir=temp_dir) as directory:
+            home = Path(directory).resolve()
+            temporary = home / "tmp"
+            temporary.mkdir()
+            environment.update(HOME=str(home), TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary),
+                               GOTMPDIR=str(temporary), PERSONA_TEST_DATABASE_URL=database, JARVIS_TEST_DATABASE_URL=database)
+            return subprocess.run(command, env=environment).returncode
+    finally:
+        os.umask(previous)
 
 
 def main():

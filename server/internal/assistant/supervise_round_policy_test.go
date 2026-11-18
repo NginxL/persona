@@ -27,7 +27,7 @@ var mainOnlySignals = []string{sigFailed, sigStarted, sigEscalated, sigLeaderStu
 
 // backgroundSignals are the signals digestTo sends the background supervisor for the main conversation's tasks:
 // every kind but mainOnlySignals.
-var backgroundSignals = []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigAllStopped, sigInterrupted,
+var backgroundSignals = []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigAllStopped, sigInterrupted,
 	sigPRConflict, sigDraftPR, sigReport, sigOrphaned, sigAsk, sigDecide, sigDecisionReply, sigRecheck, sigUndecidable,
 	sigOwnerCannot, sigParkedDue, sigParkDecided, sigInbox, sigOverdue}
 

@@ -4,8 +4,23 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
+
+var codexTranscriptGlob = filepath.Glob
+
+const (
+	oldCodexMissFor = time.Minute
+	oldCodexMissMax = 1024
+)
+
+type oldCodexMiss struct {
+	homes string
+	stamp []int64
+	at    time.Time
+}
 
 // oldCodexTranscript resolves an opaque identity after its rollout has aged out
 // of discovery and the node has restarted. This is a read lookup, not inventory:
@@ -15,16 +30,27 @@ func (n *Node) oldCodexTranscript(id string) string {
 		return ""
 	}
 	cfg := n.codexInventory()
+	var homes []string
 	for _, configured := range cfg.Homes {
 		home := canonicalCodexHome(configured, n.home)
-		if home == "" || home == cfg.LegacyHome {
-			continue
+		if home != "" && home != cfg.LegacyHome {
+			homes = append(homes, home)
 		}
+	}
+	key := cfg.LegacyHome + "\x00" + strings.Join(homes, "\x00")
+	var stamp []int64
+	for _, home := range homes {
+		stamp = append(stamp, missStamp(home)...)
+	}
+	if n.oldCodexTranscriptMissed(id, key, stamp) {
+		return ""
+	}
+	for _, home := range homes {
 		for _, pattern := range []string{
 			filepath.Join(home, "sessions", "*", "*", "*", "rollout-*.jsonl"),
 			filepath.Join(home, "archived_sessions", "rollout-*.jsonl"),
 		} {
-			paths, err := filepath.Glob(pattern)
+			paths, err := codexTranscriptGlob(pattern)
 			if err != nil {
 				n.logf("codex transcript lookup: %v", err)
 				continue
@@ -72,5 +98,28 @@ func (n *Node) oldCodexTranscript(id string) string {
 			}
 		}
 	}
+	n.noteOldCodexTranscriptMiss(id, key, stamp)
 	return ""
+}
+
+// oldCodexTranscriptMissed reuses only a negative answer. Successful lookups keep their existing per-call symlink and
+// home checks. The stamp notices normal Codex creation and archiving; the TTL also notices out-of-band imports into
+// old day directories, which those stamps cannot see.
+func (n *Node) oldCodexTranscriptMissed(id, homes string, stamp []int64) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	m, ok := n.oldMisses[id]
+	return ok && m.homes == homes && time.Since(m.at) < oldCodexMissFor && slices.Equal(m.stamp, stamp)
+}
+
+func (n *Node) noteOldCodexTranscriptMiss(id, homes string, stamp []int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.oldMisses == nil {
+		n.oldMisses = map[string]oldCodexMiss{}
+	}
+	if len(n.oldMisses) >= oldCodexMissMax {
+		clear(n.oldMisses)
+	}
+	n.oldMisses[id] = oldCodexMiss{homes: homes, stamp: slices.Clone(stamp), at: time.Now()}
 }

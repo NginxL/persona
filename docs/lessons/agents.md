@@ -1,5 +1,13 @@
 # Lessons: Claude Code, Codex, and herdr
 
+## Project MCP enums only in agy's tool declarations (#9944)
+
+agy can turn a valid boolean enum such as `task_review`'s `evidence.ready: enum [true]` into an empty Gemini string
+enum and reject the whole request. In its proxy's matched `tools/list` responses, omit enum constraints that are not
+nonempty arrays of nonempty strings. Walk schema keywords, not arbitrary objects: a property named `enum` is still
+a property, and defaults, examples and constants are data. Keep call arguments and the server's schema and validation
+unchanged. Regress with the real tool schema and proxy wire flow; a `tools/call` result containing `tools` is not a list.
+
 - Keep Codex app-server ancestry as raw thread IDs until session decoration maps it into home-scoped public IDs
   (#9393). Mapping a secondary home's parent twice leaves the child orphaned. Model-facing Agent lists must reuse
   `folded_under` and the parent's folded state too; fixing the client list alone still leaves helper rows in
@@ -36,6 +44,27 @@ Persist reuse separately from creation and keep its machine/path on retry; do no
 
 
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
+
+## Local adapter metadata is not execution authority (#7940)
+
+A runtime's model-list hooks belong to its session driver; they are not a configuration-only plugin. Reuse the
+native CLI lifecycle for a local connection adapter instead of creating a second session owner. Only trusted
+node-local configuration may name the executable: an inventory, a hub-supplied launcher name or a client scope
+field must never become a shell command. Keep the latest directory revision separate from the actual process
+binding so a refresh cannot interrupt a turn or silently change a model. Materialize an external default selection
+into its exact model ID when it is saved; otherwise a remote default change becomes an unintended conversation edit.
+
+A freshly loaded registry is not evidence that a saved target was deleted. Ordinary directory reads may remain
+nonblocking, but validation of a specific persisted pick must join one bounded inventory load on a miss and then
+repeat identity, scope and capability checks. Cover a completely cold registry and resident connection handover
+with an already-running process; fixtures that always prewarm inventory hide both failures.
+
+Pin connection environment in one final settings file while preserving Persona's hooks, MCP and permission fields;
+process environment alone does not establish the intended precedence, and appending a second `--settings` can drop
+the first. Let the node own the private output directory so group termination still removes credential files when
+the adapter's cleanup cannot run. A required or unknown agent sandbox is unsupported until the bootstrap has a
+verified sandbox boundary, not a reason to execute without it. Test initialization and control acknowledgments before
+user input, not just that a wrapper process exists.
 
 - A native terminal Codex start must preserve a user's same-name `codex()` function (#4876), not just find the executable. `codex-start` used to bypass it, losing launcher environment while a normal terminal command worked; the assistant app-server fix (#3707) did not cover this path. Pass the launcher and prompt as positional arguments to the interactive shell, never interpolate them as shell code, and keep the shell inside the agent sandbox.
   Fake-launcher tests must isolate rc paths such as `ZDOTDIR`, not just `HOME`: an inherited rc directory can otherwise load the user's real startup file and change the fake executable or flags.
@@ -254,6 +283,12 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   an empty box without a transcript receipt is ambiguous,
   not permission to paste again. A later follow-up's timestamp can show it was queued after work began; do not
   attribute the original submission to that follow-up without a terminal-key receipt.
+- A prompt of pictures only has no words to compare (#10179, from the web): its box held `[Image #n]<attached_images>`
+  and the photo's `path:` line, `pendingPrompt` saw nothing of its own, no recovery Enter went in, the window ended and
+  the send answered 200, and the leftover refused every later send to the pane as a draft for 11 minutes. Its own
+  `path:` line names the upload the send just saved under a fresh random name, so it identifies the prompt
+  (`ownPictures`); a chip alone is still nothing to tell by. Claude Code before 2.1.316 drops the `path:` lines, so
+  such a box there is not recovered.
 - Never confirm a first image prompt from quick metadata alone (#4794): its head stops at 256 KB and tail at
   384 KB, so a multi-megabyte user row can be absent from both. A real disposable Agent's normal start recorded
   the same image prompt three times while confirmation believed it had been dropped. Capture a full incremental

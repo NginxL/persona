@@ -298,6 +298,9 @@ struct HTMLView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         let v = WKWebView(frame: .zero, configuration: config)
+        #if os(iOS)
+        CallMediaGuard.shared.register(v) // a mail's media stays still while a system call is live
+        #endif
         v.scrollView.isScrollEnabled = false
         v.isOpaque = false
         v.backgroundColor = .clear

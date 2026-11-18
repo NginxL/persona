@@ -1,5 +1,11 @@
 # Lessons: Android
 
+## A cancelled SSH start must still report a rejected host key (#10101)
+
+Cancelling the coroutine waiting for JSch does not prove that its queued dial never ran or that the SSH thread has finished. Register a new session and check `closed` in one lock with `close()`; check the explicit late flag before starting queued blocking work, and pass a failure which arrives after cancellation to the tunnel's configuration-scoped block. Otherwise the next retry dials a host key which already failed the pin check. Keep the original no-redial connection assertion, test late success separately from late failure, and run the whole `core:hub` suite: this ordering may not reproduce in an isolated class. Do not replace the cancelled attempt's host-key error with a generic stopped state.
+
+A failed SSH start can leave a live local forwarding listener even after the session disconnects. A later OkHttp health probe then reaches the SSH server and looks like a second dial despite no new `HubWays.open()`. Close every listener in `Session.portForwardingL`, not only the port already assigned to `localPort`; the listener may exist before `start()` returns. Assert both the original no-redial test and that closing before port publication refuses a new probe.
+
 ## Device drag evidence needs a live touch sequence and a real test count
 
 `View.startDragAndDrop` is not a standalone drag-event factory. Inject `ACTION_DOWN` first, start the drag during that same touch sequence, then inject move and up events with the same `downTime`. Include `DRAG_FLAG_GLOBAL | DRAG_FLAG_GLOBAL_URI_READ` for content URIs that need a read grant. Without the down event, WindowManager can log `perform drag` with touch `(0,0)` and immediately unregister the drag input channel; a helper that then returns success without checking imported state creates empty negative-test passes. Assert both that the system drag started and that the expected attachment or non-import outcome reached the draft.

@@ -1,0 +1,21 @@
+{
+  "title": "エージェントに任せる",
+  "open_dialog": "エージェントに任せる…",
+  "pick": "エージェントを選ぶ",
+  "ask_label": "何をしてほしいか",
+  "ask_placeholder": "何をしてほしいか（任意）",
+  "transcript": "文字起こしも付ける",
+  "gets": "この会議の議事録（要約、決定事項、ToDo、未決事項）が届きます。",
+  "send": "送信",
+  "running": "会議はまだ続いています。終わってから任せてください。",
+  "no_material": "この会議にはまだ任せられる内容がありません（議事録も文字起こしもありません）。",
+  "problem_not_agent": "これは Persona の会話で、エージェントではありません。",
+  "problem_not_allowed": "このエージェントには会議を任せられません。",
+  "problem_unavailable": "コンピュータに接続できないか、会話が閉じています。",
+  "problem_send_failed": "メッセージを送れませんでした。",
+  "agent": "エージェント",
+  "row_sent": "「{name}」に任せました",
+  "row_failed": "「{name}」に任せられませんでした",
+  "retry": "再試行",
+  "open": "開く"
+}

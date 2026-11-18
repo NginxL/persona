@@ -159,7 +159,11 @@ func (s *Service) endPreparedIf(p *pending, status, text string, guard func(*pre
 			return
 		}
 		if text == "" {
-			text = cmpOr(a.op.Unanswered, prompts.RenderSettingUnanswered())
+			if status == "expired" {
+				text = "The approval window ended before the owner answered; nothing was executed."
+			} else {
+				text = cmpOr(a.op.Unanswered, prompts.RenderSettingUnanswered())
+			}
 		}
 		a.terminal = true
 		p.claimed = true
@@ -196,6 +200,12 @@ func (s *Service) finishPrepared(p *pending, status string) {
 	a.finished = true
 	r := a.result
 	clarified := a.clarified
+	if status == "expired" && !clarified {
+		// The original tool call is still waiting, so its result is the one place
+		// to identify the expired interaction. A clarified card instead uses its
+		// existing durable journal below; starting another delivery would duplicate it.
+		a.outcome.Text = approvalResultText(p.ix.ID, status, a.outcome.Text)
+	}
 	text := a.outcome.Text
 	journalStatus := a.reportStatus
 	if journalStatus == "" {

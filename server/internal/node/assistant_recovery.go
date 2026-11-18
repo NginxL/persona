@@ -283,6 +283,9 @@ func (n *Node) recoverAssistantResult(p *assistantProc, failed bool, result stri
 // recoverAssistantResultFor optionally requires the recovery that captured a pending result to still own the session.
 // That identity check prevents a result delayed by process replacement from restarting a turn the user has cancelled.
 func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTurnRecovery, failed bool, result string, kinds ...string) bool {
+	if proto.IsExternalLauncher(p.launcher) {
+		return false // an explicit adapter pick never enters automatic model recovery
+	}
 	// A model this chain switched to that the gateway does not have was the recovery's pick, not the user's: it is
 	// spent, remembered for the launcher, and the chain goes on to the next one (#4283, #5234). One the user asked for
 	// stays theirs to fix, unless it answered here within the hour: then the gateway failed for a moment (#5234).
@@ -421,10 +424,13 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	return true
 }
 
-// nextAssistantModel is the next concrete entry in the launcher's own ordered list. "default" is a placeholder, not a
-// fallback. A configured model ID can match an alias's resolved model; custom entries absent from the list start at its
-// first concrete entry. Nothing here invents an order for the named Agent presets in ModelProfile.Tiers.
-func nextAssistantModel(list proto.LauncherModels, current string, used map[string]bool) (string, bool) {
+// nextAssistantModel is the next concrete entry in the launcher's own ordered list: the entries after current, then
+// those before it (#10277). "default" is a placeholder, not a fallback. A configured model ID can match an alias's
+// resolved model; custom entries absent from the list start at its first concrete entry. Where fit knows the windows
+// (a Codex launcher's catalog), an entry whose window cannot hold the conversation is skipped, and those whose window is
+// at least the asked-for model's come first; with none known the order is the list's. Nothing here invents an order
+// for the named Agent presets in ModelProfile.Tiers.
+func nextAssistantModel(list proto.LauncherModels, current string, used map[string]bool, fit assistantFit) (string, bool) {
 	if list.Locked != "" {
 		return "", false
 	}
@@ -447,15 +453,28 @@ func nextAssistantModel(list proto.LauncherModels, current string, used map[stri
 			break
 		}
 	}
+	order := make([]int, 0, len(list.Models))
 	for i := at + 1; i < len(list.Models); i++ {
+		order = append(order, i)
+	}
+	for i := 0; i < at; i++ {
+		order = append(order, i)
+	}
+	next := ""
+	for _, i := range order {
 		m := list.Models[i]
 		if m.Default || m.ID == "" || m.ID == "default" || !proto.ValidModelID(m.ID) || m.ID == current ||
-			(m.Resolved != "" && (m.Resolved == current || used[m.Resolved])) || used[m.ID] {
+			(m.Resolved != "" && (m.Resolved == current || used[m.Resolved])) || used[m.ID] || !fit.holds(m) {
 			continue
 		}
-		return m.ID, true
+		if fit.preferred(m) {
+			return m.ID, true
+		}
+		if next == "" {
+			next = m.ID
+		}
 	}
-	return "", false
+	return next, next != ""
 }
 
 // resolvedAssistantDefault is the model the launcher's default stands for, when current is that default (unnamed or
@@ -525,10 +544,17 @@ func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, 
 		n.mu.Lock()
 		n.markUnavailableUsed(launcher, r.used) // a model another chain found the gateway does not serve (#5234)
 		n.mu.Unlock()
-		next, ok := nextAssistantModel(list, current, r.used)
+		fit := n.assistantFallbackFit(ctx, p.id, launcher, list, r.from.Model, current)
+		next, ok := nextAssistantModel(list, current, r.used, fit)
 		if !ok {
+			if fit.need > 0 && len(fit.windows) > 0 {
+				n.logger.Printf("assistant %s: no fallback model left whose window holds %d tokens", p.id[:8], fit.need)
+			}
 			n.finishAssistantRecovery(p, r)
 			return
+		}
+		if w := fit.windows[next]; w > 0 {
+			n.logger.Printf("assistant %s: fallback %s (window %d) for a conversation needing %d", p.id[:8], next, w, fit.need)
 		}
 		execution = assistantExecutionForModel(execution, list, next)
 		r.used[next] = true

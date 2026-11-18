@@ -6,6 +6,7 @@ import { notificationRoute } from "./contract.cjs";
 import { DesktopIPCOwner } from "./ipc-owner.js";
 import type { HubAddress } from "./urls.js";
 import type { IslandStatus } from "./island-model.js";
+import type { PageRoutes } from "./page-routes.js";
 
 function text(value: unknown, maximum: number): string {
   return typeof value === "string" ? value.trim().slice(0, maximum) : "";
@@ -56,6 +57,8 @@ export function installDesktopIPC(window: BrowserWindow, deps: {
   readonly notifications: DesktopNotifications;
   readonly presence: () => { active: boolean; notifies: boolean };
   readonly openLocalSettings: () => void;
+  /** This window's routes, which wait until its page listens (page-routes.ts, #10282). */
+  readonly routes: PageRoutes;
   /** The island at the MacBook notch (#7669, island.ts): its status, turning it on or off (kept), the web's state. */
   readonly island: {
     readonly status: () => IslandStatus;
@@ -67,7 +70,7 @@ export function installDesktopIPC(window: BrowserWindow, deps: {
     const hub = deps.hub();
     return event.sender === window.webContents && !window.isDestroyed() && event.senderFrame === event.sender.mainFrame && !!hub && inHub(hub, event.senderFrame.url);
   };
-  const names = ["desktop:notification-permission", "desktop:badge", "desktop:notify", "desktop:notifications-clear", "desktop:notification-close", "desktop:presence", "desktop:open-local-settings", "desktop:island-state"];
+  const names = ["desktop:notification-permission", "desktop:badge", "desktop:notify", "desktop:notifications-clear", "desktop:notification-close", "desktop:presence", "desktop:open-local-settings", "desktop:island-state", "desktop:page-started", "desktop:notification-listening"];
   const handlers = ["desktop:login-get", "desktop:login-set", "desktop:island-get", "desktop:island-set"];
   const releaseOwnership = ipcOwner.install();
   for (const name of names) ipcMain.removeAllListeners(name);
@@ -99,6 +102,13 @@ export function installDesktopIPC(window: BrowserWindow, deps: {
   listen("desktop:open-local-settings", (event: Electron.IpcMainEvent) => {
     // A request to show the separate local window only. No Link command, hub credential or local data crosses here.
     if (authorized(event)) deps.openLocalSettings();
+  });
+  // The preload: a new document started (its app does not listen yet), and its app now listens for routes.
+  listen("desktop:page-started", (event: Electron.IpcMainEvent) => {
+    if (authorized(event)) deps.routes.started();
+  });
+  listen("desktop:notification-listening", (event: Electron.IpcMainEvent) => {
+    if (authorized(event)) deps.routes.listen();
   });
   ipcMain.handle("desktop:login-get", function loginGet(event) {
     if (!authorized(event)) return { enabled: false };

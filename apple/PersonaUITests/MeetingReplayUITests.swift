@@ -121,8 +121,19 @@ final class MeetingReplayUITests: XCTestCase {
                 .compactMap { $0["bytes"] as? Int }.max() ?? 0
             return bytes >= 6 * 32_000
         }, "the file's audio didn't reach the hub (\(bytes) bytes)")
-        let lines = app.descendants(matching: .any).matching(identifier: "meeting-live-hub-line")
-        XCTAssertTrue(waitFor(20) { lines.count >= 1 }, "no line from the hub: \(app.debugDescription)")
+        // The hub has written a line (the mock's count, not a guess of how long that takes)…
+        var written = 0
+        XCTAssertTrue(waitFor(30) {
+            written = ((try? self.transcriptions(hub)) ?? [:]).filter { !before.contains($0.key) }.values
+                .compactMap { $0["lines"] as? Int }.max() ?? 0
+            return written >= 1
+        }, "the hub wrote no line (\(written))")
+        // …and the room shows the hub's words. Once the thread has anything the live box folds to the newest only: the
+        // hub's caption while one is being said, else its last line (MeetingLiveBox). Which one depends on whether the
+        // room's first message came before the first line, so either counts (#10109).
+        let hubLine = element(app, "meeting-live-hub-line")
+        let hubCaption = element(app, "meeting-live-interim")
+        XCTAssertTrue(waitFor(20) { hubLine.exists || hubCaption.exists }, "no words from the hub in the room: \(app.debugDescription)")
         try shot(app, "file-input")
 
         let end = app.buttons["recording-stop"].firstMatch

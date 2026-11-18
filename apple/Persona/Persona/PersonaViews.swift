@@ -43,10 +43,12 @@ struct PersonaDot: View {
     var size: CGFloat
     var state: PersonaState
     var persona: Persona?
+    /// Holds still whatever the state (a call on hold, muted or over: `CallAvatar`).
+    var still = false
 
     var body: some View {
         let p = persona ?? model.persona
-        let still = reduceMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
+        let still = still || reduceMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
         Group {
             if !p.isBuiltin, let frames = model.personas.frames(p, state) {
                 #if os(iOS) || os(visionOS)

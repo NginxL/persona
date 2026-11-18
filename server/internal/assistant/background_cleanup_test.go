@@ -35,12 +35,21 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 	tree.mu.Unlock()
 
 	// A screen-upgrade start checks runCtx under fleet.mu; taking it here closes the Add/Wait teardown window.
+	// Delayed turn completions use the same gate: stop pending timers and let an already running callback finish.
 	s.fleet.mu.Lock()
+	s.fleet.completionStopped = true
+	for timer := range s.fleet.completionTimers {
+		if timer.Stop() {
+			s.fleet.completionRuns.Done()
+		}
+		delete(s.fleet.completionTimers, timer)
+	}
 	s.fleet.mu.Unlock()
 	// workEvent and recordSendAsync use work.mu for the same runCtx + Add scheduling gate.
 	s.work.mu.Lock()
 	s.work.mu.Unlock()
 
+	waitFleetBackground(t, "turn completions", &s.fleet.completionRuns)
 	waitFleetBackground(t, "agent naming", &names.runs)
 	waitFleetBackground(t, "direction tree", &tree.runs)
 	waitFleetBackground(t, "screen upgrades", &s.fleet.upgrades)

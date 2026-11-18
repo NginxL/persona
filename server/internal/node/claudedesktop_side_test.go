@@ -98,6 +98,82 @@ func TestSideSessionsNameTheSessionThatStartedThem(t *testing.T) {
 	}
 }
 
+// A fork made with the desktop app's Fork names the session it came from only in forkedFromSessionId; the app's sidebar
+// nests a session under spawnedFrom.sessionId, else forkedFromSessionId, and so does the list (#9376): the fork's row
+// names that session's transcript in parent_agent_id, as a side session's does. spawnedFrom wins where both are written;
+// a fork moved to the top level (lineageDetached), one whose parent is not in the index or is archived, and a
+// forkedFromSessionId of another shape link nothing.
+func TestDesktopForksNestUnderTheSessionTheyCameFrom(t *testing.T) {
+	const (
+		parent   = "f0f0f0f0-0000-4000-8000-000000000001"
+		fork     = "f0f0f0f0-0000-4000-8000-000000000002" // forked from parent with the app's Fork
+		forkFork = "f0f0f0f0-0000-4000-8000-000000000003" // forked from fork: under fork
+		other    = "f0f0f0f0-0000-4000-8000-000000000004"
+		both     = "f0f0f0f0-0000-4000-8000-000000000005" // spawnedFrom names other, forkedFromSessionId parent: under other
+		split    = "f0f0f0f0-0000-4000-8000-000000000006" // split off with start_session: both name parent
+		older    = "f0f0f0f0-0000-4000-8000-000000000007" // spawnedFrom without sessionId: forkedFromSessionId names parent
+		detached = "f0f0f0f0-0000-4000-8000-000000000008" // forked from parent, then moved to the top level
+		orphan   = "f0f0f0f0-0000-4000-8000-000000000009" // forked from a session not in the index
+		gone     = "f0f0f0f0-0000-4000-8000-00000000000a" // archived: not listed
+		ofGone   = "f0f0f0f0-0000-4000-8000-00000000000b" // forked from gone
+		odd      = "f0f0f0f0-0000-4000-8000-00000000000c" // forkedFromSessionId of another shape: the entry is still read
+	)
+	n, home := testNode(t)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
+	dir := filepath.Join(home, ".claude", "projects", "-src-app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{parent, fork, forkFork, other, both, split, older, detached, orphan, gone, ofGone, odd} {
+		writeEntrypointTranscript(t, dir, id, "claude-desktop", time.Duration(i+1)*time.Minute)
+	}
+	_, third := useDesktopDirs(t)
+	forkedFrom := func(local string) string {
+		return `,"forkedFromSessionId":"local_` + local + `","forkedAtMessageUuid":"a1"`
+	}
+	spawnedFrom := func(local string) string {
+		return `,"spawnedFrom":{"sessionId":"local_` + local + `","userFork":true}`
+	}
+	writeDesktopEntry(t, third, parent, parent, false, nil, "")
+	writeDesktopEntry(t, third, fork, fork, false, nil, forkedFrom(parent))
+	writeDesktopEntry(t, third, forkFork, forkFork, false, nil, forkedFrom(fork))
+	writeDesktopEntry(t, third, other, other, false, nil, "")
+	writeDesktopEntry(t, third, both, both, false, nil, spawnedFrom(other)+forkedFrom(parent))
+	writeDesktopEntry(t, third, split, split, false, nil, spawnedFrom(parent)+forkedFrom(parent))
+	writeDesktopEntry(t, third, older, older, false, nil, `,"spawnedFrom":{"btw":true,"sideSession":true}`+forkedFrom(parent))
+	writeDesktopEntry(t, third, detached, detached, false, nil, forkedFrom(parent)+`,"lineageDetached":true,"lineageDetachedBy":"user"`)
+	writeDesktopEntry(t, third, orphan, orphan, false, nil, forkedFrom("ffffffff-0000-4000-8000-000000000003"))
+	writeDesktopEntry(t, third, gone, gone, true, nil, "")
+	writeDesktopEntry(t, third, ofGone, ofGone, false, nil, forkedFrom(gone))
+	oddPath := writeDesktopEntry(t, third, odd, odd, false, nil, `,"forkedFromSessionId":{"sessionId":"local_`+parent+`"}`)
+
+	if e := readClaudeDesktopEntry(oddPath); e.transcript != odd || e.parent != "" {
+		t.Errorf("an entry whose forkedFromSessionId is of another shape reads as transcript %q, parent %q; want %q and none", e.transcript, e.parent, odd)
+	}
+	rows := map[string]proto.Session{}
+	for _, s := range n.sessionList(context.Background(), false) {
+		rows[s.SessionID] = s
+	}
+	if _, ok := rows[gone]; ok {
+		t.Fatal("the archived session is listed")
+	}
+	want := map[string]string{parent: "", fork: parent, forkFork: fork, other: "", both: other, split: parent, older: parent,
+		detached: "", orphan: "", ofGone: "", odd: ""}
+	for id, p := range want {
+		s, ok := rows[id]
+		if !ok {
+			t.Errorf("%s is not listed", id)
+			continue
+		}
+		if got := s.ParentAgentID(); got != p {
+			t.Errorf("%s parent_agent_id = %q, want %q", id, got, p)
+		}
+		if s.IsChild() || s.IsSubtask() {
+			t.Errorf("%s became a child: a fork stays a session of its own", id)
+		}
+	}
+}
+
 // A scheduled task's runs are drawn as the app's sidebar lists them, under the task (#8314): the newest run (createdAt)
 // heads it and the others name it in parent_agent_id. A task with one run, a run some session started (its own parent
 // wins) and an archived run (not listed) are left as they are.

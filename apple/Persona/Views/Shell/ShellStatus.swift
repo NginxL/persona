@@ -143,6 +143,11 @@ struct ShellWindowHooks: UIViewRepresentable {
         }
     }
 }
+/// A window above the call's bar (`CallWindow`, iOS) whose content is placed for the pages' top bars, as the toasts'
+/// is (just below them): while the bar shows, it gets the bar's room as the pages under it do, so a toast never lies
+/// on a top bar the bar moved down (the dictation refusal's note lay on an Agent conversation's title).
+@MainActor protocol TakesCallBarRoom: AnyObject {}
+
 /// The shell's toasts (`AppModel.toast`) over everything in its scene, the drawer, the pages and a sheet over them, in a
 /// window of their own above the shell's: it takes no touches, so what is under a toast takes the tap (a toast over the
 /// top bar's switch took the tap meant for it, 2026-11-02), and it moves nothing (opening the status row for a toast
@@ -180,7 +185,7 @@ struct ShellWindowHooks: UIViewRepresentable {
     }
 
     /// Takes no touch but on the toast's button: every other one goes to the windows below.
-    private final class PassThrough: UIWindow {
+    private final class PassThrough: UIWindow, TakesCallBarRoom {
         let touchable = Touchable()
 
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

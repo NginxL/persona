@@ -148,6 +148,8 @@ type Device struct {
 	// (--model) and effort, which "Models" needs of the machine a launcher purpose runs on.
 	Version            string `json:"version,omitempty"`
 	ModelConfiguration bool   `json:"model_configuration,omitempty"`
+	// ExternalInventory is announced only by a node with an enabled, trusted local model adapter.
+	ExternalInventory bool `json:"external_inventory,omitempty"`
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`

@@ -4,6 +4,7 @@ import { parseDeepLink, parseHubAddress, externalBrowserURL, inHub } from "./url
 import type { HubAddress } from "./urls.js";
 import { appPairingURL } from "./pairing.js";
 import { installDesktopIPC, DesktopNotifications } from "./ipc.js";
+import { PageRoutes } from "./page-routes.js";
 import { installSetupIPC } from "./setup-ipc.js";
 import { JSONStore } from "./store.js";
 import { restoreWindow, DEFAULT_WINDOW } from "./window-state.js";
@@ -34,12 +35,17 @@ let screenLocked = false;
 let presenceTimer: ReturnType<typeof setInterval> | undefined;
 const hubWindow = new HubWindowLifecycle<BrowserWindow | undefined>();
 const store = () => JSONStore.inUserData(app.getPath("userData"));
+// Each hub window's routes wait until its page listens (page-routes.ts, #10282): no route is sent around them.
+const pageRoutes = new WeakMap<BrowserWindow, PageRoutes>();
+function openRoute(window: BrowserWindow | undefined, route: string): void {
+  if (window && !window.isDestroyed()) pageRoutes.get(window)?.open(route);
+}
 // The island at the MacBook notch (#7669): off until the person turns it on; a clicked row opens as a notification does.
 const island = new NotchIsland(route => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
-    mainWindow.webContents.send("desktop:notification-open", route);
+    openRoute(mainWindow, route);
   } else void showMain();
 });
 
@@ -47,7 +53,7 @@ function navigateFromDeepLink(raw: string): void {
   const link = parseDeepLink(raw);
   if (!link) return;
   if (!hub) { pendingDeepLink = raw; void showSetup(); return; }
-  if (link.kind === "open" && link.route) mainWindow?.webContents.send("desktop:notification-open", link.route);
+  if (link.kind === "open" && link.route) openRoute(mainWindow, link.route);
   if (link.kind === "pair-app") {
     const pairing = appPairingURL(hub, raw);
     if (pairing) {
@@ -139,6 +145,10 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     },
   });
   mainWindow = current;
+  const routes = new PageRoutes(route => {
+    if (!current.isDestroyed()) current.webContents.send("desktop:notification-open", route);
+  });
+  pageRoutes.set(current, routes);
   const page = current.webContents.id; // whose island state is whose (NotchIsland.forget)
   if (!app.isPackaged && process.env.PERSONA_DESKTOP_DEBUG === "1") {
     const log = (value: unknown) => {
@@ -164,6 +174,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     },
     presence: () => desktopPresence(powerMonitor.getSystemIdleTime(), screenLocked, Notification.isSupported()),
     openLocalSettings: () => { void showSetup(); },
+    routes,
     island: {
       status: () => island.status(),
       set: async enabled => {
@@ -176,7 +187,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     notifications: new DesktopNotifications(route => {
       current.show();
       current.focus();
-      current.webContents.send("desktop:notification-open", route);
+      routes.open(route);
     }),
   });
   const save = () => {
@@ -319,6 +330,9 @@ async function showSetup(): Promise<void> {
 const locked = app.requestSingleInstanceLock();
 if (!locked) app.quit();
 else {
+  // Windows and Linux start the app with the link as an argument when it is not running (macOS: open-url below); it
+  // waits like any link that comes before the window, and its route then waits for the page (#10282).
+  pendingDeepLink = process.argv.find(value => /^(?:persona|jarvis):\/\//i.test(value));
   app.on("second-instance", (_event, argv) => {
     const raw = argv.find(value => /^(?:persona|jarvis):\/\//i.test(value));
     if (raw) navigateFromDeepLink(raw);

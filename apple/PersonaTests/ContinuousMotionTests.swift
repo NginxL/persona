@@ -25,6 +25,7 @@ struct ContinuousMotionTests {
     static let registry: [String: Entry] = [
         "Persona/DesignSystem/BreathingRing.swift": Entry(count: 1, why: "Needs you: the dot breathes", stillIn: "Persona/DesignSystem/Components.swift"),
         "Persona/DesignSystem/VoiceOrb.swift": Entry(count: 1, why: "A voice call: listening and speaking", stillIn: "Persona/DesignSystem/VoiceOrb.swift"),
+        "Persona/Calls/CallAvatar.swift": Entry(count: 1, why: "A call: one clock, the ring's own, for the ring following the voice's level, its lap while the call connects, and while the assistant speaks the avatar's bounce, its ripples and Mochi's mouth (paused otherwise)", stillIn: "Persona/Calls/CallAvatar.swift"),
         "Persona/Recording/MeetingFloatingWindow.swift": Entry(count: 1, why: "The floating meeting window's waveform while someone speaks (#8731 V5)", stillIn: "Persona/Recording/MeetingFloatingWindow.swift"),
         "Persona/Recording/RecordingLevelMeter.swift": Entry(count: 2, why: "A meeting recording: the level meter (a 30 fps clock) and the recording dot's blink", stillIn: "Persona/Recording/RecordingLevelMeter.swift"),
         "Persona/DesignSystem/ComposerHoldMic.swift": Entry(count: 1, why: "Recording while the finger holds the mic", stillIn: "Persona/DesignSystem/ComposerHoldMic.swift"),

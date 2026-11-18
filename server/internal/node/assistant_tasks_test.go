@@ -16,7 +16,8 @@ import (
 func assistantNode(t *testing.T) *Node {
 	t.Helper()
 	return &Node{home: t.TempDir(), paths: map[string]string{}, files: map[string]*transcript.File{}, procs: map[string]*assistantProc{},
-		agents: map[string]host.Agent{}, state: &stateFile{Sessions: map[string]sessionState{}}, logger: log.New(io.Discard, "", 0)}
+		agents: map[string]host.Agent{}, state: &stateFile{Sessions: map[string]sessionState{}}, logger: log.New(io.Discard, "", 0),
+		metas: map[string]quickMeta{}, bgScans: map[string]*bgScan{}} // a model recovery reads the transcript's meta (#10277)
 }
 
 // claude -p reports its running background tasks and monitors (background_tasks_changed); the process waiting on

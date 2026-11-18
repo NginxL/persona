@@ -293,6 +293,10 @@ func (s *Service) launcherRoutes() {
 	})
 	// "Test": one real request through the launcher on a machine (default: the assistant's).
 	s.handle("POST /api/v1/launchers/{name}/check", func(w http.ResponseWriter, r *http.Request) {
+		if proto.IsExternalLauncher(r.PathValue("name")) {
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("external-adapter.scope_required"))
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
 		defer cancel()
 		for _, l := range s.storedLaunchers(ctx) {
@@ -381,6 +385,9 @@ func (s *Service) launcherRoutes() {
 func sessionLaunchers(discovered, configured []ConfiguredLauncher) []ConfiguredLauncher {
 	list := append([]ConfiguredLauncher{}, discovered...)
 	for _, override := range configured {
+		if proto.IsExternalLauncher(override.Name) || override.Source == proto.ExternalLauncherSource {
+			continue // only this machine's node may advertise an external target
+		}
 		found := false
 		for i := range list {
 			if list[i].Name == override.Name {
@@ -437,6 +444,9 @@ func (s *Service) pickerTiers(ctx context.Context, machine string, launchers []C
 	var out []pickerTier
 	for _, name := range slices.Sorted(maps.Keys(p.Tiers)) {
 		t := p.Tiers[name]
+		if proto.IsExternalLauncher(t.Launcher) {
+			continue
+		}
 		if slices.ContainsFunc(launchers, func(l ConfiguredLauncher) bool { return l.Name == t.Launcher }) ||
 			slices.Contains(hidden, t.Launcher) && s.hiddenUsable(ctx, machine, t.Launcher) { // hidden still runs (#4661)
 			out = append(out, pickerTier{ModelTier: t, Name: name})
@@ -475,13 +485,23 @@ func (s *Service) machineLauncherRoutes() {
 		if purpose := r.URL.Query().Get("purpose"); purpose == "" || purpose == "agent.new" {
 			host = agentStartHost(d, r.URL.Query().Get("host"))
 		}
-		list, err := s.pickerLaunchersOn(ctx, mid, host)
+		var list []ConfiguredLauncher
+		var err error
+		if d.ExternalInventory && r.URL.Query().Get("purpose") == "assistant" {
+			list, err = s.externalPickerLaunchers(ctx, d, r.URL.Query().Get("refresh") == "1")
+		} else {
+			list, err = s.pickerLaunchersOn(ctx, mid, host)
+		}
 		var unavailable []unavailableLauncher
 		if err == nil && r.URL.Query().Get("purpose") == "assistant" { // the main chat's menu, and the scheduled tasks' that follow it
 			all := list
 			if list, err = s.assistantLaunchersOf(ctx, mid, all); err == nil {
 				unavailable = s.mainChatUnavailable(ctx, mid, all, list, s.requestLang(r)) // and what it can't run, with why (#5033)
 			}
+		} else if err == nil {
+			list = slices.DeleteFunc(list, func(l ConfiguredLauncher) bool {
+				return proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource
+			})
 		}
 		if err != nil {
 			apierr.Call(w, err)
@@ -497,6 +517,10 @@ func (s *Service) machineLauncherRoutes() {
 		// ID, which clients look up here.
 		stored := s.storedLaunchers(ctx)
 		for i, l := range shown {
+			if proto.IsExternalLauncher(l.Name) && l.External != nil {
+				shown[i].DisplayName = l.External.Name
+				continue
+			}
 			j := slices.IndexFunc(stored, func(m storedLauncher) bool { return m.Name == l.Name })
 			if j >= 0 && proto.CanonicalLauncherSource(l.Source) == "persona" {
 				shown[i].DisplayName = stored[j].DisplayName

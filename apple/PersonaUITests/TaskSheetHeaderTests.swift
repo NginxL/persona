@@ -3,8 +3,12 @@ import XCTest
 /// A task opened from the main conversation (#3255): its sheet has one header, the agent's chat's — ✕, the task's
 /// title over the agent's state and place, ⋯ — with no row of the space's other agents under it; ⋯ has
 /// 「在 Agents 里打开」, and there the Agents page's chat keeps its tabs. Against scripts/mock/mock_hub.py with
-/// MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 (PERSONA_MOCK_HUB); with MOCK_TASKS_DOCK=multi (PERSONA_TASK_MULTI=1) the task has
-/// two agents and its title's ⌄ switches between them. Phone only (an iPad pushes the page, `IPadTaskDetailTests`).
+/// MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 MOCK_MANAGERS=1 (PERSONA_MOCK_HUB): one assistant, so the MacBook, where the task's
+/// agent runs, is this assistant's. With the default mock's several the MacBook is another assistant's, the app lists
+/// only the current one's sessions (#5587), and the sheet, with no agent to show, draws its own header (✕, the title as
+/// text) over 「Agent 没开起来」 (#10253): the test stops at launch on such a hub. With MOCK_TASKS_DOCK=multi
+/// (PERSONA_TASK_MULTI=1) the task has two agents and its title's ⌄ switches between them. Phone only (an iPad pushes
+/// the page, `IPadTaskDetailTests`).
 /// With PERSONA_SHOTS set it writes the pages there, PERSONA_SHOTS_APPEARANCE naming the simulator's appearance.
 final class TaskSheetHeaderTests: XCTestCase {
     private var hub: String!
@@ -12,8 +16,10 @@ final class TaskSheetHeaderTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else {
-            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 (PERSONA_MOCK_HUB)")
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 MOCK_MANAGERS=1 (PERSONA_MOCK_HUB)")
         }
+        try MockHubRoster.requireOneAssistant(hub, lacks: "the app lists only the current one's sessions, so the task's agent "
+                                              + "on the MacBook is not there and its sheet has no chat header")
         self.hub = hub
     }
 

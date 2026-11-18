@@ -262,9 +262,12 @@ type modelsState struct {
 
 	customMu sync.Mutex // one change of the remembered typed ids at a time (models_custom.go)
 
-	zshrcMu         sync.Mutex
-	zshrc           map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
-	zshrcRefreshing bool                        // one background refresh fills the last-seen snapshot at a time
+	zshrcMu           sync.Mutex
+	zshrcWrite        sync.Mutex // serialize source-scoped snapshot persistence without holding the reader lock
+	externalRefresh   map[string]*externalDirectoryRefresh
+	zshrc             map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
+	zshrcRefreshing   bool                        // one background refresh fills the last-seen snapshot at a time
+	zshrcRefreshAgain bool                        // a node changed its directory during that refresh
 	// zshrcSync: how each machine's list came in the last time they were asked (设置 › 模型供应商's 各台电脑).
 	zshrcSync map[string]LauncherSync
 
@@ -284,6 +287,9 @@ func (s *Service) modelRecord(ctx context.Context, id string) (modelRecord, erro
 // saveModelRecord writes purpose id's record if it is still at revision (the database compares and sets; the test
 // stores without that rely on the caller holding models.mu).
 func (s *Service) saveModelRecord(ctx context.Context, id string, revision int64, b ModelBinding) error {
+	if err := checkExternalPurpose(b); err != nil {
+		return err
+	}
 	st := s.store()
 	if st == nil {
 		return i18n.Err("assistant-models.err_no_database")

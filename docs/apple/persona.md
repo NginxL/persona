@@ -234,7 +234,12 @@ The built-in Mochi drawing doesn't use bitmaps; `AssistantAvatar` draws the same
 - Mochi's five states: idle looks like the icon and blinks every 3.6 seconds; thinking raises its eyes to a thought bubble at the top right (three orange dots, motion lines tucked away);
   working scans its eyes side to side, bounces gently, lights its motion lines in turn, and an orange arc runs along the circular edge; needs you has a breathing red ring around the outside and sways side to side (waving);
   offline turns gray, closes its eyes, and has no motion lines. Frame 0 of each state is recognizable on its own.
-- Drawing is in `Shared/Design/PersonaFace.swift` (one frame at a given moment); `AssistantAvatar` only provides the clock. The Lock Screen / Dynamic Island Live Activity uses the same code to draw still frames (`docs/apple/live-activity.md` ("Avatar")).
+- Drawing is in `Shared/Design/PersonaFace.swift` (one frame at a given moment); `AssistantAvatar` only provides the clock.
+- On a call's screen (#9887, `docs/apple/calls.md` "The avatar") the avatar shows the call's states with these same five
+  pictures (a package's frames for each, its idle ones for a state it lacks), plus two call-only parameters of Mochi's
+  drawing: `mouth` (moving with the voice while the assistant speaks) and `eyesShut` (on hold). Their defaults draw
+  nothing more, so every other use (the dot, the avatar, the widgets, the Live Activity) is pixel for pixel as before.
+  The pack format has no `speaking` state; an optional one is a future idea (a change to the format through the hub). The Lock Screen / Dynamic Island Live Activity uses the same code to draw still frames (`docs/apple/live-activity.md` ("Avatar")).
 
 ## Color scheme → design tokens
 

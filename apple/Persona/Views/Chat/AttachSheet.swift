@@ -1600,18 +1600,16 @@ extension AttachPanel {
 }
 
 extension AttachMoreSection {
-    /// The rows every composer's + offers besides photos and files, in their order (#3225, #3805): the calls and the
-    /// camera, then Mention. A row whose action is nil is not there (no call before a conversation exists, no camera).
+    /// The rows every composer's + offers besides photos and files, in their order (#3225, #3805): the camera, then
+    /// Mention. A row whose action is nil is not there (no camera). No Voice Chat or Call Persona rows (#9887 one
+    /// button): the composer's phone icon is the one voice entry.
     /// `scan`: Scan Document (#3720), next to Take Photo. `meeting`: Persona's main conversation's Meeting Recording
     /// (#3723), the sidebar's row by its words: with a recording under way it says so and opens it. `context`: Add as
     /// Context › Knowledge Note… / To-do… / Inbox Item… (#3721), folded under Mention.
-    static func common(voice: (() -> Void)?, call: (() -> Void)? = nil, camera: (() -> Void)?, scan: (() -> Void)? = nil,
+    static func common(camera: (() -> Void)?, scan: (() -> Void)? = nil,
                        glasses: (() -> Void)?, meeting: (() -> Void)? = nil, mention: @escaping () -> Void,
                        context: ((ContextPickKind) -> Void)? = nil) -> [AttachMoreSection] {
         var capture: [AttachMoreRow] = []
-        if let voice { capture.append(AttachMoreRow(id: "composer-menu-voice", title: String(localized: "Voice Chat"), symbol: Theme.Icon.voiceChannel, action: voice)) }
-        // Persona's main conversation (#9290): a phone call to Persona through the system's call UI, beside the chat's own voice.
-        if let call { capture.append(AttachMoreRow(id: "composer-menu-call", title: String(localized: "Call Persona"), symbol: Theme.Icon.callPersona, action: call)) }
         if let camera { capture.append(AttachMoreRow(id: "composer-menu-camera", title: String(localized: "Take Photo [Chat View 6e3a10]"), symbol: Theme.Icon.camera, action: camera)) }
         if let scan { capture.append(AttachMoreRow(id: "composer-menu-scan", title: String(localized: "Scan Document"), symbol: Theme.Icon.scanDocument, action: scan)) }
         if let glasses { capture.append(AttachMoreRow(id: "attach-glasses", title: String(localized: "Glasses Photo"), symbol: Theme.Icon.glasses, action: glasses)) }

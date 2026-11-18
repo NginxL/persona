@@ -222,7 +222,7 @@ func (s *Service) workTurnEnded(ctx context.Context, machine, sid string) {
 	}
 	s.wakeWaitersOn(machine, sid)
 	// On a timer: a goroutine asleep through the window would hold a stack per pending turn end (#2472).
-	time.AfterFunc(settleOf(s.triageCfg(ctx)), func() { s.workTurnSettled(ctx, machine, sid) })
+	s.afterTurnCompletion(settleOf(s.triageCfg(ctx)), func() { s.workTurnSettled(ctx, machine, sid) })
 }
 
 // workTurnSettled checks the turn after the settle window.

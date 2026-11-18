@@ -34,6 +34,8 @@ type Launcher struct {
 	PermissionModes PermissionModeSet `json:"permission_modes,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
+	// External is a sanitized, machine-local adapter advertisement. It grants no execution authority.
+	External *ExternalLauncher `json:"external,omitempty"`
 	// AssistantFor: on an Assistant launcher, the Agent launcher of this computer it runs the assistant for, as the
 	// runtime declares it (the person who set it up says it is the same agent and account): integrations/grok's
 	// grok-chat for the Paseo provider grok, which only starts Agents. The main chat's picker points that one at it

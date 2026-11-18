@@ -6,15 +6,37 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
-const assistantControlTimeout = 15 * time.Second
+var (
+	assistantControlTimeout = 15 * time.Second
+	// A cold shell/CLI has not begun servicing controls yet. Keep that preparation
+	// bounded independently of the ordinary acknowledgment wait.
+	assistantStartupTimeout = time.Minute
+)
 
 // assistantControlUnconfirmed keeps transport failures distinguishable from Claude's explicit refusal,
 // while preserving the coded error through RPC. A failed initial launch can still use its startup retries.
-type assistantControlUnconfirmed struct{ error }
+type assistantControlUnconfirmed struct {
+	error
+	cause error
+}
 
-func (e *assistantControlUnconfirmed) Unwrap() error { return e.error }
+func (e *assistantControlUnconfirmed) Unwrap() []error { return []error{e.error, e.cause} }
+
+type assistantControlTimeoutError struct {
+	stage string
+	wait  time.Duration
+}
+
+func (e *assistantControlTimeoutError) Error() string {
+	return i18n.T(i18n.Default, "node-assistant-start."+e.stage, i18n.Args{"wait": e.wait.Round(100 * time.Millisecond).String()})
+}
+
+func (e *assistantControlTimeoutError) Unwrap() error { return context.DeadlineExceeded }
 
 type assistantControlResponse struct {
 	RequestID string          `json:"request_id"`
@@ -31,10 +53,34 @@ func (p *assistantProc) control(ctx context.Context, request map[string]any) err
 
 // controlAnswer is control with the answer Claude gave, null when it gave none.
 func (p *assistantProc) controlAnswer(ctx context.Context, request map[string]any) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, assistantControlTimeout)
-	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	started := time.Now()
+	wait := assistantControlTimeout
+	var ready <-chan struct{}
+	if !p.hasStarted() && !p.born.IsZero() {
+		// Do not wait for stdout before writing: some CLIs emit nothing until
+		// they read a request. Stderr from shell plugins is never readiness.
+		ready = p.ready
+		// A dormant warm spare may legitimately emit nothing until its first
+		// request, long after creation. It still gets the ordinary response budget.
+		wait = max(assistantControlTimeout, time.Until(p.born.Add(assistantStartupTimeout)))
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	stage := "control_write_timeout"
+	timedOut := func() error {
+		if ready != nil {
+			p.mu.Lock()
+			shellReady := !p.shellReadyAt.IsZero() || proto.IsExternalLauncher(p.launcher)
+			p.mu.Unlock()
+			stage = "shell_start_timeout"
+			if shellReady {
+				stage = "assistant_ready_timeout"
+			}
+		}
+		return &assistantControlTimeoutError{stage: stage, wait: time.Since(started)}
 	}
 	id := fmt.Sprintf("persona-%d", p.reqSeq.Add(1))
 	result := make(chan assistantControlResponse, 1)
@@ -54,26 +100,36 @@ func (p *assistantProc) controlAnswer(ctx context.Context, request map[string]an
 	// The caller retires the process on transport failure, closing stdin and releasing this writer.
 	written := make(chan error, 1)
 	go func() { written <- p.write(line) }()
-	select {
-	case err := <-written:
-		if err != nil {
-			return nil, err
+	for {
+		select {
+		case err := <-written:
+			if err != nil {
+				return nil, err
+			}
+			written = nil
+			stage = "control_response_timeout"
+		case response := <-result:
+			if response.Subtype == "success" {
+				return response.Response, nil
+			}
+			return nil, refusal("assistant_control_failed", response.Error, nil)
+		case <-ready:
+			ready = nil
+			// The assistant is now servicing its protocol. Give this request
+			// the full normal response budget, regardless of shell startup time.
+			timer.Reset(assistantControlTimeout)
+		case <-timer.C:
+			return nil, timedOut()
+		case <-ctx.Done():
+			// A shorter caller deadline must retain the phase and elapsed wait
+			// too; assistantSend sees ctx.Err and never retries that deadline.
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, timedOut()
+			}
+			return nil, ctx.Err()
+		case <-p.exited:
+			return nil, io.EOF
 		}
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-p.exited:
-		return nil, io.EOF
-	}
-	select {
-	case response := <-result:
-		if response.Subtype == "success" {
-			return response.Response, nil
-		}
-		return nil, refusal("assistant_control_failed", response.Error, nil)
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-p.exited:
-		return nil, io.EOF
 	}
 }
 

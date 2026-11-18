@@ -388,6 +388,9 @@ final class SandboxedHTMLCoordinator: NSObject, WKNavigationDelegate, WKUIDelega
         // A weak hop: the controller keeps its handler alive, which would keep the coordinator (and its closures).
         content.add(WeakScriptHandler(coordinator), name: handler)
         let web = WKWebView(frame: .zero, configuration: config)
+        #if os(iOS)
+        CallMediaGuard.shared.register(web) // a card's media stays still while a system call is live
+        #endif
         web.navigationDelegate = coordinator
         web.uiDelegate = coordinator
         web.allowsLinkPreview = false

@@ -95,7 +95,7 @@ func TestAssistantCLIInAgentSandbox(t *testing.T) {
 	profile := t.TempDir()
 	env := []string{"PATH=/usr/bin:/bin", "CLAUDE_CONFIG_DIR=" + profile}
 	plain := func(args []string) []string {
-		return append([]string{"/bin/zsh", "-ic", "CLAUDE_CONFIG_DIR=" + shellQuote(profile) + ` claude "$@"`, "persona"}, args...)
+		return append([]string{"/bin/zsh", "-ic", "echo " + assistantShellReady + "; CLAUDE_CONFIG_DIR=" + shellQuote(profile) + ` claude "$@"`, "persona"}, args...)
 	}
 
 	n := agentNode(t, false)

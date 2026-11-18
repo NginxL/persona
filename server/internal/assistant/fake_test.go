@@ -433,6 +433,19 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		name, _ := a["name"].(string)
 		return json.Marshal(map[string]any{"agent": launcherAgent(name)})
 	case DeviceLaunchersList:
+		if a["source"] == proto.ExternalLauncherSource {
+			list, ok := f.zshrc[p.Device]
+			if !ok {
+				list = f.launcherList
+			}
+			external := []proto.Launcher{}
+			for _, l := range list {
+				if proto.IsExternalLauncher(l.Name) {
+					external = append(external, l)
+				}
+			}
+			return json.Marshal(launcherListing{Source: proto.ExternalLauncherSource, Launchers: external})
+		}
 		if f.launcherGate != nil {
 			gate := f.launcherGate
 			f.mu.Unlock()

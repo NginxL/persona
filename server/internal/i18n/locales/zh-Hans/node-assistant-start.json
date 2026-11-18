@@ -1,0 +1,9 @@
+{
+  "shell_start_timeout": "等待 shell 初始化超时，已等 {wait}。",
+  "assistant_ready_timeout": "等待助手启动响应超时，启动准备已等 {wait}。",
+  "control_write_timeout": "等待助手读取设置请求超时，已等 {wait}。",
+  "control_response_timeout": "等待助手确认设置请求超时，已等 {wait}。",
+  "attempts_exhausted": "助手启动尝试 {attempts} 次后仍失败（共等 {wait}）。{reason}",
+  "stopped_by_node": "电脑因设置未获确认而停止了助手：{reason}",
+  "not_delivered": "消息没有送达"
+}

@@ -508,6 +508,26 @@ func TestStillPromptedIgnoresChips(t *testing.T) {
 	}
 }
 
+// A prompt of pictures only has no words to tell it by, but its box shows the path: line of each photo the send just
+// saved (keepImagePaths), which nobody else types: that box is the prompt's. A chip alone, another photo's path, or
+// words in front of the block are not.
+func TestPendingPromptKnowsPicturesOnlyByTheirPaths(t *testing.T) {
+	prompted := keepImagePaths("\n\n<attached_images>\n/u/2026-11-17/ab12cd34.png\n</attached_images>")
+	for _, c := range []struct {
+		box  string
+		want bool
+	}{
+		{"[Image #11]<attached_images>\n  path:/u/2026-11-17/ab12cd34.png\n  </attached_images>", true},
+		{"[Image #1]", false}, // a chip alone: anyone's paste
+		{"[Image #1]<attached_images>\n  path:/u/2026-11-17/ef56ab78.png\n  </attached_images>", false},
+		{"look at this [Image #1]<attached_images>\n  path:/u/2026-11-17/ab12cd34.png\n  </attached_images>", false},
+	} {
+		if got := pendingPrompt(c.box, prompted); got != c.want {
+			t.Errorf("pendingPrompt(%q, %q) = %v", c.box, prompted, got)
+		}
+	}
+}
+
 // herdr 0.9.4 loses an answer over 8 KB, so a 60-line colored read of a wide pane with a status bar never arrived and
 // the check went on without colors, where Claude's grey suggestion is a draft: every send to it was refused, and Clear
 // and Send failed again (#6039). The screen is now read without colors and its bottom rows with them (spliceRead): the

@@ -1,4 +1,4 @@
-Start a Persona conversation with an opening message; return its id now. Use for user-requested separate threads. The message is marked as coming from this one; the new conversation is named after its first turn and told to report with conversation_send. Failure or no report leaves one notice per conversation. An organization read-only policy may refuse; follow its reason instead of retrying. Add `tags` only if asked.
+Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.
 
 ```json
 {
@@ -13,6 +13,10 @@ Start a Persona conversation with an opening message; return its id now. Use for
       "type": "array",
       "items": { "type": "string" },
       "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+    },
+    "quote": {
+      "type": "string",
+      "description": "\"latest\" or a message id: the user's words, carried verbatim"
     }
   }
 }

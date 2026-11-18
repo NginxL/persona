@@ -4,10 +4,11 @@
 // Stdio MCP proxy for an assistant chat's `personad mcp` (lib/compat.js mcpServers). agy defers the MCP tools over its
 // declaration budget, largest schemas first, and for servers passed through ACP it never declares `call_mcp_tool`, so
 // a deferred Persona tool cannot be called at all (#7333). This adds one small tool, persona_call, that calls any
-// Persona tool by name; small, it is never the one deferred. Everything else passes through unchanged.
+// Persona tool by name; small, it is never the one deferred. Tool declarations also omit enums agy cannot represent.
 // shortcut: works around agy 1.5.8; drop it once agy declares call_mcp_tool for ACP servers.
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { agyInputSchema } from './lib/mcp-schema.js'
 
 const DISPATCH = 'persona_call'
 const DISPATCH_TOOL = {
@@ -35,10 +36,15 @@ child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)))
 process.stdin.on('end', () => child.stdin.end())
 
 let names = null // the server's tools, from its last tools/list
+const pendingLists = new Set()
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n')
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
   const msg = parse(line)
+  if (msg?.method && Object.hasOwn(msg, 'id')) {
+    if (msg.method === 'tools/list') pendingLists.add(msg.id)
+    else pendingLists.delete(msg.id)
+  }
   if (msg?.method === 'tools/call' && msg.params?.name === DISPATCH) {
     const { name, arguments: input } = msg.params.arguments || {}
     if (!name) { // list them; the server itself rejects a name it does not have
@@ -53,10 +59,14 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line)
 
 createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => {
   const msg = parse(line)
-  const tools = msg?.result?.tools
-  if (Array.isArray(tools)) {
-    names = tools.map((t) => t.name)
-    line = JSON.stringify({ ...msg, result: { ...msg.result, tools: [...tools, DISPATCH_TOOL] } })
+  if (msg && !Object.hasOwn(msg, 'method') && Object.hasOwn(msg, 'id')
+    && (Object.hasOwn(msg, 'result') || Object.hasOwn(msg, 'error')) && pendingLists.delete(msg.id)) {
+    const tools = msg.result?.tools
+    if (Array.isArray(tools)) {
+      names = tools.map((t) => t.name)
+      const declarations = tools.map((tool) => ({ ...tool, inputSchema: agyInputSchema(tool.inputSchema) }))
+      line = JSON.stringify({ ...msg, result: { ...msg.result, tools: [...declarations, DISPATCH_TOOL] } })
+    }
   }
   process.stdout.write(line + '\n')
 })

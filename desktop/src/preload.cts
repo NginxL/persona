@@ -3,6 +3,9 @@ import type { DesktopBridge, DesktopIslandState, DesktopNotification, DesktopPre
 
 // Fixed, self-contained CommonJS capabilities; no arbitrary IPC, tokens, socket messages or Node access.
 // The annotation makes every version-1 capability, including its signature, a compile-time requirement.
+// A route for this page waits in the main process until the page's app listens (page-routes.ts, #10282): a new
+// document does not listen yet, and onOpenNotification says when it does, after its listener is in place.
+ipcRenderer.send("desktop:page-started");
 const api = Object.freeze({
   version: 1,
   platform: process.platform,
@@ -17,6 +20,7 @@ const api = Object.freeze({
   onOpenNotification(callback: (route: string) => void): () => void {
     const listener = (_event: Electron.IpcRendererEvent, route: string) => callback(route);
     ipcRenderer.on("desktop:notification-open", listener);
+    ipcRenderer.send("desktop:notification-listening");
     return () => { ipcRenderer.removeListener("desktop:notification-open", listener); };
   },
   desktopPresence(): DesktopPresence { return ipcRenderer.sendSync("desktop:presence"); },

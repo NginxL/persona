@@ -37,6 +37,7 @@ func (h *Hub) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	h.passwordLoginRoutes(mux)
+	h.browserLoginRoutes(mux)
 	api := http.NewServeMux()
 	h.apiMux = api
 	if h.upd != nil {

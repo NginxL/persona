@@ -144,6 +144,12 @@ func (r *nudgeRig) askWith(s *Service, ix proto.Interaction, chat string) proto.
 	return ix
 }
 
+func (r *nudgeRig) askExpiring(s *Service, id string, lifetime time.Duration) proto.Interaction {
+	r.t.Helper()
+	return r.askWith(s, proto.Interaction{ID: id, MachineID: "mac", SessionID: "s1", Kind: proto.IxPermission,
+		ToolName: "persona_settings", Summary: "Change the example setting", ExpiresAt: r.now.Add(lifetime)}, "")
+}
+
 // tick moves the clock on by d and runs the sweep of s.
 func (r *nudgeRig) tick(s *Service, d time.Duration) {
 	r.t.Helper()
@@ -658,5 +664,221 @@ func TestNudgeTriesSurviveARestart(t *testing.T) {
 	r.mu.Unlock()
 	if tries != 1 {
 		t.Fatalf("%d sends, want the one that failed", tries)
+	}
+}
+
+func TestNudgeDeadlineAt(t *testing.T) {
+	created := time.Date(2027, time.January, 2, 3, 4, 5, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		lifetime time.Duration
+		want     time.Duration
+		ok       bool
+	}{
+		{name: "half of a fifteen minute card", lifetime: 15 * time.Minute, want: 7*time.Minute + 30*time.Second, ok: true},
+		{name: "five minute margin on a short card", lifetime: 8 * time.Minute, want: 3 * time.Minute, ok: true},
+		{name: "two minute lower bound", lifetime: 4 * time.Minute, want: 2 * time.Minute, ok: true},
+		{name: "shortest useful card", lifetime: 3 * time.Minute, want: 2 * time.Minute, ok: true},
+		{name: "no room before expiry", lifetime: 2 * time.Minute},
+		{name: "no lifetime", lifetime: 0},
+		{name: "half of a long card", lifetime: time.Hour, want: 30 * time.Minute, ok: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := deadlineNudgeAt(created, created.Add(tc.lifetime))
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (at %s)", ok, tc.ok, got)
+			}
+			if ok && !got.Equal(created.Add(tc.want)) {
+				t.Errorf("nudge at %s, want %s after creation", got.Sub(created), tc.want)
+			}
+		})
+	}
+	if _, ok := deadlineNudgeAt(created, time.Time{}); ok {
+		t.Error("a card without a deadline has a deadline nudge")
+	}
+	if _, ok := deadlineNudgeAt(time.Time{}, created.Add(time.Hour)); ok {
+		t.Error("a card without a creation time has a deadline nudge")
+	}
+}
+
+func TestNudgeDeadlineBeforeExpiry(t *testing.T) {
+	r := newNudgeRig(t)
+	r.askExpiring(r.s, "ix_deadline", 15*time.Minute)
+	r.tick(r.s, 7*time.Minute)
+	wantNudges(t, r, 0, "before half the approval window")
+	r.tick(r.s, 30*time.Second)
+	got := wantNudges(t, r, 1, "at half the approval window")
+	if got[0]["reply_to"] != "om_ix_deadline" {
+		t.Errorf("the deadline nudge went under %v", got[0]["reply_to"])
+	}
+	c, _ := r.cardOf(r.s, "ix_deadline")
+	if c.DeadlineNudge.NudgedAt.IsZero() || !c.NudgedAt.IsZero() {
+		t.Errorf("ordinary and deadline progress are not independent: %+v", c)
+	}
+	if !r.s.cardNudged("ix_deadline") {
+		t.Error("the waiting-for-you board does not show the deadline nudge that went out")
+	}
+	r.tick(r.s, 6*time.Minute)
+	wantNudges(t, r, 1, "the same deadline nudge is not repeated")
+}
+
+func TestNudgeDeadlineIndependentOfOrdinary(t *testing.T) {
+	r := newNudgeRig(t)
+	r.setAfter(1)
+	r.askExpiring(r.s, "ix_both", 15*time.Minute)
+	r.tick(r.s, time.Minute)
+	ordinary := wantNudges(t, r, 1, "the positive ordinary wait")
+	r.tick(r.s, 6*time.Minute+30*time.Second)
+	both := wantNudges(t, r, 2, "the ordinary wait does not postpone the deadline nudge")
+	if ordinary[0]["uuid"] != nudgeKey("ix_both", ordinaryNudge) || both[1]["uuid"] != nudgeKey("ix_both", deadlineNudge) {
+		t.Errorf("nudge keys = %v, %v", ordinary[0]["uuid"], both[1]["uuid"])
+	}
+	if ordinary[0]["uuid"] == both[1]["uuid"] {
+		t.Error("the two kinds of nudge would deduplicate each other")
+	}
+	c, _ := r.cardOf(r.s, "ix_both")
+	if c.NudgedAt.IsZero() || c.DeadlineNudge.NudgedAt.IsZero() {
+		t.Errorf("one kind of nudge consumed the other's state: %+v", c)
+	}
+}
+
+func TestNudgeDeadlineZeroDisablesAll(t *testing.T) {
+	r := newNudgeRig(t)
+	r.setAfter(0)
+	r.askExpiring(r.s, "ix_off", 15*time.Minute)
+	r.tick(r.s, 8*time.Minute)
+	r.tick(r.s, 61*time.Minute)
+	wantNudges(t, r, 0, "nudge_after zero disables both kinds")
+	c, _ := r.cardOf(r.s, "ix_off")
+	if c.nudgeSettled() || c.DeadlineNudge.settled() || c.Tries != 0 || c.DeadlineNudge.Tries != 0 {
+		t.Errorf("a disabled nudge changed state: %+v", c)
+	}
+}
+
+func TestNudgeDeadlineSkipsEndedCards(t *testing.T) {
+	for _, status := range []string{"answered", "dismissed", "replaced", "expired", "withdrawn"} {
+		t.Run(status, func(t *testing.T) {
+			r := newNudgeRig(t)
+			ix := r.askExpiring(r.s, "ix_ended", 15*time.Minute)
+			r.s.feishuInteractionDone(ix, status)
+			r.tick(r.s, 8*time.Minute)
+			wantNudges(t, r, 0, status)
+		})
+	}
+}
+
+func TestNudgeDeadlineNeverSendsAPrivateCard(t *testing.T) {
+	r := newNudgeRig(t)
+	r.askWith(r.s, proto.Interaction{ID: "ix_private", MachineID: "mac", SessionID: "s1", Kind: proto.IxQuestion, Private: true,
+		Questions: []proto.Question{{Question: "private content that must stay out of Lark"}}, ExpiresAt: r.now.Add(15 * time.Minute)}, "")
+	r.tick(r.s, 8*time.Minute)
+	for _, n := range wantNudges(t, r, 0, "an anomalous record for a private card") {
+		if strings.Contains(n["text"].(string), "private content") {
+			t.Errorf("private content escaped into Lark: %v", n)
+		}
+	}
+}
+
+func TestNudgeDeadlineWaitsForResume(t *testing.T) {
+	r := newNudgeRig(t)
+	r.askExpiring(r.s, "ix_paused", 15*time.Minute)
+	r.s.fleet.mu.Lock()
+	p := r.s.fleet.interactions["ix_paused"]
+	p.prepared = &preparedApproval{paused: true}
+	r.s.fleet.mu.Unlock()
+	r.tick(r.s, 8*time.Minute)
+	wantNudges(t, r, 0, "the original deadline passed during a question pause")
+
+	r.s.fleet.mu.Lock()
+	p.prepared.paused = false
+	p.prepared.pausedTotal = 10 * time.Minute
+	r.s.fleet.mu.Unlock()
+	r.tick(r.s, 4*time.Minute)
+	wantNudges(t, r, 0, "before half of the effective twenty-five minute window")
+	r.tick(r.s, 30*time.Second)
+	wantNudges(t, r, 1, "cumulative pause time moves the effective deadline")
+}
+
+func TestNudgeDeadlineFollowsExtendedApprovalWindow(t *testing.T) {
+	r := newNudgeRig(t)
+	r.setAfter(100000) // keep the independent ordinary nudge out of this long-window check
+	r.askExpiring(r.s, "ix_extended", 15*time.Minute)
+	r.s.fleet.mu.Lock()
+	p := r.s.fleet.interactions["ix_extended"]
+	p.prepared = &preparedApproval{}
+	p.ix.ExpiresAt = r.now.Add(24 * time.Hour)
+	r.s.fleet.mu.Unlock()
+
+	r.tick(r.s, 8*time.Minute)
+	wantNudges(t, r, 0, "the stored fifteen minute deadline is obsolete")
+	r.tick(r.s, 11*time.Hour+51*time.Minute)
+	wantNudges(t, r, 0, "just before half of the extended window")
+	r.tick(r.s, time.Minute)
+	wantNudges(t, r, 1, "half of the live twenty-four hour window")
+}
+
+func TestNudgeDeadlineSurvivesRestartWithoutRepeating(t *testing.T) {
+	r := newNudgeRig(t)
+	ix := r.askExpiring(r.s, "ix_restart", 15*time.Minute)
+	r.tick(r.s, 6*time.Minute)
+	s2 := r.service() // restart shortly before the 7m30s deadline nudge
+	r.askWithoutCard(s2, ix)
+	r.tick(s2, time.Minute)
+	wantNudges(t, r, 0, "the restart did not make it early")
+	r.tick(s2, 30*time.Second)
+	wantNudges(t, r, 1, "the persisted deadline survives the restart")
+	c, _ := r.cardOf(s2, "ix_restart")
+	if !c.Ix.ExpiresAt.Equal(ix.ExpiresAt) || c.DeadlineNudge.NudgedAt.IsZero() {
+		t.Errorf("persisted card = %+v, want its deadline and sent marker", c)
+	}
+
+	s3 := r.service() // a second restart must not send the persisted one-shot again
+	r.askWithoutCard(s3, ix)
+	r.tick(s3, time.Minute)
+	wantNudges(t, r, 1, "after the sent marker is reloaded")
+}
+
+func TestNudgeDeadlineWaitsOutQuietHours(t *testing.T) {
+	t.Run("released before expiry", func(t *testing.T) {
+		r := newNudgeRig(t)
+		r.askExpiring(r.s, "ix_quiet", 15*time.Minute)
+		r.setQuiet(true)
+		r.tick(r.s, 8*time.Minute)
+		wantNudges(t, r, 0, "quiet hours")
+		r.setQuiet(false)
+		r.tick(r.s, 0)
+		wantNudges(t, r, 1, "quiet hours ended before the deadline")
+	})
+	t.Run("never late after expiry", func(t *testing.T) {
+		r := newNudgeRig(t)
+		r.askExpiring(r.s, "ix_quiet_expired", 15*time.Minute)
+		r.setQuiet(true)
+		r.tick(r.s, 16*time.Minute)
+		r.setQuiet(false)
+		r.tick(r.s, 0)
+		wantNudges(t, r, 0, "quiet hours ended after the deadline")
+	})
+}
+
+func TestNudgeDeadlineRetriesUnderOneKey(t *testing.T) {
+	r := newNudgeRig(t)
+	r.askExpiring(r.s, "ix_retry", 15*time.Minute)
+	r.mu.Lock()
+	r.sendErr, r.failures = errors.New("feishu send: HTTP 502"), 2
+	r.mu.Unlock()
+	r.tick(r.s, 7*time.Minute+30*time.Second)
+	r.tick(r.s, time.Minute)
+	wantNudges(t, r, 0, "two failed sends")
+	r.tick(r.s, time.Minute)
+	wantNudges(t, r, 1, "the retry succeeds before expiry")
+	r.mu.Lock()
+	keys := append([]any(nil), r.keys...)
+	r.mu.Unlock()
+	if len(keys) != 3 || keys[0] != nudgeKey("ix_retry", deadlineNudge) || keys[1] != keys[0] || keys[2] != keys[0] {
+		t.Errorf("deadline retry keys = %v", keys)
+	}
+	c, _ := r.cardOf(r.s, "ix_retry")
+	if c.DeadlineNudge.Tries != 3 || c.DeadlineNudge.NudgedAt.IsZero() {
+		t.Errorf("deadline retry progress = %+v", c.DeadlineNudge)
 	}
 }

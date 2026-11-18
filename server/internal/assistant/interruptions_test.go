@@ -111,16 +111,28 @@ func TestInterruptedReceiptRerouted(t *testing.T) {
 	s, _ := newTaskService(t)
 	ctx := context.Background()
 	old := cutTask(t, s, "升级依赖", "mlx", gatewayDown)
-	createdAt := interruptedAt(t, s, old).Add(time.Nanosecond)
-	s.todos.mu.Lock()
-	todo := s.todos.todos[old.ID]
-	todo.CreatedAt = createdAt
-	s.todos.todos[old.ID] = todo
-	s.todos.mu.Unlock()
+	receiptAt := interruptedAt(t, s, old)
+	createdAt := receiptAt.Add(time.Nanosecond)
 	now := time.Now().UTC()
 	changeTodo(s, old.ID, func(x *Todo) { x.CancelledAt, x.DoneAt, x.DoneBy = &now, &now, db.DoneByCancelled })
-	if _, err := s.createTodo(ctx, "升级依赖", "", "conv1", ""); err != nil {
+	replacement, err := s.createTodo(ctx, "升级依赖", "", "conv1", "")
+	if err != nil {
 		t.Fatal(err)
+	}
+	s.todos.mu.Lock()
+	s.todos.todos[replacement.ID].CreatedAt = createdAt
+	s.todos.mu.Unlock()
+	oldNow, ok := s.todoNow(old.ID)
+	if !ok || !oldNow.CreatedAt.Equal(old.CreatedAt) {
+		t.Fatalf("old task CreatedAt changed from %s to %s", old.CreatedAt, oldNow.CreatedAt)
+	}
+	replacementNow, ok := s.todoNow(replacement.ID)
+	if !ok {
+		t.Fatalf("replacement task %s was not retained", replacement.ID)
+	}
+	if !replacementNow.CreatedAt.Equal(createdAt) || !replacementNow.CreatedAt.After(receiptAt) {
+		t.Fatalf("replacement CreatedAt = %s, want %s, strictly after interrupted receipt %s",
+			replacementNow.CreatedAt, createdAt, receiptAt)
 	}
 	if rb := receiptsOf(t, s)[old.ID]; rb.Resolution != resolutionRerouted {
 		t.Fatalf("cancelled and dispatched again: %+v", rb)

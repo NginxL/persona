@@ -92,6 +92,29 @@ func ParseRelaySource(text string) *proto.MessageSource {
 	}
 }
 
+var relayQuoteRe = lazyre.New(`^\s*kind="owner-request"\s+message_id="([^"]*)"\s*$`)
+
+// ParseRelayQuoteID is the id of the owner's message a relay carries (assistant/relay.md, RelayQuote): only a quote
+// block that directly follows the canonical relay context counts, so words the sending model wrote into its text
+// can't pass for one. "" when there is none.
+func ParseRelayQuoteID(text string) string {
+	relay := false
+	for {
+		m := messageContextRe.FindStringSubmatch(text)
+		if m == nil {
+			return ""
+		}
+		if relay {
+			if q := relayQuoteRe.FindStringSubmatch(m[1]); q != nil {
+				return html.UnescapeString(q[1])
+			}
+			return ""
+		}
+		relay = ParseRelaySource(m[0]) != nil
+		text = text[len(m[0]):]
+	}
+}
+
 // ItemSource prefers explicit fields, then persisted provenance, then existing
 // injected metadata and exact legacy templates. An app's own message is never
 // text-inferred. Item.From remains separate: a peer's name is not a conversation id.

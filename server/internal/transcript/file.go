@@ -81,7 +81,7 @@ func (f *File) history() string {
 	}
 	version := ""
 	if !f.meta.Codex {
-		version = ".items2"
+		version = ".items3" // Model-only interjection items are removed; reload older client history.
 	}
 	return fmt.Sprintf("%x.%08x.%d", f.ino, f.firstHash, f.gen) + version + f.branchToken()
 }

@@ -153,6 +153,12 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     private var held = false
     /// The system's session only, on the simulator: its input is tried once the session is the call's.
     private var probeLater = false
+    /// The app's session only: interrupted (a phone call, Siri, another app's audio), and not resumed yet (#9887): nothing
+    /// starts the engine again until `resume`, not a route change and not new rates (`reconfigure`).
+    private var interruptedNow = false
+    /// The app's session only: new rates came while it was interrupted (a `ready` before the first one's audio, or after
+    /// a reconnect): kept in `format`, and the engine wired for them by `resume`.
+    private var rewireOnResume = false
     var onRunning: (@MainActor () -> Void)?
     var onStarting: (@MainActor () -> Void)?
 
@@ -344,6 +350,12 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     func reconfigure(_ format: VoiceAudioFormat) throws {
         guard format != self.format else { return }
         self.format = format
+        // Interrupted (#9887): the engine stays down, as the system left it; `resume` wires it for these rates. Started
+        // now it would be refused while the other audio has the session, and the voice chat would end instead of pausing.
+        if owner == .app, interruptedNow {
+            rewireOnResume = engine != nil
+            return
+        }
         guard let engine else { return }
         engine.stop()
         try rewire(engine)
@@ -368,8 +380,38 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
     }
 
+    /// The app's session after an interruption that may go on (#9887, the phone's voice chat): active again, and the
+    /// engine running again on it (set up again, or a new one). Throws when the session or the engine will not come back:
+    /// the voice chat ends then, with Continue.
+    func resume() throws {
+        guard owner == .app, events != nil else { return }
+        interruptedNow = false
+        let newRates = rewireOnResume
+        rewireOnResume = false
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setActive(true)
+        } catch {
+            Self.log.error("voice: the audio session would not come back after the interruption: \(error.localizedDescription, privacy: .public)")
+            throw VoiceAudioError.session
+        }
+        activated = true
+        guard let engine else { return }
+        // Running again by itself, and at the rates it runs at: nothing to do.
+        guard !engine.isRunning || newRates else { return }
+        engine.stop()
+        do {
+            try rewire(engine)
+        } catch {
+            try rebuild()
+        }
+        Self.log.notice("voice: audio back after the interruption (\(Self.describe(session.currentRoute), privacy: .public))")
+    }
+
     func stop() {
         probeLater = false
+        interruptedNow = false
+        rewireOnResume = false
         for token in observers { NotificationCenter.default.removeObserver(token) }
         observers = []
         if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
@@ -598,12 +640,11 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     private func observe() {
         let center = NotificationCenter.default
-        let owner = owner
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil,
                                             queue: .main) { @Sendable [weak self] note in
             let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
-            // A system call hears the end too: it was held, not ended.
-            if type == .ended, owner == .system {
+            // Both hear the end: a system call was held, the phone's voice chat paused (#9887), neither ended.
+            if type == .ended {
                 let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
                 MainActor.assumeIsolated { self?.events?(.interruptionEnded(shouldResume: options.contains(.shouldResume))) }
                 return
@@ -637,12 +678,16 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
     }
 
-    /// The session was interrupted: the app's call ends (`VoiceConversation`); a system call's engine goes until the
-    /// session is the call's again, and the call holds.
+    /// The session was interrupted: a system call's engine goes until the session is the call's again, and the call
+    /// holds; the app's engine (stopped by the system) waits for `resume`, and the voice chat pauses (#9887;
+    /// `VoiceConversation`; the car's ends).
     private func interrupted() {
         if owner == .system {
             systemActive = false
             tearDown()
+        } else {
+            interruptedNow = true
+            dropQueued()
         }
         events?(.interrupted)
     }
@@ -666,8 +711,10 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     }
 
     private func routeChanged() {
-        // The system's session while it is not the call's, or the call on hold: nothing starts until it is again.
+        // The system's session while it is not the call's, or the call on hold: nothing starts until it is again. The
+        // app's while interrupted: nothing until `resume`.
         if owner == .system, !systemActive || held { return }
+        if owner == .app, interruptedNow { return }
         guard let engine, !engine.isRunning else { return }
         do {
             try rewire(engine)

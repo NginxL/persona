@@ -9,8 +9,8 @@ import XCTest
 /// call to Persona starts on the main conversation, which the mock sees as a start frame with `surface: "call"`
 /// (`GET /mock/voice2`). A simulator without the microphone granted shows the prompt: it is allowed.
 /// Left on Settings (the shell's sheet) or on an Agent's conversation, the call's page comes up over it all the same
-/// (`personaCallCover`; Settings' sheet closes first, `PersonaCalls.clearTheWay`), Minimise goes back to that page with
-/// the bar to the call; a refused call (the microphone not allowed) says why in the app.
+/// (the call's own window, `CallWindow`: nothing the owner was on closes), Minimise goes back to that page with the bar
+/// to the call over it; a refused call (the microphone not allowed) says why in the app.
 /// Not Siri: the Simulator's Siri runs no App Shortcut ("Talk to Persona": "I didn't get that"), and takes "Call
 /// Persona" or "Start a call with Persona" as a phone call of its own ("Sorry, I can't make a phone call"). A device
 /// check (docs/apple/siri.md, "Verification on a phone").
@@ -147,10 +147,10 @@ final class CallPersonaShortcutTests: XCTestCase {
     }
 
     /// Call Persona with the app left on `args`' page: the call's page comes up over it and connects; Minimise goes back
-    /// to the page `under` finds (Settings' sheet, which the call's page cannot go over, is closed: `closed`), with the
-    /// bar at the top that opens the call again; End ends it.
+    /// to the page `under` finds (Settings' sheet stays open under the call), with the bar at the top that opens the call
+    /// again, and what `clear` finds (Settings' Close) not covered by it; End ends it.
     @MainActor private func callOver(_ args: [String], page: @escaping (XCUIApplication) -> XCUIElement,
-                                     under: (XCUIApplication) -> XCUIElement, closed: ((XCUIApplication) -> XCUIElement)?,
+                                     under: (XCUIApplication) -> XCUIElement, clear: ((XCUIApplication) -> XCUIElement)?,
                                      shots name: String) throws {
         let hub = try hub
         let (app, before) = try personaInTheBackground(hub: hub, args: args, page: page)
@@ -168,7 +168,8 @@ final class CallPersonaShortcutTests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "no bar back to the call\n\(app.debugDescription)")
         XCTAssertTrue(element(app, "call-screen").waitForNonExistence(timeout: 5), "the call page stayed")
         XCTAssertTrue(under(app).waitForExistence(timeout: 10), "not back on the page it was left on\n\(app.debugDescription)")
-        if let closed { XCTAssertFalse(closed(app).exists, "Settings' sheet is still up") }
+        XCTAssertTrue(bar.isHittable, "the bar is not there over the page\n\(app.debugDescription)")
+        if let clear { XCTAssertTrue(clear(app).isHittable, "the bar covers the sheet's control\n\(app.debugDescription)") }
         Thread.sleep(forTimeInterval: 1)
         shot(name + "-minimised")
         bar.tap()
@@ -179,11 +180,11 @@ final class CallPersonaShortcutTests: XCTestCase {
         app.terminate()
     }
 
-    /// Left on Settings (on the iPhone, the shell's sheet): the sheet closes and the call's page comes up; under it, the
-    /// page Settings was over (the main conversation, its voice bar on the call: Show Call).
+    /// Left on Settings (on the iPhone, the shell's sheet): the call's page comes up over it, and Minimise goes back to
+    /// Settings, still open, the bar over it and its Close clear of the bar.
     @MainActor func testSpotlightCallFromSettingsShowsTheCallPage() throws {
-        try callOver(["-tab", "settings"], page: { $0.buttons["settings-close"] }, under: { $0.buttons["voice-expand"] },
-                     closed: { $0.buttons["settings-close"] }, shots: "from-settings")
+        try callOver(["-tab", "settings"], page: { $0.buttons["settings-close"] }, under: { $0.buttons["settings-close"] },
+                     clear: { $0.buttons["settings-close"] }, shots: "from-settings")
     }
 
     /// Left on an Agent's conversation: the call's page over it, and Minimise goes back to that conversation.
@@ -191,7 +192,7 @@ final class CallPersonaShortcutTests: XCTestCase {
         let agent: (XCUIApplication) -> XCUIElement = {
             $0.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "给天气 App 加主屏幕小组件")).firstMatch
         }
-        try callOver(["-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000001"], page: agent, under: agent, closed: nil,
+        try callOver(["-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000001"], page: agent, under: agent, clear: nil,
                      shots: "from-agent")
     }
 

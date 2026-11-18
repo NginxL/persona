@@ -61,7 +61,8 @@ func icScript(t *testing.T, args []string) string {
 	if i < 0 || i+2 >= len(args) || args[i+2] != "persona" {
 		t.Fatalf("not a -ic launch: %q", args)
 	}
-	return args[i+1]
+	prefix := "echo " + assistantShellReady + "; "
+	return strings.TrimPrefix(args[i+1], prefix)
 }
 
 func TestAssistantCLICommandWindowsPathsUseForwardSlashes(t *testing.T) {
@@ -143,8 +144,8 @@ func TestScriptPathsUnchangedOffWindows(t *testing.T) {
 	n := &Node{bin: bin, home: t.TempDir(), dir: t.TempDir(), logger: log.New(io.Discard, "", 0)}
 	n.managed.byID = map[string]proto.ManagedLauncher{"work": {Name: "work"}}
 	cmd := n.assistantCLICommand("/bin/sh", "work", n.dir, false, nil, []string{"CLAUDE_CONFIG_DIR=" + profile})
-	if want := "CLAUDE_CONFIG_DIR=" + shellQuote(profile) + " " + shellQuote(bin) + ` launch work "$@"`; cmd.Args[2] != want {
-		t.Fatalf("got %q, want %q", cmd.Args[2], want)
+	if got, want := icScript(t, cmd.Args), "CLAUDE_CONFIG_DIR="+shellQuote(profile)+" "+shellQuote(bin)+` launch work "$@"`; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 	if got, want := n.codexAssistantCommand("/bin/sh", "work", nil).Args[2], codexShell(shellQuote(bin)+" launch work"); got != want {
 		t.Fatalf("codex: got %q, want %q", got, want)

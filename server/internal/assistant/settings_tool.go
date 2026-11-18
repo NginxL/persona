@@ -743,6 +743,9 @@ func (s *Service) setLauncher(ctx context.Context, v json.RawMessage) (*ownChang
 		return nil, errors.New("value must be a launcher name")
 	}
 	name = strings.TrimSpace(name)
+	if proto.IsExternalLauncher(name) {
+		return nil, i18n.Err("external-adapter.purpose_unsupported")
+	}
 	before := s.launcherNow(ctx)
 	ls, err := s.launchers(ctx)
 	if err != nil {

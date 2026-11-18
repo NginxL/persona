@@ -171,7 +171,7 @@ class Report:
         # line per content block. Lines before --since still keep this state and the round kind, but count nothing.
         seen = {}
         with open(path, errors="replace") as f:
-            for line in f:
+            for line_number, line in enumerate(f):
                 try:
                     e = json.loads(line)
                 except ValueError:
@@ -194,7 +194,7 @@ class Report:
                     continue
                 # A line without a message id is a response of its own: gateways can leave the id empty, and one
                 # requestId can then cover several responses (transcript.RequestUsage counts them the same way).
-                key = msg.get("id") or ("line", e.get("uuid") or id(e))
+                key = msg.get("id") or ("line", e.get("uuid") or line_number)
                 prev = seen.get(key)
                 target = self.sidechain if e.get("isSidechain") else self.kinds[kind]
                 if prev is None:

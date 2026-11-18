@@ -20,5 +20,13 @@
   "master_warning": "这是 hub 的总钥匙，拿到它就能做任何事，不要发给别人。登录后这个浏览器会换成自己的凭据，不保存它。",
   "master_where": "在 hub 所在的机器上运行 {pair}，或者 {jq}。",
   "master_placeholder": "hub 的总钥匙（token）",
-  "password_pairing": "扫码或配对链接"
+  "password_pairing": "扫码或配对链接",
+  "qr_expired": "二维码已过期，请刷新",
+  "qr_failed": "无法获取登录二维码，请重试",
+  "qr_denied": "已取消登录",
+  "qr_scanned": "已扫码，请在手机上确认",
+  "qr_hint": "在已登录的 Persona 手机 App 中扫码，确认后此浏览器将自动登录。二维码有效期为 5 分钟。",
+  "qr_refresh": "刷新二维码",
+  "qr_alternatives": "其他登录方式",
+  "qr_retry": "正在重连，登录请求已保留…"
 }

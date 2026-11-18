@@ -1,0 +1,9 @@
+{
+  "shell_start_timeout": "Shell initialization did not finish within {wait}.",
+  "assistant_ready_timeout": "The assistant produced no startup response within {wait} after launch preparation began.",
+  "control_write_timeout": "The assistant did not read its settings request within {wait}.",
+  "control_response_timeout": "The assistant did not confirm its settings request within {wait}.",
+  "attempts_exhausted": "Assistant launch failed after {attempts} attempts ({wait} total). {reason}",
+  "stopped_by_node": "The computer stopped the assistant because its settings were not confirmed: {reason}",
+  "not_delivered": "The message was not delivered"
+}

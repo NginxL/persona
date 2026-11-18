@@ -12,8 +12,8 @@ import Intents
 final class IntentHandler: INExtension, INStartCallIntentHandling {
     override func handler(for intent: INIntent) -> Any { self }
 
-    /// The only person there is to call: Persona, named as the app's calls name it (the handle value the system shows
-    /// in Recents and gives back on a redial, `CallHandle.persona` in the app). The product's name, in every language.
+    /// The only person there is to call: Persona, by the product's name in every language. The app's own calls carry the
+    /// assistant's name (`CallHandle.name`), which this extension cannot read; any handle calls the same main conversation.
     static var persona: INPerson {
         INPerson(personHandle: INPersonHandle(value: "Persona", type: .unknown), nameComponents: nil,
                  displayName: "Persona", image: nil, contactIdentifier: nil, customIdentifier: "persona")

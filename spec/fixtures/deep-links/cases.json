@@ -946,6 +946,32 @@
       "route": "/persona/c-7f3a"
     },
     {
+      "name": "app link, older route= form drops an action key (add)",
+      "url": "persona://open?route=%2Fsettings%3Ftab%3Dmodels%26add%3D1",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "models"
+      },
+      "route": "/settings?tab=models"
+    },
+    {
+      "name": "app link, older route= form drops keys no row lists",
+      "url": "persona://open?route=%2Fs%2Fmac-1%2F0b5c7e2a%3Fat%3Dmsg-1%26token%3Dabc",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1"
+      },
+      "route": "/s/mac-1/0b5c7e2a?at=msg-1"
+    },
+    {
       "name": "app link to a path no row lists",
       "url": "persona://open/admin",
       "hubs": [

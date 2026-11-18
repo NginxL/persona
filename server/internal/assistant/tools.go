@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
@@ -29,7 +30,7 @@ import (
 // toolNames are the tools only assistant conversations get; their descriptions and schemas are in prompts/mcp
 // (docs/assistant/prompts.md).
 var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "schedule_followup", "schedule_routine", "schedule_state_set", "delete_routine", "list_followups",
-	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
+	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_transfer", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
 	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run", "skill_import",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
 	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
@@ -448,6 +449,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			err = s.call(lctx, am.ID, DeviceSessionSend, params, &sent)
 			note.sent(lctx, err) // an unknown answer counts for the agent's next turn: it may still arrive
+			if err == nil {
+				s.progressMade(am.ID, c.SessionID, time.Now()) // the supervisor told it something: a new stretch (supervise_progress.go)
+			}
 			if err != nil {
 				if note.reopens() && sendUnknown(err) {
 					// Its own wait ran out, or the link dropped, while the node may still type it in: the model reads
@@ -485,6 +489,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolAgentInterrupt(ctx, machine, self, args) // agent_control.go
 	case "agent_supervise":
 		return s.toolAgentSupervise(ctx, self, args)
+	case "agent_transfer":
+		return s.toolAgentTransfer(ctx, self, args) // agent_route.go: the App's Move to path
 	case "agent_archive", "agent_unarchive":
 		return s.toolAgentArchive(ctx, machine, self, args, name == "agent_archive") // agent_archive_tools.go
 	case "agent_autoname":
@@ -1238,8 +1244,9 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 			session = ix.FoldedUnder
 		}
 		k := [2]string{ix.MachineID, session}
-		what += " (interaction_id=" + ix.ID + ")"
-		pending[k] = append(pending[k], clip(what, 400))
+		// The id goes after the clip: a long request must not cut it off, or interaction_answer has nothing to answer.
+		id := " (interaction_id=" + ix.ID + ")"
+		pending[k] = append(pending[k], clip(what, max(400-utf8.RuneCountInString(id), 1))+id)
 	}
 	type row struct {
 		m Device

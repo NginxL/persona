@@ -1,0 +1,220 @@
+/*
+ * Persona To-dos prototype kit: design tokens.
+ *
+ * Values follow the shipped default style (Liquid Glass, theme color System Blue): colors from
+ * StatusPalette / Theme / StyleSpec, type, spacing, radii and sizes from Theme.swift. System colors are
+ * UIKit's semantic values. Light is :root, dark is [data-theme=dark] on <html>.
+ * Components read only these variables; never hard-code a color in a variant, add a variable here.
+ */
+:root {
+  color-scheme: light;
+  --font: -apple-system, BlinkMacSystemFont, system-ui, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif; /* Chrome needs BlinkMacSystemFont / system-ui for SF */
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* surfaces */
+  --page: #FFFFFF;
+  --grouped-page: #F2F2F7;
+  --cell: #FFFFFF;
+  --card: #F2F2F7;
+  --card-stroke: rgba(0, 0, 0, .08);
+  --sidebar: #F9F9F9;
+  --raised: #FFFFFF;            /* a control lifted off a fill (segment thumb, chosen filter) */
+
+  /* ink */
+  --ink: #000000;
+  --ink-2: rgba(60, 60, 67, .60);
+  --ink-3: rgba(60, 60, 67, .30);
+  --ink-2-solid: #636366;
+  --separator: rgba(60, 60, 67, .29);
+  --hairline: rgba(60, 60, 67, .18);
+
+  /* fills */
+  --fill-well: rgba(116, 116, 128, .08);
+  --fill-chip: rgba(118, 118, 128, .12);
+  --fill-pressed: rgba(120, 120, 128, .16);
+  --scrim: rgba(0, 0, 0, .20);
+
+  /* roles */
+  --accent: #007AFF;
+  --accent-tint: rgba(0, 122, 255, .10);
+  --danger: #D93A3A;
+  --danger-tint: rgba(217, 58, 58, .10);
+  --positive: #248A3D;
+  --caution: #F08A00;
+  --caution-text: #B35400;
+  --caution-tint: rgba(240, 138, 0, .12);
+  --ai: #5B4FD6;
+  --ai-tint: rgba(91, 79, 214, .10);
+  --brand: #D4683F;
+  --count-badge: #636366;
+  --on-solid: #FFFFFF;
+
+  /* agent / to-do states (StatusPalette) */
+  --needs-dot: #007AFF;
+  --needs-text: #0064C8;
+  --needs-tint: rgba(0, 122, 255, .08);
+  --working-dot: #E8890C;
+  --working-text: #A35A00;
+  --working-tint: rgba(232, 137, 12, .10);
+  --waiting-dot: rgba(232, 137, 12, .60);
+  --waiting-text: #B7791F;
+  --unread-dot: #30A46C;
+  --unread-text: #1D7A4C;
+  --unread-tint: rgba(48, 164, 108, .10);
+  --idle-dot: rgba(60, 60, 67, .33);
+  --offline-dot: rgba(60, 60, 67, .18);
+  --state-tint: rgba(128, 128, 128, .08);
+
+  /* shell (same in every style) */
+  --composer: #FFFFFF;
+  --composer-stroke: #E3E3E3;
+  --shell-ink: #0D0D0D;
+  --segment: #E6E6E6;
+  --bubble-user: #DCEAFF;
+  --box-persona: #F0F0F3;
+  --ask-bg: rgba(0, 122, 255, .06);
+  --ask-stroke: rgba(0, 122, 255, .16);
+
+  /* hues: categories only (projects, roles); never body text */
+  --hue-blue: #2E6FD0; --hue-orange: #B35400; --hue-green: #1D7A4C; --hue-purple: #7A5AF8; --hue-indigo: #5856D6;
+  --hue-pink: #D62E5C; --hue-gray: #8E8E93; --hue-red: #D1342C; --hue-amber: #B7791F; --hue-teal: #0F7C80;
+
+  /* Liquid Glass approximation (not a repo token): blur + translucent fill + 0.5 pt stroke, no heavy shadow */
+  --glass: rgba(255, 255, 255, .66);
+  --glass-strong: rgba(255, 255, 255, .84);
+  --glass-stroke: rgba(0, 0, 0, .09);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 6px 18px rgba(0, 0, 0, .06);
+  --glass-blur: blur(20px) saturate(180%);
+  --sheet-bg: rgba(255, 255, 255, .90);
+  --fog: rgba(255, 255, 255, .92);
+
+  /* keyboard */
+  --kb-bg: rgba(214, 216, 222, .94);
+  --kb-key: #FFFFFF;
+  --kb-key-2: #ABB0BA;
+  --kb-key-ink: #000000;
+  --kb-shadow: 0 1px 0 rgba(0, 0, 0, .28);
+
+  /* type (Theme.Font, iOS points at the default text size) */
+  --fs-display: 28px;
+  --fs-title: 22px;
+  --fs-heading: 17px;
+  --fs-body: 17px;
+  --fs-secondary: 15px;
+  --fs-caption: 13px;
+  --fs-label: 12px;
+  --lh-body: 1.38;
+  --track-body: -.022em;
+  --track-tight: -.012em;
+
+  /* spacing (4 pt grid) */
+  --sp-xxs: 2px; --sp-xs: 4px; --sp-sm: 6px; --sp-s: 8px; --sp-m: 12px; --sp-l: 16px; --sp-xl: 24px; --sp-xxl: 32px;
+  --page-margin: 16px;
+
+  /* radii */
+  --r-thumb: 3px; --r-badge: 6px; --r-control: 10px; --r-card: 14px; --r-bubble: 20px; --r-panel: 22px;
+  --r-sheet: 34px; --r-composer: 32px; --r-cell: 26px;
+
+  /* sizes */
+  --tap: 44px;
+  --row-min: 44px;
+  --sb-row: 44px; --sb-glyph: 22px; --sb-col: 24px; --sb-gap: 16px; --sb-mark: 32px; --sb-radius: 10px;
+  --sidebar-ipad: 400px; --sidebar-duo: 320px; --sidebar-web: 284px;
+  --readable: 560px; --chat-readable: 760px;
+  --pill: 46px; --slim-bar: 40px; --search-h: 40px;
+  --duo-col: 84px;
+
+  /* motion (only the theme toggle and spinners move; frames are static) */
+  --m-state: 250ms; --m-layout: 300ms;
+}
+
+[data-theme=dark] {
+  color-scheme: dark;
+  --page: #000000;
+  --grouped-page: #000000;
+  --cell: #1C1C1E;
+  --card: #1C1C1E;
+  --card-stroke: rgba(255, 255, 255, .08);
+  --sidebar: #171717;
+  --raised: #48484A;
+
+  --ink: #FFFFFF;
+  --ink-2: rgba(235, 235, 245, .60);
+  --ink-3: rgba(235, 235, 245, .30);
+  --ink-2-solid: #AEAEB2;
+  --separator: rgba(84, 84, 88, .60);
+  --hairline: rgba(84, 84, 88, .45);
+
+  --fill-well: rgba(118, 118, 128, .18);
+  --fill-chip: rgba(118, 118, 128, .24);
+  --fill-pressed: rgba(120, 120, 128, .32);
+  --scrim: rgba(0, 0, 0, .45);
+
+  --accent: #0A84FF;
+  --accent-tint: rgba(10, 132, 255, .18);
+  --danger: #FF5F57;
+  --danger-tint: rgba(255, 95, 87, .16);
+  --positive: #30D158;
+  --caution: #FF9F0A;
+  --caution-text: #FF9F0A;
+  --caution-tint: rgba(255, 159, 10, .16);
+  --ai: #9C94FF;
+  --ai-tint: rgba(156, 148, 255, .16);
+  --brand: #E8835C;
+  --count-badge: #636366;
+
+  --needs-dot: #0A84FF;
+  --needs-text: #409CFF;
+  --needs-tint: rgba(10, 132, 255, .16);
+  --working-dot: #FFB224;
+  --working-text: #FFB224;
+  --working-tint: rgba(255, 178, 36, .14);
+  --waiting-dot: rgba(255, 178, 36, .62);
+  --waiting-text: #F5B342;
+  --unread-dot: #4CC38A;
+  --unread-text: #4CC38A;
+  --unread-tint: rgba(76, 195, 138, .14);
+  --idle-dot: rgba(235, 235, 245, .30);
+  --offline-dot: rgba(235, 235, 245, .16);
+  --state-tint: rgba(128, 128, 128, .16);
+
+  --composer: #1F1F21;
+  --composer-stroke: #3A3A3C;
+  --shell-ink: #F2F2F2;
+  --segment: #3A3A3C;
+  --bubble-user: #1D3557;
+  --box-persona: #2A2A2E;
+  --ask-bg: rgba(10, 132, 255, .12);
+  --ask-stroke: rgba(64, 156, 255, .26);
+
+  --hue-blue: #5B9BFF; --hue-orange: #FF9F0A; --hue-green: #4CC38A; --hue-purple: #9D8BFF; --hue-indigo: #5E5CE6;
+  --hue-pink: #FF6B8B; --hue-gray: #8E8E93; --hue-red: #FF6961; --hue-amber: #F5B342; --hue-teal: #40C8C8;
+
+  --glass: rgba(36, 36, 38, .58);
+  --glass-strong: rgba(40, 40, 42, .86);
+  --glass-stroke: rgba(255, 255, 255, .12);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .25);
+  --sheet-bg: rgba(28, 28, 30, .92);
+  --fog: rgba(0, 0, 0, .9);
+
+  --kb-bg: rgba(43, 43, 45, .96);
+  --kb-key: #59595D;
+  --kb-key-2: #3D3D40;
+  --kb-key-ink: #FFFFFF;
+  --kb-shadow: 0 1px 0 rgba(0, 0, 0, .5);
+}
+
+/* The web app uses its own, smaller desktop scale (web/src/styles.css): 14 px body, 32 px sidebar rows. */
+.k-web {
+  --fs-display: 24px;
+  --fs-title: 20px;
+  --fs-heading: 15px;
+  --fs-body: 14px;
+  --fs-secondary: 13px;
+  --fs-caption: 12px;
+  --fs-label: 11px;
+  --track-body: -.006em;
+  --sb-row: 32px; --sb-glyph: 16px; --sb-col: 20px; --sb-gap: 10px; --sb-mark: 22px; --sb-radius: 8px;
+  --row-min: 32px;
+  --r-cell: 12px;
+}

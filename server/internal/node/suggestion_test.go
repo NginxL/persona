@@ -19,7 +19,7 @@ func TestSuggestionAfterATurn(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "herdr")
 	reads := filepath.Join(dir, "reads")
-	script := "#!/bin/sh\necho x >> " + reads + "\ncat " + screen + "\n"
+	script := "#!/bin/sh\necho x >> " + shellQuote(reads) + "\ncat " + shellQuote(screen) + "\n" // a checkout path may hold spaces
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

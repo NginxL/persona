@@ -87,6 +87,7 @@ export function createGrokRuntime(options = {}) {
       model: '', effort: '', updated: new Date().toISOString(), history: `grok:${raw}`,
       restored, loaded: 0, running: false, tail: Promise.resolve(), queued: 0, epoch: 0, seen: new Set(), asks: new Set(), approved: new Set() }
     sessions.set(s.id, s)
+    rt.sessionsChanged()
     return s
   }
 

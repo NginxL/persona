@@ -4,34 +4,66 @@ import Foundation
 import Intents
 import UIKit
 
-// Placing a call to Persona (#9290): the call page in "Calling…" at once, then what can refuse it (an urgent call, a
-// recording, no hub, no voice extension, the microphone), the main conversation and its voice extension as CarPlay
-// finds them but on the selected hub, the system's Start, and the voice once the system started the call. A redial
-// from the Phone app's Recents comes here as an `INStartCallIntent` (or `INStartAudioCallIntent`) user activity.
+// Placing a call (#9290; any conversation since #9887 one button): the call page in "Calling…" at once, then what can
+// refuse it (an urgent call, a recording, no hub, no voice extension, the microphone), the conversation (the phone icon's,
+// or the main conversation as CarPlay finds it but on the selected hub) and its voice extension, the system's Start, and
+// the voice once the system started the call. A redial from the Phone app's Recents comes here as an `INStartCallIntent`
+// (or `INStartAudioCallIntent`) user activity, and always calls the main conversation.
 
 extension PersonaCalls {
-    /// Calls Persona on the main conversation of `group`'s hub (nil: the selected hub). A call already on is shown
-    /// instead. Refused with the page's note (and the page goes); when the system will not place the call, a voice chat
-    /// in the app instead, with a line that says why.
+    /// Calls Persona on the main conversation of `group`'s hub (nil: the selected hub): Recents' redial, Siri and
+    /// Shortcuts, CarPlay's Talk to Persona without a car, the DEBUG switch. A call already on is shown instead.
     func callPersona(group: String? = nil, origin: CallOrigin = .app) async {
+        await call(nil, group: group, origin: origin)
+    }
+
+    /// Calls the conversation `key` (#9887 one button: the composer's phone icon on the iPhone): the main conversation,
+    /// another assistant conversation or an Agent session; its voice starts bound to it, as a voice chat there would. A
+    /// call already on with it is shown instead; one with another conversation too, unless `endingCall` (the owner said
+    /// End and Call to the question): it ends first, and its audio goes, before this one is placed.
+    func callConversation(_ key: SessionKey, endingCall: Bool = false) async {
+        await call(key, group: key.group, origin: .app, endingCall: endingCall)
+    }
+
+    /// Places a call to `target` (nil: the main conversation of `group`'s hub, found here). Refused with the page's note
+    /// (and the page goes); when the system will not place the call, a voice chat in the app on the same conversation
+    /// instead, with a line that says why.
+    private func call(_ target: SessionKey?, group: String?, origin: CallOrigin, endingCall: Bool = false) async {
         let model = AppModel.shared
-        if origin != .app { await Self.clearTheWay(model) }
+        // Whatever page or sheet the app was left on stays: the call screen comes over it in its own window
+        // (`CallWindow`), and Minimize goes back to it.
         if let live = ownerCall, live.phase.isLive {
-            presented = true
-            return
+            guard endingCall, let target, !isOwnerCallConversation(target) else {
+                presented = true
+                return
+            }
+            Self.log.notice("call \(live.id.uuidString, privacy: .public): ends for a call to another conversation")
+            await endForVoiceChat()
+            if let still = ownerCall, still.phase.isLive {
+                presented = true
+                return
+            }
         }
         // Feedback first, before anything slow.
-        let call = add(kind: .owner(group: group ?? model.hub?.group ?? ""), direction: .outgoing)
+        let call = add(kind: .owner(group: target?.group ?? group ?? model.hub?.group ?? "", key: target), direction: .outgoing)
+        if let target { call.conversation = CallConversation.make(target, model: model) }
         presented = true
-        Self.log.notice("call \(call.id.uuidString, privacy: .public): calling Persona (\(origin.rawValue, privacy: .public))")
+        Self.log.notice("call \(call.id.uuidString, privacy: .public): calling \(target == nil ? "Persona" : call.conversation == nil ? "the main conversation" : "another conversation", privacy: .public) (\(origin.rawValue, privacy: .public))")
         // From Recents or Siri the app may have just launched: its hubs come first.
         if origin != .app { await Self.waitForHub(group) }
         guard call.phase.isLive else { return }
         if let note = admission() { return refuse(call, note: note) }
-        guard let group = group ?? model.hub?.group, let api = model.api(group) else { return refuse(call, note: Self.noHubNote) }
+        guard let group = target?.group ?? group ?? model.hub?.group, let api = model.api(group) else { return refuse(call, note: Self.noHubNote) }
 
+        // Who the call is with is decided with its conversation (#9887 review): the look, the name the main conversation's
+        // top bar says and whose main conversation it is (the hub and the assistant picked there), read before the main
+        // conversation is asked for. The call is bound to that assistant: another one picked while it waits for the hub,
+        // the extension or the microphone renames nothing (`place` takes the name again only for this one).
+        let who = (look: assistant(), name: assistantName(), owner: assistantOwner())
         let key: SessionKey
-        if let main = model.assistantMain, main.group == group {
+        if let target {
+            key = target
+        } else if let main = model.assistantMain, main.group == group {
             key = main
         } else {
             do {
@@ -42,8 +74,10 @@ extension PersonaCalls {
                 return refuse(call, note: Self.unreachableNote)
             }
         }
-        // The same checks as the chat's Voice Chat, so the reasons and Open Settings match (`VoiceEntry`). It waits for
-        // the group's probe even when the chat's page asked first (a cold launch from Recents).
+        call.assistant.retake(who.look, name: who.name, owner: who.owner)
+        // The same checks as the voice chat's, so the reasons and Open Settings match (`VoiceEntry`): read-only, a
+        // meeting's room, no voice extension or one not set up. It waits for the group's probe even when the chat's page
+        // asked first (a cold launch from Recents).
         await VoiceSupport.shared.refresh(group: group, api: api)
         guard call.phase.isLive else { return }
         let availability = model.session(key).map { VoiceSupport.shared.availability(for: $0, group: group) }
@@ -79,16 +113,24 @@ extension PersonaCalls {
     }
 
     /// Asks the system to start the call. Too early (the app still coming to the front): once more half a second later.
-    /// Refused otherwise: `instead` (the in-app voice chat), and the call ends.
+    /// Refused otherwise: `instead` (the in-app voice chat), and the call ends. Who the call is with is taken once more
+    /// just before the Start, after every wait (a cold launch's roster and look may have come meanwhile): the look and the
+    /// name the main conversation's top bar says, together, fixed from then on as the system's handle is; only while the
+    /// same assistant is picked on the same hub as when its conversation was decided (`CallAssistant.Owner`): another one
+    /// picked meanwhile keeps the call's own name and look (#9887 review).
     func place(_ call: PersonaCall, origin: CallOrigin, instead: (@MainActor (CallSystemError) -> Void)? = nil) async {
         if origin != .app { await Self.waitUntilActive() }
+        await readySystem()
         let system = system
         var again = true
         while call.phase.isLive {
             // Asked again just before each Start: an urgent call that rang meanwhile goes first.
             if let note = admission() { return refuse(call, note: note) }
+            if !call.assistant.retake(assistant(), name: assistantName(), owner: assistantOwner()) {
+                Self.log.notice("call \(call.id.uuidString, privacy: .public): another assistant was picked meanwhile; the call keeps its own")
+            }
             do {
-                try await system.start(call.id)
+                try await system.start(call.id, handle: .outgoing(name: call.name, kind: handleKind(), conversation: call.conversation?.title))
                 // Hung up while the system took it: its call ends too.
                 if call.phase.isEnded { try? await system.perform(.end, for: call.id) }
                 return
@@ -117,14 +159,19 @@ extension PersonaCalls {
         return nil
     }
 
-    /// The system would not place the call: the voice chat in the app on the main conversation, its page open.
+    /// The system would not place the call: the voice chat in the app on the same conversation, its page open. It goes
+    /// on away from its page, in the background and locked, as the call would have (`VoiceCalls`).
     private func chatInstead(_ key: SessionKey, extensionID: String, recent: [VoiceLine], why: CallSystemError) {
         let model = AppModel.shared
         model.toast = Toast(Self.insteadLine(why))
         presented = false
         model.open(key)
         let calls = voiceCalls
-        Task { await calls.start(key, extensionID: extensionID, surface: .phone, recent: recent, deps: .live(group: key.group)) }
+        var deps = VoiceDeps.live(group: key.group)
+        #if DEBUG
+        if VoiceSample.silentAudio { deps.audio = { VoiceSample.SilentAudio() } }
+        #endif
+        Task { await calls.start(key, extensionID: extensionID, surface: .phone, recent: recent, deps: deps) }
     }
 
     nonisolated static func insteadLine(_ why: CallSystemError) -> String {
@@ -141,8 +188,8 @@ extension PersonaCalls {
         activityTypes.contains(activity.activityType) || activity.interaction?.intent is INStartCallIntent
     }
 
-    /// The handle the redial names (`CallHandle.persona`, or whatever an older entry had): any calls the current hub's
-    /// main conversation.
+    /// The handle the redial names (the name the main conversation's top bar said when it was called, `CallHandle.name`, Developing Persona's
+    /// placeholder address, or whatever an older entry had): any calls the current hub's main conversation.
     nonisolated static func handle(_ activity: NSUserActivity) -> String? {
         (activity.interaction?.intent as? INStartCallIntent)?.contacts?.first?.personHandle?.value
     }
@@ -154,31 +201,15 @@ extension PersonaCalls {
         let now = clock.now
         if let last = lastRedial, now.timeIntervalSince(last) < 2 { return true }
         lastRedial = now
-        Self.log.notice("call: a redial (\(activity.activityType, privacy: .public), handle \(Self.handle(activity) == CallHandle.persona ? "Persona" : "other", privacy: .public))")
+        let handle = Self.handle(activity)
+        let named = handle == CallHandle.name(assistantName()) ? "the assistant's name"
+            : handle == CallHandle.placeholderAddress ? "the placeholder address" : "another value"
+        Self.log.notice("call: a redial (\(activity.activityType, privacy: .public), \(named, privacy: .public))")
         Task { await callPersona(origin: .recents) }
         return true
     }
 
     // MARK: Waiting
-
-    /// From Siri, Shortcuts or Recents the app comes to the front on whatever page it was left on. The call's page and a
-    /// refusal's alert go over the app's root (`personaCallCover`), which presents nothing while the shell's Settings
-    /// sheet is up: that sheet closes, as it does for a notification's chat (#3818), and the page waits for it to have
-    /// gone (at most a second). Any other page stays under the call: Minimize goes back to it, with the bar to the call.
-    static func clearTheWay(_ model: AppModel) async {
-        guard model.shellSettings else { return }
-        model.shellSettings = false
-        for _ in 0..<20 where rootPresents {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-    }
-
-    /// Something is still up over the app's root (the closing sheet until its animation ends).
-    private static var rootPresents: Bool {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .filter { $0.session.role == .windowApplication }
-            .contains { ($0.keyWindow ?? $0.windows.first)?.rootViewController?.presentedViewController != nil }
-    }
 
     /// A launch from Recents: the hubs read and the main conversation known (at most 8 s), so the call goes to them.
     private static func waitForHub(_ group: String?) async {

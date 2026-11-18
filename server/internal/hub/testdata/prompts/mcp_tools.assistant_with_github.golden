@@ -297,7 +297,7 @@
   },
   {
     "name": "schedule_followup",
-    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work, and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it and the user sees, edits and stops it in the app; never schedule the next run from inside a run. For times an interval can't say, pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused with the next runs listed. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns the task off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. `inbox` (the user's Inbox setting): pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work (a new hop chain, at most every 10 minutes), and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it; the user edits or stops it in the app; never schedule the next run from inside a run. Otherwise pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused with the next runs listed. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it the task turns off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. Pass `inbox` (the user's Inbox setting) only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -921,7 +921,7 @@
   },
   {
     "name": "agent_supervise",
-    "description": "Take an agent you did not hand out (opened by hand on the Agents page, or by agent_start without a task) under your supervision, from the main conversation, as if task_plan had started it: it becomes a task of this conversation (a todo, its card in the conversation) that is followed up: a 督办 message comes when it needs its supervisor (waits for review, stopped short, waits for an answer, makes no progress, reports), and task_review closes it. By default the background supervisor, the built-in conversation that follows up the tasks no leader supervises, gets those messages and reviews the task, and you may still review it yourself; with assistant.main_supervises_own_tasks on they come to you. The answer says which. On an agent of a task you supervise already, it sets that task's done_when and expect_minutes instead, as a logged scope change of the task's brief (the same rules as task_scope, which is the tool to use for it). An agent of another conversation's task stays that conversation's.",
+    "description": "Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -931,15 +931,15 @@
       "properties": {
         "machine": {
           "type": "string",
-          "description": "the machine's id or name, as agents_list shows it"
+          "description": "agents_list machine id or name"
         },
         "session_id": {
           "type": "string",
-          "description": "the agent's session id, or its first 8 characters"
+          "description": "Agent session id or first 8 characters"
         },
         "title": {
           "type": "string",
-          "description": "the task in a short line (Chinese, under 20 characters); empty: the agent's title"
+          "description": "Chinese task title, under 20 characters; empty: Agent title"
         },
         "done_when": {
           "type": "array",
@@ -947,11 +947,37 @@
           "items": {
             "type": "string"
           },
-          "description": "results you can check when it says it is done (a PR merged, a screenshot, what the live system answers)"
+          "description": "checkable completion criteria"
         },
         "expect_minutes": {
           "type": "integer",
-          "description": "how long it should take from now; longer without progress counts as stuck"
+          "description": "estimated minutes from now"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_transfer",
+    "description": "Main only: move an open Agent task to a current direction or main (App Move to). Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Transfer back to undo. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "supervisor"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "agents_list machine id or name"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Agent session id or first 8 characters"
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "exact direction or main id from conversations_list"
         }
       }
     }
@@ -2170,7 +2196,7 @@
   },
   {
     "name": "conversation_new",
-    "description": "Start a Persona conversation with an opening message; return its id now. Use for user-requested separate threads. The message is marked as coming from this one; the new conversation is named after its first turn and told to report with conversation_send. Failure or no report leaves one notice per conversation. An organization read-only policy may refuse; follow its reason instead of retrying. Add `tags` only if asked.",
+    "description": "Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2187,13 +2213,17 @@
             "type": "string"
           },
           "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" or a message id: the user's words, carried verbatim"
         }
       }
     }
   },
   {
     "name": "conversation_send",
-    "description": "Send a message to another Persona conversation (not this one). It waits for the current turn if running, or for 2 minutes of user quiet if they are talking; the result says which. Marked as from this one, it lets the other side answer with conversation_send. Forwarding allows a few requests per user message and a few messages per pair in ten minutes; your first reply to the conversation you are answering is its answer and adds no hop. Do not reply just to acknowledge. Policy refusals to main or a leader state why: follow it and do not retry. Owner-verbatim words to main stay allowed: start with them.",
+    "description": "Message another Persona conversation. It waits for a running turn or 2 minutes of user quiet. Marked as from this one; replies use conversation_send. A few requests per user message (not for main; a scheduled wake-up resets), a few messages per pair per ten minutes; a first reply to a request adds no hop. Don't reply just to acknowledge. Policy refusals say why: follow them, don't retry. Owner-verbatim words to main stay allowed: start with them. Handing on a user request: set quote.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2207,6 +2237,10 @@
         },
         "text": {
           "type": "string"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" or a message id: the user's words, carried verbatim"
         }
       }
     }

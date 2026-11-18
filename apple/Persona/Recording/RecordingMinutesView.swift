@@ -31,6 +31,8 @@ import UIKit
     private(set) var transcription: MeetingTranscriptionView?
     /// The meeting imported from a connected app it stands for too (#8872), with its notes' link; nil without one.
     private(set) var imported: KBImportedMeeting?
+    /// Its latest hand-off to an Agent (#8852, `detail.meta.handoffs`): where it went, or why it didn't; nil without one.
+    private(set) var handoff: MeetingHandoff?
     /// A write (Regenerate, Add to To-Dos) or the read-back after it is on its way: no other one starts meanwhile.
     private(set) var asking = false
     /// Bumped by Try Again: the page's polling starts over (its task is keyed on it).
@@ -50,10 +52,12 @@ import UIKit
             var nameSource: String?
             /// Its imported meeting's id (#8872): `links` has its notes' link.
             var importedMeetingID: String?
+            /// Its latest hand-off to an Agent (#8852).
+            var handoff: MeetingHandoff?
             struct Ref: Decodable { var id: String }
             enum CodingKeys: String, CodingKey {
                 case state = "minutes_state", trimmedAt = "trimmed_at", transcription, name, nameSource = "name_source"
-                case importedMeeting = "imported_meeting"
+                case importedMeeting = "imported_meeting", handoffs
             }
 
             init(from decoder: Decoder) throws {
@@ -63,6 +67,8 @@ import UIKit
                 name = try? c.decodeIfPresent(String.self, forKey: .name)
                 nameSource = try? c.decodeIfPresent(String.self, forKey: .nameSource)
                 importedMeetingID = (try? c.decodeIfPresent(Ref.self, forKey: .importedMeeting))?.id
+                // Read leniently: hand-offs this app can't read leave the rest as it was.
+                handoff = MeetingHandoff.latest(try? c.decodeIfPresent([Lossy<MeetingHandoff>].self, forKey: .handoffs))
                 // Read leniently: a `transcription` this app can't read leaves the rest of the page as it was.
                 transcription = MeetingTranscriptionView(try? c.decodeIfPresent(JSONValue.self, forKey: .transcription))
             }
@@ -113,6 +119,7 @@ import UIKit
             trimmed = answer.detail.meta?.trimmedAt?.isEmpty == false
             if transcription != answer.detail.meta?.transcription { transcription = answer.detail.meta?.transcription }
             if imported != answer.detail.imported { imported = answer.detail.imported }
+            if handoff != answer.detail.meta?.handoff { handoff = answer.detail.meta?.handoff }
             // The minutes' title names it from now on (#8873): read here, where the page waits for them.
             if let meta = answer.detail.meta { RecordingSync.shared.hubNamed(entry.id, name: meta.name, source: meta.nameSource) }
             #if os(iOS)

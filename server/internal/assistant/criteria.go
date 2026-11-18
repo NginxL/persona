@@ -103,7 +103,9 @@ func (s *Service) recordCriterionReports(ctx context.Context, t Todo, machine, s
 	if len(reports) == 0 {
 		return nil
 	}
+	moved := false // a reading changed: progress (supervise_progress.go)
 	_, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+		moved = false
 		// A concurrent criteria edit must not attach this report to a different entry.
 		cur, ok := s.taskOf(ctx, machine, session)
 		if !ok || cur.ID != t.ID || cur.DoneAt != nil || !slices.Equal(v.DoneWhen, t.Supervision.DoneWhen) {
@@ -112,6 +114,9 @@ func (s *Service) recordCriterionReports(ctx context.Context, t Todo, machine, s
 		v.Criteria = db.AlignTodoCriteria(v.DoneWhen, v.Criteria)
 		for _, r := range reports {
 			text := v.DoneWhen[r.Number-1]
+			if old := v.Criteria[r.Number-1]; old.State != r.State || old.Evidence != r.Evidence {
+				moved = true
+			}
 			v.Criteria[r.Number-1] = db.TodoCriterion{Criterion: text, State: r.State, Evidence: r.Evidence,
 				At: &at, By: "agent:" + machine + "/" + session}
 		}
@@ -119,6 +124,9 @@ func (s *Service) recordCriterionReports(ctx context.Context, t Todo, machine, s
 	})
 	if err == nil && !changed {
 		return fmt.Errorf("task or done_when changed: read the current task and report again")
+	}
+	if err == nil && moved {
+		s.progressMade(machine, session, at)
 	}
 	return err
 }

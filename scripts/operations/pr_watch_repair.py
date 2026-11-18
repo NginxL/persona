@@ -70,12 +70,13 @@ def failed_go_packages(worktree, text):
 
 
 def failure_signature(text):
-    """Compare a failed check identity and its specific diagnostic."""
+    """Compare failed lane labels and specific diagnostics, not test names alone."""
     signatures = []
     for line in (text or "").splitlines():
-        if re.search(r"(?:--- FAIL:|AssertionError|FileNotFoundError|ModuleNotFoundError|"
-                     r"No such file or directory|panic:|^FAIL\s+\S|baseline|not found)", line) and not line.startswith("--- FAIL:"):
+        if re.search(r"(?:^FAIL\s+\S|AssertionError|FileNotFoundError|ModuleNotFoundError|"
+                     r"No such file or directory|panic:|baseline|not found)", line):
             normalized = re.sub(r"0x[0-9a-fA-F]+", "<address>", line)
+            normalized = re.sub(r"\(\d+(?:\.\d+)?s, exit (\d+)\)", r"(exit \1)", normalized)
             normalized = normalized.replace("'plutil'", "plutil").replace('"plutil"', "plutil")
             signatures.append(normalized.strip())
     return set(signatures)
@@ -129,8 +130,7 @@ def main_failure_comparison(repo, pr, worktree, failure, timeout=600, git_root=N
             checked(["git", "worktree", "add", "--detach", str(base_worktree), pr["baseRefOid"]], cwd=git_root or worktree, timeout=180)
             result = run(command, cwd=base_worktree, timeout=timeout, environ=environ if environ is not None else verification_env())
             output = result.stdout + "\n" + result.stderr
-            ids = failure_test_ids(output)
-            reproduced = (result.returncode != 0 and ids and ids == failure_test_ids(failure)
+            reproduced = (result.returncode != 0
                           and bool(failure_signature(output) & failure_signature(failure)))
             return {"reproduced": reproduced, "command": command,
                     "output": bounded(output, 6000),
@@ -493,10 +493,16 @@ def repair_worker_argv(argv, worktree, home=None, writable_paths=(), edit_root=N
         home = repair_worker_home()
     worktree = str(Path(worktree).resolve())
     writable = [Path(worktree, safe_checkout_path(path)) for path in writable_paths]
-    env = {key: value for key, value in os.environ.items()
-           if key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
-                      "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
-                      "http_proxy", "https_proxy", "all_proxy", "no_proxy") or key.startswith("ANTHROPIC_")}
+    env = {}
+    for key, value in os.environ.items():
+        if key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
+                   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                   "http_proxy", "https_proxy", "all_proxy", "no_proxy") or key.startswith("ANTHROPIC_"):
+            env[key] = value
+        elif key.startswith("PR_WATCH_REPAIR_ENV_"):
+            # An explicit private environment can provide a CLI's existing
+            # configuration directory, never the whole maintainer HOME.
+            env[key[len("PR_WATCH_REPAIR_ENV_"):]] = value
     env.update({"HOME": str(home), "GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1", "CI": "1",
                 "PATH": "/tools:/usr/local/bin:/usr/bin:/bin",
                 "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
@@ -517,11 +523,41 @@ def repair_worker_argv(argv, worktree, home=None, writable_paths=(), edit_root=N
               "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
               "--ro-bind-try", "/etc/nsswitch.conf", "/etc/nsswitch.conf",
               "--ro-bind-try", "/etc/hosts", "/etc/hosts",
+              # /tools must exist before its explicitly configured contents.
               "--tmpfs", "/tmp", "--tmpfs", "/tools",
               "--chdir", worktree]
+    # Read-only helper files come only from trusted local configuration. Each
+    # argument that names a mounted source is rewritten to its sandbox path.
+    # This supports interpreter adapters as well as the first executable.
+    mounted = {}
+    import shlex
+    for item in shlex.split(os.environ.get("PR_WATCH_REPAIR_MOUNTS", "")):
+        source, separator, destination = item.partition(":")
+        if not separator or not source or not destination:
+            raise WatchError("PR_WATCH_REPAIR_MOUNTS needs source:/tools/name entries")
+        if source.endswith("/"):
+            source = source.rstrip("/")
+            destination = destination.rstrip("/")
+            directory = True
+        else:
+            directory = False
+        source_path = Path(source).expanduser().resolve()
+        destination_path = Path(destination)
+        if (not destination_path.is_absolute() or ".." in destination_path.parts):
+            raise WatchError("repair mount destinations must be safe absolute paths")
+        if directory:
+            if not source_path.is_dir():
+                raise WatchError("repair mount directory is unavailable")
+        elif not source_path.is_file() or source_path.is_symlink():
+            raise WatchError("repair mounts must use regular files")
+        result.extend(["--ro-bind", str(source_path), str(destination_path)])
+        if not directory:
+            mounted[source] = str(destination_path)
+            mounted[str(source_path)] = str(destination_path)
     if executable:
         result.extend(["--ro-bind", str(Path(executable).resolve()), "/tools/repair-" + Path(executable).name])
         argv = ["/tools/repair-" + Path(executable).name] + list(argv[1:])
+    argv = [mounted.get(argument, argument) for argument in argv]
     if writable:
         if edit_root is None:
             raise WatchError("conflict repair needs a separate writable workspace")

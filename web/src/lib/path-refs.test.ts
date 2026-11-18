@@ -100,6 +100,24 @@ describe("findPathRefs", () => {
 });
 
 describe("codePathRef", () => {
+  it.each(["/tmp/report.", "/tmp/report...", "~/notes/result..", "/tmp/My Notes/report."])("keeps the exact code path %j including its final dots", (path) => {
+    expect(codePathRef(path)).toMatchObject({ path, start: 0, end: path.length });
+    const text = `See \`${path}\``;
+    const refs = findPathRefs(text);
+    expect(refs[0].path).toBe(path);
+    expect(text.slice(refs[0].start, refs[0].end)).toBe(path);
+    const shortened = path.replace(/\.+$/, "");
+    expect(uniquePaths(refs)).not.toContain(shortened);
+    expect(splitAtRefs(text, refs, (p) => p === shortened)).toEqual([text]);
+    expect(splitAtRefs(text, refs, (p) => p === path)[1]).toMatchObject({ path });
+  });
+
+  it("keeps a code path's dots with its line while plain prose still trims punctuation", () => {
+    expect(codePathRef(" /tmp/report.:12:5 ")).toMatchObject({ path: "/tmp/report.", line: 12, col: 5, start: 1 });
+    expect(codePathRef("~/notes/result..#L8")).toMatchObject({ path: "~/notes/result..", line: 8 });
+    expect(paths("See /tmp/report... and ~/notes/result..")).toEqual(["/tmp/report", "~/notes/result"]);
+  });
+
   it("is a code span that is a whole path", () => {
     expect(codePathRef("src/a.ts:12")).toMatchObject({ path: "src/a.ts", line: 12 });
     expect(codePathRef(" /tmp/x/y.md ")).toMatchObject({ path: "/tmp/x/y.md", start: 1, end: 12 });

@@ -114,7 +114,14 @@ func (s *Service) NodeAnswer(ctx context.Context, machine, method string, params
 		return s.agentsDefault(ctx, machine), true, nil
 	case "assistant.model":
 		_ = json.Unmarshal(params, &p)
-		if !s.assistantCaller(ctx, machine, p.SessionID) {
+		allowed := s.assistantCaller(ctx, machine, p.SessionID)
+		if !allowed {
+			// The main conversation may still run on its confirmed computer after the
+			// default computer changes. Only its kept external pick grants this scope.
+			pick, kept := s.modelPickOf(ctx, machine, p.SessionID)
+			allowed = kept && proto.IsExternalLauncher(pick.Launcher) && s.externalMainScope(ctx, machine, p.SessionID)
+		}
+		if !allowed {
 			return map[string]any{}, true, nil
 		}
 		out, err := s.SendParams(ctx, SendParams{MachineID: machine, SessionID: p.SessionID, Params: map[string]any{}})

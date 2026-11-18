@@ -14,10 +14,15 @@ final class DevMode {
     static let shared = DevMode()
     static let onKey = "devMode.on"
     static let sinceKey = "devMode.since"
+    static let callHandleKey = "devMode.callHandle"
 
     private(set) var isOn: Bool
     /// When the switch was turned on.
     private(set) var since: Date?
+    /// Call handle (#9887): the kind of handle a call to Persona carries to the system, an on-device experiment for
+    /// Phone › Recents, which only a device shows. Read once at launch; it counts only while the switch is on
+    /// (`callHandleInUse`).
+    private(set) var callHandle: CallHandleKind
     /// The bytes recorded, read by `refresh` (off the main actor).
     private(set) var size: Int64?
 
@@ -33,8 +38,19 @@ final class DevMode {
     init(recorder: DevRecorder = .shared, defaults: UserDefaults = .standard) {
         self.recorder = recorder
         self.defaults = defaults
-        isOn = defaults.bool(forKey: Self.onKey)
-        since = isOn ? defaults.object(forKey: Self.sinceKey) as? Date : nil
+        let on = defaults.bool(forKey: Self.onKey)
+        isOn = on
+        since = on ? defaults.object(forKey: Self.sinceKey) as? Date : nil
+        callHandle = defaults.string(forKey: Self.callHandleKey).flatMap(CallHandleKind.init(rawValue:)) ?? .generic
+    }
+
+    /// The handle kind a new call carries: the switch's while Developing Persona is on, else the generic one.
+    var callHandleInUse: CallHandleKind { isOn ? callHandle : .generic }
+
+    func setCallHandle(_ kind: CallHandleKind) {
+        guard kind != callHandle else { return }
+        callHandle = kind
+        defaults.set(kind.rawValue, forKey: Self.callHandleKey)
     }
 
     /// At launch: carries on recording when the switch was left on.
@@ -242,4 +258,10 @@ final class DevMode {
         true
         #endif
     }
+}
+
+/// The kinds of handle a call to Persona can carry (`CallHandle`; Developing Persona's Call handle, #9887): the
+/// assistant's name as a generic handle (the default), or a fixed placeholder email address.
+nonisolated enum CallHandleKind: String, CaseIterable, Equatable, Sendable {
+    case generic, email
 }

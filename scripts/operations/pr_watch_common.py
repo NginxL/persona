@@ -97,9 +97,18 @@ def run(argv, cwd=None, timeout=120, environ=None, input_text=None):
     return _run_process(arguments, cwd, timeout, environ, input_text, pass_fds)
 
 
+def _bounded_command(argv):
+    """Use only the maintainer's explicit wrapper, never a host-specific default."""
+    wrapper = os.environ.get("PR_WATCH_PROCESS_WRAPPER", "").strip()
+    if not wrapper:
+        return list(argv)
+    import shlex
+    return shlex.split(wrapper) + list(argv)
+
+
 def _run_process(argv, cwd, timeout, environ, input_text, pass_fds):
     proc = subprocess.Popen(
-        argv, cwd=cwd, env=clean_env(environ), stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        _bounded_command(argv), cwd=cwd, env=clean_env(environ), stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, pass_fds=pass_fds,
     )
     try:

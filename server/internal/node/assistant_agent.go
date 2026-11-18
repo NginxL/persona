@@ -5,12 +5,22 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // assistantAgent is the agent a launcher runs, as far as the assistant goes: claude (headless -p, stream-json) or
 // codex (app-server). Anything else is refused with a reason the app shows (2026-11-01: a codex launcher used to fail
 // every message on "unexpected argument '--input-format'"; Codex has its own backend since).
 func (n *Node) assistantAgent(ctx context.Context, launcher string) (string, error) {
+	if proto.IsExternalLauncher(launcher) {
+		if n.external != nil {
+			if target, ok := n.external.lookup(launcher); ok && target.Engine == "claude-code" {
+				return "claude", nil
+			}
+		}
+		return "", externalRefusal(ctx, "adapter_target_not_found")
+	}
 	if launcher == "claude" {
 		return "claude", nil
 	}
@@ -41,6 +51,9 @@ func (n *Node) assistantAgent(ctx context.Context, launcher string) (string, err
 func (n *Node) assistantResumeLauncher(ctx context.Context, id, launcher string, st sessionState) (own string, switched bool) {
 	if id == "" || launcher == "" {
 		return launcher, false
+	}
+	if proto.IsExternalLauncher(launcher) {
+		return launcher, false // explicit adapter picks must be refused, not silently replaced
 	}
 	if n.runtimeAssistant(id) {
 		if n.assistantRuntime(launcher) == nil {

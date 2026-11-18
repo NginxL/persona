@@ -3308,6 +3308,14 @@ TODO_ASKS = {
     "todo_task_release": {"verdict": "✅ 做完了：已部署，按下面验收"},
 } if os.environ.get("MOCK_TODO_ASKS") == "1" else {}
 TODO_ASKED_AT = ago(hours=2)
+# MOCK_TODO_ASK_LONG=1 (with MOCK_TODO_ASKS): the PR check's decision has a question and a recommendation of several lines, the
+# way a supervisor writes them, so the Needs you tray's decision card can be checked with long text, hours of waiting and its
+# buttons at the bottom of a short window.
+if os.environ.get("MOCK_TODO_ASK_LONG") == "1" and "todo_review" in TODO_ASKS:
+    TODO_ASKS["todo_review"].update(
+        verdict="🤔 要你拍板：PR #42 改的公开接口已经合进 2.0 版，但旧接口还有一半的客户端在用，2.0 放量之前它们的列表页会整个空掉。要不要先把旧接口加回来止损？",
+        recommend="先加回旧接口，通知客户端的负责人这个版本之后再删")
+    TODO_ASKED_AT = ago(hours=12, minutes=31)
 # MOCK_ASK_HELD=1 (#4930, #5803, docs/assistant/todos.md "Decisions that can wait"): with MOCK_TODO_ASKS, the PR
 # check's decision is held for the next briefing (`ask.for_briefing`), so the apps mark it.
 if os.environ.get("MOCK_ASK_HELD") == "1" and "todo_review" in TODO_ASKS:
@@ -5517,6 +5525,7 @@ def meeting_detail_meta(rid, meta):
     (absent when off or trimmed), never an attending_session."""
     m = MEETING_CONV.get(rid) if meeting_conversation_on() else None
     meta = transcription_fields(rid, dict(meta))
+    if MEETING_HANDOFFS.get(rid): meta["handoffs"] = list(MEETING_HANDOFFS[rid])
     if not m: return meta
     if m["private"] is not None: meta["private"] = m["private"]
     if (v := room_view(m)) is not None:
@@ -5696,6 +5705,78 @@ def meeting_receipt(h, kind, raw, run):
     return h.send_json(out, status) or True
 
 
+# Handing a meeting to an Agent after it (#8852, assistant/meeting_handoff.go): POST /api/v1/recordings/{id}/handoff sends
+# the meeting to an Agent listed here as the owner's own message, after its checks (503, 404 / 410, 400, 409
+# meeting_running, 409 no_material), and keeps each try in MEETING_HANDOFFS (oldest first, the last 20), shown as
+# detail.meta.handoffs. As attending's rules: a Persona conversation is not_agent; Allow All or a machine not listed
+# not_allowed; offline, interrupted, a subagent or a row not listed unavailable. MOCK_HANDOFF_FAIL=<problem>, or POST
+# /mock/meeting_handoff {"fail": "<problem>"} ("" for none), keeps every try that passes them as failed with that problem
+# (send_failed, unavailable…), for the page's failed row.
+MEETING_HANDOFFS = {}
+HANDOFF_FAIL = [os.environ.get("MOCK_HANDOFF_FAIL", "")]
+MEETING_HANDOFFS_KEPT = 20
+
+
+def handoff_problem(mid, sid):
+    """The problem a hand-off to (mid, sid) is kept with, "" when it goes (meeting_handoff.go handoffSend)."""
+    if not any(m["id"] == mid for m in MACHINES): return "not_allowed"
+    if not next((m for m in MACHINES if m["id"] == mid), {}).get("online"): return "unavailable"
+    row = next((x for x in SESSIONS + ASSISTANT if x["machine_id"] == mid and x["session_id"] == sid), None)
+    if row is None: return "unavailable"
+    if row.get("permission_mode") == "bypassPermissions": return "not_allowed"
+    if row.get("assistant"): return "not_agent"
+    if row.get("is_subagent") or row.get("status") in ("offline", "interrupted"): return "unavailable"
+    return HANDOFF_FAIL[0]
+
+
+def meeting_handoff_route(h, method, p):
+    """POST /api/v1/recordings/{id}/handoff (#8852), and /mock/meeting_handoff."""
+    if p == "/mock/meeting_handoff":
+        if method == "POST":
+            body = json.loads(getattr(h, "last_body", b"") or b"{}")
+            if isinstance(body.get("fail"), str): HANDOFF_FAIL[0] = body["fail"]
+        return h.send_json({"fail": HANDOFF_FAIL[0], "meetings": MEETING_HANDOFFS}) or True
+    hit = re.fullmatch(r"/api/v1/recordings/([^/]+)/handoff", p)
+    if not hit: return False
+    rid = hit.group(1).lower()
+    if method != "POST": return h.send_json({"error": "method"}, 405) or True
+    if is_read_only(h): return h.send_json({"error": "only devices with full credentials can do this", "code": "forbidden"}, 403) or True
+    raw = getattr(h, "last_body", b"") or b""
+    if os.environ.get("MOCK_RECORDINGS_DOWN") == "1": return h.send_json({"error": "知识库暂时不可用", "code": "kb_unavailable"}, 503) or True
+    if len(raw) > 64 << 10: return h.send_json({"error": "the body is over 64 KiB", "code": "too_large"}, 413) or True
+    if rid in RECORDINGS_DELETED: return h.send_json({"error": "这条录音已删除", "code": "recording_deleted"}, 410) or True
+    if rid not in RECORDINGS: return h.send_json({"error": "还没有上传这条录音", "code": "recording_not_found"}, 404) or True
+    try: body = json.loads(raw or b"{}")
+    except ValueError: body = None
+    if not isinstance(body, dict): return h.send_json({"error": "参数不对"}, 400) or True
+    mid, sid = str(body.get("machine_id") or "").strip(), str(body.get("session_id") or "").strip()
+    if not mid or not sid: return h.send_json({"error": "session is required"}, 400) or True
+    text = str(body.get("text") or "").strip()
+    rec = RECORDINGS[rid]
+    with_lines = any((x.get("text") or "").strip() for x in rec.get("segments") or [])
+    transcript = bool(body.get("transcript")) and with_lines and rid not in RECORDINGS_TRIMMED
+    minutes = bool((KB_DETAIL.get(("recordings", rid)) or {}).get("minutes"))
+    if meeting_running(rid): return h.send_json({"error": "The meeting is still running.", "code": "meeting_running"}, 409) or True
+    if not minutes and not transcript:
+        return h.send_json({"error": "This meeting has neither minutes nor a transcript.", "code": "no_material"}, 409) or True
+    title = re.sub(r"\s+", " ", str(body.get("title") or "")).strip()[:120]
+    out = {"id": uuid.uuid4().hex[:16], "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "machine_id": mid, "session_id": sid, "state": "sent"}
+    if title: out["title"] = title
+    if transcript: out["transcript"] = True
+    problem = handoff_problem(mid, sid)
+    if problem:
+        out.update(state="failed", problem=problem)
+    else:
+        name = rec.get("title") or "会议"
+        first = f"<persona-context>\n会议：{name}\n</persona-context>\n\n" + (text or "看看这场会里和你手上的事有关的部分。")  # i18n-ignore
+        conv_append(mid, sid, [conv_item("user", first)])
+    kept = MEETING_HANDOFFS.setdefault(rid, [])
+    kept.append(out)
+    del kept[:-MEETING_HANDOFFS_KEPT]
+    return h.send_json({"handoff": out}) or True
+
+
 def meeting_conversation_route(h, method, p):
     """PUT …/private, POST …/just-me, POST …/followup, messages into a room that ended, and /mock/meeting_conversation."""
     global MEETING_CONVERSATION
@@ -5768,7 +5849,7 @@ def meeting_conversation_reset():
             if c.get("session_id"):
                 ASSISTANT[:] = [x for x in ASSISTANT if x["session_id"] != c["session_id"]]
                 ITEMS.pop(c["session_id"], None)
-    MEETING_CONV.clear(); MEETING_RECEIPTS.clear()
+    MEETING_CONV.clear(); MEETING_RECEIPTS.clear(); MEETING_HANDOFFS.clear()
     with MEETING_EVENT_LOCK: MEETING_EVENTS.clear()
     JUST_ME_GENERATION[0] += 1  # a reply still on its timer is not written
     for main, before in JUST_ME_BEFORE.items():
@@ -7063,7 +7144,8 @@ def transcription_control(h, method):
                 sock["fail"](TRANSCRIPTION_MODE["fatal"])
     elif method != "GET": return h.send_json({"code": "method_not_allowed"}, 405) or True
     return h.send_json({"on": meeting_transcription_on(), **TRANSCRIPTION_MODE,
-                        "recordings": {rid: {"frames": t["frames"], "bytes": t["bytes"], "timeline": t["timeline"],
+                        # lines: the hub's final lines so far, what a test waits on before it looks for them (#10109)
+                        "recordings": {rid: {"frames": t["frames"], "bytes": t["bytes"], "lines": len(t["hub"]), "timeline": t["timeline"],
                                               "gaps": transcription_gaps(t), "held": t["held"], "socket": t.get("socket") is not None,
                                               "transcription": transcription_view(rid)}
                                        for rid, t in TRANSCRIPTIONS.items()}}) or True
@@ -7297,6 +7379,7 @@ def recordings_route_locked(h, method, p):
     if re.fullmatch(r"/api/v1/recordings/[^/]+/segments", p) and not RECORDING_DAY["on"]:
         return h.send_json({"error": "404 page not found"}, 404, add_error_code=False) or True
     if meeting_conversation_route(h, method, p): return True
+    if meeting_handoff_route(h, method, p): return True
     if live_view_route(h, method, p): return True
     if highlights_route(h, method, p): return True
     if photos_route(h, method, p): return True
@@ -7451,7 +7534,7 @@ def recordings_route_locked(h, method, p):
     if method == "DELETE":
         if (t := TRANSCRIPTIONS.pop(rid, None)) and t.get("socket"): t["socket"]["fail"]("recording_deleted")
         existed = rid in RECORDINGS
-        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDING_RENAMED.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
+        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDING_RENAMED.pop(rid, None); MEETING_HANDOFFS.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
         kb[:] = [e for e in kb if e["id"] != rid]; KB_DETAIL.pop(("recordings", rid), None)
         with MEETING_LOCK: MEETING_LIVE.pop(rid, None)  # live lines and asks go with the recording
         with PHOTO_LOCK:  # as at the trim
