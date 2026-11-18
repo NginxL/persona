@@ -296,6 +296,310 @@
     ]
   },
   {
+    "ok": true,
+    "what": "complete 1440-large light: the app's largest text is on"
+  },
+  {
+    "list": "complete",
+    "variant": "1440-large",
+    "theme": "light",
+    "state": "folded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 204.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 244.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light folded: the complete Agents list is drawn",
+    "detail": {
+      "paged": false
+    }
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light folded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light folded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light folded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light folded: title to title is the same distance",
+    "detail": [
+      40,
+      40
+    ]
+  },
+  {
+    "list": "complete",
+    "variant": "1440-large",
+    "theme": "light",
+    "state": "unfolded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 533.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 722.8,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light unfolded: the complete Agents list is drawn",
+    "detail": {
+      "paged": false
+    }
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light unfolded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light unfolded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light unfolded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large light unfolded: each title stands as far below the group before it",
+    "detail": [
+      23.99,
+      23.99
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark: the app's largest text is on"
+  },
+  {
+    "list": "complete",
+    "variant": "1440-large",
+    "theme": "dark",
+    "state": "folded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 204.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 244.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark folded: the complete Agents list is drawn",
+    "detail": {
+      "paged": false
+    }
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark folded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark folded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark folded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark folded: title to title is the same distance",
+    "detail": [
+      40,
+      40
+    ]
+  },
+  {
+    "list": "complete",
+    "variant": "1440-large",
+    "theme": "dark",
+    "state": "unfolded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 533.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 722.8,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark unfolded: the complete Agents list is drawn",
+    "detail": {
+      "paged": false
+    }
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark unfolded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark unfolded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark unfolded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "complete 1440-large dark unfolded: each title stands as far below the group before it",
+    "detail": [
+      23.99,
+      23.99
+    ]
+  },
+  {
     "list": "complete",
     "variant": "390",
     "theme": "light",
@@ -780,7 +1084,7 @@
       {
         "name": "页面",
         "height": 24,
-        "titleTop": 161.75,
+        "titleTop": 145.75,
         "middle": 12,
         "above": null,
         "box": true
@@ -788,7 +1092,7 @@
       {
         "name": "Persona 对话",
         "height": 24,
-        "titleTop": 201.75,
+        "titleTop": 185.75,
         "middle": 12,
         "above": 24,
         "box": true
@@ -796,7 +1100,7 @@
       {
         "name": "Agents",
         "height": 24,
-        "titleTop": 241.75,
+        "titleTop": 225.75,
         "middle": 12,
         "above": 24,
         "box": true
@@ -928,7 +1232,7 @@
       {
         "name": "页面",
         "height": 24,
-        "titleTop": 161.75,
+        "titleTop": 145.75,
         "middle": 12,
         "above": null,
         "box": true
@@ -936,7 +1240,7 @@
       {
         "name": "Persona 对话",
         "height": 24,
-        "titleTop": 201.75,
+        "titleTop": 185.75,
         "middle": 12,
         "above": 24,
         "box": true
@@ -944,7 +1248,7 @@
       {
         "name": "Agents",
         "height": 24,
-        "titleTop": 241.75,
+        "titleTop": 225.75,
         "middle": 12,
         "above": 24,
         "box": true
@@ -1065,6 +1369,310 @@
     "detail": [
       24,
       24
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light: the app's largest text is on"
+  },
+  {
+    "list": "paged",
+    "variant": "1440-large",
+    "theme": "light",
+    "state": "folded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 149.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 189.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 229.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light folded: the paged Agents list is drawn",
+    "detail": {
+      "paged": true
+    }
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light folded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light folded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light folded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light folded: title to title is the same distance",
+    "detail": [
+      40,
+      40
+    ]
+  },
+  {
+    "list": "paged",
+    "variant": "1440-large",
+    "theme": "light",
+    "state": "unfolded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 533.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 722.8,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light unfolded: the paged Agents list is drawn",
+    "detail": {
+      "paged": true
+    }
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light unfolded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light unfolded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light unfolded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large light unfolded: each title stands as far below the group before it",
+    "detail": [
+      23.99,
+      23.99
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark: the app's largest text is on"
+  },
+  {
+    "list": "paged",
+    "variant": "1440-large",
+    "theme": "dark",
+    "state": "folded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 149.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 189.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 229.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark folded: the paged Agents list is drawn",
+    "detail": {
+      "paged": true
+    }
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark folded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark folded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark folded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark folded: title to title is the same distance",
+    "detail": [
+      40,
+      40
+    ]
+  },
+  {
+    "list": "paged",
+    "variant": "1440-large",
+    "theme": "dark",
+    "state": "unfolded",
+    "headings": [
+      {
+        "name": "页面",
+        "height": 24,
+        "titleTop": 164.03,
+        "middle": 11.99,
+        "above": null,
+        "box": true
+      },
+      {
+        "name": "Persona 对话",
+        "height": 24,
+        "titleTop": 533.03,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      },
+      {
+        "name": "Agents",
+        "height": 24,
+        "titleTop": 722.8,
+        "middle": 11.99,
+        "above": 23.99,
+        "box": true
+      }
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark unfolded: the paged Agents list is drawn",
+    "detail": {
+      "paged": true
+    }
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark unfolded: 3+ top-level headings, Agents last",
+    "detail": [
+      "页面",
+      "Persona 对话",
+      "Agents"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark unfolded: every heading's row is as tall",
+    "detail": [
+      "页面 24",
+      "Persona 对话 24",
+      "Agents 24"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark unfolded: every title is centred as far down its row",
+    "detail": [
+      "页面 11.99",
+      "Persona 对话 11.99",
+      "Agents 11.99"
+    ]
+  },
+  {
+    "ok": true,
+    "what": "paged 1440-large dark unfolded: each title stands as far below the group before it",
+    "detail": [
+      23.99,
+      23.99
     ]
   },
   {
