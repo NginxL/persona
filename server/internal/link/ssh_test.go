@@ -40,6 +40,7 @@ func TestMain(m *testing.M) {
 
 type standInRun struct {
 	PID     int      `json:"pid"`
+	Started int64    `json:"started"` // when the stand-in started, Unix nanoseconds
 	Args    []string `json:"args"`
 	Forward string   `json:"forward"`
 	Port    string   `json:"port"`
@@ -48,7 +49,7 @@ type standInRun struct {
 
 func standInSSHMain(args []string) int {
 	dir := os.Getenv(standInSSHDirEnv)
-	rec := standInRun{PID: os.Getpid(), Args: append([]string(nil), args...)}
+	rec := standInRun{PID: os.Getpid(), Started: time.Now().UnixNano(), Args: append([]string(nil), args...)}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
@@ -600,6 +601,22 @@ type gatedDirectListener struct {
 	url      string
 	allowed  atomic.Bool
 	attempts atomic.Int32
+
+	mu sync.Mutex
+	at []time.Time // when each dial arrived
+}
+
+// since is when the dials that arrived after t came.
+func (g *gatedDirectListener) since(t time.Time) []time.Time {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []time.Time
+	for _, at := range g.at {
+		if at.After(t) {
+			out = append(out, at)
+		}
+	}
+	return out
 }
 
 func newGatedDirectListener(t *testing.T, targetAddr string, startAllowed bool) *gatedDirectListener {
@@ -617,6 +634,9 @@ func newGatedDirectListener(t *testing.T, targetAddr string, startAllowed bool) 
 			if err != nil {
 				return
 			}
+			g.mu.Lock()
+			g.at = append(g.at, time.Now())
+			g.mu.Unlock()
 			g.attempts.Add(1)
 			if !g.allowed.Load() {
 				_ = c.Close()
@@ -690,7 +710,17 @@ func TestSSHRoutingOrderFallbackStickyReconnectAndDirectRecovery(t *testing.T) {
 	<-done1
 
 	// Phases 2 and 3 start with direct down and Always off, each in a run of its own: direct is tried first, SSH takes
-	// over, and when the hub drops that working SSH link the reconnect goes straight to SSH.
+	// over, and when the hub drops that working SSH link the reconnect goes straight to SSH. What the runs log is shown
+	// when the test fails (registered first, so it runs after the runs have stopped).
+	var logMu sync.Mutex
+	var logs []string
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			defer logMu.Unlock()
+			t.Logf("the link's log:\n%s", strings.Join(logs, "\n"))
+		}
+	})
 	startRun := func(directRetryEvery time.Duration) (chan Status, func()) {
 		ch := make(chan Status, 128)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -702,6 +732,11 @@ func TestSSHRoutingOrderFallbackStickyReconnectAndDirectRecovery(t *testing.T) {
 				SSHBin:           ssh.bin,
 				PairCheck:        30 * time.Millisecond,
 				DirectRetryEvery: directRetryEvery,
+				Logf: func(format string, args ...any) {
+					logMu.Lock()
+					defer logMu.Unlock()
+					logs = append(logs, time.Now().Format("15:04:05.000000 ")+fmt.Sprintf(format, args...))
+				},
 				Status: func(s Status) {
 					select {
 					case ch <- s:
@@ -715,36 +750,53 @@ func TestSSHRoutingOrderFallbackStickyReconnectAndDirectRecovery(t *testing.T) {
 		t.Cleanup(stop)
 		return ch, stop
 	}
-	// fallBackThenReconnect returns direct's attempts once the run fell back to SSH, then drops that SSH link from the
-	// hub's side and waits for the reconnect over SSH.
-	fallBackThenReconnect := func(ch chan Status) int32 {
+	// fallBackThenReconnect checks that direct was tried before the run fell back to SSH, then drops that SSH link from
+	// the hub's side, waits for the reconnect over SSH and says when the link was dropped.
+	fallBackThenReconnect := func(ch chan Status) time.Time {
 		t.Helper()
 		stFallback := waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH })
 		firstSSHLink := <-hub.links
-		afterFallback := direct.attempts.Load()
-		if afterFallback < 1 {
-			t.Fatalf("direct was not tried before falling back to SSH (attempts = %d)", afterFallback)
+		if n := direct.attempts.Load(); n < 1 {
+			t.Fatalf("direct was not tried before falling back to SSH (attempts = %d)", n)
 		}
+		dropped := time.Now()
 		_ = firstSSHLink.conn.Close(websocket.StatusGoingAway, "restart")
 		waitFor(t, ch, func(s Status) bool {
 			return s.State == "connected" && s.Kind == KindSSH && s.Conn > stFallback.Conn
 		})
 		<-hub.links
-		return afterFallback
+		return dropped
 	}
 
-	// Phase 2: the reconnect after the working SSH link dials no direct candidate. Direct's listener counts every dial,
-	// and a link up over SSH probes direct every DirectRetryEvery: with the probe an hour away, nothing but the reconnect
-	// can reach the listener here. (With a 300ms probe, one that fired while the test goroutine was slow was counted as
-	// the reconnect's, #10095.)
+	// Phase 2: the reconnect after the working SSH link is SSH first (sticky, docs/operations/link.md "Route
+	// selection"): no direct dial before it starts a new ssh. A link up over SSH probes direct every DirectRetryEvery,
+	// an hour away here, so only the reconnect can reach direct's listener after the drop. SSH first is the order, not a
+	// promise that direct is never dialed: a reconnect whose ssh fails tries direct after it (dialActive) and the next
+	// attempt is SSH first again, so dials after the new ssh started are the fallback, not a broken order (#10095, the
+	// review of #10104). Comparing the count of dials before and after the drop took that fallback for a broken order.
 	direct.allowed.Store(false)
 	direct.attempts.Store(0)
 	ch2, stop2 := startRun(time.Hour)
-	afterFallbackAttempts := fallBackThenReconnect(ch2)
-	if got := direct.attempts.Load(); got != afterFallbackAttempts {
-		t.Fatalf("reconnect after working SSH tried direct first: attempts went from %d to %d", afterFallbackAttempts, got)
-	}
+	dropped := fallBackThenReconnect(ch2)
 	stop2()
+	var sshAfter int64 // when the first ssh after the drop started
+	for _, r := range ssh.runs() {
+		if r.Started > dropped.UnixNano() && (sshAfter == 0 || r.Started < sshAfter) {
+			sshAfter = r.Started
+		}
+	}
+	if sshAfter == 0 {
+		t.Fatal("the reconnect after working SSH started no ssh")
+	}
+	for _, at := range direct.since(dropped) {
+		if at.UnixNano() < sshAfter {
+			t.Fatalf("reconnect after working SSH dialed direct %s before its ssh started (%s)",
+				at.Format("15:04:05.000000"), time.Unix(0, sshAfter).Format("15:04:05.000000"))
+		}
+	}
+	if late := direct.since(dropped); len(late) > 0 {
+		t.Logf("the reconnect's ssh failed and it dialed direct after it, %d time(s), as SSH first allows", len(late))
+	}
 
 	// Phase 3: the same, probing direct every 300ms (those probes may land anywhere above, so attempts are not compared).
 	// Bring direct back: the sticky SSH link's probe reaches it, reconnects over LAN, and closes the SSH tunnel.
