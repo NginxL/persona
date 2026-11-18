@@ -365,6 +365,7 @@ func grantSafeTool(name string) bool {
 	if grantSafeBuiltins[name] {
 		return true
 	}
+	name = compat.CanonicalMCPToolName(name)
 	rest, ok := strings.CutPrefix(name, "mcp__")
 	i := strings.LastIndex(rest, "__")
 	if !ok || i <= 0 || !compat.IsMCPServer(strings.TrimPrefix(rest[:i], "plugin_")) {
@@ -439,7 +440,7 @@ func planCall(it proto.Item) bool {
 	if it.Role != "assistant" || it.Kind != proto.KindToolUse {
 		return false
 	}
-	rest, ok := strings.CutPrefix(it.ToolName, "mcp__")
+	rest, ok := strings.CutPrefix(compat.CanonicalMCPToolName(it.ToolName), "mcp__")
 	i := strings.LastIndex(rest, "__")
 	return ok && i > 0 && compat.IsMCPServer(strings.TrimPrefix(rest[:i], "plugin_")) && compat.Tool(rest[i+2:]) == "task_plan"
 }

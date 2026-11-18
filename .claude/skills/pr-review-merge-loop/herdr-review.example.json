@@ -9,5 +9,12 @@
   "forbidden_flags": ["--model"],
   "startup_warning": "Optional exact startup warning; leave empty to reject every prompt",
   "startup_acceptance": "Optional exact acceptance label; leave empty to reject every prompt",
-  "process_wrapper": "/usr/bin/python3 -I /path/to/repository/.claude/skills/pr-review-merge-loop/scripts/pr_watch_resources.py /path/to/private/pr-review-runtime/resources.json --slot"
+  "process_wrapper": "/usr/bin/python3 -I /path/to/repository/.claude/skills/pr-review-merge-loop/scripts/pr_watch_resources.py /path/to/private/pr-review-runtime/resources.json --slot",
+  "scope_properties": {
+    "CPUQuota": "400%",
+    "CPUWeight": 20,
+    "MemoryHigh": 5368709120,
+    "MemoryMax": 6442450944,
+    "TasksMax": 512
+  }
 }

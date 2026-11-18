@@ -409,7 +409,7 @@ func TestAgentSendEmptyTaskIsAReply(t *testing.T) {
 			onBoxTask(t, s, "done0001", "conv2", true, "done criteria")  // another conversation's closed task
 			before := taskLedger(t, s, "conv1", "conv2")
 
-			side := prompts.RenderSideConversation(prompts.SideConversation{From: "conv1", Text: "A reply"})
+			side := prompts.RenderSideConversation("A reply")
 			for _, c := range []struct{ self, sid, receipt, sent string }{
 				{"conv1", "free0001", "Sent to free0001 on box.", "A reply"},
 				{"conv1", "peer0001", "Sent to peer0001 on box.", side},
@@ -609,7 +609,7 @@ func TestAgentSendExitToAnotherConversationsAgentIsRefused(t *testing.T) {
 			if res, err := s.runTool(ctx, "server", "conv1", "agent_send", args); err != nil || !strings.HasPrefix(res, "Sent to peer0001 on box.") {
 				t.Fatalf("/exit with an attachment: %q %v", res, err)
 			}
-			if sent := sentToAgent(f); len(sent) != 6 || !strings.HasPrefix(sent[5], prompts.RenderSideConversation(prompts.SideConversation{From: "conv1", Text: "/exit"})) {
+			if sent := sentToAgent(f); len(sent) != 6 || !strings.HasPrefix(sent[5], prompts.RenderSideConversation("/exit")) {
 				t.Fatalf("/exit with an attachment: sent %q", sent[5:])
 			}
 			if after := taskLedger(t, s, "conv1", "conv2"); after != before {

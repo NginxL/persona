@@ -31,6 +31,8 @@ type botTarget struct {
 	Kind      string `json:"kind"` // main | persona | agent
 	MachineID string `json:"machine_id,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// TodoID is set only on a to-do reminder's cards: a reply still goes to the conversation, with that to-do as data.
+	TodoID string `json:"todo_id,omitempty"`
 }
 
 const (

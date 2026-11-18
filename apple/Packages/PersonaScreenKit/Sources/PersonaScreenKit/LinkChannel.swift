@@ -26,9 +26,13 @@ public struct LinkReceiver: Equatable, Sendable {
         return Data(fresh)
     }
 
-    /// The video channel goes on at `offset` (`reset`): what lay between was dropped by the node.
-    public mutating func reset(to offset: UInt64) {
-        if offset > self.offset { self.offset = offset }
+    /// The video channel goes on at `offset` (`reset`): what lay between was dropped by the node. True when it moved the
+    /// receiver; a reset at or behind it (a late copy from an old route, #10005) changes nothing.
+    @discardableResult
+    public mutating func reset(to offset: UInt64) -> Bool {
+        guard offset > self.offset else { return false }
+        self.offset = offset
+        return true
     }
 
     /// Back to `offset`, a message boundary at most `offset` behind: the bytes of a partial message were dropped (the
@@ -97,7 +101,7 @@ public struct LinkSender: Sendable {
 }
 
 /// The video channel's bytes as whole video wire messages only: a partial message stays until it completes, and a
-/// `reset` drops it, so the decoder never sees half a message from before a dropped backlog.
+/// `reset` that moves the receiver drops it, so the decoder never sees half a message from before a dropped backlog.
 public struct VideoMessageAssembler {
     private var parser = ScreenVideoParser()
 

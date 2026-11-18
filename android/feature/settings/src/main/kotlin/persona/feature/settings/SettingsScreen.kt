@@ -471,9 +471,11 @@ private fun SettingsPageContent(
             mainReadiness = services.readiness.takeUnless { services.demo }, skipWelcome = true)
         "capsule" -> CapsuleSettingsPage(services.capsule, back)
         "knowledge-selection" -> KnowledgeSelectionPage(knowledgeSelection, connectorsService, back)
-        // The current assistant's computers alone: their Claude Code / Codex settings.
+        // The current assistant's computers alone: their Claude Code / Codex / Antigravity settings.
         "claude" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, owns = { assistant.ownsOn(it.id, it.manager) })
         "codex" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, AgentSettingsKind.Codex,
+            owns = { assistant.ownsOn(it.id, it.manager) })
+        "agy" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, AgentSettingsKind.Agy,
             owns = { assistant.ownsOn(it.id, it.manager) })
         "models" -> purpose?.let { id -> ModelPurposePage(services.models.takeUnless { services.demo }, id, onBack = { purpose = null },
                 providers = services.providers.takeUnless { services.demo }, manager = purposeManager, machines = machines) }
@@ -513,7 +515,7 @@ private fun SettingsPageContent(
         }
         "agent-settings" -> JListPage(title = stringResource(R.string.settings_home_agents), onBack = back) {
             val entries = listOf(SettingsPage.ClaudeCode to R.string.settings_row_claude, SettingsPage.Codex to R.string.settings_row_codex,
-                SettingsPage.Triage to R.string.settings_triage_title)
+                SettingsPage.Agy to R.string.settings_row_agy, SettingsPage.Triage to R.string.settings_triage_title)
             itemsIndexed(entries) { index, (destination, title) -> JGroupItem(GroupPosition.of(index, entries.size)) {
                 JRow(stringResource(title), onClick = { open(destination) })
             } }
@@ -909,6 +911,7 @@ private fun AssistantOfflinePage(page: String, assistant: persona.core.contracts
         SettingsPage.Channels -> R.string.settings_src_channels_title
         SettingsPage.ClaudeCode -> R.string.settings_row_claude
         SettingsPage.Codex -> R.string.settings_row_codex
+        SettingsPage.Agy -> R.string.settings_row_agy
         SettingsPage.Mail -> R.string.settings_src_mail_title
         SettingsPage.Feishu -> R.string.settings_src_lark_title
         SettingsPage.FeishuBot -> R.string.settings_feishu_bot_title

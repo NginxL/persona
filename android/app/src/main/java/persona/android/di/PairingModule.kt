@@ -62,7 +62,7 @@ class WiredPairingService @Inject constructor(application: Application, private 
     override val isPaired = runtime.pairedState
 
     /** The runtime restores (and migrates the old plaintext pairing) at start; this only picks up the result. */
-    suspend fun restore() = lock.withLock {
+    override suspend fun restore() = lock.withLock {
         runtime.settled()
     }
 

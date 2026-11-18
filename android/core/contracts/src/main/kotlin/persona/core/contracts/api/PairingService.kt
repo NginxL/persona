@@ -36,6 +36,8 @@ class PairingException(val reason: PairingFailure, val address: String? = null) 
 
 interface PairingService {
     val isPaired: StateFlow<Boolean>
+    /** Waits for pairings restored at process start; implementations without asynchronous restore return immediately. */
+    suspend fun restore() = Unit
     /** Opens the hub's HTTPS OPAQUE page; passwords never pass through the native API. */
     suspend fun passwordLogin(address: String, progress: (PairingProgress) -> Unit) {
         throw PairingException(PairingFailure.Incompatible)

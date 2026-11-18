@@ -370,7 +370,7 @@ extension CallAvatarLook.Row {
         case .hearing: String(localized: "Hearing you")
         case .thinking: String(localized: "Thinking [Call Screen]")
         case .speaking: String(localized: "Speaking")
-        case .working: String(localized: "Working [Call Screen]")
+        case .working: StateName.working.text // the state's own name, as every screen says it (StateNamesTests)
         case .needsYou: String(localized: "Waiting for your decision [Call Screen]")
         case .muted: String(localized: "Muted [Inbox Mutes View e5e468]")
         }

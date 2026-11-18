@@ -359,7 +359,7 @@ describe("the Agents fold-all button (#3027, #6447)", () => {
   });
 });
 
-describe("the main conversation: the column's first row, Persona with the app's mark (#2004, #5109), marked 主对话 (#6293)", () => {
+describe("the main conversation: the column's first row, Main chat with its home symbol (#10544)", () => {
   const conv = (id: string, title: string): Session => ({ machine_id: "hub", session_id: id, title, cwd: "/", status: "idle", state: "idle", assistant: true, pending_interactions: id === "main" ? 2 : 0 });
   const assistant: AssistantInfo = { machine_id: "hub", main: "main", leaders: ["c1"], conversations: [conv("main", "Persona"), conv("c1", "整理周报")] };
   const block = (title: string) => button(title)!.closest(".mt-1, .mt-3") as HTMLElement;
@@ -412,11 +412,12 @@ describe("the main conversation: the column's first row, Persona with the app's 
     await load();
     const rows = [...host.querySelectorAll<HTMLAnchorElement>("[data-sidebar-rows] a")];
     expect(rows[0]).toBe(mainRow());
-    expect(mainRow().textContent).toContain("Persona");
-    // the brand row reads as a conversation, not a heading: a small "主对话" under the name (#6293)
+    expect(mainRow().textContent).toContain("主对话");
+    // One Main chat title instead of another assistant face and name.
     const mark = mainRow().querySelector("[data-row-line]:not([data-draft])");
-    expect(mark?.textContent).toBe("主对话");
-    expect(mainRow().querySelector("svg.rounded-full")).not.toBeNull();
+    expect(mark).toBeNull();
+    expect(mainRow().querySelector('path[d^="M3 10.5 12 3"]')).not.toBeNull();
+    expect(mainRow().querySelector("canvas,img")).toBeNull();
     expect(mainRow().textContent).toContain("2"); // its pending count
     // the line parts it from the pages, which come after it
     const line = host.querySelector("[data-persona-divider]")!;

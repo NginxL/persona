@@ -7,5 +7,7 @@
   "delete_card": "Delete the to-do “{title}”",
   "complete_card": "Mark the task “{title}” done (its agents are closed once they are idle)",
   "reopen_card": "Reopen the task “{title}”",
-  "supervision_needs_deployment": "Merged; deployment and live verification still required"
+  "supervision_needs_deployment": "Merged; deployment and live verification still required",
+  "someday_closed": "Only an open to-do can be put off to Someday",
+  "someday_until": "Pick a time ahead, no later than the year 9999"
 }

@@ -80,7 +80,7 @@ describe("全部对话's background supervisor (#5082)", () => {
 
   it("is not among the user's own", async () => {
     await mount("mine");
-    expect(titles()).toEqual(["Persona", "对话 mine"]);
+    expect(titles()).toEqual(["主对话", "对话 mine"]);
   });
 
   it("only copies its id, while a scheduled task's chat keeps its whole menu", async () => {

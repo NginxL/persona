@@ -12,6 +12,8 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import shlex
 import signal
 import subprocess
@@ -20,6 +22,7 @@ import tempfile
 import time
 
 _cleanup_tab = None
+_cleanup_scope = None
 _terminated = False
 _config = None
 
@@ -42,8 +45,56 @@ def command(*args, timeout=90):
     return value.get("result", value)
 
 
+def scoped_reviewer(wrapper, slot, unit, properties):
+    """Run the visible shell in an owned, uniquely named user scope.
+
+    The resource wrapper retains affinity and rlimits for cgroup v1 hosts.
+    Redirections remain in the shell, never in systemd-run's option parser.
+    """
+    if not re.fullmatch(r"pr-review-r[0-9]{2}-[0-9]+-[a-f0-9]{8}\.scope", unit):
+        raise RuntimeError("reviewer scope name is not owned by this helper")
+    command = ["/usr/bin/systemd-run", "--user", "--scope", "--unit=" + unit[:-6], "--collect"]
+    for key, value in sorted(properties.items()):
+        if key not in {"CPUQuota", "CPUWeight", "MemoryHigh", "MemoryMax", "TasksMax"}:
+            raise RuntimeError("unsupported reviewer scope property")
+        if key == "CPUQuota":
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9]+%", value) or int(value[:-1]) <= 0:
+                raise RuntimeError("CPUQuota must be a positive percentage")
+        elif not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise RuntimeError("reviewer scope properties must be positive integers")
+        command.extend(["-p", key + "=" + str(value)])
+    return [*command, *shlex.split(wrapper), "zsh", "-lic"]
+
+
+def reviewer_command(wrapper, slot, unit, properties):
+    parts = shlex.split(wrapper)
+    if "--slot" in parts:
+        parts = [str(slot) if argument == "--slot" else argument for argument in parts]
+    elif parts:
+        parts.append(str(slot))
+    if parts:
+        parts.append("--")
+    return scoped_reviewer(shlex.join(parts), slot, unit, properties)
+
+
+def scope_command(action, unit, timeout=20):
+    if not unit:
+        return
+    subprocess.run(["/usr/bin/systemctl", "--user", action, unit],
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+
+
+def cleanup_scope():
+    # --collect reaps a normally completed scope. stop is used only to abort
+    # a live scope owned by this helper on error or termination.
+    scope_command("stop", _cleanup_scope, timeout=10)
+
+
 def cleanup_tab():
+    global _cleanup_tab
     tab = _cleanup_tab
+    _cleanup_tab = None
     if tab:
         try:
             command("tab", "close", tab, timeout=10)
@@ -55,6 +106,7 @@ def terminate_signal(signum, frame):
     global _terminated
     _terminated = True
     cleanup_tab()
+    cleanup_scope()
     raise SystemExit(128 + signum)
 
 
@@ -94,13 +146,20 @@ def wait_agent(pane, timeout=180):
     raise RuntimeError("reviewer did not become ready")
 
 
-def wait_exit(pane, deadline):
+def wait_scope(unit, deadline):
+    """An inactive scope is terminal even if Herdr retains an idle agent row."""
     while time.monotonic() < deadline and not _terminated:
-        agents = command("agent", "list", timeout=20).get("agents", [])
-        if not any(agent.get("pane_id") == pane for agent in agents):
+        result = subprocess.run(
+            ["/usr/bin/systemctl", "--user", "show", unit,
+             "--property=LoadState,ActiveState"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=20, check=False)
+        values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        if result.returncode == 0 and (values.get("LoadState") == "not-found"
+                                       or values.get("ActiveState") in ("inactive", "failed")):
             return
-        time.sleep(min(2, max(0.1, deadline - time.monotonic())))
-    raise TimeoutError("Herdr reviewer exceeded its lifetime")
+        time.sleep(min(1, max(0.1, deadline - time.monotonic())))
+    raise TimeoutError("Herdr reviewer scope exceeded its lifetime")
 
 
 def forwarded_flags(arguments, forbidden):
@@ -130,7 +189,7 @@ def forwarded_flags(arguments, forbidden):
 
 
 def run(slot, flags):
-    global _cleanup_tab
+    global _cleanup_tab, _cleanup_scope
     root = Path(_config["runtime_directory"]).expanduser()
     lease_path = root / ("slot-%02d.json" % slot)
     if lease_path.exists():
@@ -147,6 +206,7 @@ def run(slot, flags):
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
             pass
     name = "pr-r%02d-%d" % (slot, os.getpid())
+    unit = "pr-review-r%02d-%d-%s.scope" % (slot, os.getpid(), secrets.token_hex(4))
     with tempfile.TemporaryDirectory(prefix="slot-%02d-" % slot, dir=root) as temporary:
         work = Path(temporary)
         prompt_path = work / "prompt.txt"
@@ -173,20 +233,13 @@ def run(slot, flags):
                 launch = (_config["reviewer_launcher"] + " " + " ".join(shlex.quote(flag) for flag in flags)
                           + " < " + shlex.quote(str(prompt_path)) + " > " + shlex.quote(str(result_path))
                           + " 2> " + shlex.quote(str(work / "stderr.txt")))
-                bounded = []
-                wrapper = _config.get("process_wrapper", "").strip()
-                if wrapper:
-                    bounded = shlex.split(wrapper)
-                    if "--slot" in bounded:
-                        bounded = [str(slot) if argument == "--slot" else argument for argument in bounded]
-                    else:
-                        bounded.append(str(slot))
-                bounded += ["zsh", "-lic", launch]
-                if wrapper:
-                    bounded.insert(-3, "--")
+                bounded = reviewer_command(_config.get("process_wrapper", ""), slot, unit,
+                                           _config.get("scope_properties", {}))
+                bounded.append(launch)
+                _cleanup_scope = unit
                 command("pane", "run", pane, " ".join(shlex.quote(arg) for arg in bounded), timeout=30)
                 wait_agent(pane)
-                wait_exit(pane, time.monotonic() + int(_config.get("lifetime_seconds", 7200)))
+                wait_scope(unit, time.monotonic() + int(_config.get("lifetime_seconds", 7200)))
                 if not result_path.is_file():
                     detail = (work / "stderr.txt").read_text(errors="replace")[-1000:]
                     raise RuntimeError("reviewer produced no structured result: " + detail)
@@ -200,18 +253,12 @@ def run(slot, flags):
                               "structured_output": result, "permission_denials": []}
                 sys.stdout.write(json.dumps(result, separators=(",", ":")))
             except BaseException:
-                if tab is not None:
-                    try:
-                        command("tab", "close", tab, timeout=20)
-                    except (RuntimeError, subprocess.TimeoutExpired):
-                        pass
+                cleanup_tab()
+                cleanup_scope()
                 raise
             finally:
-                if tab is not None:
-                    try:
-                        command("tab", "close", tab, timeout=30)
-                    except (RuntimeError, subprocess.TimeoutExpired):
-                        pass
+                cleanup_tab()
+                cleanup_scope()
                 for path in (prompt_path, result_path):
                     path.unlink(missing_ok=True)
 
@@ -260,6 +307,7 @@ def main():
         raise RuntimeError("all %d bounded reviewer slots are occupied" % slots)
     finally:
         cleanup_tab()
+        cleanup_scope()
         for lock in locks:
             fcntl.flock(lock, fcntl.LOCK_UN)
             lock.close()

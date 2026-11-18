@@ -92,31 +92,35 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(after["findings"], [finding])
         self.assertEqual(after["repair_rounds"], 2)
 
-    def test_snapshot_retries_supported_fields_when_gh_rejects_base_oid(self):
-        fields = pr()
-        fields.pop("baseRefOid")
-        with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 1, "", 'Unknown JSON field: "baseRefOid"')) as execute, \
-                patch.object(pr_watch_common, "gh_json", return_value=fields) as fallback, \
-                patch.object(pr_watch_common, "checked", return_value=SHA_BASE + "\n"):
+    def test_snapshot_resolves_live_base_instead_of_recorded_base_oid(self):
+        # GitHub's baseRefOid is the base recorded at the PR's last sync, not
+        # the branch tip that the watcher fetches (#10568).
+        fields = dict(pr(), baseRefOid=SHA_A)
+        with patch.object(pr_watch_common, "run", side_effect=[
+                subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
+                subprocess.CompletedProcess([], 0, SHA_BASE + "\n", "")]) as execute:
             result = pr_watch_common.pr_snapshot("example/one", 7)
         self.assertEqual(result["baseRefOid"], SHA_BASE)
-        self.assertNotIn("baseRefOid", fallback.call_args.args[0][-1])
-        self.assertEqual(execute.call_count, 1)
+        view, base = (call.args[0] for call in execute.call_args_list)
+        self.assertEqual(view[:3], ["gh", "pr", "view"])
+        self.assertNotIn("baseRefOid", view[-1])
+        self.assertEqual(base[:3], ["gh", "api", "repos/example/one/commits/main"])
 
-    def test_snapshot_rejects_other_gh_errors(self):
+    def test_snapshot_rejects_gh_errors(self):
         with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 1, "", "network unavailable")):
             with self.assertRaises(pr_watch_common.WatchError):
                 pr_watch_common.pr_snapshot("example/one", 7)
 
-    def test_snapshot_falls_back_to_current_base_when_gh_omits_base_oid(self):
+    def test_snapshot_rejects_invalid_live_base(self):
         fields = pr()
         fields.pop("baseRefOid")
-        with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(fields), "")) as snapshot, \
-                patch.object(pr_watch_common, "checked", return_value=SHA_BASE + "\n") as base:
-            result = pr_watch_common.pr_snapshot("example/one", 7)
-        self.assertEqual(result["baseRefOid"], SHA_BASE)
-        self.assertIn("baseRefOid", snapshot.call_args.args[0][-1])
-        self.assertIn("commits/main", base.call_args.args[0][2])
+        for base in ("", "0" * 40, "not-a-sha"):
+            with self.subTest(base=base), \
+                    patch.object(pr_watch_common, "run", side_effect=[
+                        subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
+                        subprocess.CompletedProcess([], 0, base + "\n", "")]):
+                with self.assertRaises(pr_watch_common.WatchError):
+                    pr_watch_common.pr_snapshot("example/one", 7)
 
     def test_stale_failure_does_not_overwrite_terminal_outcome(self):
         self.watcher.state.put("example/one", 7, SHA_A,
@@ -292,7 +296,8 @@ class WatcherTests(unittest.TestCase):
                 patch.object(self.watcher, "success_review", return_value=None), \
                 patch.object(pr_watch, "semantic_review", return_value=[]), \
                 patch.object(pr_watch, "verify", return_value=[]), \
-                patch.object(pr_watch, "gh_json", side_effect=[[], [], []]):
+                patch.object(pr_watch, "gh_json", side_effect=[[], [], []]), \
+                patch.object(self.watcher, "merge", return_value=False):
             self.watcher.process("example/one", 7)
         self.assertFalse(any("seven days" in body for body in self.comments))
         self.assertNotIn("stale_closed_at", self.watcher.state.get("example/one", 7))
@@ -2017,7 +2022,8 @@ class WatcherTests(unittest.TestCase):
                                semantic="passed", verification="passed", success_posted=True)
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
                 patch.object(pr_watch, "semantic_review", return_value=[]) as review, \
-                patch.object(pr_watch, "verify", return_value=[]):
+                patch.object(pr_watch, "verify", return_value=[]), \
+                patch.object(self.watcher, "merge", return_value=False):
             self.watcher.process("example/one", 7)
         review.assert_called_once()
 
@@ -2302,6 +2308,7 @@ class WatcherTests(unittest.TestCase):
                 patch.object(pr_watch_verify, "load_paths") as selector, \
                 patch.dict(os.environ, {"GH_TOKEN": "not-for-builds", "HOME": "/maintainer-home",
                                         "PR_WATCH_WEBHOOK_SECRET": "not-for-builds", "GRADLE_USER_HOME": "/trusted-gradle"}):
+            os.environ.pop("GOFLAGS", None)  # the default below; patch.dict restores the caller's value
             selector.return_value.select.return_value = {"scripts": True}
             commands = pr_watch_verify.persona_checks(".", pr(), 1, {})
             env = pr_watch_common.verification_env()
@@ -2310,6 +2317,51 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("PR_WATCH_WEBHOOK_SECRET", env)
         self.assertEqual(env["GRADLE_USER_HOME"], "/trusted-gradle")
         self.assertNotEqual(env["HOME"], "/maintainer-home")
+        self.assertEqual(env["GOFLAGS"], "-gcflags=all=-dwarf=false -ldflags=-w -trimpath")
+
+    def test_verification_keeps_explicit_go_flags(self):
+        # -trimpath lets PR worktrees share compiled packages (#10614); an explicit setting of it, false too, stays.
+        for explicit, expected in (("-mod=readonly", "-mod=readonly -trimpath"),
+                                   ("-mod=readonly -trimpath", "-mod=readonly -trimpath"),
+                                   ("-trimpath=false", "-trimpath=false"),
+                                   ("--trimpath=true -mod=mod", "--trimpath=true -mod=mod")):
+            with self.subTest(explicit=explicit), patch.dict(os.environ, {"GOFLAGS": explicit}):
+                env = pr_watch_common.verification_env()
+                self.assertEqual(env["GOFLAGS"], expected)
+
+    def test_go_vet_clears_unused_linker_flag(self):
+        names = ["server/internal/agents/cache_test.go"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_file = root / names[0]
+            test_file.parent.mkdir(parents=True)
+            test_file.write_text("package agents\n")
+            with patch.object(pr_watch_verify, "checked", return_value=names[0] + "\n"):
+                commands = pr_watch_verify.persona_checks(str(root), pr(title="test: refine relevant tests"), 1, {})
+        self.assertIn(("Changed Go packages vet", ["go", "-C", "server", "vet", "-ldflags=", "./internal/agents"]), commands)
+
+    def test_semantic_only_skips_full_ci_and_discloses_it(self):
+        with patch.object(pr_watch_verify, "persona_checks") as full, \
+                patch.object(pr_watch_verify, "run_check", return_value={"name": "Exact-head privacy scan", "ok": True, "command": []}) as check:
+            results = pr_watch_verify.verify("nwverse/persona", pr(), ".", {"profile": "semantic_only"})
+        full.assert_not_called()
+        self.assertEqual([result["name"] for result in results], ["Exact-head privacy scan"])
+        self.assertIn("--range", check.call_args.args[1])
+        watcher = pr_watch.Watcher(self.config, verbose=False)
+        watcher.repositories["example/one"]["verify"]["profile"] = "semantic_only"
+        with patch.object(pr_watch, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            watcher.success_review("example/one", 7, pr(), results)
+        self.assertIn("no full build/vet", run.call_args.args[0][-1])
+        self.assertNotIn("all tests passed", run.call_args.args[0][-1])
+
+    def test_semantic_only_extensions_keep_repository_guards(self):
+        with patch.object(pr_watch_verify, "run_check", return_value={"name": "Privacy and documentation guards", "ok": True}) as check:
+            results = pr_watch_verify.verify("nwverse/persona-extensions", pr(), ".", {"profile": "semantic_only"})
+        self.assertEqual(len(results), 1)
+        self.assertIn("--repository-guards", check.call_args.args[1])
+
+    def test_verification_policy_version_covers_semantic_only(self):
+        self.assertGreaterEqual(pr_watch.VERIFICATION_POLICY_VERSION, 3)
 
     def test_persona_wrapper_owns_lock_and_expects_reviewed_head(self):
         repo = "nwverse/persona"
@@ -2564,11 +2616,13 @@ class WatcherTests(unittest.TestCase):
         self.watcher.tasks.put((2, -1, ("", 0)))
         self.watcher.tasks.put((2, -1, ("", 0)))
         workers = [threading.Thread(target=self.watcher.worker) for _ in range(2)]
-        for worker in workers:
-            worker.start()
-        for worker in workers:
-            worker.join(timeout=5)
-            self.assertFalse(worker.is_alive())
+        with patch.object(self.watcher, "process") as process:
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=5)
+                self.assertFalse(worker.is_alive())
+        process.assert_called_once_with("example/one", 7)
         self.assertTrue(self.watcher.tasks.empty())
 
     def test_findings_and_exhausted_repairs_do_not_get_migration_priority(self):

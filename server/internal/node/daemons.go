@@ -711,7 +711,7 @@ func (l *daemonLink) fromDaemonEvent(event string, params json.RawMessage) {
 			}
 		}
 		_ = l.rp.Notify("runtime.sessions", map[string]any{"sessions": out})
-	case "session.items", "session.delta":
+	case "session.items", "session.delta", "usage.report":
 		var p map[string]json.RawMessage
 		if json.Unmarshal(params, &p) != nil || p == nil {
 			return

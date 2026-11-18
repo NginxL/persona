@@ -7,12 +7,14 @@ import PersonaWire
 // Sent bubbles live here too: they stay until the transcript's copy arrives (`settleSend`, `showSent`), on disk as well.
 
 nonisolated enum SendOutcome: Equatable, Sendable {
-    case sent, failed, waiting
+    /// kept: it did not go in, and the assistant keeps it to send by itself (#10194): the bubble left the outbox for the
+    /// row's `undelivered`, and the chat's Processing ends as for a failure (nothing runs for it now).
+    case sent, failed, waiting, kept
 
     var state: PendingMessage.State {
         switch self {
         case .sent: .sent
-        case .failed: .failed
+        case .failed, .kept: .failed
         case .waiting: .waiting
         }
     }

@@ -40,12 +40,12 @@ export const sessionLauncher = (s: Partial<Pick<Session, "launcher" | "agent" | 
 };
 
 /** Whether `m` is the model the session runs now: `current` is what the transcript shows (a concrete model id), or
- *  the id the app switched to; the list has the alias (`opus`) and what it stands for (`resolved`), any case. The model
- *  panel matches its rows and saved setups by the same rule. */
-export function isCurrentModel(m: Pick<AgentModel, "id" | "resolved">, current: string | undefined): boolean {
+ *  the id the app switched to; the list has the alias (`opus`), what it stands for (`resolved`) and the spellings the hub
+ *  folded into the row (`aliases`, #10365), any case. The model panel matches its rows and saved setups by the same rule. */
+export function isCurrentModel(m: Pick<AgentModel, "id" | "resolved" | "aliases">, current: string | undefined): boolean {
   if (!current) return false;
   const c = current.toLowerCase();
-  return [m.id, m.resolved].some((v) => v && v.toLowerCase() === c);
+  return [m.id, m.resolved, ...(m.aliases ?? [])].some((v) => v && v.toLowerCase() === c);
 }
 
 /** `/model` alone (what the slash menu fills in, with or without the space) in the box. */

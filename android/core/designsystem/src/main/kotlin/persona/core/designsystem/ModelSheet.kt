@@ -30,6 +30,8 @@ fun JModelSheet(
     onDismiss: () -> Unit,
     initialQuery: String = "",
     custom: Boolean = false,
+    /** The launcher's display name, repeated on every model row when this sheet is a start's picker. */
+    owner: String? = null,
 ) {
     var query by remember { mutableStateOf(initialQuery) }
     val shown = remember(models, query) { models.filter { !it.isDefault && it.matches(query) } }
@@ -50,10 +52,10 @@ fun JModelSheet(
                 val rows = if (unlisted != null) 2 else 1
                 Column {
                     JGroupItem(GroupPosition.of(0, rows)) {
-                        ModelChoice(stringResource(R.string.designsystem_model_default), defaultDetail, null, selected.isEmpty()) { onPick(""); onDismiss() }
+                        ModelChoice(stringResource(R.string.designsystem_model_default), defaultDetail, null, selected.isEmpty(), owner) { onPick(""); onDismiss() }
                     }
                     if (unlisted != null) JGroupItem(GroupPosition.of(1, rows)) {
-                        ModelChoice(modelName(unlisted), stringResource(R.string.designsystem_model_unlisted), null, true) { onDismiss() }
+                        ModelChoice(modelName(unlisted), stringResource(R.string.designsystem_model_unlisted), null, true, owner) { onDismiss() }
                     }
                 }
             }
@@ -67,13 +69,13 @@ fun JModelSheet(
             }
             itemsIndexed(shown, key = { _, model -> model.id }) { index, model ->
                 JGroupItem(GroupPosition.of(index, shown.size)) {
-                    ModelChoice(model.label, model.detailLine(), model.description, model.id == selected) { onPick(model.id); onDismiss() }
+                    ModelChoice(model.label, model.detailLine(), model.description, model.id == selected, owner) { onPick(model.id); onDismiss() }
                 }
             }
             typed?.let { id ->
                 item("custom") {
                     JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
-                        ModelChoice(stringResource(R.string.designsystem_model_use, id), stringResource(R.string.designsystem_model_use_detail), null, id == selected) { onPick(id); onDismiss() }
+                        ModelChoice(stringResource(R.string.designsystem_model_use, id), stringResource(R.string.designsystem_model_use_detail), null, id == selected, owner) { onPick(id); onDismiss() }
                     }
                 }
             }
@@ -82,11 +84,15 @@ fun JModelSheet(
 }
 
 @Composable
-private fun ModelChoice(title: String, detail: String?, description: String?, selected: Boolean, onClick: () -> Unit) {
-    JRow(title, subtitle = listOfNotNull(detail, description?.takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { null },
+private fun ModelChoice(title: String, detail: String?, description: String?, selected: Boolean, owner: String? = null, onClick: () -> Unit) {
+    JRow(title, subtitle = listOfNotNull(launcherModelRowDetail(owner, detail), description?.takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { null },
         subtitleLines = 3, chevron = false, onClick = onClick,
         trailing = if (selected) ({ JIcon(PhIcons.Check, stringResource(R.string.designsystem_selected), tint = PersonaTheme.palette.ink) }) else null)
 }
+
+/** A model row keeps its launcher's name beside the model detail, never instead of it. */
+internal fun launcherModelRowDetail(owner: String?, detail: String?): String? =
+    listOfNotNull(owner?.trim()?.takeIf(String::isNotEmpty), detail?.trim()?.takeIf(String::isNotEmpty)).joinToString(" · ").ifEmpty { null }
 
 /** A model's second line: its id when the name is another word for it, and the model an alias stands for. */
 fun AgentModel.detailLine(): String? {

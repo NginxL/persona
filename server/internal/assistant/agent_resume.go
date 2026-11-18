@@ -144,15 +144,16 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	said := ""
 	if task != nil {
 		said = task.sent(sctx, s, told)
-		s.noteResume(sctx, self, task.todo.ID, note)
+		s.noteResume(sctx, self, task.todo.ID, am.ID, c.SessionID, note)
 		s.ensureSupervisor(sctx, task.todo.ID) // made or kept by adoptAgent; never left without a supervisor
 	} else if t, ok := s.openTodoOfAgent(am.ID, c.SessionID); ok {
 		s.ensureSupervisor(sctx, t.ID) // its task goes on with a supervisor, as a successor's does (tasks_successor.go)
 		s.releaseHold(sctx, t.ID)      // its supervisor sent it on: follow-ups go again (decision.go)
-		if _, err := s.appendFeed(sctx, self, feedRouted, t.ID, map[string]string{"text": told, "from": routedFromAssistant}); err != nil {
+		if _, err := s.appendFeed(sctx, self, feedRouted, t.ID, map[string]string{"text": told, "from": routedFromAssistant,
+			"machine_id": am.ID, "session_id": c.SessionID}); err != nil {
 			s.logf("task %s: routed feed: %v", t.ID, err)
 		}
-		s.noteResume(sctx, self, t.ID, note)
+		s.noteResume(sctx, self, t.ID, am.ID, c.SessionID, note)
 		said = fmt.Sprintf(" It works for your task %s (%q).", t.ID, t.Title)
 	}
 	return fmt.Sprintf("Resumed %s on %s (same session, with its context, on its own launcher and permission mode) and sent.",
@@ -164,9 +165,11 @@ func (s *Service) resumeNote(ctx context.Context, c proto.Session, am Device, wh
 	return i18n.T(s.lang(ctx), "assistant-tasks.resume_note", i18n.Args{"agent": agentLabel(c), "machine": am.Name, "why": why})
 }
 
-// noteResume puts the resume's note on task id's card in conversation self, as Persona's.
-func (s *Service) noteResume(ctx context.Context, self, id, note string) {
-	if _, err := s.appendFeed(ctx, self, feedRouted, id, map[string]string{"text": note, "from": routedFromAssistant}); err != nil {
+// noteResume puts the resume's note on task id's card in conversation self, as Persona's, naming the run it resumed
+// (machine, sid; #10465).
+func (s *Service) noteResume(ctx context.Context, self, id, machine, sid, note string) {
+	if _, err := s.appendFeed(ctx, self, feedRouted, id, map[string]string{"text": note, "from": routedFromAssistant,
+		"machine_id": machine, "session_id": sid}); err != nil {
 		s.logf("task %s: resume feed: %v", id, err)
 	}
 }

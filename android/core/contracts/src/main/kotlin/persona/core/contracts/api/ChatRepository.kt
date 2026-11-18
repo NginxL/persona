@@ -3,6 +3,7 @@ package persona.core.contracts.api
 import persona.core.contracts.Item
 import persona.core.contracts.SessionKey
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 data class ChatSnapshot(
     val items: List<Item> = emptyList(),
@@ -17,12 +18,16 @@ data class ChatSnapshot(
     val lastSeenMessageId: String? = null,
     val turnDurationSeconds: Long? = null,
     val streamingItemIds: Set<String> = emptySet(),
+    /** Current text for streaming items. Structural observation leaves their row's Item at the last structural event. */
+    val liveText: Map<String, StateFlow<String>> = emptyMap(),
     val history: String? = null,
     val recordedTurnDurations: Map<String, Long> = emptyMap(),
 )
 
 interface ChatRepository {
+    /** Complete current text in every snapshot, including each ordinary streaming delta. */
     fun observe(session: SessionKey): Flow<ChatSnapshot>
+
     suspend fun loadOlder(session: SessionKey)
     suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int): List<Item>
 
@@ -43,3 +48,15 @@ interface ChatRepository {
     /** Called only after foreground, visibility and verified-window gates pass. */
     suspend fun markSeen(session: SessionKey, itemId: String) = Unit
 }
+
+/** A repository with a separate structural projection and per-item live text holders. */
+interface StructuralChatRepository {
+    fun observeStructure(session: SessionKey): Flow<ChatSnapshot>
+}
+
+/**
+ * Chat presentation's structural view. Repositories without the optional capability, including delegating wrappers
+ * that override only [ChatRepository.observe], retain their complete-text behavior.
+ */
+fun ChatRepository.observeStructure(session: SessionKey): Flow<ChatSnapshot> =
+    (this as? StructuralChatRepository)?.observeStructure(session) ?: observe(session)

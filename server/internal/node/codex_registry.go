@@ -452,6 +452,11 @@ type codexListPass struct {
 	// paginated is codexPaginatedThreads by Codex home: each call globs the home for the App's databases and stats
 	// them, which every row's codexAppHistoryPath did (#5970).
 	paginated map[string]map[string]codexAppThread
+	// apps is loadCodexAppState by Codex home: every App row asked for it twice, and each ask globbed the home for the
+	// App's state database first, 1,100 globs a second with 550 rows.
+	apps map[string]*codexAppState
+	// looks is the missLook by Codex home that rolloutPathIn checks each thread with no rollout against.
+	looks map[string]*missLook
 }
 
 // runtimeOf is the runtime session that names Codex thread as its conversation; the zero claim when none does.
@@ -469,7 +474,7 @@ type codexStat struct {
 
 func newCodexListPass() *codexListPass {
 	return &codexListPass{real: map[string]string{}, stats: map[string]codexStat{}, desktop: map[string]bool{},
-		paginated: map[string]map[string]codexAppThread{}}
+		paginated: map[string]map[string]codexAppThread{}, apps: map[string]*codexAppState{}, looks: map[string]*missLook{}}
 }
 
 func (p *codexListPass) realPath(dir string) string {
@@ -506,6 +511,34 @@ func (p *codexListPass) desktopAvailable(home string) bool {
 		p.desktop[home] = up
 	}
 	return up
+}
+
+// appState is loadCodexAppState with each home's state looked up once per pass.
+func (p *codexListPass) appState(home string) *codexAppState {
+	if p == nil {
+		return loadCodexAppState(home)
+	}
+	app, ok := p.apps[home]
+	if !ok {
+		app = loadCodexAppState(home)
+		p.apps[home] = app
+	}
+	return app
+}
+
+// missLook is newMissLook with each home's look taken once per pass, and again once it is a second old or a listing of
+// every directory began after it (keepMiss keeps nothing for such a look): a long pass, the first after the node
+// starts, still keeps the misses it finds.
+func (p *codexListPass) missLook(home string) *missLook {
+	if p == nil {
+		return newMissLook(home)
+	}
+	look := p.looks[home]
+	if look == nil || time.Since(look.at) > time.Second || relistedSince(home, look.at) {
+		look = newMissLook(home)
+		p.looks[home] = look
+	}
+	return look
 }
 
 // paginatedThreadOf is codexPaginatedThreadOf with each home's paginated threads looked up once per pass.
@@ -670,21 +703,21 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
 			s.Capabilities.Send = true
 			s.ReadOnlyReason = ""
-			n.placeCodexDesktop(&s, src, src.thread, false)
+			n.placeCodexDesktopIn(&s, src, src.thread, false, pass)
 			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
 		} else if o := codexThreadOrigin(src); o.desktop { // a subagent whose rollout is gone too: its database row (#8191)
 			switch {
 			case o.parent != "":
 				s.AgentName, s.ParentThreadID, s.AgentSurface = "Codex App", o.parent, transcript.SurfaceDesktop
 				s.ReadOnlyReason = "仅查看：这个子 Agent 由父 Agent 驱动"
-				n.placeCodexDesktop(&s, src, o.parent, true)
+				n.placeCodexDesktopIn(&s, src, o.parent, true, pass)
 			case codexDesktopChatIn(src, pass):
 				// The Codex App on this machine runs it (codex_desktop.go): sendable while the App has the thread loaded.
 				elsewhere = true
 				s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
 				s.Capabilities.Send = true
 				s.ReadOnlyReason = ""
-				n.placeCodexDesktop(&s, src, src.thread, false)
+				n.placeCodexDesktopIn(&s, src, src.thread, false, pass)
 				n.codexDesktopEffortRow(&s, src, m)
 			}
 		} else if o.cli {
@@ -696,7 +729,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			}
 			own[src.thread] = true
 		}
-		n.decorateCodexSession(&s, src, cfg.LegacyHome, projects)
+		n.decorateCodexSessionIn(&s, src, cfg.LegacyHome, projects, pass)
 		if s.IsSubagent && pass != nil && len(pass.runtimes) > 0 {
 			if root := codexThreadOrigin(src).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})

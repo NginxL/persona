@@ -70,7 +70,7 @@ internal fun SourceMessage(item: Item, source: MessageSource, showLabel: Boolean
     val long = body.length > 320 || body.lineSequence().count() > ContentTokens.sourcePreviewLines
     val title = sourceTitle(source)
     Column(Modifier.fillMaxWidth().testTag("source-${item.id}"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        if (showLabel) Text(stringResource(R.string.chat_source_label, title), Modifier.testTag("source-label-${item.id}"),
+        if (showLabel) Text(if (source.kind == "scheduled_task") title else stringResource(R.string.chat_source_label, title), Modifier.testTag("source-label-${item.id}"),
             style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
         MessageContextGroup(contexts, "source/${item.id}/contexts", uri::openUri, alignEnd = false)
         images?.invoke()
@@ -96,6 +96,7 @@ internal fun sourceTitle(source: MessageSource): String = source.title?.takeIf(S
     "conversation" -> R.string.chat_source_conversation
     "patrol" -> R.string.chat_source_patrol
     "followup" -> R.string.chat_source_followup
+    "scheduled_task" -> R.string.chat_source_scheduled_task
     "supervision" -> R.string.chat_source_supervision
     "peer" -> R.string.chat_content_other_session
     else -> R.string.chat_source_unknown

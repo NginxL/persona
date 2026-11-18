@@ -269,8 +269,8 @@ func TestCodexWaitingRowsInOneDirectory(t *testing.T) {
 		agentOf("codex", "", proto.StatusIdle, "w1:p3", "w1:t3", "w1", cwd, ""),
 	}, nil))
 	began := time.Now().Add(-time.Minute)
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", began)
-	n.openCodexWait(context.Background(), "w1:p3", cwd, "codex", "", began)
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, began)
+	n.openCodexWait(context.Background(), "w1:p3", cwd, "codex", "", modelExecution{}, began)
 	w2, w3 := n.codexWaitOf("w1:p2"), n.codexWaitOf("w1:p3")
 	if w2 == nil || w3 == nil || w2.id == w3.id {
 		t.Fatal("no rows")
@@ -331,8 +331,8 @@ func TestCodexWaitingRowsAmbiguousScreens(t *testing.T) {
 	n.codices.checked = nil
 	n.codices.scan = func() []codexProcess { return nil }
 	began := time.Now().Add(-time.Minute)
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", began)
-	n.openCodexWait(context.Background(), "w1:p3", cwd, "codex", "", began)
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, began)
+	n.openCodexWait(context.Background(), "w1:p3", cwd, "codex", "", modelExecution{}, began)
 	w2, w3 := n.codexWaitOf("w1:p2"), n.codexWaitOf("w1:p3")
 	writeWaitRollout(t, home, cwd, "01a19a00-0000-7000-8000-00000000000a", time.Now().Add(-5*time.Second), "same words")
 	shown := "› same words\n\n› Ask Codex to do anything\n"
@@ -362,7 +362,7 @@ func TestCodexWaitingRowAfterARestart(t *testing.T) {
 	f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusDone, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
 	n.codices.checked = nil
 	n.codices.scan = func() []codexProcess { return nil }
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", time.Now())
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, time.Now())
 	id := n.codexWaitOf("w1:p2").id
 	n.mu.Lock()
 	n.codexWaiting = nil // what a new process has: the binding and the record only
@@ -390,7 +390,7 @@ func TestCodexWaitingRowGoesWithCodex(t *testing.T) {
 	f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
 	n.codices.checked = nil
 	n.codices.scan = func() []codexProcess { return nil }
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", time.Now())
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, time.Now())
 	w := n.codexWaitOf("w1:p2")
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 	f.reply("pane.get", map[string]any{"pane": map[string]any{"pane_id": "w1:p2", "agent": nil}})
@@ -432,7 +432,7 @@ func TestCodexWaitingRowTakesTheThreadItsTitleNames(t *testing.T) {
 		f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusWorking, "w1:p2", "w1:t2", "w1", cwd, title)}, nil))
 		_ = n.refreshHosts(context.Background())
 	}
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", time.Now())
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, time.Now())
 	w := n.codexWaitOf("w1:p2")
 	list("Same name | proj") // two threads have that name: none is taken
 	n.lookForCodexThreadsOnce(context.Background(), []*codexWait{w}, false)
@@ -465,7 +465,7 @@ func TestCodexWaitingRowStopsScanningForAThreadNotItsOwn(t *testing.T) {
 	f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})
 	f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
 	f.setScreen("w1:p2", cxReady)
-	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", time.Now().Add(-time.Minute))
+	n.openCodexWait(context.Background(), "w1:p2", cwd, "codex", "", modelExecution{}, time.Now().Add(-time.Minute))
 	w := n.codexWaitOf("w1:p2")
 	writeWaitRollout(t, home, cwd, "01a19a00-0000-7000-8000-0000000000d1", time.Now().Add(-10*time.Second), "someone else's")
 	for range codexJudgeLooks + 3 {

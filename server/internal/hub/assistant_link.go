@@ -73,6 +73,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.mergeList(w, r, key, h.forwardHTTP) })
 			continue
 		}
+		if pattern == todoPlacesRoute { // the To-dos places: every manager's, joined (todo_view.go)
+			api.HandleFunc(pattern, h.mergeTodoPlaces)
+			continue
+		}
 		if pattern == "POST /api/v1/assistant/conversations" {
 			api.HandleFunc(pattern, h.startConversationOnce())
 			continue

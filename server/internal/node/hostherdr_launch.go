@@ -12,16 +12,26 @@ import (
 
 // CreateSpace opens the workspace on the own server: pane-less work never goes to a named session.
 func (h *herdrHost) CreateSpace(ctx context.Context, cwd, label string) (*host.Created, error) {
-	c, err := h.c.WorkspaceCreate(ctx, cwd, label)
-	return fromHerdrCreated("", c), err
+	return h.CreateSpaceEnv(ctx, cwd, label, nil)
 }
 
 func (h *herdrHost) CreateSlot(ctx context.Context, space, cwd, label string) (*host.Created, error) {
+	return h.CreateSlotEnv(ctx, space, cwd, label, nil)
+}
+
+// CreateSpaceEnv is CreateSpace whose first pane's shell starts with env added (host.EnvLauncher).
+func (h *herdrHost) CreateSpaceEnv(ctx context.Context, cwd, label string, env []string) (*host.Created, error) {
+	c, err := h.c.WorkspaceCreate(ctx, cwd, label, env...)
+	return fromHerdrCreated("", c), err
+}
+
+// CreateSlotEnv is CreateSlot whose pane's shell starts with env added (host.EnvLauncher).
+func (h *herdrHost) CreateSlotEnv(ctx context.Context, space, cwd, label string, env []string) (*host.Created, error) {
 	t, err := h.target(ctx, space)
 	if err != nil {
 		return nil, err
 	}
-	c, err := t.c.TabCreate(ctx, t.id, cwd, label)
+	c, err := t.c.TabCreate(ctx, t.id, cwd, label, env...)
 	return fromHerdrCreated(t.session, c), err
 }
 

@@ -88,5 +88,8 @@
   "config_dir_legacy": "This computer's",
   "config_dir_hint": "“This computer's” starts new chats with the sign-in and settings claude uses there, a gateway in ~/.claude included. Chats already started keep theirs.",
   "supervise_description": "Follows up and reviews the tasks Persona hands out, so the main chat stays free to answer you. It can run on a cheaper or a stronger model than the main chat.",
-  "agents": "Agents"
+  "agents": "Agents",
+  "usage_one": "Last 7 days: {calls} call · {tokens} tokens",
+  "usage_other": "Last 7 days: {calls} calls · {tokens} tokens",
+  "usage_detail": "Last 7 days (UTC): {input} input, {output} output, {cache_write} cache write and {cache_read} cache read tokens; failed calls: {failures}. The tokens shown are input + output + cache writes; cache reads are left out."
 }

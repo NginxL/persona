@@ -4,10 +4,10 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { t } from "../i18n";
 import { ApiError, errorText } from "../lib/api";
 import {
-  cleanRepositoryDraft, loadRepositoryCatalog, loadTaskRepositories, repositoryDraft, repositoryLinkView, repositoryRequestContext,
-  saveTaskRepositories, validRepositoryAlias,
+  cleanRepositoryDraft, isExtensionProvider, loadRepositoryCatalog, loadTaskRepositories, repositoryDraft, repositoryLinkKindLabel,
+  repositoryLinkView, repositoryProviderName, repositoryRequestContext, saveTaskRepositories, validRepositoryAlias,
   type CreateRepositoryBindings, type RepositoryCatalog, type RepositoryRequestContext, type RepositoryLinkInput, type RequestedRef,
-  type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositorySet,
+  type RepositoryLinkLabel, type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositoryLink, type TaskRepositorySet,
 } from "../lib/task-repositories";
 import type { RepositoryIdentity } from "../lib/repository-identity";
 import { Group, Pill, Row, RowFailed, settingsInputClass } from "../views/settings/SettingsParts";
@@ -28,28 +28,59 @@ const hostOf = (identity: RepositoryIdentity) => { try { return new URL(identity
 const linkTag = (identity: RepositoryIdentity, view: RepositoryLinkView) => `${identity.provider === "gitlab" && view.kind === "pull_request" ? "!" : "#"}${view.number}`;
 /** The address a person recognises as the project, without the scheme every row shares. */
 const repositoryAddress = (identity: RepositoryIdentity) => identity.canonical_url.replace(/^https?:\/\//, "");
+/**
+ * An extension's source as a row names it (the name saved with the repository, never its raw id), and whether it is
+ * unavailable; nothing for GitHub and GitLab, whose own marks say it.
+ */
+function extensionSource(identity: RepositoryIdentity, saved?: string, state?: TaskRepository["provider_state"]) {
+  if (!isExtensionProvider(identity.provider)) return undefined;
+  return { name: repositoryProviderName(identity.provider, undefined, saved) ?? t("task-repositories.another_source"), unavailable: state === "off" || state === "missing" };
+}
+/** Why an extension row can't take new links, beneath it in the note style of the catalog's states. */
+const SourceNote = ({ name }: { name: string }) => <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
+  {t("task-repositories.provider_unavailable", { provider: name })}
+</p>;
 
 /**
  * A saved repository on one line: its provider mark at the same small scale as the stroke icons, its name when the
  * catalog has one, and the project's address, all inline instead of the old stacked name/host pair. The address is
  * the link, so it is a comfortable target on a phone without a second row; an address longer than the line cuts with
- * the full value in its tooltip.
+ * the full value in its tooltip. An extension's source is named after the address, so a narrow line cuts its name
+ * before the repository's path.
  */
-function RepositoryRow({ identity, name, children }: { identity: RepositoryIdentity; name?: string; children?: React.ReactNode }) {
+function RepositoryRow({ identity, name, source, children }: { identity: RepositoryIdentity; name?: string; source?: string; children?: React.ReactNode }) {
   return <div className="flex items-center gap-2.5 px-4 py-2" data-repository-row>
     <RepositoryMark provider={identity.provider} />
-    <a href={identity.canonical_url} target="_blank" rel="noreferrer noopener" title={identity.canonical_url}
+    <a href={identity.canonical_url} target="_blank" rel="noreferrer noopener" title={source ? `${identity.canonical_url} · ${source}` : identity.canonical_url}
       className="flex touch-hit min-w-0 flex-1 items-center gap-2">
       {name && <span className="min-w-0 max-w-1/2 shrink-0 truncate text-meta text-ink">{name}</span>}
-      <span className="min-w-0 flex-1 truncate text-submeta text-ink-3">{repositoryAddress(identity)}</span>
+      <span className="min-w-0 flex-1 truncate text-submeta text-ink-3">{repositoryAddress(identity)}{source && <span data-repository-source> · {source}</span>}</span>
     </a>
     {children}
   </div>;
 }
 
-/** One saved issue or pull request: the provider's kind mark, its full title (the link), and its number. */
-function LinkRow({ identity, view, onRemove, disabled }: { identity: RepositoryIdentity; view: RepositoryLinkView; onRemove?: () => void; disabled?: boolean }) {
-  const kind = t(view.kind === "issue" ? "task-repositories.issue" : "task-repositories.pull_request");
+/**
+ * One saved issue or pull request: the provider's kind mark, its full title (the link), and its number. An extension's
+ * source may name the kinds its own way (`labels`, shown as given); a pasted address its source has not read yet is
+ * the address itself, said to be checked on save.
+ */
+function LinkRow({ identity, view, labels, onRemove, disabled }: { identity: RepositoryIdentity; view: RepositoryLinkView; labels?: readonly RepositoryLinkLabel[]; onRemove?: () => void; disabled?: boolean }) {
+  if (view.pending) {
+    return <div className="flex items-start gap-2 py-2 pr-4 pl-10" data-repository-link data-link-pending>
+      <span data-link-icon="link" className="mt-0.5 shrink-0 text-ink-3"><Icon name="link" size={14} /></span>
+      <div className="min-w-0 flex-1">
+        <a href={view.url} target="_blank" rel="noreferrer noopener" className="flex touch-hit items-start gap-2 text-meta leading-snug text-ink-3 hover:underline">
+          <span className="min-w-0 break-all">{view.url}</span>
+          <Icon name="external" size={11} className="mt-1 ml-auto shrink-0 text-ink-3" />
+        </a>
+        <p className="text-submeta leading-snug text-ink-3">{t("task-repositories.link_pending")}</p>
+      </div>
+      {onRemove && <IconButton icon="x" size={24} iconSize={12} className="-mt-0.5" label={t("task-repositories.remove_link", { link: view.url })} onClick={onRemove} disabled={disabled} />}
+    </div>;
+  }
+  const kind = (isExtensionProvider(identity.provider) ? repositoryLinkKindLabel(view.kind, labels) : undefined)
+    ?? t(view.kind === "issue" ? "task-repositories.issue" : "task-repositories.pull_request");
   const icon = view.kind === "issue" ? "target" : identity.provider === "gitlab" ? "merge" : "pullRequest";
   const tag = linkTag(identity, view);
   return <div className="flex items-start gap-2 py-2 pr-4 pl-10" data-repository-link>
@@ -65,18 +96,23 @@ function LinkRow({ identity, view, onRemove, disabled }: { identity: RepositoryI
   </div>;
 }
 
-/** Adds one link by its URL: Enter adds, Escape goes back, a URL of another repository says so. */
-function AddLink({ identity, links, pending, onAdd }: { identity: RepositoryIdentity; links: TaskRepositoryInput["links"]; pending?: boolean; onAdd: (link: RepositoryLinkInput) => void }) {
+/**
+ * Adds one link by its URL: Enter adds, Escape goes back, a URL of another repository says so. `saved`: the row's saved
+ * links, which an extension's kind + number draft names; `unavailable`: its source can't read a new one now.
+ */
+function AddLink({ identity, links, saved, pending, unavailable, onAdd }: {
+  identity: RepositoryIdentity; links: TaskRepositoryInput["links"]; saved?: readonly TaskRepositoryLink[]; pending?: boolean; unavailable?: boolean; onAdd: (link: RepositoryLinkInput) => void;
+}) {
   const [adding, setAdding] = useState(false);
   const [input, setInput] = useState("");
   const [invalid, setInvalid] = useState(false);
   const add = () => {
-    const view = repositoryLinkView(identity, { url: input.trim() });
+    const view = repositoryLinkView(identity, { url: input.trim() }, saved);
     if (!view) { setInvalid(true); return; }
-    if (!(links ?? []).some((link) => repositoryLinkView(identity, link)?.url === view.url)) onAdd({ url: view.url });
+    if (!(links ?? []).some((link) => repositoryLinkView(identity, link, saved)?.url === view.url)) onAdd({ url: view.url });
     setInput(""); setInvalid(false); setAdding(false);
   };
-  if (!adding) return <Button icon="plus" tone="quiet" disabled={pending || (links?.length ?? 0) >= 50} onClick={() => setAdding(true)}>{t("task-repositories.add_link")}</Button>;
+  if (!adding || unavailable) return <Button icon="plus" tone="quiet" disabled={pending || unavailable || (links?.length ?? 0) >= 50} onClick={() => setAdding(true)}>{t("task-repositories.add_link")}</Button>;
   return <div className="space-y-2">
     <label className="block text-submeta text-ink-3">{t("task-repositories.link_url")}
       <input className={`${settingsInputClass} mt-1 min-h-11`} type="url" autoFocus inputMode="url" autoComplete="off" spellCheck={false}
@@ -108,8 +144,10 @@ function RepositoryDraftRow({ row, entry, saved, pending, onChange, onRemove }: 
   const aliasValid = validRepositoryAlias(row.directory_alias ?? "");
   if (!identity) return null;
   const name = entry && entry.canonical_url === identity.canonical_url ? entry.name || identity.path : identity.path;
+  const source = extensionSource(identity, saved?.source_snapshot.provider_name ?? entry?.provider_name, saved?.provider_state);
   return <Group>
-    <RepositoryRow identity={identity} name={name === identity.path ? undefined : name}>
+    <RepositoryRow identity={identity} name={name === identity.path ? undefined : name} source={source?.name}>
+      {source?.unavailable && <Pill>{t("task-repositories.unavailable")}</Pill>}
       {!!links.length && <Pill>{links.length}</Pill>}
       <IconButton icon="more" label={t("task-repositories.options", { name })} onClick={menu.open} disabled={pending} />
       {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right"
@@ -117,12 +155,14 @@ function RepositoryDraftRow({ row, entry, saved, pending, onChange, onRemove }: 
     </RepositoryRow>
     <div role="group" aria-label={t("task-repositories.links")} className="divide-y divide-line">
       {links.map((link, index) => {
-        const view = repositoryLinkView(identity, link);
-        return view ? <LinkRow key={`${link.kind ?? ""}:${link.number ?? ""}:${"url" in link ? link.url : ""}:${index}`} identity={identity} view={view} disabled={pending}
+        // An extension's kind + number is drawn from the saved link it names: the draft has no address to rebuild.
+        const view = repositoryLinkView(identity, link, saved?.links);
+        return view ? <LinkRow key={`${link.kind ?? ""}:${link.number ?? ""}:${"url" in link ? link.url : ""}:${index}`} identity={identity} view={view} labels={saved?.link_kinds} disabled={pending}
           onRemove={() => onChange({ links: links.filter((_, i) => i !== index) })} /> : null;
       })}
     </div>
-    <div className="py-2 pr-4 pl-10"><AddLink identity={identity} links={links} pending={pending} onAdd={(link) => onChange({ links: [...links, link] })} /></div>
+    <div className="py-2 pr-4 pl-10"><AddLink identity={identity} links={links} saved={saved?.links} pending={pending} unavailable={source?.unavailable} onAdd={(link) => onChange({ links: [...links, link] })} /></div>
+    {source?.unavailable && <SourceNote name={source.name} />}
     {!!saved?.catalog_state && saved.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
       {t(saved.catalog_state === "removed" ? "task-repositories.catalog_removed" : saved.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
     </p>}
@@ -162,7 +202,8 @@ function RepositoryPicker({ catalog, selected, disabled, onPick }: { catalog: Re
   const [query, setQuery] = useState("");
   const box = useRef<HTMLDivElement | null>(null);
   const available = catalog.repositories.filter((r) => !selected.some((s) => s.repo_id === r.id));
-  const rows = available.filter((r) => `${r.name ?? ""} ${r.path} ${hostOf(r)}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const sourceOf = (r: RepositoryCatalog["repositories"][number]) => extensionSource(r, r.provider_name)?.name;
+  const rows = available.filter((r) => `${r.name ?? ""} ${r.path} ${hostOf(r)}${isExtensionProvider(r.provider) ? ` ${sourceOf(r)}` : ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   // Closing hands the focus back to the button that opened this, not to the page.
   const close = () => { setOpen(false); setQuery(""); box.current?.querySelector("button")?.focus(); };
   const pick = (id: string) => { onPick(id); setOpen(false); setQuery(""); };
@@ -192,7 +233,7 @@ function RepositoryPicker({ catalog, selected, disabled, onPick }: { catalog: Re
             <RepositoryMark provider={row.provider} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-meta font-medium text-ink">{row.name || row.path}</span>
-              <span className="block truncate text-submeta text-ink-3">{row.path} · {hostOf(row)}</span>
+              <span className="block truncate text-submeta text-ink-3">{row.path} · {hostOf(row)}{isExtensionProvider(row.provider) && ` · ${sourceOf(row)}`}</span>
             </span>
             <Icon name="plus" size={13} className="shrink-0 text-ink-3" />
           </button>)}
@@ -401,18 +442,23 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
         ? legacyPRs.map((p) => <Row key={p.url} icon="pullRequest" hint={t("task-repositories.legacy_note")}
             label={<a href={p.url} target="_blank" rel="noreferrer noopener" className="text-accent-ink hover:underline">{p.text}</a>} />)
         : <>
-          {repositories.map((repository) => <Fragment key={repository.repo_id}>
-            <RepositoryRow identity={repository.source_snapshot.identity}>
-              {!!repository.links.length && <Pill>{repository.links.length}</Pill>}
-            </RepositoryRow>
-            {repository.links.map((link) => {
-              const view = repositoryLinkView(repository.source_snapshot.identity, link);
-              return view ? <LinkRow key={`${link.kind}:${link.number}`} identity={repository.source_snapshot.identity} view={view} /> : null;
-            })}
-            {!!repository.catalog_state && repository.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
-              {t(repository.catalog_state === "removed" ? "task-repositories.catalog_removed" : repository.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
-            </p>}
-          </Fragment>)}
+          {repositories.map((repository) => {
+            const source = extensionSource(repository.source_snapshot.identity, repository.source_snapshot.provider_name, repository.provider_state);
+            return <Fragment key={repository.repo_id}>
+              <RepositoryRow identity={repository.source_snapshot.identity} source={source?.name}>
+                {source?.unavailable && <Pill>{t("task-repositories.unavailable")}</Pill>}
+                {!!repository.links.length && <Pill>{repository.links.length}</Pill>}
+              </RepositoryRow>
+              {repository.links.map((link) => {
+                const view = repositoryLinkView(repository.source_snapshot.identity, link);
+                return view ? <LinkRow key={`${link.kind}:${link.number}`} identity={repository.source_snapshot.identity} view={view} labels={repository.link_kinds} /> : null;
+              })}
+              {source?.unavailable && <SourceNote name={source.name} />}
+              {!!repository.catalog_state && repository.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
+                {t(repository.catalog_state === "removed" ? "task-repositories.catalog_removed" : repository.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
+              </p>}
+            </Fragment>;
+          })}
           {!saved && !error && <div className="px-4 py-3"><Loading /></div>}
           {/* A successful answer is the store's whole word, even empty: the manager imports the legacy history once and
               honours an explicit removal, so `pr_url` is a fallback for a missing route (above) and nowhere else. */}

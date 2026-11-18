@@ -141,11 +141,20 @@ extension AppModel {
             return openExtension(ExtensionSystemLink(owner: ext, ui: ui, group: group, state: state)) ? .opened : nil
         case .agents:
             selectedTab = .chats
+        #if os(iOS)
         case .machines:
             showShellPage(.machines)
         case .persona, .newConversation, .inbox, .inboxItem, .todos, .knowledge, .settings:
             guard hubLevel else { return nil }
             openHubLevel(page)
+        #else
+        // visionOS has no shell pages (docs/apple/vision.md, "Shell"): these links open as web pages, as before #9993.
+        case .machines, .newConversation, .todos, .knowledge:
+            return nil
+        case .persona, .inbox, .inboxItem, .settings:
+            guard hubLevel else { return nil }
+            openHubLevel(page)
+        #endif
         }
         return .opened
     }
@@ -154,17 +163,21 @@ extension AppModel {
         switch page {
         case .persona:
             if let main = assistantMain { openAssistantConversation(main) } else { selectedTab = .assistant }
+        #if os(iOS)
         case .newConversation:
             openNewAssistant()
+        #endif
         case .inbox:
             selectedTab = .mail
         case .inboxItem(let id, let manager):
             selectedTab = .mail
             inboxToOpen = InboxOpenRequest(id: id, manager: manager)
+        #if os(iOS)
         case .todos:
             showShellPage(.todos)
         case .knowledge:
             showShellPage(.knowledge)
+        #endif
         case .settings(let tab, let item):
             openSettings(tab: tab, item: item)
         default:

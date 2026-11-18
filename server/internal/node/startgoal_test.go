@@ -170,7 +170,7 @@ func TestStartGoalRefusedBeforeAnythingStarts(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "project"))
 	for name, params := range map[string]map[string]any{
-		"codex":  {"cwd": cwd, "workspace_id": "w1", "prompt": "x", "launcher": "codex", "goal": "done"},
+		"traex":  {"cwd": cwd, "workspace_id": "w1", "prompt": "x", "launcher": "traex", "goal": "done"},
 		"resume": {"cwd": cwd, "workspace_id": "w1", "prompt": "x", "resume_session_id": sidA, "goal": "done"},
 		"long":   {"cwd": cwd, "workspace_id": "w1", "prompt": "x", "goal": strings.Repeat("y", proto.StartGoalMax+1)},
 		// The goal is set after the first message; an App's async start that sends its first message later has none.
@@ -181,6 +181,23 @@ func TestStartGoalRefusedBeforeAnythingStarts(t *testing.T) {
 		if !errors.As(err, &re) || re.Code != proto.CodeStartGoalUnsupported {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+	if got := f.trace("tab.create", "agent.prompt"); len(got) != 0 {
+		t.Fatalf("started anyway: %v", got)
+	}
+}
+
+// A start in a host that cannot read the screen or press keys (botmux) takes no goal, even when the node's default
+// host can: botmux may hand /goal to the agent as a plain message.
+func TestStartGoalRefusedInAScreenlessHost(t *testing.T) {
+	n, f, home := herdrNode(t)
+	n.hosts.Set(append(n.hosts.All(), &botmuxHost{})...)
+	cwd := mkdir(t, filepath.Join(home, "project"))
+	_, err := request(t, n, "session.start", map[string]any{"cwd": cwd, "workspace_id": "w1", "prompt": "x", "launcher": "codex",
+		"host": "botmux", "goal": "done"})
+	var re *rpc.Error
+	if !errors.As(err, &re) || re.Code != proto.CodeStartGoalUnsupported {
+		t.Fatalf("botmux: %v", err)
 	}
 	if got := f.trace("tab.create", "agent.prompt"); len(got) != 0 {
 		t.Fatalf("started anyway: %v", got)

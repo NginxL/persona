@@ -17,7 +17,9 @@ func (s *Service) newWorktree(ctx context.Context, mid, cwd, branch string) (pro
 		return proto.WorktreeCreateResult{}, err
 	}
 	var res proto.WorktreeCreateResult
+	// for_agent: every caller starts an Agent in it, so the node marks the workspace's first shell as Persona's and
+	// closes it with that Agent's finished terminal (#10624); an older node ignores it.
 	err := s.call(ctx, mid, DeviceWorktreeCreate, map[string]any{"cwd": cwd, "branch": branch,
-		"path": proto.NodeJoin(prep.Path, herdr.WorktreeDirName(branch))}, &res)
+		"path": proto.NodeJoin(prep.Path, herdr.WorktreeDirName(branch)), "for_agent": true}, &res)
 	return res, err
 }

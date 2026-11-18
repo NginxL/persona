@@ -7,7 +7,7 @@ import PackageDescription
 
 let package = Package(
     name: "PersonaInputKit",
-    platforms: [.macOS(.v15), .iOS(.v26), .visionOS(.v26)],
+    platforms: [.macOS(.v15), .iOS(.v18), .visionOS(.v26)],
     products: [
         .library(name: "PersonaInputKit", targets: ["PersonaInputKit"])
     ],

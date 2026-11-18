@@ -98,11 +98,38 @@ node confirms `Goal set:` on the screen with a bounded wait; a refusal (an untru
 policy not read yet, an empty or too-long condition, a CLI without `/goal`) or no answer never stops the work, and a
 first message that never reaches the transcript gets no goal.
 
-The assistant attaches such a goal when a start-defaults rule asks for one (`goal: "done_when"`,
-[assistant.md](../assistant/assistant.md) "Start defaults") and the task's `done_when` gives it something checkable,
-rendered as one sentence (`prompts/assistant/task_goal.md`); tasks without criteria start without one, and only
-brand-new Claude Code sessions take one. Its transcript lines, `goal_status` attachment, `Session.goal` and the goal bar are the ordinary
-goal's below; nothing else about goals changes.
+The assistant attaches such a goal when the task's `done_when` gives it something checkable, rendered as one sentence
+(`prompts/assistant/task_goal.md`), and either a start-defaults rule asks for one (`goal: "done_when"`,
+[assistant.md](../assistant/assistant.md) "Start defaults") or the Agent is Codex and no rule decides the goal: a new
+Codex task Agent whose task has acceptance criteria gets them as its goal by default, since Codex has no Stop hook to
+keep it going. The first fitting rule that names `goal` decides it, so a rule with `goal: "off"` turns that default off
+for the tasks it matches even after an earlier rule that is silent on the goal. The default is not sent to a start that
+cannot take it (an engine runtime, an app launcher), and a refused default is only logged. Claude Code gets a start
+goal only from a rule. Tasks without criteria start without one, and only brand-new Claude Code and Codex sessions
+take one. Its transcript lines, `goal_status` attachment, `Session.goal` and the goal bar are the ordinary goal's
+below; nothing else about goals changes.
+
+### Codex
+
+A brand-new Codex start (`codex_start.go`, the terminal route) takes a goal the same way: the start passes the task as
+Codex's first message, waits until the rollout has it, and then the node types Codex's own `/goal <objective>` into the
+Codex terminal (`node/codex_start_goal.go`). Before typing, it checks the Codex screen as a send does (no draft in the
+box, no approval or question open) and holds the session's typing lock until the command is in, so a message sent
+right after the start comes behind it. Codex takes `/goal` at once, also mid-turn, and records it in the rollout:
+
+```json
+{"type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"<thread>","goal":{"threadId":"<thread>","objective":"<objective>","status":"active","tokensUsed":0,"timeUsedSeconds":0,"createdAt":1795002728,"updatedAt":1795002728}}}
+```
+
+The node confirms the goal from that line with a bounded wait, not from the screen: the thread is new, so a goal updated
+after `/goal` went in is this one. Its objective is usually the typed text; a long one (the cap is 2000 characters) goes
+in as a paste, and Codex may keep it as a paste placeholder or a file reference instead, which the node logs. Only short
+objectives were checked by hand. When a turn ends with the goal still active, Codex starts the next one itself
+(`task_started` with `turn_attribution.turn_trigger: "goal"`). Checked 2026-11-18 with Codex 0.169 in a herdr pane:
+`/goal` typed while the first turn ran was recorded within a second, and a goal turn followed the first turn without a
+new message. Only a Codex whose rollout names version 0.169 or later gets the command (`goals` is stable and on by
+default there); an older one, a screen not ready for it, or a goal the rollout never shows is logged and never fails the
+start. A resumed Codex thread takes no start goal: it would replace the thread's own.
 
 ## Screenshots
 

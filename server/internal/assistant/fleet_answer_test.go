@@ -52,6 +52,32 @@ func queueCall(t *testing.T, s *Service, method string, params map[string]any) (
 	return out, nil
 }
 
+func TestHonestPlanApprovalUsesRecordedMode(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name, kind, recorded, clientMode, want string
+		approve                                *bool
+	}{
+		{"recorded mode overrides the client", proto.IxPlan, "acceptEdits", proto.ModeBypass, "acceptEdits", &yes},
+		{"recorded mode fills an omitted client mode", proto.IxPlan, proto.ModeBypass, "", proto.ModeBypass, &yes},
+		{"legacy plan keeps the client mode", proto.IxPlan, "", "acceptEdits", "acceptEdits", &yes},
+		{"legacy plan keeps an omitted mode omitted", proto.IxPlan, "", "", "", &yes},
+		{"unknown recorded mode keeps the client's choice", proto.IxPlan, "futureMode", "default", "default", &yes},
+		{"recorded plan keeps the client's choice", proto.IxPlan, "plan", "acceptEdits", "acceptEdits", &yes},
+		{"rejection is not rewritten", proto.IxPlan, "acceptEdits", proto.ModeBypass, proto.ModeBypass, &no},
+		{"an unanswered plan is not rewritten", proto.IxPlan, "acceptEdits", proto.ModeBypass, proto.ModeBypass, nil},
+		{"another kind of approval is not rewritten", proto.IxPermission, "acceptEdits", proto.ModeBypass, proto.ModeBypass, &yes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ix := proto.Interaction{Kind: tc.kind, PlanThen: tc.recorded}
+			got := honest(ix, proto.Resolution{Approve: tc.approve, Mode: tc.clientMode})
+			if got.Mode != tc.want {
+				t.Fatalf("honest(%+v, mode %q) = mode %q, want %q", ix, tc.clientMode, got.Mode, tc.want)
+			}
+		})
+	}
+}
+
 // interactions.get is the interaction while it is pending, else how it ended; interactions.answer resolves only a
 // pending question of the session named, as the assistant's answer, and the history and the hub say so.
 func TestInteractionsQueue(t *testing.T) {
@@ -147,6 +173,10 @@ func TestResolveRoute(t *testing.T) {
 	}
 	if got := <-done; got.AnsweredBy != "" || got.Remembered || got.Answers["发吗？"] != "发" {
 		t.Fatalf("hook got %+v", got)
+	}
+	status, kept, err := ft.st.InteractionOutcome(context.Background(), ix.ID)
+	if err != nil || status != "resolved" || kept == nil || kept.AnsweredBy != "" || kept.Answers["发吗？"] != "发" {
+		t.Fatalf("an ordinary user's history answer changed: status %q, resolution %+v, err %v", status, kept, err)
 	}
 	if w := post(ix.ID, `{"answers":{"发吗？":"不发"}}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"already":true`) {
 		t.Fatalf("again: %d %s", w.Code, w.Body)

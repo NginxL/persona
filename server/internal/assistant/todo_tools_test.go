@@ -160,6 +160,11 @@ func TestTodoToolsFailedStart(t *testing.T) {
 		if err != nil || !strings.Contains(got, line) || !strings.Contains(got, "failed to start: "+reason) {
 			t.Fatalf("get: %s %v", got, err)
 		}
+		// Stored done, but not done: it says it still waits on the owner and how it starts again (#10365).
+		if !strings.Contains(got, "did not start ") || !strings.Contains(got, "not done, it still waits on the owner") ||
+			!strings.Contains(got, "task_retry") || strings.Contains(got, "\ndone ") {
+			t.Fatalf("get reads as done: %s", got)
+		}
 	})
 }
 

@@ -80,8 +80,13 @@ func parseCreateBindings(raw json.RawMessage) (*repository.CreateBindings, error
 func taskRepositoriesError(w http.ResponseWriter, err error) {
 	status, code := http.StatusServiceUnavailable, "store_unavailable"
 	var problem repository.Problem
+	var provider *repository.ProviderError
 	if errors.Is(err, db.ErrTodoNotFound) {
 		status, code = 404, "not_found"
+	} else if errors.As(err, &provider) {
+		code = providerCode(provider)
+		apierr.WriteCode(w, http.StatusConflict, "task_repositories_"+code, i18n.Err("task-repositories."+code, providerArgs(provider)))
+		return
 	} else if errors.As(err, &problem) {
 		code = string(problem)
 		switch code {
@@ -151,6 +156,7 @@ func (s *Service) describeTodoRepositories(ctx context.Context, set repository.T
 	catalog := doc.taskCatalog()
 	for i, row := range set.Repositories {
 		set.Repositories[i].CatalogState = repository.CatalogState(row, catalog)
+		s.describeProviderRow(&set.Repositories[i])
 	}
 	return set, nil
 }
@@ -160,6 +166,9 @@ func (s *Service) setTodoRepositories(ctx context.Context, id string, in reposit
 		return repository.TaskSet{}, repository.Problem("store_unavailable")
 	}
 	if err := s.importLegacyTodoRepositoryLinks(ctx, id); err != nil {
+		return repository.TaskSet{}, err
+	}
+	if err := s.resolveSetInput(ctx, id, in); err != nil {
 		return repository.TaskSet{}, err
 	}
 	set, err := st.SetTodoRepositories(ctx, id, in)
@@ -176,6 +185,9 @@ func (s *Service) setTodoRepositoryLinks(ctx context.Context, id, repoID string,
 		return repository.TaskSet{}, repository.Problem("store_unavailable")
 	}
 	if err := s.importLegacyTodoRepositoryLinks(ctx, id); err != nil {
+		return repository.TaskSet{}, err
+	}
+	if err := s.resolveLinksInput(ctx, id, repoID, in); err != nil {
 		return repository.TaskSet{}, err
 	}
 	set, err := st.SetTodoRepositoryLinks(ctx, id, repoID, in)
@@ -286,7 +298,7 @@ func (s *Service) toolTodoRepositories(ctx context.Context, machine, self, name 
 		set, err = s.setTodoRepositoryLinks(ctx, todo.ID, in.RepoID, repository.LinksInput{ExpectedRevision: in.ExpectedRevision, Links: in.Links})
 	}
 	if err != nil {
-		return "", err
+		return "", s.taskRepositoryToolError(ctx, err)
 	}
 	raw, err := json.Marshal(set)
 	return string(raw), err

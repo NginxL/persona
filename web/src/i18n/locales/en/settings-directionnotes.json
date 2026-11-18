@@ -1,0 +1,12 @@
+{
+  "title": "Direction notes",
+  "footer": "What you write here goes only to that direction's leader chat, as part of its own instructions, and to the new Agents started for the direction. Other chats are not affected. Saving restarts that leader chat on its next message.",
+  "empty": "No directions yet. Pin a chat as a direction from its menu, then write its notes here.",
+  "load_failed": "Couldn't load directions: {error}",
+  "placeholder": "Rules for this direction, the readings that prove progress, terms…",
+  "project": "Project: {name}",
+  "saved": "Notes saved for {name}",
+  "save_failed": "Couldn't save the notes: {error}",
+  "count": "{count}/{max}",
+  "edited": "Edited {when}"
+}

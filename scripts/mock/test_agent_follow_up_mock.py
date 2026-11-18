@@ -11,7 +11,7 @@ import unittest
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-FIELDS = ("start_requested_tasks", "task_workspace_preference", "main_supervises_own_tasks", "agent_tasks", "idle_close_hours",
+FIELDS = ("start_requested_tasks", "task_workspace_preference", "main_supervises_own_tasks", "agent_tasks", "close_ended_terminals", "idle_close_hours",
           "archive_closed_days", "agent_auto_naming", "agent_auto_naming_max", "agent_auto_naming_interval_hours")
 
 
@@ -74,7 +74,7 @@ class AgentFollowUpMockTests(unittest.TestCase):
         a = call(base, "/api/v1/assistant")
         self.assertEqual({k: a[k] for k in FIELDS}, {
             "start_requested_tasks": True, "task_workspace_preference": "prefer-existing", "main_supervises_own_tasks": False,
-            "agent_tasks": False, "idle_close_hours": 12, "archive_closed_days": 3, "agent_auto_naming": True,
+            "agent_tasks": False, "close_ended_terminals": False, "idle_close_hours": 12, "archive_closed_days": 3, "agent_auto_naming": True,
             "agent_auto_naming_max": 1, "agent_auto_naming_interval_hours": 0})
         self.assertEqual(a["manager"], "assistant")
         after = call(base, "/api/v1/assistant", {"start_requested_tasks": False})

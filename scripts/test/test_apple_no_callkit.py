@@ -25,11 +25,23 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts" / "i18n"))
+IMPLEMENTATION_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _source_root():
+    configured = os.environ.get("PERSONA_CI_SOURCE_ROOT")
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("PERSONA_CI_SOURCE_ROOT must be absolute")
+        return Path(configured)
+    return IMPLEMENTATION_ROOT
+
+
+ROOT = _source_root()
+sys.path.insert(0, str(IMPLEMENTATION_ROOT / "scripts" / "i18n"))
 import apple_comments  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location("persona_config_for_callkit", ROOT / "scripts" / "persona_config.py")
+_spec = importlib.util.spec_from_file_location("persona_config_for_callkit", IMPLEMENTATION_ROOT / "scripts" / "persona_config.py")
 persona_config = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(persona_config)
 

@@ -27,6 +27,7 @@ var (
 	kernel32                 = windows.NewLazySystemDLL("kernel32.dll")
 	procGetSystemTimes       = kernel32.NewProc("GetSystemTimes")
 	procGlobalMemoryStatusEx = kernel32.NewProc("GlobalMemoryStatusEx")
+	procGetSystemPowerStatus = kernel32.NewProc("GetSystemPowerStatus")
 )
 
 // ReadSystem reads the edition, version and build from the registry (what winver shows), the kernel version from
@@ -142,7 +143,25 @@ func (c *windowsCollector) Sample(now time.Time) proto.MetricSample {
 			s.DiskTotal += int64(used + avail)
 		}
 	}
+	s.BatteryPercent, s.BatteryCharging = readWindowsBattery()
 	return s
+}
+
+type winSystemPowerStatus struct {
+	ACLineStatus        byte
+	BatteryFlag         byte
+	BatteryLifePercent  byte
+	SystemStatusFlag    byte
+	BatteryLifeTime     uint32
+	BatteryFullLifeTime uint32
+}
+
+func readWindowsBattery() (*float64, *bool) {
+	var st winSystemPowerStatus
+	if r, _, _ := procGetSystemPowerStatus.Call(uintptr(unsafe.Pointer(&st))); r == 0 {
+		return nil, nil
+	}
+	return parseSystemPowerStatus(st.ACLineStatus, st.BatteryFlag, st.BatteryLifePercent)
 }
 
 // sampleCores puts each core's busy share in s (all of them or none), against the last reading.

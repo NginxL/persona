@@ -562,8 +562,8 @@ func TestNodeOnTheFallbackBuildIsUpToDate(t *testing.T) {
 	s := m.snapshot()
 	want := i18n.T(i18n.Default, "devices-deploy.no_package", i18n.Args{"os": otherOS, "arch": "mips", "version": "v9-1",
 		"name": "personad-" + otherOS + "-mips"})
-	if s.CanDeploy == nil || *s.CanDeploy || s.DeployReason != want {
-		t.Fatalf("no build: %v %q", s.CanDeploy, s.DeployReason)
+	if s.CanDeploy == nil || *s.CanDeploy || s.DeployReason != want || !s.DeployNoPackage {
+		t.Fatalf("no build: %v %q no_package=%v", s.CanDeploy, s.DeployReason, s.DeployNoPackage)
 	}
 	if err := m.startDeploy(); err == nil || err.Error() != want {
 		t.Fatalf("Redeploy anyway: %v", err)

@@ -9,9 +9,9 @@
   },
   "$defs": {
     "ModelErrorCode": {
-      "description": "error.code of model.complete besides permission_denied (data {scope: \"models\"}): invalid_params; assistant_offline (the manager is away: try again); model_unavailable (nothing to call for this extension: the user picks a model for it in Settings › Model configuration); model_paused (the connection is held for quota or load, nothing was sent; data ModelPause: try again after until); model_failed (the upstream failed the request: an error status or a dropped connection); model_refused (the model declined to answer this input, a refusal or a content filter: sending it again unchanged gets the same answer, so split it, drop a part or report it; data ModelRefusal); timeout (past timeout_seconds); invalid_output (with json_schema, the reply was still not JSON matching it after one more try; data ModelInvalidOutput).",
+      "description": "error.code of model.complete besides permission_denied (data {scope: \"models\"}): invalid_params; assistant_offline (the manager is away: try again); model_unavailable (nothing to call for this extension: the user picks a model for it in Settings › Model configuration); model_paused (the connection is held for quota or load, nothing was sent; data ModelPause: try again after until); model_failed (the upstream failed the request: an error status or a dropped connection); model_refused (the model declined to answer this input, a refusal or a content filter: sending it again unchanged gets the same answer, so split it, drop a part or report it; data ModelRefusal); timeout (past timeout_seconds); invalid_output (with json_schema, the reply was still not JSON matching it after one more try; data ModelInvalidOutput); model_candidates_failed (with two or more candidates, every one failed; data ModelCandidatesFailed names how each did; a single candidate that fails answers with its own code and data).",
       "type": "string",
-      "enum": ["invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output"]
+      "enum": ["invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output", "model_candidates_failed"]
     },
     "ModelMessage": {
       "description": "One turn of the conversation: the user's, or the model's earlier answer.",
@@ -37,7 +37,8 @@
         "max_tokens": {"type": "integer", "minimum": 0, "maximum": 64000, "description": "Room for the answer; 0 is 4096. Connections speaking the Responses API are sent none."},
         "json_schema": {"description": "A JSON Schema the answer must match: the hub asks for JSON matching it, checks the reply (type, enum, const, properties, required, additionalProperties, items, prefixItems, lengths, bounds, allOf / anyOf / oneOf, local $ref) and asks once more when it does not match; the result's json has the decoded value. At most 64 KiB."},
         "timeout_seconds": {"type": "integer", "minimum": 0, "maximum": 600, "description": "Bounds the whole call, a second try included; 0 is 120."},
-        "label": {"type": "string", "maxLength": 64, "description": "What the call is for (daily, weekly…): it goes in the hub's log line with the usage."}
+        "label": {"type": "string", "maxLength": 64, "description": "What the call is for (daily, weekly…): it goes in the hub's log line with the usage."},
+        "models": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}, "description": "Candidate model ids, tried in order (#10398): one that fails (model_failed, model_refused, model_paused), runs past timeout_seconds, answers with no text (model_failed) or, with json_schema, still does not match it after its second try (invalid_output) hands over to the next. Each runs on a provider the user configured in Settings › Model providers that offers it, the purpose's own provider first (a model none offers is model_unavailable with data {model}, nothing sent). One candidate that fails answers with its own error; when two or more all fail the error is model_candidates_failed. timeout_seconds bounds each candidate; the whole call stops at 600 seconds. The user can switch these lists off (the result then has no candidate) or replace them with a list of their own (candidate names the user's model) on the extension's purpose in Settings › Model configuration. Without models the call runs on the purpose's model, as it always did; a hub older than this field answers invalid_params (unknown field \"models\")."}
       },
       "required": ["messages"]
     },
@@ -60,9 +61,41 @@
         "json": {"description": "With json_schema: the answer decoded, matching it."},
         "model": {"type": "string", "description": "The model that answered."},
         "stop_reason": {"type": "string", "description": "end_turn, or max_tokens when the answer was cut off."},
-        "usage": {"$ref": "#/$defs/ModelUsage"}
+        "usage": {"$ref": "#/$defs/ModelUsage", "description": "What the call spent; with models, every attempt's requests together."},
+        "candidate": {"type": "string", "description": "With models (or the user's own list): the candidate that answered."},
+        "attempts": {"type": "array", "items": {"$ref": "#/$defs/ModelAttempt"}, "description": "The candidates that failed before it, in order."}
       },
       "required": ["text", "model", "stop_reason", "usage"]
+    },
+    "ModelAttempt": {
+      "description": "A candidate that did not answer: its model, the error code it failed with (a ModelErrorCode; a reply with no text is model_failed), what happened, how long it took and what it spent.",
+      "type": "object",
+      "properties": {
+        "model": {"type": "string"},
+        "code": {"type": "string"},
+        "message": {"type": "string"},
+        "until": {"type": "string", "description": "model_paused: when its connection lets go, an RFC 3339 time."},
+        "seconds": {"type": "number"},
+        "usage": {"$ref": "#/$defs/ModelUsage"}
+      },
+      "required": ["model", "code", "message", "seconds", "usage"]
+    },
+    "ModelNotOffered": {
+      "description": "The data of model_unavailable for a candidate no provider the user configured offers.",
+      "type": "object",
+      "properties": {
+        "model": {"type": "string"}
+      },
+      "required": ["model"]
+    },
+    "ModelCandidatesFailed": {
+      "description": "The data of model_candidates_failed: every candidate's failure in order, and what they spent together.",
+      "type": "object",
+      "properties": {
+        "attempts": {"type": "array", "items": {"$ref": "#/$defs/ModelAttempt"}},
+        "usage": {"$ref": "#/$defs/ModelUsage"}
+      },
+      "required": ["attempts", "usage"]
     },
     "ModelPause": {
       "description": "The data of model_paused.",

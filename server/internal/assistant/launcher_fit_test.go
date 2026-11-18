@@ -275,6 +275,7 @@ func TestDispatchSwapsWhenThePreviewCouldNotTell(t *testing.T) {
 func TestLauncherInstead(t *testing.T) {
 	runtime := proto.Launcher{Name: "dsh", Source: "dsh"}
 	codex := proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc"}
+	codexApp := proto.Launcher{Name: "codex-app", Agent: "codex", Source: "codex_app"}
 	for _, c := range []struct {
 		m    Device
 		list []proto.Launcher
@@ -285,6 +286,9 @@ func TestLauncherInstead(t *testing.T) {
 		{Device{}, []proto.Launcher{runtime, codex}, "codex"}, // no Claude Code there: the first that takes a prompt
 		{Device{}, []proto.Launcher{runtime}, "claude"},
 		{Device{}, nil, "claude"},
+		// the Codex App's launcher is only ever an explicit pick: a default gives way to plain codex, never to it (#10437)
+		{Device{}, []proto.Launcher{codexApp, codex}, "codex"},
+		{Device{}, []proto.Launcher{codexApp}, "claude"},
 	} {
 		if got := launcherInstead(c.m, c.list); got != c.want {
 			t.Errorf("launcherInstead(%+v, %v) = %q, want %q", c.m, c.list, got, c.want)

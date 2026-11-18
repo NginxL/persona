@@ -242,6 +242,7 @@ fun ChatDestination(
                 files = wiring?.files, ports = wiring?.ports, onHandToPersona = handToPersona,
                 tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
                 assistantManagement = assistantManagement,
+                mainConversation = assistantSnapshot.mainSession?.sessionId,
                 leaderConversations = assistantSnapshot.leaders.toSet(),
                 agentShares = sharing,
                 inboxTrays = services.inboxTrays(), inboxScope = wiring?.scope?.path,

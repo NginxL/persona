@@ -428,6 +428,7 @@ func probeGateway(ctx context.Context, base, key, model, headers string) bool {
 		}
 	}
 	modelhttp.SetDefaultUserAgent(req.Header)
+	modelhttp.SetOpenCodeSession(req.Header, req.URL.String(), modelhttp.OpenCodeSessionHeaderValue(headers))
 	resp, err := modelProbeHTTPClient.Do(req)
 	if err != nil {
 		return false

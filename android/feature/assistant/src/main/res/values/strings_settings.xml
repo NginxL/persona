@@ -171,6 +171,9 @@
     <string name="assistant_settings_supervise_header">Task follow-up</string>
     <string name="assistant_settings_supervise_own">Main chat supervises its own tasks</string>
     <string name="assistant_settings_supervise_caption">When off, a background supervisor follows up the tasks the main chat hands out, so the main chat answers you first; turn it on to have the main chat follow them up itself.</string>
+    <string name="assistant_settings_terminals_header">Terminals</string>
+    <string name="assistant_settings_close_ended_terminals">Close an Agent\'s terminal when it ends</string>
+    <string name="assistant_settings_close_ended_terminals_caption">When an Agent Persona started is done, cancelled or quits, its terminal tab closes too. Busy Agents and terminals you opened yourself are never closed; the conversation is kept and can be resumed.</string>
     <string name="assistant_settings_supervise_model">Background supervisor model</string>
     <string name="assistant_settings_unavailable">Assistant settings aren\'t available</string>
     <string name="assistant_settings_unavailable_detail">Pair with a hub first, or leave the demo.</string>

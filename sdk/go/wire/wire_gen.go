@@ -264,34 +264,35 @@ type StoragePermission struct {
 // Contributes: contributions by extension point. A point this hub does not know installs with a warning, not taking
 // effect.
 type Contributes struct {
-	Connectors      []ConnectorItem      `json:"connectors,omitempty"`
-	Voice           []NamedItem          `json:"voice,omitempty"`
-	Transcription   []NamedItem          `json:"transcription,omitempty"`
-	Speech          []NamedItem          `json:"speech,omitempty"`
-	Computer        []NamedItem          `json:"computer,omitempty"`
-	Browser         []NamedItem          `json:"browser,omitempty"`
-	Iphone          []NamedItem          `json:"iphone,omitempty"`
-	Quota           []QuotaItem          `json:"quota,omitempty"`
-	Providers       []ProviderItem       `json:"providers,omitempty"`
-	API             []APIItem            `json:"api,omitempty"`
-	Assistant       []AssistantItem      `json:"assistant,omitempty"`
-	McpServers      []MCPServerItem      `json:"mcp_servers,omitempty"`
-	UI              []UIItem             `json:"ui,omitempty"`
-	AgentSources    []AgentSourceItem    `json:"agent_sources,omitempty"`
-	Channel         []ChannelItem        `json:"channel,omitempty"`
-	Events          []EventsItem         `json:"events,omitempty"`
-	Shortcuts       []ShortcutItem       `json:"shortcuts,omitempty"`
-	Skills          []SkillItem          `json:"skills,omitempty"`
-	Prompts         []PromptItem         `json:"prompts,omitempty"`
-	Themes          []ThemeItem          `json:"themes,omitempty"`
-	Looks           []LookItem           `json:"looks,omitempty"`
-	TriageTemplates []TriageTemplateItem `json:"triage_templates,omitempty"`
-	AgentFilters    []AgentFilterItem    `json:"agent_filters,omitempty"`
-	Tunnels         []TunnelItem         `json:"tunnels,omitempty"`
-	ErrorReports    []ErrorReportsItem   `json:"error_reports,omitempty"`
-	AuthRelay       []AuthRelayItem      `json:"auth_relay,omitempty"`
-	SecretProviders []SecretProviderItem `json:"secret_providers,omitempty"`
-	Messaging       []MessagingItem      `json:"messaging,omitempty"`
+	Connectors          []ConnectorItem          `json:"connectors,omitempty"`
+	Voice               []NamedItem              `json:"voice,omitempty"`
+	Transcription       []NamedItem              `json:"transcription,omitempty"`
+	Speech              []NamedItem              `json:"speech,omitempty"`
+	Computer            []NamedItem              `json:"computer,omitempty"`
+	Browser             []NamedItem              `json:"browser,omitempty"`
+	Iphone              []NamedItem              `json:"iphone,omitempty"`
+	Quota               []QuotaItem              `json:"quota,omitempty"`
+	Providers           []ProviderItem           `json:"providers,omitempty"`
+	API                 []APIItem                `json:"api,omitempty"`
+	Assistant           []AssistantItem          `json:"assistant,omitempty"`
+	McpServers          []MCPServerItem          `json:"mcp_servers,omitempty"`
+	UI                  []UIItem                 `json:"ui,omitempty"`
+	AgentSources        []AgentSourceItem        `json:"agent_sources,omitempty"`
+	Channel             []ChannelItem            `json:"channel,omitempty"`
+	Events              []EventsItem             `json:"events,omitempty"`
+	Shortcuts           []ShortcutItem           `json:"shortcuts,omitempty"`
+	Skills              []SkillItem              `json:"skills,omitempty"`
+	Prompts             []PromptItem             `json:"prompts,omitempty"`
+	Themes              []ThemeItem              `json:"themes,omitempty"`
+	Looks               []LookItem               `json:"looks,omitempty"`
+	TriageTemplates     []TriageTemplateItem     `json:"triage_templates,omitempty"`
+	AgentFilters        []AgentFilterItem        `json:"agent_filters,omitempty"`
+	Tunnels             []TunnelItem             `json:"tunnels,omitempty"`
+	ErrorReports        []ErrorReportsItem       `json:"error_reports,omitempty"`
+	AuthRelay           []AuthRelayItem          `json:"auth_relay,omitempty"`
+	SecretProviders     []SecretProviderItem     `json:"secret_providers,omitempty"`
+	RepositoryProviders []RepositoryProviderItem `json:"repository_providers,omitempty"`
+	Messaging           []MessagingItem          `json:"messaging,omitempty"`
 	// Extra keys stay at this object's level on the wire; they cannot replace declared fields.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
@@ -302,7 +303,7 @@ func (v *Contributes) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	declared := map[string]json.RawMessage{}
-	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"} {
+	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"} {
 		if value, ok := extra[key]; ok {
 			declared[key] = value
 			delete(extra, key)
@@ -334,7 +335,7 @@ func (v Contributes) MarshalJSON() ([]byte, error) {
 	}
 	for key, value := range v.AdditionalProperties {
 		switch key {
-		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging":
+		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging":
 			continue
 		}
 		fields[key] = value
@@ -571,6 +572,39 @@ type SecretProviderItem struct {
 	// The reference schemes it resolves, without :// (op).
 	Schemes []string `json:"schemes"`
 }
+
+// RepositoryProviderItem: A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's
+// repositories and links there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe;
+// repository.schema.json) and re-checks every answer. Needs the program to speak the protocol. A host another
+// installed extension claims, on or off, fails the install, and so does one host in two items.
+type RepositoryProviderItem struct {
+	ID string `json:"id"`
+	// What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no control
+	// characters.
+	Name string `json:"name"`
+	// The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or wildcard,
+	// not an IP address, and not a host the built-in GitHub and GitLab read.
+	Hosts []string `json:"hosts"`
+	// What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels: the
+	// kinds stay issue and pull_request.
+	LinkKinds []RepositoryLinkLabel `json:"link_kinds,omitempty"`
+}
+
+// RepositoryLinkLabel: the word a repository provider shows for one kind of its links (MR for a pull_request).
+type RepositoryLinkLabel struct {
+	Kind string `json:"kind"`
+	// Not only spaces, no control characters.
+	Label string `json:"label"`
+}
+
+// RepositoryLinkKind: the kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).
+const (
+	RepositoryLinkKindIssue       = "issue"
+	RepositoryLinkKindPullRequest = "pull_request"
+)
+
+// RepositoryLinkKinds are the values of RepositoryLinkKind, in order.
+var RepositoryLinkKinds = []string{"issue", "pull_request"}
 
 // ErrorReportsItem: it is given the error and crash reports of the hub and the user's devices
 // (error_reports.deliver): needs the program to speak the protocol, on_startup and permissions.error_reports.
@@ -4963,20 +4997,22 @@ type LeaderReportEvent struct {
 // status or a dropped connection); model_refused (the model declined to answer this input, a refusal or a content
 // filter: sending it again unchanged gets the same answer, so split it, drop a part or report it; data ModelRefusal);
 // timeout (past timeout_seconds); invalid_output (with json_schema, the reply was still not JSON matching it after
-// one more try; data ModelInvalidOutput).
+// one more try; data ModelInvalidOutput); model_candidates_failed (with two or more candidates, every one failed;
+// data ModelCandidatesFailed names how each did; a single candidate that fails answers with its own code and data).
 const (
-	ModelErrorCodeInvalidParams    = "invalid_params"
-	ModelErrorCodeAssistantOffline = "assistant_offline"
-	ModelErrorCodeModelUnavailable = "model_unavailable"
-	ModelErrorCodeModelPaused      = "model_paused"
-	ModelErrorCodeModelFailed      = "model_failed"
-	ModelErrorCodeModelRefused     = "model_refused"
-	ModelErrorCodeTimeout          = "timeout"
-	ModelErrorCodeInvalidOutput    = "invalid_output"
+	ModelErrorCodeInvalidParams         = "invalid_params"
+	ModelErrorCodeAssistantOffline      = "assistant_offline"
+	ModelErrorCodeModelUnavailable      = "model_unavailable"
+	ModelErrorCodeModelPaused           = "model_paused"
+	ModelErrorCodeModelFailed           = "model_failed"
+	ModelErrorCodeModelRefused          = "model_refused"
+	ModelErrorCodeTimeout               = "timeout"
+	ModelErrorCodeInvalidOutput         = "invalid_output"
+	ModelErrorCodeModelCandidatesFailed = "model_candidates_failed"
 )
 
 // ModelErrorCodes are the values of ModelErrorCode, in order.
-var ModelErrorCodes = []string{"invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output"}
+var ModelErrorCodes = []string{"invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output", "model_candidates_failed"}
 
 // ModelMessage: one turn of the conversation: the user's, or the model's earlier answer.
 type ModelMessage struct {
@@ -5009,6 +5045,17 @@ type ModelCompleteParams struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 	// What the call is for (daily, weekly…): it goes in the hub's log line with the usage.
 	Label string `json:"label,omitempty"`
+	// Candidate model ids, tried in order (#10398): one that fails (model_failed, model_refused, model_paused), runs
+	// past timeout_seconds, answers with no text (model_failed) or, with json_schema, still does not match it after its
+	// second try (invalid_output) hands over to the next. Each runs on a provider the user configured in Settings ›
+	// Model providers that offers it, the purpose's own provider first (a model none offers is model_unavailable with
+	// data {model}, nothing sent). One candidate that fails answers with its own error; when two or more all fail the
+	// error is model_candidates_failed. timeout_seconds bounds each candidate; the whole call stops at 600 seconds. The
+	// user can switch these lists off (the result then has no candidate) or replace them with a list of their own
+	// (candidate names the user's model) on the extension's purpose in Settings › Model configuration. Without models
+	// the call runs on the purpose's model, as it always did; a hub older than this field answers invalid_params
+	// (unknown field "models").
+	Models []string `json:"models,omitempty"`
 }
 
 // ModelUsage: what the call spent, every request of it together (a second try for json_schema included), as the
@@ -5029,8 +5076,37 @@ type ModelCompleteResult struct {
 	// The model that answered.
 	Model string `json:"model"`
 	// end_turn, or max_tokens when the answer was cut off.
-	StopReason string     `json:"stop_reason"`
-	Usage      ModelUsage `json:"usage"`
+	StopReason string `json:"stop_reason"`
+	// What the call spent; with models, every attempt's requests together.
+	Usage ModelUsage `json:"usage"`
+	// With models (or the user's own list): the candidate that answered.
+	Candidate string `json:"candidate,omitempty"`
+	// The candidates that failed before it, in order.
+	Attempts []ModelAttempt `json:"attempts,omitempty"`
+}
+
+// ModelAttempt: A candidate that did not answer: its model, the error code it failed with (a ModelErrorCode; a reply
+// with no text is model_failed), what happened, how long it took and what it spent.
+type ModelAttempt struct {
+	Model   string `json:"model"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	// model_paused: when its connection lets go, an RFC 3339 time.
+	Until   string     `json:"until,omitempty"`
+	Seconds float64    `json:"seconds"`
+	Usage   ModelUsage `json:"usage"`
+}
+
+// ModelNotOffered: the data of model_unavailable for a candidate no provider the user configured offers.
+type ModelNotOffered struct {
+	Model string `json:"model"`
+}
+
+// ModelCandidatesFailed: the data of model_candidates_failed: every candidate's failure in order, and what they spent
+// together.
+type ModelCandidatesFailed struct {
+	Attempts []ModelAttempt `json:"attempts"`
+	Usage    ModelUsage     `json:"usage"`
 }
 
 // ModelPause: the data of model_paused.
@@ -5900,6 +5976,103 @@ type TranscriptionFinishResult struct {
 	Seconds float64 `json:"seconds"`
 }
 
+// RepoErrorCode: error.code a provider answers besides the base ErrorCode: not_found (no such repository or link, or
+// the account it uses cannot see it), not_signed_in (the user has to sign in to the source first), refused (the
+// source said no: say why in message), failed (anything else, say why in message). The manager shows the message on
+// one line, clipped.
+const (
+	RepoErrorCodeNotFound    = "not_found"
+	RepoErrorCodeNotSignedIn = "not_signed_in"
+	RepoErrorCodeRefused     = "refused"
+	RepoErrorCodeFailed      = "failed"
+)
+
+// RepoErrorCodes are the values of RepoErrorCode, in order.
+var RepoErrorCodes = []string{"not_found", "not_signed_in", "refused", "failed"}
+
+// RepoParseParams: repo.parse: what repository an address on one of the contribution's hosts names (a web address, an
+// https clone address, ssh://git@host/... or git@host:...). Answer only from the address when it can; the manager
+// asks repo.check before it saves one.
+type RepoParseParams struct {
+	// The repository_providers item's id.
+	Contribution string `json:"contribution"`
+	// The address as the user or an Agent wrote it (an Agent's may be any page on the contribution's hosts).
+	URL string `json:"url"`
+}
+
+// RepoParseResult: the repository the address names. instance_url is exactly https://<host> or https://<host>:<port>,
+// a lowercase host the contribution claims and nothing after it; the default port is left out
+// (https://code.acme.test, never https://code.acme.test:443, which is refused), path its plain segments without a
+// leading or trailing / (acme/tools), canonical_url exactly instance_url + "/" + path.
+type RepoParseResult struct {
+	InstanceURL  string `json:"instance_url"`
+	Path         string `json:"path"`
+	CanonicalURL string `json:"canonical_url"`
+	// How to clone it when that is not canonical_url: https or ssh on one of the contribution's hosts, no credentials,
+	// query or fragment.
+	CloneURL string `json:"clone_url,omitempty"`
+	// A name for people (Acme Tools): the catalog's default name for it.
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// RepoCheckParams: repo.check: whether the repository exists and the account the program uses can see it, before the
+// manager saves it. Answered with Empty, or not_found / not_signed_in / refused / failed.
+type RepoCheckParams struct {
+	// The repository_providers item's id.
+	Contribution string `json:"contribution"`
+	// The repository's canonical_url as repo.parse answered it.
+	CanonicalURL string `json:"canonical_url"`
+}
+
+// RepoIdentity: A saved repository of the provider's, as repo.parse answered it.
+type RepoIdentity struct {
+	InstanceURL  string `json:"instance_url"`
+	Path         string `json:"path"`
+	CanonicalURL string `json:"canonical_url"`
+}
+
+// RepoLinkParams: repo.link: one of the repository's issues or pull requests for a to-do, named by an address (url)
+// or by kind and number. The manager asks only for a link it has not stored yet.
+type RepoLinkParams struct {
+	// The repository_providers item's id.
+	Contribution string       `json:"contribution"`
+	Repo         RepoIdentity `json:"repo"`
+	// The link's address as the user or an Agent wrote it; empty when kind and number name it. The hub only checks that
+	// the answer is under repo, so answer the link this address names, or an error when it names none.
+	URL string `json:"url,omitempty"`
+	// With number, when there is no url: the answer must be this kind.
+	Kind string `json:"kind,omitempty"`
+	// With kind: the answer must have this number.
+	Number string `json:"number,omitempty"`
+}
+
+// RepoLinkResult: the link: its kind and number, and its canonical address under the repository's canonical_url
+// (https, no credentials, query or fragment).
+type RepoLinkResult struct {
+	Kind         string `json:"kind"`
+	Number       string `json:"number"`
+	CanonicalURL string `json:"canonical_url"`
+	// Its title when the program knows it; kept on one line.
+	Title string `json:"title,omitempty"`
+}
+
+// RepoDescribeParams: repo.describe (optional): the title and state of a link the manager has stored, by its
+// canonical address.
+type RepoDescribeParams struct {
+	// The repository_providers item's id.
+	Contribution string `json:"contribution"`
+	// The link's canonical_url as repo.link answered it.
+	CanonicalURL string `json:"canonical_url"`
+}
+
+// RepoDescribeResult: what the link is called and where it stands.
+type RepoDescribeResult struct {
+	// Kept on one line.
+	Title string `json:"title"`
+	// Left out when the source has no such word for it.
+	State string `json:"state,omitempty"`
+}
+
 // requiredJSONComponent preserves required fields only inside stream payloads.
 type requiredJSONComponent Component
 
@@ -6191,6 +6364,8 @@ var newDef = map[string]func() any{
 	"TriageTemplateItem":            func() any { return new(TriageTemplateItem) },
 	"AuthRelayItem":                 func() any { return new(AuthRelayItem) },
 	"SecretProviderItem":            func() any { return new(SecretProviderItem) },
+	"RepositoryProviderItem":        func() any { return new(RepositoryProviderItem) },
+	"RepositoryLinkLabel":           func() any { return new(RepositoryLinkLabel) },
 	"ErrorReportsItem":              func() any { return new(ErrorReportsItem) },
 	"TunnelItem":                    func() any { return new(TunnelItem) },
 	"AgentFilterItem":               func() any { return new(AgentFilterItem) },
@@ -6532,6 +6707,9 @@ var newDef = map[string]func() any{
 	"ModelCompleteParams":           func() any { return new(ModelCompleteParams) },
 	"ModelUsage":                    func() any { return new(ModelUsage) },
 	"ModelCompleteResult":           func() any { return new(ModelCompleteResult) },
+	"ModelAttempt":                  func() any { return new(ModelAttempt) },
+	"ModelNotOffered":               func() any { return new(ModelNotOffered) },
+	"ModelCandidatesFailed":         func() any { return new(ModelCandidatesFailed) },
 	"ModelPause":                    func() any { return new(ModelPause) },
 	"ModelInvalidOutput":            func() any { return new(ModelInvalidOutput) },
 	"ModelRefusal":                  func() any { return new(ModelRefusal) },
@@ -6596,6 +6774,14 @@ var newDef = map[string]func() any{
 	"TranscriptionSegment":          func() any { return new(TranscriptionSegment) },
 	"TranscriptionGap":              func() any { return new(TranscriptionGap) },
 	"TranscriptionFinishResult":     func() any { return new(TranscriptionFinishResult) },
+	"RepoParseParams":               func() any { return new(RepoParseParams) },
+	"RepoParseResult":               func() any { return new(RepoParseResult) },
+	"RepoCheckParams":               func() any { return new(RepoCheckParams) },
+	"RepoIdentity":                  func() any { return new(RepoIdentity) },
+	"RepoLinkParams":                func() any { return new(RepoLinkParams) },
+	"RepoLinkResult":                func() any { return new(RepoLinkResult) },
+	"RepoDescribeParams":            func() any { return new(RepoDescribeParams) },
+	"RepoDescribeResult":            func() any { return new(RepoDescribeResult) },
 }
 
 // Call is one call or event of an extension point's protocol (the schemas' x-methods and x-events): who
@@ -6695,4 +6881,8 @@ var Calls = map[string]Call{
 	"transcription.audio":            {Name: "transcription.audio", From: "program", Params: "TranscriptionAudioParams", Result: "Empty"},
 	"transcription.finish":           {Name: "transcription.finish", From: "program", Params: "TranscriptionJobParams", Result: "TranscriptionFinishResult"},
 	"transcription.cancel":           {Name: "transcription.cancel", From: "program", Params: "TranscriptionJobParams", Result: "Empty"},
+	"repo.parse":                     {Name: "repo.parse", From: "hub", Params: "RepoParseParams", Result: "RepoParseResult"},
+	"repo.check":                     {Name: "repo.check", From: "hub", Params: "RepoCheckParams", Result: "Empty"},
+	"repo.link":                      {Name: "repo.link", From: "hub", Params: "RepoLinkParams", Result: "RepoLinkResult"},
+	"repo.describe":                  {Name: "repo.describe", From: "hub", Params: "RepoDescribeParams", Result: "RepoDescribeResult"},
 }

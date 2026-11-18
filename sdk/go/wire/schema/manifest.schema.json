@@ -362,6 +362,7 @@
         "error_reports": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/ErrorReportsItem"}},
         "auth_relay": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/AuthRelayItem"}},
         "secret_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/SecretProviderItem"}},
+        "repository_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/RepositoryProviderItem"}},
         "messaging": {"type": "array", "minItems": 1, "items": {"$ref": "messaging.schema.json#/$defs/MessagingItem"}}
       }
     },
@@ -557,6 +558,39 @@
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]{0,15}$", "not": {"enum": ["http", "https", "file", "data", "persona", "about", "javascript"]}}}
       },
       "required": ["id", "name", "schemes"]
+    },
+    "RepositoryProviderItem": {
+      "description": "A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's repositories and links there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe; repository.schema.json) and re-checks every answer. Needs the program to speak the protocol. A host another installed extension claims, on or off, fails the install, and so does one host in two items.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/ID"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*[^\\x00-\\x20\\x7f-\\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "description": "What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no control characters."},
+        "hosts": {"type": "array", "description": "The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or wildcard, not an IP address, and not a host the built-in GitHub and GitLab read.", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+          "items": {"type": "string", "maxLength": 253, "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+            "not": {"anyOf": [{"enum": ["github.com", "www.github.com", "api.github.com", "ssh.github.com", "gitlab.com", "altssh.gitlab.com"]}, {"pattern": "(^|\\.)([0-9]+|0x[0-9a-f]*)$"}]}}},
+        "link_kinds": {"type": "array", "description": "What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels: the kinds stay issue and pull_request.", "maxItems": 2, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/RepositoryLinkLabel"},
+          "not": {"minItems": 2, "anyOf": [{"items": {"properties": {"kind": {"const": "issue"}}}}, {"items": {"properties": {"kind": {"const": "pull_request"}}}}]}}
+      },
+      "required": ["id", "name", "hosts"]
+    },
+    "RepositoryLinkLabel": {
+      "description": "The word a repository provider shows for one kind of its links (MR for a pull_request).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"$ref": "#/$defs/RepositoryLinkKind"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 24, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*[^\\x00-\\x20\\x7f-\\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "description": "Not only spaces, no control characters."}
+      },
+      "required": ["kind", "label"]
+    },
+    "RepositoryLinkKind": {
+      "description": "The kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).",
+      "type": "string",
+      "enum": ["issue", "pull_request"]
     },
     "ErrorReportsItem": {
       "description": "It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the program to speak the protocol, on_startup and permissions.error_reports.",

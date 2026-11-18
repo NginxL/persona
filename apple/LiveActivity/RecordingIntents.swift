@@ -15,13 +15,20 @@ struct StartMeetingRecordingIntent: AudioRecordingIntent {
     // The contract's Wording (#3862 phase 4): a room meeting taking part may send what is said while Talk is held.
     // App Intent metadata says "this device", never "iPhone": App Store Connect rejects it (90626, #6471).
     nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while Talk is on: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge.")
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     nonisolated init() {}
 
     nonisolated func perform() async throws -> some IntentResult {
         #if !WIDGET_EXTENSION
-        if await MeetingRecorder.needsForeground { try await continueInForeground(alwaysConfirm: false) }
+        if await MeetingRecorder.needsForeground {
+            guard #available(iOS 26.0, *) else {
+                // iOS 18 cannot bring the app forward from here to ask for the microphone.
+                throw RecordingIntentFailure(message: String(localized: "Open Persona once and allow the microphone, then try again."))
+            }
+            try await continueInForeground(alwaysConfirm: false)
+        }
         // Siri, Shortcuts and the Control say it didn't start (no space, the microphone held by a call), not "done".
         if case .failed(let why) = await MeetingRecorder.shared.startMeeting(inForeground: MeetingRecorder.inForeground) {
             throw RecordingIntentFailure(message: why)

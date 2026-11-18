@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func boxed(rows ...string) string {
 	return strings.Join(rows, "\n") + "\n" + rule + "\n❯ \n" + rule + "\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
 }
 
-// none is "no status line": every line that is one has a verb.
+// none is the zero live state, used for "no status line".
 var none proto.SessionLive
 
 func TestParseClaudeStatus(t *testing.T) {
@@ -68,9 +69,12 @@ func TestParseClaudeStatus(t *testing.T) {
 // Screens read off real Claude Code panes (herdr pane read --source visible), with their content replaced.
 func TestParseClaudeStatusRealScreens(t *testing.T) {
 	for name, want := range map[string]proto.SessionLive{
-		"working.txt":     {Verb: "Frosting", ElapsedS: 27*60 + 16, TokensDown: 41500},
-		"todos.txt":       {Verb: "Frosting", ElapsedS: 3723, ThoughtS: 3},
-		"done_quoted.txt": none,
+		"working.txt":       {Verb: "Frosting", ElapsedS: 27*60 + 16, TokensDown: 41500},
+		"todos.txt":         {Verb: "Frosting", ElapsedS: 3723, ThoughtS: 3},
+		"done_quoted.txt":   none,
+		"retry_429.txt":     {RetryError: "429 Synthetic rate limit for retry capture", RetryAttempt: 5, RetryMax: 10},
+		"retry_500.txt":     {RetryError: "500 Synthetic upstream failure for retry capture", RetryAttempt: 4, RetryMax: 10},
+		"retry_generic.txt": {RetryError: "API Error", RetryAttempt: 1, RetryMax: 10},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "claudestatus", name))
 		if err != nil {
@@ -197,6 +201,129 @@ func TestWatchLivePushesChangesAndEnds(t *testing.T) {
 	noLive(t, pushes, 100*time.Millisecond)
 	stop()
 	noLive(t, pushes, 50*time.Millisecond) // null was sent already
+}
+
+// An early generic retry becomes detailed when Claude knows the error. Later attempt numbers go out even though the
+// retry has no elapsed-time field to change.
+func TestWatchLivePublishesGenericThenDetailedRetryAttempts(t *testing.T) {
+	n, f, pushes := liveNode(t, workingClaude(), boxed("✻ API Error · retrying in 1s · attempt 1/10"))
+	stop := startLive(t, n)
+	defer stop()
+	wantRetry := func(message string, attempt int) {
+		t.Helper()
+		l := nextLive(t, pushes)
+		if l == nil {
+			t.Fatal("want retry, got null")
+		}
+		got, at := *l, l.At
+		got.At = ""
+		want := proto.SessionLive{RetryError: message, RetryAttempt: attempt, RetryMax: 10}
+		if at == "" || got != want {
+			t.Fatalf("retry: got %+v at %q, want %+v", got, at, want)
+		}
+	}
+	wantRetry("API Error", 1)
+	for _, attempt := range []int{5, 6, 7} {
+		f.setScreen("w1:p1", boxed("✻ 429 Synthetic rate limit for retry capture · retrying in 4s · attempt "+strconv.Itoa(attempt)+"/10"))
+		wantRetry("429 Synthetic rate limit for retry capture", attempt)
+	}
+}
+
+// Ordinary work replaces the retry instead of retaining its error or counts.
+func TestWatchLiveNormalWorkReplacesRetry(t *testing.T) {
+	n, f, pushes := liveNode(t, workingClaude(), boxed("✻ 500 Synthetic upstream failure for retry capture · retrying in 5s · attempt 4/10"))
+	stop := startLive(t, n)
+	defer stop()
+	if l := nextLive(t, pushes); l == nil || l.RetryError != "500 Synthetic upstream failure for retry capture" {
+		t.Fatalf("retry: %+v", l)
+	}
+	f.setScreen("w1:p1", boxed("✻ Frosting… (8s · ↓ 1.2k tokens)"))
+	l := nextLive(t, pushes)
+	if l == nil {
+		t.Fatal("want ordinary work, got null")
+	}
+	got := *l
+	got.At = ""
+	want := proto.SessionLive{Verb: "Frosting", ElapsedS: 8, TokensDown: 1200}
+	if got != want {
+		t.Fatalf("ordinary work: got %+v, want %+v", got, want)
+	}
+}
+
+// A retry keeps the last ordinary metrics even though its banner has no counters of its own.
+func TestWatchLiveRetryKeepsOrdinaryMetrics(t *testing.T) {
+	n, f, pushes := liveNode(t, workingClaude(), boxed("✻ Frosting… (16s · ↓ 22.8k tokens · thought for 3s · thinking)"))
+	stop := startLive(t, n)
+	defer stop()
+	if l := nextLive(t, pushes); l == nil || l.TokensDown != 22800 || !l.Thinking {
+		t.Fatalf("ordinary: %+v", l)
+	}
+	f.setScreen("w1:p1", boxed("✻ 429 Synthetic rate limit for retry capture · retrying in 30s · attempt 5/10"))
+	l := nextLive(t, pushes)
+	if l == nil {
+		t.Fatal("want retry, got null")
+	}
+	got := *l
+	got.At = ""
+	want := proto.SessionLive{Verb: "Frosting", ElapsedS: 16, TokensDown: 22800, ThoughtS: 3,
+		RetryError: "429 Synthetic rate limit for retry capture", RetryAttempt: 5, RetryMax: 10}
+	if got != want {
+		t.Fatalf("retry metrics: got %+v, want %+v", got, want)
+	}
+}
+
+// Interrupting the retry, ending its turn, and ending the watch all clear a retry that was published.
+func TestWatchLiveClearsRetry(t *testing.T) {
+	for _, how := range []string{"line gone", "turn end", "unwatch"} {
+		t.Run(how, func(t *testing.T) {
+			n, f, pushes := liveNode(t, workingClaude(), boxed("✻ 429 Synthetic rate limit for retry capture · retrying in 4s · attempt 5/10"))
+			stop := startLive(t, n)
+			defer stop()
+			if l := nextLive(t, pushes); l == nil || l.RetryError == "" {
+				t.Fatalf("retry: %+v", l)
+			}
+			switch how {
+			case "line gone":
+				f.setScreen("w1:p1", boxed("⏺ Done."))
+			case "turn end":
+				setAgentStatus(n, sidA, proto.StatusIdle)
+			case "unwatch":
+				stop()
+			}
+			if l := nextLive(t, pushes); l != nil {
+				t.Fatalf("%s: %+v, want null", how, l)
+			}
+		})
+	}
+}
+
+// Retry support keeps the existing watched-session read: one-second cadence, a three-second read timeout, and 60
+// visible lines. It needs no other screen-reading loop.
+func TestWatchLiveRetryKeepsReadBounds(t *testing.T) {
+	if liveEvery != time.Second || liveReadTimeout != 3*time.Second || liveLines != 60 {
+		t.Fatalf("live bounds: every %v, timeout %v, lines %d", liveEvery, liveReadTimeout, liveLines)
+	}
+	n, f, pushes := liveNode(t, workingClaude(), boxed("✻ API Error · retrying in 1s · attempt 1/10"))
+	f.reset()
+	stop := startLive(t, n)
+	defer stop()
+	if l := nextLive(t, pushes); l == nil {
+		t.Fatal("want retry, got null")
+	}
+	stop()
+	reads := 0
+	for _, c := range f.calls() {
+		if c.Method != "pane.read" {
+			continue
+		}
+		reads++
+		if c.Params["pane_id"] != "w1:p1" || c.Params["source"] != "visible" || c.Params["lines"] != float64(60) {
+			t.Fatalf("unbounded live read: %s", c.String())
+		}
+	}
+	if reads == 0 {
+		t.Fatal("retry did not use the watched-session screen read")
+	}
 }
 
 // The line going away is null; a watch that ends with a line out ends it with null.

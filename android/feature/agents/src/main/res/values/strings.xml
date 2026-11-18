@@ -38,8 +38,8 @@
     </plurals>
     <string name="agents_summary_quiet">All quiet</string>
     <plurals name="agents_subtitle_unread">
-        <item quantity="one">1 just finished</item>
-        <item quantity="other">%1$d just finished</item>
+        <item quantity="one">1 unread</item>
+        <item quantity="other">%1$d unread</item>
     </plurals>
     <string name="agents_subtitle_one">%1$s.</string>
     <string name="agents_subtitle_two">%1$s, %2$s.</string>

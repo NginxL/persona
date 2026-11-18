@@ -9,12 +9,14 @@
   "launcher_missing_terminal_here": "The shell of new terminal tabs on this computer ({pane_shell}) has no command “{launcher}”; Persona found it in {launcher_shell} ({rc_file}). Define it where the terminal's shell reads its startup files, or add it to Persona as a model provider.",
   "launcher_missing_terminal_path": "The shell of new terminal tabs on {machine} ({pane_shell}) can't run “{missing}” to start the model entry “{launcher}”: the terminal runs where that file is missing or can't be run (a container, for example). Start agents in a terminal that sees it, or pick another model entry.",
   "launcher_missing_terminal_path_here": "The shell of new terminal tabs on this computer ({pane_shell}) can't run “{missing}” to start the model entry “{launcher}”: the terminal runs where that file is missing or can't be run (a container, for example). Start agents in a terminal that sees it, or pick another model entry.",
+  "launcher_missing_terminal_short": "“{launcher}” can’t start in the terminal on {machine}",
+  "launcher_missing_terminal_short_here": "“{launcher}” can’t start in this computer’s terminal",
   "claude_missing_terminal": "The shell of new terminal tabs on {machine} ({pane_shell}) can't find Claude Code (“{missing}”) to start the model entry “{launcher}”. Install Claude Code where the terminal sees it, or put it on that shell's PATH.",
   "claude_missing_terminal_here": "The shell of new terminal tabs on this computer ({pane_shell}) can't find Claude Code (“{missing}”) to start the model entry “{launcher}”. Install Claude Code where the terminal sees it, or put it on that shell's PATH.",
   "terminal_default_shell": "the default shell",
   "assistant_control_failed": "Claude could not apply this setting: {reason}",
-  "shell_waiting": "The new terminal tab on {machine} stopped on a question before the agent could start: “{line}”. Nothing ran; the tab stays open for a few minutes so the question can be answered.",
-  "shell_waiting_here": "The new terminal tab on this computer stopped on a question before the agent could start: “{line}”. Nothing ran; the tab stays open for a few minutes so the question can be answered.",
+  "shell_waiting": "The new terminal tab on {machine} stopped on a question before the agent could start: “{line}”. Nothing ran. Where Persona lists the question's answers, pick one and the agent starts in that tab; or answer it in the tab on {machine} and start the agent again. The tab stays open for a few minutes.",
+  "shell_waiting_here": "The new terminal tab on this computer stopped on a question before the agent could start: “{line}”. Nothing ran. Where Persona lists the question's answers, pick one and the agent starts in that tab; or answer it in the tab on this computer and start the agent again. The tab stays open for a few minutes.",
   "start_line_rejected": "The new terminal tab on {machine} didn't take the start command, twice (it printed “{line}”). Nothing ran; check what that shell does when it starts, then try again.",
   "start_line_rejected_here": "The new terminal tab on this computer didn't take the start command, twice (it printed “{line}”). Nothing ran; check what that shell does when it starts, then try again."
 }

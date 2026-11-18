@@ -95,6 +95,9 @@ export const SIDEBAR_DEFAULT = 284;
 export const SIDEBAR_MIN = 240;
 export const SIDEBAR_MAX = 480;
 
+/** Space between the Web shell columns at desktop widths (#7522). */
+export const PANEL_GAP = 6;
+
 /** What the conversation beside the side panel keeps at the least (#5148): its input box and header still fit. */
 export const CHAT_MIN = 440;
 /** The narrowest the side panel is drawn on a wide screen (views/SidePanel.tsx). */

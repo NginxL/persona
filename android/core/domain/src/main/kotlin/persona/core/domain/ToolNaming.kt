@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import persona.core.contracts.canonicalMcpToolName
 import java.math.BigDecimal
 
 /**
@@ -85,7 +86,7 @@ object ToolNaming {
     }
 
     /** Another server's MCP tool, not Persona's own ([isPersonaTool]): no table names it by its bare name. */
-    fun isOtherMcp(name: String): Boolean = name.startsWith("mcp__") && !isPersonaTool(name)
+    fun isOtherMcp(name: String): Boolean = canonicalMcpToolName(name).startsWith("mcp__") && !isPersonaTool(name)
 
     /**
      * The name the tool tables match on: a tool's own name ("Read", "agent_read" of mcp__persona__agent_read), or for

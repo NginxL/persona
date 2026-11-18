@@ -91,6 +91,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		defer func() { // this start took the ticket: failed, nothing else may fetch its values (secretenv.go)
 			if startErr != nil {
 				n.handoffs().take(execution.SecretTicket, false)
+				startErr = withoutAnswers(startErr) // nor can an answer start it again with them (start.continue)
 			}
 		}()
 	}
@@ -179,11 +180,13 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if resume != "" { // a Codex thread is resumed above: this id is not one
 			return nil, refusal(codexResumeRefused, "找不到这个 Codex 会话的记录，没法接着它：请在电脑上恢复（codex resume）。", nil)
 		}
-		if execution.Effort != "" && n.codexEffortInherited(ctx, argv, cwd, execution.Effort) {
-			// An inherited effort needs no override, which would leave the shared app-server.
-			execution.Effort = ""
+		// An inherited effort needs no override, which would leave the shared app-server; the record keeps it all the same.
+		runs := n.codexOwnEffort(ctx, argv, codexPaneEnv(launch), cwd, execution)
+		s, err := n.startCodex(ctx, launch, cwd, launcher, codexExecutionArgs(argv, runs), execution, prompt, ws, tabName, mode)
+		if err == nil && strings.TrimSpace(prompt) != "" {
+			n.codexGoalAfterStart(s.SessionID, s.PaneID, execution.Goal) // its first message is in (codex_start_goal.go)
 		}
-		return n.startCodex(ctx, launch, cwd, launcher, codexExecutionArgs(argv, execution), prompt, ws, tabName, mode)
+		return s, err
 	}
 	if work := workAgentKind(launcher, kind); work != "" { // workagent.go
 		if resume != "" {
@@ -226,7 +229,8 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	planThen := planThenOf(mode, execution.PlanThen)
 	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
 	settings, hooks := n.claudeStartSettings(ctx, launcher, "claude", cwd)
-	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: execution.Model,
+	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
+	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
 		Plugins: n.claudeLoadsPlugins(ctx)}
 	// herdr told it is Claude (hostherdr.go): a launcher that wraps another binary is otherwise not seen as one. The
 	// node's directory in front, the assistant's environment left out (agentenv.go).
@@ -288,7 +292,8 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	n.starts.recovered(id)
 	_ = launch.NameAgent(ctx, created.Pane, "j-"+id[:6])
 	n.holdResume(ctx, launch, pane, id, spec) // herdr's restore resumes it through the launcher (herdrresume.go)
-	// The goal goes after the first prompt is in (startgoal.go): only a new Claude's.
+	// The goal goes after the first prompt is in (startgoal.go): only a new Claude's here; a Codex's in startCodex's
+	// caller above.
 	goal := ""
 	if kind == "claude" && resume == "" {
 		goal = execution.Goal
@@ -502,13 +507,29 @@ func (n *Node) sessionFor(id string, a host.Agent) *proto.Session {
 // closes its tab, or in a split tab only its own pane, so the other panes survive; herdr-core ends its terminal.
 // Its user-action callers hold the recovery and typing locks, including retire's already-checked turn.
 func (n *Node) close(ctx context.Context, id string) error {
+	return n.closeWithCause(ctx, id, proto.StopUser)
+}
+
+// closeWithCause is close recording cause: the user's (saved and read back before anything is closed), or an
+// automatic one (idle, task_completed: #10355), which is recorded only once the close went through, as an automatic
+// stop's is (retire.go).
+func (n *Node) closeWithCause(ctx context.Context, id string, cause proto.StopCause) (err error) {
 	if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
 		return err
 	}
-	if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
-		return err
+	if cause == proto.StopUser {
+		if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+			return err
+		}
+		defer n.state.stopped(id, proto.StopUser)
+	} else {
+		n.state.stopped(id, proto.StopUnknown) // an automatic close that fails grants no recovery
+		defer func() {
+			if err == nil {
+				n.state.stopped(id, cause)
+			}
+		}()
 	}
-	defer n.state.stopped(id, proto.StopUser)
 	a, ok := n.agent(id)
 	if !ok {
 		if st, mine := n.state.get(id); mine {
@@ -540,10 +561,12 @@ func exitCommand(text string) bool {
 // the shell, retire.go), and one already stopped is left as it is rather than resumed in a new tab just to quit there.
 // It runs inside send's turn for the session, so it does not take the typing lock again as stop does.
 func (n *Node) exitAgent(ctx context.Context, id string) error {
-	if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+	// Recorded as an exit, not the user's Stop: the session ended (the owner's close-on-end setting, #10355, closes
+	// its terminal; a Stop keeps it). Neither permits a supervisor resume.
+	if err := n.saveStopCause(ctx, id, proto.StopExit); err != nil {
 		return err
 	}
-	defer n.state.stopped(id, proto.StopUser)
+	defer n.state.stopped(id, proto.StopExit)
 	a, ok := n.agent(id)
 	if !ok {
 		return nil

@@ -930,6 +930,8 @@ func TestActivityIn(t *testing.T) {
 		{i18n.En, "在跑测试", "Running tests"},
 		{i18n.Ja, "在读 runs.go", "読み取り中"},
 		{i18n.En, "在等 CI", i18n.T(i18n.En, "hub-transcript_text.act_ci")},
+		{i18n.En, "子任务完成 review_api", "Subtask done"},
+		{i18n.Ja, "在联系子任务 review_api", "サブタスクに連絡中"},
 		{i18n.En, "在想 runs.go", ""},
 		{i18n.En, "", ""},
 	} {

@@ -525,12 +525,22 @@ func (r *Registry) validatePlan(id, previewID, digest string, refs []PreviewRef,
 	if err := checkCandidateDependencyGraph(baseline, manifests...); err != nil {
 		return nil, err
 	}
+	owners := make(map[string]*Manifest, len(combined))
+	for key, p := range combined {
+		owners[key] = p.Full
+	}
 	for _, plan := range plans {
 		m := plan.preview.Manifest
+		if errs := claimClashes(m, owners); len(errs) > 0 {
+			return nil, errors.Join(errs...)
+		}
 		for point, ids := range m.Contributions() {
 			for _, cid := range ids {
 				if owner := r.reserved[point][cid]; owner != "" {
 					return nil, fmt.Errorf("%s 的 %s 已由 %s 使用", point, cid, owner)
+				}
+				if point == "ui" { // UI identity is the extension plus its local contribution ID, as in preview.
+					continue
 				}
 				for other, p := range combined {
 					if other != m.ID && slices.Contains(p.Full.Items(point), cid) {

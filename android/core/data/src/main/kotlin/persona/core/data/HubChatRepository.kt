@@ -38,7 +38,7 @@ class HubChatRepository(
     /** Streamed text publishes its first chunk at once, then at most once per this window; the turn's end publishes at once. */
     private val deltaPublishWindowMillis: Long = 50,
     private val continuityFactory: (String, (ContinuityAdapter.Applied) -> Unit) -> ContinuityAdapter = ContinuityAdapters::create,
-) : ChatRepository {
+) : ChatRepository, StructuralChatRepository {
     private class Entry(val key: SessionKey, val scope: CoroutineScope) {
         lateinit var continuity: ContinuityAdapter
         var appliedContinuity = ContinuityAdapter.State()
@@ -321,7 +321,20 @@ class HubChatRepository(
         }
     }
 
-    override fun observe(session: SessionKey): Flow<ChatSnapshot> = flow {
+    /** Existing consumers keep seeing each delta as a complete, immutable snapshot. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observe(session: SessionKey): Flow<ChatSnapshot> = observeStructure(session).flatMapLatest { snapshot ->
+        val live = snapshot.liveText
+        if (live.isEmpty()) flowOf(snapshot)
+        else combine(live.map { (id, text) -> text.map { value -> id to value } }) { values ->
+            val updates = values.toMap()
+            snapshot.copy(items = snapshot.items.map { item ->
+                updates[item.id]?.takeIf { it != item.text.orEmpty() }?.let { item.copy(text = it) } ?: item
+            })
+        }
+    }
+
+    override fun observeStructure(session: SessionKey): Flow<ChatSnapshot> = flow {
         cache.retain(session)
         try {
             val entry = synchronized(entries) {
@@ -362,6 +375,10 @@ class HubChatRepository(
             }
         } finally { withContext(NonCancellable) { cache.release(session) } }
     }
+
+    /** Latest arrival, independent of the merged UI publish window. */
+    internal fun liveText(session: SessionKey): String? =
+        existing(session)?.let { entry -> entry.realtime.currentText(entry.reducer.items) }
 
     /** Keep this send subscribed before POST, including while the main queue is binding its first conversation. */
     suspend fun withSendSubscription(session: SessionKey, send: suspend () -> persona.core.contracts.api.MessageTransportResult): persona.core.contracts.api.MessageTransportResult = coroutineScope {
@@ -1050,11 +1067,13 @@ class HubChatRepository(
             entry.realtime.finish()
             entry.reconnected = false
         }
-        val items = entry.realtime.items(recorded)
+        val items = entry.realtime.structuralItems(recorded)
+        entry.realtime.publishLiveText(recorded)
         // Loading only while nothing is shown and the hub has not answered for the chat yet: an empty chat is one it said is empty.
         entry.state.update { it.copy(items = items, loading = entry.firstPagePending && items.isEmpty(),
             history = entry.reducer.history,
             streamingItemIds = entry.realtime.streamingItemIds(),
+            liveText = entry.realtime.liveText(),
             hasOlder = entry.reducer.hasMore == true, error = entry.eventError, verified = verified,
             lastSeenMessageId = lastSeen?.let(entry.realtime::displayId),
             ended = runtime.ended || (it.ended && !relisted), replaced = runtime.replaced || (it.replaced && !relisted),

@@ -13,7 +13,21 @@ WINDOWS = os.name == "nt"
 
 
 def resolve(command):
-    """On Windows, launchers such as npm are `.cmd` shims that CreateProcess finds only by their full path."""
+    """Resolve trusted checker scripts without using the source checkout's copy."""
+    if (command and command[0] in {"ci_python", "ci_node", "python3", "node"}
+            and os.environ.get("CI_IMPLEMENTATION_ROOT") and len(command) > 1
+            and command[1].endswith((".py", ".mjs", ".js"))):
+        if len(command) < 2 or not command[1] or command[1].startswith("-"):
+            raise ValueError("a checker command needs a script path")
+        root = os.environ.get("CI_IMPLEMENTATION_ROOT")
+        if not root or not Path(root).is_absolute():
+            raise ValueError("CI_IMPLEMENTATION_ROOT must be an absolute trusted path")
+        script = Path(command[1])
+        if not script.is_absolute():
+            if ".." in script.parts:
+                raise ValueError("checker script must stay in the implementation checkout")
+            script = Path(root) / script
+        return ["python3" if command[0] in {"ci_python", "python3"} else "node", str(script), *command[2:]]
     if not WINDOWS:
         return command
     found = shutil.which(command[0])

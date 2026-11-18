@@ -344,6 +344,11 @@ type Session struct {
 	StateSince time.Time `json:"state_since,omitempty"`
 	// Queued is input typed while the agent works, waiting to be taken (shown above the composer, not in the chat).
 	Queued []string `json:"queued,omitempty"`
+	// Undelivered are the owner's messages to an assistant conversation that could not go in (its process did not
+	// start, its computer was away) and that its manager keeps and sends again by itself (#10194, docs/assistant/
+	// assistant.md "Messages that could not go in"); oldest first. Shown in the chat as the owner's own, marked not
+	// delivered, on every client. Behind a pointer: a Session stays in its allocation size class (see QueuedRelayed).
+	Undelivered *[]UndeliveredMessage `json:"undelivered,omitempty"`
 	// Background lists commands / agents Claude started in the background that have not reported back yet
 	// (the TUI's "2 shells still running").
 	Background []BackgroundTask `json:"background,omitempty"`
@@ -404,7 +409,9 @@ type Session struct {
 	TurnError string `json:"turn_error,omitempty"`
 	// TurnErrorKind is what the agent's record says of TurnError, when it says (Claude Code's error field, Codex's
 	// error kinds): TurnErrorTransient (worth a "Continue"), TurnErrorUser (the user must act) or TurnErrorUsageLimit
-	// (a subscription's usage limit, until it resets); empty: read off the text.
+	// (a subscription's usage limit, until it resets); empty: read off the text. Or the hub's own word on a task
+	// Agent's turn that had no output at all (SilentTurnKind: TurnErrorNoOutput, TurnErrorStopped), with TurnError
+	// the sentence for it in the user's language (#10187).
 	TurnErrorKind string `json:"turn_error_kind,omitempty"`
 	// TurnErrorResetsAt is when the subscription usage limit that ended the turn resets (TurnErrorKind
 	// TurnErrorUsageLimit): what the agent's record says (Claude Code's quotaLimits.resetsAt, the full window of a Codex
@@ -479,7 +486,15 @@ const (
 	TurnErrorTransient  = "transient"   // the model service failed for a moment: worth a "Continue"
 	TurnErrorUser       = "user"        // sign-in, context window, the model…: the user must act
 	TurnErrorUsageLimit = "usage_limit" // a subscription's usage limit: it goes on once the limit resets (TurnErrorResetsAt)
+	// The hub's word on a task Agent's turn that ended with no reply, tool call or image (#2349, #10187): no error the
+	// model service reported, and no "Done" either.
+	TurnErrorNoOutput = "no_output" // the model service answered nothing: interrupted, worth a "Continue"
+	TurnErrorStopped  = "stopped"   // Persona's own Stop interrupted it (its conversation was stopped): the owner's to go on with
 )
+
+// SilentTurnKind: kind is the hub's word on a turn with no output (TurnErrorNoOutput, TurnErrorStopped), not an error
+// the model service reported: nothing for Session Triage to ask the user about or to continue by itself.
+func SilentTurnKind(kind string) bool { return kind == TurnErrorNoOutput || kind == TurnErrorStopped }
 
 // Session.TurnErrorCode values (docs/assistant/onboarding.md 4.6).
 const (
@@ -488,6 +503,9 @@ const (
 	TurnErrorModelRoute               = "model_route"                // the model name is not one the service or gateway knows
 	TurnErrorRateLimited              = "rate_limited"               // too many requests, or a usage limit
 	TurnErrorModelFallbackUnavailable = "model_fallback_unavailable" // a refusal selected a model the service cannot use
+	// TurnErrorToolSearchUnsupported: the gateway refused Claude Code's on-demand tool loading (tool search, #10365). The
+	// node now starts that launcher and model with every tool loaded, so a retry works: not the user's to fix.
+	TurnErrorToolSearchUnsupported = "tool_search_unsupported"
 )
 
 // Codes a call refuses with when the assistant's conversation cannot start on a machine (docs/assistant/onboarding.md 4.6, 5.2):
@@ -640,6 +658,26 @@ type ModelPick struct {
 	Model    string `json:"model,omitempty"`
 	Effort   string `json:"effort,omitempty"`
 }
+
+// UndeliveredMessage is one of Session.Undelivered: an owner's message its manager keeps after it could not go in.
+type UndeliveredMessage struct {
+	// ID is the message's client_msg_id: the bubble the sending app shows for it, and its once-only key when it goes.
+	ID     string    `json:"id"`
+	Text   string    `json:"text"`
+	Images int       `json:"images,omitempty"` // how many pictures it carries (they are kept and sent with it)
+	At     time.Time `json:"at"`               // when the owner sent it
+	// State is UndeliveredWaiting (it is sent again by itself) or UndeliveredFailed (it gave up: Retry or Delete).
+	State    string     `json:"state"`
+	Attempts int        `json:"attempts,omitempty"`
+	NextAt   *time.Time `json:"next_at,omitempty"` // when the next try is due while waiting
+	Error    string     `json:"error,omitempty"`   // why the last try did not go in, in the owner's language
+}
+
+// UndeliveredMessage states.
+const (
+	UndeliveredWaiting = "waiting"
+	UndeliveredFailed  = "failed"
+)
 
 // QueueEdit is the answer to POST /api/v1/sessions/{mid}/{sid}/queue in a Persona conversation (node session.queue.edit,
 // docs/protocol/protocol.md): the messages that were queued before the edit, in order, and their photos for the composer

@@ -21,6 +21,9 @@ data class MetricSample(
     @SerialName("net_tx") val netTx: Double? = null,
     @SerialName("disk_used") val diskUsed: Long? = null,
     @SerialName("disk_total") val diskTotal: Long? = null,
+    @SerialName("battery_percent") val batteryPercent: Double? = null,
+    @SerialName("battery_charging") val batteryCharging: Boolean? = null,
+    @SerialName("temp_c") val tempC: Double? = null,
 )
 
 /** History memory, disk and swap values are bytes, not percentages. */
@@ -36,6 +39,8 @@ data class MetricPoint(
     val rx: Double? = null,
     val tx: Double? = null,
     val disk: Double? = null,
+    @SerialName("battery_percent") val batteryPercent: Double? = null,
+    @SerialName("temp_c") val tempC: Double? = null,
 )
 
 @KeepGeneratedSerializer

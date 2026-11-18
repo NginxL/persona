@@ -438,6 +438,11 @@ func triageRules(c proto.Session, loc *time.Location, l i18n.Lang) (w *proto.Wor
 		return nil, "", true
 	}
 	if e := c.TurnError; e != "" {
+		if proto.SilentTurnKind(c.TurnErrorKind) {
+			// The hub's word on a task Agent's turn with no output (silent_turns.go): no model error to ask the user about
+			// and none to continue by itself. Its task's receipt has the "Continue"; a turn Persona's Stop ended stays stopped.
+			return nil, "", true
+		}
 		if sessionTurnErrorCode(c) == proto.TurnErrorModelFallbackUnavailable {
 			return &proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitUser,
 				Line: i18n.T(l, "assistant-readiness.model_fallback_unavailable_title"),
@@ -527,7 +532,7 @@ func turnErrorTransient(c proto.Session) bool {
 	switch c.TurnErrorKind {
 	case proto.TurnErrorTransient:
 		return true
-	case proto.TurnErrorUser, proto.TurnErrorUsageLimit:
+	case proto.TurnErrorUser, proto.TurnErrorUsageLimit, proto.TurnErrorNoOutput, proto.TurnErrorStopped:
 		return false
 	}
 	return transientError(c.TurnError)

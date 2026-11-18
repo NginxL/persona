@@ -16,7 +16,6 @@
   "parked_age": "已搁置 {age}",
   "last_contact": "上次由 {sender} 问过 · {time} · {channel}",
   "contact_unknown": "未记录已发出的请求",
-  "no_person_request": "未记录向他人发出的询问",
   "wake": "等待变化：{wake}",
   "wake_unknown": "恢复条件未记录",
   "source": "来源 {number}",

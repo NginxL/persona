@@ -110,7 +110,10 @@ def step(lang, sid, state, code, machine_name, launcher, action):
     st = {"id": sid, "state": state, "code": code}
     if launcher and sid not in ("computer", "first_message"):
         st["launcher"] = launcher
-    st["title"] = t(lang, "assistant-readiness.%s_title" % code, machine=name, launcher=launcher)
+    title_code = code
+    if sid == "model" and launcher and code in ("not_logged_in", "auth_failed", "model_route"):
+        title_code += "_launcher"
+    st["title"] = t(lang, "assistant-readiness.%s_title" % title_code, machine=name, launcher=launcher)
     st["detail"] = t(lang, "assistant-readiness.%s_detail" % code, machine=name, launcher=launcher)
     if action:
         st["action"] = {"id": action}

@@ -20,8 +20,9 @@ open class ActionReceiver : BroadcastReceiver() {
             // "Resume" needs an unlock, which the system reports a moment after it let the button through.
             val pending = goAsync()
             CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
-                try { if (!lockedAfterUnlockSettles({ keyguard.isDeviceLocked })) Notify.resume(context) }
-                finally { pending.finish() }
+                try {
+                    if (!lockedAfterUnlockSettles({ keyguard.isDeviceLocked })) Notify.resume(context).join()
+                } finally { pending.finish() }
             }
             return
         }
@@ -45,6 +46,7 @@ open class ActionReceiver : BroadcastReceiver() {
             try {
                 // A bounded receiver lifetime is a timeout, not a delivery guarantee.
                 withTimeout(8_000) {
+                    dependencies.pairing().restore()
                     val sessions = dependencies.sessions()
                     // Claims and the second-tap check share this phone's journal: a request gone from the hub that it
                     // claimed was its own answer, with no notice (#2483).

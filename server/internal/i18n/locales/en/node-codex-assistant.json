@@ -1,0 +1,3 @@
+{
+  "compaction_loop_stopped": "Stopped: this conversation is too long for the current model. It was compressed twice and still didn’t fit. Switch to a model that can hold longer conversations, or start a new chat."
+}

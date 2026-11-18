@@ -275,7 +275,7 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 				if err := checkAPITransport(l.Kind, l.API, l.Proxy, l.NoProxy, l.HeadersSealed != ""); err != nil {
 					return c, err
 				}
-				c = ai.Config{API: l.API, BaseURL: l.BaseURL, Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
+				c = ai.Config{API: l.API, BaseURL: l.LaunchBaseURL(), Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
 				providerModels = l.Models
 				model, err := resolveAPITierAlias(l, cmp.Or(b.Model, l.Model))
 				if err != nil {
@@ -335,6 +335,10 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 
 // purposeModel is purpose id's model, resolved at the start of every request.
 func (s *Service) purposeModel(id string) *ai.Client {
+	return s.purposeModelFor(id, "")
+}
+
+func (s *Service) purposeModelFor(id, operation string) *ai.Client {
 	return ai.NewResolved(func(ctx context.Context) (*ai.Client, error) {
 		b, err := s.resolveModel(ctx, id)
 		if err != nil {
@@ -344,7 +348,7 @@ func (s *Service) purposeModel(id string) *ai.Client {
 		if err != nil {
 			return nil, err
 		}
-		return s.aiClient(c), nil
+		return s.countedClient(id, operation, b.Provider, c), nil
 	})
 }
 

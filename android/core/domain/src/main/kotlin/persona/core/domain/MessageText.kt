@@ -13,6 +13,9 @@ data class MessageText(
     val files: List<String> = emptyList(),
 )
 
+/** A file-looking path and its source range, for incremental consumers that partition a whole-message scan. */
+data class FilePathRef(val start: Int, val end: Int, val path: String)
+
 private val pastedTags = Regex("</?pasted_content[^>]*>")
 private val imagePlaceholders = Regex("\\[Image #\\d+]\\s*")
 
@@ -68,18 +71,21 @@ object FilePaths {
     )
 
     /** The paths in [text] in order, without repeats, at most six; cached by text (rows redraw all the time). */
-    fun find(text: String): List<String> = memo[text] ?: scan(text).also { memo[text] = it }
+    fun find(text: String): List<String> = memo[text] ?: findDetailed(text).map(FilePathRef::path).also { memo[text] = it }
 
-    private fun scan(text: String): List<String> {
-        val out = ArrayList<String>()
+    /** The same matches as [find], with source positions for settled/tail partitioning. */
+    fun findDetailed(text: String): List<FilePathRef> {
+        val out = ArrayList<FilePathRef>()
+        val paths = ArrayList<String>()
         for (match in pattern.findAll(text)) {
             var path = match.groupValues[1]
             while (path.isNotEmpty() && path.last() in ".,;:)") path = path.dropLast(1)
             val start = match.range.first
             val before = if (start >= 3) text.substring(start - 3, start) else ""
-            if (before.endsWith("://") || path.startsWith("//") || path.length < 4 || path in out) continue
+            if (before.endsWith("://") || path.startsWith("//") || path.length < 4 || path in paths) continue
             if (path.startsWith("/") && path.split('/').count { it.isNotEmpty() } < 2) continue
-            out += path
+            paths += path
+            out += FilePathRef(start, match.range.last + 1, path)
             if (out.size >= LIMIT) break
         }
         return out

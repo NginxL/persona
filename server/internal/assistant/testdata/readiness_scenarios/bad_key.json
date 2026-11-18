@@ -36,7 +36,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "The model's key doesn't work"
+        "title": "Model not connected: the key for claude is wrong"
       },
       {
         "action": {
@@ -100,7 +100,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "モデルのキーが正しくありません"
+        "title": "claudeのキーが無効です"
       },
       {
         "action": {
@@ -164,7 +164,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "模型的 Key 不对"
+        "title": "模型没接好：claude 的 Key 不对"
       },
       {
         "action": {

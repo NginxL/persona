@@ -7,6 +7,19 @@ nonisolated enum HubNaming {
     static var productPattern: String { "(?:persona|" + NSRegularExpression.escapedPattern(for: LegacyNames.product) + ")" }
     static var contextPattern: String { productPattern + "-context" }
     static var filePattern: String { productPattern + "-file" }
+    private static let agyMCPTool = try! NSRegularExpression(
+        pattern: "^mcp_" + productPattern + "(?:_[0-9a-fA-F]{8,16})?_([a-z][a-z0-9_]*)$"
+    )
+
+    /// Normalizes Antigravity's single-underscore Persona MCP names (`mcp_persona_<tool>`, `mcp_persona_<hex>_<tool>`)
+    /// to `mcp__persona__<tool>`.
+    static func canonicalMCPTool(_ name: String) -> String {
+        guard name.hasPrefix("mcp_"), !name.hasPrefix("mcp__") else { return name }
+        let range = NSRange(name.startIndex..., in: name)
+        guard let match = agyMCPTool.firstMatch(in: name, range: range),
+              let toolRange = Range(match.range(at: 1), in: name) else { return name }
+        return "mcp__persona__" + name[toolRange]
+    }
 
     static func accepts(scheme: String?) -> Bool {
         guard let scheme = scheme?.lowercased() else { return false }

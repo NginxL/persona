@@ -113,6 +113,9 @@ struct SidebarPageRoots {
 
     /// Whether a drill-down path is kept for `root` (tests).
     func keeps(_ root: SidebarPageRoot) -> Bool { saved[root] != nil }
+
+    /// Nothing for `forget` to do: the conversation in front, nothing kept.
+    var forgotten: Bool { current == .conversation && saved.isEmpty }
 }
 
 extension SidebarPageRoot {

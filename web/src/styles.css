@@ -7,6 +7,49 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The Web shell columns share this gutter with the width budget in lib/layout.ts. */
+@media (width >= 64rem) {
+  [data-app-shell] {
+    --panel-gap: 6px;
+    background: var(--inset);
+  }
+
+  [data-sidebar-column] {
+    flex-shrink: 0;
+    margin-right: var(--panel-gap);
+    border-right: 0;
+  }
+
+  [data-app-shell] > aside {
+    margin-left: var(--panel-gap);
+    border-left: 0;
+    border-radius: var(--radius-card);
+  }
+
+  [data-app-shell] > main {
+    background: var(--page);
+  }
+
+  /* The sidebar's usage dialog may extend beyond the rounded background. */
+  [data-sidebar-column] > aside {
+    border-radius: var(--radius-card);
+  }
+
+  [data-app-shell] > main,
+  [data-app-shell] > aside > div:not([role="separator"]) {
+    border-radius: var(--radius-card);
+    overflow: clip;
+  }
+
+  [data-sidebar-column] > [role="separator"] {
+    right: calc(-0.25rem - var(--panel-gap) / 2);
+  }
+
+  [data-app-shell] > aside > [role="separator"] {
+    left: calc(-0.25rem - var(--panel-gap) / 2);
+  }
+}
+
 /* Shared by every sidebar grouping, below the measured Persona row. */
 .sidebar-group-heading {
   position: sticky;

@@ -126,6 +126,9 @@ func (msg relayMsg) decisionSince() time.Time {
 // session list shows the round ended (ownerRoundsSeen), or on its safety limits if the list never shows the round
 // working or never shows it stop.
 func (b *relayBook) holdLocked(to string, msg relayMsg, now time.Time) time.Duration {
+	if wait := msg.Due.Sub(now); !msg.Due.IsZero() && wait > 0 {
+		return wait // past the relay rate: it waits for the window (#10400)
+	}
 	if msg.Owner {
 		return 0
 	}
@@ -365,6 +368,17 @@ func (s *Service) drainHeldRelays(ctx context.Context, now time.Time) {
 		return
 	}
 	var due []string
+	// A message that waited for the relay rate (#10400) whose timer a restart lost.
+	for id, q := range b.st.Queue {
+		if _, spoke := b.st.Spoke[id]; spoke || b.holds[id] != nil || b.draining[id] {
+			continue
+		}
+		if slices.ContainsFunc(q, func(m relayMsg) bool { return !m.Due.IsZero() }) {
+			if i, _ := b.pickLocked(id, now); i >= 0 {
+				due = append(due, id)
+			}
+		}
+	}
 	for id, spoke := range b.st.Spoke {
 		if len(b.st.Queue[id]) == 0 {
 			if now.Sub(spoke) >= ownerPresentFor {

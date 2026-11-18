@@ -246,7 +246,7 @@ func (d *Store) ImportTodoRepositoryLinkDetails(ctx context.Context, id string, 
 			}
 			canonical = append(canonical, link.CanonicalURL)
 			if source == "explicit" || !slices.Contains(seen, link.CanonicalURL) {
-				pending = append(pending, repository.LinkInput{URL: link.CanonicalURL, Title: link.Title})
+				pending = append(pending, repository.LinkInput{URL: link.CanonicalURL, Title: link.Title, Resolved: in.Resolved})
 			}
 		}
 		if len(pending) == 0 {

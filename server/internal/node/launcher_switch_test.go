@@ -441,8 +441,9 @@ func TestLauncherSwitchOnTheUsersNextMessage(t *testing.T) {
 		t.Errorf("a tab was opened or closed: %q", got)
 	}
 	starts := typedStarts(f, "w1:p1")
+	// "opus" is the gateway provider's own model for that tier, its default here (#10365).
 	if len(starts) != 1 || !strings.Contains(starts[0], " launch work ") || !strings.Contains(starts[0], "--resume "+sidA) ||
-		!strings.Contains(starts[0], "--model opus") || strings.HasPrefix(starts[0], "cd ") {
+		!strings.Contains(starts[0], "--model glm-5") || strings.HasPrefix(starts[0], "cd ") {
 		t.Fatalf("typed %q", starts)
 	}
 	trace := strings.Join(f.trace("pane.send_keys", "pane.send_input", "agent.prompt"), "\n")

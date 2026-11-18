@@ -13,11 +13,14 @@
   "action_edit_provider": "キーを変更",
   "action_test_assistant": "試してみる",
   "action_main_chat_model": "別のアプリや設定を選ぶ",
+  "action_pick_model": "別のモデルを選ぶ",
   "action_open_admin": "管理画面を開く",
   "turn_not_logged_in": "モデル未接続：Claude Code CLI にログインしていません",
   "turn_not_logged_in_detail": "Claude デスクトップアプリのログインはこれに含まれません。そのコンピュータのターミナルで claude auth login を実行するか、代わりに API キーを使ってください。",
   "turn_auth_failed": "モデル未接続：キーが正しくありません",
   "turn_auth_failed_detail": "キーが正しくないか期限切れです。使えるキーに替えてください。",
   "turn_model_route": "モデル未接続：このモデルは使えません",
-  "turn_model_route_detail": "モデル名が違うか、今は使えません。別のモデルを試してください。"
+  "turn_model_route_detail": "モデル名が違うか、今は使えません。別のモデルを試してください。",
+  "turn_tool_search_unsupported": "モデル未接続：このゲートウェイはツールの必要時読み込みに対応していません",
+  "turn_tool_search_unsupported_detail": "再試行してください。"
 }

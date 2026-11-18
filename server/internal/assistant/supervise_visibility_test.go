@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-func TestAgentSendPreservesSideConversationProvenance(t *testing.T) {
+func TestAgentSendOmitsSideConversationSender(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
 	assigned, err := s.createTodo(ctx, "Example task", "Fix and verify the example task.", "conv1", "")
@@ -29,8 +28,13 @@ func TestAgentSendPreservesSideConversationProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := sentToAgent(f)
-	if len(messages) != 1 || !strings.Contains(messages[0], `<persona-context kind="side-conversation">`) || !strings.Contains(messages[0], "From: conv-other") {
-		t.Fatalf("side source missing: %q", messages)
+	want := `<persona-context kind="side-conversation">
+This message does not replace or complete your assigned task. Answer it separately, then continue that task.
+</persona-context>
+<persona-side-conversation />
+Can you explain a different change?`
+	if len(messages) != 1 || messages[0] != want {
+		t.Fatalf("side instruction = %q, want %q", messages, want)
 	}
 	if _, err := s.runTool(ctx, "server", "conv1", "agent_send", args); err != nil {
 		t.Fatal(err)
@@ -38,6 +42,15 @@ func TestAgentSendPreservesSideConversationProvenance(t *testing.T) {
 	messages = sentToAgent(f)
 	if len(messages) != 2 || messages[1] != "Can you explain a different change?" {
 		t.Fatalf("owner instruction misclassified: %q", messages)
+	}
+	f.setSessions("box", proto.Session{SessionID: "s2abcdef", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusIdle})
+	unassigned := json.RawMessage(`{"machine":"box","session_id":"s2abcdef","text":"Can you explain a different change?"}`)
+	if _, err := s.runTool(ctx, "server", "conv-other", "agent_send", unassigned); err != nil {
+		t.Fatal(err)
+	}
+	messages = sentToAgent(f)
+	if len(messages) != 3 || messages[2] != "Can you explain a different change?" {
+		t.Fatalf("unassigned instruction misclassified: %q", messages)
 	}
 }
 

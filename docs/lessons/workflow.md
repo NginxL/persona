@@ -202,6 +202,13 @@ applying the same content assertion; so does a grep without `-q` that reads all
 of it (`holds` in `scripts/ci/image-smoke.sh`, where `hub pair` writes a QR code
 after the link and failed two runs in three).
 
+Inside an `if`, the same early exit makes a check pass instead: with pipefail,
+`if strings "$APP/Persona" | grep -qx …; then exit 1; fi` takes the status of
+`strings`, killed by SIGPIPE (141) once grep stopped reading, so a match
+followed by more output than the pipe holds counts as no match. The release's
+DEBUG checks (the switch list and the runtime CLI's names) read all of `strings`
+in `scripts/release/debug_switches.py` for that reason (#10616, #10654).
+
 - In zsh, a glob that matches no files (`rm -rf /tmp/x-*`) makes the whole command fail (nomatch), and nothing after `&&` runs (2026-11-04: the end-to-end test never ran, yet the result was recorded as a failure).
   To clean temp directories use `find /tmp -maxdepth 1 -name 'x-*' -exec rm -rf {} +` or `setopt nullglob` first; before recording a check result, confirm the command actually ran.
 

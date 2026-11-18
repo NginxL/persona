@@ -1,16 +1,12 @@
 package hub
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // gitReview relays GET /api/v1/machines/{mid}/git/review?cwd=&scope=&base=&path=… to the node's git.review: every
@@ -24,18 +20,9 @@ func (h *Hub) gitReview(w http.ResponseWriter, r *http.Request, m *Machine) {
 		writeErr(w, http.StatusBadRequest, errors.New("cwd is required"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 75*time.Second)
-	defer cancel()
-	var out json.RawMessage
-	if err := m.call(ctx, "git.review", p, &out); err != nil {
-		var re *rpc.Error
-		if errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method") {
-			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-gitreview.outdated"), nil)
-			return
-		}
-		callErr(w, err)
+	out, ok := h.callNode(w, r, m, "git.review", p, 75*time.Second, "hub-gitreview.outdated", nil)
+	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(out)
+	writeRawJSON(w, out)
 }

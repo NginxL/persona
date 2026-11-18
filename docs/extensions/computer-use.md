@@ -867,7 +867,8 @@ iPhone's side comes next.
   does not re-check an earlier close; moving or losing a route alone does not owe the close again. A reset handed to a
   writer is outstanding until the phone confirms it, whatever the buffer holds and whether or not EOF has arrived. If no
   bytes were already in flight, its stall interval starts at handout. A route that keeps it unconfirmed for the stall
-  limit is closed, and the next route owes the reset again.
+  limit is closed, and the next route owes the reset again. The phone can so get one reset over two routes; it applies
+  only a reset ahead of its receiver, so the late copy leaves a message it has started since intact (#10005).
 - **Direct routes** (`screenlink.Direct`): while at least one session is live, the node listens on one TCP port bound
   to each of its candidate addresses (never the wildcard), and closes the listener with the last session. Candidates
   come from its own interfaces, with no Tailscale API or command: private IPv4 and unique-local IPv6 on Ethernet or
@@ -886,8 +887,9 @@ iPhone's side comes next.
 - **The phone's side** (`PersonaScreenKit`, pure and tested with `swift test`): `ScreenLinkMessage` frames the wire
   exactly as the node does (both check `spec/fixtures/screen-link`); `LinkReceiver` / `LinkSender` keep each channel's
   offsets (bytes once and in order, what the node hasn't acknowledged kept within a window); `VideoMessageAssembler`
-  hands the decoder whole video messages only and drops a partial one on `reset`; `LinkMeter` turns pongs into
-  `LinkStats`; `RouteEligibility` names the phone interface a candidate may be dialed on (a LAN address only from
+  hands the decoder whole video messages only and drops a partial one on a `reset` that moves the receiver (one at or
+  behind it, a late copy of an owed reset from a route the channel left, changes nothing, #10005); `LinkMeter` turns
+  pongs into `LinkStats`; `RouteEligibility` names the phone interface a candidate may be dialed on (a LAN address only from
   Wi-Fi or Ethernet on its subnet, a Tailscale address only through the phone's own Tailscale tunnel, never cellular,
   another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
   relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // An Agent's Background tasks side panel (#5421, after cindy's Background tasks tab): Running (the /loop, the running
-// workflow runs oldest first, the background tasks) and Completed (ended runs newest first); a row's kind mark, status
-// mark, title and "status · progress · duration · tokens · tool uses"; a run's detail with Back; a command's output in
-// its own detail with live output; Stop for the loop that asks first; "No background tasks in this session yet" when there is nothing.
+// workflow runs oldest first, the background tasks) and Completed (ended runs and retained command outcomes newest
+// first); a row's kind mark, status mark, title and "status · progress · duration · tokens · tool uses"; a run's detail
+// with Back; a command's status, runtime, full command and output in its own detail, before and after it ends; Stop for
+// the loop that asks first; "No background tasks in this session yet" when there is nothing.
 import { act } from "react";
 import { Blob as NodeBlob } from "node:buffer";
 import { createRoot, type Root } from "react-dom/client";
@@ -124,6 +125,24 @@ describe("the list", () => {
     expect(q('[data-background-section="completed"]')!.querySelectorAll("[data-bg-run]")).toHaveLength(2);
   });
 
+  it("lists retained command outcomes newest first without counting them as running", () => {
+    put({
+      background: [shell],
+      background_ended: [
+        { ...shell, id: "old", status: "stopped", started_at: at(-300), ended_at: at(-200) },
+        { ...shell, id: "new", status: "failed", exit_code: 2, started_at: at(-50), ended_at: at(-10) },
+        { ...shell, id: "middle", status: "completed", exit_code: 0, started_at: at(-80), ended_at: at(-20) },
+      ],
+    });
+    draw();
+    expect(rows()).toEqual(["b1", "new", "middle", "old"]);
+    expect(q('[data-background-section="running"] [data-bg-task="b1"]')).not.toBeNull();
+    expect(q('[data-bg-task="new"] [data-bg-status]')!.getAttribute("data-bg-status")).toBe("failed");
+    expect(q('[data-bg-task="middle"] [data-bg-status]')!.getAttribute("data-bg-status")).toBe("completed");
+    expect(q('[data-bg-task="old"] [data-bg-status]')!.getAttribute("data-bg-status")).toBe("stopped");
+    expect(meta('[data-bg-task="middle"]')).toBe("已完成 · 1m");
+  });
+
   it("says a run's status, agents, duration, tokens and tool uses, with its kind and status marks", () => {
     put({ workflows: [run("w1"), ended("w2", -100, { status: "failed", agents_failed: 1, agents_done: 4 })] });
     draw();
@@ -225,6 +244,38 @@ describe("a background task", () => {
     put({ background: [shell, { ...shell, id: "b9" }] });
     expect(q("[data-bg-command-detail]")).toBeNull();
     expect(q('[data-bg-task="b9"]')).not.toBeNull();
+  });
+
+  it("updates an open command to its retained outcome and reopens it from Completed", async () => {
+    put({ background: [shell] });
+    draw({ kind: "background", mid: "m", sid: "s", task: "b1" }); await flush();
+    const beforeEnd = vi.mocked(fetch).mock.calls.length;
+    put({ background: [], background_ended: [{ ...shell, status: "completed", exit_code: 0, ended_at: at(0) }] });
+    await flush();
+    expect(q('[data-bg-command-detail="b1"]')).not.toBeNull();
+    expect(q('[role="status"]')!.textContent).toBe("已完成");
+    expect(q("[data-command-exit-code]")!.textContent).toBe("退出码 0");
+    expect(q("[data-command-runtime]")!.textContent).toBe("1m 5s");
+    expect(vi.mocked(fetch).mock.calls.length).toBe(beforeEnd + 1);
+    act(() => vi.advanceTimersByTime(6000)); await flush();
+    expect(vi.mocked(fetch).mock.calls.length).toBe(beforeEnd + 1);
+    act(() => q('button[aria-label="返回"]')!.click());
+    expect(q('[data-background-section="completed"] [data-bg-task="b1"]')).not.toBeNull();
+    act(() => q('[data-bg-task="b1"] [data-bg-row-button]')!.click()); await flush();
+    expect(q('[data-bg-command-detail="b1"] [role="status"]')!.textContent).toBe("已完成");
+    expect(q("[data-command-runtime]")!.textContent).toBe("1m 5s");
+  });
+
+  it("prefers a retained outcome over a stale running row and stops polling", async () => {
+    put({ background: [shell], background_ended: [{ ...shell, status: "completed", exit_code: 0, ended_at: at(0) }] });
+    draw();
+    expect(q('[data-background-section="running"]')).toBeNull();
+    expect(q('[data-background-section="completed"] [data-bg-task="b1"]')).not.toBeNull();
+    draw({ kind: "background", mid: "m", sid: "s", task: "b1" }); await flush();
+    expect(q('[data-bg-command-detail="b1"] [role="status"]')!.textContent).toBe("已完成");
+    const reads = vi.mocked(fetch).mock.calls.length;
+    act(() => vi.advanceTimersByTime(6000)); await flush();
+    expect(vi.mocked(fetch).mock.calls.length).toBe(reads);
   });
 
   it("keeps the latest command and output path after it leaves the running list, with one last read", async () => {
@@ -398,6 +449,6 @@ describe("a run's detail", () => {
 
 describe("backgroundSections", () => {
   it("is empty for no session", () => {
-    expect(backgroundSections(undefined, T0)).toEqual({ loop: undefined, running: [], tasks: [], completed: [] });
+    expect(backgroundSections(undefined, T0)).toEqual({ loop: undefined, running: [], tasks: [], completed: [], completedTasks: [] });
   });
 });

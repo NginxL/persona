@@ -10,7 +10,8 @@ import Testing
 @MainActor
 struct CallRecentsTests {
     /// The members update goes first, then startedConnecting, both only once the system has the conversation (it drops
-    /// reports before), and the voice's first ready reports connected after them.
+    /// reports before), and the voice's first ready reports connected after them. When the conversation joins, the
+    /// members are reported again: the system discards updates while idle (#10495).
     @Test func anOutgoingCallReportsItsMembersBeforeItConnects() async throws {
         let rig = CallRig()
         rig.system.knowsAtOnce = false
@@ -20,21 +21,35 @@ struct CallRecentsTests {
         #expect(rig.system.reports.isEmpty, "nothing before the system has the conversation")
         rig.calls.system(changed: call.id, state: .joining)
         #expect(rig.system.reports == [.members, .startedConnecting(rig.voice.clock.now)])
+        rig.calls.system(changed: call.id, state: .joined)
+        #expect(rig.system.reports.filter { $0 == .members }.count == 2, "said again once the conversation joined (#10495)")
         await rig.voice.waitUntil { rig.voice.socket != nil }
         rig.system.activate()
         let socket = try #require(rig.voice.socket)
         socket.ready(rig.voice.key)
-        #expect(rig.system.reports.count == 3)
         #expect(rig.system.reports.last.map { if case .connected = $0 { true } else { false } } == true)
-        #expect(rig.system.reports.filter { $0 == .members }.count == 1, "said once")
     }
 
-    /// Known right after the Start's fulfil (the system lists the conversation then): the same order at once.
+    /// Known right after the Start's fulfil (the system lists the conversation then): the same order at once; when the
+    /// conversation joins, the members are reported again so the system persists them for Recents (#10495).
     @Test func knownRightAfterTheFulfilReportsTheMembersAtOnce() async {
         let rig = CallRig()
         let call = await rig.dial()
         rig.system.act(.start, call.id)
         #expect(rig.system.reports == [.members, .startedConnecting(rig.voice.clock.now)])
+        rig.calls.system(changed: call.id, state: .joined)
+        #expect(rig.system.reports.filter { $0 == .members }.count == 2, "re-reported once joined")
+    }
+
+    /// The members re-report on joined is only for outgoing calls: an incoming call's members went with its ring.
+    @Test func anIncomingCallDoesNotReReportMembersOnJoined() async throws {
+        let rig = CallRig()
+        let id = UUID()
+        try await rig.calls.ring(id, callID: "call_1", name: "Urgent: the build broke")
+        rig.system.act(.join, id)
+        rig.calls.system(changed: id, state: .joined)
+        rig.system.activate()
+        #expect(!rig.system.reports.contains(.members))
     }
 
     /// The incoming path is unchanged: an urgent call's members go with its ring (`reportNewIncomingConversation`), and

@@ -32,6 +32,8 @@
   "approve_mode": "批准方式",
   "permission_kicker": "在等你批准",
   "permission_title": "允许使用 {tool}？",
+  "permission_load_failed": "审批卡加载失败",
+  "permission_load_hint": "请求仍在等待处理。请检查连接后重试。",
   "denied_message": "用户拒绝了",
   "deny": "拒绝",
   "edit_text": "编辑正文",

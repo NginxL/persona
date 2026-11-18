@@ -167,7 +167,7 @@ fun AssistantSidebarContent(
                         try {
                             target.archiveConversation(session.key)
                             feedback?.notice(archivedWords, persona.core.designsystem.FeedbackStyle.Success)
-                            onRetired(session.key)
+                            // Archiving only hides the row; End below is what retires an open conversation.
                             repository.refresh()
                             archived = archived - session.key
                         } catch (cancelled: CancellationException) { throw cancelled }

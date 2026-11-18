@@ -242,6 +242,9 @@ internal fun MachineManagement.inGroup(names: GroupNames): MachineManagement {
         override suspend fun codexSettings(machineId: String) = source.codexSettings(names.rawMachine(machineId))
         override suspend fun setCodexSetting(machineId: String, key: String, value: JsonElement) =
             source.setCodexSetting(names.rawMachine(machineId), key, value)
+        override suspend fun agySettings(machineId: String) = source.agySettings(names.rawMachine(machineId))
+        override suspend fun setAgySetting(machineId: String, key: String, value: JsonElement) =
+            source.setAgySetting(names.rawMachine(machineId), key, value)
         override suspend fun claudeDirs(machineId: String) = source.claudeDirs(names.rawMachine(machineId))
         override suspend fun setBlockedClaudeDirs(machineId: String, blocked: List<String>) =
             source.setBlockedClaudeDirs(names.rawMachine(machineId), blocked)

@@ -272,6 +272,8 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 	})
 	route("GET /api/v1/machines/{mid}/codex/{sid}/takeover", d.prepareCodexTakeover)
 	route("GET /api/v1/sessions/{mid}/{sid}/skills", d.getSessionSkills)
+	route("GET /api/v1/sessions/{mid}/{sid}/mode-changes", d.getModeChanges)
+	route("POST /api/v1/sessions/{mid}/{sid}/start/continue", d.postStartContinue)
 	route("POST /api/v1/machines/{mid}/codex/{sid}/takeover", d.commitCodexTakeover)
 	route("PUT /api/v1/machines/{mid}/engine", d.putEngine)
 	route("GET /api/v1/machines/{mid}/herdr", d.getHerdr)

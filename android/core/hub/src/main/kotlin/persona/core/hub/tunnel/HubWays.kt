@@ -153,6 +153,8 @@ class HubWays(
     private val recent = HashSet<Pair<String, TunnelKind>>()
     /** A failure only the user can fix, with the settings it happened with: not dialled again until they change. */
     private val blocked = HashMap<Pair<String, TunnelKind>, Pair<HubTunnel, TunnelProblem>>()
+    /** The epoch of each key's last explicit unblock. Ordinary closes do not fence late host-key failures. */
+    private val unblocks = HashMap<Pair<String, TunnelKind>, Int>()
 
     private val _states = MutableStateFlow<Map<Pair<String, TunnelKind>, TunnelState>>(emptyMap())
     /** By hub id and kind; a closed tunnel has none. */
@@ -207,10 +209,13 @@ class HubWays(
             val ssh = tunnel.ssh?.let {
                 SshTunnel(it, identity(), sshTimings) { problem ->
                     // The rejection is a fact about these settings even if the waiting start was cancelled. Keep it
-                    // until the user changes them, without overwriting the state of a newer attempt (#10101).
+                    // until the user changes them, without overwriting the state of a newer attempt (#10101). An
+                    // explicit unblock instead fences every failure from the attempts which preceded it.
                     synchronized(lock) {
-                        if (blocked[key]?.first?.sameWay(tunnel) != true) blocked[key] = tunnel to problem
-                        if (running[key]?.tunnel?.sameWay(tunnel) == true) setState(key, TunnelState.Down(problem))
+                        if ((unblocks[key] ?: -1) <= epoch) {
+                            if (blocked[key]?.first?.sameWay(tunnel) != true) blocked[key] = tunnel to problem
+                            if (running[key]?.tunnel?.sameWay(tunnel) == true) setState(key, TunnelState.Down(problem))
+                        }
                     }
                 }
             }
@@ -313,6 +318,10 @@ class HubWays(
      */
     fun unblock(hubId: String, kind: TunnelKind) = synchronized(lock) {
         val key = hubId to kind
+        // The user acted on the visible failure while its start may still be unwinding. Invalidate that attempt before
+        // clearing it, so neither its catch nor its late JSch callback can restore the failure and prevent every redial.
+        bump(key)
+        unblocks[key] = epochs[key] ?: 0
         blocked -= key
         if (_states.value[key] is TunnelState.Down) setState(key, null)
     }

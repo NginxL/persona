@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { t } from "../i18n";
 import {
   answeredItems,
   cardFiled,
@@ -25,8 +26,9 @@ import {
   type TaskPlan,
 } from "./feed";
 import { conversationCards } from "./assistant-views";
+import { retryOnLauncher, TASK_RETRY_LAUNCHER_FEATURE } from "./start-retry";
 import { getPanel, openPanel } from "./panel";
-import { markConversationDeleted, refreshTodos, reset } from "./store";
+import { getState, markConversationDeleted, refreshTodos, reset } from "./store";
 import type { Todo } from "./todos";
 import type { ChatLine, Segment } from "./turns";
 import type { Item } from "./types";
@@ -196,6 +198,25 @@ describe("a task whose agent did not start (#1077, #1142)", () => {
       expect(posts).toHaveLength(1);
       expect(String(posts[0][0])).toMatch(/\/todos\/t1\/retry$/);
       expect(getFeedState().busy[retryKey("t1")]).toBe(false);
+    });
+
+    it("starts it on another launcher only with a hub that takes it: the body names it, else nothing is sent (#10365)", async () => {
+      const fetcher = vi.fn((_url: string, init?: RequestInit) => Promise.resolve(ok(init?.method === "POST" ? { todo: todo() } : { todos: [] })));
+      vi.stubGlobal("localStorage", { getItem: () => "jd_test" });
+      vi.stubGlobal("fetch", fetcher);
+      const failed = todo({ start_error: "x", done_at: "2026-11-04T10:00:05Z" });
+      const posts = () => fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
+      const features = getState().features;
+      Object.assign(getState(), { features: ["todo_seen"] });
+      // an older hub ignores the body and would start the launcher that failed again: refused here, nothing sent
+      await expect(retryOnLauncher(failed, "claude")).rejects.toThrow(t("lib-start-retry.retry_launcher_unsupported"));
+      expect(posts()).toHaveLength(0);
+      expect(getFeedState().busy[retryKey("t1")]).toBeFalsy();
+      Object.assign(getState(), { features: [TASK_RETRY_LAUNCHER_FEATURE] });
+      await retryOnLauncher(failed, "claude");
+      await retryTask(failed);
+      expect(posts().map(([, init]) => init?.body ?? null)).toEqual([JSON.stringify({ launcher: "claude" }), null]);
+      Object.assign(getState(), { features });
     });
 
     it("says why when the hub refuses the retry, and can be tapped again", async () => {

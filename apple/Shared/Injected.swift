@@ -6,8 +6,9 @@ import PersonaWire
 nonisolated enum Supervision {
     /// Only these bare tools or tools in Persona's exact MCP namespaces count, never unrelated servers with the same
     /// suffix. Plugin namespaces and the compatibility server id follow the web's `supervisionTool` contract.
-    static func tool(_ name: String?) -> String? {
-        guard var name else { return nil }
+    static func tool(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        var name = HubNaming.canonicalMCPTool(raw)
         if name.hasPrefix("mcp__") {
             let rest = String(name.dropFirst(5))
             guard let separator = rest.range(of: "__", options: .backwards) else { return nil }

@@ -19,6 +19,9 @@ const (
 	MessageSendDelivered  = "delivered"
 	MessageSendFailed     = "failed"
 	MessageSendUnknown    = "unknown"
+	// MessageSendKept: nothing went in, and the assistant conversation's manager keeps the message and sends it again
+	// by itself (the HTTP answer is 202 {"delivered":"later"}; the row's undelivered list shows it, #10194).
+	MessageSendKept = "kept"
 )
 
 // SendTraceID is a bounded diagnostic correlation, never the original message ID.

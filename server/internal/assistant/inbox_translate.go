@@ -112,7 +112,7 @@ func (s *Service) translateTexts(ctx context.Context, texts []string, target str
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	// A reasoning model spends hidden tokens first (docs/lessons/agents.md): leave plenty.
-	if err := s.inboxModelJSON(cctx, purposeTranslate, prompts.RenderTranslateTexts(lang), string(body), min(4000+total*3, 32000), &res); err != nil {
+	if err := s.inboxModelJSON(cctx, purposeTranslate, prompts.RenderTranslateTexts(prompts.Translation{Language: answerLanguage(s.hello(ctx).Locale), Target: lang}), string(body), min(4000+total*3, 32000), &res); err != nil {
 		return nil, err
 	}
 	if len(res.Texts) != len(in) {
@@ -178,8 +178,9 @@ func (s *Service) translateMailFresh(ctx context.Context, ref assistantwire.Inbo
 	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	in := prompts.RenderTranslateMailInput(m.Subject, text)
-	if err := s.inboxModelJSON(cctx, purposeTranslate, prompts.RenderTranslateMail(lang), in, min(4000+len([]rune(in))*3, 48000), &t); err != nil {
+	language := answerLanguage(s.hello(ctx).Locale)
+	in := prompts.RenderTranslateMailInput(language, m.Subject, text)
+	if err := s.inboxModelJSON(cctx, purposeTranslate, prompts.RenderTranslateMail(prompts.Translation{Language: language, Target: lang}), in, min(4000+len([]rune(in))*3, 48000), &t); err != nil {
 		return mailTranslation{}, err
 	}
 	t.Subject, t.Text = strings.TrimSpace(t.Subject), strings.TrimSpace(t.Text)

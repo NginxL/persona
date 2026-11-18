@@ -55,7 +55,9 @@ internal class ChatTimeline {
         if (!window.isFrozen) { window.freeze(items); frozenLiveId = shownLiveId }
     }
     @Synchronized fun follow() { window.follow(); frozenLiveId = null }
-    @Synchronized fun newMessageCount(items: List<Item>, below: Item?, lastRead: Item?) = window.newMessageCount(items, below, lastRead)
+    @Synchronized fun isFrozen(): Boolean = window.isFrozen
+    @Synchronized fun newMessageCount(items: List<Item>, below: Item?, lastRead: Item?, defer: Boolean = false) =
+        window.newMessageCount(items, below, lastRead, defer)
     @Synchronized fun unfold(fold: Item, items: List<Item>) { expanded[fold.id] = fold to items }
 
     /**

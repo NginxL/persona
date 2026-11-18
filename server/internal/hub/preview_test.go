@@ -241,6 +241,9 @@ func TestPreviewServersAndStart(t *testing.T) {
 	if code, _ := do("POST", "/api/v1/machines/m1/preview/start", `{"cwd":"/home/me/proj","name":"web"}`); code != http.StatusBadRequest {
 		t.Errorf("start without a workspace: %d", code)
 	}
+	if code, body := do("POST", "/api/v1/machines/m1/preview/start", `{"cwd":"`+strings.Repeat("x", 64<<10)+`","name":"web","workspace":"w1"}`); code != http.StatusRequestEntityTooLarge || !strings.Contains(body, `"code":"too_large"`) {
+		t.Errorf("oversized start: %d %s", code, body)
+	}
 	if len(*calls) != 2 {
 		t.Errorf("node calls: %v", *calls)
 	}

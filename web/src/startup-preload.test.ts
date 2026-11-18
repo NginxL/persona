@@ -332,6 +332,12 @@ describe("idle tier", () => {
     expect(() => idleImports(code)).toThrow(why);
   });
 
+  it("loads the Close Agent dialog only when its action opens it", () => {
+    const host = readFileSync(join(__dirname, "views/CloseAgentHost.tsx"), "utf8");
+    expect(host).toContain('lazyDialog(() => import("./chat/CloseAgentDialog").then((m) => m.CloseAgentDialog))');
+    expect(idleImports(host)).toEqual([]);
+  });
+
   it("counts each file gzipped at the best level, or as it is under 1 KB", async () => {
     const dir = mkdtempSync(join(tmpdir(), "idle-gz-"));
     mkdirSync(join(dir, "assets"));

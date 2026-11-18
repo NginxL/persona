@@ -17,6 +17,9 @@ func (h *Hub) withInjected(items []proto.Item) []proto.Item {
 	for i := range items {
 		it := &items[i]
 		it.Source = prompts.ItemSource(*it)
+		if it.Source != nil && it.Source.Kind == proto.SourceScheduledTask {
+			continue // already classified by the runtime; its visible instructions are not a Persona envelope
+		}
 		if it.Role != "user" || it.Kind != proto.KindText || it.ClientMsgID != "" || it.From != "" || it.Injected != nil || prompts.UserAuthoredContext(it.Text) {
 			continue
 		}

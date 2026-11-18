@@ -10,6 +10,9 @@ import java.net.URI
  */
 data class PortLink(val port: Int, val path: String, val secure: Boolean)
 
+/** A recognized link and its source range, for settled/tail partitioning. */
+data class PortLinkMatch(val start: Int, val end: Int, val link: PortLink, val web: Boolean)
+
 object PortLinks {
     /** Hosts that always mean "this machine" (java.net.URI keeps IPv6 literals in brackets). */
     private val loopback = setOf("localhost", "127.0.0.1", "0.0.0.0", "::1", "::", "[::1]", "[::]")
@@ -39,19 +42,23 @@ object PortLinks {
     }
 
     /** The port links in [text], in order, one per port and path. */
-    fun find(text: String, hostnames: List<String> = emptyList()): List<PortLink> {
+    fun find(text: String, hostnames: List<String> = emptyList()): List<PortLink> =
+        findMatches(text, hostnames).map(PortLinkMatch::link)
+
+    /** The same links as [find], with source positions for settled/tail partitioning. */
+    fun findMatches(text: String, hostnames: List<String> = emptyList()): List<PortLinkMatch> {
         if (':' !in text) return emptyList()
-        val out = LinkedHashSet<PortLink>()
+        val out = LinkedHashMap<PortLink, PortLinkMatch>()
         val covered = mutableListOf<IntRange>()
         for (m in web.findAll(text)) {
             covered += m.range
-            link(trimTail(m.value), hostnames)?.let(out::add)
+            link(trimTail(m.value), hostnames)?.let { out.putIfAbsent(it, PortLinkMatch(m.range.first, m.range.last + 1, it, web = true)) }
         }
         for (m in bare.findAll(text)) {
             if (covered.any { it.first <= m.range.last && m.range.first <= it.last }) continue
-            link("http://" + trimTail(m.value))?.let(out::add)
+            link("http://" + trimTail(m.value))?.let { out.putIfAbsent(it, PortLinkMatch(m.range.first, m.range.last + 1, it, web = false)) }
         }
-        return out.toList()
+        return out.values.toList()
     }
 
     private fun trimTail(value: String): String = value.trimEnd('.', ',', ';', ':', '!', '?', ')', '>', '"', '\'')

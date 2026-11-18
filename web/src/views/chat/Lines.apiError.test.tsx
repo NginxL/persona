@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { parseAPIError } from "../../lib/api-errors";
+import { turnErrorFix } from "../../lib/readiness";
 import { recoveryExhausted } from "../../lib/model-fallback";
 import { usageLimitClock } from "../../lib/usage-limit";
 import type { ChatLine } from "../../lib/turns";
@@ -31,6 +32,42 @@ describe("a model error's fix", () => {
     expect(inline("Invalid API key · Fix external API key", true)).toContain("去修");
   });
 
+  it("names the affected launcher and opens its provider settings", () => {
+    history.replaceState(null, "", "/");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const fix = turnErrorFix("auth_failed", "team-relay");
+    act(() => root.render(<ErrorBanner line={line("Invalid API key · Fix external API key")} onDismiss={() => {}} assistant fix={fix} />));
+    expect(host.textContent).toContain("team-relay");
+    const repair = [...host.querySelectorAll("button")].find((b) => b.textContent === "去修")!;
+    act(() => repair.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=models&launcher=team-relay");
+    act(() => root.unmount());
+    host.remove();
+    history.replaceState(null, "", "/");
+  });
+
+  it("keeps the launcher on text-derived fallback fixes", () => {
+    for (const kind of ["line", "banner"] as const) {
+      history.replaceState(null, "", "/");
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      const props = { line: line("Invalid API key · Fix external API key"), assistant: true, launcher: "team-relay" };
+      act(() => root.render(kind === "line"
+        ? <ChatLineView {...props} mid="m" sid="s" expandFold={async () => {}} />
+        : <ErrorBanner {...props} onDismiss={() => {}} />));
+      expect(host.textContent).toContain("team-relay ·");
+      const repair = [...host.querySelectorAll("button")].find((b) => b.textContent === "去修")!;
+      act(() => repair.click());
+      expect(location.pathname + location.search).toBe("/settings?tab=models&launcher=team-relay");
+      act(() => root.unmount());
+      host.remove();
+    }
+    history.replaceState(null, "", "/");
+  });
+
   it("does not point an agent session at Persona's settings", () => {
     expect(banner("Invalid API key · Fix external API key", false)).not.toContain("去修");
   });
@@ -52,6 +89,52 @@ describe("a model error's fix", () => {
     expect(html).not.toContain(">重试</button>");
     expect(banner(text, false)).not.toContain("编辑上一条消息");
     expect(banner(text, true, { onEditLastMessage: () => {} })).not.toContain("编辑上一条消息");
+  });
+});
+
+describe("a gateway that refused on-demand tools (tool_search_unsupported)", () => {
+  // i18n-ignore: a gateway's words
+  const edge = "API Error: 400 request is not representable on this edge: ToolSearch is not supported on this endpoint (defer_loading:true, tool_search_*, tool_reference); resend with all tools loaded";
+
+  it("says so in a Persona conversation and offers Retry, not a provider to set up", () => {
+    const html = banner(edge, true);
+    expect(html).toContain("这个网关不支持按需加载工具");
+    expect(html).not.toContain("全部工具"); // an older computer's node keeps tool search on: no promise it can't keep
+    expect(html).toContain(">重试</button>");
+    expect(html).not.toContain("去修");
+    // the record in the chat says the same, with no button of its own
+    expect(inline(edge, true)).toContain("这个网关不支持按需加载工具");
+    expect(inline(edge, true)).not.toContain("去修");
+  });
+
+  it("is the hub's code too, and an Agent session's card keeps the rejected request without a Retry that would fail the same way", () => {
+    expect(banner("API Error: 400 Bad Request", true, { fix: turnErrorFix("tool_search_unsupported") })).toContain(">重试</button>");
+    const html = banner(edge, false);
+    expect(html).toContain("请求被拒绝");
+    expect(html).not.toContain("按需加载工具");
+    expect(html).not.toContain(">重试</button>");
+  });
+});
+
+describe("a model the chat can't run (model_route)", () => {
+  const route = "There's an issue with the selected model (x). It may not exist or you may not have access to it.";
+
+  it("offers Fix it, which opens the chat's picker, and the way back while the chat keeps a pick", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const onPickModel = vi.fn(() => true);
+    const run = vi.fn();
+    const fix = { ...turnErrorFix("model_route")!, onPickModel, back: { label: "恢复跟随默认", run } };
+    act(() => root.render(<ErrorBanner line={line(route)} assistant fix={fix} onRetry={() => {}} onDismiss={() => {}} />));
+    const buttons = [...host.querySelectorAll("button")];
+    expect(buttons.some((b) => b.textContent === "重试")).toBe(false);
+    act(() => buttons.find((b) => b.textContent === "去修")!.click());
+    expect(onPickModel).toHaveBeenCalledTimes(1);
+    act(() => buttons.find((b) => b.textContent === "恢复跟随默认")!.click());
+    expect(run).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+    host.remove();
   });
 });
 

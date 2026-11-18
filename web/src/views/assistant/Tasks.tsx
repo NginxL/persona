@@ -52,7 +52,6 @@ import { Button, Collapse, cx, IconButton, Loading, Menu, toast, useNow } from "
 import { StatusMark } from "../../ui/StatusMark";
 import { Icon, type IconName } from "../../ui/icons";
 import { AcceptRow, BriefCard } from "./Brief";
-import { startFailureRowLine } from "../../lib/start-failure";
 import { setTodoSeen, todoSeenOn } from "../../lib/todo-seen";
 import { triage } from "../../lib/todo-triage";
 
@@ -61,14 +60,15 @@ const PlanBrief = lazy(() => import("./TaskBrief").then((m) => ({ default: m.Pla
 const HeldPushesEntry = lazyPage(() => import("./HeldPushes").then((m) => m.HeldPushesEntry));
 
 // A decision's row comes with the tray's first decision, not with the first screen (startup-preload's budget); the
-// same chunk has a suggested rule's line (#5802), which comes with the first card that carries one.
+// same chunk has a suggested rule's line (#5802), which comes with the first card that carries one, and a task whose
+// Agent did not start (#10365), which comes with the first such row.
 const NeedsYouPart = lazy(() => import("./TaskDecision"));
 /** The suggested rule's line of a card, drawn right after it; nothing for a card without the field, unless Always
  *  was answered on it here (the line then says what was made, though the hub sent the card again without the field). */
 const ruleLine = (of: RuleCard) => (of.suggestion || underCard.made?.has(of.id!)) && <Suspense fallback={null}><NeedsYouPart rule={of} /></Suspense>;
 underCard.line = ruleLine;
 import { SentLine } from "./Sent";
-import { feedWake, HandoffCard, HandoffCards, taskHandoffs, whyNotStarted } from "./Handoff";
+import { feedWake, HandoffCard, HandoffCards, taskHandoffs } from "./Handoff";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
 import { useChosenManager, useLinkManager } from "../../lib/manager-choice";
@@ -879,7 +879,7 @@ function TaskProgressMeter({ value, total, blocked, title }: { value: number; to
 }
 
 /** The task's line in Needs you when no card of its agent stands for it: what it waits for. */
-function waitsLabel(todo: Todo, status: TodoStatus): string {
+export function waitsLabel(todo: Todo, status: TodoStatus): string {
   if (todo.supervision?.state === "pending_review") return t("assistant-tasks.review_pending");
   if (todo.supervision?.state === "needs_user") return t("assistant-tasks.review_needs_user");
   return TODO_STATUS_INFO[status]?.label ?? t("assistant-tasks.review_needs_user");
@@ -1026,12 +1026,17 @@ export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nes
       </Suspense>
     );
   if (ask) return <div data-needs-row={rowKey} {...taskOpenAttr} className="min-w-0 rounded-control bg-field px-3 py-2.5"><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={askRow(todo, ask)} /></div>;
-  if (status === "failed") return <FailedTaskRow rowKey={item.key} todo={todo} countsOpenAttr={taskOpenAttr} />;
+  if (status === "failed")
+    return (
+      <Suspense fallback={<div data-needs-row={item.key} {...taskOpenAttr} className="truncate rounded-control bg-danger-wash px-3 py-2 text-sm">{todo.title}</div>}>
+        <NeedsYouPart rowKey={item.key} failed={todo} countsOpenAttr={taskOpenAttr} />
+      </Suspense>
+    );
   return <WaitingTaskRow rowKey={rowKey} todo={todo} status={status} countsOpenAttr={taskOpenAttr} />;
 }
 
 /** The buttons under a Needs you task row's words (Continue; Retry and Remove), lined up with them. */
-const ROW_ACTIONS = "flex items-center gap-4 pl-6 text-[12.5px]";
+export const ROW_ACTIONS = "flex items-center gap-4 pl-6 text-[12.5px]";
 
 /** A task in Needs you that only waits (#8237): cut off by the model service, with why and Continue (its receipt card's
  *  until then); waiting for review, with what it handed in; else what it waits for. The title opens the task. */
@@ -1062,34 +1067,6 @@ function WaitingTaskRow({ rowKey, todo, status, countsOpenAttr }: { rowKey?: str
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-/** A task whose Agent did not start, in Needs you: why, and Retry / Remove where it is (#5096: no panel to open for them;
- *  the title opens the to-do's page). */
-function FailedTaskRow({ rowKey, todo, countsOpenAttr }: { rowKey: string; todo: Todo; countsOpenAttr: { "data-counts-open"?: string } }) {
-  const retrying = useRetrying(todo.id);
-  const why = useFeed((s) => whyNotStarted(todo, s.plans));
-  return (
-    <div data-needs-row={rowKey} {...countsOpenAttr} data-failed-task={todo.id} className="flex flex-col gap-1.5 rounded-control bg-danger-wash px-3 py-2 text-sm">
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon name="info" className="shrink-0 text-red" />
-        <button type="button" onClick={() => openTask(todo.id)} className="min-w-0 flex-1 truncate text-left hover:underline">{todo.title}</button>
-        <span className="shrink-0 text-xs text-ink">{waitsLabel(todo, "failed")}</span>
-      </div>
-      {/* in plain words; the hub's raw error is the task's details' (#8237) */}
-      {why && <div className="truncate pl-6 text-xs text-ink">{startFailureRowLine(why)}</div>}
-      <div className={ROW_ACTIONS}>
-        <button type="button" disabled={retrying} onClick={() => retryTaskNow(todo)} className="touch-hit inline-flex items-center gap-1 whitespace-nowrap font-semibold text-ink hover:underline disabled:opacity-50 disabled:hover:no-underline">
-          <Icon name="retry" size={12} />
-          {retrying ? t("assistant-tasks.retrying") : t("assistant-tasks.retry")}
-        </button>
-        <button type="button" onClick={() => removeTaskNow(todo)} className="touch-hit inline-flex items-center gap-1 whitespace-nowrap font-semibold text-ink hover:underline">
-          <Icon name="trash" size={12} />
-          {t("assistant-tasks.remove")}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1140,6 +1117,8 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   const [expanded, setExpanded] = useState(false);
   // the Needs you rows opened in place (#5569), by key; every row is folded again when the tray changes
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
+  const bar = useRef<HTMLDivElement>(null);
+  const lastOwn = useRef<string | null>(null);
   const setTray = (next: AssistantTray | null) => {
     setTrayNow(next);
     setExpanded(false);
@@ -1195,10 +1174,41 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   const badgeOf = (items: { kind: string; countsOpen?: boolean }[]) =>
     items.reduce((n, item) => n + (item.kind === "task" ? (item.countsOpen ? 1 : 0) : 1), 0);
   const counts: Record<AssistantTray, number> = { needs: ownAsks.length + badgeOf(entries.needsYou), running: badgeOf(entries.running), parked: badgeOf(entries.parked), review: badgeOf(entries.review) };
-  // the card is in the chat already: close the tray onto it and bring it into view
-  const openOwn = (id: string) => {
+  // the card is in the chat already: close the tray onto it and bring it into view. A folded stack shows only its first
+  // card, so use its existing expander before looking for another one (#10347).
+  const scrollOwn = (id: string, keepBar = false) => {
+    const scope = bar.current?.closest("[data-chat-dock]") ?? document;
+    const card = [...scope.querySelectorAll<HTMLElement>("[data-card]")].find((el) => el.dataset.card === id);
+    if (!card) return false;
+    card.firstElementChild?.scrollIntoView?.({ block: "nearest" });
+    // Revealing another card can scroll the capsule row out of the dock's own scroll box; keep Next clickable for the
+    // following card and the wrap to the first (#10347). A Needs you row keeps its existing landing.
+    if (keepBar) bar.current?.scrollIntoView?.({ block: "nearest" });
+    return true;
+  };
+  const openOwn = (id: string, keepBar = false) => {
     setTray(null);
-    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-card]")].find((el) => el.dataset.card === id)?.firstElementChild?.scrollIntoView?.({ block: "nearest" }));
+    requestAnimationFrame(() => {
+      if (scrollOwn(id, keepBar)) return;
+      const dock = bar.current?.closest("[data-chat-dock]");
+      // On a narrow screen a keyboard or short height first folds the whole stack to one row; that row is the first
+      // expander, then the position chip opens the other cards. Desktop starts at the position-chip step.
+      dock?.querySelector<HTMLButtonElement>("[data-chat-cards-position][aria-expanded='false'], [data-chat-cards-fold]")?.click();
+      requestAnimationFrame(() => {
+        if (scrollOwn(id, keepBar)) return;
+        const queue = dock?.querySelector<HTMLButtonElement>("[data-chat-cards-position][aria-expanded='false']");
+        if (!queue) return;
+        queue.click();
+        requestAnimationFrame(() => scrollOwn(id, keepBar));
+      });
+    });
+  };
+  const openNextOwn = () => {
+    if (!ownAsks.length) return;
+    const previous = ownAsks.findIndex((ix) => ix.id === lastOwn.current);
+    const next = ownAsks[(previous + 1) % ownAsks.length];
+    lastOwn.current = next.id;
+    openOwn(next.id, true);
   };
   useEffect(() => {
     const needs = (event: Event) => { if ((event as CustomEvent).detail === conversation) setTray("needs"); };
@@ -1231,7 +1241,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   return (
     // shrinks with the dock (ChatView's DOCK_MAX): an open tray gives up its height and scrolls inside, instead of
     // standing taller than the dock and leaving its bottom (a card's answer row) and the entries under the composer
-    <div className="flex min-h-0 shrink flex-col gap-2" data-assistant-actionbar onKeyDownCapture={onTrayKey}>
+    <div ref={bar} className={cx("flex min-h-0 flex-col gap-2", ownAsks.length > 0 && !tray ? "shrink-0" : "shrink")} data-assistant-actionbar onKeyDownCapture={onTrayKey}>
       {tray && (
         // its height follows what is visible (styles.css: an open tray lets the dock take most of it); the header stays
         // and the list scrolls under it, so a plan card's Start (sticky to the list's bottom) is never under the header
@@ -1284,6 +1294,12 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           open tray is the selected capsule. The scroller pads by the focus ring's width and takes it back, as the
           dock's did, so a large font scrolls sideways instead of clipping the ring. */}
       <div className="scrollbar-none -my-1 flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto py-1">
+        {ownAsks.length > 0 && (
+          <button type="button" data-next-own-ask onClick={openNextOwn} className={cx(DOCK_CAPSULE, "gap-2 bg-field font-medium text-ink hover:bg-hover")}>
+            <span className="whitespace-nowrap">{t("assistant-tasks.next_unanswered")}</span>
+            <span className="tabular-nums text-ink-2">{ownAsks.length}</span>
+          </button>
+        )}
         {entryKeys.map((key) => {
           const open = tray === key;
           // An empty entry is drawn quiet (grey), Needs you and In progress alike, and still opens its "nothing here" line.

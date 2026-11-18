@@ -29,6 +29,9 @@ const startThread = "01a19a00-0000-7000-8000-00000000c0de"
 
 var startFileRE = regexp.MustCompile(` codex-start '?([^' ]+?)'?$`)
 
+// startRolloutVersion is the Codex version codexStartHerdr's rollouts name.
+var startRolloutVersion = "0.169.0"
+
 // ran is the launcher's words the last start's file held, ranAgent its HERDR_AGENT.
 var (
 	ran      []string
@@ -74,7 +77,7 @@ func codexStartHerdr(t *testing.T, delay time.Duration) (*Node, *fakeHerdr, stri
 			dir := mkdir(t, filepath.Join(home, ".codex", "sessions", day.Format("2006"), day.Format("01"), day.Format("02")))
 			now := time.Now().UTC().Format(time.RFC3339Nano)
 			resolved, _ := filepath.EvalSymlinks(cwd) // Codex records the shell's working directory, resolved
-			meta, _ := json.Marshal(map[string]any{"timestamp": now, "type": "session_meta", "payload": map[string]any{"id": startThread, "cwd": resolved}})
+			meta, _ := json.Marshal(map[string]any{"timestamp": now, "type": "session_meta", "payload": map[string]any{"id": startThread, "cwd": resolved, "cli_version": startRolloutVersion}})
 			user, _ := json.Marshal(map[string]any{"timestamp": now, "type": "event_msg", "payload": map[string]any{"type": "item_completed",
 				"item": map[string]any{"type": "UserMessage", "id": "u1", "content": []any{map[string]any{"type": "text", "text": prompt}}}}})
 			_ = os.WriteFile(filepath.Join(dir, "rollout-2026-11-02T10-00-00-"+startThread+".jsonl"), []byte(string(meta)+"\n"+string(user)+"\n"), 0o600)

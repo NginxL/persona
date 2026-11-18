@@ -8,6 +8,9 @@ export interface TaskWait {
   since?: number;
   sinceRequest: boolean;
   contact?: ParkContact;
+  /** Whether a missing contact is worth saying. An external event or a date never carries one (park_evidence.go refuses
+   *  it), so saying none was recorded tells the owner nothing; a legacy park or an implicit PR wait could have had one. */
+  contactExpected: boolean;
   wake?: string;
   reason?: string;
   until?: number;
@@ -26,7 +29,8 @@ export function taskWait(todo: Todo, now: number, merges: readonly PRFacts[] = [
   const e = p?.evidence;
   const kinds: string[] = ["person_reply", "merge_review", "external_event", "date"];
   const kind = e && kinds.includes(e.kind) ? e.kind : p ? "legacy" : "merge_review";
-  const contact = (kind === "person_reply" || kind === "merge_review") ? sentWaitContact(e, now) : undefined;
+  const contactKind = kind === "person_reply" || kind === "merge_review";
+  const contact = contactKind ? sentWaitContact(e, now) : undefined;
   const deadline = p?.until ? Date.parse(p.until) : NaN;
   const until = Number.isFinite(deadline) && deadline > 0 ? deadline : undefined;
   const contactDue = contact ? Date.parse(contact.sent_at) + (kind === "merge_review" ? 72 : 24) * 3_600_000 : undefined;
@@ -37,6 +41,7 @@ export function taskWait(todo: Todo, now: number, merges: readonly PRFacts[] = [
     since: start.at,
     sinceRequest: start.request,
     contact,
+    contactExpected: contactKind || kind === "legacy",
     wake: e?.wake?.trim() || undefined,
     reason: p?.reason,
     until,

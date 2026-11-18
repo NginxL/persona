@@ -67,7 +67,10 @@ type Settings struct {
 	Former []FormerMain `json:"former_main,omitempty"`
 	// MainTasksQuiet: tasks the main conversation opens are told only there, not pushed, on the Live Activity or in
 	// task badges (#1731). nil is on (the default); the view always says what is in effect.
-	MainTasksQuiet *bool `json:"main_tasks_quiet,omitempty"`
+	MainTasksQuiet         *bool `json:"main_tasks_quiet,omitempty"`
+	IdleAutoCompact        *bool `json:"idle_auto_compact,omitempty"`
+	IdleAutoCompactMinutes *int  `json:"idle_auto_compact_minutes,omitempty"`
+	IdleAutoCompactTokens  *int  `json:"idle_auto_compact_tokens,omitempty"`
 	// StartRequestedTasks: a task_plan task the user asked for in so many words starts without the card's "Start"
 	// (#2559). nil is on (the default).
 	StartRequestedTasks     *bool  `json:"start_requested_tasks,omitempty"`
@@ -110,6 +113,10 @@ type Settings struct {
 	// AgentTasks: every agent Persona starts is on a quiet, supervised todo (#3617, agent_tasks.go). nil is off (the
 	// default).
 	AgentTasks *bool `json:"agent_tasks,omitempty"`
+	// CloseEndedTerminals: when an Agent's session ends (its task is done or cancelled, it quit by itself or was told
+	// to), its terminal tab is closed too, through the "Archive and close" path (#10355, agent_terminal_close.go).
+	// nil is off (the default): the terminal stays, as since #4754.
+	CloseEndedTerminals *bool `json:"close_ended_terminals,omitempty"`
 	// AgentAutoNaming corrects recognizable placeholder names; nil is on. Manual titles are protected.
 	AgentAutoNaming *bool `json:"agent_auto_naming,omitempty"`
 	// AgentAutoNamingMax counts successful automatic title changes per session; nil is one.
@@ -143,6 +150,9 @@ type Settings struct {
 	// Leaders are the side conversations the user made leaders (#3133, supervise_leader.go): a task one hands out with
 	// task_plan is supervised by it instead of the main conversation. Empty (the default): only the main one supervises.
 	Leaders []string `json:"leaders,omitempty"`
+	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts. Nil uses the supervision
+	// thresholds documented by briefingWaitsOf; changes go through persona_settings' ordinary owner approval.
+	BriefingWaits *BriefingWaits `json:"briefing_waits,omitempty"`
 	// InterjectBackground: a message the user sends while a Claude conversation is still answering moves what runs in
 	// the foreground (Bash commands, subagents) to the background, so the message is taken up at once instead of after
 	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the
@@ -507,12 +517,15 @@ func stateDirOn(home, dataDir, name string) string {
 
 type assistantView struct {
 	Settings
-	Manager            string             `json:"manager"`
-	PermissionDefaults permissionDefaults `json:"permission_defaults"`
-	Cwd                string             `json:"cwd"`
-	Conversations      []proto.Session    `json:"conversations"`
-	NotesEffective     string             `json:"notes_effective"`  // what the assistant is told about the user
-	MainTasksQuiet     bool               `json:"main_tasks_quiet"` // in effect (the setting's own is left out while unset)
+	Manager                string             `json:"manager"`
+	PermissionDefaults     permissionDefaults `json:"permission_defaults"`
+	Cwd                    string             `json:"cwd"`
+	Conversations          []proto.Session    `json:"conversations"`
+	NotesEffective         string             `json:"notes_effective"`  // what the assistant is told about the user
+	MainTasksQuiet         bool               `json:"main_tasks_quiet"` // in effect (the setting's own is left out while unset)
+	IdleAutoCompact        bool               `json:"idle_auto_compact"`
+	IdleAutoCompactMinutes int                `json:"idle_auto_compact_minutes"`
+	IdleAutoCompactTokens  int                `json:"idle_auto_compact_tokens"`
 	// StartRequestedTasks is in effect, like MainTasksQuiet.
 	StartRequestedTasks     bool   `json:"start_requested_tasks"`
 	TaskWorkspacePreference string `json:"task_workspace_preference"`
@@ -543,7 +556,9 @@ type assistantView struct {
 	// InterjectBackground is in effect, like DoneNeedsDelivery.
 	InterjectBackground bool `json:"interject_background"`
 	// AgentTasks is in effect, like DoneNeedsDelivery.
-	AgentTasks                   bool `json:"agent_tasks"`
+	AgentTasks bool `json:"agent_tasks"`
+	// CloseEndedTerminals is in effect, like DoneNeedsDelivery.
+	CloseEndedTerminals          bool `json:"close_ended_terminals"`
 	AgentAutoNaming              bool `json:"agent_auto_naming"`
 	AgentAutoNamingMax           int  `json:"agent_auto_naming_max"`
 	AgentAutoNamingIntervalHours int  `json:"agent_auto_naming_interval_hours"`
@@ -572,6 +587,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	v.Launcher = s.launcherNow(ctx)
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
+		IdleAutoCompact: s.idleAutoCompact(ctx), IdleAutoCompactMinutes: s.idleAutoCompactMinutes(ctx), IdleAutoCompactTokens: s.idleAutoCompactTokens(ctx),
 		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
 		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
@@ -584,6 +600,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		ReviewSamplePercent:          s.reviewSamplePercent(ctx),
 		InterjectBackground:          v.InterjectBackground != nil && *v.InterjectBackground,
 		AgentTasks:                   v.AgentTasks != nil && *v.AgentTasks,
+		CloseEndedTerminals:          v.CloseEndedTerminals != nil && *v.CloseEndedTerminals,
 		AgentAutoNaming:              quietOn(v.AgentAutoNaming),
 		AgentAutoNamingMax:           agentNamingLimit(v),
 		AgentAutoNamingIntervalHours: agentNamingInterval(v),

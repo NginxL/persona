@@ -13,15 +13,19 @@ import (
 	"github.com/nwverse/persona/server/internal/link"
 )
 
-// sshPairFlags holds the optional SSH tunnel flags on `pair` and `install --pair`.
-type sshPairFlags struct {
+// routeFlags holds the optional route flags on `pair` and `install --pair`: the SSH tunnel's and the outbound proxy's.
+type routeFlags struct {
 	server    string
 	target    string
 	always    bool
 	alwaysSet bool
+	proxy     proxyFlag
 }
 
-func (f *sshPairFlags) consume(args []string, i int) (next int, ok bool, err error) {
+func (f *routeFlags) consume(args []string, i int) (next int, ok bool, err error) {
+	if next, ok, err := f.proxy.consume(args, i); ok || err != nil {
+		return next, ok, err
+	}
 	switch args[i] {
 	case "--ssh-always":
 		f.always, f.alwaysSet = true, true
@@ -41,11 +45,12 @@ func (f *sshPairFlags) consume(args []string, i int) (next int, ok bool, err err
 	return i, false, nil
 }
 
-func (f sshPairFlags) any() bool {
+// any: an SSH flag is there.
+func (f routeFlags) any() bool {
 	return f.server != "" || f.target != "" || f.alwaysSet
 }
 
-func (f sshPairFlags) build(rawLink string) (*link.SSH, error) {
+func (f routeFlags) build(rawLink string) (*link.SSH, error) {
 	if !f.any() {
 		return nil, nil
 	}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "android": {
+    "output": {
+      "directory": "android/feature/settings/src/test/kotlin/persona/feature/settings/generated",
+      "packageName": "persona.feature.settings.generated"
+    },
+    "imports": ["persona.core.designsystem.JRow"],
+    "components": {
+      "SettingsReadOnlyRow": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true },
+          { "label": "value", "type": "string", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "JRow",
+        "argumentStyle": "named",
+        "arguments": [
+          { "source": "title", "target": "title" },
+          { "source": "value", "target": "value" }
+        ],
+        "attributes": {}
+      }
+    },
+    "nativeComponents": {},
+    "modifiers": {},
+    "tokens": { "spacing": {}, "radius": {}, "font": {}, "color": {} },
+    "resources": {
+      "className": "persona.feature.settings.R",
+      "catalog": "android/feature/settings/src/main/res/values/strings_core.xml",
+      "strings": {
+        "settings.about.version": "settings_about_version",
+        "settings.not.provided": "settings_not_provided"
+      }
+    }
+  },
+  "harmonyOS": {
+    "output": { "directory": "android/refract/about/generated-harmony-unverified" },
+    "imports": [{ "module": "persona/designsystem/SettingsReadOnlyRow", "symbols": ["SettingsReadOnlyRow"] }],
+    "components": {
+      "SettingsReadOnlyRow": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true },
+          { "label": "value", "type": "string", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "SettingsReadOnlyRow",
+        "argumentStyle": "object",
+        "arguments": [
+          { "source": "title", "target": "title" },
+          { "source": "value", "target": "value" }
+        ],
+        "attributes": {}
+      }
+    },
+    "nativeComponents": {},
+    "modifiers": {},
+    "tokens": { "spacing": {}, "radius": {}, "font": {}, "color": {} },
+    "resources": {
+      "namespace": "app",
+      "stringTable": "string",
+      "catalog": "android/refract/about/harmony-resource-validation-only/string.json",
+      "strings": {
+        "settings.about.version": "settings_about_version",
+        "settings.not.provided": "settings_not_provided"
+      }
+    }
+  }
+}

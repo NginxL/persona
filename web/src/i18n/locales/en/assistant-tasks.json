@@ -11,6 +11,7 @@
   "workspace_resolving": "Resolving workspace path…",
   "workspace_engine_path": "The machine's workspace engine chooses the path. Edit the branch to preview again.",
   "tray_needs_you": "Needs you",
+  "next_unanswered": "Next waiting for your answer",
   "tray_running": "In progress",
   "tray_empty_parked": "No tasks parked",
   "tray_review": "Persona reviewing",

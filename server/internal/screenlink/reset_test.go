@@ -181,6 +181,44 @@ func TestVideoResetDeliveryR4UseDuringBlockedWrite(t *testing.T) {
 	}
 }
 
+// R4 with the old route's reset landing inside the keyframe (#10005): the new route has sent its reset and the
+// keyframe's first chunk when the old route's write of the same reset completes. That copy is at or behind the phone's
+// receiver, so it keeps the half keyframe, and the rest completes it.
+func TestVideoResetDeliveryLateResetInsideMessage(t *testing.T) {
+	s, p, cv, helper, id, _ := openVideo(t, true, resetTestLimits())
+	old := activeTransport(s, id)
+	first := installWriteGate(t, s, old, TypeReset, 0)
+	fallback := activeTransport(s, RFB)
+	rest := installWriteGate(t, s, fallback, TypeData, 1) // the keyframe's second chunk
+	jump, requests := prepareLostReset(t, s, p, helper, id)
+	nextKeyframeRequest(t, requests)
+
+	first.await(t)
+	p.carriers[0].send(TypeUse, chanOffset(id, p.offset(id)))
+	p.dropData(id, false)
+	key := videoFrameMsg(2, true, dataChunk+100)
+	writeVideo(helper, key)
+	rest.await(t)
+	reset := p.nextOf(TypeReset)
+	if _, at, _, _ := readChanOffset(reset.body); at != jump || reset.via != p.carriers[0] {
+		t.Fatalf("reset at %d on the wrong transport, want %d on the second", at, jump)
+	}
+	half := jump + dataChunk
+	waitFor(t, "the keyframe's first chunk", func() bool { return p.offset(id) == half })
+
+	first.completeLateWrite(t, s, old, nil) // the old route's reset reaches the phone inside the keyframe
+	late := p.nextOf(TypeReset)
+	if _, at, _, _ := readChanOffset(late.body); at != jump || late.via != cv {
+		t.Fatalf("late reset at %d via old=%v, want %d on the old route", at, late.via == cv, jump)
+	}
+	if got, pending := p.offset(id), p.pendingVideo(id); got != half || pending != dataChunk {
+		t.Fatalf("after the late reset the phone is at %d with %d bytes pending, want %d with %d", got, pending, half, dataChunk)
+	}
+	rest.complete(nil)
+	p.waitReceived(id, key)
+	waitChannelActive(t, s, id, fallback)
+}
+
 func channelPosition(s *Session, id byte) (base, sent uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

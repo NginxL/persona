@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -89,6 +90,29 @@ func TestSupervisedUnjudgedIsNotStoppedShort(t *testing.T) {
 	n := entryLine(f.notices()[1])
 	if !strings.Contains(n, "Agent 停下了，hub 没判断出来是不是做完了（不是说没做完）（判定模型出错）") || strings.Contains(n, "停下了，但没做完") {
 		t.Fatalf("after failures:\n%s", n)
+	}
+}
+
+// With no model set up for the judge, the supervisor hears that the judge has no model, not that the model erred: a
+// retry will not mend it, and the supervisor reads the reply itself.
+func TestSupervisedUnjudgedSaysTheJudgeHasNoModel(t *testing.T) {
+	fastJudgeRetry(t)
+	s, f, _ := newSupervisedService(t)
+	f.pageTurns = true
+	f.mu.Lock()
+	f.hello.Models.AI, f.hello.Models.TriageAI = ai.Config{}, nil
+	f.mu.Unlock()
+	s.settingsChanged(context.Background())
+	if _, err := s.purposeModel("inbox.judge").Complete(context.Background(), "", "reply", 16); !ai.IsNotConfigured(err) {
+		t.Fatalf("the judge has a model: %v", err)
+	}
+	f.setItems(text("assistant", fullReport))
+	agentTurn(s, f, proto.StatusWorking, "", 0)
+	agentTurn(s, f, proto.StatusDone, fullReport, 0)
+	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) == 1 })
+	n := entryLine(f.notices()[0])
+	if !strings.Contains(n, "signal=unjudged") || !strings.Contains(n, "（判定模型未配置）") || strings.Contains(n, "判定模型出错") {
+		t.Fatalf("no model for the judge:\n%s", n)
 	}
 }
 

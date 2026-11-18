@@ -7,5 +7,7 @@
   "agent_names_unavailable": "无法读取保存的 Agent 名字，这次没有改名。请重试。",
   "bad_agent_naming_max": "改名次数请填写 1 至 1000 的整数。",
   "bad_agent_naming_interval": "更新间隔请填写 1 至 8760 的整数小时，或关闭定期更新。",
-  "bad_minutes_days": "minutes_days 必须为 0（永久保留）或 1 至 3650 的整数天数。"
+  "bad_minutes_days": "minutes_days 必须为 0（永久保留）或 1 至 3650 的整数天数。",
+  "bad_idle_auto_compact_minutes": "idle_auto_compact_minutes 必须为 1 至 1440 的整数分钟。",
+  "bad_idle_auto_compact_tokens": "idle_auto_compact_tokens 必须为 10000 至 10000000 的整数。"
 }

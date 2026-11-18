@@ -36,6 +36,8 @@ type herdrStarter struct {
 	said chan struct{}
 	once sync.Once
 	init sync.Once
+	// started is the socket of a server this node process started itself (startHerdr); n.hstart.mu.
+	started string
 }
 
 func (s *herdrStarter) saidCh() chan struct{} {
@@ -149,6 +151,7 @@ func (n *Node) startHerdr(ctx context.Context, h *herdrHost, why string) error {
 		return err
 	}
 	n.logf("herdr: server running after %s", time.Since(start).Round(10*time.Millisecond))
+	n.hstart.started = sock
 	return nil
 }
 
@@ -299,4 +302,34 @@ func sessionNote(session string) string {
 		return ""
 	}
 	return " (session " + session + ", the one of this data directory)"
+}
+
+// StopUnusedHerdr is what a node serving one hub connection over stdio does as it ends (#10114): the herdr server it
+// started itself in this process (startHerdr) is stopped when nothing is open in it, so a hub's own machine, or a
+// throwaway hub run for a check, leaves no server behind that it made and nobody used. A server with any pane, one
+// this process did not start, or one that does not answer is left as it is; a later start starts one again. The
+// resident node (--attach) never calls it: its herdr is the user's working set.
+func (n *Node) StopUnusedHerdr(ctx context.Context) {
+	n.hstart.mu.Lock()
+	defer n.hstart.mu.Unlock()
+	sock := n.hstart.started
+	if sock == "" {
+		return
+	}
+	c := &herdr.Client{Bin: "herdr", Socket: sock}
+	panes, err := c.PaneCount(ctx)
+	switch {
+	case err != nil:
+		n.logf("herdr: the server this node started (%s) did not say what is open in it, left running: %v", sock, err)
+		return
+	case panes > 0:
+		n.logf("herdr: the server this node started (%s) has %d panes, left running", sock, panes)
+		return
+	}
+	if err := c.ServerStop(ctx); err != nil {
+		n.logf("herdr: could not stop the unused server this node started (%s): %v", sock, err)
+		return
+	}
+	n.hstart.started = ""
+	n.logf("herdr: stopped the server this node started (%s): nothing was open in it", sock)
 }

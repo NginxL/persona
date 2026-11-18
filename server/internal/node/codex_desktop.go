@@ -416,7 +416,12 @@ func (a *codexAppState) listed(thread string) bool {
 // placeCodexDesktop puts an App thread in its sidebar project — a subagent in its parent's (`group`) — and, for recent
 // ones, gives it its state. A subagent's finished turn is not something to read on its own: it is idle.
 func (n *Node) placeCodexDesktop(s *proto.Session, src codexSource, group string, subagent bool) {
-	app := loadCodexAppState(src.home)
+	n.placeCodexDesktopIn(s, src, group, subagent, nil)
+}
+
+// placeCodexDesktopIn is placeCodexDesktop with the App's state looked up once per home in a list pass (codexListPass).
+func (n *Node) placeCodexDesktopIn(s *proto.Session, src codexSource, group string, subagent bool, pass *codexListPass) {
+	app := pass.appState(src.home)
 	s.SpaceKind = "codex_app"
 	if pid, name := app.project(group, s.Cwd); pid != "" && name != "" && (app == nil || !app.projectless[group]) {
 		s.SpaceID, s.SpaceName = "codex-app:"+pid, name
@@ -615,7 +620,7 @@ func codexDesktopChatIn(src codexSource, pass *codexListPass) bool {
 		return ok && !t.origin().sub
 	}
 	o := readCodexOrigin(src.path)
-	return o.desktop && o.parent == "" && (o.persona || loadCodexAppState(src.home).listed(src.thread))
+	return o.desktop && o.parent == "" && (o.persona || pass.appState(src.home).listed(src.thread))
 }
 
 // loadedOwner is the App window that owns the thread, the App asked to open it when none does: it loads a thread it is

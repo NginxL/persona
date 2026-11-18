@@ -4,7 +4,7 @@ Here `persona` means the avatar (name / picture / status dot), not a separate pr
 
 An avatar = Persona's **name**, **picture**, the **animated status dot** in Persona's top bar, and the **App icon** (the logo inside the App and the home screen icon), optionally with a **color scheme**.
 You pick it in **Settings › Appearance › Avatar**, and once picked all of these change together: the face and name in the top bar (only the face, top left, in the new shell), the sidebar card, the profile page, the input field's "Ask xxx…",
-the Dynamic Island and Lock Screen Live Activity, the logo in front of the main chat in the sidebar and at the top of Settings, and the home screen icon. The App icon has no separate setting (requested 2026-11-05: merge into one "avatar", #3203); see "App icon" below.
+the Dynamic Island and Lock Screen Live Activity, the logo at the top of Settings, and the home screen icon. The App icon has no separate setting (requested 2026-11-05: merge into one "avatar", #3203); see "App icon" below.
 
 **An avatar doesn't change the App's colors** (requested 2026-10-31: keep "avatar, theme color and UI components" as separate choices). Settings has three independent choices:
 avatar (this document), theme color (`ThemeColor`), and interface style (`AppStyle`, which only governs how components are drawn); see `docs/apple/ios.md` ("Design language").
@@ -114,7 +114,7 @@ The quickest way to a custom avatar, without a terminal: the **Upload** card at 
 The avatar decides the in-app logo; there is no separate App icon picker. Only Mochi's packaged home screen icon remains. Downloadable hub and extension packs retain their own in-app picture but use Mochi for surfaces that require a bundled icon. Retired or unknown icon fallbacks also resolve to Mochi.
 
 - **Packaged icon**: Mochi uses the primary `AppIcon`, plus its fixed Light / Dark variants. The preview is read from the same art by `scripts/assets/make_alt_icons.py`; no retired drawing is generated. The former Mac face-rendering helper was removed with the retired icons (#6220).
-- **The logo inside the App** (`AppGlyph`: the main chat row in the sidebar, the top of Settings, the welcome / pairing pages): built-in avatars draw their icon; avatar packs draw the pack's own picture (cropped to the icon's rounded square).
+- **The logo inside the App** (`AppGlyph`: the top of Settings, the welcome / pairing pages; the sidebar's main chat row has the main conversation's symbol instead, #9973): built-in avatars draw their icon; avatar packs draw the pack's own picture (cropped to the icon's rounded square).
 - **Home screen icon** (`AppIconModel.follow`): checked once when an avatar is chosen, when light / dark changes, and every time the App returns to the foreground; if it doesn't match, it calls `setAlternateIconName`, and the system shows its "icon changed" alert once (unavoidable); if it matches, nothing happens and nothing pops up.
   While an avatar pack is still downloading, it switches to the icon the pack declares in the list (`PersonaStore.appIcon`), so it doesn't switch back to the default first and then back again. Demo mode uses Mochi's. The watch and Mac have only one icon.
 - **Platform limits**: iOS home screen icons can only be the ones packaged at build time; images downloaded at runtime can't be home screen icons. Avatars from the hub and from extensions fully apply inside the App (picture, dot, name, colors, the in-App logo);
@@ -385,5 +385,5 @@ DEBUG launch arguments for screenshots and recordings:
 - `-showPersonaState idle|thinking|working|needs_you|offline`: pin the shell's top-left avatar to one state.
 - `-showAvatarCrop <image path>` (with `-tab settings -openAppearance persona`; `-showAvatarCropName <name>` fills the name): the New from Photo crop sheet with that image. `-showAvatarDelete <id>`: the confirmation before deleting that uploaded avatar, as its corner button opens it. Mock: `MOCK_LOOK_UPLOADS=demo` (one uploaded avatar, `u-demo0001`), `MOCK_LOOK_UPLOADS=off` (a hub without them), `MOCK_LOOK_UPLOAD_FILES=fail` (avatars it makes are listed but their files answer 503: the sheet's Try Again).
 
-Following the CLAUDE.md convention, launch argument names start with `open…` / `show…` and are added to the list in `release.sh`.
+Following the CLAUDE.md convention, launch argument names start with `open…` / `show…` and are added to `scripts/release/debug_switches.txt`.
 - `-tab assistant -openAssistantPage avatars`: every avatar's picture and five states, once in light and once in dark.

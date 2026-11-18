@@ -17,9 +17,10 @@ import (
 
 // Codex rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl) are a different JSONL: every line is
 // {timestamp, type, payload}. The conversation lives in event_msg/item_completed (UserMessage, AgentMessage,
-// Reasoning, CommandExecution, FileChange, McpToolCall, ImageView, ContextCompaction); response_item lines repeat
-// the same content in the model's wire format and are skipped. They map onto the same items as Claude's transcript,
-// with Claude's tool names (Bash, Edit, Read, mcp__server__tool) so the apps render them alike.
+// Reasoning, CommandExecution, FileChange, McpToolCall, ImageView, Extension, SubAgentActivity, CollabAgentToolCall,
+// ContextCompaction); response_item lines repeat the same content in the model's wire format and are skipped. They map
+// onto the same items as Claude's transcript, with Claude's tool names (Bash, Edit, Read, mcp__server__tool) so the
+// apps render them alike.
 
 type codexLine struct {
 	Timestamp time.Time       `json:"timestamp"`
@@ -137,6 +138,17 @@ type codexItem struct {
 		Domain  string `json:"domain"`
 		Snippet string `json:"snippet"`
 	} `json:"results"`
+	// Extension (kind clock.sleep): how long the agent waited
+	DurationMs *int64 `json:"durationMs"`
+	// SubAgentActivity (kind started, interacted or completed): the subagent, and on start its model and effort
+	AgentThreadID   string  `json:"agent_thread_id"`
+	AgentPath       string  `json:"agent_path"`
+	Model           *string `json:"model"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+	// CollabAgentToolCall (tool wait…): the subagents it was about, and their states when it returned
+	ReceiverThreadIDs []string        `json:"receiver_thread_ids"`
+	ReceiverAgents    json.RawMessage `json:"receiver_agents"`
+	AgentsStates      json.RawMessage `json:"agents_states"`
 }
 
 // isCodexLine tells a rollout line from a Claude transcript line: only rollouts wrap everything in "payload" under a
@@ -407,10 +419,25 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		for _, c := range it.Content {
 			switch {
 			case c.Type == "text" && strings.TrimSpace(c.Text) != "":
-				parts = append(parts, codexUserText(c.Text))
+				parts = append(parts, c.Text)
 			case c.Type == "local_image" && c.Path != "":
 				images = append(images, strings.TrimPrefix(c.Path, "file://"))
 			}
+		}
+		// Match the envelope before removing other kinds of input metadata or clipping long prompts.
+		if len(parts) == 1 && len(images) == 0 {
+			if prompt, ok := codexHeartbeatPrompt(strings.TrimSpace(parts[0])); ok {
+				u := mk(0, it.ID, "user", proto.KindText)
+				u.Source = &proto.MessageSource{Kind: proto.SourceScheduledTask}
+				u.Text = clip(prompt)
+				if meta.codexUserID == "" {
+					meta.codexUserID = u.ID
+				}
+				return []proto.Item{u}
+			}
+		}
+		for i := range parts {
+			parts[i] = codexUserText(parts[i])
 		}
 		text := strings.TrimSpace(strings.Join(parts, "\n"))
 		items, paseo := paseoInput(func(n int, role, kind string) proto.Item { return mk(n, it.ID, role, kind) }, 0, text)
@@ -442,7 +469,12 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		for _, c := range it.Content {
 			b.WriteString(c.Text)
 		}
-		text := codexThreadLinks(strings.TrimSpace(b.String()))
+		text := strings.TrimSpace(b.String())
+		quiet := false
+		if it.Phase == "final_answer" {
+			text, quiet = codexHeartbeatAnswer(text)
+		}
+		text = codexThreadLinks(text)
 		if text == "" {
 			return nil
 		}
@@ -453,6 +485,7 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		}
 		a := mk(0, it.ID, "assistant", proto.KindText)
 		a.Narration = it.Phase == "commentary"
+		a.CodexHeartbeatQuiet = quiet
 		a.Text = clip(text)
 		return []proto.Item{a}
 	case "Reasoning":
@@ -524,12 +557,19 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		input, _ := json.Marshal(map[string]string{"file_path": strings.TrimPrefix(it.Path, "file://")})
 		return codexTool(mk, it.ID, "Read", input, "", false)
 	case "Extension":
-		if it.Kind != "web.search" {
-			n := mk(0, it.ID, "system", proto.KindNotice)
-			n.Text = "Codex 扩展事件：" + it.Kind + "（完整记录在原会话中）"
-			return []proto.Item{n}
+		switch it.Kind {
+		case "web.search":
+			return codexWebSearch(mk, it)
+		case "clock.sleep":
+			return codexSleep(mk, it)
 		}
-		return codexWebSearch(mk, it)
+		n := mk(0, it.ID, "system", proto.KindNotice)
+		n.Text = "Codex 扩展事件：" + it.Kind + "（完整记录在原会话中）"
+		return []proto.Item{n}
+	case "SubAgentActivity":
+		return codexSubagentActivity(mk, it)
+	case "CollabAgentToolCall":
+		return codexCollabCall(mk, it)
 	case "ContextCompaction":
 		meta.Compactions++
 		n := mk(0, it.ID, "system", proto.KindNotice)
@@ -737,6 +777,91 @@ func codexWebSearch(mk func(int, string, string, string) proto.Item, it *codexIt
 	}
 	raw, _ := json.Marshal(input)
 	return codexTool(mk, it.ID, name, raw, strings.Join(lines, "\n"), false)
+}
+
+// codexSleep shows the agent waiting (Codex's clock.sleep, a coordinator's pause while its subagents work) as a call of
+// its own: work that folds with the calls around it, and a run of sleeps folds into one row.
+func codexSleep(mk func(int, string, string, string) proto.Item, it *codexItem) []proto.Item {
+	input := map[string]any{}
+	if ms := it.DurationMs; ms != nil && *ms >= 0 {
+		input["duration"], input["duration_ms"] = sleepDuration(*ms), *ms
+	}
+	raw, _ := json.Marshal(input)
+	return codexTool(mk, it.ID, "sleep", raw, "", false)
+}
+
+// sleepDuration is a wait as people read it: 25s, 1m30s, 2m.
+func sleepDuration(ms int64) string {
+	s := (time.Duration(ms) * time.Millisecond).String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
+// codexSubagentActivity shows a subagent started, messaged or finished (SubAgentActivity) as a call named by the
+// subagent's task; started also carries the model and effort Codex gave it.
+func codexSubagentActivity(mk func(int, string, string, string) proto.Item, it *codexItem) []proto.Item {
+	name := it.AgentThreadID
+	if p := strings.TrimRight(it.AgentPath, "/"); p != "" {
+		name = p[strings.LastIndex(p, "/")+1:]
+	}
+	raw, _ := json.Marshal(struct {
+		Name            string `json:"name,omitempty"`
+		Event           string `json:"event,omitempty"`
+		AgentPath       string `json:"agent_path,omitempty"`
+		AgentThreadID   string `json:"agent_thread_id,omitempty"`
+		Model           string `json:"model,omitempty"`
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	}{name, it.Kind, it.AgentPath, it.AgentThreadID, derefString(it.Model), derefString(it.ReasoningEffort)})
+	return codexTool(mk, it.ID, "subagent", raw, "", false)
+}
+
+// codexCollabCall shows a call that coordinates subagents (CollabAgentToolCall): wait is Codex's wait_agent, the
+// subagents it names are its input and their states when it returned its result.
+func codexCollabCall(mk func(int, string, string, string) proto.Item, it *codexItem) []proto.Item {
+	name := it.Tool
+	switch name {
+	case "":
+		name = "collab_agent"
+	case "wait":
+		name = "wait_agent"
+	}
+	input := map[string]any{}
+	if len(it.ReceiverThreadIDs) > 0 {
+		input["receiver_thread_ids"] = it.ReceiverThreadIDs
+	}
+	if jsonNonEmpty(it.ReceiverAgents) {
+		input["receiver_agents"] = it.ReceiverAgents
+	}
+	raw, _ := json.Marshal(input)
+	result := ""
+	if jsonNonEmpty(it.AgentsStates) {
+		result = string(it.AgentsStates)
+	}
+	failed := it.Status == "failed"
+	items := codexTool(mk, it.ID, name, raw, result, failed)
+	items[1].Outcome.Status = codexStatus(it.Status, failed)
+	return items
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// jsonNonEmpty is false for a missing, null, empty array or empty object value.
+func jsonNonEmpty(raw json.RawMessage) bool {
+	switch string(bytes.TrimSpace(raw)) {
+	case "", "null", "[]", "{}":
+		return false
+	}
+	return true
 }
 
 // codexTool is a finished tool call: Codex writes the call and its result in one line. Its input is clipped as a

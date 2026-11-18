@@ -138,11 +138,34 @@ nonisolated enum CallMain {
     }
 }
 
+/// One platform fact, injected into the call factory, push registration and Settings by their tests.
+nonisolated enum CallPlatform {
+    static var isiOSAppOnMac: Bool { ProcessInfo.processInfo.isiOSAppOnMac }
+}
+
+/// An iPhone app on a Mac cannot use LiveCommunicationKit. Calls that somehow still ask for its system side fail
+/// without constructing a manager or touching its delegate conformance; launch and Settings never offer them there.
+@MainActor final class UnavailableCallSystem: CallSystem {
+    weak var handler: (any CallSystemHandler)?
+    func start(_ id: UUID, handle: CallHandle) async throws { throw CancellationError() }
+    func reportIncoming(_ id: UUID, name: String, title: String) async throws { throw CancellationError() }
+    func perform(_ request: CallRequest, for id: UUID) async throws { throw CancellationError() }
+    func report(_ report: CallReport, for id: UUID) {}
+    func knows(_ id: UUID) -> Bool { false }
+    func activateAudio() async -> Bool { false }
+}
+
 // MARK: LiveCommunicationKit
 
 /// The app's one `ConversationManager` (one per process: a second one takes every action from the first). Its
 /// configuration is read-only, so it is decided here once (docs: #9290 "LCK configuration").
 @MainActor final class LCKCallSystem: CallSystem {
+    /// Tests set the platform explicitly. Production guards before naming this type, then calls it with false.
+    static func make(isiOSAppOnMac: Bool = CallPlatform.isiOSAppOnMac) -> LCKCallSystem? {
+        guard !isiOSAppOnMac else { return nil }
+        return LCKCallSystem()
+    }
+
     private static let log = Logger(subsystem: "persona", category: "call")
     weak var handler: (any CallSystemHandler)?
     /// Used only from the main actor (its async calls run on its own queue): held unchecked rather than sent between regions.

@@ -1,0 +1,5 @@
+{
+  "start_code_launcher_terminal": "{launcher} can't start in this computer's terminal",
+  "start_code_worktree_path_taken": "A workspace from an earlier try is still in the way",
+  "retry_launcher_unsupported": "This hub can't start it on another launcher yet. Update Persona on the hub, or Retry."
+}

@@ -125,11 +125,23 @@ func TestWaitingApprovalExpiresAfterTheWaitingWindow(t *testing.T) {
 		if got := len(ft.s.pendingInteractions()); got != 1 {
 			t.Fatalf("the waiting card ended before its waiting window: pending=%d", got)
 		}
+		ft.s.fleet.mu.Lock()
+		p := ft.s.fleet.interactions["ix_waiting_expiry"]
+		ft.s.fleet.mu.Unlock()
+		if p == nil {
+			t.Fatal("the waiting card has no prepared state")
+		}
 		elapse(200 * time.Millisecond)
 		ft.waitPending(0)
-		if result := waitApprovalResult(t, ft, "ix_waiting_expiry"); !strings.Contains(result, "expired") {
-			t.Fatalf("terminal result = %q", result)
+		result := waitApprovalResult(t, ft, "ix_waiting_expiry")
+		for _, want := range []string{"ix_waiting_expiry", "expired", "nothing was executed"} {
+			if !strings.Contains(result, want) {
+				t.Errorf("terminal result = %q, want %q", result, want)
+			}
 		}
+		ft.s.expirePrepared(p) // a repeated timer is not another terminal result
+		ft.s.deliverApprovalResults()
+		waitApprovalResult(t, ft, "ix_waiting_expiry")
 	})
 }
 

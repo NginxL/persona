@@ -25,6 +25,13 @@ struct NotificationSettingsView: View {
     @State private var debugPage: DebugPage?
     private enum DebugPage: Hashable { case island, urgentCalls }
 
+    #if os(iOS)
+    /// Urgent calls need LiveCommunicationKit, whose Mac build lacks symbols the iPhone app uses (#9948).
+    static func offersUrgentCalls(isiOSAppOnMac: Bool = CallPlatform.isiOSAppOnMac) -> Bool {
+        !isiOSAppOnMac
+    }
+    #endif
+
     var body: some View {
         SettingsForm {
             if let error = page?.error {
@@ -133,15 +140,17 @@ struct NotificationSettingsView: View {
 
             // Urgent calls (docs/assistant/urgent-call.md): the assistant may ring this iPhone; off by default.
             #if os(iOS)
-            Section {
-                NavigationLink {
-                    UrgentCallSettingsView()
-                } label: {
-                    Label("Urgent Calls", systemImage: Theme.Icon.voiceChannel)
+            if Self.offersUrgentCalls() {
+                Section {
+                    NavigationLink {
+                        UrgentCallSettingsView()
+                    } label: {
+                        Label("Urgent Calls", systemImage: Theme.Icon.voiceChannel)
+                    }
+                    .accessibilityIdentifier("notify.urgentCalls")
+                } footer: {
+                    Text("When something can't wait, Persona can ring this iPhone like a phone call.")
                 }
-                .accessibilityIdentifier("notify.urgentCalls")
-            } footer: {
-                Text("When something can't wait, Persona can ring this iPhone like a phone call.")
             }
             #endif
 
@@ -171,13 +180,15 @@ struct NotificationSettingsView: View {
         .navigationDestination(item: $debugPage) { page in
             switch page {
             case .island: IslandSettingsView(island: binding(\.island))
-            case .urgentCalls: UrgentCallSettingsView()
+            case .urgentCalls:
+                if Self.offersUrgentCalls() { UrgentCallSettingsView() }
             }
         }
         .task {
             // `-openUrgentCallSettings YES` (with `-openNotificationSettings YES -tab settings`): Urgent Calls.
             let d = UserDefaults.standard
-            let page: DebugPage? = d.bool(forKey: "openIslandSettings") ? .island : d.bool(forKey: "openUrgentCallSettings") ? .urgentCalls : nil
+            let urgentCalls = d.bool(forKey: "openUrgentCallSettings") && Self.offersUrgentCalls()
+            let page: DebugPage? = d.bool(forKey: "openIslandSettings") ? .island : urgentCalls ? .urgentCalls : nil
             if let page {
                 try? await Task.sleep(for: .milliseconds(600))
                 debugPage = page

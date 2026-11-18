@@ -17,7 +17,11 @@ func TestRuntimeSummaryBackgroundProgress(t *testing.T) {
 		Workflows: []proto.Workflow{{TaskID: "ended", Status: "completed"}, {TaskID: "flow", Running: true, Status: "running", Name: strings.Repeat("n", 300), Phase: "Adversarial review", Phases: []string{"Review", "Adversarial review"}, PhaseIndex: 2,
 			AgentsStarted: 6, AgentsDone: 5, AgentsRunning: 1, StartedAt: at, Agents: []proto.WorkflowAgent{{ID: "private-agent"}}, Error: "private error"}},
 	}
+	s.SetBackgroundEnded([]proto.BackgroundTask{{ID: "ended", Kind: "shell", Command: "private ended command"}})
 	got := runtimeSummary(s)
+	if len(got.BackgroundEnded()) != 0 || len(s.BackgroundEnded()) != 1 {
+		t.Fatalf("summary retained or mutated ended details: got %+v source %+v", got.BackgroundEnded(), s.BackgroundEnded())
+	}
 	if got.BackgroundTasksCount != 2 || got.RunningSubagents != 1 || got.RunningWorkflows != 1 || got.BackgroundCount != 4 || !got.Waiting {
 		t.Fatalf("wrong independent counts: %+v", got)
 	}
@@ -35,7 +39,7 @@ func TestRuntimeSummaryBackgroundProgress(t *testing.T) {
 			t.Fatalf("missing %s: %s", want, text)
 		}
 	}
-	for _, private := range []string{"private command", "private-agent", "private error", `"agents":`, `"phases":`, `"background":`, `"subagents":`, `"workflows":`} {
+	for _, private := range []string{"private command", "private ended command", "private-agent", "private error", `"agents":`, `"phases":`, `"background":`, `"background_ended":`, `"subagents":`, `"workflows":`} {
 		if strings.Contains(text, private) {
 			t.Fatalf("summary includes detail %s: %s", private, text)
 		}

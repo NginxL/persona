@@ -12,6 +12,14 @@ import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
 import com.mikepenz.markdown.model.State as MarkdownResult
 
+/** Settled source metadata shared with the renderer, without exposing the stream's mutable tail. */
+internal data class ChatMarkdownStable(val boundary: Int, val count: Int)
+internal data class ChatMarkdownStep(
+    val result: MarkdownResult,
+    val whole: Boolean,
+    val stable: ChatMarkdownStable?,
+)
+
 /**
  * A streaming reply's Markdown, parsed from its last settled block on (docs/android/android.md "Reply Markdown parsing").
  * The hub sends a growing reply's whole text with each delta, so parsing all of it each time costs O(n²) over
@@ -53,14 +61,19 @@ internal class ChatMarkdownStream(private val whole: (String) -> MarkdownResult)
     }
 
     /** [markdown]'s parse for [id]'s stream, going on from its last step, and whether it parsed the whole text. */
-    fun parse(id: String, markdown: String): Pair<MarkdownResult, Boolean> {
+    fun parse(id: String, markdown: String): Pair<MarkdownResult, Boolean> =
+        parseMetadata(id, markdown).let { it.result to it.whole }
+
+    /** The parse plus the source boundary and top-level node count that a renderer can retain. */
+    fun parseMetadata(id: String, markdown: String): ChatMarkdownStep {
         val previous = synchronized(this) { tails[id] }
         // Anything unexpected in a step (a tail that fails to parse among them) parses the whole text instead.
         val stepped = previous?.takeIf { it.boundary <= markdown.length && markdown.regionMatches(0, it.markdown, 0, it.boundary) }
             ?.let { runCatching { step(it, markdown) }.getOrNull() }
         val (result, next) = stepped ?: parseWhole(markdown)
         synchronized(this) { if (id in tails) tails[id] = next }
-        return result to (stepped == null)
+        return ChatMarkdownStep(result, stepped == null,
+            next?.let { ChatMarkdownStable(it.boundary, it.settled.size) })
     }
 
     private fun parseWhole(markdown: String): Pair<MarkdownResult, Tail?> {

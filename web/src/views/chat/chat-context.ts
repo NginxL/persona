@@ -27,8 +27,9 @@ export interface ChatContextValue {
   /** What runs the chat's subagents, as its agent is called ("Claude Code", "Codex", a Paseo provider's label, #8142);
    *  unset: Claude Code. */
   harness?: string;
-  /** The message an extension opened this conversation with and where it came from (#3758, `externalOpening`). */
-  opening?: { id: string; origin: ExternalOrigin };
+  /** The message an extension opened this conversation with and where it came from (#3758, `externalOpening`), with
+   *  the extension that opened it (`openerOf`) and the conversation's manager, so its mark is the rows' (#10358). */
+  opening?: { id: string; origin: ExternalOrigin; opened_by?: string; manager?: string };
   /** The exchange whose last words carried the closeout the card above the transcript shows (#3612): they are drawn
    *  without the raw block. Unset while no card is shown. */
   closeoutSegment?: string;

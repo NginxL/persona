@@ -207,7 +207,7 @@ func TestIdlePassesReadWhatRuns(t *testing.T) {
 	d.settle() // the fixture's own passes list in the background too; wait them out before counting (#6121)
 	before := d.lists()
 	refused := taskCloseRefused{}
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, doneSeen{})
 	if n := d.lists() - before; n != 0 {
 		t.Errorf("closeDoneTaskAgents listed the machine %d times for an agent no longer there", n)
 	}

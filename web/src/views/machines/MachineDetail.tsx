@@ -27,6 +27,7 @@ import {
   rate,
   systemFacts,
   systemLine,
+  temperature,
   usedOfTotal,
   type DetailMachine,
   type DetailMetrics,
@@ -630,6 +631,24 @@ function NowTiles({ s, cores }: { s: NonNullable<DetailMetrics["latest"]>; cores
     { label: t("machines-machinedetail.disk"), value: percent(diskPct), sub: s.disk_used !== undefined ? usedOfTotal(s.disk_used, s.disk_total) : undefined, frac: diskPct, lv: level(diskPct, 80, 90) },
     { label: t("machines-machinedetail.swap"), value: s.swap_total ? bytesBin(s.swap_used) : t("machines-machinedetail.swap_off"), sub: s.swap_total ? t("machines-machinedetail.swap_total", { total: bytesBin(s.swap_total) }) : undefined, frac: swapPct, lv: "normal" },
   ];
+  if (s.battery_percent !== undefined && Number.isFinite(s.battery_percent)) {
+    const charging = s.battery_charging === true;
+    tiles.push({
+      label: t("machines-machinedetail.battery"),
+      value: percent(s.battery_percent),
+      sub: charging ? t("machines-machinedetail.charging") : undefined,
+      frac: s.battery_percent,
+      lv: s.battery_percent <= 15 && !charging ? "critical" : s.battery_percent <= 25 && !charging ? "warning" : "normal",
+    });
+  }
+  if (s.temp_c !== undefined && Number.isFinite(s.temp_c)) {
+    tiles.push({
+      label: t("machines-machinedetail.temperature"),
+      value: temperature(s.temp_c),
+      frac: Math.min(100, (s.temp_c / 125) * 100),
+      lv: level(s.temp_c, 75, 90),
+    });
+  }
   return (
     <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
       {tiles.map((tile) => (

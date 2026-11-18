@@ -27,6 +27,46 @@ class HelperTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             module["forwarded_flags"](["--model", "other"], {"--model"})
 
+    def test_reviewer_scope_wraps_visible_shell_without_moving_redirections(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        argv = module["reviewer_command"](
+            "python3 -I wrapper.py resources.json --slot", 7,
+            "pr-review-r07-123-01234567.scope",
+            {"CPUQuota": "400%", "CPUWeight": 20, "MemoryHigh": 5 * 1024**3,
+             "MemoryMax": 6 * 1024**3, "TasksMax": 512})
+        self.assertEqual(argv[:5], ["/usr/bin/systemd-run", "--user", "--scope",
+                                   "--unit=pr-review-r07-123-01234567", "--collect"])
+        self.assertIn("MemoryMax=6442450944", argv)
+        self.assertEqual(argv[-8:], ["python3", "-I", "wrapper.py", "resources.json", "7", "--",
+                                    "zsh", "-lic"])
+        launch = "cc_k3 -p < /private/prompt.txt > /private/result.json"
+        self.assertEqual(argv + [launch], [*argv, launch])
+        explicit = module["reviewer_command"]("python3 -I wrapper.py resources.json", 2,
+                                              "pr-review-r02-123-01234567.scope", {})
+        self.assertEqual(explicit[-8:], ["python3", "-I", "wrapper.py", "resources.json", "2", "--",
+                                        "zsh", "-lic"])
+        with self.assertRaises(RuntimeError):
+            module["scoped_reviewer"]("", 7, "refract-worker-222.scope", {})
+        with self.assertRaises(RuntimeError):
+            module["scoped_reviewer"]("", 7, "pr-review-r07-123-01234567.scope",
+                                       {"ExecStartPost": "true"})
+
+    def test_reviewer_scope_lifetime_does_not_wait_for_stale_agent_rows(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        result = subprocess.CompletedProcess(["systemctl"], 0, "LoadState=not-found\nActiveState=inactive\n", "")
+        with patch.object(module["subprocess"], "run", return_value=result) as run:
+            module["wait_scope"]("pr-review-r00-123-01234567.scope", module["time"].monotonic() + 10)
+        self.assertIn("pr-review-r00-123-01234567.scope", run.call_args.args[0])
+
+    def test_reviewer_closes_its_tab_once(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        close = unittest.mock.Mock()
+        with patch.dict(module["cleanup_tab"].__globals__, {"command": close}):
+            module["cleanup_tab"].__globals__["_cleanup_tab"] = "w3:t9"
+            module["cleanup_tab"]()
+            module["cleanup_tab"]()
+        close.assert_called_once_with("tab", "close", "w3:t9", timeout=10)
+
     def test_resource_lock_survives_exec_and_limits_process(self):
         with tempfile.TemporaryDirectory(prefix="pr-review-resource-test-") as root:
             config = Path(root) / "resources.json"

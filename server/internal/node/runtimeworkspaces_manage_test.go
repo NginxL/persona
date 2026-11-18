@@ -393,29 +393,35 @@ func TestRuntimeWorktreeDeleteSaysWhyNot(t *testing.T) {
 }
 
 // A confirmed deletion has one deadline for the node's checks and Paseo's archive: one that runs out says the outcome
-// is not known (reconcile tells), rather than the hub timing out while it goes on.
+// is not known (reconcile tells), rather than the hub timing out while it goes on; the node's own deadline ends a
+// deletion that nothing else ends.
 func TestRuntimeWorktreeDeleteHasOneDeadline(t *testing.T) {
 	r := runtimeRepoNode(t)
 	r.manageAnswers(t, nil)
-	tree := filepath.Join(r.trees, "feat-s")
-	if _, err := request(t, r.n, "worktree.create", map[string]any{"workspace_id": "wks_main", "kind": "paseo", "branch": "feat/s", "path": tree}); err != nil {
-		t.Fatal(err)
+	// Two worktrees, one for each deadline, each with its preview: a confirmed deletion's token is spent.
+	tokens := map[string]any{}
+	for _, w := range []struct{ id, branch, folder string }{{"wks_new1", "feat/s", "feat-s"}, {"wks_new2", "feat/t", "feat-t"}} {
+		if _, err := request(t, r.n, "worktree.create", map[string]any{"workspace_id": "wks_main", "kind": "paseo", "branch": w.branch,
+			"path": filepath.Join(r.trees, w.folder)}); err != nil {
+			t.Fatal(err)
+		}
+		prev, err := request(t, r.n, "worktree.delete", map[string]any{"workspace_id": w.id, "kind": "paseo", "preview": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens[w.id] = prev["preview_token"]
 	}
-	prev, err := request(t, r.n, "worktree.delete", map[string]any{"workspace_id": "wks_new1", "kind": "paseo", "preview": true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := runtimeWorktreeDeadline
-	runtimeWorktreeDeadline = 500 * time.Millisecond
-	t.Cleanup(func() { runtimeWorktreeDeadline = old })
-	// Paseo's archive is held until the test ends: only the deadline ends the call. Should the node not give up, the
-	// archive goes ahead after 3 s, so that the test fails rather than hangs.
+	// Paseo's archive is held until the test ends: only a deadline ends the call. Should the node not give up, the
+	// archive goes ahead after 3 s, so that the test fails rather than hangs. The call's deadline runs out once Paseo is
+	// asked to archive, however long the node's checks before it took.
 	held := make(chan struct{})
 	t.Cleanup(func() { close(held) })
+	cue := newCueDeadline()
 	r.rt.mu.Lock()
 	prevAnswer := r.rt.answer
 	r.rt.answer = func(method string, params json.RawMessage) (any, error) {
 		if method == "workspace.archive" {
+			cue.expire()
 			select {
 			case <-held:
 				return nil, errors.New("the test ended")
@@ -425,13 +431,29 @@ func TestRuntimeWorktreeDeleteHasOneDeadline(t *testing.T) {
 		return prevAnswer(method, params)
 	}
 	r.rt.mu.Unlock()
-	start := time.Now()
-	res, err := request(t, r.n, "worktree.delete", map[string]any{"workspace_id": "wks_new1", "kind": "paseo", "preview_token": prev["preview_token"]})
+	confirm := func(ctx context.Context, id string) (map[string]any, error) {
+		return requestCtx(t, ctx, r.n, "worktree.delete", map[string]any{"workspace_id": id, "kind": "paseo", "preview_token": tokens[id]})
+	}
+	res, err := confirm(cue, "wks_new1")
 	if err != nil || res["state"] != "unknown" || res["removed"] == true {
 		t.Fatalf("past the deadline: %v %v", res, err)
 	}
+	if took := cue.since(); took > 2*time.Second {
+		t.Fatalf("ended %s after its deadline", took)
+	}
+
+	// Nothing else ends it: the node's own deadline does, wherever it runs out (in the checks on a busy machine, which
+	// then refuse).
+	old := runtimeWorktreeDeadline
+	runtimeWorktreeDeadline = 300 * time.Millisecond
+	t.Cleanup(func() { runtimeWorktreeDeadline = old })
+	start := time.Now()
+	res, err = confirm(context.Background(), "wks_new2")
+	if res["removed"] == true || err == nil && res["state"] != "unknown" {
+		t.Fatalf("past the node's deadline: %v %v", res, err)
+	}
 	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("took %s", took)
+		t.Fatalf("took %s: the node's deadline did not end the deletion", took)
 	}
 }
 

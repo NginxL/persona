@@ -97,13 +97,17 @@ import UIKit
     /// Where `entry`'s minutes are now. `synced`: the hub has this revision of its text.
     func load(_ entry: RecordingEntry, synced: Bool) async {
         let meeting = entry.isMeeting
-        #if DEBUG && os(iOS)
-        // A replayed meeting (`MeetingReplay`, #9417): its tape's minutes once it ended, none before.
-        if MeetingReplay.holds(entry.id) {
-            state = entry.active ? .waitingForText : MeetingReplay.minutes(for: entry.id).map { .ready($0) } ?? .waitingForSync
+        // A replayed meeting (`ReplayedMeeting`, #9417, #10589): its tape's minutes once it ended, none before; never the
+        // hub's.
+        if ReplayedMeeting.holds(entry.id) {
+            #if os(iOS)
+            let tape = MeetingReplay.minutes(for: entry.id)
+            #else
+            let tape: RecordingMinutes? = nil
+            #endif
+            state = entry.active ? .waitingForText : tape.map { .ready($0) } ?? .waitingForSync
             return
         }
-        #endif
         if entry.active || !entry.transcribedAll {
             if case .ready = state { return } // a re-transcription keeps showing the minutes it has
             state = meeting ? .waitingForText : .none
@@ -154,7 +158,7 @@ import UIKit
     /// Writes them again (`POST /api/v1/recordings/{id}/minutes`): after a failure, or when they missed something. Minutes
     /// shown stay while the new ones are written (Updating), as the hub keeps them.
     func regenerate(_ id: UUID) async {
-        guard let api = api(), !asking else { return }
+        guard !ReplayedMeeting.holds(id), let api = api(), !asking else { return }
         asking = true
         defer { asking = false }
         do {
@@ -193,7 +197,8 @@ import UIKit
     /// reads the recording back before anything else is sent. Minutes rewritten since they were shown (`409
     /// minutes_stale`) are shown as they are now, and nothing is sent again: the user sees the new ones first.
     func add(_ ids: [String], to entry: RecordingEntry, synced: Bool) async {
-        guard case .ready(let minutes) = state, let version = minutes.version, !ids.isEmpty, let api = api(), !asking else { return }
+        guard !ReplayedMeeting.holds(entry.id), case .ready(let minutes) = state, let version = minutes.version, !ids.isEmpty,
+              let api = api(), !asking else { return }
         asking = true
         defer { asking = false }
         struct Body: Encodable { var version: Int; var actions: [String] }

@@ -443,6 +443,10 @@ extension EnvironmentValues {
     /// fields, segmented choices and row controls are drawn as they look instead of left out, progress bars as shapes,
     /// tables and Markdown wrap (`ImageRenderer` draws no scroll views and no UIKit controls).
     @Entry var extensionPicture = false
+    /// Drawn inside a card (a section of `ExtensionViewStack`, a code page, a columns view), its padding: a carousel
+    /// then scrolls to the card's edges and is cut there (#10233); nil on the page's list, where it scrolls to the
+    /// section's edges.
+    @Entry var extensionCardInset: CGFloat? = nil
 }
 
 /// An extension's View on a page that is not a list (a machine's page, a card, the assistant's reply): each section a
@@ -492,7 +496,7 @@ struct ExtensionViewStack: View {
                     }
                     if s.items.contains(where: { !Self.leftOut($0, html: htmlContext != nil) }) || (s.more != nil && model != nil) {
                         let body = ExtensionSectionItems(section: s, index: i, model: model, link: $link)
-                        if cards { body.card() } else { body }
+                        if cards { body.environment(\.extensionCardInset, CardStyle.padding).card() } else { body }
                     }
                     if let f = s.footer, !f.isEmpty {
                         Text(f).font(Theme.Font.label).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.xs)

@@ -315,7 +315,9 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 		// over (mode_restart.go, #6476). Any other pick drops such a restart that waits.
 		if n.needsModeRestart(id, mode) {
 			if err := n.restartable(ctx, id); err == nil {
-				n.queueModeRestart(id, mode)
+				if err := n.queueModeRestart(id, mode); err != nil {
+					return err
+				}
 				mode = ""
 				if effort == "" {
 					return nil

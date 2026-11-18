@@ -39,5 +39,8 @@
   "network_last_hour": "最近一小时网络：下载（橙色）、上传（紫色）",
   "view_label": "显示方式",
   "view_cards": "卡片",
-  "view_capabilities": "能力"
+  "view_capabilities": "能力",
+  "battery": "电量",
+  "charging": "充电中",
+  "temperature": "温度"
 }

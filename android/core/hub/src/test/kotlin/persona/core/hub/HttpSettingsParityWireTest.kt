@@ -120,6 +120,19 @@ class HttpSettingsParityWireTest {
         }
     }
 
+    /** #10355: "Close an Agent's terminal when it ends" goes out alone when set; an older hub sends none. */
+    @Test fun closeEndedTerminalsIsSentOnlyWhenSet() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"machine_id":"server","launcher":"claude","cwd":"","close_ended_terminals":true}"""))
+            val saved = api.updateConfig(AssistantConfigUpdate(closeEndedTerminals = true))
+            assertEquals("""{"close_ended_terminals":true}""", server.takeRequest().body.readUtf8())
+            assertEquals(true, saved.closeEndedTerminals)
+            server.enqueue(MockResponse().setBody("""{"machine_id":"server","launcher":"claude","cwd":""}"""))
+            assertEquals(null, api.config().closeEndedTerminals)
+        }
+    }
+
     /**
      * #5084: "The main chat supervises its own tasks" goes out alone when set; the background supervisor's conversation
      * is read, never written; an older hub sends none of it.

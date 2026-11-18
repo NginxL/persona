@@ -112,7 +112,7 @@ func Held(cfg Config) *Pause {
 	if err != nil {
 		return nil
 	}
-	v, ok := gates.Load(gateKey(cfg.BaseURL, key))
+	v, ok := gates.Load(gateKeyFor(cfg.API, cfg.BaseURL, key))
 	if !ok {
 		return nil
 	}
@@ -157,13 +157,29 @@ type turn struct {
 
 var gates sync.Map // gateKey → *gate
 
-func gateKey(baseURL, key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return strings.TrimRight(baseURL, "/") + "#" + hex.EncodeToString(sum[:8])
+func normalizeGateBase(api, baseURL string) string {
+	switch api {
+	case "chat":
+		baseURL = trimSingleEndpointPath(baseURL, "/chat/completions")
+	case "responses":
+		baseURL = trimVersionedEndpointPath(baseURL, "/responses")
+	default:
+		baseURL = trimVersionedEndpointPath(baseURL, "/messages")
+	}
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
 }
 
-func gateFor(baseURL, key string) *gate {
-	k := gateKey(baseURL, key)
+func gateKeyFor(api, baseURL, key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return normalizeGateBase(api, baseURL) + "#" + hex.EncodeToString(sum[:8])
+}
+
+func gateKey(baseURL, key string) string {
+	return gateKeyFor("", baseURL, key)
+}
+
+func gateForAPI(api, baseURL, key string) *gate {
+	k := gateKeyFor(api, baseURL, key)
 	if g, ok := gates.Load(k); ok {
 		return g.(*gate)
 	}
@@ -173,6 +189,10 @@ func gateFor(baseURL, key string) *gate {
 	}
 	g, _ := gates.LoadOrStore(k, &gate{host: host, wake: make(chan struct{})})
 	return g.(*gate)
+}
+
+func gateFor(baseURL, key string) *gate {
+	return gateForAPI("", baseURL, key)
 }
 
 // admit lets a request go out, waits its turn, or puts it off while the connection is held. Its turn: a slot under

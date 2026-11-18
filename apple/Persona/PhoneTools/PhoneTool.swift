@@ -26,7 +26,8 @@ enum PhoneDataSource: String, CaseIterable, Identifiable, Codable {
         #if os(macOS)
         allCases.filter { $0 != .health && !iPhoneOnly.contains($0) } // no health data on a Mac (PhoneToolRegistry.healthTools)
         #elseif os(iOS)
-        allCases.filter { $0 != .home || HomeAccess.isBuilt } // Home needs the HomeKit capability in the build (#2285)
+        // Home needs the HomeKit capability in the build (#2285), alarms AlarmKit (iOS 26).
+        allCases.filter { ($0 != .home || HomeAccess.isBuilt) && ($0 != .alarms || AlarmsAccess.isSupported) }
         #else
         allCases.filter { !iPhoneOnly.contains($0) }
         #endif

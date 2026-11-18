@@ -12,6 +12,8 @@ import PersonaWire
 nonisolated extension ExtensionUIPlace: Identifiable {
     /// The extension that draws it: `extension` under /api/v1/extensions, `plugin` under the old path (#1844).
     var owner: String { self.extension?.isEmpty == false ? self.extension! : (plugin ?? "") }
+    /// Stable identity for lists containing slots from more than one extension.
+    var scopedID: String { owner + "/" + id }
     /// The extension's name (its entries say whose they are).
     var ownerName: String? { extensionName?.isEmpty == false ? extensionName : pluginName }
 

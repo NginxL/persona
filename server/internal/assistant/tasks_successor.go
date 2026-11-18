@@ -88,6 +88,11 @@ type taskStart struct {
 func (s *Service) claimTaskStart(id string) (cur *taskStart, ok bool) {
 	s.tasks.mu.Lock()
 	defer s.tasks.mu.Unlock()
+	return s.claimTaskStartLocked(id)
+}
+
+// claimTaskStartLocked is claimTaskStart under tasks.mu.
+func (s *Service) claimTaskStartLocked(id string) (cur *taskStart, ok bool) {
 	if cur := s.tasks.retrying[id]; cur != nil {
 		return cur, false
 	}

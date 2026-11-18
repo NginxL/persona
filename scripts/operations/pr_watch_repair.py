@@ -170,6 +170,13 @@ def main_failure_comparison(repo, pr, worktree, failure, timeout=600, git_root=N
         run(["git", "worktree", "remove", "--force", str(base_worktree)], cwd=git_root or worktree, timeout=90)
 
 
+def fetch_branch(branch):
+    """Fetch one branch into this worktree's FETCH_HEAD only. Worktrees share the
+    checkout's refs; an empty refmap keeps concurrent workers from racing to
+    update refs/remotes/origin/<branch> (#10584)."""
+    return ["git", "fetch", "-q", "--refmap=", "origin", "refs/heads/" + branch]
+
+
 def contains(worktree, ancestor, descendant):
     return run(["git", "merge-base", "--is-ancestor", ancestor, descendant], cwd=worktree).returncode == 0
 
@@ -178,7 +185,7 @@ def fetch_current_main(pr, worktree, base):
     """The base branch's tip now. Main moves every few minutes and a verification takes longer (#7840), so a repair
     merges the main it fetched as long as that still contains `base`, the one read before verifying; a rewritten main
     stops it."""
-    checked(["git", "fetch", "-q", "origin", "refs/heads/" + pr["baseRefName"]], cwd=worktree, timeout=180)
+    checked(fetch_branch(pr["baseRefName"]), cwd=worktree, timeout=180)
     tip = checked(["git", "rev-parse", "FETCH_HEAD"], cwd=worktree).strip()
     if tip != base and not contains(worktree, base, tip):
         raise WatchError("main was rewritten while preparing the repair")
@@ -244,7 +251,7 @@ def push_updated_head(repo, pr, worktree, updated_head):
     """Publish an already verified merge without changing its exact tree."""
     if checked(["git", "rev-parse", "HEAD"], cwd=worktree).strip() != updated_head:
         raise WatchError("verified merge head changed before publication")
-    checked(["git", "fetch", "-q", "origin", "refs/heads/" + pr["headRefName"]], cwd=worktree, timeout=180)
+    checked(fetch_branch(pr["headRefName"]), cwd=worktree, timeout=180)
     if checked(["git", "rev-parse", "FETCH_HEAD"], cwd=worktree).strip() != pr["headRefOid"]:
         raise WatchError("PR head moved before merging main; nothing was pushed")
     checked(["git", "push", "origin", "HEAD:refs/heads/" + pr["headRefName"]], cwd=worktree, timeout=180)
@@ -725,7 +732,7 @@ def commit_and_push_repair(repo, pr, worktree, base, failure, verify_config=None
         latest = pr_snapshot(repo, identity_pr["number"])
         if moved(latest, identity_pr, follows_main):
             raise WatchError("PR head/base moved before the repair push was accepted")
-    checked(["git", "fetch", "-q", "origin", "refs/heads/" + pr["baseRefName"]], cwd=worktree, timeout=180)
+    checked(fetch_branch(pr["baseRefName"]), cwd=worktree, timeout=180)
     tip = checked(["git", "rev-parse", "FETCH_HEAD"], cwd=worktree).strip()
     if tip != base and not (follows_main and contains(worktree, base, tip)):
         raise WatchError("base moved before the repair push; nothing was pushed")
@@ -749,7 +756,7 @@ def commit_and_push_repair(repo, pr, worktree, base, failure, verify_config=None
             if remote != head:
                 raise WatchError("continuation branch exists at a different head; choose a fresh repair branch")
     if not pr.get("isCrossRepository"):
-        checked(["git", "fetch", "-q", "origin", "refs/heads/" + pr["headRefName"]], cwd=worktree, timeout=180)
+        checked(fetch_branch(pr["headRefName"]), cwd=worktree, timeout=180)
         remote_output = checked(["git", "ls-remote", "origin", "refs/heads/" + pr["headRefName"]], cwd=worktree, timeout=180).strip()
         if not remote_output:
             raise WatchError("contributor branch is absent; refusing to recreate it without an unchanged-head guarantee")

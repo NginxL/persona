@@ -147,6 +147,8 @@ var catalogItemTypes = map[string]reflect.Type{
 	"shortcuts":        reflect.TypeFor[ShortcutItem](),
 	"computer":         reflect.TypeFor[ComputerItem](),
 	"iphone":           reflect.TypeFor[ComputerItem](),
+
+	"repository_providers": reflect.TypeFor[RepositoryProviderItem](),
 }
 
 // Include the parsed projection as well as the signed entry fields: callers may

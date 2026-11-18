@@ -117,7 +117,7 @@ extension View {
     func runFonts() -> some View { modifier(RunFonts()) }
 }
 
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 /// Inline code's ink (#9477): `Theme.Reply.codeInk`, a step quieter than the words, where they are in the body's own
 /// ink. Words drawn in an ink of their own (a quote, a quieter heading, an agent's quiet words between its steps) keep it
 /// for their code too, and so does a written link: code in it is the link's. A copy link (`CodeCopyMarkdown`, what
@@ -238,9 +238,11 @@ struct UserBubble: View, Equatable {
     /// The extension that opened the conversation with this message (#3758): 「来自 飞书 /agent」 under it. Set by the chat
     /// page on the conversation's first message only.
     var external: AutoConversationSource? = nil
+    /// Which extension that was, whose own icon that line draws when it can (#10358).
+    var opener: ConversationOpener? = nil
     /// Only the message itself: the chat page re-evaluates its body on every hub push, and without this every row on
     /// screen (and in the lazy list's buffer) ran its body again too (about 45 a push on a long Persona conversation).
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item && a.external == b.external }
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item && a.external == b.external && a.opener == b.opener }
     @Environment(\.openFile) private var openFile
     @Environment(\.loadImage) private var loadImage
     @Environment(\.chatPin) private var pin
@@ -277,7 +279,7 @@ struct UserBubble: View, Equatable {
             if ChannelSource.possible(item.clientMsgID) {
                 ChannelSourceLine(clientMsgID: item.clientMsgID)
             } else if let external {
-                ExternalSourceLine(source: external)
+                ExternalSourceLine(source: external, opener: opener)
             }
             if d.cardSource != nil {
                 Text("From a card").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -469,6 +471,75 @@ struct PendingBubble: View {
         .messageActionBar(id: msg.id.uuidString, text: shown, isUser: true, date: msg.createdAt, pending: true,
                           delete: .of(msg, run: discard))
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}
+
+/// One of your messages the assistant keeps after it could not go in (`Session.undelivered`, #10194): your bubble as a
+/// failed one looks (`PendingBubble`), with a line under it. Waiting: why, and that it goes by itself; its mark's menu
+/// offers Delete. Given up: why, with Retry and Delete. Shown on every device, from the chat's row.
+struct UndeliveredBubble: View {
+    var message: UndeliveredMessage
+    var retry: () -> Void
+    var discard: () -> Void
+    @Environment(\.rowMemoScope) private var memoScope
+    @Environment(\.chatPin) private var pin
+
+    var body: some View {
+        let parsed = ContextRef.parse(message.text)
+        let shown = AttachedFile.parse(parsed.rest).rest
+        let reason = message.error ?? String(localized: "The assistant could not start")
+        VStack(alignment: .trailing, spacing: Theme.Space.sm) {
+            let files = AttachedFile.parse(message.text).files
+            if !files.isEmpty { AttachedFileCards(files: files) }
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                Spacer(minLength: 40)
+                Menu {
+                    if message.gaveUp {
+                        Button(action: retry) { Label("Retry", systemImage: Theme.Icon.retry) }
+                    }
+                    Button(role: .destructive, action: discard) { Label("Delete", systemImage: Theme.Icon.delete) }
+                } label: {
+                    if message.gaveUp {
+                        ThemedIcon(Theme.Icon.errorFilled).font(Theme.Font.body).foregroundStyle(Theme.danger)
+                    } else {
+                        ThemedIcon(Theme.Icon.time).font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
+                            .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                            .contentShape(.rect)
+                    }
+                }
+                .accessibilityLabel(message.gaveUp ? Text("Not delivered. Retry or delete.") : Text("Not delivered yet. It will be sent automatically."))
+                // The menu's items as actions too (VoiceOver's Actions rotor, the Runtime CLI), as on PendingBubble.
+                .accessibilityActions {
+                    if message.gaveUp { Button("Retry", action: retry) }
+                    Button("Delete", action: discard)
+                }
+                let split = MessageComments.inBubble(shown)
+                let fold = BubbleFoldKey(id: "undelivered-" + message.id)
+                UserBubbleBody(quotes: ContextRef.quotes(parsed.refs) ?? [], text: split?.rest ?? shown, comments: split?.comments ?? [], lead: split?.quote,
+                               fold: fold)
+                    .opacity(0.6)
+                    .messageLongPress(id: "undelivered-" + message.id, opens: { fold.openOnPress(scope: memoScope, pin: pin) }) {
+                        UserBubbleBody(quotes: ContextRef.quotes(parsed.refs) ?? [], text: split?.rest ?? shown, comments: split?.comments ?? [], lead: split?.quote)
+                    }
+            }
+            Group {
+                if message.gaveUp {
+                    Text("Not delivered: \(reason)").foregroundStyle(Theme.danger)
+                } else {
+                    Text("Not delivered: \(reason). It will be sent automatically.").foregroundStyle(Theme.cautionText)
+                }
+            }
+            .font(Theme.Font.label)
+            .multilineTextAlignment(.trailing)
+            if let n = message.images, n > 0 {
+                Text("Pictures: \(n)").font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        // Copy, and Delete, from the long-press bar as on a message only on this phone (#6427).
+        .messageActionBar(id: "undelivered-" + message.id, text: shown, isUser: true, date: message.at, pending: true,
+                          delete: MessageBarDelete(title: String(localized: "Delete"), run: discard))
+        .transition(.opacity)
     }
 }
 
@@ -799,6 +870,96 @@ struct ThinkingRow: View {
 /// Where Claude Code compacted the context (`Item.compact`): a hairline across the chat, 「以上内容已压缩」 in the middle with
 /// where it came from (Manual / Auto / While idle) and the size before it, when known, as the web and Android write it (#1762).
 /// A tap shows the notes that came with it and when.
+/// The words of a permission mode change line (#10297, `ModeChangeLine`): who changed which mode to which, the modes in
+/// quotes, and what became of a restart into one, with why where the node said (its codes; rows from before them hold
+/// English words, left out). The web's `modeChangeLabel` says the same.
+nonisolated enum ModeChangeWords {
+    /// A mode's name as the session's own menu calls it.
+    static func mode(_ id: String?, session: Session?) -> String {
+        guard let id, !id.isEmpty else { return "" }
+        if session?.listedModes?.contains(id) == true { return SessionModes.listedOption(id).title }
+        return SessionModes.modeLabel(id) ?? id
+    }
+
+    static func who(_ c: APIClient.ModeChange) -> String {
+        if c.actorKind == "hub" { return String(localized: "The hub [mode change]") }
+        let name = c.deviceName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? String(localized: "A device [mode change]") : name
+    }
+
+    static func why(_ code: String?) -> String? {
+        switch code {
+        case "replaced": String(localized: "another switch took its place")
+        case "process_exited": String(localized: "the process it was picked for has exited")
+        case "process_replaced": String(localized: "the session runs in another process now")
+        case "process_unknown": String(localized: "it couldn't tell which process to restart")
+        case "expired": String(localized: "it waited over two hours")
+        case "not_stopped": String(localized: "the agent didn't quit")
+        case "start_failed": String(localized: "the new process didn't start, so the session carries on as before")
+        case "stopped": String(localized: "the new process didn't start, and the session has stopped")
+        default: nil
+        }
+    }
+
+    static func label(_ c: APIClient.ModeChange, session: Session?) -> String {
+        let to = mode(c.to, session: session)
+        switch c.kind {
+        case "restart_done":
+            return c.reason == "already_in" ? String(localized: "Already in “\(to)”, no restart needed")
+                : String(localized: "Restarted in “\(to)”")
+        case "restart_failed":
+            if let why = why(c.reason) { return String(localized: "Couldn't restart in “\(to)”: \(why)") }
+            return String(localized: "Couldn't restart in “\(to)”")
+        case "restart_dropped":
+            if let why = why(c.reason) { return String(localized: "Called off, won't restart in “\(to)”: \(why)") }
+            return String(localized: "Called off, won't restart in “\(to)”")
+        default:
+            let who = who(c)
+            if c.applied == "restart" { return String(localized: "\(who) picked “\(to)”: the session restarts in it once this turn ends") }
+            let from = mode(c.from, session: session)
+            return from.isEmpty || from == to ? String(localized: "\(who) changed the permission mode to “\(to)”")
+                : String(localized: "\(who) changed the permission mode from “\(from)” to “\(to)”")
+        }
+    }
+}
+
+/// A permission mode change in an Agent's chat (#10297, `ChatLines.mergeModeChanges`): rules either side of a line of
+/// words, as the compaction divider draws (`CompactDivider`), but not a control. Rules only where the words fit on one
+/// line with at least `Theme.Space.l` of rule each side; otherwise the words alone, wrapped and centered: rules a point
+/// or two long read as dots, and rules beside the first of two lines read as crooked (the owner, 2026-11-18).
+struct ModeChangeLine: View {
+    var change: APIClient.ModeChange
+    var session: Session?
+
+    private var rule: some View {
+        let beautiful = AppStyle.current.usesBeautifulUI
+        return Rectangle().fill(beautiful ? Theme.cardStroke : Color(uiColor: .separator))
+            .frame(height: beautiful ? Theme.Size.line : Theme.Size.hairline)
+            .frame(minWidth: Theme.Space.l, maxWidth: .infinity)
+    }
+
+    var body: some View {
+        let label = ModeChangeWords.label(change, session: session)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                rule
+                Text(label).lineLimit(1).fixedSize()
+                rule
+            }
+            Text(label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+        }
+        .font(Theme.Font.label)
+        .foregroundStyle(.secondary)
+        .padding(.vertical, Theme.Space.s)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("chat.modeChange")
+    }
+}
+
 struct CompactDivider: View {
     var item: Item
     @State private var open = false

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { t } from "../../i18n";
 import { isRelayContext, sourceLabel } from "../../lib/message-source";
 import { parseUserText } from "../../lib/turns";
@@ -15,8 +15,20 @@ import { FileCards } from "./FileCards";
 import { Thumb } from "./Steps";
 import { ContextGroup } from "./ContextGroup";
 
+export type SourceProps = { msg: UserMessage; mid: string; sid: string };
+
+// Keep the scheduled-task disclosure off the startup path for chats without one.
+const ScheduledTaskMessage = lazy(() => import("./ScheduledTaskMessage"));
+
 /** Relayed words and automatic inputs are sources in one chat, never participants or user bubbles. */
-export function SourceMessage({ msg, mid, sid }: { msg: UserMessage; mid: string; sid: string }) {
+export function SourceMessage(props: SourceProps) {
+  if (props.msg.source?.kind === "scheduled_task") {
+    return <Suspense fallback={<div className="h-24" aria-hidden="true" />}><ScheduledTaskMessage {...props} /></Suspense>;
+  }
+  return <RelayedSourceMessage {...props} />;
+}
+
+function RelayedSourceMessage({ msg, mid, sid }: SourceProps) {
   const { scope } = useChatContext();
   const [open, setOpen] = useExpanded(`${scope}source:${msg.id}`);
   const [measuredLong, setMeasuredLong] = useState(false);

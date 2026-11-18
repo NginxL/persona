@@ -59,6 +59,29 @@ final class PerfAgentsTests: PerfTestCase {
         measureVerifiedGlide()
     }
 
+    /// A query retained after a result opens and closes: the field stays reachable while the filtered list glides (#7332).
+    @MainActor func testAgentsListScrollWithRetainedQuery() throws {
+        openList(["-dev.grouping", "repo"])
+        see(app.buttons["agents.filter.all"], "the quick filters", timeout: 30)
+        let field = app.revealAgentsSearch()
+        field.tap()
+        field.typeText("a")
+        field.typeText("\n")
+        sleep(2)
+        let row = see(app.buttons.matching(identifier: "agents.row").firstMatch, "a query result")
+        row.tap()
+        see(chatReady, "the result chat", timeout: 15)
+        back()
+        XCTAssertTrue(chatReady.waitForNonExistence(timeout: 10), "the result chat still covers the retained list")
+        see(row, "the retained query results")
+        let retained = app.searchFields.firstMatch
+        XCTAssertTrue(retained.waitForExistence(timeout: 5) && retained.isHittable, "the retained field is not visible")
+        XCTAssertTrue(row.isHittable, "the retained result row is not visible")
+        XCTAssertEqual(retained.value as? String, "a")
+        sleep(1) // let the navigation transition finish before FrameProbe chooses the list to glide
+        measureVerifiedGlide()
+    }
+
     /// Grouped by machine, then by state: other section structures over the same agents.
     @MainActor func testAgentsListScrollByMachine() throws {
         openList(["-dev.grouping", "machine"])

@@ -40,5 +40,9 @@
   "options": "{name} のオプション",
   "no_links": "関連付けたリポジトリはありません",
   "agent_hint": "エージェントが作業中にリポジトリと関連項目を管理します。手動でも追加・削除できます。",
-  "legacy_note": "リポジトリの関連付けを保存する前のリンクです。"
+  "legacy_note": "リポジトリの関連付けを保存する前のリンクです。",
+  "unavailable": "利用不可",
+  "provider_unavailable": "{provider}は利用できません。既存のリンクは開けますが、新しいリンクの追加には{provider}が必要です。",
+  "link_pending": "保存時に確認",
+  "another_source": "別のソース"
 }

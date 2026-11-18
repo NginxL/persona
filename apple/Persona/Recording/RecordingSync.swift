@@ -285,10 +285,8 @@ final class RecordingSync {
     func status(_ entry: RecordingEntry) -> Status {
         // An all-day recording's text isn't in its entry (`RecordingDaySummaries` has its state): nothing here to send.
         if entry.isDay { return .waiting }
-        #if DEBUG && os(iOS)
-        // A replayed meeting (`MeetingReplay`, #9417) never goes to a hub.
-        if MeetingReplay.holds(entry.id) { return .waiting }
-        #endif
+        // A replayed meeting (`ReplayedMeeting`, #9417, #10589) never goes to a hub.
+        if ReplayedMeeting.holds(entry.id) { return .waiting }
         if isExpired(entry) { return .expired }
         if uploading == entry.id { return .uploading }
         if let have = store.synced[entry.id], have >= entry.revision { return .synced }
@@ -348,6 +346,15 @@ final class RecordingSync {
     /// `day`: the caller knows it is a day recording (the day upload's `410`), also when the library has no row for it
     /// yet (one is written only after its first chunk was stored): without the row, nothing would ask the watch.
     func delete(_ id: UUID, day isDay: Bool = false) throws {
+        // The replayed meeting (`ReplayedMeeting`, #10589) is on no hub: gone here only. A delete sent for its fixed id
+        // would leave the hub a tombstone that later deletes every replay while it plays.
+        if ReplayedMeeting.holds(id) {
+            try library.remove(id)
+            store.deletes.remove(id)
+            forget(id)
+            save()
+            return
+        }
         let day = isDay || library.entry(id)?.isDay == true
         try library.remove(id)
         store.deletes.insert(id)
@@ -464,7 +471,9 @@ final class RecordingSync {
                 hubNamed(id, name: row.name, source: row.nameSource)
             }
             handDays(rows, deleted: (answer.deleted ?? []).compactMap(UUID.init(uuidString:)))
-            for id in (answer.deleted ?? []).compactMap(UUID.init(uuidString:)) where library.entry(id).map({ !$0.isDay }) == true {
+            // Never the replayed meeting: a hub that holds a tombstone for its id (an older app sent one) has no say on it.
+            for id in (answer.deleted ?? []).compactMap(UUID.init(uuidString:))
+            where library.entry(id).map({ !$0.isDay }) == true && !ReplayedMeeting.holds(id) {
                 deletedOnHub(id)
             }
             save()
@@ -707,6 +716,12 @@ final class RecordingSync {
     }
 
     private func sendDelete(_ id: UUID, _ api: APIClient) async -> Bool {
+        // A delete an older app queued for the replayed meeting is dropped, never sent.
+        if ReplayedMeeting.holds(id) {
+            store.deletes.remove(id)
+            save()
+            return true
+        }
         do {
             _ = try await api.request("DELETE", "/api/v1/recordings/\(id.uuidString.lowercased())")
         } catch let error as APIError where error.status == 410 {

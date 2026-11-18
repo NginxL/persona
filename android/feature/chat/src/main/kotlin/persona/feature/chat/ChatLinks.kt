@@ -13,6 +13,11 @@ import java.net.URLDecoder
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 
 internal data class ChatLinkMatch(val url: String, val start: Int, val end: Int)
 
@@ -143,6 +148,14 @@ internal object ChatLinks {
         }
     }
 }
+
+/** Live text keeps preloads current without emitting the same destinations again for every chunk. */
+internal fun chatLinkPreloads(
+    revisions: Flow<ChatLiveItems.Revision>,
+    now: () -> Instant = Instant::now,
+): Flow<List<String>> = revisions.map { revision -> ChatLinks.toPreload(revision.items, now()) }
+    .distinctUntilChanged()
+    .flowOn(Dispatchers.Default)
 
 /**
  * A piece of a page picked in the link sheet, carried in a message as

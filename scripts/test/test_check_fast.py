@@ -259,6 +259,60 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertIn("FAIL     scripts/test/test_doc_wire.py", out)
                 self.assertNotIn("test_doc_paths.py", out)
 
+    def test_wire_schema_inputs_run_the_wire_sample_suite(self):
+        # test_wire_schema.py holds the samples the shared fixtures keep for each wire schema to it, runs the generator's
+        # --check and imports the extension test's validator.
+        self.break_suite("test_wire_schema.py")
+        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")  # a schema/ change runs it too
+        self.commit_on_top("scripts/gen/extension_schema.py", "", "base")
+        for path in ("schema/wire/x.schema.json", "spec/fixtures/todo-view/x.json", "scripts/gen/extension_schema.py",
+                     "scripts/test/test_extension_schema.py"):
+            with self.subTest(path=path):
+                self.write(path, "# changed\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("checkout", "-q", "base", "--", "scripts")
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/test/test_wire_schema.py", out)
+
+    def test_todo_fixture_inputs_run_the_todo_fixture_suite(self):
+        # test_todo_fixtures.py reads the to-do page and window fixtures, the view schema, the todo-view line keys, the
+        # agent names and the hub's row fields, and imports the wire and extension schema tests.
+        self.break_suite("test_todo_fixtures.py")
+        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")  # a schema/ change runs it too
+        for path in ("spec/fixtures/todo-detail/x.json", "spec/fixtures/todo-layout/README.md",
+                     "spec/fixtures/todo-view/README.md", "spec/fixtures/agent-names/names.json",
+                     "schema/wire/todo-view.schema.json", "server/internal/assistant/todos.go",
+                     "server/internal/assistant/todo_ask.go", "scripts/test/test_wire_schema.py",
+                     "scripts/test/test_extension_schema.py"):
+            with self.subTest(path=path):
+                self.write(path, "# changed\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("checkout", "-q", "base", "--", "scripts")
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/test/test_todo_fixtures.py", out)
+
+    def test_other_todo_files_do_not_run_the_todo_fixture_suite(self):
+        self.break_suite("test_todo_fixtures.py")
+        for path in ("spec/fixtures/todo-view/todo_view.json", "spec/fixtures/todo-counts/x.json",
+                     "server/internal/assistant/todo_plan.go"):
+            with self.subTest(path=path):
+                self.write(path, "{}\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertNotIn("test_todo_fixtures.py", out)
+
+    def test_other_schema_and_spec_files_do_not_run_the_wire_sample_suite(self):
+        self.break_suite("test_wire_schema.py")
+        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")
+        for path in ("schema/extension/x.schema.json", "spec/tokens/x.json"):
+            with self.subTest(path=path):
+                self.write(path, "{}\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertNotIn("test_wire_schema.py", out)
+
     def test_a_change_where_the_section_check_reads_runs_it(self):
         # Most names test_doc_sections.py checks are in code comments, so a change under any of its SOURCE_DIRS runs it.
         self.break_suite("test_doc_sections.py")
@@ -444,6 +498,37 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertEqual(1, code, out)
                 self.assertIn("FAIL     scripts/ci/test_changed_ratchets.py", out)
                 self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
+
+    def test_a_go_trimpath_change_also_runs_the_suites_of_its_callers(self):
+        # server.sh and check-fast.sh compose GOFLAGS with the helper (#10614); test_ci.py and this suite run them.
+        helper = "scripts/test/go_trimpath.sh"
+        self.commit_on_top(helper, "#!/bin/sh\nprintf '%s\\n' -trimpath\n", "base")
+        for suite in ("scripts/test/test_go_trimpath.py", "scripts/ci/test_ci.py", "scripts/test/test_check_fast.py"):
+            self.commit_on_top(suite, FAILING, "base")
+        self.write(helper, "#!/bin/sh\n# changed\nprintf '%s\\n' -trimpath\n")
+        code, out = self.check_fast()
+        self.assertEqual(1, code, out)
+        self.assertIn("FAIL     scripts/test/test_go_trimpath.py", out)
+        self.assertIn("FAIL     scripts/ci/test_ci.py", out)
+        self.assertIn("FAIL     scripts/test/test_check_fast.py", out)
+
+    def test_the_debug_switch_list_and_its_checker_run_the_suites_that_read_them(self):
+        # debug_switches.txt matches no script name, yet a union merge can leave it out of order (#10616) and a new
+        # name can equal one that ships; the checker and release.sh, which runs it, are tested by the same suites.
+        self.commit_on_top("scripts/release/test_debug_switches.py", FAILING, "base")
+        self.commit_on_top("scripts/release/test_release_debug_guard.py", FAILING, "base")
+        self.break_suite("test_apple_release_switch_names.py")
+        for path in ("scripts/release/debug_switches.txt", "scripts/release/debug_switches.py",
+                     "scripts/release/release.sh"):
+            with self.subTest(path=path):
+                self.write(path, "changed\n")
+                code, out = self.check_fast()
+                (self.repo / path).unlink()
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/release/test_debug_switches.py", out)
+                self.assertIn("FAIL     scripts/release/test_release_debug_guard.py", out)
+                self.assertIn("FAIL     scripts/test/test_apple_release_switch_names.py", out)
+                self.assertNotIn("scripts/tools/test_other.py", out)
 
     def test_a_migration_edit_runs_the_freeze_check(self):
         self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
@@ -631,6 +716,16 @@ class CheckFastServerInputsTests(unittest.TestCase):
         out, packages = self.check_fast()
         self.assertEqual(["./internal/ext/..."], packages, out)
 
+    def test_a_wire_schema_runs_its_readers(self):
+        self.write("server/internal/wirereader/wire_test.go",
+                   'package wirereader\n\nvar s = filepath.Join("..", "..", "..", "schema", "wire", "x.schema.json")\n')
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "reader")
+        self.git("tag", "-f", "base")
+        self.write("schema/wire/x.schema.json", '{"changed": true}\n')
+        out, packages = self.check_fast()
+        self.assertEqual(["./internal/wirereader/..."], packages, out)
+
     def test_the_server_test_launcher_runs_its_reader(self):
         self.write("scripts/test/server_test_env.py", "# changed\n")
         out, packages = self.check_fast()
@@ -697,6 +792,26 @@ class CheckFastServerInputsTests(unittest.TestCase):
         self.assertEqual(["./internal/guide/conformance/..."], packages, out)
         self.assertEqual([], self.guard_calls(), out)
         self.assertNotIn("repo-wide guards", out)
+
+    def test_go_runs_with_trimpath_and_the_callers_flags(self):
+        # Worktrees share compiled packages only under -trimpath (#10614): check-fast adds it with
+        # scripts/test/go_trimpath.sh, which keeps a user-set GOFLAGS.
+        shutil.copy(ROOT / "scripts/test/go_trimpath.sh", self.repo / "scripts/test/go_trimpath.sh")
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "helper")
+        self.git("tag", "-f", "base")
+        # This go answers go env GOFLAGS as the real one does and records the GOFLAGS of every other call.
+        (self.go_log.parent / "go").write_text(
+            '#!/bin/sh\n[ "$*" = "env GOFLAGS" ] && { printf "%s\\n" "$GOFLAGS"; exit 0; }\n'
+            'printf "%s|%s|%s\\n" "${PWD##*/}" "$GOFLAGS" "$*" >> "$FAKE_GO_LOG"\n')
+        self.env["GOFLAGS"] = "-mod=readonly"
+        self.write("server/internal/foo/x.go", "package foo\n")
+        self.check_fast()
+        calls = [line.split("|", 2) for line in self.go_log.read_text().splitlines()]
+        tests = [call for call in calls if call[0] == "server" and call[2].startswith("test ")]
+        self.assertEqual(3, len(tests), calls)  # the package and the two guard calls
+        for _, goflags, _ in tests:
+            self.assertEqual("-mod=readonly -trimpath", goflags)
 
 
 # A privacy-scan stub that never finishes on its own: it records its own pid, its parent's (the GNU timeout that runs

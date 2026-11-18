@@ -8,7 +8,7 @@ import persona.core.contracts.Session
 import org.junit.Assert.*
 import org.junit.Test
 
-/** By Status as iOS lays it out (#4338 A5): eight sections in rank order, and Seen folded until it is opened. */
+/** By Status as iOS lays it out (#4338 A5): nine sections in rank order, and Seen folded until it is opened. */
 class ByStatusTest {
     private val machines = listOf(Machine("m", online = true))
     private val byStatus = AgentListSettings(grouping = AgentGrouping.State)
@@ -31,7 +31,7 @@ class ByStatusTest {
         assertFalse(busy.waitsInBackground)
         // Only a working agent waits in the background.
         assertFalse(row("stale", "idle", background = true).waitsInBackground)
-        assertEquals(listOf(3, 4, 7), listOf(busy, sleeping, seen).map { agentRank(it) })
+        assertEquals(listOf(3, 4, 8), listOf(busy, sleeping, seen).map { agentRank(it) })
         val list = buildAgentList(listOf(seen, sleeping, busy), machines, settings = byStatus)
         assertEquals(listOf("state/working", "state/background", "state/idle"), list.groups.map { it.id })
         assertEquals(CoreText.Key.StateBackgroundWaiting, list.groups[1].title.key)

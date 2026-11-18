@@ -336,10 +336,10 @@ pathlib.Path({str(resumed)!r}).touch()
     def test_real_writer_is_quiesced_for_the_whole_snapshot(self):
         request = self.history_fixture()
         runtime = Path(request["runtime"])
-        pause, paused = self.root/"pause", self.root/"paused"
+        pause, paused, ready = self.root/"pause", self.root/"paused", self.root/"writer-ready"
         writer = self.root/"writer.py"
         writer.write_text('''import pathlib,sys,time
-root,pause,paused,db=map(pathlib.Path,sys.argv[1:])
+root,pause,paused,db,ready=map(pathlib.Path,sys.argv[1:])
 counter=0
 while True:
     if pause.exists():
@@ -349,10 +349,13 @@ while True:
     counter+=1
     (root/'data/history.txt').write_text(str(counter))
     db.write_text(str(counter))
+    if counter == 1: ready.touch()
     time.sleep(.002)
 ''')
-        process = subprocess.Popen([sys.executable,str(writer),str(runtime),str(pause),str(paused),str(self.root/"database.json")])
+        process = subprocess.Popen([sys.executable,str(writer),str(runtime),str(pause),str(paused),str(self.root/"database.json"),str(ready)])
         self.addCleanup(lambda: (process.terminate(),process.wait(timeout=3)))
+        # The byte comparison requires the writer's first completed paired write.
+        self.wait_file(ready, process)
         hook = self.tool("coordinate", '''import pathlib,sys,time
 pause,paused=map(pathlib.Path,sys.argv[1:3])
 if sys.argv[3]=='pause': pause.touch()
@@ -369,6 +372,17 @@ else: raise SystemExit(3)
             history = archive.extractfile("root-0/data/history.txt").read()
         self.assertEqual((path/"database-0.dump").read_bytes()[5:], history)
         self.assertFalse(pause.exists())
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                self.fail("writer exited before resuming")
+            live_history = (runtime/"data/history.txt").read_bytes()
+            live_database = (self.root/"database.json").read_bytes()
+            if live_history not in (b"", history) and live_history == live_database:
+                break
+            time.sleep(.01)
+        else:
+            self.fail("writer did not resume paired writes")
 
 
 if __name__ == "__main__":

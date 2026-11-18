@@ -118,7 +118,10 @@ func (h *Hub) uploadFile(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if err != nil {
 		var re *rpc.Error
 		// A node from before file.upload.*, or before dest=dir / inbox: "unknown upload destination".
-		if errors.As(err, &re) && re.Code == "" && (strings.HasPrefix(re.Message, "unknown method") || strings.HasPrefix(re.Message, "unknown upload destination")) {
+		if h.nodeOutdated(w, r, err, "hub-upload.outdated", i18n.Args{"name": m.name()}) {
+			return
+		}
+		if errors.As(err, &re) && re.Code == "" && strings.HasPrefix(re.Message, "unknown upload destination") {
 			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-upload.outdated", i18n.Args{"name": m.name()}), nil)
 			return
 		}

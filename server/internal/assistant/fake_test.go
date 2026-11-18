@@ -39,9 +39,9 @@ type fakeHub struct {
 	itemReads     int                       // session.items reads since the hooks were set
 	onDevicesList func()                    // runs once, then clears, before the next devices.list; no lock held
 	// beforeSend runs once, then clears, when session.send is called, before it is answered (what happens on the
-	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list was
-	// answered. No lock held. sendHangs: session.send is never answered while the link stays up, and ends with the
-	// call's context, after beforeSend (a request that went out).
+	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list made
+	// with a listHooked context was answered. No lock held. sendHangs: session.send is never answered while the link
+	// stays up, and ends with the call's context, after beforeSend (a request that went out).
 	beforeSend   func()
 	afterList    map[string]func()
 	sendHangs    bool
@@ -179,6 +179,12 @@ type fakeHub struct {
 	// context: a check that takes its time; its error is the call's.
 	checkWait func(ctx context.Context) error
 	checkedAt []time.Time
+
+	// checkParams are the launchers.check params in order; oldCheck: the node runs the plain check whatever it is asked
+	// (no assistant_turn in its answer), as one without launcher_check_assistant_turn
+	checkParams []map[string]any
+	oldCheck    bool
+
 	repairs   []map[string]any
 	repairRes *proto.LauncherRepair
 	onRepair  func(f *fakeHub)
@@ -230,6 +236,16 @@ func (f *fakeHub) Hello(context.Context) (Hello, error) {
 	return h, nil
 }
 
+// afterListCall marks the context of the call a test arms afterList for (listHooked).
+type afterListCall struct{}
+
+// listHooked is ctx for the call under test: afterList runs only after a sessions.list made with it, never after one
+// a background goroutine makes meanwhile. A change to a task's agents has the todo-token sync list their machine
+// (syncTodoTokens), and on a busy machine that list can still be out when the test arms the hook.
+func listHooked(ctx context.Context) context.Context {
+	return context.WithValue(ctx, afterListCall{}, true)
+}
+
 func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
 	if p.Device == DeviceAll && p.Method == DeviceDevicesList {
 		f.mu.Lock()
@@ -255,7 +271,7 @@ func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	}
 	if p.Method != DeviceSessionItems {
 		out, err := f.deviceCall(ctx, p)
-		if p.Method == DeviceSessionsList {
+		if p.Method == DeviceSessionsList && ctx.Value(afterListCall{}) != nil {
 			f.mu.Lock()
 			hook := f.afterList[p.Device]
 			delete(f.afterList, p.Device)
@@ -409,14 +425,17 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	case assistantwire.DeviceLaunchersCheck:
 		name, _ := a["name"].(string)
 		f.checked = append(f.checked, p.Device+"/"+name)
+		f.checkParams = append(f.checkParams, a)
 		if f.onCheck != nil {
 			f.onCheck(f)
 		}
 		f.checkedAt = append(f.checkedAt, time.Now())
+		turn := a["assistant_turn"] == true && !f.oldCheck && launcherAgent(name) == "claude"
 		if c, ok := f.checks[p.Device+"/"+name]; ok {
+			c.AssistantTurn = c.AssistantTurn || turn
 			return json.Marshal(c)
 		}
-		return json.Marshal(proto.LauncherCheck{OK: true, Agent: launcherAgent(name), Model: "m", Answer: "ok"})
+		return json.Marshal(proto.LauncherCheck{OK: true, Agent: launcherAgent(name), Model: "m", Answer: "ok", AssistantTurn: turn})
 	case assistantwire.DeviceLaunchersRepair:
 		f.repairs = append(f.repairs, a)
 		if f.repairRes == nil {

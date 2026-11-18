@@ -1033,7 +1033,9 @@ func TestACardMessageReopensOnlyItsOwnTask(t *testing.T) {
 		other = todoNow(s, "todo_b")
 	}}
 	f.mu.Unlock()
-	if _, err := s.routeToTask(ctx, "conv1", accepted.ID, "Please cover the landscape case too"); err != nil {
+	// Only the card message's own look at the agents runs the hook: the token sync the acceptance started may still be
+	// listing box.
+	if _, err := s.routeToTask(listHooked(ctx), "conv1", accepted.ID, "Please cover the landscape case too"); err != nil {
 		t.Fatalf("the card message: %v", err)
 	}
 	if other.ID == "" || other.DoneAt == nil || other.DoneBy != db.DoneByReview || !slices.ContainsFunc(other.Agents, func(a TodoAgent) bool {

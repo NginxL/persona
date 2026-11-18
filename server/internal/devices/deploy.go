@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,8 +142,14 @@ func (m *Machine) startDeployOf(auto bool) error {
 	return nil
 }
 
+// deployExitWrapper is the deploy script's exit status when bin is a script (remote_bin a wrapper that sets the node's
+// environment, PERSONA_HOME say, and execs personad): replacing it would move the node to another data directory and
+// machine uid, so nothing is replaced and the owner updates the binary the wrapper runs.
+const deployExitWrapper = 5
+
 // deployScript is the remote command that installs the gzipped binary on stdin as bin and stops a resident node so
 // launchd restarts it. The staged binary must run `version` before it can replace the installed one or stop the node.
+// An installed file that is a script is never replaced (deployExitWrapper); one that is replaced is kept as bin.prev.
 // The pkill pattern is written so it does not match this ssh session's own command line.
 // personaNode: the binary is persona-node, which never replaces a file that is not persona-node already (a personad,
 // which may run a hub or a manager too, put there since the node said what it runs). The file says which it is in
@@ -159,6 +166,9 @@ func deployScript(bin string, personaNode bool) string {
 	}
 	return posixCommand("set -e; b=" + target + `; mkdir -p "$(dirname "$b")"; gzip -dc > "$b.new"; chmod 755 "$b.new"; ` + keep +
 		`if ! "$b.new" version >/dev/null; then rm -f "$b.new"; echo "$b failed its staged version check: keeping the current binary and node" >&2; exit 4; fi; ` +
+		`if [ -f "$b" ] && [ "$(head -c 2 "$b")" = '#!' ]; then rm -f "$b.new"; ` +
+		`echo "$b is a script, not personad: not replacing it (update the personad it runs instead)" >&2; exit ` + strconv.Itoa(deployExitWrapper) + `; fi; ` +
+		`if [ -f "$b" ]; then ln -f "$b" "$b.prev" 2>/dev/null || cp -p "$b" "$b.prev"; fi; ` +
 		`mv "$b.new" "$b"; pkill -f '` + residentNodePattern + `' || true`)
 }
 
@@ -236,6 +246,10 @@ func (m *Machine) deploy(ctx context.Context, bin, target string) error {
 		pw.CloseWithError(err)
 	}()
 	if out, err := cmd.CombinedOutput(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == deployExitWrapper {
+			return i18n.Err("devices-deploy.wrapper", i18n.Args{"path": remote})
+		}
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()

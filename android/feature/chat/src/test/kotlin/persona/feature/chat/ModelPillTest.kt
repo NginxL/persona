@@ -1,12 +1,15 @@
 package persona.feature.chat
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
@@ -23,6 +26,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.ModelPick
 import persona.core.contracts.PendingSwitch
@@ -126,7 +131,7 @@ class ModelPillTest {
         override suspend fun launcherModels(machineId: String, launcher: String) = when (launcher) {
             "claude" -> LauncherModels("claude", listOf(AgentModel("default", "Default", resolved = "claude-opus-5-5", isDefault = true),
                 AgentModel("opus", "Opus 5.5", resolved = "claude-opus-5-5")))
-            else -> LauncherModels("claude", listOf(AgentModel("sonnet", "Sonnet 4.5")))
+            else -> LauncherModels("claude", listOf(AgentModel("sonnet", "Sonnet 4.5", resolved = "claude-sonnet-4-5")))
         }
         override suspend fun setModelPick(session: SessionKey, pick: ModelPick) = pick.also { asked += "PUT ${session.sessionId} $it" }
         override suspend fun clearModelPick(session: SessionKey) { asked += "DELETE ${session.sessionId}" }
@@ -174,6 +179,34 @@ class ModelPillTest {
         rule.onNode(hasDialogText("Follow default"), useUnmergedTree = true).performClick()
         rule.waitUntil(5_000) { hub.asked.size == 2 }
         assertEquals("DELETE main", hub.asked.last())
+    }
+
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
+    @Test fun aPersonaChatsAllListNamesItsLauncher() {
+        val hub = Hub()
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"main","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        var dark by mutableStateOf(false)
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(chat, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.onNodeWithTag("model-pill").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodes(hasDialogText("Sonnet 4.5"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        val out = File(System.getProperty("persona.shots") ?: "build/model-pill-launcher-shots").apply { mkdirs() }
+        for (night in listOf(false, true)) {
+            rule.runOnIdle { dark = night }
+            rule.waitForIdle()
+            val bitmap = rule.onNode(isDialog()).captureToImage().asAndroidBitmap()
+            File(out, "model-panel-${if (night) "dark" else "light"}.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        rule.onNode(hasDialogText("Team API · claude-sonnet-4-5"), useUnmergedTree = true).assertExists()
     }
 
     @Test fun aNonMainAssistantConversationDrawsNoPill() {

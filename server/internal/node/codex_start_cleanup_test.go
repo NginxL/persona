@@ -83,7 +83,7 @@ func TestCodexCancelledWaitStillCloses(t *testing.T) {
 			cancel()
 		}
 	})
-	_, err := n.startCodex(ctx, n.defaultHost().(host.Launcher), filepath.Join(filepath.Dir(n.dir), "proj"), "codex", []string{"codex"}, "do the task", "w1", "", "")
+	_, err := n.startCodex(ctx, n.defaultHost().(host.Launcher), filepath.Join(filepath.Dir(n.dir), "proj"), "codex", []string{"codex"}, modelExecution{}, "do the task", "w1", "", "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation lost: %v", err)
 	}

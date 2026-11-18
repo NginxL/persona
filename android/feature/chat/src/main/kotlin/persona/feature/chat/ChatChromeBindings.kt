@@ -65,6 +65,8 @@ data class ChatChromeBindings(
      * [manager]; null: the recommended-setup rows have no button.
      */
     val onOpenSetup: ((page: persona.core.contracts.BriefSetupPage, manager: String?) -> Unit)? = null,
+    /** The manager's main conversation id, when known before [tasks] or [assistantManagement] resolves. */
+    val mainConversation: String? = null,
     /**
      * The hub's leader (direction) conversations for this manager (#6595): their patrol, supervision and relayed
      * rounds fold like the main conversation's. Empty from an older hub or a non-assistant surface.

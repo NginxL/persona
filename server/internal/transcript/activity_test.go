@@ -43,6 +43,11 @@ func TestActivitySaysWhatAToolCallDoes(t *testing.T) {
 		{"TodoWrite", `{"todos":[]}`, "在更新计划"},
 		{"Skill", `{"skill":"code-review"}`, "在用技能 code-review"},
 		{"ScheduleWakeup", `{"delaySeconds":270}`, "在等待"},
+		{"sleep", `{"duration":"25s","duration_ms":25000}`, "在等待"},
+		{"wait_agent", `{}`, "在等待"},
+		{"subagent", `{"name":"review_api","event":"started"}`, "在派子任务 review_api"},
+		{"subagent", `{"name":"review_api","event":"interacted"}`, "在联系子任务 review_api"},
+		{"subagent", `{"name":"review_api","event":"completed"}`, "子任务完成 review_api"},
 		{"mcp__persona__phone_calendar_events", `{}`, "在调用 phone_calendar_events"},
 		{"SomethingNew", `{}`, "在调用 SomethingNew"},
 	}
@@ -153,5 +158,19 @@ func TestThinkingAsTextIsThinking(t *testing.T) {
 	parse("💭 Thinking about it, the fix is small.")
 	if m.LastText != "💭 Thinking about it, the fix is small." {
 		t.Fatalf("plain text that starts the same way is text: %q", m.LastText)
+	}
+}
+
+// Every verb a Codex subagent event's line starts with is one the hub words in the user's language (ActivityKey): not
+// the node's Chinese passed through as it is.
+func TestSubagentActivityVerbsHaveKeys(t *testing.T) {
+	for event, want := range map[string]string{
+		"started": "act_subtask", "interacted": "act_subtask_message", "completed": "act_subtask_done",
+	} {
+		line := Activity("subagent", json.RawMessage(`{"name":"review_api","event":"`+event+`"}`))
+		verb, _, _ := strings.Cut(line, " ")
+		if key, isVerb := ActivityKey(verb); key != want || !isVerb {
+			t.Errorf("%s: ActivityKey(%q) = %q, %v; want %q, true", event, verb, key, isVerb, want)
+		}
 	}
 }

@@ -41,7 +41,8 @@ import java.io.File
  * Where Back from a conversation lands and New chat's page (#4339 C11), in every style, light and dark, and the Assistant
  * tab's menu on Glass, inside the shell's bar: the same steps on `main` and on the branch draw the before and after. The conversation itself is a stand-in (the
  * shared chat page needs the app's services); the page around it is the real one. Written as PNGs to
- * `build/no-home-shots/` (or `-Dpersona.shots=<dir>`).
+ * `build/no-home-shots/` (or `-Dpersona.shots=<dir>`). The real Archive / End comparison writes to
+ * `build/archive-end-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -63,15 +64,35 @@ class NoHomePageShotsTest {
     @Before fun setup() = AssistantManagerChoice.choose("hub", null, "assistant")
     @After fun cleanup() = AssistantManagerChoice.reset()
 
-    private class Hub(main: SessionKey) : AssistantRepository, MessageSender, MainConversationSender {
-        override val assistant = MutableStateFlow(AssistantSnapshot(mainSession = main, conversations = listOf(
+    private class Hub(main: SessionKey) : AssistantRepository, MessageSender, MainConversationSender, AssistantManagement {
+        private val all = listOf(
             Session(machineId = "mac", sessionId = "main", title = "Main chat", assistant = true),
             Session(machineId = "mac", sessionId = "side", title = "Trip plan", assistant = true),
-        )))
+        )
+        override val assistant = MutableStateFlow(AssistantSnapshot(mainSession = main, conversations = all, managerId = "assistant"))
         override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
-        override suspend fun refresh() = Unit
+        val archived = mutableListOf<SessionKey>()
+        val ended = mutableListOf<SessionKey>()
+        override suspend fun refresh() {
+            assistant.value = assistant.value.copy(conversations = all.filter { it.key !in archived && it.key !in ended })
+        }
         override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = Unit
         override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) = Unit
+        override suspend fun archiveConversation(session: SessionKey) { archived += session }
+        override suspend fun archivedConversations(): List<Session> = all.filter { it.key in archived }.map { it.copy(archived = true) }
+        override suspend fun endConversation(session: SessionKey) { ended += session }
+        override suspend fun warm() = Unit
+        override suspend fun tasks(): List<ScheduledTask> = emptyList()
+        override suspend fun saveTask(task: ScheduledTask): ScheduledTask = error("Unexpected save")
+        override suspend fun deleteTask(id: String) = error("Unexpected delete")
+        override suspend fun runTask(id: String): SessionKey = error("Unexpected run")
+        override suspend fun freshTask(id: String): ScheduledTask = error("Unexpected fresh")
+        override suspend fun runs(): List<Run> = emptyList()
+        override suspend fun notes() = AssistantNotes()
+        override suspend fun setNotes(text: String) = error("Unexpected notes")
+        override suspend fun memory(): List<MemoryFile> = emptyList()
+        override suspend fun saveMemory(name: String, content: String) = error("Unexpected memory")
+        override suspend fun deleteMemory(name: String) = error("Unexpected delete")
         suspend fun start() = SessionKey("mac", "new")
     }
 
@@ -113,11 +134,8 @@ class NoHomePageShotsTest {
         fun capture(name: String, dialog: Boolean = false) {
             rule.waitForIdle()
             val node = if (dialog) rule.onNode(isDialog()) else rule.onNodeWithTag("shot")
-            val bitmap = node.captureToImage().asAndroidBitmap()
-            val out = File(System.getProperty("persona.shots") ?: "build/no-home-shots").also { it.mkdirs() }
-            File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            saveCapture(name, node.captureToImage().asAndroidBitmap())
         }
-        fun back() { rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }; rule.waitForIdle() }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d; round++
             rule.waitForIdle()
@@ -135,6 +153,89 @@ class NoHomePageShotsTest {
             rule.onNodeWithText("Assistant").performClick()
             capture("$name-4-menu", dialog = true)
             back()
+        }
+    }
+
+    /**
+     * Archive and End act through the real row menus and state holders. Archive leaves Trip plan on screen; End replaces it
+     * with Main chat. Every style, light and dark, with the sheet and page composited into the same PNG.
+     */
+    @Test
+    @Config(qualifiers = "en-w400dp-h1200dp-xhdpi")
+    fun archiveAndEndOnTheOpenConversation() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var round by mutableIntStateOf(0)
+        var hub by mutableStateOf(Hub(main))
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                val configuration = Configuration(LocalConfiguration.current).apply {
+                    uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                        if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+                }
+                CompositionLocalProvider(LocalConfiguration provides configuration, LocalManagerRoster provides ManagerRoster(listOf(
+                    HubManager("assistant", "Helper", online = true, isDefault = true),
+                ), "assistant")) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(1200.dp).background(PersonaTheme.palette.background)) {
+                        key(round) {
+                            AssistantScreen(navigator, hub, hub, hub::start, composerService = null, mainConversationSender = hub,
+                                management = hub, requestedSession = side, chatContent = { key -> StandInChat(key) })
+                        }
+                    }
+                }
+            }
+        }
+        fun reset() {
+            hub = Hub(main)
+            round++
+            rule.waitForIdle()
+            rule.onNodeWithText("Plan a weekend in the mountains").assertExists()
+        }
+        fun openList() {
+            rule.onNodeWithContentDescription("Chats").performClick()
+            rule.waitForIdle()
+            rule.onAllNodesWithContentDescription("Chat actions").assertCountEquals(2)
+        }
+        fun capture(name: String) = captureAllWindows(name, "archive-end-shots")
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            reset()
+            openList()
+            rule.onAllNodesWithContentDescription("Chat actions")[1].performClick()
+            rule.onNodeWithText("Archive").performClick()
+            rule.waitUntil(5_000) { hub.archived == listOf(side) }
+            rule.waitForIdle()
+            rule.onAllNodesWithContentDescription("Chat actions").assertCountEquals(1)
+            rule.onNodeWithText("Archived (1)").assertExists()
+            rule.onNodeWithText("Archived").assertExists()
+            rule.onAllNodesWithText("Trip plan").assertCountEquals(1)
+            rule.onNodeWithText("Plan a weekend in the mountains").assertExists()
+            rule.onNodeWithText("Here is a two-day plan with a cabin near the trailhead.").assertExists()
+            val name = "${s.name.lowercase()}-${if (d) "dark" else "light"}"
+            capture("archive-end-$name-1-archive-list")
+            back()
+            rule.onAllNodesWithText("Trip plan").assertCountEquals(1)
+            rule.onNodeWithText("Plan a weekend in the mountains").assertExists()
+            capture("archive-end-$name-2-archive-chat")
+
+            reset()
+            openList()
+            rule.onAllNodesWithContentDescription("Chat actions")[1].performClick()
+            rule.onNodeWithText("End…").performClick()
+            rule.onNodeWithText("End chat").performClick()
+            rule.waitUntil(5_000) { hub.ended == listOf(side) }
+            rule.waitForIdle()
+            rule.onAllNodesWithContentDescription("Chat actions").assertCountEquals(1)
+            rule.onAllNodesWithText("Trip plan").assertCountEquals(0)
+            rule.onAllNodesWithText("Main chat").assertCountEquals(2)
+            rule.onNodeWithText("What's on my calendar today?").assertExists()
+            rule.onNodeWithText("Two meetings: design review at 10:00 and a 1:1 at 15:30.").assertExists()
+            rule.onAllNodesWithText("Archived (1)").assertCountEquals(0)
+            capture("archive-end-$name-3-end-list")
+            back()
+            rule.onAllNodesWithText("Main chat").assertCountEquals(1)
+            rule.onNodeWithText("What's on my calendar today?").assertExists()
+            capture("archive-end-$name-4-end-main")
         }
     }
 
@@ -181,6 +282,36 @@ class NoHomePageShotsTest {
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             File(out, "no-main-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
+    }
+
+    private fun saveCapture(name: String, bitmap: Bitmap, directory: String = "no-home-shots") {
+        val out = File(System.getProperty("persona.shots") ?: "build/$directory").also { it.mkdirs() }
+        File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun back() {
+        rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitForIdle()
+    }
+
+    private fun captureAllWindows(name: String, directory: String) {
+        rule.waitForIdle()
+        saveCapture(name, rule.runOnIdle { captureWindows() }, directory)
+    }
+
+    /** Draw the real page and sheet windows together; capturing only the page node omits the sheet. */
+    @Suppress("UNCHECKED_CAST")
+    private fun captureWindows(): Bitmap {
+        val global = Class.forName("android.view.WindowManagerGlobal")
+        val instance = global.getMethod("getInstance").invoke(null)
+        val views = global.getDeclaredField("mViews").apply { isAccessible = true }.get(instance) as List<android.view.View>
+        val bitmap = Bitmap.createBitmap(views.first().width, views.first().height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        views.forEach { view ->
+            val position = IntArray(2).also { view.getLocationOnScreen(it) }
+            canvas.save(); canvas.translate(position[0].toFloat(), position[1].toFloat()); view.draw(canvas); canvas.restore()
+        }
+        return bitmap
     }
 
     /** The conversation as the shared chat page draws it, roughly: a question, an answer, the composer under them. */

@@ -140,6 +140,13 @@ chosen by a `runtime` in the main chat's model binding. Each pair keeps working:
 | Session rows | `runtime` and `runtime_fallback` are no longer produced, and the hub drops them from an older node's report. Clients read their absence as the CLI. |
 | The runtime package | The Agent SDK runtime package (`persona-agent-sdk-runtime`, under its older `jarvis-` name too) is no longer carried. An older node that looks for it finds none and runs the CLI, its existing fallback. Copies already unpacked under a node's `runtime-packages/` are unused and not cleaned up. |
 
+### Launcher default models (#4663)
+
+A launcher with no explicit model has an empty `model` on the wire; display text is never a model ID. Older nodes and
+shell helpers could send the Chinese placeholder `默认` instead. Every client treats that legacy value exactly like an
+empty model: the launcher's own default applies, its existing localized Default presentation is used, and no placeholder
+is sent as a model pick. Explicit model IDs are unchanged in both directions.
+
 ## 配置、目录、服务与升级渠道
 
 | 标识 | 旧名 | 新名 | 新实现读旧安装 | 与旧实现共存／回退 |

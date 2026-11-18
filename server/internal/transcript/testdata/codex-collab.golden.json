@@ -1,0 +1,231 @@
+{
+  "items": [
+    {
+      "id": "prompt-one#0",
+      "seq": 4,
+      "ts": "2026-01-01T00:00:02Z",
+      "role": "user",
+      "kind": "text",
+      "text": "split the review between two helpers"
+    },
+    {
+      "id": "call_start_a#0",
+      "seq": 5,
+      "ts": "2026-01-01T00:00:03Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_start_a",
+      "tool_name": "subagent",
+      "tool_input": {
+        "name": "review_api",
+        "event": "started",
+        "agent_path": "/root/review_api",
+        "agent_thread_id": "00000000-0000-7000-8000-00000000000a",
+        "model": "example-model",
+        "reasoning_effort": "high"
+      }
+    },
+    {
+      "id": "call_start_a#1",
+      "seq": 5,
+      "ts": "2026-01-01T00:00:03Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_start_a",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_start_b#0",
+      "seq": 6,
+      "ts": "2026-01-01T00:00:04Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_start_b",
+      "tool_name": "subagent",
+      "tool_input": {
+        "name": "review_docs",
+        "event": "started",
+        "agent_path": "/root/review_docs",
+        "agent_thread_id": "00000000-0000-7000-8000-00000000000b",
+        "model": "example-model-mini",
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "id": "call_start_b#1",
+      "seq": 6,
+      "ts": "2026-01-01T00:00:04Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_start_b",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_sleep_1#0",
+      "seq": 7,
+      "ts": "2026-01-01T00:00:05Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_sleep_1",
+      "tool_name": "sleep",
+      "tool_input": {
+        "duration": "25s",
+        "duration_ms": 25000
+      }
+    },
+    {
+      "id": "call_sleep_1#1",
+      "seq": 7,
+      "ts": "2026-01-01T00:00:05Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_sleep_1",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_sleep_2#0",
+      "seq": 8,
+      "ts": "2026-01-01T00:00:30Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_sleep_2",
+      "tool_name": "sleep",
+      "tool_input": {
+        "duration": "1m30s",
+        "duration_ms": 90000
+      }
+    },
+    {
+      "id": "call_sleep_2#1",
+      "seq": 8,
+      "ts": "2026-01-01T00:00:30Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_sleep_2",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_ping_a#0",
+      "seq": 9,
+      "ts": "2026-01-01T00:02:00Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_ping_a",
+      "tool_name": "subagent",
+      "tool_input": {
+        "name": "review_api",
+        "event": "interacted",
+        "agent_path": "/root/review_api",
+        "agent_thread_id": "00000000-0000-7000-8000-00000000000a"
+      }
+    },
+    {
+      "id": "call_ping_a#1",
+      "seq": 9,
+      "ts": "2026-01-01T00:02:00Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_ping_a",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_wait_1#0",
+      "seq": 10,
+      "ts": "2026-01-01T00:02:01Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_wait_1",
+      "tool_name": "wait_agent",
+      "tool_input": {}
+    },
+    {
+      "id": "call_wait_1#1",
+      "seq": 10,
+      "ts": "2026-01-01T00:02:01Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_wait_1",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_done_a#0",
+      "seq": 11,
+      "ts": "2026-01-01T00:02:30Z",
+      "role": "assistant",
+      "kind": "tool_use",
+      "tool_use_id": "call_done_a",
+      "tool_name": "subagent",
+      "tool_input": {
+        "name": "review_api",
+        "event": "completed",
+        "agent_path": "/root/review_api",
+        "agent_thread_id": "00000000-0000-7000-8000-00000000000a"
+      }
+    },
+    {
+      "id": "call_done_a#1",
+      "seq": 11,
+      "ts": "2026-01-01T00:02:30Z",
+      "role": "user",
+      "kind": "tool_result",
+      "tool_use_id": "call_done_a",
+      "outcome": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "call_image_1#0",
+      "seq": 12,
+      "ts": "2026-01-01T00:02:31Z",
+      "role": "system",
+      "kind": "notice",
+      "text": "Codex 扩展事件：image.generate（完整记录在原会话中）"
+    },
+    {
+      "id": "reply-one#0",
+      "seq": 13,
+      "ts": "2026-01-01T00:02:32Z",
+      "role": "assistant",
+      "kind": "text",
+      "text": "both reviews are in"
+    },
+    {
+      "id": "line14#0",
+      "seq": 14,
+      "ts": "2026-01-01T00:02:33Z",
+      "role": "system",
+      "kind": "turn_duration",
+      "turn_duration": {
+        "duration_ms": 152000,
+        "source": "codex_task_complete",
+        "turn_id": "turn-one",
+        "user_item_id": "prompt-one#0"
+      }
+    }
+  ],
+  "meta": {
+    "first_user": "split the review between two helpers",
+    "last_text": "both reviews are in",
+    "model": "example-model",
+    "cwd": "/work/project/f1",
+    "permission_mode": "never",
+    "effort": "high",
+    "turns": 1,
+    "compactions": 0,
+    "context_tokens": 0,
+    "output_tokens": 0,
+    "last_activity": "2026-01-01T00:02:32Z"
+  }
+}

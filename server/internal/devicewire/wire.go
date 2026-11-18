@@ -345,6 +345,18 @@ type NodeCall struct {
 	// Fallback (a connection's calls only): sent instead when the node answers unknown method, a node from before
 	// Method (launchers.catalog falls back to launchers.managed).
 	Fallback *NodeCall `json:"fallback,omitempty"`
+	// Actor says who asked for a session.modes call the manager keeps a record of (#10297): display only, never
+	// trusted for access (the hub checked the request already). Nil from an older hub and on every other call.
+	Actor *Actor `json:"actor,omitempty"`
+}
+
+// Actor is who asked the hub for a call (NodeCall.Actor): the kind of token ("device", "hub" for the hub's own
+// token, "extension") and, for a device, its id and name as the hub knows them; an extension's id. Display only.
+type Actor struct {
+	Kind       string `json:"kind"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
+	Extension  string `json:"extension,omitempty"`
 }
 
 // RequestEnd is devices.request_end's params.
@@ -387,6 +399,9 @@ type PairConnector struct {
 // assistant's): its own settings of each machine and what only it can do.
 var Routes = []string{
 	"GET /api/v1/sessions/{mid}/{sid}/skills",
+	"GET /api/v1/sessions/{mid}/{sid}/mode-changes",
+	// The answer to a start's startup question, from a full device (#10365, internal/devices start_continue.go).
+	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",

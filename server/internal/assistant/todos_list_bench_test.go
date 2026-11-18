@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,8 +18,12 @@ import (
 // manyTodos is a manager holding n finished supervised tasks from the main conversation, each on a brief of its own,
 // except that every fourth one took over the one before it (two to-dos on one brief, a lineage of two steps). All its
 // times are fixed: the same n gives the same list, byte for byte.
-func manyTodos(n int) *Service {
-	s := New(Options{Hub: newFakeHub(), Logf: func(string, ...any) {}})
+func manyTodos(n int) *Service { return manyTodosOn(n, Options{Hub: newFakeHub()}) }
+
+// manyTodosOn is manyTodos on a manager made with o (a fleet, a store), its log quiet.
+func manyTodosOn(n int, o Options) *Service {
+	o.Logf = func(string, ...any) {}
+	s := New(o)
 	base := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	b := &s.todos
 	b.mu.Lock()
@@ -82,6 +87,110 @@ func BenchmarkTodosList(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkTodosView: the To-dos view's part of GET /api/v1/todos (todo_view_routes.go: every row's view and the
+// list's counts over the listed rows), with n finished supervised tasks as BenchmarkTodosList has them; open=n with
+// every one of them open again and its run's session listed, so each reads its run, the pass at its dearest. The
+// sessions come from a device call there; fleet/… reads them as a manager that carries the fleet does (production):
+// the computer lists the open runs and as many other sessions, and its archive keeps records rows it no longer lists.
+func BenchmarkTodosView(b *testing.B) {
+	run := func(b *testing.B, s *Service) {
+		ctx := context.Background()
+		list, err := s.listedTodos(ctx, true)
+		if err != nil {
+			b.Fatal(err)
+		}
+		now := time.Now()
+		b.ReportAllocs()
+		for b.Loop() {
+			s.viewed(ctx, list, now).counts()
+		}
+	}
+	for _, n := range []int{250, 1000, 4000} {
+		for _, open := range []bool{false, true} {
+			name := fmt.Sprintf("todos=%d", n)
+			if open {
+				name = fmt.Sprintf("open=%d", n)
+			}
+			b.Run(name, func(b *testing.B) {
+				s := manyTodos(n)
+				if open {
+					s.hub.(*fakeHub).setSessions("box", reopenForBench(s)...)
+				}
+				run(b, s)
+			})
+		}
+	}
+	for _, records := range []int{0, 4000} {
+		b.Run(fmt.Sprintf("fleet/open=1000/archive=%d", records), func(b *testing.B) {
+			run(b, fleetTodosForBench(b, 1000, records))
+		})
+	}
+	b.Run("fleet/open=1000/cards=200", func(b *testing.B) {
+		s := fleetTodosForBench(b, 1000, 0)
+		holdCardsForBench(s, 100)
+		run(b, s)
+	})
+}
+
+// holdCardsForBench puts up a card on every tenth of fleetTodosForBench's first n*10 runs, and one on each of n
+// sessions no to-do links: a read hands each run its own card and copies none of the others.
+func holdCardsForBench(s *Service, n int) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	for i := range n {
+		for _, sid := range []string{fmt.Sprintf("s%06d", i*10), fmt.Sprintf("other%05d", i)} {
+			ix := proto.Interaction{ID: "ix_" + sid, MachineID: "box", SessionID: sid, Kind: proto.IxQuestion,
+				CreatedAt: at, ExpiresAt: at.Add(time.Hour), Questions: []proto.Question{{Question: "Which test first?",
+					Options: []proto.QuestionOption{{Label: "The landscape test"}, {Label: "The rotation test"}}}}}
+			s.ixMapLocked()[ix.ID] = &pending{ix: ix}
+		}
+	}
+}
+
+// reopenForBench opens every to-do of manyTodos again, accepted and not seen, and answers its run's session, idle on
+// its computer.
+func reopenForBench(s *Service) []proto.Session {
+	var sessions []proto.Session
+	s.todos.mu.Lock()
+	for _, t := range s.todos.todos {
+		t.DoneAt, t.DoneBy, t.DoneReason = nil, "", ""
+		for _, a := range t.Agents {
+			sessions = append(sessions, proto.Session{MachineID: a.MachineID, SessionID: a.SessionID, Title: a.Title,
+				Status: proto.StatusIdle, State: proto.StateIdle, StateSince: t.UpdatedAt, UpdatedAt: t.UpdatedAt})
+		}
+	}
+	s.todos.mu.Unlock()
+	return sessions
+}
+
+// fleetTodosForBench is manyTodos's n tasks, open again (reopenForBench), on a manager that carries the fleet: its
+// computer lists their runs and n sessions no to-do links, and its archive keeps records rows the computer no longer
+// lists, as months of work leave them.
+func fleetTodosForBench(b *testing.B, n, records int) *Service {
+	d := newFleetDevs()
+	d.add("box", "Computer")
+	st := newFleetMem()
+	s := manyTodosOn(n, Options{Hub: newFakeHub(), Devices: d, Store: func() Store { return st }})
+	archive := map[string]agentArchive{}
+	for i := range records {
+		at := time.Unix(1600000000+int64(i), 0)
+		sess := archiveSnapshot(proto.Session{MachineID: "box", SessionID: fmt.Sprintf("a%05d", i), Title: "An archived task",
+			Cwd: "/code/example", Agent: "claude", UpdatedAt: at, LastText: strings.Repeat("x", 180)})
+		archive[runtimeListID("box", sess.SessionID)] = agentArchive{Session: sess, Archived: true, ChangedAt: at}
+	}
+	if err := st.PutSetting(context.Background(), agentArchivesKey, archive); err != nil {
+		b.Fatal(err)
+	}
+	list := reopenForBench(s)
+	for i := range n {
+		list = append(list, proto.Session{SessionID: fmt.Sprintf("other%05d", i), Cwd: "/code/example", Agent: "claude",
+			Status: proto.StatusIdle, Title: "Example task", LastText: strings.Repeat("Example result. ", 32)})
+	}
+	d.setSessions("box", list)
+	return s
 }
 
 // BenchmarkSuperviseWatch: one pass of the supervision loop (every superviseTick) over n finished supervised tasks.

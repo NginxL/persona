@@ -521,6 +521,7 @@ struct ModelLauncherDetailView: View {
                 Section { ProgressView().frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl) }.listRowBackground(Color.clear)
             }
         }
+        .accessibilityIdentifier("launcher.detail")
         .detailTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .pageToolbar {

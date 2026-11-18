@@ -763,6 +763,9 @@ enum ExtensionText {
             markets = list.markets
             error = nil
             missing = false
+            // An extension installed, upgraded or removed since: the marks of the conversations one opened read theirs
+            // again the next time one appears (#10358).
+            OpenerIcons.shared.stale()
         } catch {
             guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
             self.error = error.localizedDescription

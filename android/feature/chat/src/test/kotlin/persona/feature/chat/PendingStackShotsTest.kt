@@ -51,6 +51,7 @@ import persona.core.designsystem.NavItem
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.domain.answer.AnswerDraft
 import persona.core.domain.sort.SessionRenamer
 import persona.core.domain.tasks.TasksStore
 import java.io.File
@@ -90,6 +91,8 @@ class PendingStackShotsTest {
         questions = listOf(Question("Which branch should I push to?", options = listOf(QuestionOption("main"), QuestionOption("release/1.4")))))
     private val plan = Interaction("plan", machineId = key.machineId, sessionId = key.sessionId, kind = "plan", createdAt = at(5),
         summary = "Retry the import once after a restart", plan = "## Retry the import\n1. Catch the restart error\n2. Retry once\n3. Add a test")
+    private val recordedPlan = plan.copy(id = "plan-then", planThen = "default")
+    private val recordedPlanLarge = recordedPlan.copy(plan = "1. Catch the restart error")
     private val renamer = object : SessionRenamer {
         override fun project(source: Flow<List<Session>>) = source
         override suspend fun rename(session: Session, title: String?, tabName: String?) = false
@@ -264,6 +267,28 @@ class PendingStackShotsTest {
     @Test fun threeBoard() = agentScene("three", listOf(question, plan, permission), AppStyle.Board, false)
     @Test fun threeBoardDark() = agentScene("three", listOf(question, plan, permission), AppStyle.Board, true)
     @Test fun threeGlassLarge() = agentScene("three", listOf(question, plan, permission), AppStyle.Glass, false, large = true)
+    @Test fun recordedPlanGlass() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Glass, false)
+    @Test fun recordedPlanGlassDark() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Glass, true)
+    @Test fun recordedPlanBrief() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Brief, false)
+    @Test fun recordedPlanBriefDark() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Brief, true)
+    @Test fun recordedPlanBoard() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Board, false)
+    @Test fun recordedPlanBoardDark() = agentScene("recorded-plan", listOf(recordedPlan), AppStyle.Board, true)
+    @Test fun recordedPlanGlassLarge() = agentScene("recorded-plan", listOf(recordedPlanLarge), AppStyle.Glass, false, large = true)
+    @Test fun recordedPlanComponentGlassLarge() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                    Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
+                        InteractionForm(recordedPlanLarge, null, AnswerDraft(), {}, busy = false, uncertain = false, full = false,
+                            onAnswer = { _, _, _ -> }, onTerminal = null, onExpand = {}, showTerminalHelp = false)
+                    }
+                }
+            }
+        }
+        repeat(20) { Snapshot.sendApplyNotifications(); rule.mainClock.advanceTimeByFrame() }
+        save("recorded-plan-component-glass-light-large")
+    }
     @Test fun foldedGlass() = agentScene("folded", listOf(permission, question), AppStyle.Glass, false, fold = true)
     @Test fun foldedGlassDark() = agentScene("folded", listOf(permission, question), AppStyle.Glass, true, fold = true)
     @Test fun foldedBrief() = agentScene("folded", listOf(permission, question), AppStyle.Brief, false, fold = true)

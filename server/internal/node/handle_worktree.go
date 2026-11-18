@@ -34,6 +34,9 @@ type worktreeCreateParams struct {
 	Path              string `json:"path"`
 	ParentWorkspaceID string `json:"parent_workspace_id"`
 	AutoName          bool   `json:"auto_name"`
+	// ForAgent: the assistant makes this worktree for an Agent it starts there, so its first shell is Persona's
+	// (finished_close.go, #10624). The user's "New worktree…" never sends it.
+	ForAgent bool `json:"for_agent"`
 }
 
 // worktreeSourceParams is the request of worktree.source, .preset and .delete: which workspace (their handlers read the rest of the request themselves).

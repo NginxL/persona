@@ -323,7 +323,7 @@ func (t *tracker) check(ctx context.Context, r *voiceRun) {
 		onUser = waitingOnUser(sess)
 		if !look.Working {
 			look.Waiting = onUser
-			look.Failed = !look.Waiting && strings.TrimSpace(sess.TurnError) != ""
+			look.Failed = !look.Waiting && turnFailed(sess)
 		}
 		if !r.Seen && !look.Working && sess.Rev != 0 && sess.Rev != r.rev {
 			// Its transcript moved since the send: a short turn may have come and gone between two looks (no hub link
@@ -434,7 +434,7 @@ func (t *tracker) check(ctx context.Context, r *voiceRun) {
 		rd.Answer = withoutError(rd.Answer, sess.TurnError) // its sort is said, not its text
 	}
 	if rd.Stopped == "" && !look.Working && sess != nil {
-		rd.Stopped = channel.StopReason(sess.TurnError) // a Codex turn the model service failed writes no line of it
+		rd.Stopped = stopOf(sess) // a Codex turn the model service failed writes no line of it
 	}
 	if res := r.Decide(rd, look); res != nil {
 		if r.Observed {

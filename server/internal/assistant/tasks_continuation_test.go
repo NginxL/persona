@@ -462,7 +462,8 @@ func failedWritableCodexContinuation(t *testing.T, e *threadEnv) (string, string
 			return false
 		}
 		failed, err := e.s.loadPlan(ctx, plan.ID)
-		return err == nil && failed.Tasks[0].Error != ""
+		// The failure becomes visible before the async start releases its takeover claim; a retry in that gap is a no-op.
+		return e.s.taskStarting.Load() == 0 && err == nil && failed.Tasks[0].Error != ""
 	})
 	e.f.failStart = nil
 	if current := todoNow(e.s, id); current.PlanID != original.ID {

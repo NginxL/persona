@@ -38,6 +38,8 @@ type CatalogEntry struct {
 	Identity
 	ID       string `json:"id"`
 	CloneURL string `json:"clone_url,omitempty"`
+	// ProviderName is an extension provider's name when the entry was saved (absent for the built-ins).
+	ProviderName string `json:"provider_name,omitempty"`
 }
 type Catalog struct {
 	Revision     int64          `json:"revision"`
@@ -48,12 +50,23 @@ type SourceSnapshot struct {
 	CloneURL        string   `json:"clone_url"`
 	TransportOrigin string   `json:"transport_origin"`
 	CatalogRevision int64    `json:"catalog_revision"`
+	// ProviderName keeps an extension provider's name, so the row still reads when it is gone (absent for the built-ins).
+	ProviderName string `json:"provider_name,omitempty"`
 }
 type LinkInput struct {
 	URL    string `json:"url,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	Number string `json:"number,omitempty"`
 	Title  string `json:"title,omitempty"`
+	// Resolved is an extension identity's link as the service resolved it before the transaction (never JSON).
+	Resolved *ResolvedLink `json:"-"`
+}
+
+// ResolvedLink is a link of an extension provider's repository, taken from the stored set or asked of the provider
+// (repo.link) before any transaction; Source is the repository it belongs to.
+type ResolvedLink struct {
+	Source SourceSnapshot
+	Link   TaskLink
 }
 type TaskLink struct {
 	Kind         string `json:"kind"`
@@ -75,6 +88,10 @@ type TaskRepository struct {
 	SourceSnapshot SourceSnapshot `json:"source_snapshot"`
 	Links          []TaskLink     `json:"links"`
 	CatalogState   string         `json:"catalog_state,omitempty"`
+	// ProviderState and LinkKinds describe an extension provider's row when answering reads (available, off or
+	// missing; its own link labels). Computed like CatalogState, never stored.
+	ProviderState string      `json:"provider_state,omitempty"`
+	LinkKinds     []LinkLabel `json:"link_kinds,omitempty"`
 }
 type TaskSet struct {
 	SchemaVersion int              `json:"schema_version"`
@@ -169,8 +186,15 @@ func NormalizeRef(ref RequestedRef) (RequestedRef, error) {
 	return ref, nil
 }
 
-// CloneTransport accepts credential-free repository roots, not provider subpages.
+// CloneTransport accepts credential-free repository roots, not provider subpages. An extension provider's address was
+// checked against its hosts when it was saved; here only its shape is, so it works with the provider gone.
 func CloneTransport(raw string, identity Identity) (string, error) {
+	if IsExtensionProvider(identity.Provider) {
+		if _, ok := cloneHost(raw); !ok {
+			return "", Problem("invalid")
+		}
+		return raw, nil
+	}
 	parsed, err := Parse(raw, identity.Provider)
 	if err != nil || parsed != identity {
 		return "", Problem("invalid")
@@ -201,6 +225,9 @@ func NormalizeLink(identity Identity, in LinkInput) (TaskLink, error) {
 	in.Title = strings.TrimSpace(in.Title)
 	if !utf8.ValidString(in.Title) || len(in.Title) > 1024 || strings.ContainsFunc(in.Title, unicode.IsControl) {
 		return TaskLink{}, Problem("invalid")
+	}
+	if IsExtensionProvider(identity.Provider) {
+		return extensionLink(identity, in)
 	}
 	if in.URL != "" {
 		if in.Kind != "" || in.Number != "" || len(in.URL) > 2048 {
@@ -253,6 +280,28 @@ func NormalizeLink(identity Identity, in LinkInput) (TaskLink, error) {
 		}
 	}
 	return TaskLink{Kind: in.Kind, Number: in.Number, CanonicalURL: identity.CanonicalURL + "/" + segment + "/" + in.Number, Title: in.Title}, nil
+}
+
+// extensionLink is an extension identity's link as the service resolved it before the transaction: a stored link or the
+// provider's answer, re-checked. Nothing is synthesized from a kind and number: without an answer the link is refused.
+func extensionLink(identity Identity, in LinkInput) (TaskLink, error) {
+	if in.URL != "" && (in.Kind != "" || in.Number != "" || len(in.URL) > 2048) || in.URL == "" && in.Kind == "" {
+		return TaskLink{}, Problem("invalid")
+	}
+	if in.Resolved == nil || in.Resolved.Source.Identity != identity {
+		return TaskLink{}, Problem("invalid")
+	}
+	link := in.Resolved.Link
+	if link.Kind != "issue" && link.Kind != "pull_request" || !linkNumber(link.Number) || !underRepository(identity, link.CanonicalURL) ||
+		in.Kind != "" && (in.Kind != link.Kind || in.Number != link.Number) {
+		return TaskLink{}, Problem("link_repository_mismatch")
+	}
+	if in.Title != "" {
+		link.Title = in.Title
+	} else if len(link.Title) > 1024 || !utf8.ValidString(link.Title) || strings.ContainsFunc(link.Title, unicode.IsControl) {
+		link.Title = ""
+	}
+	return link, nil
 }
 
 // PreserveLinkTitles keeps metadata when older clients send only link identities.
@@ -344,7 +393,7 @@ func Bind(current []TaskRepository, input []TaskInput, catalog Catalog) ([]TaskR
 			if _, err := CloneTransport(transport, entry.Identity); err != nil {
 				return nil, err
 			}
-			row.SourceSnapshot = SourceSnapshot{entry.Identity, transport, origin, catalog.Revision}
+			row.SourceSnapshot = SourceSnapshot{entry.Identity, transport, origin, catalog.Revision, entry.ProviderName}
 		}
 		if identities[row.SourceSnapshot.Identity] {
 			return nil, Problem("duplicate_repo")
@@ -473,10 +522,19 @@ func MergeTaskLinks(current []TaskRepository, urls []string, catalog Catalog) ([
 	return MergeTaskLinkDetails(current, input, catalog)
 }
 
-// ParseTaskLinkInput accepts an exact URL and optional title, without a remote lookup.
+// ParseTaskLinkInput accepts an exact URL and optional title, without a remote lookup. A link the service resolved
+// through its extension provider keeps that provider's repository and link.
 func ParseTaskLinkInput(in LinkInput) (Identity, TaskLink, error) {
 	if in.Kind != "" || in.Number != "" {
 		return Identity{}, TaskLink{}, Problem("invalid")
+	}
+	if in.Resolved != nil {
+		identity := in.Resolved.Source.Identity
+		if !IsExtensionProvider(identity.Provider) {
+			return Identity{}, TaskLink{}, Problem("invalid")
+		}
+		link, err := NormalizeLink(identity, in)
+		return identity, link, err
 	}
 	identity, link, err := ParseTaskLink(in.URL)
 	if err != nil {
@@ -505,13 +563,27 @@ func MergeTaskLinkDetails(current []TaskRepository, input []LinkInput, catalog C
 			digest := sha256.Sum256([]byte(identity.Provider + "|" + identity.CanonicalURL))
 			id := "linked_" + hex.EncodeToString(digest[:12])
 			source := SourceSnapshot{Identity: identity, CloneURL: identity.CanonicalURL, TransportOrigin: "canonical_default"}
+			if in.Resolved != nil {
+				// An extension provider's repository is cloned from where its provider said (repo.parse's clone_url).
+				source.ProviderName = in.Resolved.Source.ProviderName
+				if clone := in.Resolved.Source.CloneURL; clone != "" && clone != identity.CanonicalURL {
+					if _, err := CloneTransport(clone, identity); err == nil {
+						source.CloneURL, source.TransportOrigin = clone, "provider"
+					}
+				}
+			}
 			for _, entry := range catalog.Repositories {
 				if entry.Identity == identity && !slices.ContainsFunc(out, func(r TaskRepository) bool { return r.RepoID == entry.ID }) {
+					// The saved repository's own transport, as binding it would give (Bind).
 					id = entry.ID
 					source.CatalogRevision = catalog.Revision
+					source.CloneURL, source.TransportOrigin = identity.CanonicalURL, "canonical_default"
 					if entry.CloneURL != "" {
 						source.CloneURL = entry.CloneURL
 						source.TransportOrigin = "catalog"
+					}
+					if entry.ProviderName != "" {
+						source.ProviderName = entry.ProviderName
 					}
 					break
 				}

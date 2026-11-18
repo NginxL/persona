@@ -103,6 +103,12 @@ class HttpMachineManagement internal constructor(
     override suspend fun setCodexSetting(machineId: String, key: String, value: JsonElement): List<ClaudeSetting> =
         setSetting(machineId, "codex-settings", key, value)
 
+    override suspend fun agySettings(machineId: String): List<ClaudeSetting> =
+        settings(call(api("machines", machineId, "agy-settings"), "GET"))
+
+    override suspend fun setAgySetting(machineId: String, key: String, value: JsonElement): List<ClaudeSetting> =
+        setSetting(machineId, "agy-settings", key, value)
+
     private suspend fun setSetting(machineId: String, page: String, key: String, value: JsonElement): List<ClaudeSetting> {
         require(key.isNotBlank())
         return settings(call(api("machines", machineId, page), "PUT", buildJsonObject {

@@ -12,19 +12,31 @@ import PushKit
     /// Urgent calls were on when the settings were last read or changed on this phone (read once at launch).
     static let onKey = "urgentCalls.on"
 
+    private let isiOSAppOnMac: Bool
+    private let defaults: UserDefaults
+    private let makeRegistry: @MainActor () -> PKPushRegistry
     private var registry: PKPushRegistry?
     /// The PushKit token (hex) while registered.
     private(set) var token: String?
 
-    /// At launch: registers when urgent calls were on.
+    init(isiOSAppOnMac: Bool = CallPlatform.isiOSAppOnMac, defaults: UserDefaults = .standard,
+         makeRegistry: @escaping @MainActor () -> PKPushRegistry = { PKPushRegistry(queue: .main) }) {
+        self.isiOSAppOnMac = isiOSAppOnMac
+        self.defaults = defaults
+        self.makeRegistry = makeRegistry
+    }
+
+    /// At launch: registers when urgent calls were on. A Mac never creates a registry.
     func start() {
-        if UserDefaults.standard.bool(forKey: Self.onKey) { register() }
+        guard !isiOSAppOnMac else { return }
+        if defaults.bool(forKey: Self.onKey) { register() }
     }
 
     /// Urgent calls were turned on or off (Settings › Urgent calls, or read from the hub): registers or lets go, and the
     /// hub hears the token, or that there is none.
     func set(on: Bool) {
-        if UserDefaults.standard.bool(forKey: Self.onKey) != on { UserDefaults.standard.set(on, forKey: Self.onKey) }
+        guard !isiOSAppOnMac else { return }
+        if defaults.bool(forKey: Self.onKey) != on { defaults.set(on, forKey: Self.onKey) }
         if on {
             register()
         } else if registry != nil {
@@ -36,8 +48,8 @@ import PushKit
     }
 
     private func register() {
-        guard registry == nil else { return }
-        let r = PKPushRegistry(queue: .main)
+        guard !isiOSAppOnMac, registry == nil else { return }
+        let r = makeRegistry()
         r.delegate = self
         r.desiredPushTypes = [.voIP]
         registry = r

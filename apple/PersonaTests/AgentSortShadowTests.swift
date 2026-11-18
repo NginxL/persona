@@ -67,8 +67,7 @@ import PersonaWire
                 let core = try ProjectionFixture.project(fixture.input, fixture.name, using: PersonaCoreProjections.sort)
                 let coreComparable = try AgentSortComparable(core: try JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input, presentation: snapshot.presentation, now: snapshot.now)).utf8)), input: input, presentation: snapshot.presentation)
                 let differences = AgentSortComparable.differences(native: native, core: coreComparable)
-                let known = ["machine_uses_registry_order": Set(["quick-filter", "pin-membership"]), // #9221
-                             "space_time_tie_reversed": Set(["unread-shown"])] // #9335
+                let known = ["machine_uses_registry_order": Set(["quick-filter", "pin-membership"])] // #9221
                 if let expected = known[fixture.name], expected == Set(differences) {
                     withKnownIssue("Tracked core discrepancy for \(fixture.name)") {
                         #expect(differences == [], "\(fixture.name)")
@@ -81,6 +80,23 @@ import PersonaWire
                 Issue.record("\(fixture.name): \(error)")
             }
         }
+    }
+
+    @Test func spaceTimeTieReversedPreservesFilteredUnreadOrderThroughTheRealCABI() throws {
+        let fixture = try ProjectionFixture.require(try ProjectionFixture.cases(in: "sort", operation: "agents_list").first { $0.name == "space_time_tie_reversed" }, "space_time_tie_reversed")
+        let snapshot = try nativeSnapshot(fixture)
+        let native = AgentSortComparable(native: snapshot.input, presentation: snapshot.presentation, now: snapshot.now)
+        let legacy = try ProjectionFixture.project(fixture.input, fixture.name, using: PersonaCoreProjections.sort)
+        try ProjectionFixture.assertEqual(legacy, fixture.expected, fixture.name)
+        let output = try PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(snapshot.input, presentation: snapshot.presentation, now: snapshot.now))
+        let core = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(output.utf8)), input: snapshot.input, presentation: snapshot.presentation)
+        let expectedGroups = ["machine-a/space-a", "machine-a/space-b"]
+        let expectedUnread = ["machine-a/b", "machine-a/a"]
+        #expect(native.groups.map(\.id) == expectedGroups)
+        #expect(core.groups.map(\.id) == expectedGroups)
+        #expect(native.unread == expectedUnread)
+        #expect(core.unread == expectedUnread)
+        #expect(AgentSortComparable.differences(native: native, core: core) == [])
     }
 
     @Test func adapterKeepsSwiftOutputIdentical() throws {
@@ -279,6 +295,32 @@ import PersonaWire
         let coreSide = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input, presentation: sidePresentation)).utf8)), input: input, presentation: sidePresentation)
         #expect(coreSide.groups.map(\.visibleRows) == nativeSide.groups.map(\.visibleRows))
         #expect(AgentSortComparable.differences(native: nativeSide, core: coreSide) == [])
+    }
+
+    @Test func compactSpaceRowsAndUnreadKeepTheirOwnOrderThroughTheRealCABI() throws {
+        let sessions = try ["b", "a"].map { id in
+            try session(.object([
+                "machine_id": .string("machine-a"), "session_id": .string(id),
+                "title": .string("Fixture"), "state": .string("unread"), "status": .string("idle"),
+                "space_id": .string("space-a"), "space_name": .string("Project"),
+                "updated_at": .string("2026-01-01T00:00:10Z"),
+            ]))
+        }
+        let machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"machine-a","name":"Fixture","kind":"local","online":true}"#.utf8))
+        let input = AgentListProjection.Input(sessions: sessions, machines: [machine], settings: .init(grouping: "space"))
+        let presentation = AgentSortPresentation(compact: true)
+        let native = AgentSortComparable(native: input, presentation: presentation)
+        let expectedOrder = ["machine-a/b", "machine-a/a"]
+        #expect(native.filtered == expectedOrder)
+        #expect(native.presentationRows?.count == 2)
+        #expect(Set(native.presentationRows?.map(\.id) ?? []) == Set(expectedOrder))
+        #expect(native.unread == expectedOrder)
+        let output = try PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input, presentation: presentation))
+        let core = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(output.utf8)), input: input, presentation: presentation)
+        // Compact display order and unread order are independent contracts; neither is derived from the other.
+        #expect(core.presentationRows?.map(\.id) == native.presentationRows?.map(\.id))
+        #expect(core.unread == expectedOrder)
+        #expect(AgentSortComparable.differences(native: native, core: core) == [])
     }
 
     @Test func presentationComparisonDetectsReorderedRows() throws {

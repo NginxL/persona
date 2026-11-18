@@ -119,6 +119,44 @@ func TestHerdrSetModelTypesTheCommandAndChecksTheScreen(t *testing.T) {
 	}
 }
 
+// A typed /model on a managed provider behind a gateway gets what a start's --model gets (#10365): a tier alias is the
+// provider's model for that tier, and one it names none for is left out, `/model default` (its default) typed instead
+// of an alias Claude Code would send to the gateway as a model's name.
+func TestHerdrSetModelMapsATierAliasOnAGatewayProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		l     proto.ManagedLauncher
+		model string
+		typed string
+	}{
+		{"mapped", proto.ManagedLauncher{Name: "gw", Kind: "api", BaseURL: "https://gw.example.com", Model: "m1", OpusModel: "route/claude-opus-4-6"}, "opus[1m]", "route/claude-opus-4-6[1m]"},
+		{"left out", proto.ManagedLauncher{Name: "gw", Kind: "api", BaseURL: "https://gw.example.com"}, "opus", "default"},
+		{"a model ID", proto.ManagedLauncher{Name: "gw", Kind: "api", BaseURL: "https://gw.example.com"}, "vendor/model-x", "vendor/model-x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f, _ := herdrNode(t)
+			n.setManaged([]proto.ManagedLauncher{tc.l})
+			seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", "/tmp/m", ""))
+			n.state.put(sidA, sessionState{Launcher: "gw", Cwd: "/tmp/m"})
+			empty, emptyANSI := screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi")
+			f.setScreens("w1:p1", empty, emptyANSI)
+			f.after(func(c herdrCall) {
+				if c.Method == "agent.prompt" {
+					f.setScreens("w1:p1", empty+"\n❯ /model "+tc.typed+"\n  ⎿  Set model to "+tc.typed+"\n", emptyANSI)
+				}
+			})
+			if err := setModel(t, n, sidA, tc.model); err != nil {
+				t.Fatal(err)
+			}
+			assertTrace(t, squeeze(f.trace()), []string{
+				readANSI("w1:p1"),
+				call("agent.prompt", map[string]any{"target": "w1:p1", "text": "/model " + tc.typed}),
+				readVisible("w1:p1"),
+			})
+		})
+	}
+}
+
 func TestHerdrSetModelWaitsForConfirmationAfterTheLatestCommand(t *testing.T) {
 	n, f, _ := herdrNode(t)
 	seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", "/tmp/m", ""))

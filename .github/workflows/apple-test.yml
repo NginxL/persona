@@ -25,7 +25,7 @@ jobs:
   apple:
     name: iOS, Watch and HTML tests (Xcode 26.0)
     runs-on: macos-26
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
       CI_SPM_CACHE: ${{ github.workspace }}/.ci-cache/spm

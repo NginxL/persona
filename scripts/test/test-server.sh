@@ -21,6 +21,8 @@ rsync -a --delete sdk/templates/ "$H":"$D/sdk/templates/"
 rsync -a --delete --exclude node_modules sdk/ts/ "$H":"$D/sdk/ts/"
 # Extension conformance tests read the source schemas' valid and invalid examples outside the Go module.
 rsync -a --delete schema/extension/ "$H":"$D/schema/extension/"
+# The wire type tests (assistantwire, todo projection) read the generated wire schemas from ../../../schema/wire (#10307).
+rsync -a --delete schema/wire/ "$H":"$D/schema/wire/"
 # Wire, continuity and resolution tests read the shared fixtures next to server/ (../../../spec from a package),
 # and the resolution ones check the apps' Swift sources against them.
 rsync -a --delete spec/ "$H":"$D/spec/"

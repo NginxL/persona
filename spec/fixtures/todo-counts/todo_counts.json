@@ -1,0 +1,2296 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty_list",
+      "description": "No to-dos: every count 0, every section named with 0, and the three fixed places only.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.3",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Counts\""
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [],
+        "sessions": []
+      },
+      "expected": {
+        "counts": {
+          "open": 0,
+          "needs_you": 0,
+          "in_progress": 0,
+          "sections": {
+            "needs_you": 0,
+            "can_wait": 0,
+            "working": 0,
+            "waiting": 0,
+            "todo": 0,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 0
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 0,
+            "needs_you": 0,
+            "in_progress": 0,
+            "sections": {
+              "needs_you": 0,
+              "can_wait": 0,
+              "working": 0,
+              "waiting": 0,
+              "todo": 0,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mixed_list",
+      "description": "One to-do in each section. N counts the failed start only: the quiet task's ask and the Can wait decision are listed, not counted; In progress is Working and Waiting; Someday and the closed ones are not open; projects with nothing open get no place.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Counts\"",
+        "docs/design/proposals/todos-redesign.md 3.3",
+        "#10226 (counting)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_a1",
+            "title": "Book the train to Kyoto",
+            "notes": "",
+            "done_at": "2026-11-10T09:00:00Z",
+            "created_at": "2026-11-10T08:55:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip"
+          },
+          {
+            "id": "todo_b1",
+            "title": "Plan the Kyoto trip",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-ryokan",
+                "linked_at": "2026-11-09T08:01:00Z",
+                "title": "Ryokan research",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": true,
+            "project": "kyoto-trip"
+          },
+          {
+            "id": "todo_e1",
+            "title": "Pick the cherry blossom spot",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-spots",
+                "linked_at": "2026-11-09T08:01:00Z",
+                "title": "Blossom spots",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "A picnic spot is chosen"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-10T10:00:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which spot for the picnic?",
+                  "recommend": "Maruyama Park",
+                  "options": [
+                    {
+                      "label": "Maruyama Park",
+                      "leads_to": "A picnic under the big weeping cherry"
+                    },
+                    {
+                      "label": "Philosopher's Path",
+                      "leads_to": "A walk along the canal, no picnic spot"
+                    }
+                  ],
+                  "deadline": "2026-11-13T09:00:00Z",
+                  "reversible": true
+                }
+              ],
+              "updated_at": "2026-11-10T10:00:00Z"
+            },
+            "project": "home",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Maruyama Park",
+              "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "safe",
+              "question": "Which spot for the picnic?",
+              "options": [
+                {
+                  "label": "Maruyama Park",
+                  "leads_to": "A picnic under the big weeping cherry"
+                },
+                {
+                  "label": "Philosopher's Path",
+                  "leads_to": "A walk along the canal, no picnic spot"
+                }
+              ],
+              "deadline": "2026-11-13T09:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            }
+          },
+          {
+            "id": "todo_g1",
+            "title": "Plan the Osaka day",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-osaka",
+                "linked_at": "2026-11-08T08:01:00Z",
+                "title": "Osaka itinerary",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "project": "kyoto-trip"
+          },
+          {
+            "id": "todo_h1",
+            "title": "Confirm the tea ceremony booking",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-09T15:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-tea",
+                "linked_at": "2026-11-08T08:01:00Z",
+                "title": "Tea ceremony booking",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "The venue confirmed the booking"
+              ],
+              "criteria": [],
+              "state": "parked",
+              "parked": {
+                "reason": "Waiting for the venue to confirm by mail",
+                "until": "2026-11-11T09:00:00Z",
+                "waiting_on": "external_event",
+                "count": 1
+              },
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-09T15:00:00Z",
+                  "verdict": "parked",
+                  "reason": "Waiting for the venue to confirm by mail",
+                  "until": "2026-11-11T09:00:00Z",
+                  "waiting_on": "external_event",
+                  "parks": 1
+                }
+              ],
+              "updated_at": "2026-11-09T15:00:00Z"
+            }
+          },
+          {
+            "id": "todo_i1",
+            "title": "Compare the rail pass prices",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T07:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-rail",
+                "linked_at": "2026-11-10T07:01:00Z",
+                "title": "Rail pass prices",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_l1",
+            "title": "Send the itinerary to the group",
+            "notes": "",
+            "done_at": "2026-11-10T10:00:00Z",
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-send",
+                "linked_at": "2026-11-09T07:01:00Z",
+                "released_at": "2026-11-10T10:00:00Z",
+                "title": "Itinerary mail",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "project": "travel-admin"
+          },
+          {
+            "id": "todo_p1",
+            "title": "Water the plants",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-09T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home"
+          },
+          {
+            "id": "todo_n1",
+            "title": "Learn to make matcha at home",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-01T07:00:00Z",
+            "updated_at": "2026-11-01T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "reading"
+          },
+          {
+            "id": "todo_m1",
+            "title": "Book the airport limousine",
+            "notes": "",
+            "done_at": "2026-11-10T08:00:00Z",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "done_by": "review",
+            "cancelled_at": "2026-11-10T08:00:00Z",
+            "cancelled_reason": "The trip moved to spring",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "seen_at": "2026-11-10T09:00:00Z"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-ryokan",
+            "title": "Ryokan research",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:30:00Z",
+            "pending_interactions": 1,
+            "asks": "Which ryokan should I book?",
+            "quiet": true
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-spots",
+            "title": "Blossom spots",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T09:50:00Z",
+            "updated_at": "2026-11-10T09:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-osaka",
+            "title": "Osaka itinerary",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:40:00Z",
+            "updated_at": "2026-11-10T11:55:00Z",
+            "pending_interactions": 0,
+            "activity": "reading the train timetable",
+            "activity_at": "2026-11-10T11:55:00Z",
+            "last_text": "Checking the Shinkansen times"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-tea",
+            "title": "Tea ceremony booking",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-09T14:50:00Z",
+            "updated_at": "2026-11-09T14:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-rail",
+            "title": "Rail pass prices",
+            "status": "idle",
+            "state": "unread",
+            "state_since": "2026-11-10T11:20:00Z",
+            "updated_at": "2026-11-10T11:20:00Z",
+            "pending_interactions": 0
+          }
+        ],
+        "someday_until": {
+          "todo_n1": "2026-12-01T00:00:00Z"
+        },
+        "projects": {
+          "home": "Home",
+          "kyoto-trip": "Kyoto trip",
+          "reading": "Reading list",
+          "travel-admin": "Travel admin"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 7,
+          "needs_you": 1,
+          "in_progress": 2,
+          "sections": {
+            "needs_you": 2,
+            "can_wait": 1,
+            "working": 1,
+            "waiting": 1,
+            "todo": 1,
+            "just_finished": 2,
+            "someday": 1,
+            "done": 1
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 1
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "project:home",
+              "kind": "project",
+              "title": "Home",
+              "project": "home",
+              "needs_you": 0
+            },
+            {
+              "id": "project:kyoto-trip",
+              "kind": "project",
+              "title": "Kyoto trip",
+              "project": "kyoto-trip",
+              "needs_you": 1
+            }
+          ],
+          "counts": {
+            "open": 7,
+            "needs_you": 1,
+            "in_progress": 2,
+            "sections": {
+              "needs_you": 2,
+              "can_wait": 1,
+              "working": 1,
+              "waiting": 1,
+              "todo": 1,
+              "just_finished": 2,
+              "someday": 1,
+              "done": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "failed_start_counts_open",
+      "description": "A failed start older than 48 hours is an open To do, counted open though done_at is stored; a closed to-do is not; a project the knowledge base does not name is titled by its slug.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Counts\"",
+        "#10226 (a failed start reads as open)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_a2",
+            "title": "Plant the tulip bulbs",
+            "notes": "",
+            "done_at": "2026-11-07T10:00:00Z",
+            "created_at": "2026-11-07T09:55:00Z",
+            "updated_at": "2026-11-07T10:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "garden"
+          },
+          {
+            "id": "todo_q1",
+            "title": "Order the seeds",
+            "notes": "",
+            "done_at": "2026-11-02T07:00:00Z",
+            "created_at": "2026-11-01T07:00:00Z",
+            "updated_at": "2026-11-02T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "garden"
+          },
+          {
+            "id": "todo_r1",
+            "title": "Pick up the dry cleaning",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-09T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "errands"
+          }
+        ],
+        "sessions": [],
+        "projects": {
+          "garden": "Garden"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 2,
+          "needs_you": 0,
+          "in_progress": 0,
+          "sections": {
+            "needs_you": 0,
+            "can_wait": 0,
+            "working": 0,
+            "waiting": 0,
+            "todo": 2,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 1
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "project:errands",
+              "kind": "project",
+              "title": "errands",
+              "project": "errands",
+              "needs_you": 0
+            },
+            {
+              "id": "project:garden",
+              "kind": "project",
+              "title": "Garden",
+              "project": "garden",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 2,
+            "needs_you": 0,
+            "in_progress": 0,
+            "sections": {
+              "needs_you": 0,
+              "can_wait": 0,
+              "working": 0,
+              "waiting": 0,
+              "todo": 2,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "superseded_failed_start",
+      "description": "A start that failed yesterday, and a to-do with the same title and plan that finished the work since: the failed start is superseded, closed and not counted open, where alone it would need the owner.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 7 and \"Rule 1a\"",
+        "docs/assistant/todo-status-sop.md \"Related to-dos\""
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_y2",
+            "title": "Book the airport transfer",
+            "notes": "",
+            "done_at": "2026-11-09T09:00:00Z",
+            "created_at": "2026-11-09T08:55:00Z",
+            "updated_at": "2026-11-09T09:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_t1",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "travel-admin"
+          },
+          {
+            "id": "todo_y3",
+            "title": "Book the airport transfer",
+            "notes": "",
+            "done_at": "2026-11-09T14:00:00Z",
+            "created_at": "2026-11-09T09:30:00Z",
+            "updated_at": "2026-11-09T14:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_t1",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "travel-admin"
+          }
+        ],
+        "sessions": [],
+        "projects": {
+          "travel-admin": "Travel admin"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 0,
+          "needs_you": 0,
+          "in_progress": 0,
+          "sections": {
+            "needs_you": 0,
+            "can_wait": 0,
+            "working": 0,
+            "waiting": 0,
+            "todo": 0,
+            "just_finished": 1,
+            "someday": 0,
+            "done": 1
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 0,
+            "needs_you": 0,
+            "in_progress": 0,
+            "sections": {
+              "needs_you": 0,
+              "can_wait": 0,
+              "working": 0,
+              "waiting": 0,
+              "todo": 0,
+              "just_finished": 1,
+              "someday": 0,
+              "done": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "step_counted_once",
+      "description": "A plan whose step waits on the owner's decision, and its other step: the plan is one row in Needs you, counted once; the steps it carries are no rows of their own, so neither counts open or in a section.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Steps roll up\"",
+        "docs/design/proposals/todos-redesign.md 6.2 invariant 6"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_ad1",
+            "title": "Plan the Kyoto stay",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip"
+          },
+          {
+            "id": "todo_ad2",
+            "title": "Pick the ryokan",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:05:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-pick",
+                "linked_at": "2026-11-08T08:06:00Z",
+                "title": "Ryokan pick",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "A ryokan is chosen"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-10T09:00:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which of the three?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "Two nights for 42,000 yen, dinner included"
+                    },
+                    {
+                      "label": "Kiyomizu Inn",
+                      "leads_to": "Two nights for 51,000 yen, a short walk to the temple"
+                    },
+                    {
+                      "label": "Gion House",
+                      "leads_to": "Two nights for 38,000 yen, no dinner"
+                    }
+                  ]
+                }
+              ],
+              "updated_at": "2026-11-10T09:00:00Z"
+            },
+            "project": "kyoto-trip",
+            "part_of": "todo_ad1",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Ryokan Hanami",
+              "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
+              "question": "Which of the three?",
+              "options": [
+                {
+                  "label": "Ryokan Hanami",
+                  "leads_to": "Two nights for 42,000 yen, dinner included"
+                },
+                {
+                  "label": "Kiyomizu Inn",
+                  "leads_to": "Two nights for 51,000 yen, a short walk to the temple"
+                },
+                {
+                  "label": "Gion House",
+                  "leads_to": "Two nights for 38,000 yen, no dinner"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            }
+          },
+          {
+            "id": "todo_ad3",
+            "title": "Reserve the tea ceremony",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:06:00Z",
+            "updated_at": "2026-11-08T08:06:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "part_of": "todo_ad1",
+            "after": [
+              "todo_ad2"
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-pick",
+            "title": "Ryokan pick",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T08:50:00Z",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "pending_interactions": 0
+          }
+        ],
+        "projects": {
+          "kyoto-trip": "Kyoto trip"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 1,
+          "needs_you": 1,
+          "in_progress": 0,
+          "sections": {
+            "needs_you": 1,
+            "can_wait": 0,
+            "working": 0,
+            "waiting": 0,
+            "todo": 0,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 0
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 1
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "project:kyoto-trip",
+              "kind": "project",
+              "title": "Kyoto trip",
+              "project": "kyoto-trip",
+              "needs_you": 1
+            }
+          ],
+          "counts": {
+            "open": 1,
+            "needs_you": 1,
+            "in_progress": 0,
+            "sections": {
+              "needs_you": 1,
+              "can_wait": 0,
+              "working": 0,
+              "waiting": 0,
+              "todo": 0,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ranked_list",
+      "description": "Rows in every section, each in the order of its section's rule: Needs you and Can wait by deadline, then the oldest ask; Working by the latest activity; Waiting by the soonest wake; To do by due, priority and the newest; Just finished and Done newest first; Someday soonest back first.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Within a section\""
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_rk_n2",
+            "title": "Renew the passport",
+            "notes": "",
+            "done_at": "2026-11-10T08:00:00Z",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_n1",
+            "title": "Upgrade to the window seats",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Yes",
+              "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "open",
+              "question": "Upgrade to the window seats?",
+              "options": [
+                {
+                  "label": "Yes",
+                  "leads_to": "Go ahead"
+                },
+                {
+                  "label": "No",
+                  "leads_to": "Leave it"
+                }
+              ],
+              "deadline": "2026-11-11T09:00:00Z",
+              "default": "never",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            }
+          },
+          {
+            "id": "todo_rk_n3",
+            "title": "Order the travel adapters",
+            "notes": "",
+            "done_at": "2026-11-10T11:00:00Z",
+            "created_at": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-12"
+          },
+          {
+            "id": "todo_rk_n4",
+            "title": "Print the hotel vouchers",
+            "notes": "",
+            "done_at": "2026-11-10T10:00:00Z",
+            "created_at": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_c1",
+            "title": "Add a day in Nara",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T09:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Yes",
+              "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
+              "question": "Add a day in Nara?",
+              "options": [
+                {
+                  "label": "Yes",
+                  "leads_to": "Go ahead"
+                },
+                {
+                  "label": "No",
+                  "leads_to": "Leave it"
+                }
+              ],
+              "deadline": "2026-11-12T09:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            }
+          },
+          {
+            "id": "todo_rk_c2",
+            "title": "Take the early train",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T09:30:00Z",
+            "updated_at": "2026-11-10T09:30:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Yes",
+              "asked_at": "2026-11-10T09:30:00Z",
+              "risk": "safe",
+              "question": "Take the early train?",
+              "options": [
+                {
+                  "label": "Yes",
+                  "leads_to": "Go ahead"
+                },
+                {
+                  "label": "No",
+                  "leads_to": "Leave it"
+                }
+              ],
+              "deadline": "2026-11-11T18:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            }
+          },
+          {
+            "id": "todo_rk_w1",
+            "title": "Map the walking route",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-route",
+                "linked_at": "2026-11-10T08:01:00Z",
+                "title": "Walking route",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_w2",
+            "title": "Find a vegetarian lunch",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-lunch",
+                "linked_at": "2026-11-10T08:01:00Z",
+                "title": "Vegetarian lunch",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_p1",
+            "title": "Confirm the bike rental",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-09T15:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-bike",
+                "linked_at": "2026-11-08T08:01:00Z",
+                "title": "Confirm the bike rental",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "The venue answered"
+              ],
+              "criteria": [],
+              "state": "parked",
+              "parked": {
+                "reason": "Waiting for the venue to answer",
+                "until": "2026-11-12T09:00:00Z",
+                "waiting_on": "external_event",
+                "count": 1
+              },
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-09T15:00:00Z",
+                  "verdict": "parked",
+                  "reason": "Waiting for the venue to answer",
+                  "until": "2026-11-12T09:00:00Z",
+                  "waiting_on": "external_event",
+                  "parks": 1
+                }
+              ],
+              "updated_at": "2026-11-09T15:00:00Z"
+            }
+          },
+          {
+            "id": "todo_rk_p2",
+            "title": "Confirm the cooking class",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-09T15:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-cook",
+                "linked_at": "2026-11-08T08:01:00Z",
+                "title": "Confirm the cooking class",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "The venue answered"
+              ],
+              "criteria": [],
+              "state": "parked",
+              "parked": {
+                "reason": "Waiting for the venue to answer",
+                "until": "2026-11-11T09:00:00Z",
+                "waiting_on": "external_event",
+                "count": 1
+              },
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-09T15:00:00Z",
+                  "verdict": "parked",
+                  "reason": "Waiting for the venue to answer",
+                  "until": "2026-11-11T09:00:00Z",
+                  "waiting_on": "external_event",
+                  "parks": 1
+                }
+              ],
+              "updated_at": "2026-11-09T15:00:00Z"
+            }
+          },
+          {
+            "id": "todo_rk_p3",
+            "title": "Translate the museum guide",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T07:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-museum",
+                "linked_at": "2026-11-10T07:01:00Z",
+                "title": "Museum guide",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_p4",
+            "title": "Fix the map links on the trip site",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-09T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-links",
+                "linked_at": "2026-11-09T08:01:00Z",
+                "title": "Map links",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/trip-site/pull/7",
+            "pr_status": {
+              "url": "https://github.com/example/trip-site/pull/7",
+              "state": "open",
+              "draft": false,
+              "review": "required",
+              "checks": "passing",
+              "conflicts": false,
+              "checked_at": "2026-11-10T11:55:00Z"
+            }
+          },
+          {
+            "id": "todo_rk_t6",
+            "title": "Buy a travel pillow",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-05T07:00:00Z",
+            "updated_at": "2026-11-05T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_t3",
+            "title": "Exchange some yen",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-06T07:00:00Z",
+            "updated_at": "2026-11-06T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-14"
+          },
+          {
+            "id": "todo_rk_t1",
+            "title": "Cancel the newspaper",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-06T07:00:00Z",
+            "updated_at": "2026-11-06T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-09"
+          },
+          {
+            "id": "todo_rk_t5",
+            "title": "Charge the camera",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-09T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_t2",
+            "title": "Water the balcony plants",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-06T07:00:00Z",
+            "updated_at": "2026-11-06T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-10"
+          },
+          {
+            "id": "todo_rk_t4",
+            "title": "Check the passport photo rules",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-01T07:00:00Z",
+            "updated_at": "2026-11-01T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "priority": "high"
+          },
+          {
+            "id": "todo_rk_j1",
+            "title": "Send the itinerary to the hotel",
+            "notes": "",
+            "done_at": "2026-11-10T08:00:00Z",
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_j2",
+            "title": "Book the airport bus",
+            "notes": "",
+            "done_at": "2026-11-10T11:00:00Z",
+            "created_at": "2026-11-09T07:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "origin": "conv_main",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_s1",
+            "title": "Learn some Japanese phrases",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-01T07:00:00Z",
+            "updated_at": "2026-11-01T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_s2",
+            "title": "Try calligraphy",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-02T07:00:00Z",
+            "updated_at": "2026-11-02T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_s3",
+            "title": "Read about Kyoto's history",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-03T07:00:00Z",
+            "updated_at": "2026-11-03T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rk_d1",
+            "title": "Renew the travel card",
+            "notes": "",
+            "done_at": "2026-11-01T07:00:00Z",
+            "created_at": "2026-10-30T07:00:00Z",
+            "updated_at": "2026-11-01T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "seen_at": "2026-11-01T08:00:00Z"
+          },
+          {
+            "id": "todo_rk_d2",
+            "title": "Book the flights",
+            "notes": "",
+            "done_at": "2026-11-05T07:00:00Z",
+            "created_at": "2026-10-30T07:00:00Z",
+            "updated_at": "2026-11-05T07:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "seen_at": "2026-11-05T08:00:00Z"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-route",
+            "title": "Walking route",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-lunch",
+            "title": "Vegetarian lunch",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:58:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-bike",
+            "title": "Confirm the bike rental",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-09T14:50:00Z",
+            "updated_at": "2026-11-09T14:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-cook",
+            "title": "Confirm the cooking class",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-09T14:50:00Z",
+            "updated_at": "2026-11-09T14:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-museum",
+            "title": "Museum guide",
+            "status": "idle",
+            "state": "unread",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 0,
+            "turn_error": "You've hit your usage limit",
+            "turn_error_kind": "usage_limit",
+            "turn_error_resets_at": "2026-11-10T13:00:00Z"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-links",
+            "title": "Map links",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "pending_interactions": 0
+          }
+        ],
+        "someday_until": {
+          "todo_rk_s1": "2026-12-01T00:00:00Z",
+          "todo_rk_s2": "9999-12-31T00:00:00Z",
+          "todo_rk_s3": "2026-11-20T00:00:00Z"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 18,
+          "needs_you": 4,
+          "in_progress": 6,
+          "sections": {
+            "needs_you": 4,
+            "can_wait": 2,
+            "working": 2,
+            "waiting": 4,
+            "todo": 6,
+            "just_finished": 2,
+            "someday": 3,
+            "done": 2
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 4
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 18,
+            "needs_you": 4,
+            "in_progress": 6,
+            "sections": {
+              "needs_you": 4,
+              "can_wait": 2,
+              "working": 2,
+              "waiting": 4,
+              "todo": 6,
+              "just_finished": 2,
+              "someday": 3,
+              "done": 2
+            }
+          }
+        },
+        "order": {
+          "needs_you": [
+            "todo_rk_n1",
+            "todo_rk_n3",
+            "todo_rk_n2",
+            "todo_rk_n4"
+          ],
+          "can_wait": [
+            "todo_rk_c2",
+            "todo_rk_c1"
+          ],
+          "working": [
+            "todo_rk_w2",
+            "todo_rk_w1"
+          ],
+          "waiting": [
+            "todo_rk_p3",
+            "todo_rk_p2",
+            "todo_rk_p1",
+            "todo_rk_p4"
+          ],
+          "todo": [
+            "todo_rk_t1",
+            "todo_rk_t2",
+            "todo_rk_t3",
+            "todo_rk_t4",
+            "todo_rk_t5",
+            "todo_rk_t6"
+          ],
+          "just_finished": [
+            "todo_rk_j2",
+            "todo_rk_j1"
+          ],
+          "someday": [
+            "todo_rk_s3",
+            "todo_rk_s1",
+            "todo_rk_s2"
+          ],
+          "done": [
+            "todo_rk_d2",
+            "todo_rk_d1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ranked_steps",
+      "description": "Plans ranked by what their steps carry: a plan carrying its step's decision due at 13:00 comes before a decision due at 15:00 asked earlier, and a plan carrying its step's usage limit that resets at 17:00 comes after a limit that resets at 14:00, though its own Inactive mark would come sooner; each carried step ranks beside its plan (ties go by id) and counts nowhere.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Within a section\"",
+        "docs/design/proposals/todos-redesign.md 3.4 \"Steps roll up\""
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_rs_w2",
+            "title": "Draft the day plan",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-09T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-plan",
+                "linked_at": "2026-11-09T08:01:00Z",
+                "title": "Day plan",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_rs_s2",
+            "title": "Check the shrine hours",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T07:05:00Z",
+            "updated_at": "2026-11-08T07:05:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-shrine",
+                "linked_at": "2026-11-08T07:06:00Z",
+                "title": "Shrine hours",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "part_of": "todo_rs_p2"
+          },
+          {
+            "id": "todo_rs_p2",
+            "title": "Plan the Nikko day",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-08T13:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          },
+          {
+            "id": "todo_rs_n2",
+            "title": "Choose the rental car",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T09:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "A minivan",
+              "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
+              "question": "Which car?",
+              "options": [
+                {
+                  "label": "A compact car",
+                  "leads_to": "Easy to park, two small bags"
+                },
+                {
+                  "label": "A minivan",
+                  "leads_to": "Room for everyone and the luggage"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "deadline": "2026-11-10T15:00:00Z"
+            }
+          },
+          {
+            "id": "todo_rs_s1",
+            "title": "Pick the onsen",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:05:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "part_of": "todo_rs_p1",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Tenseien",
+              "asked_at": "2026-11-10T11:00:00Z",
+              "risk": "safe",
+              "question": "Which onsen?",
+              "options": [
+                {
+                  "label": "Tenseien",
+                  "leads_to": "An open-air bath by the river"
+                },
+                {
+                  "label": "Hakone Yuryo",
+                  "leads_to": "Private baths, booked by the hour"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "deadline": "2026-11-10T13:00:00Z"
+            }
+          },
+          {
+            "id": "todo_rs_p1",
+            "title": "Plan the Hakone day",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-plan",
+            "title": "Day plan",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "pending_interactions": 0,
+            "turn_error": "You've hit your usage limit",
+            "turn_error_kind": "usage_limit",
+            "turn_error_resets_at": "2026-11-10T14:00:00Z"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-shrine",
+            "title": "Shrine hours",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "pending_interactions": 0,
+            "turn_error": "You've hit your usage limit",
+            "turn_error_kind": "usage_limit",
+            "turn_error_resets_at": "2026-11-10T17:00:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "counts": {
+          "open": 4,
+          "needs_you": 2,
+          "in_progress": 2,
+          "sections": {
+            "needs_you": 2,
+            "can_wait": 0,
+            "working": 0,
+            "waiting": 2,
+            "todo": 0,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 0
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 2
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 4,
+            "needs_you": 2,
+            "in_progress": 2,
+            "sections": {
+              "needs_you": 2,
+              "can_wait": 0,
+              "working": 0,
+              "waiting": 2,
+              "todo": 0,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 0
+            }
+          }
+        },
+        "order": {
+          "needs_you": [
+            "todo_rs_p1",
+            "todo_rs_s1",
+            "todo_rs_n2"
+          ],
+          "waiting": [
+            "todo_rs_w2",
+            "todo_rs_p2",
+            "todo_rs_s2"
+          ]
+        }
+      }
+    },
+    {
+      "name": "waiting_ranked_by_wake",
+      "description": "Runs that wait on another Agent or an outside event are Waiting rows, counted In progress, and rank by the hub's next wake of them (work.wake_at) with the park and the usage limit: the soonest first, rows with no wake after them (a fallback check the hub dropped as long overdue, a named wait the hub schedules no wake for, an open PR), the longest waiting first. A moment's model failure the hub retries is Working.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Within a section\"",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Counts\"",
+        "#10226 (runs that wait on another Agent or an outside event are Waiting)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_wr_e1",
+            "title": "Publish the trip site",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T09:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-deploy",
+                "linked_at": "2026-11-10T09:01:00Z",
+                "title": "Trip site deploy",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_wr_a1",
+            "title": "Merge the trip notes into the itinerary",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-merge",
+                "linked_at": "2026-11-10T08:01:00Z",
+                "title": "Itinerary merge",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_wr_u1",
+            "title": "Translate the museum guide",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T07:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-museum",
+                "linked_at": "2026-11-10T07:01:00Z",
+                "title": "Museum guide",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_wr_p1",
+            "title": "Confirm the cooking class",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-cook",
+                "linked_at": "2026-11-08T08:01:00Z",
+                "title": "Confirm the cooking class",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "The venue answered"
+              ],
+              "criteria": [],
+              "state": "parked",
+              "parked": {
+                "reason": "Waiting for the venue to answer",
+                "until": "2026-11-11T09:00:00Z",
+                "waiting_on": "external_event",
+                "count": 1
+              },
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-09T15:00:00Z",
+                  "verdict": "parked",
+                  "reason": "Waiting for the venue to answer",
+                  "until": "2026-11-11T09:00:00Z",
+                  "waiting_on": "external_event",
+                  "parks": 1
+                }
+              ],
+              "updated_at": "2026-11-09T15:00:00Z"
+            }
+          },
+          {
+            "id": "todo_wr_a2",
+            "title": "Collect the restaurant shortlist",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T06:00:00Z",
+            "updated_at": "2026-11-10T06:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-shortlist",
+                "linked_at": "2026-11-10T06:01:00Z",
+                "title": "Restaurant shortlist",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_wr_l1",
+            "title": "Watch the ferry timetable",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T06:30:00Z",
+            "updated_at": "2026-11-10T06:30:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-timetable",
+                "linked_at": "2026-11-10T06:31:00Z",
+                "title": "Ferry timetable",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          },
+          {
+            "id": "todo_wr_r1",
+            "title": "Fix the map links on the trip site",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-09T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-links",
+                "linked_at": "2026-11-09T08:01:00Z",
+                "title": "Map links",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/trip-site/pull/7",
+            "pr_status": {
+              "url": "https://github.com/example/trip-site/pull/7",
+              "state": "open",
+              "draft": false,
+              "review": "required",
+              "checks": "passing",
+              "conflicts": false,
+              "checked_at": "2026-11-10T11:55:00Z"
+            }
+          },
+          {
+            "id": "todo_wr_t1",
+            "title": "Summarize the museum reviews",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-reviews",
+                "linked_at": "2026-11-10T10:01:00Z",
+                "title": "Museum reviews",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-deploy",
+            "title": "Trip site deploy",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T11:40:00Z",
+            "updated_at": "2026-11-10T11:40:00Z",
+            "pending_interactions": 0,
+            "work": {
+              "phase": "blocked",
+              "on": "external",
+              "line": "Waiting for the deploy to finish, then checking the live site",
+              "wait": "The deploy finishes",
+              "then": "Check the live site",
+              "every_minutes": 30,
+              "wake_at": "2026-11-10T12:10:00Z",
+              "max": 6,
+              "turn_at": "2026-11-10T11:40:00Z",
+              "at": "2026-11-10T11:40:15Z",
+              "by": "model"
+            }
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-merge",
+            "title": "Itinerary merge",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T11:20:00Z",
+            "updated_at": "2026-11-10T11:20:00Z",
+            "pending_interactions": 0,
+            "work": {
+              "phase": "blocked",
+              "on": "agent",
+              "line": "Waiting for the hotel search to finish",
+              "wait": "The hotel search finishes",
+              "then": "Merge its picks into the itinerary",
+              "every_minutes": 60,
+              "wake_at": "2026-11-10T12:20:00Z",
+              "agent": {
+                "machine_id": "m1",
+                "session_id": "s-hotels",
+                "label": "Hotel search"
+              },
+              "turn_at": "2026-11-10T11:20:00Z",
+              "at": "2026-11-10T11:20:20Z",
+              "by": "model"
+            }
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-museum",
+            "title": "Museum guide",
+            "status": "idle",
+            "state": "unread",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 0,
+            "turn_error": "You've hit your usage limit",
+            "turn_error_kind": "usage_limit",
+            "turn_error_resets_at": "2026-11-10T13:00:00Z"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-cook",
+            "title": "Confirm the cooking class",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-09T14:50:00Z",
+            "updated_at": "2026-11-09T14:50:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-shortlist",
+            "title": "Restaurant shortlist",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "pending_interactions": 0,
+            "work": {
+              "phase": "blocked",
+              "on": "agent",
+              "line": "Waiting for the reviews summary",
+              "wait": "The reviews summary finishes",
+              "then": "Pick the top five",
+              "agent": {
+                "machine_id": "m1",
+                "session_id": "s-reviews",
+                "label": "Museum reviews"
+              },
+              "turn_at": "2026-11-10T10:00:00Z",
+              "at": "2026-11-10T10:00:20Z",
+              "by": "model"
+            }
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-timetable",
+            "title": "Ferry timetable",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 0,
+            "work": {
+              "phase": "blocked",
+              "on": "external",
+              "line": "Waiting for the summer ferry timetable",
+              "wait": "The summer timetable is published",
+              "then": "Plan the island days",
+              "turn_at": "2026-11-10T11:00:00Z",
+              "at": "2026-11-10T11:00:10Z",
+              "by": "model"
+            }
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-links",
+            "title": "Map links",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T10:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "pending_interactions": 0
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-reviews",
+            "title": "Museum reviews",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T11:59:40Z",
+            "updated_at": "2026-11-10T11:59:40Z",
+            "pending_interactions": 0,
+            "turn_error": "API Error: 529 overloaded",
+            "turn_error_kind": "transient",
+            "work": {
+              "phase": "blocked",
+              "on": "transient",
+              "line": "The model service failed for a moment; continuing",
+              "wait": "API Error: 529 overloaded",
+              "wake_at": "2026-11-10T12:00:10Z",
+              "attempts": 1,
+              "max": 5,
+              "turn_at": "2026-11-10T11:59:40Z",
+              "at": "2026-11-10T11:59:40Z",
+              "by": "rule"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "counts": {
+          "open": 8,
+          "needs_you": 0,
+          "in_progress": 8,
+          "sections": {
+            "needs_you": 0,
+            "can_wait": 0,
+            "working": 1,
+            "waiting": 7,
+            "todo": 0,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 0
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 8,
+            "needs_you": 0,
+            "in_progress": 8,
+            "sections": {
+              "needs_you": 0,
+              "can_wait": 0,
+              "working": 1,
+              "waiting": 7,
+              "todo": 0,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 0
+            }
+          }
+        },
+        "order": {
+          "working": [
+            "todo_wr_t1"
+          ],
+          "waiting": [
+            "todo_wr_e1",
+            "todo_wr_a1",
+            "todo_wr_u1",
+            "todo_wr_p1",
+            "todo_wr_a2",
+            "todo_wr_l1",
+            "todo_wr_r1"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -286,6 +286,8 @@ object PersonaIcons {
     val run: PhIcon get() = PhIcons.Play
     /** SF Symbol `safari`. */
     val safari: PhIcon get() = PhIcons.GlobeSimple
+    /** SF Symbol `qrcode.viewfinder`. */
+    val scanCode: PhIcon get() = PhIcons.QrCode
     /** SF Symbol `alarm`. */
     val schedule: PhIcon get() = PhIcons.Clock
     /** SF Symbol `display`. */

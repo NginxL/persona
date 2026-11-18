@@ -261,3 +261,45 @@ func TestSnapshotListsAQuestionTodoOnceItsAskRecordIsPruned(t *testing.T) {
 		t.Fatalf("question line = %+v", asked)
 	}
 }
+
+// A failed start is stored done with its start error, but the app's To-dos count it open while it waits on the owner
+// (triageCountsAsOpen): the snapshot's open count and roster do the same and mark it, so one failing to start no
+// longer takes one off the count and puts it back when it is taken up again (#10365). One older than the triage keeps
+// it waiting, one whose row's work finished in a related to-do (superseded), and a cancelled one stay out.
+func TestSnapshotCountsAFailedStartOpenAsTheAppDoes(t *testing.T) {
+	s := newStorelessService(t, newFakeHub().withMachine())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, id := range []string{"todo_open", "todo_failed", "todo_failed_old", "todo_failed_superseded", "todo_superseder", "todo_failed_cancelled"} {
+		title := "fixture " + id
+		if id == "todo_failed_superseded" || id == "todo_superseder" {
+			title = "Release the tablet layout"
+		}
+		if _, err := s.newTodoAs(ctx, id, title, "", "conversation", "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.todos.mu.Lock()
+	fail := func(id string, at time.Time) {
+		row := s.todos.todos[id]
+		row.DoneAt, row.StartError, row.UpdatedAt, row.CreatedAt = &at, "没开起来", at, at
+	}
+	fail("todo_failed", now.Add(-time.Hour))
+	fail("todo_failed_old", now.Add(-72*time.Hour))
+	fail("todo_failed_superseded", now.Add(-time.Hour))
+	fail("todo_failed_cancelled", now.Add(-time.Hour))
+	s.todos.todos["todo_failed_cancelled"].CancelledAt = &now
+	finished := now.Add(-time.Minute)
+	s.todos.todos["todo_superseder"].DoneAt = &finished
+	s.todos.mu.Unlock()
+
+	rows, total := s.snapshotOpenTodos(ctx, "")
+	if total != 2 || len(rows) != 2 {
+		t.Fatalf("open count = %d (%v), want todo_open and todo_failed", total, rows)
+	}
+	text := fitSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", OpenTodos: rows, OpenTodosTotal: total, OpenTodosLoaded: true})
+	if !strings.Contains(text, "开放待办：共 2 件") || !strings.Contains(text, "todo_failed「fixture todo_failed」（没开起来）") ||
+		!strings.Contains(text, "todo_open「fixture todo_open」") || strings.Contains(text, "todo_open「fixture todo_open」（没开起来）") {
+		t.Fatalf("roster:\n%s", text)
+	}
+}

@@ -238,7 +238,6 @@ private struct CaptureEnvironment: ViewModifier {
             .modifier(IslandEnvironment(env))
             .environment(\.shellRailEdge, env.shellRailEdge)
             .environment(\.shellPillFollowsStrip, env.shellPillFollowsStrip)
-            .environment(\.tabBarAlongFoot, env.tabBarAlongFoot)
             .environment(\.tabIsActive, env.tabIsActive)
             .environment(\.openURL, env.openURL)
             .environment(\.openPort, env.openPort)

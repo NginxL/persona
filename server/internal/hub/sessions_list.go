@@ -377,6 +377,7 @@ func legacyListCut(s *proto.Session) {
 	}
 	s.Queued = nil
 	s.Background = nil
+	s.SetBackgroundEnded(nil)
 	s.Subagents = nil
 	s.Workflows = nil
 	s.Ports = nil
@@ -458,6 +459,7 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		Model: s.Model, Effort: s.Effort, ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
 		Hierarchy: s.Hierarchy, // folded_under, children, started_at: the child cards and the parent's state (#5120)
 	}
+	out.SetBackgroundEnded(nil)
 	if s.Work != nil {
 		out.Work = &proto.WorkState{Phase: s.Work.Phase, On: s.Work.On, Line: rowText(s.Work.Line, 180),
 			Wait: rowText(s.Work.Wait, 180), Then: rowText(s.Work.Then, 180), WakeAt: s.Work.WakeAt, ResetsAt: s.Work.ResetsAt,

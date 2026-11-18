@@ -229,6 +229,14 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 		}
 	}()
 	in := prompts.BotMessage{Persona: !t.agent(), Topic: topic != nil, Owner: s.owner(ctx), Text: content.Text}
+	if t.TodoID != "" && topic == nil {
+		todo, ok, err := s.todo(ctx, t.TodoID)
+		if err != nil {
+			s.logf("bots: reminder reply: todo %s: %v", t.TodoID, err)
+		} else if ok && !s.todoInHealth(ctx, todo) {
+			in.Todo = &prompts.BotTodo{ID: todo.ID, Title: clip(todo.Title, 500), Notes: clip(todo.Notes, 4000)}
+		}
+	}
 	to := topic.target()
 	s.fbot.mu.Lock()
 	_, ours := s.fbot.st.Threads[msg.ParentID]

@@ -46,6 +46,7 @@ class ByStatusShotsTest {
         """"session_id":"awaiting","title":"Pick a release name","state":"idle","awaits_reply":true""",
         """"session_id":"working","title":"Fix the login bug","state":"working"""",
         """"session_id":"background","title":"Watch the CI run","state":"working","background_waiting":true,"background_working":true""",
+        """"session_id":"finished","title":"Ship the release notes","state":"idle","work":{"phase":"done","line":"Release notes merged","just_finished":true}""",
         """"session_id":"waiting","title":"Nightly report","state":"idle","loop":{"kind":"cron"}""",
         """"session_id":"muted","title":"Side experiment","state":"working"""",
         """"session_id":"seen1","title":"Update the docs","state":"idle"""",

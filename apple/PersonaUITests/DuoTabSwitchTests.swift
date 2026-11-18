@@ -1,13 +1,9 @@
 import XCTest
 
-/// iPhone Duo in the Separate layout (#4231): one tab bar on both displays, the pages' symbols over their names
-/// (Assistant, Agents, Messages), the chosen one's symbol on the Theme Color's circle, counts red at a symbol's corner:
-/// - closed, the outer display: in the shell's rail down the system's column on the right, centred on the status bar, in
-///   the column's lower middle;
-/// - open on its side: the same in the system's column on the right, in the system's tab bar's place;
-/// - open upright: along the window's foot, centred, the pages keeping its room as for the system's tab bar, so the
-///   composer stands on it at the whole width.
-/// The keyboard sends it away. Settings › Appearance › Sidebar switches between Merged (the one sidebar) and Separate at
+/// iPhone Duo folded, the outer display, in the Separate layout (#4231): the shell's rail down the system's column on
+/// the right holds the tab bar, the pages' symbols over their names (Assistant, Agents, Messages), the chosen one's
+/// symbol on the Theme Color's circle, counts red at a symbol's corner, centred on the status bar in the column's lower
+/// middle. The open Duo shows the system's tab bar instead (`DuoOpenChromeTests`). The keyboard sends it away. Settings › Appearance › Sidebar switches between Merged (the one sidebar) and Separate at
 /// once, and the choice is kept.
 ///
 /// The posture is set before the run (scripts' display tool or Xcode's Device Hub; `XCUIDevice.orientation` does not
@@ -28,12 +24,14 @@ final class DuoTabSwitchTests: XCTestCase {
         }
         app = XCUIApplication()
         launch([])
+        if app.windows.firstMatch.waitForExistence(timeout: 20), app.windows.firstMatch.frame.width > 600 {
+            throw XCTSkip("the open Duo shows the system's tab bar (DuoOpenChromeTests)")
+        }
         let agents = app.descendants(matching: .any)["shell-agents"].firstMatch
         let assistant = app.descendants(matching: .any)["shell-assistant"].firstMatch
         XCTAssertTrue(agents.waitForExistence(timeout: 20) && assistant.exists, "no switch:\n\(app.debugDescription)")
         let window = app.windows.firstMatch.frame
-        if window.width > 900 { posture = .side }
-        else if window.width > 600 { posture = .upright }
+        if window.width > 600 { throw XCTSkip("the open Duo shows the system's tab bar (DuoOpenChromeTests)") }
         else if abs(assistant.frame.midX - agents.frame.midX) < 2, agents.frame.minY > assistant.frame.maxY - 2 { posture = .outer }
         else { throw XCTSkip("not an iPhone Duo: the switch runs across the top here") }
     }

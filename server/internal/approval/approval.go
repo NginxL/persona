@@ -14,6 +14,11 @@ import (
 // The operation must not apply; the owner needs a fresh card.
 var ErrStale = errors.New("the proposal is stale; ask for a fresh approval")
 
+// ErrNotApplied says execution had not started, so no side effect is possible.
+// It is for validation and durability failures before Apply, never for an Apply
+// error whose side effects are unknown.
+var ErrNotApplied = errors.New("the operation was not applied")
+
 // Operation is one immutable proposal and its owner-specific apply path. Apply
 // must recheck current state immediately before changing anything. Discard
 // releases any owner-side handle without applying; it is optional for direct

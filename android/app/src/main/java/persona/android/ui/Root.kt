@@ -379,6 +379,7 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
     }
     val visibleAgentChat = remember { kotlinx.coroutines.flow.MutableStateFlow<SessionKey?>(null) }
     val heldAgentChat = remember { kotlinx.coroutines.flow.MutableStateFlow<SessionKey?>(null) }
+    val finishedAgentChat = remember { kotlinx.coroutines.flow.MutableStateFlow<SessionKey?>(null) }
     val agentPreferences = remember(session) { session.preferences.snapshots }
     val navigator = remember { AppNavigator(stacks, { selected }, { selected = it }, chatTab = { route ->
         currentKind(SessionKey(route.machineId, route.sessionId))?.let { if (it == ConversationKind.Assistant) AppTab.Persona else AppTab.Agents }
@@ -441,6 +442,7 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
             override fun wiring() = object : AgentsWiring { override val state = navigationWiring }
             override fun visibleChat() = visibleAgentChat
             override fun heldChat() = heldAgentChat
+            override fun finishedChat() = finishedAgentChat
         }
     }
     val assistantNavigator = remember {
@@ -480,12 +482,15 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
     val visibleChat = when (visible) { is ChatRoute -> visible; is InteractionRoute -> visible.chat; else -> null }
     LaunchedEffect(visibleChat) {
         val agent = visibleChat?.takeIf { it.kind != ConversationKind.Assistant }?.let { SessionKey(it.machineId, it.sessionId) }
-        // Capture on entry, before ChatScreen's receipt or a conflated hub snapshot turns the row idle (iOS markSeen).
-        heldAgentChat.value = agent?.takeIf { key ->
-            sessions.firstOrNull { it.key == key }?.let {
-                it.agentState == AgentState.Unread && agentPreferences.first().seen[key.path] != "${it.updatedAt.orEmpty()}|${it.rev ?: ""}"
-            } == true
-        }
+        // Capture on entry, before ChatScreen's receipt or a conflated hub snapshot turns the row idle (iOS markSeen). A Just
+        // finished row (#9786) is held the same way, in its own place: the hub's list loses the flag once the seen is recorded.
+        val row = agent?.let { key -> sessions.firstOrNull { it.key == key } }
+        val unread = row?.agentState == AgentState.Unread
+        val finished = row?.agentState == AgentState.Idle && row.work?.justFinished == true
+        val unseen = row != null && (unread || finished) &&
+            agentPreferences.first().seen[row.key.path] != "${row.updatedAt.orEmpty()}|${row.rev ?: ""}"
+        heldAgentChat.value = agent?.takeIf { unseen && unread }
+        finishedAgentChat.value = agent?.takeIf { unseen && finished }
         visibleAgentChat.value = agent
     }
     DisposableEffect(visibleChat, session.demo) {

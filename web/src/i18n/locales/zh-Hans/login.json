@@ -24,9 +24,13 @@
   "qr_expired": "二维码已过期，请刷新",
   "qr_failed": "无法获取登录二维码，请重试",
   "qr_denied": "已取消登录",
-  "qr_scanned": "已扫码，请在手机上确认",
-  "qr_hint": "在已登录的 Persona 手机 App 中扫码，确认后此浏览器将自动登录。二维码有效期为 5 分钟。",
+  "qr_scanned": "已扫码，请在手机上允许",
+  "qr_hint": "在手机上的 Persona 里打开 设置 › 设备 › 扫描网页登录码，扫这个码并允许。二维码 5 分钟内有效。",
   "qr_refresh": "刷新二维码",
-  "qr_alternatives": "其他登录方式",
-  "qr_retry": "正在重连，登录请求已保留…"
+  "qr_retry": "正在重连，登录请求已保留…",
+  "qr_open": "用手机上的 Persona 扫码登录",
+  "qr_title": "用手机上的 Persona 扫这个码",
+  "qr_number_label": "手机上显示的数字",
+  "qr_number_hint": "输入手机上显示的数字。只能输一次，输错这次登录就作废。",
+  "qr_voided": "数字不对，这次登录已作废。请刷新二维码再试。"
 }

@@ -83,7 +83,10 @@ class ReorganizedSettingsPagesTest {
         for (page in listOf("agent-settings", "about", "diag")) for (d in listOf(false, true)) {
             rule.runOnIdle { initial = page; dark = d }
             rule.waitForIdle()
-            if (page == "agent-settings") rule.onNodeWithText("会话分诊").assertExists()
+            if (page == "agent-settings") {
+                rule.onNodeWithText("Antigravity 设置").assertExists()
+                rule.onNodeWithText("会话分诊").assertExists()
+            }
             if (page == "about") rule.onNodeWithText("检查更新").assertExists()
             if (page == "diag") rule.onNodeWithText("配对").assertExists()
             image("$page-${if (d) "dark" else "light"}")

@@ -214,7 +214,10 @@ moving the archive into the user's zone ("Time zones") is the archive lane's fir
 lane's writes. The steps' backoffs (a failed source put off, `retryWait`) live with the manager's knowledge base, not the
 engine, so they carry over when the hub's settings change and a new engine is built; a lane already running finishes
 its run with the engine it started with. Each lane run that called the model, or took longer than a round, logs one line: `kb: <lane> lane: <duration>, <n> model call(s),
-<n> failed, <n> put off` (put off: a paused connection, "Upstream rate limits" in [model-config.md](model-config.md)). While the
+<n> failed, <n> put off` (put off: a paused connection, "Upstream rate limits" in [model-config.md](model-config.md)). A call with
+no model set up for it (no provider with a key for the step's purpose) is neither a call nor a failure: the lane logs
+`kb: <lane> lane: no model is set up for <purpose> …` once for each purpose, and `kb: <lane> lane: a model answers <purpose>
+again` once a call for that purpose gets an answer (a failed call is no answer) (#10435; before, such a lane logged "1 model call(s), 1 failed" every 2 minutes). While the
 assistant is not connected, the knowledge base closes once no lane runs; a lane started goes on to the end of its run, as a round did.
 
 1. **Archive**: every 2 minutes (5 seconds after a Lark live event), inspect the 100 recently active chats in Lark's Messages list, reading only when the list timestamp is newer than the last archive.
@@ -240,7 +243,7 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
    At most 8 chats per round, most relevant first. Direct-chat / email tags propagate to the other person; a person's `summary.md` is assembled from metadata and direct-chat context without a model call.
    When the model declines the batch (a `refusal` stop reason, e.g. a safety classifier), it would decline it again: the batch is marked covered without a new summary and the chat continues with later messages.
    Any other failure puts the chat off for 10 minutes, doubled with each failure in a row up to 6 hours (`compress_failures` / `compress_retry_at` in `meta.json`, cleared on success);
-   a paused model connection does not count. Before this, a chat whose batch the model refused was sent again every round, every two minutes for days.
+   a paused model connection, or no model set up for it, does not count: the chat stays due without a log line of its own, and the round's compression stops there (#10435; before, no model counted as a failure of each chat, put it off up to 6 hours and logged a line for each). Before this, a chat whose batch the model refused was sent again every round, every two minutes for days.
 3. **Evolution (evo)**: merge projects mentioned in compression into `projects/` (names or aliases equal after stripping punctuation and case are merged; otherwise create), append progress to `log.md`
    and mark dirty. Only aliases belonging to this project are accepted: names / aliases of other unmerged projects, single characters or two-letter abbreviations, and generic terms are rejected; at most 12 automatic aliases per project
    (#2546: previously, several projects accumulated hundreds of aliases after a week and crossed into each other). Manual aliases from `kb_update` have no limit; `remove_aliases` deletes them. If several unmerged projects match a name,

@@ -13,5 +13,14 @@
   "output_not_running": "実行中の一覧にはありません",
   "output_failed": "出力を読み込めませんでした",
   "open_output_file": "ファイルとして開く",
+  "command_status": "状態",
+  "command_runtime": "実行時間",
+  "command_started": "開始時刻",
+  "command": "コマンド",
+  "command_show_more": "コマンド全文を表示",
+  "command_show_less": "折りたたむ",
+  "output": "出力",
+  "output_lines": "{count} 行",
+  "output_tail_lines": "最新 {count} 行",
   "output_tail": "以前の出力は省略されています。以前の出力はファイルを開いて確認できます。"
 }

@@ -323,11 +323,12 @@ func TestConversationNewAndSend(t *testing.T) {
 	if _, isErr = tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"d"}`); isErr {
 		t.Fatal("after the user spoke")
 	}
-	// trip → main twice so far in ten minutes; a third is fine, a fourth is not.
+	// trip → main twice so far in ten minutes; a third and a fourth go too: one-way messages only meet a loose cost
+	// cap, past which they queue (#10400).
 	if _, isErr = tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"e"}`); isErr {
 		t.Fatal("the third")
 	}
-	if out, isErr = tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"f"}`); !isErr || !strings.Contains(out, "Wait for its answer") {
+	if out, isErr = tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"f"}`); isErr || strings.Contains(out, "Queued for") {
 		t.Fatalf("the fourth to one conversation: %s", out)
 	}
 }
@@ -353,12 +354,16 @@ func TestConversationSendAnswerKeepsHop(t *testing.T) {
 			t.Fatalf("message %d: %s works at hop %d, want %d", i+1, to, got, want)
 		}
 	}
-	// main-0001 is the main conversation: its fourth request is not refused for the hop (#10099); the per-pair rate
-	// still stops it. The other side is cut at the last hop as before.
-	if out, isErr := tool(t, h, n, "main-0001", "conversation_send", `{"id":"trip-0002","text":"第 7 条"}`); !isErr || strings.Contains(out, "hop") || !strings.Contains(out, "messages to that conversation") {
-		t.Fatalf("the main conversation's fourth request: %s", out)
+	// main-0001 is the main conversation: its fourth request is not refused for the hop (#10099) and goes at the
+	// last hop; seven messages are far from the round-trip cut (#10400). The other side may answer it, and is cut at
+	// the last hop as before.
+	for i, st := range []struct{ from, to string }{{"main-0001", "trip-0002"}, {"trip-0002", "main-0001"}} {
+		out, isErr := tool(t, h, n, st.from, "conversation_send", fmt.Sprintf(`{"id":%q,"text":"第 %d 条"}`, st.to, i+7))
+		if isErr || !strings.Contains(out, "Sent to") || !strings.Contains(n.lastSend(t)["text"].(string), "第 3 跳") {
+			t.Fatalf("message %d, %s → %s: %s", i+7, st.from, st.to, out)
+		}
 	}
-	if out, isErr := tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"第 8 条"}`); !isErr || !strings.Contains(out, "hop 4") {
+	if out, isErr := tool(t, h, n, "trip-0002", "conversation_send", `{"id":"main-0001","text":"第 9 条"}`); !isErr || !strings.Contains(out, "hop 4") {
 		t.Fatalf("the other side's fourth request: %s", out)
 	}
 }

@@ -224,10 +224,16 @@ struct MeetingPage: View {
                 Text(entry.displayTitle).font(Theme.Font.heading).lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("recording-now-title")
-                stateLine()
+                // A replayed tape (#10589): where the tape is of its length, and its speed.
+                if MeetingRoomOffers.of(entry.id).replayClock { MeetingReplayStateLine(paused: paused) } else { stateLine() }
             }
             .frame(maxWidth: .infinity)
-            pageMenu(entry)
+            if MeetingRoomOffers.of(entry.id).pageMenu {
+                pageMenu(entry)
+            } else {
+                // The menu's room, so the title stays in the middle.
+                Color.clear.tapTargetFrame().accessibilityHidden(true)
+            }
         }
     }
 
@@ -285,8 +291,9 @@ struct MeetingPage: View {
     }
 
     /// Persona's role attends, but it can't be asked now (`MeetingAsk.canAsk`, the rule the bar and the asks follow).
+    /// Never for a replayed tape (#10589): Persona is in its room as the tape had it, though nothing can ask it.
     private func unreachable(_ entry: RecordingEntry, _ role: MeetingAttendance) -> Bool {
-        role.answers && !MeetingAsk.canAsk(entry, roomMissing: sync.roomMissing.contains(entry.id))
+        role.answers && !MeetingAsk.canAsk(entry, roomMissing: sync.roomMissing.contains(entry.id)) && !ReplayedMeeting.holds(entry.id)
     }
 
     static func roleWords(_ role: MeetingAttendance) -> String {
@@ -570,7 +577,7 @@ struct MeetingPage: View {
         // In the sheet its ✕ at the leading corner (#9653, `SheetClose`); pushed, the back button there. The ⋯ trailing.
         .toolbar {
             if let close { SheetClose(id: "recording-wrapup-done") { close() } }
-            ToolbarItem(placement: .topBarTrailing) { afterMenu(entry) }
+            if MeetingRoomOffers.of(entry.id).handOff { ToolbarItem(placement: .topBarTrailing) { afterMenu(entry) } }
         }
         .toolbar(.visible, for: .navigationBar)
         .fullScreenCover(isPresented: $mapFull) { mapPage(entry) }
@@ -583,7 +590,9 @@ struct MeetingPage: View {
         // Typing goes to the conversation: it is where the answer comes.
         .onChange(of: writing) { _, now in if now { afterPart = .conversation } }
         .onChange(of: minutes.ready, initial: true) { _, ready in cardsFollow(ready, entry: entry) }
-        .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) { afterBar(entry) }
+        .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) {
+            if MeetingRoomOffers.of(entry.id).followup { afterBar(entry) }
+        }
         .voiceUnavailableAlert($voiceNote, model: model)
         // Whether the follow-up's hub has a voice to call (at most once a minute, `VoiceSupport`). The id says whether the
         // follow-up exists: with one hub paired its group is "", so the group alone wouldn't change when the first message
@@ -874,9 +883,12 @@ private struct MeetingPageSubtitle: View {
     @State private var transcription = MeetingTranscription.shared
 
     var body: some View {
-        let parts = [persona, String(localized: "On this iPhone"),
-                     transcription.hubTranscribes(id) ? String(localized: "Transcribed on the hub") : nil,
-                     privateMark ? String(localized: "Private") : nil]
+        // A replayed tape (#10589) says what it is: on this phone only, not on the hub.
+        let parts = ReplayedMeeting.holds(id)
+            ? [String(localized: "Replaying a tape"), String(localized: "On this iPhone only"), String(localized: "Not on your hub")]
+            : [persona, String(localized: "On this iPhone"),
+               transcription.hubTranscribes(id) ? String(localized: "Transcribed on the hub") : nil,
+               privateMark ? String(localized: "Private") : nil]
         Text(parts.compactMap { $0 }.joined(separator: " · "))
             .font(Theme.Font.secondary).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

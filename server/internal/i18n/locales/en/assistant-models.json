@@ -135,10 +135,15 @@
   "source_auto_named": "Automatic: {provider} (a connection the hub can call directly)",
   "err_model_invalid": "Model ID {model} can’t be used: it must start with a letter or digit (or ~ and then one) and have only letters, digits and . _ - / : @ [ ], up to 256 characters",
   "custom_model_description": "A model ID you used before",
+  "model_route_name": "{name} ({route})",
   "err_role_forget": "Full access is required to forget a model ID.",
   "err_via_offline": "{name} is offline. This connection sends its requests through it: bring it online, or choose another computer under Send through in Settings › Model Providers",
   "err_run_no_machine": "This provider runs on the main chat’s computer, and none is set: choose one in Settings › Assistant",
   "err_run_offline": "{name} is offline. This use runs {launcher} there: bring it online, or choose another provider in Settings › Model configuration",
   "err_run_logged_out": "{launcher} isn’t logged in on {name}: log in there, or choose another provider in Settings › Model configuration",
-  "err_run_timeout": "{launcher} on {name} didn’t answer in time"
+  "err_run_timeout": "{launcher} on {name} didn’t answer in time",
+  "err_candidates_extension_only": "Only an extension’s purpose has candidate models",
+  "err_candidates_invalid": "Candidate models: choose “extension”, “off” or “custom”, and list each provider and model once, only for “custom”",
+  "err_candidates_count": "Candidate models: list 1 to {most}",
+  "err_candidates_not_callable": "{provider} can’t be called directly, so it can’t be a candidate. Choose a direct API provider or a provider with an address and a key"
 }

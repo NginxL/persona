@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -215,6 +216,9 @@ func (s *Service) setStandingAuthorizations(ctx context.Context, value json.RawM
 		s.standingMu.Lock()
 		defer s.standingMu.Unlock()
 		if err := s.saveStandingAuthorizations(ctx, before.Revision, after); err != nil {
+			if errors.Is(err, errStandingConflict) {
+				return "", fmt.Errorf("%w: %w", approvalops.ErrStale, err)
+			}
 			return "", err
 		}
 		return s.getStandingAuthorizations(ctx)

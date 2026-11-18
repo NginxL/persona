@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -193,6 +194,14 @@ func (n *Node) launcherCommandQ(name string, q func(string) string) string {
 			return "CLAUDE_CONFIG_DIR=" + shellDirQ(*d, q) + " " + name
 		}
 	}
+	if name == "codex" {
+		launcherCache.Lock()
+		words := launcherCache.codex[name]
+		launcherCache.Unlock()
+		if len(words) == 1 && filepath.IsAbs(words[0]) { // the ChatGPT app's codex, which the shell does not find
+			return q(words[0])
+		}
+	}
 	return name
 }
 
@@ -208,17 +217,24 @@ func shellDirQ(p string, q func(string) string) string {
 	return q(p)
 }
 
+const openCodeSessionEnv = "PERSONA_OPENCODE_SESSION"
+
 func managedEnv(l proto.ManagedLauncher) []string {
 	switch l.AgentType() {
 	case "codex":
 		var env []string
-		if l.BaseURL != "" {
-			env = append(env, "OPENAI_BASE_URL="+l.BaseURL)
+		if base := l.LaunchBaseURL(); base != "" {
+			env = append(env, "OPENAI_BASE_URL="+base)
 		}
 		if l.APIKey != "" {
 			env = append(env, "OPENAI_API_KEY="+l.APIKey)
 		}
-		return withLauncherEnv(env, l.Env)
+		env = withLauncherEnv(env, l.Env)
+		if effectiveBase := envValue(env, "OPENAI_BASE_URL"); modelhttp.OpenCodeGo(effectiveBase) && envValue(env, openCodeSessionEnv) == "" {
+			session := cmp.Or(modelhttp.OpenCodeSessionHeaderValue(l.Headers), modelhttp.OpenCodeSessionID("launcher:"+cmp.Or(l.Name, effectiveBase)))
+			env = append(env, openCodeSessionEnv+"="+session)
+		}
+		return env
 	case "agy":
 		var env []string
 		if l.BaseURL != "" {
@@ -348,6 +364,12 @@ func agentExecutable(bin string) (string, error) {
 		}
 	}
 
+	if bin == "codex" {
+		if p := bundledCodexCLI(); p != "" {
+			return p, nil
+		}
+	}
+
 	return "", fmt.Errorf("%s not found in PATH or the usual install locations (node service environment; add its bin directory to PATH and restart the node, or symlink into ~/.local/bin)", bin)
 }
 
@@ -400,6 +422,11 @@ func Launch(ctx context.Context, name string, args []string, ticket string) erro
 		if len(resp.Clear) == 0 {
 			resp.Clear = legacyEnvClear
 		}
+		// The last guard for a tier alias behind a gateway (#10365), wherever the --model came from (a terminal, an
+		// older node's start, the assistant's own Bash).
+		warn := func(msg string) { fmt.Fprintf(os.Stderr, "personad launch %s: %s\n", name, msg) }
+		args, resp.Args = gatewayModelArgs(args, resp.Env, warn), gatewayModelArgs(resp.Args, resp.Env, warn)
+		resp.Clear = withProviderToolSearch(resp.Clear, resp.Env)
 		resp.Env, resp.Clear = sessionOutput(resp.Env, resp.Clear, resp.MaxOutput, sessionModel(args, resp.Args, resp.Env))
 		resp.Clear = inheritedOutputClear(resp.Clear, resp.Env, os.Getenv) // a session Persona launched runs this one
 		resp.Clear, resp.Env = launchEnvFor(resp.Clear, resp.Env, os.Getenv("PERSONA_ASSISTANT") == "1")
@@ -462,6 +489,57 @@ func LaunchWithSecrets(ctx context.Context, ticket string, argv []string) error 
 	}
 	env := append(withoutEnv(os.Environ(), envNames(secrets)), secrets...)
 	return osproc.Exec(exe, argv, env)
+}
+
+// withProviderToolSearch is clear (what `personad launch` drops from the shell) with ENABLE_TOOL_SEARCH added when env,
+// the provider's environment as the node gave it, sets it (#10365): the shell's value, the assistant's process's
+// included, would otherwise come first in the agent's environment.
+func withProviderToolSearch(clear, env []string) []string {
+	if !slices.Contains(envNames(env), toolSearchEnv) || slices.Contains(clear, toolSearchEnv) {
+		return clear
+	}
+	return append(slices.Clone(clear), toolSearchEnv)
+}
+
+// gatewayModelArgs is a claude's args (before a "--", which starts the prompt) with each --model that names a tier
+// alias behind a gateway (env, the provider's environment as the node gave it, names a Base URL that is not
+// Anthropic's API) replaced by the model env gives that tier, or left out with its value when env gives none, which
+// warn says (#10365): Claude Code would send the alias to the gateway as the model's name.
+func gatewayModelArgs(args, env []string, warn func(string)) []string {
+	if anthropicEndpoint(envValue(env, "ANTHROPIC_BASE_URL")) {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a, m, pair := args[i], "", false
+		switch {
+		case a == "--":
+			return append(out, args[i:]...)
+		case (a == "--model" || a == "-m") && i+1 < len(args):
+			m, pair = args[i+1], true
+		case strings.HasPrefix(a, "--model="):
+			m = strings.TrimPrefix(a, "--model=")
+		default:
+			out = append(out, a)
+			continue
+		}
+		if pair {
+			i++
+		}
+		r := m
+		if isTierAlias(m) {
+			r = resolveTier(planTier(m), func(k string) string { return envValue(env, k) })
+		}
+		switch {
+		case isTierAlias(r):
+			warn("--model " + m + " is a Claude Code tier the provider names no model for: it runs the provider's default model")
+		case pair:
+			out = append(out, a, r)
+		default:
+			out = append(out, "--model="+r)
+		}
+	}
+	return out
 }
 
 // launchArgv builds the argument vector for starting an agent.
@@ -549,6 +627,9 @@ func codexProviderArgs(args, env []string, catalog string) []string {
 		if catalog != "" { // keyless, codex would not fetch it and would list nothing
 			provider += ",model_catalog_url=" + q(catalog)
 		}
+	}
+	if modelhttp.OpenCodeGo(base) && envValue(env, openCodeSessionEnv) != "" {
+		provider += `,env_http_headers={` + q(modelhttp.OpenCodeSessionHeader) + `=` + q(openCodeSessionEnv) + `}`
 	}
 	return []string{"-c", `model_provider="persona-launcher"`, "-c", "model_providers.persona-launcher=" + provider + "}"}
 }

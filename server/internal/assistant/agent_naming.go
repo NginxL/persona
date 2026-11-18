@@ -62,6 +62,9 @@ type agentNamingBook struct {
 	requests  singleflight.Group // one model call per session for requested names (agent_naming_request.go)
 	// beforeRequest lets a concurrency test observe every caller reaching the singleflight gate; nil in production.
 	beforeRequest func()
+	// unconfigured: the background naming found no model set up and the log has said so; not said again (for each
+	// session it tries) until a model answers (agentNamingSay).
+	unconfigured bool
 }
 
 func agentNameKey(machine, session string) string {
@@ -371,7 +374,7 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 	callCtx, cancel := context.WithTimeout(ctx, agentNamingTimeout)
 	defer cancel()
 	title, failureReason := s.agentNameFromModel(callCtx, machine, c.SessionID)
-	if failureReason != "" {
+	if s.agentNamingSay(failureReason) {
 		s.logf("agent naming: session=%q/%q reason=%s", machine, c.SessionID, failureReason)
 	}
 	// Observe the raw node row, not our decorated title; a native /rename wins immediately.
@@ -427,6 +430,23 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 	// Publishing takes the ledger lock to decorate, so release it before the asynchronous publication.
 	go s.publishSessions(machine)
 	return true
+}
+
+// agentNamingSay says whether the background naming logs a call's failure reason: model_not_configured once, until a
+// model answers (the log had a line for every session it tried), every other failure each time.
+func (s *Service) agentNamingSay(reason string) bool {
+	b := &s.agentNames
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch reason {
+	case "model_not_configured":
+		said := b.unconfigured
+		b.unconfigured = true
+		return !said
+	case "", "model_call_failed", "invalid_name", "model_output_truncated": // a model was there to call
+		b.unconfigured = false
+	}
+	return reason != ""
 }
 
 // agentNameFromModel asks the naming model for session id's name: the dialogue, the prompt and the validity check

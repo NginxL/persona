@@ -63,11 +63,13 @@ class ApproveFirstModel(
     private val paired: () -> Boolean,
     private val center: InteractionCenter,
     private val machines: () -> List<Machine>,
+    private val restore: suspend () -> Unit = {},
 ) {
     private val mutable = MutableStateFlow<ApproveState>(ApproveState.Loading)
     val state: StateFlow<ApproveState> = mutable.asStateFlow()
 
     suspend fun load() {
+        restore()
         if (!paired()) { mutable.value = ApproveState.NotPaired; return }
         mutable.value = ApproveState.Loading
         mutable.value = try {
@@ -125,7 +127,7 @@ class ApproveFirstActivity : ComponentActivity() {
         enableEdgeToEdge()
         val dependencies = SurfacesDependencies.of(this)
         val model = ApproveFirstModel(resources, { dependencies.pairing().isPaired.value }, dependencies.interactions(),
-            { dependencies.sessions().machines.value })
+            { dependencies.sessions().machines.value }, restore = { dependencies.pairing().restore() })
         val keyguard = getSystemService(KeyguardManager::class.java)
         val style = AppStyleStore(this).style.value
         setContent {

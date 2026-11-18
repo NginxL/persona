@@ -84,11 +84,15 @@ public nonisolated struct MetricSample: Codable, Hashable, Sendable {
     public var netTx: Double?
     public var diskUsed: Int64
     public var diskTotal: Int64
+    public var batteryPercent: Double?
+    public var batteryCharging: Bool?
+    public var tempC: Double?
 
     public enum CodingKeys: String, CodingKey {
         case t, cpu, cores, load
         case memUsed = "mem_used", memTotal = "mem_total", swapUsed = "swap_used", swapTotal = "swap_total"
         case netRx = "net_rx", netTx = "net_tx", diskUsed = "disk_used", diskTotal = "disk_total"
+        case batteryPercent = "battery_percent", batteryCharging = "battery_charging", tempC = "temp_c"
     }
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(t)) }
@@ -96,7 +100,7 @@ public nonisolated struct MetricSample: Codable, Hashable, Sendable {
     public var diskPercent: Double? { diskTotal > 0 ? 100 * Double(diskUsed) / Double(diskTotal) : nil }
     public var swapPercent: Double? { swapTotal > 0 ? 100 * Double(swapUsed) / Double(swapTotal) : nil }
 
-    public init(t: Int64, cpu: Double? = nil, cores: [Double]? = nil, load: Double? = nil, memUsed: Int64, memTotal: Int64, swapUsed: Int64, swapTotal: Int64, netRx: Double? = nil, netTx: Double? = nil, diskUsed: Int64, diskTotal: Int64) {
+    public init(t: Int64, cpu: Double? = nil, cores: [Double]? = nil, load: Double? = nil, memUsed: Int64, memTotal: Int64, swapUsed: Int64, swapTotal: Int64, netRx: Double? = nil, netTx: Double? = nil, diskUsed: Int64, diskTotal: Int64, batteryPercent: Double? = nil, batteryCharging: Bool? = nil, tempC: Double? = nil) {
         self.t = t
         self.cpu = cpu
         self.cores = cores
@@ -109,6 +113,9 @@ public nonisolated struct MetricSample: Codable, Hashable, Sendable {
         self.netTx = netTx
         self.diskUsed = diskUsed
         self.diskTotal = diskTotal
+        self.batteryPercent = batteryPercent
+        self.batteryCharging = batteryCharging
+        self.tempC = tempC
     }
 }
 
@@ -123,10 +130,17 @@ public nonisolated struct MetricPoint: Codable, Hashable, Sendable {
     public var rx: Double?
     public var tx: Double?
     public var disk: Double?
+    public var batteryPercent: Double?
+    public var tempC: Double?
+
+    public enum CodingKeys: String, CodingKey {
+        case t, gap, cpu, load, mem, swap, rx, tx, disk
+        case batteryPercent = "battery_percent", tempC = "temp_c"
+    }
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(t)) }
 
-    public init(t: Int64, gap: Bool? = nil, cpu: Double? = nil, load: Double? = nil, mem: Double? = nil, swap: Double? = nil, rx: Double? = nil, tx: Double? = nil, disk: Double? = nil) {
+    public init(t: Int64, gap: Bool? = nil, cpu: Double? = nil, load: Double? = nil, mem: Double? = nil, swap: Double? = nil, rx: Double? = nil, tx: Double? = nil, disk: Double? = nil, batteryPercent: Double? = nil, tempC: Double? = nil) {
         self.t = t
         self.gap = gap
         self.cpu = cpu
@@ -136,6 +150,8 @@ public nonisolated struct MetricPoint: Codable, Hashable, Sendable {
         self.rx = rx
         self.tx = tx
         self.disk = disk
+        self.batteryPercent = batteryPercent
+        self.tempC = tempC
     }
     public var isGap: Bool { gap == true }
 }

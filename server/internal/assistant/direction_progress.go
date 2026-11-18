@@ -65,7 +65,7 @@ func (s *Service) setDirectionName(ctx context.Context, id, name, by string) err
 	}
 	s.saveDirectionsLocked(ctx)
 	b.mu.Unlock()
-	s.directionsSoon() // leader.changed with the new name
+	s.publish(ctx) // session titles update now; the existing direction/name events follow
 	return nil
 }
 
@@ -201,6 +201,37 @@ func (s *Service) directionOf(id string) *direction {
 	}
 	cp := *b.m[id]
 	return &cp
+}
+
+// directionSessionNames uses the same canonical resolver as the tree without opening
+// the knowledge base while publish holds pubMu. directionsSync publishes refreshed
+// project fallbacks once the knowledge base is available; explicit names are immediate.
+func (s *Service) directionSessionNames(ctx context.Context, cfg Settings, titles map[string]shownTitle) map[string]string {
+	projects, available := map[string]string{}, false
+	if opened := s.kb.cur.Load(); opened != nil && s.kbOn(ctx) {
+		available = true
+		for _, project := range opened.eng.Store.Projects() {
+			projects[project.Slug] = project.Name
+		}
+	}
+	b := &s.directions
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.directionsLocked(ctx) {
+		return nil
+	}
+	names := make(map[string]string, len(cfg.Leaders))
+	for _, id := range cfg.Leaders {
+		if id == "" || id == cfg.Main {
+			continue
+		}
+		name := directionName(nil, titles[id].title, "")
+		if d := b.m[id]; d != nil {
+			name = nameOf(d, titles[id].title, projects, available)
+		}
+		names[id] = name
+	}
+	return names
 }
 
 // leaderNames are what the directions of leaders ids are called now (directionName), read once for all of them; a

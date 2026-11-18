@@ -546,4 +546,77 @@ struct ChatLinesTests {
         let next = PendingMessage(text: "next day", images: [], state: .failed, createdAt: day2.addingTimeInterval(3600))
         #expect(ChatLines.placeFailed(lines, [next]).before == ["imgs": [next]])
     }
+
+    // MARK: Permission mode change lines (#10297)
+
+    private func sent(_ seq: Int, at: Date, role: String = "user") -> Item {
+        Item(id: "\(seq)#0", seq: seq, ts: at, role: role, kind: .text, text: role == "user" ? "问题\(seq)" : "回答\(seq)",
+             toolUseID: nil, toolName: nil, toolInput: nil, isError: nil, image: nil)
+    }
+
+    private func modeChange(_ at: Date, _ kind: String = "set", to: String = "acceptEdits", applied: String? = "now",
+                            reason: String? = nil, from: String? = "default", who: String? = "Phone") -> APIClient.ModeChange {
+        APIClient.ModeChange(kind: kind, from: from, to: to, applied: applied, actorKind: who == nil ? "hub" : "device",
+                             deviceName: who, reason: reason, at: at)
+    }
+
+    private func modeIDs(_ lines: [ChatLine]) -> [String] {
+        lines.map { line in if case .modeChange = line.content { "mode" } else { line.id } }
+    }
+
+    @Test func modeChangesGoAtTheEndOfTheExchangeTheyHappenedIn() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let lines = ChatLines(openWork: []).build(blocks([sent(1, at: t0), sent(2, at: t0.addingTimeInterval(60), role: "assistant"),
+                                                          sent(3, at: t0.addingTimeInterval(600)), sent(4, at: t0.addingTimeInterval(660), role: "assistant")]), live: nil)
+        let merged = ChatLines.mergeModeChanges(lines, [modeChange(t0.addingTimeInterval(120)), modeChange(t0.addingTimeInterval(900), to: "plan"),
+                                                        modeChange(t0.addingTimeInterval(-60), to: "auto")])
+        // before the first message, after the first exchange (never between its message and answer), after the last.
+        // Built a part at a time: one chained sum of five arrays is more than Xcode 26.3's type checker takes (#10519).
+        var expected: [String] = ["mode"]
+        expected += modeIDs(Array(lines.prefix(2)))
+        expected.append("mode")
+        expected += modeIDs(Array(lines.dropFirst(2)))
+        expected.append("mode")
+        #expect(modeIDs(merged) == expected)
+        #expect(Set(merged.map(\.id)).count == merged.count)
+        // the last line Retry and the error cards ask about is not a mode change
+        #expect(ChatLines.lastOfChat(merged)?.id == lines.last?.id)
+        // older history still to load: a change from before the first loaded item waits for it
+        let held = ChatLines.mergeModeChanges(lines, [modeChange(t0.addingTimeInterval(-60))], earliest: t0)
+        #expect(held.map(\.id) == lines.map(\.id))
+        // nothing to place them by: an empty chat keeps its placeholder
+        #expect(ChatLines.mergeModeChanges([], [modeChange(t0)]).isEmpty)
+    }
+
+    @Test func modeChangeIDsSurviveTheListGrowingOrLosingItsOldest() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let lines = ChatLines(openWork: []).build(blocks([sent(1, at: t0)]), live: nil)
+        let twice = [modeChange(t0.addingTimeInterval(5)), modeChange(t0.addingTimeInterval(5)), modeChange(t0.addingTimeInterval(9))]
+        let before = ChatLines.mergeModeChanges(lines, twice).map(\.id)
+        let after = ChatLines.mergeModeChanges(lines, Array(twice.dropFirst())).map(\.id)
+        #expect(Set(before).count == before.count)
+        #expect(after.last == before.last)
+    }
+
+    /// Tests run in zh-Hans: the modes in 「」, a restart's outcome with why, no colon without one.
+    @Test func modeChangeWords() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let auto = SessionModes.modeLabel("acceptEdits") ?? "", all = SessionModes.modeLabel("bypassPermissions") ?? ""
+        let start = SessionModes.modeLabel("default") ?? ""
+        #expect(ModeChangeWords.label(modeChange(t0), session: nil) == "Phone 把权限模式从「\(start)」改成了「\(auto)」")
+        #expect(ModeChangeWords.label(modeChange(t0, from: nil), session: nil) == "Phone 把权限模式改成了「\(auto)」")
+        #expect(ModeChangeWords.label(modeChange(t0, to: "bypassPermissions", applied: "restart"), session: nil)
+                == "Phone 选了「\(all)」，这一轮结束后会重启会话再切过去")
+        #expect(ModeChangeWords.label(modeChange(t0, who: nil), session: nil).hasPrefix("hub 把权限模式"))
+        func outcome(_ kind: String, _ reason: String?) -> String {
+            ModeChangeWords.label(modeChange(t0, kind, to: "bypassPermissions", applied: nil, reason: reason, from: nil), session: nil)
+        }
+        #expect(outcome("restart_done", nil) == "已重启，切到了「\(all)」")
+        #expect(outcome("restart_done", "already_in") == "已经是「\(all)」了，不用重启")
+        #expect(outcome("restart_dropped", "process_replaced") == "已取消，不会重启到「\(all)」：会话换了进程")
+        #expect(outcome("restart_dropped", "process_exited") == "已取消，不会重启到「\(all)」：原进程已经退出")
+        #expect(outcome("restart_failed", "start_failed") == "没能重启到「\(all)」：新进程没起来，会话按原来的模式继续")
+        #expect(outcome("restart_failed", nil) == "没能重启到「\(all)」")
+        #expect(outcome("restart_dropped", "claude 4101, the process it was picked for, has exited") == "已取消，不会重启到「\(all)」")
+    }
 }

@@ -31,7 +31,7 @@
     </plurals>
     <string name="agents_summary_quiet">すべて落ち着いています</string>
     <plurals name="agents_subtitle_unread">
-        <item quantity="other">%1$d個が完了したばかり</item>
+        <item quantity="other">%1$d件が未確認</item>
     </plurals>
     <string name="agents_subtitle_one">%1$s。</string>
     <string name="agents_subtitle_two">%1$s、%2$s。</string>

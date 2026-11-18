@@ -197,6 +197,9 @@ func TestGoldenTodoThreadReply(t *testing.T) {
 	golden(t, "todo_thread_reply.unrecorded", prompts.RenderTodoThreadReply(prompts.TodoThreadReply{Title: "天气 App 发 1.3 版", Text: "先发安卓，iOS 等审核过了再说"}))
 	in := prompts.BotMessage{Persona: true, Owner: "示例用户", Text: "先发安卓"}
 	golden(t, "bot_message.private", prompts.RenderBotMessage(in))
+	in.Todo = &prompts.BotTodo{ID: "todo_0123456789abcdef", Title: "天气 App 发版", Notes: "先发安卓。\n链接：https://example.com/release"}
+	golden(t, "bot_message.todo_reminder", prompts.RenderBotMessage(in))
+	in.Todo = nil
 	in.Topic = true
 	golden(t, "bot_message.topic", prompts.RenderBotMessage(in))
 }

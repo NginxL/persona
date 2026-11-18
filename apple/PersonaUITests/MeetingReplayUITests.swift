@@ -6,6 +6,8 @@ import XCTest
 /// - The made-up tape (`-showMeetingReplay sample`, `MeetingTapeSample`) at 2×: the room's live box takes the hub's lines
 ///   one by one, the Highlights page and the map follow the tape, End writes no minutes on the hub but shows the tape's,
 ///   and the mock never hears of the replayed meeting (no upload, no audio).
+/// - The made-up tape from Settings › About › Developing Persona › Replay a Meeting Tape (#10589): Pause, the speed, End,
+///   with nothing that asks the hub in the room.
 /// - A meeting started on the Recordings page with `-openMeetingAudio` and the made-up tape's audio
 ///   (Fixtures/meeting-tape/audio.m4a, macOS `say`): no microphone prompt, and the file's audio goes up the hub's audio
 ///   socket in hub transcription, whose lines come back to the room.
@@ -73,7 +75,8 @@ final class MeetingReplayUITests: XCTestCase {
         let end = app.buttons["recording-stop"].firstMatch
         XCTAssertTrue(end.waitForExistence(timeout: 5), app.debugDescription)
         end.tap()
-        let confirm = app.buttons["结束并生成纪要"].firstMatch
+        // A replay's End asks "End the Replay?" (#10589): nothing is written to the hub.
+        let confirm = app.buttons["结束回放"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
         try shot(app, "end")
         confirm.tap()
@@ -86,6 +89,84 @@ final class MeetingReplayUITests: XCTestCase {
         try shot(app, "minutes")
         XCTAssertNil(try upload(hub, replayed), "the replayed meeting went to the hub")
         XCTAssertNil(try transcription(hub, replayed), "the replayed meeting opened an audio socket")
+    }
+
+    /// Settings › About › Developing Persona › Replay a Meeting Tape (#10589): the made-up tape on this phone, played from
+    /// the page at 2×. The room shows the tape's time and speed with only Pause and End (nothing that asks the hub); Pause
+    /// holds the tape; the speed changes while it plays; End shows the tape's minutes with no Hand to Agent; and the mock
+    /// never hears of the replayed meeting (no upload, no audio, no delete).
+    @MainActor func testATapeReplaysFromDevelopingPersona() throws {
+        let hub = try mockHub()
+        XCUIDevice.shared.appearance = ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] == "dark" ? .dark : .light
+        let app = XCUIApplication()
+        app.launchArguments = ["-pairURL", pair(hub), "-tab", "settings", "-openMeetingTapes", "sample",
+                               "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchPinned()
+        let tape = element(app, "meeting-tape")
+        XCTAssertTrue(tape.waitForExistence(timeout: 30), "no tape on the page:\n\(app.debugDescription)")
+        XCTAssertTrue(element(app, "meeting-tapes-files").exists, app.debugDescription)
+        try shot(app, "tapes")
+
+        // The page's row in About, shown while Developing Persona is on.
+        app.navigationBars.buttons.firstMatch.tap()
+        let row = element(app, "dev-mode-meeting-tapes")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "no row in About: \(app.debugDescription)")
+        try shot(app, "about")
+        row.tap()
+        XCTAssertTrue(tape.waitForExistence(timeout: 10), app.debugDescription)
+        app.segmentedControls["meeting-tapes-speed"].buttons["2×"].tap()
+        tape.tap()
+
+        // The room: the tape's time and speed, Pause and End only.
+        let clock = element(app, "meeting-replay-clock")
+        XCTAssertTrue(clock.waitForExistence(timeout: 20), "no replay in the room:\n\(app.debugDescription)")
+        XCTAssertTrue(element(app, "meeting-replay-speed").exists)
+        for absent in ["meeting-ask-field", "recording-bookmark", "meeting-just-me", "meeting-page-menu", "meeting-room-speaker",
+                       "meeting-room-invite-button"] {
+            XCTAssertFalse(element(app, absent).exists, "\(absent) shows in a replay:\n\(app.debugDescription)")
+        }
+        let lines = app.descendants(matching: .any).matching(identifier: "meeting-live-hub-line")
+        XCTAssertTrue(waitFor(15) { lines.count >= 1 }, "no line from the tape: \(app.debugDescription)")
+        try shot(app, "live")
+
+        // Pause holds the tape: the time and the lines stay.
+        app.buttons["recording-pause"].firstMatch.tap()
+        XCTAssertTrue(waitFor(5) { self.element(app, "meeting-replay-state").label == "已暂停" }, app.debugDescription)
+        let held = clock.label, heldLines = lines.count
+        RunLoop.current.run(until: Date().addingTimeInterval(3))
+        XCTAssertEqual(clock.label, held, "the tape moved while paused")
+        XCTAssertEqual(lines.count, heldLines)
+        try shot(app, "paused")
+        app.buttons["recording-pause"].firstMatch.tap()
+        XCTAssertTrue(waitFor(5) { self.element(app, "meeting-replay-state").label == "回放中" }, app.debugDescription)
+
+        // The speed, changed while it plays.
+        element(app, "meeting-replay-speed").tap()
+        let faster = app.buttons["4×"].firstMatch
+        XCTAssertTrue(faster.waitForExistence(timeout: 5), app.debugDescription)
+        try shot(app, "speed")
+        faster.tap()
+        XCTAssertTrue(waitFor(5) { self.element(app, "meeting-replay-speed").value as? String == "4×" }, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["那我周五前把发布说明写好。"].firstMatch.waitForExistence(timeout: 20),
+                      "the tape's last line never came: \(app.debugDescription)")
+        app.buttons["meeting-room-tab-map"].firstMatch.tap()
+        XCTAssertTrue(element(app, "meeting-room-map").waitForExistence(timeout: 5), app.debugDescription)
+        try shot(app, "map")
+        app.buttons["meeting-room-tab-live"].firstMatch.tap()
+
+        // End: the tape's minutes, nothing on the hub.
+        app.buttons["recording-stop"].firstMatch.tap()
+        let confirm = app.buttons["结束回放"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        try shot(app, "end")
+        confirm.tap()
+        XCTAssertTrue(element(app, "meeting-after-summary").waitForExistence(timeout: 20), "no summary after the replay: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "meeting-after-menu").exists, "Hand to Agent is offered for a replay")
+        try shot(app, "after")
+        XCTAssertNil(try upload(hub, replayed), "the replayed meeting went to the hub")
+        XCTAssertNil(try transcription(hub, replayed), "the replayed meeting opened an audio socket")
+        let deleted = try json(hub, "/mock/recordings")["deleted"] as? [String] ?? []
+        XCTAssertFalse(deleted.contains(replayed), "the replayed meeting was deleted on the hub")
     }
 
     @MainActor func testAMeetingRecordsFromAnAudioFile() throws {

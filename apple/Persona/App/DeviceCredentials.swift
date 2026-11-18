@@ -171,10 +171,18 @@ struct DevicesView: View {
     @State private var loaded = false
     @State private var revoking: APIClient.DeviceToken?
     @State private var connecting = false
+    /// Scan Browser Sign-in Code open (#10293).
+    @State private var scanningBrowser = false
 
     var body: some View {
         SettingsForm {
             Section {
+                if canApproveBrowsers {
+                    Button { scanningBrowser = true } label: {
+                        Label("Scan Browser Sign-in Code", systemImage: Theme.Icon.scanCode).lineLimit(1)
+                    }
+                    .accessibilityIdentifier("devices.scanBrowser")
+                }
                 Button { connecting = true } label: {
                     Label("Connect New Device", systemImage: Theme.Icon.pairing).lineLimit(1)
                 }
@@ -207,9 +215,17 @@ struct DevicesView: View {
         .sheet(isPresented: $connecting, onDismiss: { Task { await load() } }) {
             ConnectDeviceSheet { Task { await load() } }
         }
+        .sheet(isPresented: $scanningBrowser, onDismiss: { Task { await load() } }) {
+            BrowserLoginSheet()
+        }
         #if DEBUG
         .task { // `-openConnectDevice YES | web`: Connect New Device open (on Browser), for screenshots
             if UserDefaults.standard.string(forKey: "openConnectDevice") != nil { try? await Task.sleep(for: .seconds(1)); connecting = true }
+        }
+        .task { // `-showBrowserLoginSample lan | internet | unknown | number | signedIn | voided | expired`: that step, sample data
+            guard BrowserLoginSample.current != nil else { return }
+            try? await Task.sleep(for: .seconds(1))
+            scanningBrowser = true
         }
         #endif
         .confirmationDialog(revoking.map { String(localized: "Revoke “\($0.name)”?") } ?? "", isPresented: Binding(
@@ -219,6 +235,23 @@ struct DevicesView: View {
         } message: { t in
             Text(t.id == current ? Self.revokeSelfNote : String(localized: "That device disconnects right away and has to be paired again."))
         }
+    }
+
+    #if DEBUG
+    /// `-showBrowserLoginSample`, read once.
+    private static let browserSampleOn = UserDefaults.standard.string(forKey: "showBrowserLoginSample") != nil
+    #endif
+
+    /// The hub matches a number (`browser_qr_match`): only then can this device approve a browser.
+    private var canApproveBrowsers: Bool {
+        #if DEBUG
+        if Self.browserSampleOn { return true }
+        #endif
+        #if os(iOS) || os(visionOS)
+        return model.hubFeatures.contains(APIClient.browserQRMatchFeature)
+        #else
+        return false
+        #endif
     }
 
     #if os(macOS)

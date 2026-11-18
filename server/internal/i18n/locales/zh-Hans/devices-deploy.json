@@ -7,6 +7,7 @@
   "package_bad": "从发布站下载的 {os}/{arch} node 程序没有通过校验，没有使用：{err}",
   "package_moved": "下载 {os}/{arch} 的 node 程序期间发布了新版本 {version}，这次下载的没有使用。再试一次会从新版本取程序",
   "install_failed": "装不上：{err}",
+  "wrapper": "这台电脑上的 {path} 是一个脚本（启动 personad 的包装脚本），不是 personad 本身，所以没有替换它：替换会丢掉脚本里的设置，比如 node 用哪个数据目录。请改为更新这个脚本运行的 personad",
   "minutes_other": "{count} 分钟",
   "seconds_other": "{count} 秒",
   "not_back": "装好了，但这台电脑 {wait}内没有重新连上 hub",

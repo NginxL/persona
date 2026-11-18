@@ -7,6 +7,8 @@ package sysmon
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -534,4 +536,210 @@ func unescapeMount(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+// powerSupply holds the raw text of one /sys/class/power_supply/<name> entry.
+type powerSupply struct {
+	Type       string
+	Scope      string
+	Present    string
+	Status     string
+	Capacity   string
+	EnergyNow  string
+	EnergyFull string
+	ChargeNow  string
+	ChargeFull string
+}
+
+func clampPercent(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return round1(v)
+}
+
+func parseBatteryStatus(status string) *bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "charging":
+		v := true
+		return &v
+	case "discharging", "not charging", "not_charging", "full":
+		v := false
+		return &v
+	default:
+		return nil
+	}
+}
+
+// parsePowerSupplies returns the system battery percentage and charging state from /sys/class/power_supply entries.
+// Peripheral batteries (scope == "Device", e.g. Bluetooth mice/keyboards/controllers) and absent/unreadable batteries
+// are skipped; returns (nil, nil) when no valid system battery is present.
+func parsePowerSupplies(supplies []powerSupply) (pct *float64, charging *bool) {
+	var sum float64
+	var count int
+	var anyCharging, anyKnown bool
+	for _, s := range supplies {
+		if !strings.EqualFold(strings.TrimSpace(s.Type), "Battery") {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(s.Scope), "Device") {
+			continue
+		}
+		if strings.TrimSpace(s.Present) == "0" {
+			continue
+		}
+		var capVal float64
+		var ok bool
+		if c, err := strconv.ParseFloat(strings.TrimSpace(s.Capacity), 64); err == nil && !math.IsNaN(c) && !math.IsInf(c, 0) && c >= 0 && c <= 100 {
+			capVal, ok = round1(c), true
+		} else if en, err1 := strconv.ParseFloat(strings.TrimSpace(s.EnergyNow), 64); err1 == nil && en >= 0 {
+			if ef, err2 := strconv.ParseFloat(strings.TrimSpace(s.EnergyFull), 64); err2 == nil && ef > 0 {
+				capVal, ok = clampPercent(100*en/ef), true
+			}
+		} else if cn, err1 := strconv.ParseFloat(strings.TrimSpace(s.ChargeNow), 64); err1 == nil && cn >= 0 {
+			if cf, err2 := strconv.ParseFloat(strings.TrimSpace(s.ChargeFull), 64); err2 == nil && cf > 0 {
+				capVal, ok = clampPercent(100*cn/cf), true
+			}
+		}
+		if !ok {
+			continue
+		}
+		sum += capVal
+		count++
+		if st := parseBatteryStatus(s.Status); st != nil {
+			anyKnown = true
+			if *st {
+				anyCharging = true
+			}
+		}
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	v := round1(sum / float64(count))
+	if anyKnown {
+		c := anyCharging
+		return &v, &c
+	}
+	return &v, nil
+}
+
+// parseTermuxBatteryStatus parses the JSON output of `termux-battery-status`.
+func parseTermuxBatteryStatus(b []byte) (pct *float64, charging *bool) {
+	var out struct {
+		Percentage *float64 `json:"percentage"`
+		Status     string   `json:"status"`
+	}
+	if json.Unmarshal(b, &out) != nil || out.Percentage == nil {
+		return nil, nil
+	}
+	p := *out.Percentage
+	if math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 100 {
+		return nil, nil
+	}
+	v := round1(p)
+	return &v, parseBatteryStatus(out.Status)
+}
+
+// parsePmsetBatt parses `pmset -g batt` on macOS, returning nil when no InternalBattery is present (e.g. Mac mini/Studio).
+func parsePmsetBatt(b []byte) (pct *float64, charging *bool) {
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.Contains(line, "InternalBattery") {
+			continue
+		}
+		pctIdx := strings.IndexByte(line, '%')
+		if pctIdx <= 0 {
+			continue
+		}
+		start := pctIdx - 1
+		for start >= 0 && ((line[start] >= '0' && line[start] <= '9') || line[start] == '.') {
+			start--
+		}
+		p, err := strconv.ParseFloat(line[start+1:pctIdx], 64)
+		if err != nil || math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 100 {
+			continue
+		}
+		v := round1(p)
+		low := strings.ToLower(line)
+		switch {
+		case strings.Contains(low, "; charging") || strings.Contains(low, "; finishing charge"):
+			c := true
+			return &v, &c
+		case strings.Contains(low, "; discharging") || strings.Contains(low, "; charged") || strings.Contains(low, "; not charging"):
+			c := false
+			return &v, &c
+		default:
+			return &v, nil
+		}
+	}
+	return nil, nil
+}
+
+// thermalReading is one hwmon or thermal_zone temperature reading in millidegrees Celsius.
+type thermalReading struct {
+	Name   string
+	Label  string
+	MilliC int64
+}
+
+func excludedThermalName(s string) bool {
+	t := strings.ToLower(strings.TrimSpace(s))
+	if t == "" {
+		return false
+	}
+	if t == "pa" || strings.HasPrefix(t, "pa_") || strings.HasPrefix(t, "pa-") ||
+		(strings.HasPrefix(t, "pa") && len(t) > 2 && t[2] >= '0' && t[2] <= '9') ||
+		strings.HasSuffix(t, "-pa") || strings.HasSuffix(t, "_pa") {
+		return true
+	}
+	for _, sub := range []string{"sdr", "bcl", "ibat", "vbat", "iwlwifi", "wifi", "wlan", "modem", "battery", "batt", "chg", "usb"} {
+		if strings.HasPrefix(t, sub) || strings.Contains(t, "_"+sub) || strings.Contains(t, "-"+sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func thermalPriority(name, label string) int {
+	n := strings.ToLower(strings.TrimSpace(name))
+	l := strings.ToLower(strings.TrimSpace(label))
+	for _, hi := range []string{"x86_pkg_temp", "coretemp", "k10temp", "zenpower", "cpu_thermal", "soc_thermal", "cpuss", "cpu", "soc", "package", "tctl", "tdie"} {
+		if strings.HasPrefix(l, hi) || strings.Contains(l, hi) || strings.HasPrefix(n, hi) {
+			return 3
+		}
+	}
+	for _, mid := range []string{"aoss", "acpitz", "tsens", "mtktscpu", "k8temp", "thinkpad", "dell_smm", "apple_smc", "big", "little", "cluster"} {
+		if strings.HasPrefix(n, mid) || strings.HasPrefix(l, mid) {
+			return 2
+		}
+	}
+	return 1
+}
+
+// selectTempC picks the best valid host/CPU/SoC temperature in °C (0 < temp <= 125), returning nil if none is valid.
+func selectTempC(readings []thermalReading) *float64 {
+	bestPrio := 0
+	var bestTemp float64
+	for _, r := range readings {
+		if excludedThermalName(r.Name) || excludedThermalName(r.Label) {
+			continue
+		}
+		c := float64(r.MilliC) / 1000.0
+		if math.IsNaN(c) || math.IsInf(c, 0) || c <= 0 || c > 125 {
+			continue
+		}
+		p := thermalPriority(r.Name, r.Label)
+		c = round1(c)
+		if p > bestPrio || (p == bestPrio && c > bestTemp) {
+			bestPrio = p
+			bestTemp = c
+		}
+	}
+	if bestPrio == 0 {
+		return nil
+	}
+	return &bestTemp
 }

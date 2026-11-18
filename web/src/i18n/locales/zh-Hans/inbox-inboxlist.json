@@ -30,6 +30,8 @@
   "clear_search": "清除搜索",
   "clear_fyi": "全部看过",
   "clear_noise": "全部清除",
+  "clear_in_fyi": "看过「{name}」的全部 {count} 条",
+  "clear_in_noise": "清除「{name}」的全部 {count} 条",
   "done": "已处理",
   "refreshing": "正在刷新",
   "translated": "已翻译",

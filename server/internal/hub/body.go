@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -13,6 +14,20 @@ import (
 // with an *http.MaxBytesError (and the server closes the connection instead of draining the rest).
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
 	return json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v)
+}
+
+// optionalObject accepts an empty body or a JSON object and writes any decoding error.
+func optionalObject(w http.ResponseWriter, r *http.Request, limit int64) (map[string]any, bool) {
+	p := map[string]any{}
+	if err := decodeJSONBody(w, r, &p, limit); err != nil && !errors.Is(err, io.EOF) {
+		writeBodyErr(w, err, err)
+		return nil, false
+	}
+	if p == nil {
+		writeErr(w, http.StatusBadRequest, errors.New("request body must be a JSON object"))
+		return nil, false
+	}
+	return p, true
 }
 
 // bodyTooLarge reports whether err is decodeJSONBody's over-the-limit error.

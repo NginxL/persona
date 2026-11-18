@@ -9,6 +9,9 @@ import type { Interaction, Item, Session } from "../../lib/types";
 import zh from "../../i18n/locales/zh-Hans/chat-interactions.json";
 import en from "../../i18n/locales/en/chat-interactions.json";
 import ja from "../../i18n/locales/ja/chat-interactions.json";
+import zhTasks from "../../i18n/locales/zh-Hans/assistant-tasks.json";
+import enTasks from "../../i18n/locales/en/assistant-tasks.json";
+import jaTasks from "../../i18n/locales/ja/assistant-tasks.json";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -36,20 +39,35 @@ const bash = {
   created_at: "2020-01-01T00:00:00Z",
 } as Interaction;
 
+const question = {
+  id: "ix_question", machine_id: "hub", session_id: "c1", session_title: "Persona", kind: "question", tool_name: "AskUserQuestion",
+  questions: [{ question: "Which mock change should ship?", header: "Mock choice", options: [{ label: "Use mock", description: "Local fixture only" }] }],
+  created_at: "2020-01-01T00:01:00Z",
+} as Interaction;
+
 let host: HTMLDivElement;
 let root: Root;
 let fetcher: ReturnType<typeof vi.fn>;
 const flush = async () => {
   for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 };
-const card = () => host.querySelector(`[data-card="${bash.id}"]`);
+const card = (id = bash.id) => host.querySelector(`[data-card="${id}"]`);
 const tray = () => host.querySelector("[data-assistant-actionbar]");
+const nextOwn = () => host.querySelector<HTMLButtonElement>("[data-next-own-ask]");
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label);
 const resolves = () => fetcher.mock.calls.filter(([url]) => String(url).endsWith(`/interactions/${bash.id}/resolve`));
+const revealed: string[] = [];
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
 
 beforeEach(() => {
   localStorage.clear();
   transcript.items = [];
+  revealed.length = 0;
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, writable: true, value: function (this: HTMLElement) {
+    const id = this.parentElement?.closest("[data-card]")?.getAttribute("data-card");
+    if (id) revealed.push(id);
+  } });
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0));
   upsertSession({ machine_id: "hub", session_id: "c1", title: "Persona", status: "working", state: "needs_you", assistant: true, agent: "claude" } as Session);
   Object.assign(getState(), { interactions: [bash], answered: {} });
   fetcher = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -62,6 +80,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  if (originalScrollIntoView) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScrollIntoView);
+  else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
   reset();
   vi.unstubAllGlobals();
 });
@@ -176,6 +196,59 @@ describe("a Persona conversation's own approval card (#4883)", () => {
     act(() => row!.click());
     expect(host.querySelector("[data-tray-list]")).toBeNull();
     expect(card()).not.toBeNull();
+  });
+
+  it("cycles to the next unanswered question or approval card, expanding the existing stack and wrapping (#10347)", async () => {
+    Object.assign(getState(), { interactions: [bash, question], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    expect(nextOwn()?.textContent).toBe(`${t("assistant-tasks.next_unanswered")}2`);
+    expect(card(question.id)).toBeNull();
+    revealed.length = 0; // the card slot's initial landing is not a shortcut navigation
+
+    act(() => nextOwn()!.click());
+    await flush();
+    expect(revealed).toEqual([bash.id]);
+
+    act(() => nextOwn()!.click());
+    await flush();
+    expect(card(question.id)).not.toBeNull();
+    expect(revealed).toEqual([bash.id, question.id]);
+    // The expanded cards must not shrink the closed action bar to zero and cover the next click (real-browser evidence).
+    expect(tray()?.classList.contains("shrink-0")).toBe(true);
+
+    act(() => nextOwn()!.click());
+    await flush();
+    expect(revealed).toEqual([bash.id, question.id, bash.id]);
+    expect(host.querySelectorAll("[data-card]")).toHaveLength(2);
+  });
+
+  it("reduces the next-unanswered count as either kind of card is answered, then hides it", async () => {
+    Object.assign(getState(), { interactions: [bash, question], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    act(() => button(t("chat-interactions.allow"))!.click());
+    await flush();
+    expect(nextOwn()?.textContent).toBe(`${t("assistant-tasks.next_unanswered")}1`);
+
+    const choice = [...card(question.id)!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Use mock"));
+    act(() => choice!.click());
+    await flush();
+    expect(getState().interactions).toEqual([]);
+    expect(nextOwn()).toBeNull();
+  });
+
+  it("has no next-unanswered entry when no card waits", async () => {
+    Object.assign(getState(), { interactions: [], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    expect(nextOwn()).toBeNull();
+  });
+
+  it("labels the next-unanswered entry in all three languages", () => {
+    expect(enTasks.next_unanswered).toBe("Next waiting for your answer");
+    expect(zhTasks.next_unanswered).toBe("下一条等你回复");
+    expect(jaTasks.next_unanswered).toBe("次の回答待ち");
   });
 
   it("ends once allowed, and the chat goes on", async () => {

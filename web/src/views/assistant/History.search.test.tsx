@@ -148,3 +148,11 @@ describe("All chats' search with the manager's (#6283)", () => {
     expect(host.querySelector("mark")).toBeNull();
   });
 });
+
+it("finds the main conversation by its displayed Main chat label and keeps the home symbol", async () => {
+  await type("主对话");
+  const main = [...host.querySelectorAll("a")].find((a) => a.textContent?.includes("主对话"));
+  expect(main).toBeDefined();
+  expect(main?.querySelector('path[d^="M3 10.5 12 3"]')).not.toBeNull();
+  expect(main?.textContent).not.toContain("对话 main");
+});

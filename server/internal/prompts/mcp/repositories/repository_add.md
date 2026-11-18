@@ -1,4 +1,4 @@
-Add a saved repository reference to the current assistant when the user asks. Accepts the same GitHub/GitLab URLs and metadata as Settings > Repositories, checks existence through the existing guarded metadata service, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings > Repositories to reverse the addition.
+Add a saved repository reference to the current assistant when the user asks. Accepts the same URLs and metadata as Settings > Repositories, checks existence through the repository's provider, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings > Repositories to reverse the addition.
 
 ```json
 {
@@ -6,8 +6,8 @@ Add a saved repository reference to the current assistant when the user asks. Ac
   "additionalProperties": false,
   "required": ["url"],
   "properties": {
-    "url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "GitHub or GitLab repository URL, repository page, or git SSH remote without credentials."},
-    "provider": {"type": "string", "enum": ["github", "gitlab"], "description": "Required for a self-hosted instance; public GitHub/GitLab is detected from its host."},
+    "url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "Repository URL, repository page, or git SSH remote without credentials."},
+    "provider": {"type": "string", "enum": ["github", "gitlab"], "description": "Required for a self-hosted GitHub/GitLab; other providers are detected from the host."},
     "name": {"type": "string", "maxLength": 80},
     "aliases": {"type": "array", "maxItems": 10, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
     "purpose": {"type": "string", "maxLength": 500}

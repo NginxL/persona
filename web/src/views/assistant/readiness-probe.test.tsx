@@ -49,7 +49,8 @@ describe("Try it's read", () => {
   });
 
   it("waits past the hub's own limit, then says the try got no answer", async () => {
-    expect(PROBE_HUB_MS).toBeGreaterThanOrEqual(112_000); // the hub's 100 s check and 12 s self-check
+    // the hub's 20 s to work out the turn, its 170 s bound on the check and the 12 s self-check after it
+    expect(PROBE_HUB_MS).toBeGreaterThanOrEqual(202_000);
     vi.stubGlobal("fetch", vi.fn(hang));
     resetReadiness(readiness({ ok: true, answer: "an earlier try" }));
     act(() => root.render(<Probe />));

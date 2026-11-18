@@ -24,7 +24,7 @@ const RuntimeHeadLengthHeader = "X-Persona-Runtime-Head-Content-Length"
 
 // runtimeFetch is a bounded bridge to the existing fixed-identity proxy policy, not
 // another network policy. It is exposed only on an extension's registered unix listener.
-func (p *Proxy) runtimeFetch(w http.ResponseWriter, r *http.Request, ext string) {
+func (p *Proxy) runtimeFetch(w http.ResponseWriter, r *http.Request, ext string, chk *check) {
 	// Bound broker-owned allocations globally as well as per registration.
 	p.mu.Lock()
 	if p.runtimeActive == nil {
@@ -108,10 +108,15 @@ func (p *Proxy) runtimeFetch(w http.ResponseWriter, r *http.Request, ext string)
 	}
 	// HTTPS is forwarded by the same policy using a TLS connection after its approved dial.
 	out = out.WithContext(context.WithValue(out.Context(), runtimeFetchKey{}, true))
+	if chk != nil {
+		// Only the outer broker credential selects this immutable check. Guest JSON carries no identity or targets.
+		out = out.WithContext(context.WithValue(out.Context(), runtimeCheckKey{}, chk))
+	}
 	p.handler(ext).ServeHTTP(&boundedResponse{ResponseWriter: w, left: RuntimeBodyMost}, out)
 }
 
 type runtimeFetchKey struct{}
+type runtimeCheckKey struct{}
 
 type boundedResponse struct {
 	http.ResponseWriter

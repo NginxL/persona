@@ -43,7 +43,13 @@ const (
 	CodeInvalidOutput = "invalid_output"
 	// CodeModelTimeout: the call ran past its timeout_seconds.
 	CodeModelTimeout = "timeout"
+	// CodeModelCandidatesFailed: with two or more candidates, every one failed; data ModelCandidatesFailed names how
+	// each did. A single candidate that fails answers with its own code and data instead.
+	CodeModelCandidatesFailed = "model_candidates_failed"
 )
+
+// ModelCandidatesMost is how many candidate models one call may name.
+const ModelCandidatesMost = 8
 
 // PurposeSubscriptionRecipe drafts a source subscription's recipe (#2040, docs/extensions/subscriptions.md "Drafting
 // with a model"): an API purpose under Information processing (kb), following it until the user picks another.
@@ -104,6 +110,33 @@ type ModelCompleteParams struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 	// Label says what the call is for ("daily", "weekly"): it goes in the hub's log line with the usage.
 	Label string `json:"label,omitempty"`
+	// Models are candidate model ids tried in order (#10398): an error, a timeout, an empty reply or one not matching
+	// json_schema moves to the next. Each runs on a provider the user configured that offers it; the user can switch
+	// the list off or replace it in Settings › Model configuration. Empty: the purpose's model, as before.
+	Models []string `json:"models,omitempty"`
+}
+
+// ModelAttempt is one candidate that did not answer: its model, the error code it failed with (one of model.complete's;
+// a reply with no text is model_failed), what happened, how long it took and what it spent.
+type ModelAttempt struct {
+	Model   string `json:"model"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	// Until is model_paused's: when its connection lets go (RFC 3339).
+	Until   string     `json:"until,omitempty"`
+	Seconds float64    `json:"seconds"`
+	Usage   ModelUsage `json:"usage"`
+}
+
+// ModelNotOffered is the data of model_unavailable for a candidate no configured provider offers.
+type ModelNotOffered struct {
+	Model string `json:"model"`
+}
+
+// ModelCandidatesFailed is the data of model_candidates_failed: every candidate's failure in order, and what they spent.
+type ModelCandidatesFailed struct {
+	Attempts []ModelAttempt `json:"attempts"`
+	Usage    ModelUsage     `json:"usage"`
 }
 
 // ModelUsage is what a call spent, every request of it together (a second try for json_schema included).
@@ -125,6 +158,10 @@ type ModelCompleteResult struct {
 	// StopReason is end_turn, or max_tokens when the answer was cut off.
 	StopReason string     `json:"stop_reason"`
 	Usage      ModelUsage `json:"usage"`
+	// Candidate is the entry of the params' models that answered; empty without models.
+	Candidate string `json:"candidate,omitempty"`
+	// Attempts are the candidates that failed before it, in order.
+	Attempts []ModelAttempt `json:"attempts,omitempty"`
 }
 
 // ModelPause is the data of model_paused.

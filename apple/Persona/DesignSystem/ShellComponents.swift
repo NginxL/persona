@@ -21,8 +21,6 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     @Environment(AppModel.self) private var model
     /// Across the top bar, or down the side column on iPhone Duo (`ShellSideRail`): there it is the Duo's tab bar.
     var axis: Axis = .horizontal
-    /// iPhone Duo's tab bar along the foot of the inner display upright (#4231, `TabSwitchOverlay`), across.
-    var bottomBar = false
     @ViewBuilder var chatMenu: () -> ChatMenu
     @ViewBuilder var workMenu: () -> WorkMenu
     @Namespace private var pill
@@ -63,9 +61,9 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         }
     }
 
-    /// The switch is iPhone Duo's tab bar (#4231): down the side column, or along the foot upright. Its items are the
+    /// The switch is iPhone Duo's tab bar on the outer display (#4231), down the side column. Its items are the
     /// page's symbol over its name; across the top it is the iPhone's switch of names.
-    private var tabBar: Bool { axis == .vertical || bottomBar }
+    private var tabBar: Bool { axis == .vertical }
 
     /// The page the switch shows as chosen: the shell's, or `tab` outside it.
     private var chosen: AppTab {
@@ -315,7 +313,7 @@ private struct TabBarLens: View {
             .overlay(alignment: .topLeading) {
                 if running {
                     TimelineView(.animation(paused: !running)) { context in
-                        lens(TabBarGlide.frame(from: glide.from, to: glide.to, at: context.date.timeIntervalSince(glide.start)))
+                        lens(glide.frame(at: context.date))
                     }
                 }
             }
@@ -340,7 +338,14 @@ private struct TabBarLens: View {
 
 /// The tab bar lens's glide (#9837), one for every iPhone Duo tab bar on screen: in the shell each page has its own bar
 /// and the moving bar stands in while the pages change, so a bar that comes in midway draws the glide where it is by
-/// then, from the same start. Only `begin` writes it, once per choice.
+/// then, on the same clock. Only `begin` starts it, once per choice.
+///
+/// Its clock runs on the frames the lens is drawn in, not on the wall's: the page the choice brings in is swapped in
+/// under the bar in the same frames (the open Duo's tab, its whole split; the shell's pages laid side by side), and a
+/// frame held up by that (85–165 ms on the open Duo on its side, 54–77 ms and then 25–45 ms on the outer display, on the
+/// simulator), and the slow frames after it, made a lens timed by the wall jump on by up to a third of its way at once
+/// (#10270). Each frame now moves it on by the time since the last one drawn, at most `longestStep`, and it sets off from
+/// where it starts only once the frames come on time (`longestWait`).
 @MainActor @Observable final class TabBarGlide {
     static let shared = TabBarGlide()
 
@@ -353,12 +358,51 @@ private struct TabBarLens: View {
 
     private(set) var from: CGFloat = 0
     private(set) var to = 0
-    private(set) var start = Date.distantPast
     private(set) var running = false
+    /// How far into the glide the lens has been drawn, when the last frame it was drawn in was, and how long it waited on
+    /// its first place (`frame(at:)`).
+    @ObservationIgnored private(set) var elapsed: TimeInterval = 0
+    @ObservationIgnored private var drawnAt: Date?
+    @ObservationIgnored private var waited: TimeInterval = 0
     @ObservationIgnored private var serial = 0
 
     /// How long a glide lasts, its fade included.
     nonisolated static var length: TimeInterval { Theme.Motion.lensGlideTime + Theme.Motion.lensFadeTime }
+
+    /// The most of its way the glide goes on between two frames drawn: a frame and a half at 60 Hz (an iPhone draws an
+    /// app's own animations at 60 Hz), so a frame that is a little late still moves it on by all of its time, and one held
+    /// up for longer only by this.
+    nonisolated static let longestStep: TimeInterval = 0.025
+    /// Before it has set off, the lens waits where it starts through frames held up, this long at most: the first frames
+    /// after the page comes in are slow to draw (the open Duo's tab: two or three of 33–50 ms), and a lens setting off in
+    /// them went in fits and starts. It sets off on the first frame on time.
+    nonisolated static let longestWait: TimeInterval = 0.25
+    /// Frames drawn closer together than this are the same frame: every bar on screen draws the lens and reads the clock,
+    /// and the shell's bars read dates up to 7 ms apart in one frame. Half a 60 Hz frame.
+    nonisolated static let sameFrame: TimeInterval = 0.008
+
+    /// The lens in the frame drawn at `date`: the clock moves on by the time since the last frame drawn, at most
+    /// `longestStep`, or not at all while it waits to set off (`longestWait`); the bars that draw the same frame get the
+    /// same lens.
+    func frame(at date: Date) -> Frame {
+        if let drawnAt {
+            let step = date.timeIntervalSince(drawnAt)
+            if step > Self.sameFrame {
+                if elapsed == 0, step > Self.longestStep, waited < Self.longestWait {
+                    waited += step
+                } else {
+                    elapsed += min(step, Self.longestStep)
+                }
+                self.drawnAt = date
+            }
+        } else {
+            drawnAt = date
+        }
+        #if DEBUG
+        LensCadence.note(date, elapsed)
+        #endif
+        return Self.frame(from: from, to: to, at: elapsed)
+    }
 
     /// The lens `t` seconds after leaving `from` for `to`: it swells as it goes, glides with a bounce, and once there it
     /// shrinks back and fades.
@@ -376,16 +420,25 @@ private struct TabBarLens: View {
     /// bar that sees the choice asks; the first one starts it.
     func begin(from old: Int, to new: Int) {
         guard old != new, !(running && to == new) else { return }
-        let now = Date.now
-        from = running ? Self.frame(from: from, to: to, at: now.timeIntervalSince(start)).at : CGFloat(old)
+        from = running ? Self.frame(from: from, to: to, at: elapsed).at : CGFloat(old)
         to = new
-        start = now
+        elapsed = 0
+        drawnAt = nil
+        waited = 0
         running = true
         serial += 1
         let mine = serial
+        // It ends once drawn to its end, which held-up frames put off (a tab's first visit holds one up for 0.5 s or more);
+        // should no bar draw it, it still ends.
+        let deadline = Date.now + Self.length + Self.longestWait + 1
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Self.length))
-            if let self, self.serial == mine { self.running = false }
+            var left = Self.length
+            while left > 0 {
+                try? await Task.sleep(for: .seconds(left))
+                guard let glide = self, glide.serial == mine else { return }
+                left = Date.now < deadline ? Self.length - glide.elapsed : 0
+            }
+            self?.running = false
         }
     }
 }
@@ -440,7 +493,7 @@ private struct TabBarBadge: View {
 /// The count iPhone Duo's tab bar draws (#4231), the system's tab bar badge: `Theme.Size.badge` (18 pt) tall, round for one
 /// digit and a capsule for more, its number `Theme.Font.labelHeavy` (12 pt) white on the system's red (`Theme.tabBarBadge`),
 /// ringed `Theme.Shell.tabBarBadgeRing` in the page's color so it stands apart from the chosen item's circle and the
-/// symbol under it. The same view on both displays (`DuoTabBarAlignmentTests`).
+/// symbol under it (`DuoTabBarAlignmentTests`).
 struct TabBarCount: View {
     let count: Int
     /// What VoiceOver says for it ("3 need you"); by default the exact number.

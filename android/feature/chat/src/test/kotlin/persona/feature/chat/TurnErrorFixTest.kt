@@ -18,12 +18,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import coil3.ImageLoader
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -31,8 +34,18 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.Interaction
 import persona.core.contracts.Item
+import persona.core.contracts.Machine
+import persona.core.contracts.Resolution
+import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.ChatRepository
+import persona.core.contracts.api.ChatSnapshot
+import persona.core.contracts.api.InteractionCenter
+import persona.core.contracts.api.MessageSender
+import persona.core.contracts.api.OutboxMessage
+import persona.core.contracts.api.SessionsRepository
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.ReadinessActionId
@@ -104,6 +117,54 @@ class TurnErrorFixTest {
         rule.runOnIdle { style = AppStyle.Glass; dark = false }
         rule.onAllNodesWithTextFirstClick("Fix it")
         assertEquals(listOf(ReadinessActionId.ConnectModel), fixed)
+    }
+
+    @Test fun theChatNamesAndRepairsTheSessionsLauncher() {
+        val key = SessionKey("box", "main")
+        val text = "API Error: 401 authentication_error"
+        val row = Session(machineId = key.machineId, sessionId = key.sessionId, assistant = true, status = "idle", state = "idle",
+            launcher = "team-relay", turnError = text, turnErrorCode = "auth_failed")
+        val chats = object : ChatRepository {
+            override fun observe(session: SessionKey) = MutableStateFlow(ChatSnapshot(items = listOf(
+                Item("e#0", 1, role = "assistant", kind = "text", text = text)), loading = false))
+            override suspend fun loadOlder(session: SessionKey) = Unit
+            override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int): List<Item> = emptyList()
+        }
+        val sessions = object : SessionsRepository {
+            override val machines = MutableStateFlow(emptyList<Machine>())
+            override val sessions = MutableStateFlow(listOf(row))
+            override suspend fun refresh() = Unit
+        }
+        val sender = object : MessageSender {
+            override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+            override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) = Unit
+        }
+        val interactions = object : InteractionCenter {
+            override val pending = MutableStateFlow(emptyList<Interaction>())
+            override suspend fun refresh() = Unit
+            override suspend fun resolve(id: String, resolution: Resolution) = Unit
+        }
+        var repaired: String? = null
+        var dark by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                ChatScreen(key, chats, sender, interactions, sessions, onBack = {}, renderStyle = ChatRenderStyle.Assistant,
+                    chrome = ChatChromeBindings(onFixModel = { _, launcher, _ -> repaired = launcher }))
+            }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("Fix it").fetchSemanticsNodes().isNotEmpty() }
+        val out = File(System.getProperty("persona.shots") ?: "build/turn-error-launcher-shots").also { it.mkdirs() }
+        for (night in listOf(false, true)) {
+            rule.runOnIdle { dark = night }
+            rule.waitForIdle()
+            val bitmap = rule.onRoot().captureToImage().asAndroidBitmap()
+            File(out, "turn-error-${if (night) "dark" else "light"}.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        rule.onNodeWithText("Model not connected: the key for team-relay is wrong").assertExists()
+        rule.onNodeWithText("Fix it").performClick()
+        assertEquals("team-relay", repaired)
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTextCount(text: String, count: Int) {

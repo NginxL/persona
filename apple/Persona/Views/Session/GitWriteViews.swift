@@ -39,7 +39,7 @@ struct GitNewCommitSheet: View {
             .listStyle(.insetGrouped)
             .themedPage()
             .navigationTitle(Text("Commit"))
-            .navigationSubtitle(status.branch ?? "")
+            .navigationSubtitleWhenSupported(status.branch ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 SheetClose(disabled: committing) { dismiss() }

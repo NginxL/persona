@@ -24,7 +24,7 @@ func TestGoldenP1Context(t *testing.T) {
 
 func TestGoldenP1SuperviseLeaderStuck(t *testing.T) {
 	golden(t, "supervise.leader_stuck", prompts.RenderSupervise(prompts.Supervise{LeaderStuck: true, Entries: []prompts.SuperviseEntry{{
-		ID: "todo_1", Title: "平板布局", Kind: sigLeaderStuck, Detail: "基建 · 卡住超过一天，停着没做完：平板布局"}}}))
+		ID: "todo_1", Title: "平板布局", Kind: sigLeaderStuck, Detail: "基建 · 卡住了，停着没做完：平板布局"}}}))
 }
 
 func TestGoldenP1BriefLeaders(t *testing.T) {
@@ -33,7 +33,7 @@ func TestGoldenP1BriefLeaders(t *testing.T) {
 		{Name: "基建", Open: 1}}}))
 }
 
-// A leader's task stuck over a day: the extensions get leader.report stuck, and the main conversation one supervision
+// A leader's task past its inactivity threshold: the extensions get leader.report stuck, and the main conversation one supervision
 // entry naming the direction (no push).
 func TestLeaderStuckTellsTheMainConversation(t *testing.T) {
 	st := &memStore{}

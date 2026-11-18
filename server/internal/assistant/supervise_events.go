@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -130,8 +131,13 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 	}
 	if err != nil {
 		// The judge failed (the model service, a reply that was no verdict): no word on whether it is finished, not
-		// "stopped short" (#3111). The supervisor reads the agent's reply and decides.
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: "判定模型出错"})
+		// "stopped short" (#3111). The supervisor reads the agent's reply and decides. No model set up for the judge is
+		// said as such, not as a model error that a retry might mend.
+		detail := "判定模型出错" // i18n-ignore: the supervision message is the assistant's prompt
+		if ai.IsNotConfigured(err) {
+			detail = "判定模型未配置" // i18n-ignore: the supervision message is the assistant's prompt
+		}
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail})
 		return
 	}
 	if c.Verdict == verdictNeedsUser {

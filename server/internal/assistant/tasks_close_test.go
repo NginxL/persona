@@ -76,23 +76,23 @@ func TestDoneTaskAgentIsClosed(t *testing.T) {
 	s, f := newTaskService(t)
 	todo := startedTask(t, s, f)
 	f.setSessions("box", idleAgent(time.Now().Add(-time.Hour)))
-	refused := taskCloseRefused{}
+	refused, seen := taskCloseRefused{}, doneSeen{}
 
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if got := f.retires(); len(got) != 0 {
 		t.Fatalf("closed the agent of an open task: %v", got)
 	}
 	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
 		t.Fatalf("auto done: %v %v", ok, err)
 	}
-	s.closeDoneTaskAgents(ctx, refused) // done just now: not yet
+	s.closeDoneTaskAgents(ctx, refused, seen) // done just now: not yet
 	if got := f.retires(); len(got) != 0 {
 		t.Fatalf("closed at once: %v", got)
 	}
 	old := taskCloseIdle
 	taskCloseIdle = 0
 	t.Cleanup(func() { taskCloseIdle = old })
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if got := f.retires(); len(got) != 1 || got[0] != "s1" {
 		t.Fatalf("retired %v", got)
 	}
@@ -110,7 +110,7 @@ func TestDoneTaskAgentIsClosed(t *testing.T) {
 	c := idleAgent(time.Now().Add(-time.Hour))
 	c.Status, c.PaneID = proto.StatusOffline, ""
 	f.setSessions("box", c)
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if got := f.retires(); len(got) != 1 {
 		t.Fatalf("asked again: %v", got)
 	}
@@ -145,14 +145,14 @@ func TestRefusedRetireIsNotRepeated(t *testing.T) {
 	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
 		t.Fatalf("auto done: %v %v", ok, err)
 	}
-	refused := taskCloseRefused{}
-	s.closeDoneTaskAgents(ctx, refused)
-	s.closeDoneTaskAgents(ctx, refused)
+	refused, seen := taskCloseRefused{}, doneSeen{}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if asked = count(); asked != 1 {
 		t.Fatalf("asked %d times", asked)
 	}
 	f.setSessions("box", idleAgent(at.Add(time.Minute))) // it did something since
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if asked = count(); asked != 2 {
 		t.Fatalf("not asked again after a change: %d", asked)
 	}
@@ -161,18 +161,143 @@ func TestRefusedRetireIsNotRepeated(t *testing.T) {
 	f.mu.Lock()
 	f.retireErr = nil
 	f.mu.Unlock()
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if asked = count(); asked != 2 {
 		t.Fatalf("asked again at once: %d", asked)
 	}
 	oldRetry := taskCloseRetry
 	taskCloseRetry = 0
 	t.Cleanup(func() { taskCloseRetry = oldRetry })
-	s.closeDoneTaskAgents(ctx, refused)
+	s.closeDoneTaskAgents(ctx, refused, seen)
 	if got := f.retires(); count() != 3 || len(got) != 1 {
 		t.Fatalf("not asked again after a while: %d (%v closed)", count(), got)
 	}
 	if _, ok := refused[[2]string{"box", "s1"}]; ok {
 		t.Fatal("the refusal outlived the close")
+	}
+}
+
+// retiredAgent is s1 stopped, its terminal kept: offline, in no pane.
+func retiredAgent(at time.Time) proto.Session {
+	c := idleAgent(at)
+	c.Status, c.PaneID = proto.StatusOffline, ""
+	return c
+}
+
+// doneTaskAgentClosed is a task done with its agent s1 stopped by the pass, still listed as running (the next list has
+// not caught up), and the pass's memory.
+func doneTaskAgentClosed(t *testing.T) (*Service, *fakeHub, Todo, taskCloseRefused, doneSeen) {
+	t.Helper()
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	todo := startedTask(t, s, f)
+	old := taskCloseIdle
+	taskCloseIdle = 0
+	t.Cleanup(func() { taskCloseIdle = old })
+	f.setSessions("box", idleAgent(time.Now().Add(-time.Hour)))
+	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
+		t.Fatalf("auto done: %v %v", ok, err)
+	}
+	refused, seen := taskCloseRefused{}, doneSeen{}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("retired %v", got)
+	}
+	return s, f, todo, refused, seen
+}
+
+// The owner resumes a done task's stopped agent and types for a while (#10311): the resume adds no step, so its last
+// step and the task's completion are both old, yet it is not stopped again. It runs until the idle rule stops it, or
+// until its task, reopened, is done again: then it stops as before.
+func TestResumedDoneTaskAgentIsLeftRunning(t *testing.T) {
+	ctx := context.Background()
+	s, f, todo, refused, seen := doneTaskAgentClosed(t)
+	old := time.Now().Add(-time.Hour)
+	f.setSessions("box", retiredAgent(old))
+	s.closeDoneTaskAgents(ctx, refused, seen)
+
+	f.setSessions("box", idleAgent(old)) // Resume: running again, its last step unchanged
+	for range 3 {
+		s.closeDoneTaskAgents(ctx, refused, seen)
+	}
+	if got := f.retires(); len(got) != 1 {
+		t.Fatalf("stopped the resumed agent again: %v", got)
+	}
+
+	if err := s.reopenTodo(ctx, todo.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if ok, err := s.autoDoneTodo(ctx, todo.ID, "又做完了", time.Now()); err != nil || !ok {
+		t.Fatalf("done again: %v %v", ok, err)
+	}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 2 {
+		t.Fatalf("the agent of a task done again was not stopped: %v", got)
+	}
+}
+
+// Resumed before any list showed it stopped: the pass stopped it itself, so running again is a resume all the same.
+func TestResumeBeforeTheNextPassIsAResume(t *testing.T) {
+	ctx := context.Background()
+	s, f, _, refused, seen := doneTaskAgentClosed(t)
+	for range 3 {
+		s.closeDoneTaskAgents(ctx, refused, seen)
+	}
+	if got := f.retires(); len(got) != 1 {
+		t.Fatalf("stopped the resumed agent again: %v", got)
+	}
+}
+
+// A task done while its agent was still launching (#2954): the launch is no stop, so the agent that comes up is the
+// task's, not a resumed one, and stops once still as before.
+func TestLaunchingAgentOfDoneTaskIsNoResume(t *testing.T) {
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	todo := startedTask(t, s, f)
+	old := taskCloseIdle
+	taskCloseIdle = 0
+	t.Cleanup(func() { taskCloseIdle = old })
+	at := time.Now().Add(-time.Hour)
+	launching := idleAgent(at)
+	launching.Starting, launching.PaneID = true, ""
+	f.setSessions("box", launching)
+	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
+		t.Fatalf("auto done: %v %v", ok, err)
+	}
+	refused, seen := taskCloseRefused{}, doneSeen{}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	f.setSessions("box", idleAgent(at))
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("the launched agent of a done task was not stopped: %v", got)
+	}
+}
+
+// With nothing seen yet (a manager restart: the owner may have resumed the agent meanwhile), the agent's stillness
+// counts from when the pass first saw it running, never from its old last step alone.
+func TestFirstSightHoldsOffTheStop(t *testing.T) {
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	todo := startedTask(t, s, f)
+	at := time.Now().Add(-time.Hour)
+	f.setSessions("box", idleAgent(at))
+	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
+		t.Fatalf("auto done: %v %v", ok, err)
+	}
+	s.todos.mu.Lock()
+	s.todos.todos[todo.ID].DoneAt = &at
+	s.todos.mu.Unlock()
+	refused, seen := taskCloseRefused{}, doneSeen{}
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 0 {
+		t.Fatalf("stopped on first sight: %v", got)
+	}
+	old := taskCloseIdle
+	taskCloseIdle = 0
+	t.Cleanup(func() { taskCloseIdle = old })
+	s.closeDoneTaskAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 1 {
+		t.Fatalf("not stopped once still since first sight: %v", got)
 	}
 }

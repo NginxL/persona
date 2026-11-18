@@ -120,6 +120,9 @@ private val softBreak = Regex("([^\n])\n(?=[^\n])")
 internal data class MarkdownText(val key: String, val text: String) {
     private val asked by lazy { PathLinks.asked(text) }
     @Volatile private var linked: Pair<Set<String>, String>? = null
+    internal var ancillary: AssistantAncillaryStream? = null
+
+    internal fun withAncillary(stream: AssistantAncillaryStream): MarkdownText = apply { ancillary = stream }
 
     /**
      * What the row parses [text] as (ChatMarkdownBody): with the paths [paths] knows to be there as links, when the page
@@ -127,6 +130,11 @@ internal data class MarkdownText(val key: String, val text: String) {
      * parse instead of parsing again.
      */
     fun source(paths: PathPresence?): String {
+        ancillary?.let { stream ->
+            val current = stream.update(text, linkable = emptySet())
+            val linkable = if (paths == null) emptySet() else current.paths.filterTo(LinkedHashSet(), paths::linkable)
+            return stream.update(text, linkable = linkable).linkedMarkdown
+        }
         if (paths == null) return text
         val linkable = asked.filterTo(LinkedHashSet(), paths::linkable)
         linked?.takeIf { it.first == linkable }?.let { return it.second }
@@ -154,6 +162,18 @@ internal class MarkdownPrewarm(private val limit: Int = 80) {
     /** Where the last item's texts are: at the end of [latest] (1), at the start of [earlier] (2), nowhere (0); and how many. */
     private var lastSide = 0
     private var lastCount = 0
+    private var structureGeneration = -1L
+    private val ancillary = object : LinkedHashMap<String, AssistantAncillaryStream>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AssistantAncillaryStream>) = size > 8
+    }
+
+    /** A conflated revision still proves whether its structural base was the one this consumer last processed. */
+    @Synchronized fun split(revision: ChatLiveItems.Revision): Pair<List<MarkdownText>, List<MarkdownText>> {
+        val result = if (revision.lastTextOnly && revision.structureGeneration == structureGeneration)
+            splitLast(revision.items, streamingLast = true) else split(revision.items)
+        structureGeneration = revision.structureGeneration
+        return result
+    }
 
     @Synchronized fun split(items: List<Item>): Pair<List<MarkdownText>, List<MarkdownText>> {
         val before = this.items
@@ -182,8 +202,34 @@ internal class MarkdownPrewarm(private val limit: Int = 80) {
         return latest to earlier
     }
 
-    private fun texts(item: Item) = messageParts(item.text.orEmpty().let { if (item.fullSize != null) cutText(it) else it }, item.from)
-        .mapIndexedNotNull { index, part -> (part as? MessagePart.Text)?.let { MarkdownText("${item.id}/$index", it.text) } }
+    @Synchronized fun splitLast(items: List<Item>, streamingLast: Boolean = false): Pair<List<MarkdownText>, List<MarkdownText>> {
+        val last = items.lastOrNull()
+        val was = this.items.lastOrNull()
+        if (last == null || was == null || this.items.size != items.size || last.id != was.id || last.seq != was.seq ||
+            last.role != was.role || last.kind != was.kind) return split(items)
+        // The caller's live revision proves that every earlier item is unchanged; do not compare the whole prefix again.
+        this.items = items
+        if (lastSide != 0) {
+            val texts = texts(last, streamingLast)
+            if (lastSide == 1) latest = latest.subList(0, latest.size - lastCount) + texts
+            else earlier = texts + earlier.subList(lastCount, earlier.size)
+            lastCount = texts.size
+        }
+        return latest to earlier
+    }
+
+    private fun texts(item: Item, streaming: Boolean = false): List<MarkdownText> {
+        val raw = item.text.orEmpty().let { if (item.fullSize != null) cutText(it) else it }
+        if (streaming && item.from.isNullOrBlank()) {
+            val stream = ancillary.getOrPut(item.id) { AssistantAncillaryStream { _, _ -> } }
+            return stream.update(raw, linkable = emptySet()).model.parts.mapIndexedNotNull { index, part ->
+                (part as? MessagePart.Text)?.let { MarkdownText("${item.id}/$index", it.text).withAncillary(stream) }
+            }
+        }
+        return messageParts(raw, item.from).mapIndexedNotNull { index, part ->
+            (part as? MessagePart.Text)?.let { MarkdownText("${item.id}/$index", it.text) }
+        }
+    }
 }
 
 /**

@@ -20,7 +20,7 @@ func supervisionUserAction(run []proto.Item, uses map[string]proto.Item) bool {
 		if !ok {
 			continue
 		}
-		name := use.ToolName
+		name := compat.CanonicalMCPToolName(use.ToolName)
 		if strings.HasPrefix(name, "mcp__") {
 			if !slices.Contains(compat.MCPToolNames([]string{"notify_user", "ask_user", "supervision_finish", "task_review"}), name) {
 				continue // A similarly named tool on another MCP server is not Persona's user action.

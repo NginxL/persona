@@ -617,6 +617,17 @@ private struct NowGrid: View {
             tile(String(localized: "Swap"), sample.swapTotal > 0 ? MetricFormat.bytes(sample.swapUsed) : String(localized: "Off [Machine Detail View f95ea7]"),
                  detail: sample.swapTotal > 0 ? String(localized: "\(MetricFormat.bytes(sample.swapTotal)) total") : nil,
                  fraction: sample.swapPercent.map { $0 / 100 }, color: .secondary, level: .normal)
+            if let battery = sample.batteryPercent {
+                let charging = sample.batteryCharging == true
+                tile("Battery", MetricFormat.percent(battery), detail: charging ? "⚡" : nil,
+                     fraction: battery / 100, color: .secondary,
+                     level: !charging && battery <= 15 ? .critical : !charging && battery <= 25 ? .warning : .normal)
+            }
+            if let temp = sample.tempC {
+                tile("Temp", String(format: "%.1f°C", temp), detail: nil,
+                     fraction: min(1.0, max(0.0, temp / 125.0)), color: .secondary,
+                     level: MetricLevel.of(temp, warn: 75, crit: 90))
+            }
         }
     }
 

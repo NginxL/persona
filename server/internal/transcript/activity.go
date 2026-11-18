@@ -81,6 +81,15 @@ func Activity(name string, input json.RawMessage) string {
 		s = join("在搜网页", str("query"))
 	case "Task", "Agent":
 		s = join("在派子任务", str("description"))
+	case "subagent": // Codex's subagent activity (codex.go)
+		switch str("event") {
+		case "interacted":
+			s = join("在联系子任务", str("name"))
+		case "completed":
+			s = join("子任务完成", str("name"))
+		default:
+			s = join("在派子任务", str("name"))
+		}
 	case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
 		s = "在更新计划"
 	case "Skill":
@@ -89,7 +98,7 @@ func Activity(name string, input json.RawMessage) string {
 		s = "在问你问题"
 	case "ExitPlanMode":
 		s = "在等你批准计划"
-	case "ScheduleWakeup", "Monitor", "Sleep":
+	case "ScheduleWakeup", "Monitor", "Sleep", "sleep", "wait_agent":
 		s = "在等待"
 	case "BashOutput", "TaskOutput":
 		s = "在等后台任务"
@@ -190,7 +199,8 @@ var (
 	}
 	activityVerbs = map[string]string{
 		"在读": "act_read", "在改": "act_edit", "在写": "act_write", "在搜": "act_grep", "在找文件": "act_glob", "在看目录": "act_ls",
-		"在看网页": "act_fetch", "在搜网页": "act_web_search", "在派子任务": "act_subtask", "在用技能": "act_skill", "在调用": "act_tool",
+		"在看网页": "act_fetch", "在搜网页": "act_web_search", "在派子任务": "act_subtask", "在联系子任务": "act_subtask_message",
+		"子任务完成": "act_subtask_done", "在用技能": "act_skill", "在调用": "act_tool",
 		"在跑": "act_run",
 	}
 )

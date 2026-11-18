@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/iphone"
 	"github.com/nwverse/persona/server/internal/mcpserver"
@@ -173,5 +174,8 @@ func runNode(ctx context.Context, args []string, b Build) error {
 	if err = n.ServeStdio(ctx); errors.Is(err, io.EOF) {
 		err = nil
 	}
+	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	n.StopUnusedHerdr(stop) // a herdr it started and nobody used does not outlive it (#10114)
 	return err
 }

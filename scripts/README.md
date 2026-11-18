@@ -15,7 +15,7 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 | `test/` | Server, protocol, source and script regression checks | `test/check-fast.sh`, `test/test-server.sh`, `test/test_doc_paths.py`, `test/isolation-lint.sh` (blocking calls on the main actor in `apple/`; its SwiftSyntax package is `test/isolation-lint/`) |
 | `hooks/` | Privacy hooks, the trusted Deno adapter check and PR merging | `hooks/merge-pr.sh`, `hooks/check-deno-adapter.sh` |
 | `operations/` | Maintainer automation, including semantic PR review and exact-head merging | `operations/pr_watch.py`, `operations/pr_watch_merge.py`; [configuration](../docs/operations/pr-review-automation.md) |
-| `gen/` | Generated extension wire types and SDK bundles | `gen/extension_schema.py`, `gen/sdk_bundle.py`, `gen/sync-sdk.sh` |
+| `gen/` | Generated extension and hub wire types (`schema/extension`, `schema/wire`) and SDK bundles | `gen/extension_schema.py`, `gen/sdk_bundle.py`, `gen/sync-sdk.sh` |
 | `i18n/` | Localization checks and catalog synchronization | `i18n/apple_l10n.py`, `i18n/apple_l10n.py check` |
 
 ## Shared tools

@@ -159,7 +159,7 @@ final class EngineChoiceTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.staticTexts["离线，暂无检测信息"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["engine.option.herdr"].tap()
-        app.buttons["engine.save"].tap()
+        confirmEngine()
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertEqual(try current("nas"), "herdr")
     }
@@ -170,6 +170,12 @@ final class EngineChoiceTests: XCTestCase {
         app.launchPinned()
         XCTAssertTrue(app.buttons["welcome.pair"].waitForExistence(timeout: 10))
         app.buttons["welcome.pair"].tap()
+        let scanOrToken = app.buttons["扫码或其他配对方式"]
+        XCTAssertTrue(scanOrToken.waitForExistence(timeout: 10), "no scan-or-token pairing method")
+        scanOrToken.tap()
+        let otherWays = app.buttons["pair.other"]
+        XCTAssertTrue(otherWays.waitForExistence(timeout: 10), "no manual pairing entry")
+        otherWays.tap()
         let address = app.textFields["服务器地址"]
         XCTAssertTrue(address.waitForExistence(timeout: 10))
         address.tap()

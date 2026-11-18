@@ -380,6 +380,13 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 			set[x.Resolved] = true
 			aliases[x.ID] = x.Resolved
 		}
+		// a folded row's other spellings (oneRowPerModel) stand for the model it runs
+		for _, a := range x.Aliases {
+			set[a] = true
+			if a != cmp.Or(x.Resolved, x.ID) {
+				aliases[a] = cmp.Or(x.Resolved, x.ID)
+			}
+		}
 		if x.Default && defaultModel == "" {
 			defaultModel = x.ID
 			if x.Resolved != "" {
@@ -424,7 +431,7 @@ func (s *Service) launcherModelResolution(ctx context.Context, machine, launcher
 }
 
 // askLauncherModels is machine's node's /model list of launcher name (node/launcher_models.go), with the models of
-// the plugin gateway behind it.
+// the plugin gateway behind it, one row per model (oneRowPerModel).
 func (s *Service) askLauncherModels(ctx context.Context, machine, name string, refresh bool) (proto.LauncherModels, error) {
 	var res proto.LauncherModels
 	params := map[string]any{"refresh": refresh}
@@ -437,7 +444,7 @@ func (s *Service) askLauncherModels(ctx context.Context, machine, name string, r
 	if res.Models == nil {
 		res.Models = []proto.AgentModel{}
 	}
-	res = s.presetModels(ctx, machine, name, res)
+	res = s.oneRowPerModel(ctx, name, s.presetModels(ctx, machine, name, res))
 	for i, m := range res.Models {
 		id := m.ID
 		if m.Resolved != "" {

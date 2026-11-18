@@ -19,7 +19,7 @@ import (
 func TestPreparedSettingHandleIsOwnerBoundAndAppliedOnce(t *testing.T) {
 	h := &Hub{}
 	var applies atomic.Int32
-	if err := h.retainPreparedSetting("manager-a", "ix_hub_once", func(context.Context, proto.Resolution) (string, error) {
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_once"}, func(context.Context, proto.Resolution) (string, error) {
 		applies.Add(1)
 		return "applied", nil
 	}); err != nil {
@@ -41,7 +41,7 @@ func TestPreparedSettingHandleIsOwnerBoundAndAppliedOnce(t *testing.T) {
 
 func TestPreparedSettingDiscardIsOwnerBound(t *testing.T) {
 	h := &Hub{}
-	if err := h.retainPreparedSetting("manager-a", "ix_hub_discard", func(context.Context, proto.Resolution) (string, error) {
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_discard"}, func(context.Context, proto.Resolution) (string, error) {
 		return "unexpected", nil
 	}); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestPreparedSettingDiscardIsOwnerBound(t *testing.T) {
 	if _, err := h.applyPreparedSetting(context.Background(), "manager-a", "ix_hub_discard", proto.Resolution{}); err != nil {
 		t.Fatalf("another manager discarded the handle: %v", err)
 	}
-	if err := h.retainPreparedSetting("manager-a", "ix_hub_discard", func(context.Context, proto.Resolution) (string, error) {
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_discard"}, func(context.Context, proto.Resolution) (string, error) {
 		return "unexpected", nil
 	}); err != nil {
 		t.Fatal(err)
@@ -64,13 +64,14 @@ func TestPreparedSettingDiscardIsOwnerBound(t *testing.T) {
 func TestPreparedSettingBusReturnsStructuredStaleAndConsumesHandle(t *testing.T) {
 	h := &Hub{}
 	var applies atomic.Int32
-	if err := h.retainPreparedSetting("manager-a", "ix_hub_stale", func(context.Context, proto.Resolution) (string, error) {
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_stale"}, func(context.Context, proto.Resolution) (string, error) {
 		applies.Add(1)
 		return "", approval.ErrStale
 	}); err != nil {
 		t.Fatal(err)
 	}
-	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_stale", Resolution: proto.Resolution{}})
+	allow := true
+	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_stale", Resolution: proto.Resolution{Allow: &allow}})
 	raw, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +83,16 @@ func TestPreparedSettingBusReturnsStructuredStaleAndConsumesHandle(t *testing.T)
 	if applies.Load() != 1 {
 		t.Fatalf("stale apply count = %d", applies.Load())
 	}
-	if _, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params); err == nil || !strings.Contains(err.Error(), "no longer pending") {
-		t.Fatalf("duplicate stale apply error = %v", err)
+	again, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params)
+	if err != nil {
+		t.Fatalf("duplicate apply did not get a structured definite-not-applied result: %v", err)
+	}
+	repeated, ok := again.(assistantwire.FleetApprovalApplyResult)
+	if !ok || !repeated.Stale || repeated.Text != "" {
+		t.Fatalf("duplicate apply result = %#v, want stale with no execution", again)
+	}
+	if applies.Load() != 1 {
+		t.Fatalf("duplicate bus apply executed the setting again: apply count = %d, want one", applies.Load())
 	}
 }
 
@@ -111,12 +120,13 @@ func TestPreparedSettingOneShotAdapterStillAppliesAndCleansUp(t *testing.T) {
 
 func TestPreparedSettingBusDoesNotExecuteForAnotherManager(t *testing.T) {
 	h := &Hub{}
-	if err := h.retainPreparedSetting("manager-a", "ix_hub_wrong_caller", func(context.Context, proto.Resolution) (string, error) {
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_wrong_caller"}, func(context.Context, proto.Resolution) (string, error) {
 		return "", errors.New("must not run")
 	}); err != nil {
 		t.Fatal(err)
 	}
-	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_wrong_caller"})
+	allow := true
+	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_wrong_caller", Resolution: proto.Resolution{Allow: &allow}})
 	if _, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-b"}}, params); err == nil {
 		t.Fatal("the bus accepted another manager's apply")
 	}
@@ -126,6 +136,169 @@ func TestPreparedSettingBusDoesNotExecuteForAnotherManager(t *testing.T) {
 	if !kept {
 		t.Fatal("another manager's failed apply consumed the handle")
 	}
+}
+
+func TestPreparedSettingBusRequiresFreshOwnerAllow(t *testing.T) {
+	h := &Hub{}
+	var applies atomic.Int32
+	if err := h.retainPreparedSetting("manager-a", proto.Interaction{ID: "ix_hub_owner"}, func(context.Context, proto.Resolution) (string, error) {
+		applies.Add(1)
+		return "applied", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	allow := true
+	for name, resolution := range map[string]proto.Resolution{
+		"attributed": {Allow: &allow, AnsweredBy: proto.AnsweredByAssistant},
+		"remembered": {Allow: &allow, Remembered: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_owner", Resolution: resolution})
+			if _, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params); err == nil {
+				t.Fatal("a non-owner answer consumed the prepared setting")
+			}
+			if applies.Load() != 0 {
+				t.Fatal("a non-owner answer executed the prepared setting")
+			}
+		})
+	}
+	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: "ix_hub_owner", Resolution: proto.Resolution{Allow: &allow}})
+	raw, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params)
+	if err != nil || raw.(assistantwire.FleetApprovalApplyResult).Text != "applied" || applies.Load() != 1 {
+		t.Fatalf("fresh owner Allow = %#v, %v, applies=%d", raw, err, applies.Load())
+	}
+}
+
+func TestPreparedSettingHandleOutlivesPauseBudgetButNotItsGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := &Hub{}
+		start := time.Now()
+		var applies atomic.Int32
+		ix := proto.Interaction{ID: "ix_hub_deadline", ExpiresAt: start.Add(15 * time.Minute)}
+		if err := h.retainPreparedSetting("manager-a", ix, func(context.Context, proto.Resolution) (string, error) {
+			applies.Add(1)
+			return "unexpected", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(15*time.Minute + preparedSettingPauseBudget) // sleep-ok: virtual synctest time advances the bounded handle lifetime
+		h.prepared.mu.Lock()
+		_, kept := h.prepared.byID[ix.ID]
+		h.prepared.mu.Unlock()
+		if !kept {
+			t.Fatal("the handle expired before the cumulative clarification budget plus decision time")
+		}
+		time.Sleep(cardAnswerGrace) // sleep-ok: virtual synctest time crosses the answer grace
+		synctest.Wait()
+		h.prepared.mu.Lock()
+		_, kept = h.prepared.byID[ix.ID]
+		h.prepared.mu.Unlock()
+		if kept {
+			t.Fatal("the handle survived its bounded clarification lifetime")
+		}
+		allow := true
+		params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: ix.ID, Resolution: proto.Resolution{Allow: &allow}})
+		raw, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params)
+		if err != nil || !raw.(assistantwire.FleetApprovalApplyResult).Stale || applies.Load() != 0 {
+			t.Fatalf("expired handle apply = %#v, %v, applies=%d; want definite not applied", raw, err, applies.Load())
+		}
+	})
+}
+
+func TestPreparedSettingWaitingCardOutlivesWaitingAndPauseBudgets(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		h.askVia = nil
+		mgr := playManager(t, h, func(context.Context, string, json.RawMessage) (any, error) { return map[string]any{}, nil })
+		mgr.peer.OnRequest = func(context.Context, string, json.RawMessage) (any, error) {
+			time.Sleep(15 * time.Minute) // sleep-ok: virtual synctest time covers the coordinator's first decision window
+			return approval.Outcome{Clarifying: true, Text: approval.WaitingText}, nil
+		}
+		start := time.Now()
+		var applies atomic.Int32
+		ix := proto.Interaction{ID: "ix_hub_waiting_deadline", MachineID: "m1", SessionID: "s1", Kind: proto.IxPermission,
+			ExpiresAt: start.Add(15 * time.Minute)}
+		out, err := h.waitPreparedSetting(context.Background(), assistantwire.AssistantID, ix, "",
+			func(context.Context, proto.Resolution) (string, error) {
+				applies.Add(1)
+				return "unexpected", nil
+			}, nil)
+		if err != nil || !out.Clarifying || out.Text != approval.WaitingText || time.Since(start) != 15*time.Minute {
+			t.Fatalf("waiting prepared setting = %+v, %v after %s", out, err, time.Since(start))
+		}
+
+		// The original pause-only deadline ends here. A waiting card must still
+		// retain its handle for the clarification budget that can follow.
+		time.Sleep(preparedSettingPauseBudget + cardAnswerGrace) // sleep-ok: virtual synctest time advances the bounded handle lifetime
+		synctest.Wait()
+		h.prepared.mu.Lock()
+		_, kept := h.prepared.byID[ix.ID]
+		h.prepared.mu.Unlock()
+		if !kept {
+			t.Fatal("the handle expired between the unanswered window and its clarification budget")
+		}
+		time.Sleep(preparedSettingPauseBudget) // sleep-ok: virtual synctest time spends the clarification budget
+		synctest.Wait()
+		h.prepared.mu.Lock()
+		_, kept = h.prepared.byID[ix.ID]
+		h.prepared.mu.Unlock()
+		if kept {
+			t.Fatal("the waiting plus clarification handle survived its bounded lifetime")
+		}
+		allow := true
+		params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: ix.ID, Resolution: proto.Resolution{Allow: &allow}})
+		raw, err := h.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: assistantwire.AssistantID}}, params)
+		if err != nil || !raw.(assistantwire.FleetApprovalApplyResult).Stale || applies.Load() != 0 {
+			t.Fatalf("expired waiting handle apply = %#v, %v, applies=%d; want definite not applied", raw, err, applies.Load())
+		}
+	})
+}
+
+func TestPreparedSettingRestartLosesExecutableHandle(t *testing.T) {
+	oldHub := &Hub{}
+	var applies atomic.Int32
+	ix := proto.Interaction{ID: "ix_hub_restart", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := oldHub.retainPreparedSetting("manager-a", ix, func(context.Context, proto.Resolution) (string, error) {
+		applies.Add(1)
+		return "unexpected", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Executable closures are process-local. The new hub has no handle to apply,
+	// and its structured result must not turn that into an uncertain execution.
+	restartedHub := &Hub{}
+	allow := true
+	params, _ := json.Marshal(assistantwire.FleetApprovalApply{InteractionID: ix.ID, Resolution: proto.Resolution{Allow: &allow}})
+	raw, err := restartedHub.busPreparedSettingApply(context.Background(), &busConn{ident: db.BusIdentity{ID: "manager-a"}}, params)
+	if err != nil || !raw.(assistantwire.FleetApprovalApplyResult).Stale || applies.Load() != 0 {
+		t.Fatalf("restart-lost handle apply = %#v, %v, applies=%d; want definite not applied", raw, err, applies.Load())
+	}
+}
+
+func TestPreparedSettingWithoutExpiryGetsBoundedAfterClarification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		h.askVia = nil
+		mgr := playManager(t, h, func(context.Context, string, json.RawMessage) (any, error) { return map[string]any{}, nil })
+		mgr.peer.OnRequest = func(context.Context, string, json.RawMessage) (any, error) {
+			return approval.Outcome{Clarifying: true, Text: approval.ClarifyingText}, nil
+		}
+		out, err := h.waitPreparedSetting(context.Background(), assistantwire.AssistantID,
+			proto.Interaction{ID: "ix_hub_no_expiry", MachineID: "m1", SessionID: "s1", Kind: proto.IxPermission}, "",
+			func(context.Context, proto.Resolution) (string, error) { return "unexpected", nil }, nil)
+		if err != nil || !out.Clarifying {
+			t.Fatalf("clarifying no-expiry card = %+v, %v", out, err)
+		}
+		time.Sleep(preparedSettingPauseBudget + cardAnswerGrace) // sleep-ok: virtual synctest time advances the bounded handle lifetime
+		synctest.Wait()
+		h.prepared.mu.Lock()
+		_, kept := h.prepared.byID["ix_hub_no_expiry"]
+		h.prepared.mu.Unlock()
+		if kept {
+			t.Fatal("a clarified card without its own expiry retained the handle forever")
+		}
+	})
 }
 
 func TestHubSelfSettingRechecksCurrentProposalAfterClarification(t *testing.T) {

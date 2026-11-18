@@ -64,7 +64,7 @@ func (s *Service) modelRun(ctx context.Context, c ai.Config, r ai.Request) (ai.R
 	if err := json.Unmarshal(out, &a); err != nil {
 		return ai.Reply{}, fmt.Errorf("model.run: bad answer: %w", err)
 	}
-	return ai.Reply{Text: a.Text, Model: a.Model}, nil
+	return ai.Reply{Text: a.Text, Model: a.Model, Usage: a.Usage}, nil
 }
 
 // runPrompt is the conversation as the CLI reads it: a single user turn as it is, several as one transcript.

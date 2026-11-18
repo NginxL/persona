@@ -3,8 +3,10 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,13 @@ type assistantCompaction struct {
 	ownSettings string
 	// profile: the conversation's Claude config directory as the policy resolves it, "" for none (assistantUserSetup).
 	profile string
+	// endpoint: the ANTHROPIC_BASE_URL a Claude start's requests go to, "" Anthropic's own API, as the layers below give
+	// it (claudeEndpoint); endpointKnown: they could tell (a managed provider, a launcher the probe saw); ownToolSearch:
+	// the launcher sets ENABLE_TOOL_SEARCH itself. toolSearchOff: the start writes ENABLE_TOOL_SEARCH=false into its
+	// settings (toolSearchFor's forceOff, #10365).
+	endpoint                     string
+	endpointKnown, ownToolSearch bool
+	toolSearchOff                bool
 }
 
 // codexLimit is the model_auto_compact_token_limit a Codex start passes: a managed launcher's declared window (the main
@@ -155,11 +164,17 @@ func (n *Node) assistantCompactionPolicy(launcher, cwd, settings string, executi
 			declare(contextLimit(env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]), providerCapacity(l, execution.Model))
 			c.ownSettings = settingsArg(l.Args)
 			declare(settingsCompaction(c.ownSettings, cwd, n.home))
+			// Its gateway is pinned in the start's settings (mergeManagedSettings): no other layer moves it.
+			c.endpoint, c.endpointKnown = managedBaseURL(l), true
+			for _, kv := range launcherEnvVars(l.Env) {
+				c.ownToolSearch = c.ownToolSearch || kv[0] == toolSearchEnv
+			}
 		}
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if p, err := n.keptProbe(ctx, launcher); err == nil { // the probe the message's checks just read (#9097)
+		p, probeErr := n.keptProbe(ctx, launcher)
+		if probeErr == nil { // the probe the message's checks just read (#9097)
 			declare(contextLimit(p.Env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]), contextLimit(p.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]))
 			declare(0, codexCapacity(p.Args))
 			c.ownSettings = settingsArg(p.Args)
@@ -180,6 +195,10 @@ func (n *Node) assistantCompactionPolicy(launcher, cwd, settings string, executi
 			for _, file := range []string{"settings.json", "settings.local.json"} {
 				declare(settingsCompaction(filepath.Join(cwd, ".claude", file), cwd, n.home))
 			}
+			if probeErr == nil {
+				c.endpoint, c.ownToolSearch = claudeEndpoint(p, c.ownSettings, configDir, cwd, n.home)
+				c.endpointKnown = true
+			}
 		}
 	}
 	c.profile = configDir
@@ -197,6 +216,68 @@ func (n *Node) assistantCompactionPolicy(launcher, cwd, settings string, executi
 	}
 	c.capMain(execution)
 	return c
+}
+
+// claudeEndpoint is where a claude a launcher starts sends its requests (an ANTHROPIC_BASE_URL, "" Anthropic's own
+// API), and whether the launcher sets ENABLE_TOOL_SEARCH itself, read as Claude Code reads them: a settings env wins
+// over the process environment, the administrator's managed settings first (claudeManagedEnvLayers, above everything),
+// then the launcher's --settings (own), the project's local and shared settings in cwd and the user settings of its
+// config directory; then what the launcher exports (p.Env), then the shell's environment unless the launcher unset it
+// (the node's own when the probe did not see it). The first layer that names the variable counts, an empty value too
+// (Anthropic's own API). A value the shell has only because the node has it is not the launcher's own; a managed one
+// counts as the launcher's (nothing Persona writes would win over it).
+func claudeEndpoint(p Probe, own, configDir, cwd, home string) (endpoint string, ownToolSearch bool) {
+	read := func(arg string) map[string]string {
+		if arg == "" {
+			return nil
+		}
+		s, err := readLauncherSettings(arg, cwd, home)
+		if err != nil {
+			return nil
+		}
+		env, _ := s["env"].(map[string]any)
+		out := map[string]string{}
+		for k, v := range env {
+			out[k] = fmt.Sprint(v) // a string, or a JSON true Claude Code takes as "true"
+		}
+		return out
+	}
+	var layers []map[string]string
+	for _, f := range claudeManagedEnvLayers() {
+		layers = append(layers, read(f))
+	}
+	layers = append(layers, read(own), read(filepath.Join(cwd, ".claude", "settings.local.json")),
+		read(filepath.Join(cwd, ".claude", "settings.json")), read(filepath.Join(configDir, "settings.json")), p.Env)
+	shell := map[string]string{}
+	if p.Shell == nil {
+		for _, kv := range os.Environ() {
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				shell[k] = v
+			}
+		}
+	} else {
+		for k, v := range p.Shell {
+			if !slices.Contains(p.Unset, k) {
+				shell[k] = v
+			}
+		}
+	}
+	base, set := "", false
+	for _, layer := range layers {
+		if v, ok := layer["ANTHROPIC_BASE_URL"]; ok && !set {
+			base, set = v, true
+		}
+		if _, ok := layer[toolSearchEnv]; ok {
+			ownToolSearch = true
+		}
+	}
+	if !set {
+		base = shell["ANTHROPIC_BASE_URL"]
+	}
+	if v, ok := shell[toolSearchEnv]; ok && p.Shell != nil && os.Getenv(toolSearchEnv) != v {
+		ownToolSearch = true // the user's startup files export it
+	}
+	return base, ownToolSearch
 }
 
 // capMain holds the main conversation on a managed launcher (pin: Persona writes its values) to the window the manager
@@ -322,6 +403,9 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 	for _, kv := range c.env() {
 		k, v, _ := strings.Cut(kv, "=")
 		env[k] = v
+	}
+	if c.toolSearchOff { // the endpoint refused tool search: over the provider's, the launcher's and the user's (#10365)
+		env[toolSearchEnv] = "false"
 	}
 	s["env"] = env
 

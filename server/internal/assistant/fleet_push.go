@@ -340,6 +340,9 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 	}
 	place := s.pushPlace(machine, sess)
 	head, text := doneAlert(s.lang(context.Background()), sess)
+	if report && strings.HasPrefix(head, "⚠️") && s.briefOf(id) != nil {
+		return // the scheduled-run watcher sends the one fixed-facts fallback, not this model error
+	}
 	// A routine with facts says the counts it worked out (briefing.go) when it ended normally and asks nothing: a question
 	// is what the owner acts on, and a health conversation says only that there is news.
 	if !strings.HasPrefix(head, "⚠️") && !strings.HasPrefix(head, "⏳") && !sess.AwaitsReply && spaceOf(sess) != SpaceHealth {
@@ -452,6 +455,10 @@ func doneAlert(l i18n.Lang, sess proto.Session) (head, text string) {
 	if e := strings.TrimSpace(sess.TurnError); e != "" && sess.TurnErrorKind == proto.TurnErrorUsageLimit {
 		// Not "the model service failed": the subscription's limit, which the user goes on from after it resets.
 		head, text = "⚠️ "+title, i18n.T(l, "push.usage_limit", i18n.Args{"error": e})
+	} else if e != "" && sess.TurnErrorKind == proto.TurnErrorStopped {
+		head, text = title, e // the owner's own Stop (silent_turns.go): not news of a failure, nor of a finished turn
+	} else if e != "" && sess.TurnErrorKind == proto.TurnErrorNoOutput {
+		head, text = "⚠️ "+title, e // the hub's sentence for it, in l: it says the turn had no output (silent_turns.go)
 	} else if e != "" {
 		head, text = "⚠️ "+title, interruptedSummary+"："+e
 	} else if assistantwire.CutOff(text) {

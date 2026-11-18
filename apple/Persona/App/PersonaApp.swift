@@ -62,6 +62,12 @@ struct PersonaApp: App {
                     if let link = ExtensionSystemLink(url: url) { model.openExtension(link); return }
                     if SentSettingsLink.matches(url) { model.openSentRecords(); return }
                     if IPhoneSetupLink.matches(url) { model.openIPhoneSetup(); return }
+                    // The web sign-in page's code, read by the Camera app: only the scanner in Settings › Devices
+                    // approves a browser (#10293), so a link says where to scan it and does nothing else.
+                    if BrowserLoginLink.matches(url) {
+                        model.toast = Toast(String(localized: "To sign in a browser, scan its code in Settings › Devices › Scan Browser Sign-in Code."))
+                        return
+                    }
                     // A page of Persona's (persona://open<path>, an older persona:// form, #9926): only opens it.
                     if let opened = model.openOwnLink(url) {
                         if case .sheet(let page) = opened { model.linkSheet = page }
@@ -395,6 +401,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if os(iOS)
         RecordingDayCatchUp.register()
         #endif
+        #if os(iOS)
+        MeetingReplay.shared.clearEnded() // a replayed meeting tape (#10589) left from the last run leaves the recordings
+        #endif
         #if DEBUG
         RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending|overview`
         #if os(iOS)
@@ -407,6 +416,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // `-openDayCatchUp YES`: runs the all-day catch-up now (the simulator never runs background tasks).
         if UserDefaults.standard.bool(forKey: "openDayCatchUp") { Task { _ = await RecordingDayCatchUp.catchUp() } }
         MeetingReplay.startIfAsked() // `-showMeetingReplay <tape>|sample` (#9417)
+        MeetingTapeLibrary.installSampleIfAsked() // `-openMeetingTapes sample|empty` (#10589)
         MeetingTapeRecorder.startIfAsked() // `-openMeetingAudio <file>`: the meeting it records writes a tape
         #endif
         #endif
@@ -414,6 +424,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         AppModel.shared.start()
         AppIconBadgeWatcher.shared.start(AppModel.shared)
         LiveActivityController.shared.start()
+        // A hub that retired this device's push registration answers its writes 409 (#9612): register again, then retry.
+        APIClient.onPushRegistrationRequired = { group in await PushRegistrar.shared.registrationRequired(group: group).value }
         if !automation { PushRegistrar.shared.registerIfPossible() }
         return true
     }

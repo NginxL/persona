@@ -22,14 +22,19 @@ import (
 const repositoriesKey = "assistant.repositories"
 const repositoriesMax = 200
 
+// providersListWait is how long GET …/repositories/providers waits for the providers to be listed after a restart.
+var providersListWait = 2 * time.Second
+
 type RepositoryBinding struct {
 	repository.Identity
-	ID         string    `json:"id"`
-	Name       string    `json:"name,omitempty"`
-	Aliases    []string  `json:"aliases,omitempty"`
-	Purpose    string    `json:"purpose,omitempty"`
-	CloneURL   string    `json:"clone_url,omitempty"`
-	VerifiedAt time.Time `json:"verified_at"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name,omitempty"`
+	Aliases  []string `json:"aliases,omitempty"`
+	Purpose  string   `json:"purpose,omitempty"`
+	CloneURL string   `json:"clone_url,omitempty"`
+	// ProviderName is an extension provider's name when the reference was saved (absent for GitHub and GitLab).
+	ProviderName string    `json:"provider_name,omitempty"`
+	VerifiedAt   time.Time `json:"verified_at"`
 }
 
 type repositoryRemoved struct {
@@ -47,7 +52,8 @@ type repositoryDocument struct {
 func (doc repositoryDocument) taskCatalog() repository.Catalog {
 	out := repository.Catalog{Revision: doc.Revision, Repositories: make([]repository.CatalogEntry, 0, len(doc.Repositories))}
 	for _, entry := range doc.Repositories {
-		out.Repositories = append(out.Repositories, repository.CatalogEntry{Identity: entry.Identity, ID: entry.ID, CloneURL: entry.CloneURL})
+		out.Repositories = append(out.Repositories, repository.CatalogEntry{Identity: entry.Identity, ID: entry.ID, CloneURL: entry.CloneURL,
+			ProviderName: entry.ProviderName})
 	}
 	return out
 }
@@ -71,12 +77,13 @@ func repositoryText(value string, max int) bool {
 	})
 }
 
+// binding is in for the built-in providers, offline (Service.repositoryBinding routes an extension provider's address).
 func (in repositoryInput) binding() (RepositoryBinding, error) {
 	id, err := repository.Parse(in.URL, in.Provider)
 	if err != nil {
 		return RepositoryBinding{}, repositoryProblem("remote")
 	}
-	out := RepositoryBinding{Identity: id, Name: strings.TrimSpace(in.Name), Purpose: strings.TrimSpace(in.Purpose)}
+	out := RepositoryBinding{Identity: id}
 	if in.CloneURL != nil {
 		transport, err := repository.CloneTransport(*in.CloneURL, id)
 		if err != nil {
@@ -84,6 +91,12 @@ func (in repositoryInput) binding() (RepositoryBinding, error) {
 		}
 		out.CloneURL = transport
 	}
+	return in.details(out)
+}
+
+// details are in's name, purpose and aliases on out, checked.
+func (in repositoryInput) details(out RepositoryBinding) (RepositoryBinding, error) {
+	out.Name, out.Purpose = strings.TrimSpace(in.Name), strings.TrimSpace(in.Purpose)
 	if !repositoryText(out.Name, 80) || !repositoryText(out.Purpose, 500) || len(in.Aliases) > 10 {
 		return out, repositoryProblem("metadata")
 	}
@@ -143,6 +156,9 @@ func (s *Service) changeRepositories(ctx context.Context, change func(*repositor
 }
 
 func (s *Service) checkRepository(ctx context.Context, id repository.Identity) error {
+	if repository.IsExtensionProvider(id.Provider) {
+		return s.checkProviderRepository(ctx, id)
+	}
 	if s.repositoryCheck != nil {
 		return s.repositoryCheck(ctx, id)
 	}
@@ -167,6 +183,8 @@ func (s *Service) saveRepository(ctx context.Context, id string, binding Reposit
 		if id != "" && index < 0 {
 			return repositoryProblem("not_found")
 		}
+		// A repository saved before its extension was renamed is the same one under the provider's current id.
+		binding.Identity = s.savedIdentity(*doc, id, binding.Identity)
 		if slices.ContainsFunc(doc.Repositories, func(b RepositoryBinding) bool { return b.ID != id && b.Identity == binding.Identity }) {
 			return repositoryProblem("duplicate")
 		}
@@ -241,7 +259,9 @@ func (s *Service) restoreRepository(ctx context.Context, id, receipt string) (Re
 			return repositoryProblem("conflict")
 		}
 		binding = doc.Removed[index].Binding
-		if len(doc.Repositories) >= repositoriesMax || slices.ContainsFunc(doc.Repositories, func(b RepositoryBinding) bool { return b.ID == id || b.Identity == binding.Identity }) {
+		if len(doc.Repositories) >= repositoriesMax || slices.ContainsFunc(doc.Repositories, func(b RepositoryBinding) bool {
+			return b.ID == id || s.sameRepository(b.Identity, binding.Identity)
+		}) {
 			return repositoryProblem("conflict")
 		}
 		doc.Repositories = append(doc.Repositories, binding)
@@ -255,12 +275,23 @@ func repositoryError(w http.ResponseWriter, err error) {
 	code, status := "store", http.StatusServiceUnavailable
 	var problem repositoryProblem
 	var check *repository.CheckError
+	var provider *repository.ProviderError
 	switch {
 	case errors.As(err, &problem):
 		code = string(problem)
 		status = map[string]int{"store": 503, "remote": 400, "metadata": 400, "duplicate": 409, "conflict": 409, "not_found": 404, "full": 409, "readonly": 403}[code]
 	case errors.As(err, &check):
 		code, status = check.Code, http.StatusUnprocessableEntity
+	case errors.As(err, &provider):
+		code, status = providerCode(provider), http.StatusUnprocessableEntity
+		if code == "no_provider" || code == "provider_off" || code == providersStartingCode {
+			status = http.StatusConflict
+		}
+		apierr.WriteCode(w, status, "repository_"+code, i18n.Err("assistant-repositories."+code, providerArgs(provider)))
+		return
+	}
+	if status == 0 { // a code without a status is never written as one
+		code, status = "store", http.StatusServiceUnavailable
 	}
 	apierr.WriteCode(w, status, "repository_"+code, i18n.Err("assistant-repositories."+code))
 }
@@ -303,26 +334,39 @@ func (s *Service) repositoryRoutes() {
 		}
 		apierr.WriteJSON(w, map[string]any{"manager": s.managerIdentity(), "repository": binding})
 	})
+	// The sources of repositories: GitHub, GitLab, then the extensions' providers, on or off. Right after a restart it
+	// waits a moment for the extensions to start, then answers the providers listed by then.
+	s.handle("GET /api/v1/assistant/repositories/providers", func(w http.ResponseWriter, r *http.Request) {
+		wait, cancel := context.WithTimeout(r.Context(), providersListWait)
+		s.awaitProviders(wait)
+		cancel()
+		apierr.WriteJSON(w, map[string]any{"manager": s.managerIdentity(), "providers": s.repositoryProviders()})
+	})
 	s.handle("POST /api/v1/assistant/repositories/preview", func(w http.ResponseWriter, r *http.Request) {
 		var in repositoryInput
 		if !repositoryBody(w, r, &in) {
 			return
 		}
-		binding, err := in.binding()
+		binding, err := s.repositoryBinding(withProviderBudget(r.Context()), in, "")
 		if err != nil {
 			repositoryError(w, err)
 			return
 		}
-		apierr.WriteJSON(w, map[string]any{"manager": s.managerIdentity(), "identity": binding.Identity})
+		out := map[string]any{"manager": s.managerIdentity(), "identity": binding.Identity}
+		if binding.ProviderName != "" {
+			out["provider_name"] = binding.ProviderName
+		}
+		apierr.WriteJSON(w, out)
 	})
 	save := func(w http.ResponseWriter, r *http.Request) {
 		var in repositoryInput
 		if !repositoryBody(w, r, &in) {
 			return
 		}
-		binding, err := in.binding()
+		ctx := withProviderBudget(r.Context()) // the provider's parse and check share one budget
+		binding, err := s.repositoryBinding(ctx, in, r.PathValue("id"))
 		if err == nil {
-			binding, err = s.saveRepository(r.Context(), r.PathValue("id"), binding)
+			binding, err = s.saveRepository(ctx, r.PathValue("id"), binding)
 		}
 		if err != nil {
 			repositoryError(w, err)

@@ -115,7 +115,13 @@ func (s *Service) sendQuietNotice(id string) {
 		s.logf("task %s: quiet notice: no main conversation", id)
 		return
 	}
-	msg := relayMsg{From: id, FromTitle: "任务「" + n.todo.Title + "」", Tool: noticeTool, Text: renderNotice(n, reporting), At: time.Now().UTC(), State: n.state}
+	retryWith := ""
+	if n.state == "failed" { // the launcher its card offers instead, when its own could not start there (#10365)
+		if _, p, i, err := s.remedyOf(ctx, id); err == nil && len(p.Tasks[i].RetryWith) > 0 {
+			retryWith = p.Tasks[i].RetryWith[0]
+		}
+	}
+	msg := relayMsg{From: id, FromTitle: "任务「" + n.todo.Title + "」", Tool: noticeTool, Text: renderNotice(n, reporting, retryWith), At: time.Now().UTC(), State: n.state}
 	if s.replaceQueuedNotice(to, msg) {
 		s.publish(ctx)
 		return
@@ -174,10 +180,11 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 	return false
 }
 
-// renderNotice is n's text; reporting: for the reporting conversation that opened the task, not the main one.
-func renderNotice(n *quietNotice, reporting bool) string {
+// renderNotice is n's text; reporting: for the reporting conversation that opened the task, not the main one;
+// retryWith: a failed start's launcher its card offers instead.
+func renderNotice(n *quietNotice, reporting bool, retryWith string) string {
 	return prompts.RenderTaskNotice(prompts.TaskNotice{Title: n.todo.Title, Machine: n.machine, State: n.state, Earlier: n.earlier,
-		Ask: n.ask, Text: n.text, Reporting: reporting})
+		Ask: n.ask, Text: n.text, Reporting: reporting, RetryWith: retryWith})
 }
 
 // replaceQueuedNotice: a notice about the same task still waits in the queue: msg takes its place (true).

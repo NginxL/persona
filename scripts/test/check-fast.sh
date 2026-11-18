@@ -15,7 +15,7 @@
 #   web/**                     npm ci (only with no node_modules or a changed package.json/package-lock.json),
 #                              node_modules against package-lock.json, typecheck, vitest run
 #   schema/extension/**, spec/fixtures/injected/**, spec/fixtures/sync/**, spec/fixtures/attention/**,
-#   spec/fixtures/chat-search/**, scripts/mock/inbox_events.json
+#   spec/fixtures/chat-search/**, spec/fixtures/triage/**, spec/fixtures/todo-view/**, scripts/mock/inbox_events.json
 #                              also the web check: web/src and its vitest suite read these files. They are the inputs
 #                              outside web/ of the web lane in scripts/ci/paths.py; test_check_fast.py keeps the two in sync
 #   integrations/<pkg>/**      node --test test/*.test.{js,mjs} (packages without tests are skipped)
@@ -37,12 +37,21 @@
 #                              fall, never rise; comments, strings and a // sleep-ok: reason line do not count; a new
 #                              file starts at zero; --update only lowers). A rename out of those trees counts too.
 #                              --all runs it when the script is present.
-#   spec/fixtures/**, schema/extension/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
+#   spec/fixtures/**, schema/extension/**, schema/wire/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
 #                              also go test on each server package whose _test.go names that input (server-test.yml's
 #                              path filter), found at run time with git grep (comment lines are ignored)
 #   android/**                 scripts/app/android_i18n_check.py plus the android checkers' own unittests (no gradle)
 #   .github/**                 scripts/test/pr_needs_issue_test.mjs
 #   schema/**                  the extension-schema py, the sdk bundle py, and sdk/go go test (mirrors CI's job)
+#   schema/wire/**, spec/fixtures/**, scripts/gen/extension_schema.py, scripts/test/test_extension_schema.py
+#                              also scripts/test/test_wire_schema.py: it holds the fixtures' samples to the wire schemas
+#                              (and imports the extension test's validator); CI's guards step always runs it
+#   spec/fixtures/todo-{detail,layout}/**, spec/fixtures/todo-view/README.md, spec/fixtures/agent-names/**,
+#   schema/wire/todo-view.schema.json, server/internal/assistant/{todos,todo_ask}.go, scripts/test/test_wire_schema.py,
+#   scripts/test/test_extension_schema.py
+#                              also scripts/test/test_todo_fixtures.py: it holds the to-do page and window fixtures to
+#                              their READMEs' rules, the view schema, the todo-view line keys, the agent names and the
+#                              fields the hub writes on a listed to-do (and imports the wire and extension schema tests)
 #   scripts/**                 privacy/PR/extension/refs/bundle/i18n checks picked by path; PR+extension when
 #                              ambiguous (a case "*" matches slashes, so scripts/* covers nested paths too); plus
 #                              each changed scripts/<dir>/test_*.py and the test_<name>.py of each changed script
@@ -50,7 +59,11 @@
 #                              directory as CI does (#3968). scripts/hooks/** also runs
 #                              scripts/test/test_privacy_check.py and test_check_deno_adapter_sh.py (they run the
 #                              hooks; the latter also for scripts/gen/deno_adapter.sh); scripts/privacy_check.py also
-#                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check)
+#                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check);
+#                              scripts/release/debug_switches.{txt,py} and release.sh also test_debug_switches.py,
+#                              test_release_debug_guard.py and scripts/test/test_apple_release_switch_names.py;
+#                              scripts/test/go_trimpath.sh also scripts/ci/test_ci.py and scripts/test/test_check_fast.py
+#                              (they run server.sh and check-fast.sh with it)
 #   docs/**, any *.md          scripts/test/test_doc_paths.py and test_doc_go_paths.py (paths quoted in the docs, the
 #                              CLAUDE.md doc index), test_doc_sections.py (section names quoted after a doc path),
 #                              test_doc_wire.py (the wire lists in protocol.md, extensions.md)
@@ -134,6 +147,11 @@ node_ok() { [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; }
 HAVE_GO=0; have go && HAVE_GO=1
 HAVE_PY=0; have python3 && HAVE_PY=1
 HAVE_BUN=0; have bun && HAVE_BUN=1
+# Go's build cache key holds each package's directory unless -trimpath is set: add it, so worktrees share compiled
+# packages (#10614). The helper keeps a user-set GOFLAGS; without the helper GOFLAGS stays as it was.
+if [ "$HAVE_GO" -eq 1 ] && GO_TRIMPATH_FLAGS=$(sh scripts/test/go_trimpath.sh 2>/dev/null); then
+  export GOFLAGS="$GO_TRIMPATH_FLAGS"
+fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/check-fast.XXXXXX")
 # Keep WORK after a failure or timeout (its logs are the trail to read); a clean run removes it on exit.
@@ -617,7 +635,7 @@ else
     # Repository files outside web/ that web/src and its vitest suite read: a change to one also runs the web check,
     # on top of its own mapping below. The same list is the web lane's filter in scripts/ci/paths.py.
     case "$f" in
-      schema/extension/*|spec/fixtures/injected/*|spec/fixtures/sync/*|spec/fixtures/attention/*|spec/fixtures/chat-search/*|scripts/mock/inbox_events.json) WEB=1 ;;
+      schema/extension/*|spec/fixtures/injected/*|spec/fixtures/sync/*|spec/fixtures/attention/*|spec/fixtures/chat-search/*|spec/fixtures/triage/*|spec/fixtures/todo-view/*|scripts/mock/inbox_events.json) WEB=1 ;;
     esac
     case "$f" in server/*|sdk/go/*) GO_GUARDS=1 ;; esac  # on top of the mapping below (job_go_guards)
     case "$f" in
@@ -701,6 +719,7 @@ if [ "$ALL" -eq 0 ]; then
     case "$f" in
       spec/fixtures/*) _re='spec/fixtures|"spec", *"fixtures"' ;;
       schema/extension/*) _re='schema/extension|"schema", *"extension"' ;;
+      schema/wire/*) _re='schema/wire|"schema", *"wire"' ;;
       integrations/*/*) _re='integrations/|"integrations"' ;;
       scripts/test/server_test_env.py) _re='server_test_env\.py' ;;
       docs/*) _re=$(printf '%s' "$f" | sed 's/[][\.^$*+?(){}|]/\\&/g') ;;  # docs/example-guide.md -> docs/example-guide\.md
@@ -796,6 +815,7 @@ else
     # check_bundle_privacy.py imports privacy_check; test_merge_pr_sh.py copies privacy_check.py into its temp
     # repositories, where merge-pr.sh runs it, and checks that pr_watch_merge.py's merge lock excludes merge-pr.sh's.
     # It copies changed_ratchets.py and the two ratchets it imports there too (#7977); test_changed_ratchets.py imports them.
+    # test_ci.py and test_check_fast.py run server.sh and this script with go_trimpath.sh, which composes their GOFLAGS.
     case "$f" in
       scripts/hooks/*)
         script_test_add scripts/test/test_privacy_check.py; script_test_add scripts/test/test_check_deno_adapter_sh.py ;;
@@ -805,8 +825,29 @@ else
       scripts/operations/pr_watch_merge.py|scripts/ci/changed_ratchets.py) script_test_add scripts/test/test_merge_pr_sh.py ;;
       scripts/ci/sleep_ratchet.py|scripts/ci/web_font_ratchet.py)
         script_test_add scripts/ci/test_changed_ratchets.py; script_test_add scripts/test/test_merge_pr_sh.py ;;
+      scripts/test/go_trimpath.sh)
+        script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast.py ;;
+    esac
+    # The Release binary's DEBUG checks (#10616, #10654): a list that matches no script name, whose union merges can
+    # leave it out of order, the checker test_apple_release_switch_names.py imports, and release.sh, which runs it.
+    case "$f" in
+      scripts/release/debug_switches.txt|scripts/release/debug_switches.py|scripts/release/release.sh)
+        script_test_add scripts/release/test_debug_switches.py; script_test_add scripts/release/test_release_debug_guard.py
+        script_test_add scripts/test/test_apple_release_switch_names.py ;;
     esac
     case "$f" in deploy/docker/*|docs/operations/docker.md|Dockerfile) script_test_add scripts/test/test_docker_entrypoint.py ;; esac
+    # test_wire_schema.py holds every sample the shared fixtures keep for a wire schema to that schema, at any depth.
+    case "$f" in
+      schema/wire/*|spec/fixtures/*|scripts/gen/extension_schema.py|scripts/test/test_extension_schema.py)
+        script_test_add scripts/test/test_wire_schema.py ;;
+    esac
+    # test_todo_fixtures.py holds the to-do page and window fixtures to their READMEs' rules; it also reads the view
+    # schema, the todo-view line keys, the agent names and the row fields of the hub's Todo and listedTodo, and imports
+    # the wire and extension schema tests.
+    case "$f" in
+      spec/fixtures/todo-detail/*|spec/fixtures/todo-layout/*|spec/fixtures/todo-view/README.md|spec/fixtures/agent-names/*|schema/wire/todo-view.schema.json|server/internal/assistant/todos.go|server/internal/assistant/todo_ask.go|scripts/test/test_wire_schema.py|scripts/test/test_extension_schema.py)
+        script_test_add scripts/test/test_todo_fixtures.py ;;
+    esac
   done <<< "$CHANGED"
 fi
 

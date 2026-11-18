@@ -261,6 +261,7 @@
     <string name="chat_source_conversation">对话</string>
     <string name="chat_source_patrol">例行巡检</string>
     <string name="chat_source_followup">跟进</string>
+    <string name="chat_source_scheduled_task">由已安排任务发送</string>
     <string name="chat_source_supervision">督办</string>
     <string name="chat_source_unknown">来源</string>
     <string name="chat_source_expand">展开</string>
@@ -476,10 +477,13 @@
     <string name="chat_doc_pdf">PDF 文档</string>
     <string name="chat_doc_other">文档</string>
     <string name="chat_turn_fix_not_logged_in">模型没接好：Claude Code 命令行没登录</string>
+    <string name="chat_turn_fix_not_logged_in_launcher">模型没接好：%1$s 没登录</string>
     <string name="chat_turn_fix_not_logged_in_detail">Claude 桌面版登录了也不算。在那台电脑的终端里运行 claude auth login，或者改用 API Key。</string>
     <string name="chat_turn_fix_auth_failed">模型没接好：Key 不对</string>
+    <string name="chat_turn_fix_auth_failed_launcher">模型没接好：%1$s 的 Key 不对</string>
     <string name="chat_turn_fix_auth_failed_detail">Key 不对或过期了，换一个能用的。</string>
     <string name="chat_turn_fix_model_route">模型没接好：这个模型用不了</string>
+    <string name="chat_turn_fix_model_route_launcher">模型没接好：%1$s 用不了这个模型</string>
     <string name="chat_turn_fix_model_route_detail">模型名不对，或者这个模型现在用不了，换一个试试。</string>
     <string name="chat_turn_fix_action">去修</string>
 </resources>

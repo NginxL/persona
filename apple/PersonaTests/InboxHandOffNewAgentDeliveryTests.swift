@@ -193,6 +193,71 @@ struct InboxHandOffNewAgentDeliveryTests {
                 "a refused message retries under a new id, while the hand-off record keeps its prepared client id")
     }
 
+    @Test func olderHubMessageOverridesSurviveRetryAndClearWithoutChangingAssistantConfig() async throws {
+        let hub = FakeHub(), path = "/api/v1/sessions/m/\(key.sessionID)/messages"
+        var attempts = 0
+        hub.on("POST", path) { _ in
+            attempts += 1
+            if attempts == 2 {
+                throw APIError(status: 409, message: "Finish the draft first",
+                               fields: ["code": "input_draft", "delivered": "none"])
+            }
+            return Data(#"{"ok":true}"#.utf8)
+        }
+        hub.on("GET", "/api/v1/assistant", json: """
+        {"machine_id":"m","launcher":"saved-launcher","cwd":"/tmp/p","main":"\(key.sessionID)",
+         "timezone_picked":true,"conversations":[]}
+        """)
+        let app = app(hub)
+        defer { app.outboxRetry.values.forEach { $0.cancel() } }
+        await app.refreshAssistant()
+        let savedLauncher = app.assistantConfig?.launcher
+        #expect(savedLauncher != nil)
+        app.assistantLaunchers[key] = "team-api"
+        app.assistantModels[key] = "claude-sonnet-5-5"
+
+        let first = PendingMessage(text: "first", images: []), second = PendingMessage(text: "second", images: [])
+        app.chat(key).pending = [first]
+        app.settleSend(key, first.id, await app.sendPending(key, first))
+        app.chat(key).pending.append(second)
+        app.settleSend(key, second.id, await app.sendPending(key, second))
+        let refused = try #require(app.chat(key).pending.first { $0.id == second.id })
+        #expect(refused.state == .failed)
+
+        app.retry(key, refused)
+        try await waitForRefreshTest {
+            let retry = app.chat(key).pending.first { $0.text == "second" }
+            return retry?.state == .waiting && retry?.id != second.id
+        }
+        app.flushOutbox()
+        try await waitForRefreshTest {
+            app.flushingOutbox.isEmpty && hub.sent("POST", path).count == 3 &&
+                app.chat(key).pending.first { $0.text == "second" }?.state == .sent
+        }
+
+        // AssistantTopBar.pickDefault: later messages inherit Settings > Assistant again.
+        app.assistantLaunchers[key] = nil
+        app.assistantModels[key] = nil
+        let third = PendingMessage(text: "default", images: [])
+        app.chat(key).pending.append(third)
+        app.settleSend(key, third.id, await app.sendPending(key, third))
+
+        let requests = hub.sent("POST", path)
+        #expect(requests.count == 4)
+        for request in requests.prefix(3) {
+            let body = try #require(request.body)
+            let fields = try JSONDecoder().decode([String: String].self, from: body)
+            #expect(fields["launcher"] == "team-api")
+            #expect(fields["model"] == "claude-sonnet-5-5")
+        }
+        let defaultBody = try #require(requests.last?.body)
+        let defaultFields = try JSONDecoder().decode([String: String].self, from: defaultBody)
+        #expect(defaultFields["text"] == "default")
+        #expect(defaultFields["launcher"] == nil && defaultFields["model"] == nil)
+        #expect(app.assistantConfig?.launcher == savedLauncher,
+                "default changed from \(savedLauncher ?? "nil") to \(app.assistantConfig?.launcher ?? "nil")")
+    }
+
     @Test func failedDeliveryDoesNotRecord() async throws {
         let hub = FakeHub(), path = "/api/v1/sessions/m/\(key.sessionID)/messages"
         hub.on("POST", path) { _ in throw APIError(status: 500, message: "send failed") }

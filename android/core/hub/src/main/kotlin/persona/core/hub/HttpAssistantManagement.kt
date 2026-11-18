@@ -108,7 +108,8 @@ class HttpAssistantManagement private constructor(
     override suspend fun launcherModels(machineId: String, launcher: String): LauncherModels? = try {
         require(machineId.isNotBlank() && launcher.isNotBlank())
         JsonCodec.decodeFromJsonElement(request("GET",
-            listOf("api", "v1", "machines", machineId, "launchers", launcher, "models")))
+            listOf("api", "v1", "machines", machineId, "launchers", launcher, "models"),
+            query = mapOf("purpose" to "assistant")))
     } catch (failure: HubFailure) {
         if (failure.status == 404) null else throw failure
     }

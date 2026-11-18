@@ -360,6 +360,7 @@ nonisolated enum RecordingDayRuns {
     /// The on-device engine (`RecordingAnalyzerEngine.transcribeRun`).
     nonisolated static func onDevice(_ urls: [URL], _ durations: [Double], _ locale: Locale, _ priority: TaskPriority,
                                      _ downloadsAssets: Bool) async throws -> [(file: Int, sentence: RecordingSentence)] {
+        guard #available(iOS 26.0, *) else { throw RecordingSpeechError.needsNewerSystem }
         guard let (engine, resolved) = await RecordingAnalyzerEngine.best(for: locale) else { throw RecordingSpeechError.unsupportedLanguage }
         return try await engine.transcribeRun(urls, durations: durations, locale: resolved, priority: priority,
                                               downloadsAssets: downloadsAssets)

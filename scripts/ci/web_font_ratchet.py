@@ -13,11 +13,22 @@ create a baseline (that would record what is already in the tree).
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _source_root():
+    configured = os.environ.get("PERSONA_CI_SOURCE_ROOT")
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("PERSONA_CI_SOURCE_ROOT must be absolute")
+        return Path(configured)
+    return Path(__file__).resolve().parents[2]
+
+
+ROOT = _source_root()
 SOURCE = "web/src"
 BASELINE_REL = "scripts/ci/web_font_baseline.json"
 SUFFIXES = (".ts", ".tsx", ".css")

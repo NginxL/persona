@@ -97,7 +97,7 @@ func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 				return src.path
 			}
 		}
-		if p := rolloutPath(src.home, src.thread); p != "" {
+		if p := rolloutPathIn(src.home, src.thread, pass); p != "" {
 			return p
 		}
 		return n.codexAppHistoryPath(src, pass) // the App's chat with no rollout: its history as written (codex_apphistory.go)

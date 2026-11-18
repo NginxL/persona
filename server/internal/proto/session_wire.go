@@ -21,7 +21,7 @@ import (
 // fields differ from them (a field added, renamed, retyped or retagged by a change that did not update this file),
 // appendSession leaves every session to the reflect encoder: the session is sent whole, only slower, until its line
 // here and this hash are brought up to date. TestSessionWireMatchesReflect fails meanwhile and prints the new hash.
-const sessionWireLayout = 0x3eda488a48f98e7c
+const sessionWireLayout = 0x3b11d3e1bfabc8cc
 
 var sessionWireCurrent = sessionLayout() == sessionWireLayout && hierarchyLayout() == hierarchyWireLayout
 
@@ -34,14 +34,14 @@ func sessionLayout() uint64 {
 // too, each type under its own layout hash: while one's fields differ from the ones written here, its values are left to
 // the reflect encoder (value), the rest of the session still written here.
 const (
-	backgroundWireLayout   = 0xf3f44642839ae39d
+	backgroundWireLayout   = 0x2c6a40db481222e7
 	subagentWireLayout     = 0xbf84f2ee699de074
 	workflowToolWireLayout = 0x56c71f2c71223998
 )
 
 // hierarchyWireLayout is the layout hash of SessionHierarchy and SessionChildren, whose members appendSession writes
 // on the row: while either differs, appendSession leaves every session to the reflect encoder, as for sessionWireLayout.
-const hierarchyWireLayout = 0x4902aefc2aad6f7d
+const hierarchyWireLayout = 0x6b086a44c528e38b
 
 // hierarchyLayout hashes SessionHierarchy's fields, then SessionChildren's.
 func hierarchyLayout() uint64 {
@@ -186,6 +186,9 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.time(`"seen_at":`, s.SeenAt) // time.Time is a struct, never empty, so omitempty keeps it
 	w.time(`"state_since":`, s.StateSince)
 	w.strs(`"queued":`, s.Queued)
+	if s.Undelivered != nil {
+		w.value(`"undelivered":`, s.Undelivered)
+	}
 	if len(s.Background) > 0 {
 		if backgroundWireCurrent {
 			w.key(`"background":`)
@@ -298,6 +301,14 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 			w.value(`"engine_history":`, &h.EngineHistory)
 		}
 		w.strs(`"aliases":`, h.Aliases)
+		if len(h.BackgroundEnded) > 0 {
+			if backgroundWireCurrent {
+				w.key(`"background_ended":`)
+				w.backgroundTasks(h.BackgroundEnded)
+			} else {
+				w.value(`"background_ended":`, &h.BackgroundEnded)
+			}
+		}
 		w.boolean(`"deleted":`, h.Deleted, true)
 	}
 	w.boolean(legacyStartedMember, s.StartedByPersona, false) // sessionWire's legacy key (compatibility.go)
@@ -404,6 +415,13 @@ func (w *wireWriter) backgroundTasks(list []BackgroundTask) {
 			w.time(`"expires_at":`, *t.ExpiresAt)
 		}
 		w.str(`"run_id":`, t.RunID, true)
+		w.str(`"status":`, t.Status, true)
+		if t.EndedAt != nil {
+			w.time(`"ended_at":`, *t.EndedAt)
+		}
+		if t.ExitCode != nil {
+			w.integer(`"exit_code":`, int64(*t.ExitCode), false)
+		}
 		w.close()
 	}
 	w.b = append(w.b, ']')

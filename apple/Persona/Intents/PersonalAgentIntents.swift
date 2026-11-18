@@ -77,6 +77,7 @@ struct AgentTaskIntent: AppIntent {
         categoryName: "Personal Agents",
         searchKeywords: ["Agent", "Personal Agents", "Tasks", "have it do", "task"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Session")
@@ -126,6 +127,7 @@ struct AgentsStatusIntent: AppIntent {
         categoryName: "Personal Agents",
         searchKeywords: ["Agent", "Unread [Personal Agent Intents 4d0680]", "Recent", "unread"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     nonisolated init() {}
@@ -144,7 +146,10 @@ struct AgentsStatusIntent: AppIntent {
 /// Opens the app on one personal agent's conversation (Spotlight results and the dialog buttons land here).
 struct OpenPersonalAgentIntent: OpenIntent {
     nonisolated static let title: LocalizedStringResource = "Open Personal Agent"
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
 
     @Parameter(title: "Session")
     var target: PersonalAgentEntity

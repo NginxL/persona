@@ -79,15 +79,16 @@ export function blockingStep(r: Readiness | null | undefined): ReadinessStep | n
   return next && next.state !== "ok" && next.state !== "skipped" ? next : null;
 }
 
-/** What the send button says while the main conversation cannot answer (4.4: "Connect a model first" / "Add a computer first"). */
-export function sendLabel(step: ReadinessStep): string {
+/** What the send button says while the main conversation cannot answer (4.4: "Connect a model first" / "Add a computer first");
+ *  a model it can't run, what its button does (`main`, stepActions). */
+export function sendLabel(step: ReadinessStep, main?: string): string {
   if (step.id === "computer") {
     if (step.code === "node_unreachable") return t("lib-readiness.send_wake_computer");
     if (step.code === "machine_pending") return t("lib-readiness.send_confirm_computer");
     if (step.code === "node_outdated") return t("lib-readiness.send_update_computer");
     return t("lib-readiness.send_add_computer");
   }
-  return t("lib-readiness.send_connect_model");
+  return main && step.code === "model_route" ? actionLabel(main) : t("lib-readiness.send_connect_model");
 }
 
 // ── actions ─────────────────────────────────────────────
@@ -103,10 +104,23 @@ export function helpTopic(id: string): HelpTopic {
 }
 
 /** The action ids a card can draw a button for (5.1); an id this page does not know is text only (5, general rules). */
-const ACTIONS = new Set(["add_computer", "confirm_computer", "wake_computer", "install_claude", "login_claude", "connect_model", "edit_provider", "test_assistant", "main_chat_model", "enable_tls", "open_admin"]);
+const ACTIONS = new Set(["add_computer", "confirm_computer", "wake_computer", "install_claude", "login_claude", "connect_model", "edit_provider", "test_assistant", "main_chat_model", "pick_model", "enable_tls", "open_admin"]);
 
 export function knownAction(id: string | undefined): boolean {
   return Boolean(id && ACTIONS.has(id));
+}
+
+/**
+ * A step's buttons here: the main one (none: undefined) and the others, the ones this page knows. A model the main chat
+ * can't run (model_route) is picked again in the chat's own panel (`pick_model`, as its model error's Fix it), not added
+ * as a new provider: the hub says connect_model, which the other clients follow. Once another model is picked
+ * (`picked`), "Try it" comes first: only a try of it clears the failed turn and lets the chat send again.
+ */
+export function stepActions(step: ReadinessStep, picked?: boolean): [string | undefined, string[]] {
+  const ids = [step.action?.id ?? "", ...(step.alt_actions ?? []).map((a) => a.id)].map((id) => (id === "connect_model" && step.code === "model_route" ? "pick_model" : id));
+  if (picked) ids.sort((a, b) => +(b === "test_assistant") - +(a === "test_assistant"));
+  const main = knownAction(ids[0]) ? ids[0] : undefined;
+  return [main, ids.slice(1).filter((id) => knownAction(id) && id !== main)];
 }
 
 export function actionLabel(id: string): string {
@@ -129,6 +143,8 @@ export function actionLabel(id: string): string {
       return t("lib-readiness.action_test_assistant");
     case "main_chat_model":
       return t("lib-readiness.action_main_chat_model");
+    case "pick_model":
+      return t("lib-readiness.action_pick_model");
     case "enable_tls":
     case "open_admin":
       return t("lib-readiness.action_open_admin");
@@ -148,9 +164,10 @@ export function providersPath(launcher?: string): string {
 /**
  * What a button does: a help topic to open in place (add_computer too: the page that owns `onHelp` opens the add flow
  * instead where the hub has it), or done here (a page opened, a check run). `launcher` is the step's, for "Change the key";
- * `onConfirm` opens the confirm screen of a computer waiting to be confirmed (without it: the machines page).
+ * `onConfirm` opens the confirm screen of a computer waiting to be confirmed (without it: the machines page);
+ * `onPickModel` opens the chat's own model panel for `pick_model`, false when it has none.
  */
-export function runAction(id: string, o: { launcher?: string; onHelp: (topic: HelpTopic) => void; onConfirm?: () => void }): void {
+export function runAction(id: string, o: { launcher?: string; onHelp: (topic: HelpTopic) => void; onConfirm?: () => void; onPickModel?: () => boolean }): void {
   switch (id) {
     case "add_computer":
     case "wake_computer":
@@ -160,11 +177,14 @@ export function runAction(id: string, o: { launcher?: string; onHelp: (topic: He
     case "confirm_computer":
       return o.onConfirm ? o.onConfirm() : navigate("/machines");
     case "connect_model":
-      return navigate(providersPath());
+      return navigate(providersPath(o.launcher?.trim() || undefined));
     case "edit_provider":
       return navigate(o.launcher ? providersPath(o.launcher) : "/settings?tab=models");
     case "main_chat_model": // the Main chat purpose of the model configuration: pick one of the machine's launchers
       return navigate("/settings?tab=models");
+    case "pick_model": // a model the chat can't run (turnErrorFix): another one in its own panel, never a new provider
+      if (!o.onPickModel?.()) navigate("/settings?tab=models");
+      return;
     case "test_assistant":
       void refreshReadiness({ probe: true });
       return;
@@ -212,15 +232,34 @@ export function passesBySelf(e: unknown): boolean {
 
 // ── turn errors (turn_error_code) ───────────────────────
 
-/** A turn that ended on a model error the user must fix: the card's title and its button (4.4 "Model error"). */
-export function turnErrorFix(code: string | undefined): { title: string; detail: string; action: string } | null {
+/** A turn error's card: its words and what "Fix it" does (runAction; `retry`: the card offers Retry instead). A Persona
+ *  chat adds its own model panel for `pick_model` and, while it keeps a pick, the way back to the default
+ *  (views/chat/ModelPill.tsx useAssistantTurnFix). The launcher names and scopes the affected connection. */
+export interface TurnFix {
+  title: string;
+  detail: string;
+  action: string;
+  launcher?: string;
+  onPickModel?: () => boolean;
+  back?: { label: string; run: () => void };
+}
+
+/** A turn that ended on a model error the user must fix: the card's title and its button (4.4 "Model error"). A model
+ *  the chat can't run is fixed by picking another one for it (`pick_model`), not by adding a provider; a gateway that
+ *  refused on-demand tool loading gets a retry, in words that promise nothing more: a current node sends that gateway
+ *  every tool from then on, an older one does not, and the card can't tell which runs the chat. */
+export function turnErrorFix(code: string | undefined, launcher?: string): TurnFix | null {
+  const name = launcher?.trim() || undefined;
+  const title = (key: string) => name ? `${name} · ${t(key)}` : t(key);
   switch (code) {
     case "not_logged_in":
-      return { title: t("lib-readiness.turn_not_logged_in"), detail: t("lib-readiness.turn_not_logged_in_detail"), action: "connect_model" };
+      return { title: title("lib-readiness.turn_not_logged_in"), detail: t("lib-readiness.turn_not_logged_in_detail"), action: "connect_model", launcher: name };
     case "auth_failed":
-      return { title: t("lib-readiness.turn_auth_failed"), detail: t("lib-readiness.turn_auth_failed_detail"), action: "edit_provider" };
+      return { title: title("lib-readiness.turn_auth_failed"), detail: t("lib-readiness.turn_auth_failed_detail"), action: "edit_provider", launcher: name };
     case "model_route":
-      return { title: t("lib-readiness.turn_model_route"), detail: t("lib-readiness.turn_model_route_detail"), action: "connect_model" };
+      return { title: title("lib-readiness.turn_model_route"), detail: t("lib-readiness.turn_model_route_detail"), action: "pick_model", launcher: name };
+    case "tool_search_unsupported":
+      return { title: t("lib-readiness.turn_tool_search_unsupported"), detail: t("lib-readiness.turn_tool_search_unsupported_detail"), action: "retry" };
   }
   return null;
 }
@@ -259,9 +298,10 @@ const FRESH_MS = 5_000;
 const BLOCKED_RETRY_MS = 2_000;
 const BLOCKED_RETRY_MAX_MS = 60_000;
 
-/** The hub's own limit for "Try it": the one-word check (healthCheckTimeout, 100 s) and then the node's self-check
+/** The hub's own limit for "Try it": working out what the chat's next turn runs (readinessTargetWait, 20 s), the
+ *  one-word check (healthCheckTimeout, 170 s; the node's own bound is 150 s) and then the node's self-check
  *  (readinessWaitGet, 12 s). The read waits past it (`pastHub`), so a slow check still ends in its result (#1892). */
-export const PROBE_HUB_MS = 112_000;
+export const PROBE_HUB_MS = 202_000;
 
 /**
  * Asks the hub again (a visit, a machine coming or going, after a failure, "Try it"'s probe). `force` asks even with a

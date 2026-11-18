@@ -209,6 +209,26 @@ func hubSettingCard() proto.Interaction {
 		SessionTitle: "Persona", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(15 * time.Minute).UTC()}
 }
 
+// waitPreparedSettingForTest keeps the original Resolution assertions pointed
+// at the production prepared-settings path. It adapts only the result shape;
+// every wait, deadline, cancellation and withdrawal still runs in the hub.
+func waitPreparedSettingForTest(h *Hub, ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
+	out, err := h.waitPreparedSetting(ctx, assistantwire.AssistantID, ix, "",
+		func(context.Context, proto.Resolution) (string, error) { return "applied", nil }, nil)
+	if err != nil {
+		return proto.Resolution{}, err
+	}
+	switch out.Text {
+	case "applied":
+		allow := true
+		return proto.Resolution{Allow: &allow}, nil
+	case prompts.RenderSettingUnanswered():
+		return proto.Resolution{Dismiss: true}, nil
+	default:
+		return proto.Resolution{}, fmt.Errorf("unexpected prepared-setting outcome: %+v", out)
+	}
+}
+
 // askedCard plays the manager for the hub's own card (fleet.ask): the user allows it after allowAfter (0: never), the
 // manager ends it at its expiry when expires is set, as its queue does, and it is withdrawn when the hub stops waiting.
 type askedCard struct {
@@ -258,7 +278,7 @@ func TestHubSettingCardWaitsItsWholeLife(t *testing.T) {
 		h.askVia = nil // the hub's own wait: fleet.ask to the manager on the bus
 		card := &askedCard{start: time.Now(), allowAfter: 14 * time.Minute, expires: true}
 		playManager(t, h, card.answer)
-		r, err := h.waitInteraction(context.Background(), hubSettingCard())
+		r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.UserAllowed() || waited != 14*time.Minute || card.withdrawnAfter() != 0 {
@@ -278,7 +298,7 @@ func TestHubSettingCardEndsWithItsExpiry(t *testing.T) {
 			h.askVia = nil
 			card := &askedCard{start: time.Now(), expires: true}
 			playManager(t, h, card.answer)
-			r, err := h.waitInteraction(context.Background(), hubSettingCard())
+			r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 			waited := time.Since(card.start)
 			synctest.Wait()
 			if err != nil || !r.Dismiss || r.UserAllowed() || r.UserDenied() || waited != 15*time.Minute || card.withdrawnAfter() != 0 {
@@ -293,7 +313,7 @@ func TestHubSettingCardEndsWithItsExpiry(t *testing.T) {
 			h.askVia = nil
 			card := &askedCard{start: time.Now()}
 			playManager(t, h, card.answer)
-			r, err := h.waitInteraction(context.Background(), hubSettingCard())
+			r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 			waited := time.Since(card.start)
 			synctest.Wait()
 			if err != nil || !r.Dismiss || r.UserAllowed() || r.UserDenied() || waited <= 15*time.Minute || waited > 16*time.Minute ||
@@ -315,7 +335,7 @@ func TestHubCardWithoutExpiryWaitsForTheManager(t *testing.T) {
 		playManager(t, h, card.answer)
 		ix := hubSettingCard()
 		ix.ExpiresAt = time.Time{}
-		r, err := h.waitInteraction(context.Background(), ix)
+		r, err := waitPreparedSettingForTest(h, context.Background(), ix)
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.UserAllowed() || waited != 25*time.Minute || card.withdrawnAfter() != 0 {
@@ -334,7 +354,7 @@ func TestHubSettingCardGoesWithItsCaller(t *testing.T) {
 		playManager(t, h, card.answer)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		r, err := h.waitInteraction(ctx, hubSettingCard())
+		r, err := waitPreparedSettingForTest(h, ctx, hubSettingCard())
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.Dismiss || waited != 5*time.Minute || card.withdrawnAfter() != 5*time.Minute {

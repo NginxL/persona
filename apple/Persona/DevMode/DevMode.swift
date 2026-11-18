@@ -77,6 +77,10 @@ final class DevMode {
             defaults.removeObject(forKey: Self.sinceKey)
             let store = recorder.store
             recorder.afterWrites { store.clear() }
+            #if os(iOS)
+            // The meeting tapes kept for replays (#10589) go with it: they hold other people's words.
+            MeetingTapeLibrary.shared.deleteAll()
+            #endif
         }
     }
 

@@ -835,6 +835,14 @@ describe("模型服务出错中断的任务 (#1516)", () => {
     });
     expect(interruption(mockSession("mac-1", "s1", "unread", { last_text: "修好了" }))).toBeUndefined();
   });
+
+  it("没有输出的一轮说 hub 的原话，不说模型请求失败 (#10187)", () => {
+    for (const kind of ["no_output", "stopped"]) {
+      const s = mockSession("mac-1", "s1", "unread", { turn_error: "随对话一起停下了，这一轮还没有任何输出", turn_error_kind: kind });
+      expect(interruption(s)).toEqual({ reason: "随对话一起停下了，这一轮还没有任何输出", canContinue: true });
+      expect(todoStatus(todo, makeSessionLookup([s]))).toBe("interrupted");
+    }
+  });
 });
 
 describe("任务卡片的进度 (taskNow, #1583)", () => {

@@ -88,5 +88,7 @@
   "config_dir_legacy": "このコンピューターの",
   "config_dir_hint": "「このコンピューターの」を選ぶと、新しい会話はそのコンピューターで claude を実行するときのサインインと設定（~/.claude のゲートウェイを含む）を使います。開始済みの会話はそのままです",
   "supervise_description": "Persona が任せたタスクをフォローして検収し、メインチャットがいつでも返信できるようにします。メインチャットより安価なモデルや高性能なモデルも選べます。",
-  "agents": "Agents"
+  "agents": "Agents",
+  "usage_other": "過去 7 日間：{calls} 回の呼び出し · {tokens} トークン",
+  "usage_detail": "過去 7 日間（UTC）：入力 {input}、出力 {output}、キャッシュ書き込み {cache_write}、キャッシュ読み取り {cache_read} トークン、失敗 {failures} 回。表示しているトークンは入力 + 出力 + キャッシュ書き込みで、キャッシュ読み取りは含みません。"
 }

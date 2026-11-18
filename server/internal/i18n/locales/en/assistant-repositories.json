@@ -1,6 +1,6 @@
 {
   "store": "Couldn't confirm the repository references were read or saved. Refresh before retrying; a change may have taken effect.",
-  "remote": "Use a GitHub or GitLab HTTP(S) or git SSH link without credentials. Repository pages are accepted. Choose the provider for a self-hosted instance.",
+  "remote": "Use a repository's HTTP(S) or git SSH link without credentials. Repository pages are accepted. For a self-hosted GitHub or GitLab, choose the provider.",
   "metadata": "Couldn't read these details. Use a name and up to 10 aliases of at most 80 characters each, and a purpose of at most 500 characters.",
   "duplicate": "This assistant already has a reference to that repository.",
   "conflict": "The saved references changed, or this undo has expired. Reload and retry.",
@@ -14,5 +14,12 @@
   "network": "Couldn't reach the repository metadata service. Check the connection and retry; nothing was saved.",
   "timeout": "The repository check timed out. Retry; nothing was saved.",
   "unsafe_target": "This destination isn't allowed for repository checks. Private instances need an explicitly trusted instance and network in the assistant's configuration; nothing was saved.",
-  "canceled": "The repository check was canceled. Nothing was saved."
+  "canceled": "The repository check was canceled. Nothing was saved.",
+  "no_provider": "{provider} isn't installed. Install it in Settings › Extensions, then try again; nothing was saved.",
+  "provider_off": "{provider} is off or not running. Turn it on in Settings › Extensions, then try again; nothing was saved.",
+  "provider_not_found": "{provider} can't find this repository. Check the address and your access; nothing was saved.",
+  "provider_not_signed_in": "{provider} isn't signed in. Check its settings in Settings › Extensions; nothing was saved.",
+  "provider_refused": "{provider} refused: {why}",
+  "provider_failed": "{provider} couldn't check this repository: {why}",
+  "providers_starting": "Extensions are still starting. Try again in a moment; nothing was saved."
 }

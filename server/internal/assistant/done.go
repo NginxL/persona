@@ -230,26 +230,34 @@ const userStoppedNotice = transcript.InterruptedNotice
 // (it retries once with a hidden "no visible output" prompt, then stops); Codex's rollout maps to the same items.
 // Thinking alone is no output: the user sees nothing.
 func silentTurn(items []proto.Item) bool {
+	none, stopped := turnWithoutOutput(items)
+	return none && !stopped // stopped: the user stopped it (Esc), no failure to report
+}
+
+// turnWithoutOutput: a turn the node could read (none: it has items, at least the prompt) in which the agent neither
+// replied nor called a tool, and whether the transcript says it was stopped (the interrupted notice). Thinking alone
+// is no output.
+func turnWithoutOutput(items []proto.Item) (none, stopped bool) {
 	if len(items) == 0 {
-		return false // nothing to go by (an older node, a runtime that does not page items): not judged silent
+		return false, false // nothing to go by (an older node, a runtime that does not page items): not judged silent
 	}
 	for _, it := range items {
 		if it.Kind == proto.KindNotice && it.Text == userStoppedNotice {
-			return false // the user stopped it (Esc): no failure to report
+			stopped = true
 		}
 		if it.Role != "assistant" {
 			continue
 		}
 		switch it.Kind {
 		case proto.KindToolUse, proto.KindImage:
-			return false
+			return false, stopped
 		case proto.KindText:
 			if strings.TrimSpace(it.Text) != "" {
-				return false
+				return false, stopped
 			}
 		}
 	}
-	return true
+	return true, stopped
 }
 
 // sameRequest: ask is the task's own prompt (as sent, maybe with context around it).

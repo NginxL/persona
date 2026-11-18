@@ -95,6 +95,7 @@
     <string name="designsystem_core_state_awaiting_reply">待你回复</string>
     <string name="designsystem_core_state_working">工作中</string>
     <string name="designsystem_core_state_background_waiting">后台等待中</string>
+    <string name="designsystem_core_state_just_finished">刚做完待看</string>
     <string name="designsystem_core_state_working_background">工作中（后台）</string>
     <string name="designsystem_core_state_waiting">待唤醒</string>
     <string name="designsystem_core_state_muted">已屏蔽</string>

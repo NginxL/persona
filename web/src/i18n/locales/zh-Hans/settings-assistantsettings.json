@@ -130,6 +130,8 @@
   "agents_title": "Agent 跟进",
   "agent_tasks": "Persona 开的每个 Agent 都有人跟进",
   "agent_tasks_hint": "不是从主对话派出去的 Agent 也会挂上一个不打扰的任务，有人验收结果、做完后关掉它；会多花一些模型调用",
+  "close_ended_terminals": "Agent 结束后关掉它的终端",
+  "close_ended_terminals_hint": "Persona 启动的 Agent 做完、被取消或自己退出后，顺手关掉它的终端标签页。正在忙的 Agent 和你自己开的终端不会被关；对话会保留，之后还能继续",
   "inbox_signals": "任务有新消息时告诉督办它的对话",
   "inbox_signals_hint": "收件箱的 AI 分身把别人发来的新消息关联到 Persona 跟进的任务时，督办这个任务的对话会在下一条督办消息里看到；需要打开 AI 分身；会多花一些模型调用",
   "archive_closed": "已关闭的会话多久后归档",

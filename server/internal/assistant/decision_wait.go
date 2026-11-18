@@ -43,7 +43,7 @@ const (
 // answer: the deadline is counted from when the decision is raised, not from when they are told.
 func (s *Service) decisionWaits(ctx context.Context, why string, deadline time.Time, reversible bool, now time.Time) (bool, string) {
 	switch {
-	case neverDefault(why) || !deadline.IsZero() && !reversible:
+	case cannotUndo(why, deadline, reversible):
 		return false, waitNoNeverDefault
 	case !deadline.IsZero() && deadline.Sub(now) < decisionWaitDeadline:
 		return false, waitNoDeadline
@@ -57,6 +57,14 @@ func (s *Service) decisionWaits(ctx context.Context, why string, deadline time.T
 		return false, waitNoBriefingTime
 	}
 	return true, ""
+}
+
+// cannotUndo: a decision that cannot be undone or that other people will see: why only the owner decides says so
+// (neverDefault), or taking it at its deadline could not be undone. Such a decision is never held for a briefing
+// (decisionWaits), and answering it is open (askRisk): the owner answers it after a look, never from a row or the lock
+// screen.
+func cannotUndo(why string, deadline time.Time, reversible bool) bool {
+	return neverDefault(why) || !deadline.IsZero() && !reversible
 }
 
 // briefingDue is when the next daily routine with facts runs after now, zero when none is on: the routines the

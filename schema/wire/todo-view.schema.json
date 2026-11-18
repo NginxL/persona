@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "todo-view.schema.json",
+  "title": "To-do view",
+  "description": "What the manager works out for each to-do and for the To-dos list (#10226, docs/design/proposals/todos-redesign.md 3.3, 3.7, 6.1, 6.3): the row's view and its asks, the places and the counts. The hub only adds counts up and merges places; the cases are in spec/fixtures/todo-view and spec/fixtures/todo-counts.",
+  "x-out": {
+    "ts": "web/src/lib/todo-view-wire.ts",
+    "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/TodoViewWire.swift",
+    "go": "server/internal/assistantwire/todo_view_gen.go",
+    "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/TodoViewWire.kt"
+  },
+  "x-guard": ["arkts", "rust"],
+  "x-reserved": ["AssistantNeeds", "TodoTimelineEntry", "TodoRound", "TodoMessageState"],
+  "x-guard-keys": ["next_change_at", "default_at", "can_wait", "finished_seen", "finished_recent", "closed_unseen", "steps_proposed"],
+  "$defs": {
+    "TodoPhase": {
+      "description": "The to-do's state in the domain (proposal 6.3): needs_you, the owner has to act; working, Persona or an Agent works on it now; waiting, it waits on something named; ready, finished work nobody has ticked; todo, nobody works on it and nothing waits; someday, the owner put it off; done, closed. done holds exactly when the to-do is closed, and a start that failed reads as open. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["needs_you", "working", "waiting", "ready", "todo", "someday", "done"]
+    },
+    "TodoListSection": {
+      "description": "Where the list draws the row, in the list's order (proposal 3.4): needs_you; can_wait, folded at the foot of Needs you, listed but not counted; working; waiting; todo; just_finished, open work finished and not ticked, and closed work not seen yet within 24 hours; someday; done. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["needs_you", "can_wait", "working", "waiting", "todo", "just_finished", "someday", "done"]
+    },
+    "TodoReason": {
+      "description": "Why the row is where it is: the row of proposal 6.3 that placed it (docs/design/proposals/todos-redesign.md 3.4 and 6.3 say which reasons each section holds). Inactivity is a mark (TodoSummary.inactive), not a reason. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": [
+        "failed_start",
+        "agent_asks",
+        "interrupted",
+        "stopped_unfinished",
+        "owner_decides",
+        "verify",
+        "steps_proposed",
+        "signin",
+        "can_wait",
+        "awaits_reply",
+        "persona_working",
+        "agent_running",
+        "starting",
+        "queued",
+        "background",
+        "closed_unseen",
+        "completed",
+        "canceled",
+        "reported",
+        "superseded",
+        "parked",
+        "finished_unseen",
+        "finished_recent",
+        "pr_open",
+        "usage_limit",
+        "computer_offline",
+        "scheduled_report",
+        "someone_else",
+        "finished_seen",
+        "deferred",
+        "rest"
+      ]
+    },
+    "TodoLine": {
+      "description": "The row's second line as a key and its arguments, never words: each client says it in its own language (spec/fixtures/todo-view/README.md lists every key and its arguments).",
+      "type": "object",
+      "required": ["key"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Stable: never renamed or reused. A client that does not know the key draws no line."
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {"type": "string"},
+          "description": "The key's arguments by name, all strings. A time is an absolute RFC 3339 time, never one relative to now, so the list's bytes stay the same while time passes. Absent when the key takes none."
+        }
+      }
+    },
+    "TodoStepCount": {
+      "description": "The steps of a to-do, the to-dos whose part_of names it: how many are closed, of how many.",
+      "type": "object",
+      "required": ["done", "total"],
+      "properties": {
+        "done": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Steps closed; a step whose start failed counts as open."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "All its steps."
+        }
+      }
+    },
+    "TodoRunRef": {
+      "description": "An Agent session working for the to-do (a run), by its ids and its title; never its runtime, engine, model or folder.",
+      "type": "object",
+      "required": ["machine_id", "session_id"],
+      "properties": {
+        "machine_id": {
+          "type": "string",
+          "description": "The machine the session runs on."
+        },
+        "session_id": {
+          "type": "string",
+          "description": "The session."
+        },
+        "title": {
+          "type": "string",
+          "description": "The session's title as the session list has it, else as the to-do's link recorded it; absent when neither has one."
+        }
+      }
+    },
+    "OwnerAskKind": {
+      "description": "What an ask wants from the owner. The to-do's own asks: decision, verify (Check the result), retry (a start that failed), signin, steps_proposed, duplicate. A run's asks: question, plan, tool (an approval), secret, form. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["decision", "verify", "retry", "signin", "steps_proposed", "duplicate", "question", "plan", "tool", "secret", "form"]
+    },
+    "OwnerAskHome": {
+      "description": "Where the ask's full card lives (proposal 3.7): todo, on the to-do's page under its state line; run, at the foot of the run's session. Every other place that shows the ask is a door to that home.",
+      "type": "string",
+      "enum": ["todo", "run"]
+    },
+    "OwnerAskRisk": {
+      "description": "How risky answering an ask is (proposal 3.7, decision 4(a)): safe, the row, the card or a push may answer it in place; open, it cannot be undone, other people will see it or what it asks needs a look, so the owner answers it after a look, on its page or at its run. The manager's rule: a decision is open when why only the owner decides is irreversible or visible_to_others, or Persona would take it at a deadline that cannot be undone; a retry is safe; a run's card is safe when a notification may answer it too (one question with options and no fields, not from a Just me turn or a health conversation) and its asker did not say going ahead cannot be undone, and anything else a run asks is open (a question in words, several questions, a dialog on the screen, a plan, a tool approval, a form, a secret, or a run whose card the hub does not hold). Open: a newer hub may send other values, which clients read as open.",
+      "type": "string",
+      "enum": ["safe", "open"]
+    },
+    "OwnerAskLockscreen": {
+      "description": "What a push about the ask may offer on the lock screen (proposal 3.7): answer, its answers as actions, each needing the phone unlocked; open_only, no action, a tap opens it. open_only exactly when the risk is open. Open: a newer hub may send other values, which clients read as open_only.",
+      "type": "string",
+      "enum": ["answer", "open_only"]
+    },
+    "OwnerAskOption": {
+      "description": "One option of a decision, as its card lists it.",
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "The option in its card's words; an answer names it."
+        },
+        "leads_to": {
+          "type": "string",
+          "description": "What choosing it leads to, in one line; absent when the ask did not say."
+        }
+      }
+    },
+    "OwnerAsk": {
+      "description": "One ask that holds the to-do in Needs you or Can wait: the to-do's own (home todo) or one of its runs' (home run), with how risky answering it is and what a push about it may offer on the lock screen. Its state (answered, held for Undo) comes with answering in place.",
+      "type": "object",
+      "required": ["id", "kind", "home"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique within the row and never reused for a later ask, so what a client keeps by id (an answer, a Later) never lands on a new question. The same while the ask is open, though a hub restart may give an open run's ask a new one, which clients take as a new ask. Opaque to clients (spec/fixtures/todo-view/README.md says how the hub forms it)."
+        },
+        "kind": {"$ref": "#/$defs/OwnerAskKind"},
+        "home": {"$ref": "#/$defs/OwnerAskHome"},
+        "round": {
+          "type": "string",
+          "description": "The ask round an answer is for, opaque: sent back as it is (today the asked_at the accept route takes). Absent for an ask with no round (a start that failed, a run's ask)."
+        },
+        "text": {
+          "type": "string",
+          "description": "What it asks, in the words it was asked in (\"Which ryokan?\"); absent when nothing says."
+        },
+        "run": {
+          "$ref": "#/$defs/TodoRunRef",
+          "description": "The run that asks; only on a run's ask."
+        },
+        "recommend": {
+          "type": "string",
+          "description": "The label of the option the hub recommends; absent when none is."
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/OwnerAskOption"},
+          "description": "A decision's options, the recommended one first; absent when the ask has none."
+        },
+        "can_wait": {
+          "type": "boolean",
+          "description": "It can wait for the briefing: listed under Can wait, not counted. Written only when true."
+        },
+        "default_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When Persona takes the recommendation unless the owner answers first; absent when it never does."
+        },
+        "risk": {
+          "$ref": "#/$defs/OwnerAskRisk",
+          "description": "How risky answering it is. Absent from an older manager: clients read it as open."
+        },
+        "lockscreen": {
+          "$ref": "#/$defs/OwnerAskLockscreen",
+          "description": "What a push about it may offer on the lock screen. Absent from an older manager: clients read it as open_only."
+        },
+        "interaction": {
+          "type": "string",
+          "description": "The id of the run's pending card this ask is (the session's own before Persona's card about its turn, then the oldest), answered through POST /api/v1/interactions/{id}/resolve; only on a run's ask, and absent while the hub holds no card for the run (its kind is then question)."
+        }
+      }
+    },
+    "TodoSummary": {
+      "description": "The view of a to-do: the row's `view` on GET /api/v1/todos and GET /api/v1/todos/{id}. The manager works it out from the to-do, its runs' sessions, its asks and the time, so every client draws the same row without rules of its own (proposal 6.1, 6.3). A row without it comes from an older manager and is drawn as before; so is a row whose section or reason the client does not know.",
+      "type": "object",
+      "required": ["phase", "section", "reason", "rank"],
+      "properties": {
+        "phase": {"$ref": "#/$defs/TodoPhase"},
+        "section": {"$ref": "#/$defs/TodoListSection"},
+        "reason": {"$ref": "#/$defs/TodoReason"},
+        "line": {
+          "$ref": "#/$defs/TodoLine",
+          "description": "Line 2 of the row; absent when there is nothing to say (a plain To do row)."
+        },
+        "since": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the reason began (the ask, the failure, the park, the close…); absent when nothing says."
+        },
+        "next_change_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The next moment time alone changes this view (24 hours in Just finished, 48 hours to the Inactive mark, a Someday date): a client files the row again then, without the hub. Absent when only new facts change it."
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The row's place in its section among the rows of its list, 0 first (proposal 3.4 \"Within a section\")."
+        },
+        "seen": {
+          "type": "boolean",
+          "description": "The owner looked at it since it got where it is (docs/assistant/todo-status-sop.md \"Seen\"). Written only when true."
+        },
+        "inactive": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The Inactive mark: when activity stopped, on a task nothing has moved for 48 hours that no other rule places. Absent while it is active."
+        },
+        "can_wait": {
+          "type": "boolean",
+          "description": "In Can wait: it needs the owner but can wait, and is not counted. Written only when true."
+        },
+        "asks": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/OwnerAsk"},
+          "description": "The asks that hold the row in Needs you or Can wait, the most urgent first; absent when none does."
+        },
+        "steps": {
+          "$ref": "#/$defs/TodoStepCount",
+          "description": "Its steps; absent when it has none."
+        }
+      }
+    },
+    "TodoPlaceKind": {
+      "description": "What kind of place a To-dos place is (proposal 3.3): all (All To-dos), today, upcoming, or a project's. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["all", "today", "upcoming", "project"]
+    },
+    "TodoPlace": {
+      "description": "One place of the To-dos sidebar: All To-dos, Today, Upcoming, or a knowledge-base project with open to-dos.",
+      "type": "object",
+      "required": ["id", "kind", "title", "needs_you"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "all, today, upcoming, or project:<slug>."
+        },
+        "kind": {"$ref": "#/$defs/TodoPlaceKind"},
+        "title": {
+          "type": "string",
+          "description": "The project's title; \"\" for all, today and upcoming, which each client names in its own language."
+        },
+        "project": {
+          "type": "string",
+          "description": "The project's slug; only on a project's place."
+        },
+        "needs_you": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The place's part of TodoCounts.needs_you, counted the same way; 0 for today and upcoming, which draw no count."
+        },
+        "manager": {
+          "type": "string",
+          "description": "The manager the place belongs to, stamped by the hub when it merges several managers' places; absent in a manager's own answer."
+        }
+      }
+    },
+    "TodoCounts": {
+      "description": "The numbers of the To-dos list (proposal 3.7), on GET /api/v1/todos and GET /api/v1/todos/places. Across managers the hub adds them up field by field and key by key.",
+      "type": "object",
+      "required": ["open", "needs_you", "in_progress", "sections"],
+      "properties": {
+        "open": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Open to-dos except Someday: every to-do that is not closed (a start that failed counts), in any section but Someday."
+        },
+        "needs_you": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are not counted. The To-dos row's badge, the bar's Needs you and the Needs you header show it."
+        },
+        "in_progress": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The rows of Working and Waiting; Just finished is listed at the foot of In progress but not counted."
+        },
+        "sections": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/TodoListSection"},
+          "additionalProperties": {"type": "integer", "minimum": 0},
+          "required": ["needs_you", "can_wait", "working", "waiting", "todo", "just_finished", "someday", "done"],
+          "description": "Rows per section, every section named, 0 included, so the bytes stay stable and the hub adds maps up key by key. Quiet tasks count here as the rows they are."
+        }
+      }
+    },
+    "TodoPlaces": {
+      "description": "The answer of GET /api/v1/todos/places: the places, and the counts of the whole list.",
+      "type": "object",
+      "required": ["places", "counts"],
+      "properties": {
+        "places": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/TodoPlace"},
+          "description": "all, today and upcoming, then one place for each project with open to-dos, by slug."
+        },
+        "counts": {
+          "$ref": "#/$defs/TodoCounts",
+          "description": "The counts of All To-dos, as GET /api/v1/todos answers them."
+        }
+      }
+    }
+  }
+}

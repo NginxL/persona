@@ -3,7 +3,7 @@
 // and on the right what a pick applies: the Agent's mark, the effort, ⚡ for Fast. The second: where it comes from (All,
 // Recent, Favorites) or what the model is (a provider's own view). The model that runs now has a whole-row fill and no
 // check mark. Enter or Space picks it, ← or a right-click opens its setup flyout. A name cut short shows the model's whole
-// ID as its second line (a touch screen has no tooltip), and a touch screen shows the ID instead of the provider's name.
+// ID as its second line (a touch screen has no tooltip), and a touch screen adds the full ID to the provider's line.
 import { useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
 import { t } from "../../i18n";
 import { priceTier, shownEffort, type PanelRow } from "../../lib/model-panel";
@@ -189,8 +189,8 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
       )}
       {idLine && (
         <div data-row-id={idLine} className={cx("min-w-0 pt-px pl-[26px]", idLine === "touch" && "hidden [@media(hover:none)]:block")}>
-          <div title={model.id} className="line-clamp-2 font-mono text-xs leading-[1.4] break-all text-ink-2">
-            {model.id}
+          <div title={second ? `${second} · ${model.id}` : model.id} className="line-clamp-2 font-mono text-xs leading-[1.4] break-all text-ink-2">
+            {second ? `${second} · ${model.id}` : model.id}
           </div>
         </div>
       )}

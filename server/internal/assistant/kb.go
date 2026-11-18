@@ -224,7 +224,7 @@ func (s *Service) kbOpenLocked(ctx context.Context, set assistantwire.KBSettings
 	s.kbRezone(k.store, loc)
 	// The models are counted per lane run (kb_lanes.go: kbCounted, through the run's context).
 	// Retries: the steps' backoffs carry over to the engine after this one (the hub's settings changed; #4247).
-	e := &kb.Engine{Store: k.store, Retries: &k.retries, Model: kbCounted(s.kbModel("inbox.triage")), ModelFor: func(id string) kb.Model { return kbCounted(s.kbModel(id)) },
+	e := &kb.Engine{Store: k.store, Retries: &k.retries, Model: kbCounted("inbox.triage", s.kbModel("inbox.triage")), ModelFor: func(id string) kb.Model { return kbCounted(id, s.kbModel(id)) },
 		Owner: s.owner(ctx), Logf: s.logf, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, HandleKey: k.key, Index: s.kbIndexEntity, Unindex: s.kbUnindex, RecordingDaysFunc: s.recordingDaysNow, MinutesDaysFunc: s.minutesDaysNow, MinutesWritten: s.minutesWritten, LiveChanged: s.meetingKick, MeetingChanged: s.meetingLiveChanged, TranscriptionReady: s.transcriptionReadyCached, EarlierMeetingsInAnswers: true, Changed: s.kbChanged, MineObserved: s.kbObserveOwner,
 		Selection: s.kbSelectionNow, TopicsOn: s.kbTopicsNow,
 		// All-day recordings (kb_day.go): the recap time from the evening routine's, their names; the day's push below
@@ -516,7 +516,7 @@ func (s *Service) kbArchiveLane(ctx context.Context, e *kb.Engine, r *kbRounds) 
 				break
 			}
 			if err := e.Compress(ctx, c); err != nil {
-				if ai.IsPaused(err) { // the chats stay due: compressed once the connection is back
+				if ai.IsPaused(err) || ai.IsNotConfigured(err) { // the chats stay due: compressed once the connection or a model is back (the lane says it has none)
 					break
 				}
 				s.logf("kb: compress %s: %v", c.ID, err)

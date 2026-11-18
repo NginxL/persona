@@ -21,6 +21,7 @@ from them instead of being written once per platform:
 | `storage.schema.json` | **Plugin-side.** Default-deny installation-owned business storage (#1187): CAS/atomic transactions, bounded request receipts and queues, and opaque chunked blobs; manager-owned authentication/retention/restore are not guest RPC methods. See `docs/extensions/extensions.md` ("Installation-owned business storage") |
 | `todos.schema.json` | **Plugin-side.** The to-do events an extension subscribed to and was granted `todos.read` is told of (`docs/extensions/extensions.md` "Events"): `event.todo.changed`, `event.todo.decision` |
 | `leaders.schema.json` | **Plugin-side.** The leader events an extension subscribed to and was granted `leaders.read` is told of (`docs/extensions/extensions.md` "Leader events"): `event.leader.changed`, `event.leader.report` |
+| `repository.schema.json` | **Plugin-side.** The `repository_providers` extension point's calls (#10330): the manager asks a code-hosting source's program `repo.parse` (what repository an address on its hosts names), `repo.check` (it exists and is visible), `repo.link` (an issue or pull request of a repository, by address or by kind and number) and the optional `repo.describe` (a stored link's title and state), and re-checks every answer; `RepoErrorCode`. The manifest's item (`RepositoryProviderItem`, `RepositoryLinkLabel`, `RepositoryLinkKind`) is in `manifest.schema.json` |
 | `examples/` | Examples: `<definition>.<name>.json` must hold to the schema; those under `examples/invalid/` must not. The plugin-side schemas' are in `examples/plugin/` (and `examples/plugin/invalid/`) |
 
 ## Generating
@@ -39,10 +40,11 @@ python3 scripts/test/test_extension_schema.py     # --check, and the examples ho
 | Swift | `apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift` | Type names with an `Extension` prefix (`ExtensionView`), `public nonisolated`, `Codable`, `Hashable`, `Sendable`; legacy models take zero/nil for missing or mistyped fields, while stream envelopes reject missing required and mistyped present fields; a union is an enum, an unknown or unreadable component is `.unknown(type:)`; free JSON is `JSONValue` |
 | Kotlin | `android/core/contracts/src/main/kotlin/persona/core/contracts/generated/ExtensionWire.kt` | kotlinx.serialization data classes, also with the `Extension` prefix, every field with a default; a union is a sealed interface plus a serializer reading `type`, an unknown or unreadable one is `Unknown(type, raw)` and written back as it was. Unlike Swift, an object other than a component with a field of the wrong type does not read at all (the hub checks Views against the schema first, so what the apps get holds) |
 
-The generator also copies the schemas as they are to `sdk/go/wire/schema/` (`go:embed` cannot reach outside the
-module): `wire.Validate(<definition>, value)` checks against them. The hub checks extensions' Views with it
-(`extension.CheckView`), the conformance tests check `initialize`'s answer and every connector call with it, and it
-knows the same subset as the validator in `scripts/test/test_extension_schema.py`.
+The same generator also writes the hub wire types of `schema/wire/` (TypeScript, Swift, Go and Kotlin, each where its
+schema's `x-out` says; `schema/wire/README.md`). It also copies the schemas here as they are to `sdk/go/wire/schema/`
+(`go:embed` cannot reach outside the module): `wire.Validate(<definition>, value)` checks against them. The hub checks
+extensions' Views with it (`extension.CheckView`), the conformance tests check `initialize`'s answer and every connector
+call with it, and it knows the same subset as the validator in `scripts/test/test_extension_schema.py`.
 The View semantics both extensions and the assistant check (charts, tables, fields) are in `sdk/go/wire/viewcheck.go`.
 
 ## Native UI stream protocol 1
@@ -266,7 +268,8 @@ The generator understands only what is below; anything else stops it with an err
     `additionalProperties: true` or a sub-schema also keeps extra keys (see "Custom contributions" below); one that
     says nothing or `false` is generated as before.
   - **A string enum**: `"type": "string"` + `enum`. The field stays a string in every language (an unknown value
-    still reads), with constants and a list besides.
+    still reads), with constants and a list besides. A value named like the list (`all`) is the constant `allValue`
+    in Swift and `ALL_VALUE` in Kotlin.
   - **A named scalar**: `"type": "string"` (or integer / number / boolean) without `enum`, such as `ID` or `Host`:
     where it is referenced it is that scalar; `pattern` and the like only validate.
   - **A union told apart by a field**: `oneOf` of `$ref`s only, with `"x-discriminator": "type"`; each variant is a
@@ -284,6 +287,8 @@ The generator understands only what is below; anything else stops it with an err
   (`"x-go-type": "int64"` is 64 bits: Go `int64`, Swift `Int64`, Kotlin `Long`; `Int` on the watch is 32 bits and
   cannot hold a build number), `number`, `boolean`, `array` + `items`, an `object` **without** `properties` +
   `additionalProperties` (a map whose values are `additionalProperties`), `$ref`, or nothing (free JSON).
+  On a map, `propertyNames` and `required` only validate: every language still generates a plain map, so the producer
+  writes each required key itself (and Go allocates the map, or writes `null`).
   A field that is an object with `properties` must be a definition of its own, referenced.
 - Optional fields are those not in `required`. Go adds `omitempty` (`omitzero` for a time) and makes an object a
   pointer; a scalar whose absence means something other than its zero value gets `"x-go-pointer": true` (a

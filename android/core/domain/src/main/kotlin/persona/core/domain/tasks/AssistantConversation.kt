@@ -10,15 +10,25 @@ import persona.core.domain.lines.WorkItem
 data class AssistantConversation(val foreground: List<ChatLine>, val background: List<ChatLine>) {
     companion object {
         /**
-         * [folding]: the main conversation folds its background rounds (#4314, [BackgroundFolding]); null leaves every
-         * round as it was. [inline] (Glass, #4339 C13, iOS `ChatLines.lines`): a quiet round stays in the conversation
-         * rather than going to the background record: a supervision round folds into one "Handled in the background" line
-         * (with [folding]), and the scheduled and follow-up rounds read as they are unless the background rounds fold.
+         * [folding]: the main and leader conversations fold their background rounds (#4314, #6595, [BackgroundFolding]); null
+         * leaves every round as it was. [inline] (Glass, #4339 C13, iOS `ChatLines.lines`): a quiet round stays in the
+         * conversation rather than going to the background record: a supervision round folds into one "Handled in the
+         * background" line (with [folding]), and the scheduled and follow-up rounds read as they are unless the background
+         * rounds fold. [supervisingConversation]: true for the main and leader conversations; a standalone scheduled or
+         * follow-up conversation owns its scheduled/follow-up exchanges and never strips them into the background record.
          */
-        fun project(lines: List<ChatLine>, items: List<Item>, folding: BackgroundFolding? = null, inline: Boolean = false): AssistantConversation {
+        fun project(
+            lines: List<ChatLine>,
+            items: List<Item>,
+            folding: BackgroundFolding? = null,
+            inline: Boolean = false,
+            supervisingConversation: Boolean = true,
+        ): AssistantConversation {
             val quiet = mutableSetOf<String>()
             val hints = mutableSetOf<String>()
-            var background = false
+            val quietRoundOf = mutableMapOf<String, String>()
+            val quietRounds = mutableMapOf<String, MutableList<Item>>()
+            var quietRound: String? = null
             // The folded round each item belongs to (its first input's id), and each such round's source and items.
             val roundOf = mutableMapOf<String, String>()
             val rounds = mutableMapOf<String, Pair<persona.core.contracts.MessageSource, MutableList<Item>>>()
@@ -32,30 +42,53 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
                     val systemHint = injected?.kind == "system" && injected.state != "supervise"
                     if (systemHint) hints += item.id
                     else {
-                        background = !inline && (source?.kind in setOf("supervision", "patrol", "routine", "schedule") ||
-                            (source?.kind == "followup" && !source.conversationId.isNullOrBlank() && injected?.state != "wake") ||
-                            (injected?.kind == "followup" && injected.state in setOf("once", "daily", "interval")) ||
-                            injected?.kind in setOf("supervision", "routine", "patrol", "schedule"))
+                        val isSupervision = source?.kind == "supervision" || injected?.kind == "supervision"
+                        val isScheduledOrFollowup = injected?.kind != "limit_continue" &&
+                            injected?.state !in setOf("limit_continue", "wake") &&
+                            (source?.kind in setOf("patrol", "routine", "schedule") ||
+                                (source?.kind == "followup" && !source.conversationId.isNullOrBlank()) ||
+                                (injected?.kind == "followup" && injected.state in setOf("once", "daily", "interval")) ||
+                                injected?.kind in setOf("routine", "patrol", "schedule"))
+                        val quietCandidate = !inline && (isSupervision || (supervisingConversation && isScheduledOrFollowup))
                         // A round lasts until the next genuine input, a queued one included; a folded one is drawn, not moved.
                         round = folding?.let { f ->
-                            BackgroundFolding.supervision.takeIf { inline && source?.kind == it.kind }
+                            BackgroundFolding.supervision.takeIf { (inline || !supervisingConversation) && isSupervision }
                                 ?: BackgroundFolding.sourceOf(item)?.takeIf { f.rounds }
                         }?.let { folded ->
-                            background = false
                             rounds[item.id] = folded to mutableListOf()
                             item.id
                         }
+                        quietRound = if (round == null && quietCandidate) {
+                            quietRounds[item.id] = mutableListOf()
+                            item.id
+                        } else null
                     }
-                } else if (item.kind == "image" && item.role == "user" && item.toolUseId == null) { background = false; round = null }
-                if (background) quiet += item.id
+                } else if (item.kind == "image" && item.role == "user" && item.toolUseId == null) {
+                    quietRound = null
+                    round = null
+                }
+                quietRound?.let { id -> quietRoundOf[item.id] = id; quietRounds.getValue(id) += item }
                 round?.let { id -> roundOf[item.id] = id; rounds.getValue(id).second += item }
                 // An upstream refusal (#2528) is the user's to see in Persona's chats too, as on the web.
                 if ((item.role == "system" || item.kind == "notice" || item.kind == "recap") && item.modelRefusal == null) hints += item.id
             }
+            if (quietRounds.isNotEmpty()) {
+                val results = items.filter { it.kind == "tool_result" && it.toolUseId != null }.associateBy { it.toolUseId!! }
+                for ((id, ordered) in quietRounds) {
+                    val live = lines.any { line ->
+                        line is ChatLine.Work && line.live && (
+                            (line.id == persona.core.domain.lines.LiveWorkId && quietRound == id) ||
+                                quietRoundOf[line.id.removePrefix("w-")] == id ||
+                                line.steps.any { quietRoundOf[it.originalId()] == id }
+                            )
+                    }
+                    if (!supervisionVisible(ordered, results, live)) ordered.mapTo(quiet) { it.id }
+                }
+            }
             val quietGroups = lines.filterIsInstance<ChatLine.Work>().filter { line ->
                 line.id.removePrefix("w-") in quiet || line.steps.any { it.originalId() in quiet }
             }.mapTo(mutableSetOf()) { it.id }
-            if (background) quietGroups += persona.core.domain.lines.LiveWorkId
+            if (quietRound != null && quietRound in quiet) quietGroups += persona.core.domain.lines.LiveWorkId
             val record = mutableListOf<ChatLine>()
             val visible = lines.mapNotNull { line ->
                 val hidden = when (line) {

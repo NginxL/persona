@@ -135,8 +135,10 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 		return "", err
 	}
 	if t, ok := s.taskOf(ctx, am.ID, c.SessionID); ok && (t.Origin == self || t.Supervision != nil && t.Supervision.Supervisor == self) {
-		// The conversation shows what it told its task, as for agent_send to a task (routed); marked when it cut in.
-		if _, err := s.appendFeed(ctx, self, feedRouted, t.ID, map[string]any{"text": then, "interrupted": working, "from": routedFromAssistant}); err != nil {
+		// The conversation shows what it told its task, as for agent_send to a task (routed); marked when it cut in, and
+		// naming the run it told (#10465).
+		if _, err := s.appendFeed(ctx, self, feedRouted, t.ID, map[string]any{"text": then, "interrupted": working, "from": routedFromAssistant,
+			"machine_id": am.ID, "session_id": c.SessionID}); err != nil {
 			s.logf("task %s: routed feed: %v", t.ID, err)
 		}
 	}
@@ -335,6 +337,7 @@ type handedTask struct {
 	task sendTask
 	// wake: its card's (taskCard), wakeResumed when the agent was closed and the message resumes it
 	wake string
+	run  SessionRef // the agent the text goes to, which its routed line names (#10465)
 }
 
 // sendTaskAllowed refuses agent_send's task before anything is sent: only the main conversation supervises; an agent
@@ -443,12 +446,12 @@ func (s *Service) handTask(ctx context.Context, self string, am Device, c proto.
 		if c.Status == proto.StatusOffline || stoppedAgent(c) { // closed: the send (or its resume, #8099) starts it first
 			wake = wakeResumed
 		}
-		return &handedTask{todo: todo, made: true, self: self, wake: wake}, nil
+		return &handedTask{todo: todo, made: true, self: self, wake: wake, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
 	}
 	if err := otherWork(c, todo, task); err != nil {
 		return nil, err
 	}
-	return &handedTask{todo: todo, self: self, task: task}, nil
+	return &handedTask{todo: todo, self: self, task: task, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
 }
 
 // sent: the text went. A task made for it gets its card in the conversation; one it was on already gets task's
@@ -472,7 +475,8 @@ func (h *handedTask) sent(ctx context.Context, s *Service, text string) string {
 			h.todo.Supervision = &v
 		}
 	}
-	if _, err := s.appendFeed(ctx, h.self, feedRouted, h.todo.ID, map[string]string{"text": text, "from": routedFromAssistant}); err != nil {
+	if _, err := s.appendFeed(ctx, h.self, feedRouted, h.todo.ID, map[string]string{"text": text, "from": routedFromAssistant,
+		"machine_id": h.run.MachineID, "session_id": h.run.SessionID}); err != nil {
 		s.logf("task %s: routed feed: %v", h.todo.ID, err)
 	}
 	if !h.made {

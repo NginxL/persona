@@ -53,6 +53,23 @@ export interface ModelPurpose {
   runtimes?: string[];
   /** Main chat only (#4633): the profiles its new conversations can start in (an older hub: none, no row). */
   config_dirs?: string[];
+  /** What its calls of the last 7 UTC days added up to, the list's only (#10498): none without calls, none from an older hub. */
+  usage?: ModelUsage;
+}
+
+export interface ModelUsage {
+  calls: number;
+  failures: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+/** The tokens Settings › Models shows for a purpose (#10498): input + output + cache writes. Cache reads cost a fraction
+ *  and would swamp the number, so they are left out of it and listed apart. */
+export function usageTokens(u: ModelUsage): number {
+  return u.input_tokens + u.output_tokens + u.cache_creation_input_tokens;
 }
 
 export interface ModelConfigurationBody {

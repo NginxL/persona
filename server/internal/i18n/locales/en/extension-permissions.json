@@ -105,6 +105,9 @@
   "secret_provider_title": "Supply secret values",
   "secret_provider_more_title": "Supply secret values (new)",
   "secret_provider_detail": "When one of your settings holds a {schemes} reference, or you approve handing one to an Agent on the phone, Persona asks it for the value. It learns which reference is used and what for, never your other secrets",
+  "repository_provider_title": "Look up repositories and links",
+  "repository_provider_more_title": "Look up repositories and links (new)",
+  "repository_provider_detail": "When you add a repository on {hosts}, or you or your Agents add or mention an address there in a to-do's work, Persona asks it to read the address, check the repository and look up the link. It learns those addresses, not those on other hosts",
   "assistant_data_title": "Add what it writes to what your assistant reads",
   "assistant_data_detail": "Text its program writes can go into the assistant's instructions and skills, an Agent's project background or Inbox triage and drafts, within size limits. You can switch each part off in its details"
 }

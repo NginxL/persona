@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/shellcmd"
 )
@@ -25,16 +28,26 @@ import (
 // codexProfileKey matches a line that selects a Codex profile (`profile = "…"`, quoted or not), in any table.
 var codexProfileKey = lazyre.New(`(?m)^[ \t]*"?profile"?[ \t]*=`)
 
+// codexOwnEffort is e without an effort the Codex that argv starts in cwd already runs (codexEffortInherited).
+func (n *Node) codexOwnEffort(ctx context.Context, argv, pane []string, cwd string, e modelExecution) modelExecution {
+	if e.Effort != "" && n.codexEffortInherited(ctx, argv, pane, cwd, e.Effort) {
+		e.Effort = ""
+	}
+	return e
+}
+
 // codexEffortInherited: the Codex that argv starts in cwd already runs at effort without the flag. True only when sure:
 //   - argv runs codex itself (not a managed launcher), changes no home or shell lookup settings, and would join the shared
 //     app-server (no own-process flag, no --remote); a bare codex is not a shell function (#4876);
+//   - the codex the pane's shell finds (pane holds the engine's pane variables) is the Codex CLI, not a wrapper script
+//     that may set its own CODEX_HOME or profile (codexCLIExecutable);
 //   - this node's Codex home sets effort at the top level of config.toml, selects no profile and keeps Codex's own
 //     project markers;
 //   - no project .codex/config.toml Codex may read for cwd names an effort or a profile.
 //
 // Between the user's file and a -c override, Codex has only the profile and project layers; its managed layers come
 // after both and apply either way (codex-rs config_layer_source.rs).
-func (n *Node) codexEffortInherited(ctx context.Context, argv []string, cwd, effort string) bool {
+func (n *Node) codexEffortInherited(ctx context.Context, argv, pane []string, cwd, effort string) bool {
 	words := argv
 	for len(words) > 0 && shellcmd.AssignRe.MatchString(words[0]) {
 		key, _, _ := strings.Cut(words[0], "=")
@@ -64,29 +77,107 @@ func (n *Node) codexEffortInherited(ctx context.Context, argv []string, cwd, eff
 			return false
 		}
 	}
-	if words[0] == "codex" && runtime.GOOS != "windows" {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	exe := words[0]
+	if exe == "codex" {
 		// codex-start preserves a same-name shell function. Its flags are not in argv and may select another effort.
+		// Otherwise its shell runs the first codex on its PATH, which the pane's rc files may change.
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		cmd := loginShell(ctx, `
+		cmd := exec.CommandContext(ctx, codexStartShellProgram(), "-ic", `
 if [ -n "${ZSH_VERSION-}" ]; then
   (( $+functions[codex] )) && exit 0
+  p=$(whence -p codex) || exit 0
 elif [ -n "${BASH_VERSION-}" ]; then
   builtin declare -F codex >/dev/null && exit 0
+  p=$(type -P codex) || exit 0
 else
   exit 0
 fi
-printf '\001persona-codex-unshadowed\001'
+printf '\001persona-codex-unshadowed\001%s\001' "$p"
 `)
 		cmd.Dir = cwd
-		cmd.Env = append(cmd.Environ(), argv[:len(argv)-len(words)]...)
+		cmd.Env = append(append(cmd.Environ(), pane...), argv[:len(argv)-len(words)]...)
 		killGroupOnCancel(cmd)
 		out, err := cmd.Output()
-		if err != nil || !bytes.Contains(out, []byte("\x01persona-codex-unshadowed\x01")) {
+		_, found, ok := bytes.Cut(out, []byte("\x01persona-codex-unshadowed\x01"))
+		if err != nil || !ok {
 			return false
 		}
+		found, _, ok = bytes.Cut(found, []byte("\x01"))
+		if !ok {
+			return false
+		}
+		exe = string(found)
 	}
-	return true
+	if !filepath.IsAbs(exe) {
+		exe = filepath.Join(cwd, exe)
+	}
+	return codexCLIExecutable(exe)
+}
+
+// codexPaneEnv is what a pane of launch's engine holds before its shell reads the rc files, which may choose another
+// codex by it: herdr's pane variables and the HERDR_AGENT codex-start runs with.
+func codexPaneEnv(launch host.Launcher) []string {
+	if _, ok := launch.(*herdrHost); !ok {
+		return nil
+	}
+	return []string{"HERDR_ENV=1", "TERM_PROGRAM=herdr", herdrAgentEnv + "=" + herdrAgentFor(launch, "codex")}
+}
+
+// codexCLIExecutable: path is the Codex CLI itself, a native executable, or one of the official launchers that only
+// exec it: npm's bin/codex.js, or the /bin/sh shim a desktop app bundles in codex-cli/bin, which execs
+// ../CodexCLI.app/Contents/MacOS/codex. Leaving that shim out would take every start through it off the shared
+// app-server (#4860). Any other script may set its own CODEX_HOME or profile (#10432).
+func codexCLIExecutable(path string) bool {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	if nativeExecutable(real) {
+		return true
+	}
+	if strings.HasSuffix(filepath.ToSlash(real), "/node_modules/@openai/codex/bin/codex.js") {
+		return true
+	}
+	bin := filepath.Dir(real)
+	if filepath.Base(real) != "codex" || filepath.Base(bin) != "bin" || filepath.Base(filepath.Dir(bin)) != "codex-cli" {
+		return false
+	}
+	st, err := os.Stat(real)
+	if err != nil || st.Size() > 4096 {
+		return false
+	}
+	b, err := os.ReadFile(real)
+	return err == nil && bytes.HasPrefix(b, []byte("#!/bin/sh\n")) &&
+		bytes.Contains(b, []byte("/../CodexCLI.app/Contents/MacOS/codex\" \"$@\"")) &&
+		!bytes.Contains(b, []byte("CODEX_HOME")) && !bytes.Contains(b, []byte("profile")) &&
+		nativeExecutable(filepath.Join(filepath.Dir(bin), "CodexCLI.app", "Contents", "MacOS", "codex"))
+}
+
+// nativeExecutable: path is a regular file holding a Mach-O or ELF program.
+func nativeExecutable(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return false
+	}
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false
+	}
+	switch string(magic[:]) {
+	case "\x7fELF",
+		"\xfe\xed\xfa\xce", "\xce\xfa\xed\xfe", "\xfe\xed\xfa\xcf", "\xcf\xfa\xed\xfe", // Mach-O, 32 and 64 bit
+		"\xca\xfe\xba\xbe", "\xca\xfe\xba\xbf": // universal
+		return true
+	}
+	return false
 }
 
 // noProjectEffort: none of the project configs Codex may read for dir names an effort or a profile. Codex reads

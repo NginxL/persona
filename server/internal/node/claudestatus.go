@@ -28,6 +28,7 @@ var (
 	// statusLineRE: a spinner at column 0, the verb, "…" (or "..."), and the rest. Claude's own output starts with
 	// "⏺", tool results and tips are indented, and what the user wrote starts with "❯" or ">": none of those match.
 	statusLineRE = lazyre.New(`^(\S) +([^\s….(][^….(]*?)(?:…|\.\.\.)\s*(.*)$`)
+	retryLineRE  = lazyre.New(`^(\S) +(.+) · (?i:retrying) in \d+(?:\.\d+)?s · attempt (\d+)/(\d+)\s*$`)
 	durationRE   = lazyre.New(`^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$`)
 	tokensRE     = lazyre.New(`^([↓↑])\s*([\d.,]+)\s*([kKmM]?)\s*tokens?$`)
 )
@@ -52,6 +53,9 @@ func parseClaudeStatus(text string) (proto.SessionLive, bool) {
 }
 
 func parseStatusLine(line string) (proto.SessionLive, bool) {
+	if live, ok := parseRetryStatusLine(line); ok {
+		return live, true
+	}
 	m := statusLineRE.FindStringSubmatch(line)
 	if m == nil {
 		return proto.SessionLive{}, false
@@ -88,6 +92,27 @@ func parseStatusLine(line string) (proto.SessionLive, bool) {
 		} // anything else ("esc to interrupt", hints) is not ours
 	}
 	return live, true
+}
+
+// parseRetryStatusLine reads the retry banner Claude draws above the same input box while the request is still
+// running: "✻ 429 … · retrying in 4s · attempt 5/10". Only facts on the screen become live state; the countdown is
+// deliberately left out, so a new attempt (not elapsed time) is what changes the value.
+func parseRetryStatusLine(line string) (proto.SessionLive, bool) {
+	m := retryLineRE.FindStringSubmatch(line)
+	if m == nil {
+		return proto.SessionLive{}, false
+	}
+	spin, _ := utf8.DecodeRuneInString(m[1])
+	if unicode.IsLetter(spin) || unicode.IsDigit(spin) || strings.ContainsRune(notSpinner, spin) {
+		return proto.SessionLive{}, false
+	}
+	attempt, attemptErr := strconv.Atoi(m[3])
+	maxAttempts, maxErr := strconv.Atoi(m[4])
+	message := strings.TrimSpace(m[2])
+	if attemptErr != nil || maxErr != nil || attempt <= 0 || maxAttempts <= 0 || message == "" {
+		return proto.SessionLive{}, false
+	}
+	return proto.SessionLive{RetryError: message, RetryAttempt: attempt, RetryMax: maxAttempts}, true
 }
 
 // parseDuration reads "2s", "1m 5s", "1h 2m 3s" (and "2m", "1h") as seconds.
@@ -176,6 +201,23 @@ func (n *Node) setLive(w *watch, l *proto.SessionLive) {
 	lw := &w.live
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
+	if l != nil && l.RetryError != "" && lw.last != nil {
+		// The retry banner has no counters of its own. Keep the last ordinary metrics while it is on screen;
+		// current thinking is different state and is not carried over.
+		previous := *lw.last
+		if l.Verb == "" {
+			l.Verb = previous.Verb
+		}
+		if l.ElapsedS == 0 {
+			l.ElapsedS = previous.ElapsedS
+		}
+		if l.TokensDown == 0 {
+			l.TokensDown = previous.TokensDown
+		}
+		if l.ThoughtS == 0 {
+			l.ThoughtS = previous.ThoughtS
+		}
+	}
 	if lw.ended || sameLive(l, lw.last) {
 		return
 	}

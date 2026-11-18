@@ -138,6 +138,7 @@ class ShellLaneTests(unittest.TestCase):
                      "test_android_slot_order.py", "android_i18n_check.py", "android_token_baseline.py",
                      "android_motion_baseline.py", "android_slot_order.py"):
             (self.root / "scripts/app" / name).write_text("pass\n")
+        (self.root / "scripts/app/refract_about_version.py").write_text("pass\n")  # pinned About Version regeneration (#9694)
         (self.root / "scripts/assets").mkdir()
         (self.root / "scripts/assets/gen_tokens.py").write_text("pass\n")  # the generated-tokens check (#4209)
         (self.root / "scripts/assets/gen_icon_meanings.py").write_text("pass\n")  # the icon meanings check (#4209)

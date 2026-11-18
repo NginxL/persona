@@ -36,6 +36,50 @@ func TestOldCodexOpaqueTranscriptArchiveInvalidatesMiss(t *testing.T) {
 	}
 }
 
+func TestOldCodexOpaqueTranscriptHitCacheBoundsRepeatedScans(t *testing.T) {
+	n := remoteTestNode(t)
+	base := t.TempDir()
+	home := canonicalCodexHome(filepath.Join(base, ".codex"), n.home)
+	n.configureCodex(proto.CodexConfig{Homes: []string{home}})
+	old := time.Now().AddDate(0, 0, -30)
+	writeRollout(t, base, remoteRaw, "/wanted", old, old)
+	path := rolloutPath(home, remoteRaw)
+	id := codexSourceID(home, remoteRaw, n.codexInventory().LegacyHome)
+
+	calls := 0
+	glob := codexTranscriptGlob
+	codexTranscriptGlob = func(pattern string) ([]string, error) {
+		calls++
+		return glob(pattern)
+	}
+	t.Cleanup(func() { codexTranscriptGlob = glob })
+
+	if got := n.oldCodexTranscript(id); got != path {
+		t.Fatalf("first lookup = %q, want %q", got, path)
+	}
+	first := calls
+	if first == 0 {
+		t.Fatal("the first hit did not inspect the home")
+	}
+	if got := n.oldCodexTranscript(id); got != path {
+		t.Fatalf("cached lookup = %q, want %q", got, path)
+	}
+	if calls != first {
+		t.Fatalf("unchanged hit globbed again: %d -> %d", first, calls)
+	}
+
+	// A cached path is still checked on every call. Its disappearance triggers a fresh lookup, not a stale answer.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.oldCodexTranscript(id); got != "" {
+		t.Fatalf("lookup after removing the cached path = %q, want missing", got)
+	}
+	if calls <= first {
+		t.Fatal("a missing cached path did not trigger a fresh lookup")
+	}
+}
+
 func TestOldCodexOpaqueTranscriptMissCacheBoundsRepeatedScans(t *testing.T) {
 	n := remoteTestNode(t)
 	base := t.TempDir()
@@ -98,9 +142,9 @@ func TestOldCodexOpaqueTranscriptMissCacheBoundsRepeatedScans(t *testing.T) {
 		t.Fatalf("second independent miss globbed again: %d -> %d", before, calls)
 	}
 	n.mu.Lock()
-	miss := n.oldMisses[missing]
-	miss.at = time.Now().Add(-2 * oldCodexMissFor)
-	n.oldMisses[missing] = miss
+	miss := n.oldCache[missing]
+	miss.at = time.Now().Add(-2 * oldCodexLookupFor)
+	n.oldCache[missing] = miss
 	n.mu.Unlock()
 	_ = n.oldCodexTranscript(missing)
 	if calls <= before {

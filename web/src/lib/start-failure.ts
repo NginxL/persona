@@ -1,7 +1,8 @@
 // Why a task's Agent did not start, in words for everyone (#8237; iOS `StartFailureWords`). The hub's reason is often a
 // raw error ("rpc: connection closed", "context deadline exceeded"); that stays for the task's details. The hand-off card
 // and the Needs you row say the cause in a few plain words when the error names a known one, keep a sentence the hub
-// already wrote for people (in the owner's language, or a whole English sentence), and otherwise say to open it.
+// already wrote for people (in the owner's language, or a whole English sentence), and otherwise say to open it. The
+// Needs you row reads its plan task's code first (lib/start-retry.ts startFailureCodeLine, #10365).
 import { t } from "../i18n";
 
 export type StartFailureCause = "connection_lost" | "offline" | "timed_out" | "not_allowed" | "needs_update";

@@ -163,7 +163,10 @@ type Meta struct {
 	queued []queuedInput
 	// Background holds background shells / agents that have not reported back (see trackBackground).
 	Background []proto.BackgroundTask
-	bgPending  map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id
+	// BackgroundEnded holds recent shell / Monitor outcomes, oldest first, at most backgroundEndedKept.
+	BackgroundEnded []proto.BackgroundTask
+	bgPending       map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id
+	bgPendingIDs    [][]byte                        // the same ids, for readers that skip lines without a static marker
 	// fgBash: foreground Bash calls waiting for their result, which may say it was moved to the background by hand
 	// (Ctrl+B, or a message sent mid-turn: node/assistant_interject.go).
 	fgBash map[string]proto.BackgroundTask

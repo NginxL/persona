@@ -74,6 +74,8 @@ type fleetBook struct {
 	turns              *turnTracker // "machine/session" -> the turn in progress, for the finished push
 	clients            assistantwire.Clients
 	prev               map[string]map[string]turnPrev // each machine's list setSessions saw last, by session id
+	// prevConn: the node connection (devices' ConnectedAt) each machine's prev list came on.
+	prevConn map[string]time.Time
 
 	// sent: what is kept of each machine's last session list told the hub (fleet.sessions): its length and digest, not
 	// its bytes. sentMu is held while a list is decorated, encoded into enc and told (publishList), so the lists reach
@@ -344,6 +346,10 @@ func turnErrorCode(text string) string {
 		return proto.TurnErrorNotLoggedIn
 	case strings.Contains(t, "There's an issue with the selected model"):
 		return proto.TurnErrorModelRoute
+	case assistantwire.ToolSearchRefused(t):
+		// Before the classes below: a gateway's words for it may say "not supported" next to "model". The node resent
+		// the turn once with every tool loaded and starts the conversation that way from now on (#10365).
+		return proto.TurnErrorToolSearchUnsupported
 	}
 	switch classifyLauncherError(t) { // the launcher health checks' classes (launcher_health.go)
 	case errKindUsageLimit:

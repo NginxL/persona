@@ -70,9 +70,9 @@ internal fun portBadgeLabel(link: PortLink, state: PortPresence.State?, stopped:
  * title, gray once nothing listens there; a tap opens it through the hub as the link would.
  */
 @Composable
-internal fun PortBadges(text: String) {
+internal fun PortBadges(text: String, found: List<PortLink>? = null) {
     val ports = LocalChatPorts.current ?: return
-    val links = remember(text, ports.hostnames) { PortLinks.find(text, ports.hostnames) }
+    val links = found ?: remember(text, ports.hostnames) { PortLinks.find(text, ports.hostnames) }
     if (links.isEmpty()) return
     val presence = ports.presence
     if (presence != null) LaunchedEffect(presence, links, ports.listed) { presence.ask(links.map { it.port }.distinct(), ports.listed) }

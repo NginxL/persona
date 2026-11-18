@@ -1,0 +1,6 @@
+{
+  "waiting": "Not delivered: {reason}. It will be sent automatically.",
+  "failed": "Not delivered: {reason}",
+  "images": "Pictures: {count}",
+  "action_failed": "That did not work: {error}"
+}

@@ -79,6 +79,8 @@ import { directionTitle, groupsByDirection, useDirectionTree, type Direction } f
 import { DirectionCountsText } from "./DirectionMarks";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, supersededFailedStarts, triage, triageTodos, type TriageGroup, type TriageResult, type TriageSection } from "../lib/todo-triage";
 import { orderWaitGroups } from "../lib/task-wait";
+import { viewDrawOn } from "../features/todos/model/view-gates";
+import { drawnFromView, openAsDrawn } from "../features/todos/model/view-triage";
 import {
   TODO_LIST_FILTERS,
   TODO_LIST_SORTS,
@@ -115,6 +117,7 @@ import { UltraMark } from "./chat/Ultracode";
 import { boundThread, threadLine, threadName, todoThreadsOn, unbindTodoThread } from "../lib/todo-thread";
 import { setTodoSeen, todoSeenOn } from "../lib/todo-seen";
 import { retryKey, retryTask, useFeed } from "../lib/feed";
+import { planTaskOf, retryLauncher, retryOnLauncher } from "../lib/start-retry";
 import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
 
 /** What this browser was last on (#2029): the list or the calendar, the calendar's mode, and whether it shows done ones. */
@@ -298,14 +301,25 @@ export function TodosView({
   // a search and the filter narrow the to-dos first; the sections (or the folders) place what is left
   const filterTodo = (t: Todo) => matchesSearch(t) && inFilter(t);
 
+  // Developing Persona's view switch (docs/web/web.md "Developing Persona"): the sections from the hub's view, a row
+  // without one placed as before
+  const features = useStore((s) => s.features);
+  const fromView = useMemo(() => viewDrawOn(features), [features]);
   const triaged = useMemo(
-    () => orderWaitGroups(triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }), Date.now()),
-    [todos, lookup, restored, search, listFilter, superseded, tick],
+    () => {
+      const r = orderWaitGroups(triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }), Date.now());
+      return fromView ? drawnFromView(r, Date.now()) : r;
+    },
+    [todos, lookup, restored, search, listFilter, superseded, tick, fromView],
   );
   // the header's counts: what the filter shows, whatever is searched
   const triageAll = useMemo(
-    () => (search.trim() ? orderWaitGroups(triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }), Date.now()) : triaged),
-    [todos, lookup, restored, search, listFilter, superseded, triaged, tick],
+    () => {
+      if (!search.trim()) return triaged;
+      const r = orderWaitGroups(triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }), Date.now());
+      return fromView ? drawnFromView(r, Date.now()) : r;
+    },
+    [todos, lookup, restored, search, listFilter, superseded, triaged, tick, fromView],
   );
   // Where the status sections place each to-do the search and the filter leave: its row's section (a merged row takes
   // its most urgent member's), and whether it counts as open (countsAsOpen, the sidebar badge's rule, its own reading).
@@ -318,10 +332,10 @@ export function TodosView({
       for (const g of triaged.sections[sec])
         for (const m of g.members) {
           row.set(m.id, sec);
-          if (countsAsOpen(m, g.triage.get(m.id)!)) open.add(m.id);
+          if ((fromView ? openAsDrawn : countsAsOpen)(m, g.triage.get(m.id)!)) open.add(m.id);
         }
     return { row, open };
-  }, [triaged]);
+  }, [triaged, fromView]);
   const filteredUncompleted = useSteady(
     useMemo(() => sortTodos(todos.filter((td) => placed.row.has(td.id) && placed.row.get(td.id) !== "done"), lookup), [todos, placed, lookup]),
     sameList,
@@ -842,7 +856,7 @@ export function TodosView({
               )
             ) : (
               byStatus ? (
-              <div className="flex flex-col gap-1" data-testid="todos-sections">
+              <div className="flex flex-col gap-1" data-testid="todos-sections" data-todo-source={fromView ? "view" : undefined}>
                 {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
                 {TRIAGE_SECTIONS.map((sec) =>
                   triaged.sections[sec].length === 0 ? null : (
@@ -1923,6 +1937,8 @@ const TodoRequestGraph = lazy(() => import("./TodoRequestGraph"));
 const TaskBriefPanel = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.TaskBriefPanel })));
 const TaskBriefHistory = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.TaskBriefHistory })));
 const BriefResultExtras = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.BriefResultExtras })));
+// the question a failed start's tab stopped on, answered on its page (#10365): only for such a failure
+const ShellQuestion = lazy(() => import("./ShellQuestionCard"));
 
 // The existing review UI lives with this lazy page, not the first screen's card badges.
 const MARK: Record<CheckMark, { icon: "check" | "x" | "clock" | "minus"; className: string; label: () => string }> = {
@@ -2096,13 +2112,20 @@ function TodoDetail({
   };
 
   // A task whose agent never started, waiting on the owner (#3713, audit item 13): open, as its row reads, with why it
-  // did not start; Retry when the hub can start it again from its plan (POST …/retry), else Hand to agent.
+  // did not start; Retry for any a conversation handed out (POST …/retry: the hub finds the plan that binds it, one a
+  // plan took over through todo_id has no plan id of its own, #8770, and says when there is none), and Hand to agent.
+  // Its launcher could not start there: "Use … instead" on the computer's other launcher comes first (#10365). Its
+  // tab's shell stopped on a question: the answers are offered here too, and the task then starts in that tab.
   const failedStart = open && Boolean(todo.start_error);
-  const canRetry = failedStart && Boolean(todo.plan_id && todo.origin);
+  const canRetry = failedStart && Boolean(todo.origin);
+  const features = useStore((s) => s.features);
+  const failedTask = useFeed((s) => (canRetry ? planTaskOf(todo, s.plans) : undefined));
+  const instead = retryLauncher(failedTask, features);
   // the main chat's task card's Retry (lib/feed retryTask): one on its way at a time from either, and the to-do the hub
   // reopens shows at once; its agent starts in the background and the list says how the start goes
   const retrying = useFeed((s) => Boolean(s.busy[retryKey(todo.id)]));
-  const retry = () => retryTask(todo).catch((e) => toast(t("todos.action_failed", { error: errorText(e) }), "error"));
+  const retry = (launcher?: string) =>
+    (launcher ? retryOnLauncher(todo, launcher) : retryTask(todo)).catch((e) => toast(t("todos.action_failed", { error: errorText(e) }), "error"));
   const status = todoStatus(todo, lookup);
   const statusInfo = TODO_STATUS_INFO[shownStatus(todo, status)];
   // The to-do's own PR, parsed once here (the list row and the repository section's fallback share it).
@@ -2184,6 +2207,7 @@ function TodoDetail({
           {t("todos.start_failed", { error: todo.start_error ?? "" })}
         </p>
       )}
+      {failedTask?.error_code === "shell_waiting" && <Suspense fallback={null}><ShellQuestion todo={todo} task={failedTask} className="mt-3" /></Suspense>}
       {isAutoDone(todo) && (
         <p className="mt-2 text-[12.5px] leading-[1.6] text-ink-3">
           {todo.done_reason ? t("todos.auto_done_reason", { reason: todo.done_reason }) : t("todos.auto_done")}
@@ -2436,9 +2460,22 @@ function TodoDetail({
           failed start is open: Retry (or Hand to agent, which reopens it first) and Complete, which closes it for good as
           its row's checkbox does. */}
       <div className="mt-8 flex flex-wrap items-center gap-2.5 border-t border-line pt-4">
-        {canRetry && (
+        {instead && (
           <Button
             tone="accent"
+            icon="retry"
+            busy={retrying}
+            disabled={retrying}
+            onClick={() => void retry(instead)}
+            testId="todo-retry-launcher"
+            className="h-8.5 px-3.5 text-meta whitespace-nowrap"
+          >
+            {t("assistant-task-actions.use_launcher_instead", { launcher: instead })}
+          </Button>
+        )}
+        {canRetry && (
+          <Button
+            tone={instead ? "secondary" : "accent"}
             icon="retry"
             busy={retrying}
             disabled={retrying}

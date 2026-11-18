@@ -139,9 +139,18 @@ import UIKit
             }
             #expect(try banner(long, width) != row(long, slim: false, repository: false, width))
         }
-        // xxxLarge on the iPhone 17 Pro, and the narrowest iPad split (320 pt): slim, the repository still there.
+        // xxxLarge on the iPhone 17 Pro, and the narrowest iPad split (320 pt): slim, the repository still there. Before
+        // iOS 26 the bar, and the banner with it, stops growing a size earlier (`Theme.Shell.topBarLargestTypeSize`,
+        // #6730): there it draws a row with the repository at that size.
+        let largest = Theme.Shell.topBarLargestTypeSize
         for name in [long, short] {
-            #expect(try banner(name, 370, .xxxLarge) == row(name, slim: true, repository: true, 370, .xxxLarge), "xxxLarge, \(name)")
+            if largest == .xxxLarge {
+                #expect(try banner(name, 370, .xxxLarge) == row(name, slim: true, repository: true, 370, .xxxLarge), "xxxLarge, \(name)")
+            } else {
+                let drawn = try banner(name, 370, .xxxLarge)
+                #expect(try [false, true].contains { try drawn == row(name, slim: $0, repository: true, 370, largest) },
+                        "\(largest), \(name)")
+            }
             #expect(try banner(name, 288) == row(name, slim: true, repository: true, 288), "288 pt, \(name)")
         }
         // Narrower than any bar: the mark alone.

@@ -264,6 +264,9 @@ type SnapshotOwner struct {
 type SnapshotOpenTodo struct {
 	ID, Title, Link string
 	Owner           SnapshotOwner
+	// Failed: its agent did not start, and it still waits on the owner (stored done with its start error, counted open
+	// as the app's To-dos count it).
+	Failed bool
 }
 
 // SnapshotReport is a supervised task's agent's latest report: its kind (progress, question, blocked, done), the step
@@ -438,6 +441,10 @@ type AssistantContext struct {
 	// LeaderName: for a leader, its direction's name.
 	Directions []ContextDirection
 	LeaderName string
+	// LeaderStatus: for a leader whose direction has notes, the one-line status of the knowledge-base project it is
+	// filed under (#10086). Here rather than in its system prompt: a summary rewrite changes it, and a changed system
+	// prompt would restart the leader.
+	LeaderStatus string
 	// Background: this is the background supervisor (#4927), which follows up the tasks no leader supervises.
 	// BackgroundStarted: for the main conversation, once: the background supervisor's id, the first message after it
 	// began to follow up the main conversation's tasks.
@@ -502,6 +509,10 @@ type BriefFacts struct {
 	// InboxWaiting and InboxDue are read-only follow-up facts for the model only; neither is on the card or in the push.
 	InboxWaiting, InboxDue []BriefFollow
 	Leaders                []BriefLeader // one per direction (#3609)
+	// Directions are the deterministic per-direction wait lists, main included. Every direction keeps all owner-wait
+	// rows and folds only its non-owner tail; More says how many rows the direction link holds beyond it.
+	Directions       []BriefDirection
+	DisabledRoutines []BriefDisabledRoutine
 	// Briefs: the open pieces of work that need the owner or changed since the last briefing, in their own words;
 	// BriefsDone: those that ended since, once, with each criterion's result (#3822).
 	Briefs, BriefsDone []BriefTask
@@ -594,11 +605,40 @@ type BriefTask struct {
 type BriefCriterion struct{ Criterion, State, Change string }
 
 // BriefLeader is one direction in the briefing's facts: its name, its open tasks, those waiting for the owner, those
-// stuck over a day, and its leader's latest summary of the day (empty parts: none).
+// past their inactivity thresholds, and its leader's latest summary of the day (empty parts: none).
 type BriefLeader struct {
 	Name                     string
 	Open, Waiting, Stuck     int
 	Reached, Doing, NeedsYou string
+}
+
+// BriefDirection is one direction's open-work count and deterministic wait rows. Main and leader directions alike keep
+// every owner-wait row; only the non-owner tail is folded into More. Line is ready to read in the owner's language.
+type BriefDirection struct {
+	ID, Name, Link             string
+	Owner                      bool
+	Open, Active, Undispatched int
+	Waits                      []BriefWait
+	More                       int
+}
+
+// BriefWait is one stopped task or unanswered card. Kind is needs_user, review, question, permission, private,
+// parked, capacity, orphaned, overdue or stalled. Since/Until are zero when the ledger did not record them.
+type BriefWait struct {
+	TodoID, InteractionID string
+	Title, Kind           string
+	Since                 time.Time
+	Until                 time.Time
+	WaitingOn, Reason     string
+	Link, Line            string
+}
+
+// BriefDisabledRoutine is a disabled daily report or patrol. DisabledAt is nil for routines saved before the hub
+// recorded the transition; Line says "disable time not recorded" rather than substituting LastRun.
+type BriefDisabledRoutine struct {
+	ID, Title, Direction, Kind string
+	DisabledAt                 *time.Time
+	Link, Line                 string
 }
 
 // BriefFailed is one thing that did not go through: a task whose agent did not start, a scheduled run that failed
@@ -669,6 +709,9 @@ type TaskNotice struct {
 	Earlier        []string // what else it went through since the last notice ("waiting on the user", "done"), oldest first
 	Ask            string   // needs: what it asks
 	Text           string   // what its agent said last, or why it did not start
+	// RetryWith: failed because of its launcher there, the launcher the assistant may start it with instead when the
+	// user asks (task_retry's launcher; only the web's card has a button for it, #10365).
+	RetryWith string
 	// Reporting: the notice goes into the conversation that opened the task (one started with report_tasks, such as
 	// a Feishu /agent's, #3192), not the main conversation.
 	Reporting bool
@@ -755,7 +798,7 @@ type Supervise struct {
 	BackgroundEscalated bool
 	// Side: it goes to an ordinary side conversation, for the tasks that conversation handed out itself.
 	Side bool
-	// LeaderStuck: an entry is a leader's task stuck over a day (sigLeaderStuck), told the main conversation (#3609).
+	// LeaderStuck: an entry is a leader's task past its inactivity threshold (sigLeaderStuck), told the main conversation (#3609).
 	LeaderStuck bool
 	// Overdue: an entry is a task past its brief's clock (#3822).
 	Overdue bool
@@ -814,6 +857,9 @@ type SuperviseEntry struct {
 	// lines, and how many retries are left; KeptUntil "" when the start failed for good.
 	KeptUntil, Question, Screen string
 	RetriesLeft                 int
+	// RetryWith: failed because of its launcher on that computer, the other launchers there task_retry may start it
+	// with (PlanTask.RetryWith, #10365), the first suggested.
+	RetryWith []string
 	// ask: the cards waiting, and the task's decisions in effect (prompts/todo/decisions.md, rendered), which
 	// parked_due and park_decided carry too; escalated: the cards a leader gave the user.
 	Asks      []SuperviseAsk
@@ -946,8 +992,8 @@ func RenderTaskDoneWhen(criteria []string) string {
 	return render("assistant/task_done_when", struct{ Criteria []string }{criteria})
 }
 
-// RenderTaskGoal is a task's done_when as one checkable condition, for a Claude Code /goal typed before the task's
-// first message (docs/integrations/agent-goal.md "A goal set at the start"): one line, trimmed.
+// RenderTaskGoal is a task's done_when as one checkable condition, for the Claude Code or Codex /goal typed after the
+// task's first message (docs/integrations/agent-goal.md "A goal set at the start"): one line, trimmed.
 func RenderTaskGoal(criteria []string) string {
 	return strings.TrimSpace(render("assistant/task_goal", struct{ Criteria []string }{criteria}))
 }
@@ -1081,13 +1127,9 @@ func RenderTaskAttachments(a TaskAttachments) string {
 	return strings.TrimRight(render("assistant/task_attachments", a), "\n")
 }
 
-// SideConversation preserves the provenance of a non-owner's message to a tasked Agent.
-type SideConversation struct {
-	From, Text string
-}
-
-func RenderSideConversation(in SideConversation) string {
-	return render("assistant/side_conversation", in)
+// RenderSideConversation marks a separate request for an Agent assigned to a task.
+func RenderSideConversation(text string) string {
+	return render("assistant/side_conversation", text)
 }
 
 // TaskDoneInput is the task as it was handed out and what its agents said when they stopped (assistant/task_done_input).
@@ -1210,3 +1252,31 @@ func RenderRouteInput(in RouteInput) string { return render("assistant/route_inp
 // RenderRouteAgent is the system prompt of assistant.route for a new agent (assistant/route_agent): which leader's
 // direction its work belongs to; it reads RouteInput (the agent's first message as the sentence, no projects).
 func RenderRouteAgent() string { return render("assistant/route_agent", nil) }
+
+// DirectionNotes is what a leader conversation is told of its own direction (#10086): the notes the owner wrote for it
+// and the goal of the knowledge-base project it is filed under. Lang is the owner's language (i18n code; "" or
+// zh-Hans: Chinese).
+type DirectionNotes struct {
+	Lang, Name, Notes, ProjectName, ProjectGoal string
+}
+
+// Empty: nothing the owner wrote and no project goal, so nothing is added to the leader's policy.
+func (d DirectionNotes) Empty() bool { return d.Notes == "" && d.ProjectGoal == "" }
+
+// RenderDirectionNotes is the block appended to a leader's role policy (supervision_instructions); empty when there
+// is nothing to say, so a direction without notes keeps its policy byte for byte.
+func RenderDirectionNotes(d DirectionNotes) string {
+	if d.Empty() {
+		return ""
+	}
+	return render("assistant/direction_notes", d)
+}
+
+// RenderTodoDirection is the block a new Agent working for a direction gets before its first prompt (todo/direction);
+// empty without notes.
+func RenderTodoDirection(d DirectionNotes) string {
+	if d.Notes == "" {
+		return ""
+	}
+	return render("todo/direction", d)
+}

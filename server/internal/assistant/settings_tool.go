@@ -76,6 +76,21 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.startRequestedTasks(ctx)), nil },
 			set: s.setStartRequestedTasks},
+		{Setting: Setting{Key: "assistant.idle_auto_compact", Title: "Compact idle conversations", Actions: getSet,
+			About: "on (the default): compact an idle conversation when the idle time and context size thresholds are both reached",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompact(ctx)), nil },
+			set: s.setIdleAutoCompact},
+		{Setting: Setting{Key: "assistant.idle_auto_compact_minutes", Title: "Idle time before compaction", Actions: getSet,
+			About: "minimum idle time before automatic compaction; 30 minutes by default",
+			Value: "a whole number from 1 to 1440"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompactMinutes(ctx)), nil },
+			set: s.setIdleAutoCompactMinutes},
+		{Setting: Setting{Key: "assistant.idle_auto_compact_tokens", Title: "Context size before compaction", Actions: getSet,
+			About: "minimum context size before automatic compaction; 300000 tokens by default",
+			Value: "a whole number from 10000 to 10000000"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompactTokens(ctx)), nil },
+			set: s.setIdleAutoCompactTokens},
 		{Setting: Setting{Key: readonlyModeKey, Title: "Read-only task protection", Actions: getSet,
 			About: "sandbox (the default) keeps current runtime protection: Codex uses a read-only sandbox, while Claude uses " +
 				"bypassPermissions and a first-message read-only instruction. prompt keeps the instruction without forcing plan " +
@@ -174,6 +189,14 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "the whole list of leader conversation ids (conversations_list), [] for none"},
 			get: s.getLeaders,
 			set: s.setLeaders},
+		{Setting: Setting{Key: "assistant.briefing_waits", Title: "Briefing wait rows", Actions: getSet,
+			About: "thresholds for the deterministic per-direction wait rows in morning/evening facts. Defaults come from the existing " +
+				"supervision floors: stalled_minutes=20 (superviseStallMin), silent_minutes=120 (superviseSilentMin), " +
+				"orphan_minutes=10 (orphanOfflineAfter), card_minutes=3 (superviseNeedsAfter); max_rows=15 bounds only non-owner " +
+				"rows per direction, and every owner-wait row is kept. These values do not change supervision notifications",
+			Value: "the whole object {stalled_minutes, silent_minutes, orphan_minutes, card_minutes, max_rows}; minutes 1–10080, max_rows 1–100; null restores the defaults"},
+			get: s.getBriefingWaits,
+			set: s.setBriefingWaits},
 		{Setting: Setting{Key: "assistant.interject_background", Title: "Move running work to the background when I interject", Actions: getSet,
 			About: "off (the default): a message the user sends while a Claude conversation is still answering waits until the command " +
 				"or subagent running in the foreground ends; on: that work moves to the background (it goes on and reports when done) " +
@@ -204,6 +227,17 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.agentTasks(ctx)), nil },
 			set: s.setAgentTasks},
+		{Setting: Setting{Key: "assistant.close_ended_terminals", Title: "Close an Agent's terminal when it ends", Actions: getSet,
+			About: "off (the default): an Agent's terminal tab stays open after it stops, with the shell it ran in, until the user " +
+				"closes it. on: when an Agent Persona started ends, Persona closes the tab it opened for it, the way Archive and " +
+				"close does: when its task is done or cancelled (an idle Agent), and when it quits by itself or is told to (/exit). " +
+				"Never closed: a busy Agent (working, waiting for an answer, background work, subagents or workflows running, a " +
+				"/loop, queued messages, a server it runs), one the user stopped with Stop or that was stopped for being idle, and " +
+				"terminals Persona did not open. The conversation is kept and can be resumed in a new tab. Applies from the next " +
+				"Agent that ends",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.closeEndedTerminals(ctx)), nil },
+			set: s.setCloseEndedTerminals},
 		{Setting: Setting{Key: "assistant.inbox_signals", Title: "Tell a task's supervisor about new Inbox messages on it", Actions: getSet,
 			About: "off (the default): an Inbox message the AI twin's judge links to a task only reaches the twin's handling chat " +
 				"(and a message card once it drafts a reply). on: new messages from other people linked to a supervised task also " +
@@ -380,7 +414,9 @@ func (s *Service) ownSettingAction(ctx context.Context, call ToolCall, o ownSett
 				return "", approvalops.ErrStale
 			}
 			if err != nil {
-				return "", err
+				// The setter only rebuilds and validates a fresh operation here;
+				// fresh.apply below is the first possible side effect.
+				return "", fmt.Errorf("%w: validate the approved operation against current state: %v", approvalops.ErrNotApplied, err)
 			}
 			if fresh == nil || fresh.apply == nil || fresh.card(l) != proposal {
 				return "", approvalops.ErrStale
@@ -401,12 +437,13 @@ func orNone(s string) string {
 // settingTitles are the settings' titles for the card the user approves on, in this file's namespace (Title stays
 // what the assistant reads).
 var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing_authorizations", "assistant.notes": "title_notes", "assistant.main_tasks_quiet": "title_main_tasks_quiet",
+	"assistant.idle_auto_compact": "title_idle_auto_compact", "assistant.idle_auto_compact_minutes": "title_idle_auto_compact_minutes", "assistant.idle_auto_compact_tokens": "title_idle_auto_compact_tokens",
 	readonlyModeKey:                       "title_readonly_mode",
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
-	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
-	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
+	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
@@ -420,6 +457,63 @@ func clipped(l i18n.Lang, s string) string {
 		s = i18n.T(l, "assistant-settings_tool.none")
 	}
 	return clip(oneLine(s), 120)
+}
+
+func (s *Service) setIdleAutoCompact(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value *bool
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact")
+	}
+	return s.setBoolSetting(ctx, raw, s.idleAutoCompact, i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged"), func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.IdleAutoCompact },
+		"Idle compaction setting saved (%v); applies from the next unattended message.")
+}
+
+func (s *Service) setIdleAutoCompactMinutes(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil || value < minIdleAutoCompactMinutes || value > maxIdleAutoCompactMinutes {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact_minutes")
+	}
+	before := s.idleAutoCompactMinutes(ctx)
+	if value == before {
+		return &ownChange{summary: i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged")}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact_minutes", i18n.Args{"before": before, "after": value})
+	}, apply: func(ctx context.Context) (string, error) {
+		if _, err := s.updateSettings(ctx, func(v *Settings) error { v.IdleAutoCompactMinutes = &value; return nil }); err != nil {
+			return "", err
+		}
+		s.settingsChanged(ctx)
+		return i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_saved"), nil
+	}}, nil
+}
+
+func (s *Service) setIdleAutoCompactTokens(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil || value < minIdleAutoCompactTokens || value > maxIdleAutoCompactTokens {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact_tokens")
+	}
+	before := s.idleAutoCompactTokens(ctx)
+	if value == before {
+		return &ownChange{summary: i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged")}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact_tokens", i18n.Args{"before": before, "after": value})
+	}, apply: func(ctx context.Context) (string, error) {
+		if _, err := s.updateSettings(ctx, func(v *Settings) error { v.IdleAutoCompactTokens = &value; return nil }); err != nil {
+			return "", err
+		}
+		s.settingsChanged(ctx)
+		return i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_saved"), nil
+	}}, nil
 }
 
 func (s *Service) setNotes(ctx context.Context, v json.RawMessage) (*ownChange, error) {
@@ -677,6 +771,13 @@ func (s *Service) setAgentTasks(ctx context.Context, v json.RawMessage) (*ownCha
 		return i18n.T(l, "assistant-settings_tool.change_agent_tasks", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.AgentTasks },
 		"assistant.agent_tasks is %v from the next start, turn end and report on (to-dos made before keep what they have).")
+}
+
+func (s *Service) setCloseEndedTerminals(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.closeEndedTerminals, "assistant.close_ended_terminals is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_close_ended_terminals", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.CloseEndedTerminals },
+		"assistant.close_ended_terminals is %v for Agents that end from now on (terminals already left open stay).")
 }
 
 func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownChange, error) {

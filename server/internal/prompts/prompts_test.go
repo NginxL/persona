@@ -147,8 +147,8 @@ func TestFirstRendersRunConcurrently(t *testing.T) {
 		name string
 		data any
 	}{
-		{"tools/translate_texts", "English"},
-		{"tools/translate_mail", "English"},
+		{"tools/translate_texts", Translation{Target: "English"}},
+		{"tools/translate_mail", Translation{Target: "English"}},
 		{"voice/instructions", VoiceInstructions{}},
 		{"voice/report", VoiceReport{}},
 		{"assistant/snapshot", Snapshot{Now: now, Zone: "UTC", Calendar: &SnapshotCalendar{}}},
@@ -183,17 +183,17 @@ func TestMissingFieldPanics(t *testing.T) {
 
 func TestSmallPrompts(t *testing.T) {
 	for got, want := range map[string]string{
-		RenderReadonlyTaskPlanExit():       "This task is read-only. Stay in plan mode; do not request implementation approval. Return your findings and report completion to your supervisor with report_to_supervisor.",
-		RenderReadonlyTaskConstraint():     "本任务只读：不改项目文件、不提交、不对外写入",
-		RenderPlanFirstTaskConstraint():    "Before you change anything, write a short plan: the steps you will take and how you will check each one. Work through them in order, and before you finish, check every acceptance criterion yourself and fix what does not hold.",
-		RenderQuestionCancelled():          "The user closed this question without answering. Continue without an answer; do not repeat this question.",
-		RenderQuestionUserSpoke():          "The user did not pick an option: they wrote a new message in this conversation instead. It is delivered when you end this turn, so end the turn now and do not call ask_user again in it. Read their message then: it may be the answer; if you still need one, ask again after reading it.",
-		RenderRefused("他说不行"):              "（没有执行）他说不行",
-		RenderLauncherCheck():              "Reply with exactly one word: ok",
-		RenderJSONOnly("system"):           "system\n\nReply with a single JSON object only, no prose, no code fences.",
-		RenderTranslateMailInput("S", "T"): "主题：S\n\nT",
-		RenderCodexInstructions("mem"):     "mem",
-		SnapshotCut():                      "- 快照到此截断；其余用 agents_list、todo_list 查；收件箱在 App 里看",
+		RenderReadonlyTaskPlanExit():           "This task is read-only. Stay in plan mode; do not request implementation approval. Return your findings and report completion to your supervisor with report_to_supervisor.",
+		RenderReadonlyTaskConstraint():         "本任务只读：不改项目文件、不提交、不对外写入",
+		RenderPlanFirstTaskConstraint():        "Before you change anything, write a short plan: the steps you will take and how you will check each one. Work through them in order, and before you finish, check every acceptance criterion yourself and fix what does not hold.",
+		RenderQuestionCancelled():              "The user closed this question without answering. Continue without an answer; do not repeat this question.",
+		RenderQuestionUserSpoke():              "The user did not pick an option: they wrote a new message in this conversation instead. It is delivered when you end this turn, so end the turn now and do not call ask_user again in it. Read their message then: it may be the answer; if you still need one, ask again after reading it.",
+		RenderRefused("他说不行"):                  "（没有执行）他说不行",
+		RenderLauncherCheck():                  "Reply with exactly one word: ok",
+		RenderJSONOnly("system"):               "system\n\nReply with a single JSON object only, no prose, no code fences.",
+		RenderTranslateMailInput("", "S", "T"): "主题：S\n\nT",
+		RenderCodexInstructions("mem"):         "mem",
+		SnapshotCut():                          "- 快照到此截断；其余用 agents_list、todo_list 查；收件箱在 App 里看",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)

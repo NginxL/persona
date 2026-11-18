@@ -1,5 +1,7 @@
 package proto
 
+import "github.com/nwverse/persona/server/internal/aiwire"
+
 // model.run: one request of an API purpose answered by a launcher's CLI run headless on a computer
 // (docs/assistant/model-config.md "Running API purposes on a launcher", docs/protocol/protocol.md "hub ↔ node RPC").
 
@@ -23,8 +25,9 @@ type ModelRunParams struct {
 	TimeoutMS  int64  `json:"timeout_ms,omitempty"` // the whole run, waiting for a slot included; the node caps it
 }
 
-// ModelRunAnswer is the run's final text and the model that answered, when the CLI says.
+// ModelRunAnswer is the final text, model and usage reported by the CLI.
 type ModelRunAnswer struct {
-	Text  string `json:"text"`
-	Model string `json:"model,omitempty"`
+	Text  string       `json:"text"`
+	Model string       `json:"model,omitempty"`
+	Usage aiwire.Usage `json:"usage,omitzero"`
 }

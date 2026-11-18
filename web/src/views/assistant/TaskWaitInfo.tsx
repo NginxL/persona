@@ -46,7 +46,7 @@ export function TaskWaitInfo({ todo, merges = [], expanded = false }: { todo: To
     </div>
     {contact ? <a data-wait-contact href={contact.url} target="_blank" rel="noreferrer noopener" className="block break-words text-accent-ink hover:underline pointer-coarse:min-h-11">
       {t("task-wait.last_contact", { sender: contact.sender, time: contactTime ?? contact.sent_at, channel: contact.channel })}
-    </a> : <p data-wait-contact-missing className="text-ink-3">{t(info.kind === "date" || info.kind === "external_event" ? "task-wait.no_person_request" : "task-wait.contact_unknown")}</p>}
+    </a> : info.contactExpected && <p data-wait-contact-missing className="text-ink-3">{t("task-wait.contact_unknown")}</p>}
     <p data-wait-wake className="break-words">{info.wake ? t("task-wait.wake", { wake: info.wake }) : t("task-wait.wake_unknown")}</p>
     {sourceLinks.length > 0 && <div className="space-y-1">{sourceLinks.map((url, i) => {
       const pr = merges.find((facts) => waitSource(facts.url) === url);

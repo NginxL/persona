@@ -143,14 +143,13 @@ private fun ChatPage(
     historyReadOnly: Boolean, historyFooter: (@Composable () -> Unit)?,
     historySession: Session?, healthChat: Boolean,
 ) {
-    val pageSources = rememberChatPageSources(key, repository, sender, interactions, sessions, chrome, textUpdates,
-        statusBindings)
+    val pageSources = rememberChatPageSources(key, repository, sender, interactions, sessions, chrome, statusBindings)
     val scope = pageSources.scope
     val haptics = pageSources.haptics
     val res = pageSources.res
     val recovery = pageSources.recovery
     val snapshot by pageSources.snapshot
-    val liveTextUpdates = pageSources.liveTextUpdates
+    val liveItems = pageSources.liveItems
     val renamer = pageSources.renamer
     val sessionList by pageSources.sessionList
     val managerChoice by pageSources.managerChoice
@@ -218,6 +217,7 @@ private fun ChatPage(
     val inboxDrafts by pageTrays.inboxDrafts
     var traySchedules by pageTrays.traySchedules
     val foldsBackground = pageTrays.foldsBackground
+    val supervisingConversation = pageTrays.supervisingConversation
     val pageRequests = rememberChatPageRequests(key, chrome, renderStyle, composerService, snapshot, sessionList, machines,
         allRequests, allMessages)
     val machine = pageRequests.machine
@@ -342,14 +342,23 @@ private fun ChatPage(
     var backgroundOpen by rememberSaveable(key.path) { mutableStateOf(false) }
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
     val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
-    val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, tasks, taskTodos, search,
+    val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
         openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList())
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
     val subagentCards = pageLines.subagentCards
     val lines = pageLines.lines
-    val searchableItems by produceState(emptyList<Item>(), snapshot.items, timelineVersion, search.visible) {
-        if (search.visible) value = withContext(Dispatchers.Default) { timeline.searchItems(snapshot.items) }
+    val searchableItems by produceState(emptyList<Item>(), liveItems, timelineVersion, search.visible) {
+        if (!search.visible) return@produceState
+        val projection = ChatSearchProjection()
+        liveItems.revisions.collect { revision ->
+            val items = withContext(Dispatchers.Default) {
+                projection.update(revision, timeline.isFrozen()) {
+                    timeline.searchItems(revision.current())
+                }
+            }
+            if (items != null) value = items
+        }
     }
     // Photos sent just before a message go into that message's bubble instead of a row of their own.
     val pageContent = rememberChatPageContent(lines)
@@ -374,10 +383,10 @@ private fun ChatPage(
     // The newest "while you were away" recap open as the last line until tapped or typing starts (Glass, an Agent's chat).
     val pageRecap = rememberChatPageRecap(key, composer, readOnly, lines, glass, agentChat)
     val openRecap = pageRecap.openRecap
-    val pageReader = rememberChatPageReader(key, repository, snapshot, chatList, lines)
+    val pageReader = rememberChatPageReader(key, repository, snapshot, chatList, lines, liveItems)
     var planSheet by pageReader.planSheet
     var sheetPlan by pageReader.sheetPlan
-    val currentItems by pageReader.currentItems
+    val currentItems = pageReader.currentItems
     val currentLinesByKey by pageReader.currentLinesByKey
     val list = pageReader.list
     var reportedSeen by pageReader.reportedSeen
@@ -388,8 +397,8 @@ private fun ChatPage(
     val loader = pageReader.loader
     val markdownCache = pageReader.markdownCache
     // Only fresh Agent replies preload their links (ChatLinks.toPreload): paging old history never does.
-    val preloadUrls by produceState(emptyList<String>(), snapshot.items) {
-        value = withContext(Dispatchers.Default) { ChatLinks.toPreload(snapshot.items, java.time.Instant.now()) }
+    val preloadUrls by produceState(emptyList<String>(), liveItems) {
+        chatLinkPreloads(liveItems.revisions).collect { value = it }
     }
     // The items whose latest turn has its Markdown parsed. An unread conversation opens on its last question and waits
     // for this: a reply drawn as plain text and then as Markdown grows after the list was placed, and in the reversed
@@ -573,7 +582,7 @@ private fun ChatPage(
         ChatRowActions(key, fullText = { item -> repository.fullText(key, item.id) },
             openPath = if (chrome.onOpenPath != null) ({ path, line -> currentOpenPath?.invoke(path, line) }) else null,
             paths = pathPresence,
-            photos = photos, pictures = { chatViewerImages(key, currentItems, repository, imageDescription) },
+            photos = photos, pictures = { chatViewerImages(key, currentItems(), repository, imageDescription) },
             openImages = { images, index -> viewer = ViewerRequest(images, index) },
             menu = messageMenu, retryLineId = retryId, onRetry = { currentSend(continueText) }, imageDescription = imageDescription,
             thumbnails = chrome.files?.let { files ->
@@ -581,18 +590,23 @@ private fun ChatPage(
                 ({ path -> "${key.machineId}\n$cwd\n$path" to { pixels: Int -> files.thumbnail(key.machineId, cwd, path, pixels) } })
             }, viewerImage = { item, description -> chatViewerImage(key, item, repository, description) }, exhausted = exhausted)
     }
-    LaunchedEffect(snapshot.items) {
-        // Replies render each text part under "<item id>/<part index>" (MessageContent), so prewarm those keys, each with
-        // the source its row parses there (MarkdownText.source): the same key and source, so the row finds the parse.
-        val items = snapshot.items
-        val paths = rowActions.paths?.takeIf { rowActions.openPath != null }
-        val (latest, earlier) = withContext(Dispatchers.Default) {
-            markdownSplit.split(items).let { (latest, earlier) -> latest.map { it.key to it.source(paths) } to earlier.map { it.key to it.source(paths) } }
+    val currentMarkdownPaths by rememberUpdatedState(rowActions.paths?.takeIf { rowActions.openPath != null })
+    LaunchedEffect(liveItems) {
+        liveItems.revisions.collect { revision ->
+            // Replies render each text part under "<item id>/<part index>" (MessageContent), so prewarm those keys, each with
+            // the source its row parses there (MarkdownText.source): the same key and source, so the row finds the parse.
+            val paths = currentMarkdownPaths
+            val (latest, earlier) = withContext(Dispatchers.Default) {
+                markdownSplit.split(revision).let { (latest, earlier) ->
+                    latest.map { it.key to it.source(paths) } to earlier.map { it.key to it.source(paths) }
+                }
+            }
+            markdownCache.keep(latest.map { it.first } + earlier.map { it.first })
+            latest.forEach { (id, source) -> markdownCache.parse(id, source) }
+            // Readiness still describes the structural snapshot, never the lazy live overlay's list identity.
+            markdownReadyFor = revision.base
+            earlier.forEach { (id, source) -> markdownCache.parse(id, source) }
         }
-        markdownCache.keep(latest.map { it.first } + earlier.map { it.first })
-        latest.forEach { (id, source) -> markdownCache.parse(id, source) }
-        markdownReadyFor = items
-        earlier.forEach { (id, source) -> markdownCache.parse(id, source) }
     }
     // A task's detail or the dock's "All", open over the conversation; kept across the host being made again.
     val taskSheet = remember(key) { mutableStateOf<TaskSheet?>(null) }
@@ -734,7 +748,7 @@ private fun ChatPage(
             (unreadEntry == null || markdownReadyFor == snapshot.items), entry = unreadEntry,
         rowAliases = lines.associate { it.id to it.contentKey },
         hasOlder = snapshot.hasOlder, loadingOlder = snapshot.loadingOlder,
-        onFreeze = { timeline.freeze(currentItems); timelineVersion++ },
+        onFreeze = { timeline.freeze(currentItems()); timelineVersion++ },
         onFollow = { timeline.follow(); timelineVersion++ },
         loadOlder = {
             try { repository.loadOlder(key) } catch (e: CancellationException) { throw e }
@@ -862,7 +876,7 @@ private fun ChatPage(
                                         onFiles = chrome.onFiles, onGit = chrome.onGit, gitLabel = chrome.gitLabel,
                                         statusState = status, onDetails = { statusSheet = true },
                                         onOpenTodo = chrome.onOpenTodo, agentShares = chrome.agentShares, worktrees = chrome.worktrees,
-                                        onSearch = { search.open(chatList) { timeline.freeze(currentItems); timelineVersion++ } },
+                                        onSearch = { search.open(chatList) { timeline.freeze(currentItems()); timelineVersion++ } },
                                         onTerminal = agentTerminal, onTerminalHelp = if (hasTerminal && terminal == null) ({ terminalHelp = true }) else null,
                                         onResumeInTerminal = resumeInTerminal,
                                         turnStart = runningSince,
@@ -882,7 +896,7 @@ private fun ChatPage(
                             else header()
 
                             ChatTasks(projection.tasks, lines, chatList,
-                                onFreeze = { timeline.freeze(currentItems); timelineVersion++ },
+                                onFreeze = { timeline.freeze(currentItems()); timelineVersion++ },
                                 onVisibilityChanged = { taskPageVisible = it },
                                 onExpandFold = ::expand, foldErrors = foldErrors,
                                 // While the link card peeks, the composer needs the room more (glass laid them over each other).
@@ -1128,13 +1142,15 @@ private fun ChatPage(
                                             ::toggle, ::expand, folding, foldErrors,
                                             lastUserId = lastUserId,
                                             turnFix = turnFix.takeIf { line.contentKey == lines.firstOrNull()?.contentKey },
+                                            turnLauncher = session?.launcher,
                                             onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = { item ->
                                             scope.launch {
                                                 try { fullText = repository.fullText(key, item.id) }
                                                 catch (e: CancellationException) { throw e }
                                                 catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
                                             }
-                                        }, style = renderStyle, textUpdates = liveTextUpdates,
+                                        }, style = renderStyle, textUpdates = textUpdates,
+                                            liveText = snapshot.liveText, streamingItemIds = snapshot.streamingItemIds,
                                             userImages = contentUserImages[line.id].orEmpty(),
                                             imagesInUserBubble = line.id in contentHiddenImages,
                                             workRunning = (line as? ChatLine.Step)?.let { contentWorkGroups[it.groupId]?.live } == true,
@@ -1187,14 +1203,15 @@ private fun ChatPage(
                                 PlanPill(progress.step, progress.total, progress.done, onClick = {
                                     if (opensSheet) { sheetPlan = anchor.plan; planSheet = true }
                                     else scope.launch {
-                                        timeline.freeze(currentItems); timelineVersion++
+                                        timeline.freeze(currentItems()); timelineVersion++
                                         chatList.scrollToRecord(anchor.lineId)
                                     }
                                 }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = padding.calculateBottomPadding() + Tokens.Space.l),
                                     spoken = if (opensSheet) planStepText(res, anchor.plan.todos) else null,
                                     onClickLabel = if (opensSheet) stringResource(R.string.chat_plan_pill_opens) else null)
                             }
-                            if (!chatList.followsEnd) JumpToLatest(timeline.newMessageCount(snapshot.items, newestVisibleItem, readThrough),
+                            if (!chatList.followsEnd) JumpToLatest(timeline.newMessageCount(snapshot.items, newestVisibleItem, readThrough,
+                                defer = snapshot.streamingItemIds.isNotEmpty()),
                                 onClick = chatList::returnToLatest,
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = horizontalPadding, bottom = padding.calculateBottomPadding() + 16.dp.dense))
                         }

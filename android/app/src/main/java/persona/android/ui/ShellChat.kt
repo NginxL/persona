@@ -127,6 +127,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     lookupRows = home.rows,
                     worktrees = wiring?.worktrees,
                     assistantManagement = assistantManagement,
+                    mainConversation = assistantSnapshot.mainSession?.sessionId,
                     leaderConversations = assistantSnapshot.leaders.toSet(),
                     onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
                     onOpenSide = { navigator.navigate(ChatRoute(it.machineId, it.sessionId, ConversationKind.Agent, side = true)) },

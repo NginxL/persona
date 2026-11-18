@@ -33,7 +33,7 @@ Supported since 2026-11-02 (issue #325). The node-side code is in `server/intern
 
    A single message is at most 64 MiB. A trailing newline is optional.
 4. **Protocol**: exactly the same as on runtime.sock.
-   - The daemon sends `runtime.hello` first, then pushes `runtime.sessions`, `session.items`, `session.delta`, and sends `interaction.create` for questions.
+   - The daemon sends `runtime.hello` first, then pushes `runtime.sessions`, `session.items`, `session.delta`, `usage.report` (node feature `usage`), and sends `interaction.create` for questions.
    - It answers the node's `session.*` requests as usual.
    - Capabilities are declared in `caps` as usual.
 5. **Connection**:

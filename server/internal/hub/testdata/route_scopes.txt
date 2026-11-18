@@ -50,6 +50,7 @@ extensions.call:{id} /api/v1/extensions/{id}/
 -                    DELETE /api/v1/assistant/conversations/{id}
 -                    DELETE /api/v1/assistant/conversations/{id}/always/{hash}
 -                    DELETE /api/v1/assistant/conversations/{id}/model
+-                    DELETE /api/v1/assistant/conversations/{id}/undelivered/{msg}
 -                    DELETE /api/v1/assistant/directions/offers/{id}
 -                    DELETE /api/v1/assistant/followups/{id}
 -                    DELETE /api/v1/assistant/memory/{name}
@@ -92,6 +93,7 @@ inbox.write          DELETE /api/v1/inbox/policies/{id}
 -                    DELETE /api/v1/todos/{id}
 todos.write          DELETE /api/v1/todos/{id}/agents/{mid}/{sid}
 -                    DELETE /api/v1/todos/{id}/seen
+-                    DELETE /api/v1/todos/{id}/someday
 todos.write          DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    DELETE /api/v1/todos/{id}/thread
 -                    DELETE {base}/markets/{mid}
@@ -147,6 +149,7 @@ leaders.read         GET /api/v1/assistant/leaders
 -                    GET /api/v1/assistant/readiness
 assistant.ask        GET /api/v1/assistant/reporters
 -                    GET /api/v1/assistant/repositories
+-                    GET /api/v1/assistant/repositories/providers
 -                    GET /api/v1/assistant/repositories/{id}
 -                    GET /api/v1/assistant/routines
 -                    GET /api/v1/assistant/runs
@@ -313,6 +316,7 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/info
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image
+-                    GET /api/v1/sessions/{mid}/{sid}/mode-changes
 agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/sessions/{mid}/{sid}/share-catalog
 -                    GET /api/v1/sessions/{mid}/{sid}/share-preview/{preview_id}
@@ -326,6 +330,8 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/task-plans/{id}
 -                    GET /api/v1/task-trust
 todos.read           GET /api/v1/todos
+todos.read           GET /api/v1/todos/places
+todos.read           GET /api/v1/todos/{id}
 todos.read           GET /api/v1/todos/{id}/decisions
 todos.read           GET /api/v1/todos/{id}/repositories
 -                    GET /api/v1/usage
@@ -395,6 +401,7 @@ assistant.ask        POST /api/v1/assistant/conversations
 assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/conversations/{id}/today
 -                    POST /api/v1/assistant/conversations/{id}/unarchive
+-                    POST /api/v1/assistant/conversations/{id}/undelivered/{msg}/retry
 -                    POST /api/v1/assistant/conversations/{id}/views/{key}/actions
 -                    POST /api/v1/assistant/conversations/{id}/views/{key}/html-actions
 -                    POST /api/v1/assistant/directions/{id}/end
@@ -425,6 +432,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/urgent-call/test
 -                    POST /api/v1/assistant/warm
 -                    POST /api/v1/auth/browser-login/approve
+-                    POST /api/v1/auth/browser-login/confirm
 -                    POST /api/v1/auth/browser-login/poll
 -                    POST /api/v1/auth/browser-login/start
 -                    POST /api/v1/auth/pair-codes
@@ -589,6 +597,7 @@ agents.control       POST /api/v1/sessions/{mid}/{sid}/rename
 -                    POST /api/v1/sessions/{mid}/{sid}/screen/before
 agents.control       POST /api/v1/sessions/{mid}/{sid}/seen
 -                    POST /api/v1/sessions/{mid}/{sid}/share-preview
+-                    POST /api/v1/sessions/{mid}/{sid}/start/continue
 -                    POST /api/v1/sessions/{mid}/{sid}/unarchive
 -                    POST /api/v1/skills/import
 -                    POST /api/v1/subscriptions
@@ -610,6 +619,7 @@ todos.write          POST /api/v1/todos
 todos.write          POST /api/v1/todos/{id}/decisions
 -                    POST /api/v1/todos/{id}/done-check
 -                    POST /api/v1/todos/{id}/retry
+-                    POST /api/v1/todos/{id}/start/answer
 -                    POST /api/v1/translate
 -                    POST /api/v1/translate/mail
 -                    POST /api/v1/workspace-board
@@ -635,6 +645,7 @@ todos.write          POST /api/v1/todos/{id}/decisions
 -                    PUT /api/v1/assistant/conversations/{id}/model
 -                    PUT /api/v1/assistant/conversations/{id}/tags
 -                    PUT /api/v1/assistant/directions/{id}/name
+-                    PUT /api/v1/assistant/directions/{id}/notes
 assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/feishu/companions
 -                    PUT /api/v1/assistant/memory/{name}
@@ -701,7 +712,9 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 todos.write          PUT /api/v1/todos/{id}/agents/{mid}/{sid}
 todos.write          PUT /api/v1/todos/{id}/repositories
 todos.write          PUT /api/v1/todos/{id}/repositories/{repo_id}/links
+-                    PUT /api/v1/todos/{id}/restored
 -                    PUT /api/v1/todos/{id}/seen
+-                    PUT /api/v1/todos/{id}/someday
 todos.write          PUT /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    PUT /api/v1/todos/{id}/thread
 -                    PUT /api/v1/workspace-board/settings

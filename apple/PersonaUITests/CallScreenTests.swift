@@ -253,9 +253,10 @@ final class CallScreenTests: XCTestCase {
 
     /// The composer's phone icon is the one voice entry (#9887 one button): + › More offers neither Voice Chat nor Call
     /// Persona, in the main conversation or an Agent's, and the icon is in both composers, saying it calls this
-    /// conversation (`main-composer-phone.png`, `agent-composer-phone.png`).
+    /// conversation (`main-composer-phone.png`, `agent-composer-phone.png`). `-showCameraRows YES` lists Take Photo as a
+    /// phone does, whether or not the Simulator has a camera: the drag that opens More to full height starts on it.
     @MainActor func testThePhoneIconIsTheOneVoiceEntry() throws {
-        let app = try launch(Self.main)
+        let app = try launch(Self.main + ["-showCameraRows", "YES"])
         let icon = app.descendants(matching: .any).matching(identifier: "shell-composer-voice").firstMatch
         XCTAssertTrue(icon.waitForExistence(timeout: 90), "no phone icon in the main conversation's composer\n\(app.debugDescription)")
         XCTAssertEqual(icon.label, "呼叫这段对话", "the phone icon does not say it calls this conversation")
@@ -297,6 +298,29 @@ final class CallScreenTests: XCTestCase {
         XCTAssertTrue(icon.waitForExistence(timeout: 90), "no phone icon:\n\(app.debugDescription)")
         sleep(2)
         icon.tap()
+    }
+
+    /// The call screen comes up after the phone icon, and the call connects: its running time shows. The Simulator records
+    /// through the Mac's microphone (#5029); on a Mac with no audio input, or one that does not let the Simulator use it,
+    /// the call ends at once on the audio failure note, often before the screen is looked for (the microphone already
+    /// allowed, nothing to tap). The real path needs a Mac that lets the Simulator record (docs/operations/testing.md), and
+    /// the failure says so rather than reading like the app's.
+    @MainActor private func assertCallScreen(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        guard !element(app, "call-screen").waitForExistence(timeout: 15) else { return }
+        XCTFail("no call screen" + cannotRecord(app) + "\n" + app.debugDescription, file: file, line: line)
+    }
+
+    @MainActor private func assertConnected(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        guard !element(app, "call-duration").waitForExistence(timeout: 30) else { return }
+        XCTFail("the call never connected" + cannotRecord(app) + "\n" + app.debugDescription, file: file, line: line)
+    }
+
+    /// Why, when the call ended on the audio failure note; empty otherwise.
+    @MainActor private func cannotRecord(_ app: XCUIApplication) -> String {
+        let ended = element(app, "voice-ended-text")
+        guard ended.exists, ended.label.contains("麦克风或扬声器出了问题") else { return "" } // i18n-ignore: the app's audio failure note
+        return ": the call ended on the audio failure: this Mac has no audio input (or does not let the Simulator use its "
+            + "microphone), so the Simulator cannot record; these cases need a Mac that lets it record (docs/operations/testing.md)"
     }
 
     @MainActor private func openMore(_ app: XCUIApplication) throws {
@@ -374,8 +398,8 @@ final class CallScreenTests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         if allow.waitForExistence(timeout: 5) { allow.tap() }
-        XCTAssertTrue(element(app, "call-screen").waitForExistence(timeout: 15), "no call screen\n\(app.debugDescription)")
-        XCTAssertTrue(element(app, "call-duration").waitForExistence(timeout: 30), "the call never connected\n\(app.debugDescription)")
+        assertCallScreen(app)
+        assertConnected(app)
         Thread.sleep(forTimeInterval: 3)
         shot("real-call-connected", app)
         let starts = try XCTUnwrap(log(hub)["starts"] as? [[String: Any]])
@@ -492,8 +516,8 @@ final class CallScreenTests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         if allow.waitForExistence(timeout: 5) { allow.tap() }
-        XCTAssertTrue(element(app, "call-screen").waitForExistence(timeout: 15), "no call screen\n\(app.debugDescription)")
-        XCTAssertTrue(element(app, "call-duration").waitForExistence(timeout: 30), "the call never connected\n\(app.debugDescription)")
+        assertCallScreen(app)
+        assertConnected(app)
         let start = try XCTUnwrap((log(hub)["starts"] as? [[String: Any]])?.last)
         XCTAssertEqual(start["surface"] as? String, "call", "the start was not a system call's: \(start)")
         let target = start["target"] as? [String: String]
@@ -633,10 +657,10 @@ final class CallScreenTests: XCTestCase {
 
     /// The avatar's states for VoiceOver (#9887 review): the avatar stays decorative (no element unless it is Interrupt
     /// Voice), and the call's line, which shows the running time, says what the avatar shows as its value: 「在听」 while
-    /// nobody speaks, 「正在思考」, 「正在工作」, 「等你拿主意」 while a card waits, 「正在说」 while it speaks. The urgent call's header says the
+    /// nobody speaks, 「正在思考」, 「工作中」 (the state's own name, #10502), 「等你拿主意」 while a card waits, 「正在说」 while it speaks. The urgent call's header says the
     /// call's name, the main conversation's top bar's (the mock's 「助手」), beside its face.
     @MainActor func testTheAvatarsStatesForVoiceOver() throws {
-        let rows = [("connected", "在听"), ("thinking", "正在思考"), ("working", "正在工作"), ("asking", "等你拿主意"),
+        let rows = [("connected", "在听"), ("thinking", "正在思考"), ("working", "工作中"), ("asking", "等你拿主意"),
                     ("speaking", "正在说")] // i18n-ignore: the catalog's words, as VoiceOver reads them
         for (state, words) in rows {
             try XCTContext.runActivity(named: state) { _ in
@@ -686,8 +710,8 @@ final class CallScreenTests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         if allow.waitForExistence(timeout: 5) { allow.tap() }
-        XCTAssertTrue(element(app, "call-screen").waitForExistence(timeout: 15), "no call screen\n\(app.debugDescription)")
-        XCTAssertTrue(element(app, "call-duration").waitForExistence(timeout: 30), "the call never connected\n\(app.debugDescription)")
+        assertCallScreen(app)
+        assertConnected(app)
         Thread.sleep(forTimeInterval: 3)
         try step("connected", app, shot: "walk-connected")
 
@@ -896,7 +920,7 @@ final class CallScreenTests: XCTestCase {
             Thread.sleep(forTimeInterval: attempt == 0 ? 8 : 5)
             tapPhoneIcon(app)
             if allow.waitForExistence(timeout: 3) { allow.tap() }
-            XCTAssertTrue(element(app, "call-duration").waitForExistence(timeout: 30), "the call never connected\n\(app.debugDescription)")
+            assertConnected(app)
             named = element(app, "call-screen").staticTexts["奶蛙"].exists
             if !named {
                 app.buttons["call-end"].tap()

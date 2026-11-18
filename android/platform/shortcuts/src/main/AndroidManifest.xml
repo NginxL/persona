@@ -22,6 +22,14 @@
             </intent-filter>
             <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="false" />
         </service>
+        <!-- Not exported: the tile starts this foreground router before its own service can be destroyed. -->
+        <activity
+            android:name="persona.platform.shortcuts.TileRouteActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Persona.Shortcut" />
         <!-- Not exported: only the launcher's own shortcut, started on the app's behalf, reaches it. -->
         <activity
             android:name="persona.platform.shortcuts.ApproveFirstActivity"

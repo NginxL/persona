@@ -258,7 +258,7 @@ final class DemoHub {
             case "dirs":
                 guard online(id) else { throw APIError(status: 503, message: "\(id): machine is offline") }
                 return data["dirs"] ?? .object([:])
-            case "claude-settings", "codex-settings": return ["settings": .array([])]
+            case "claude-settings", "codex-settings", "agy-settings": return ["settings": .array([])]
             case "claude-dirs": return claudeDirsState(id)
             case "claude-live-replies": return ["on": .bool(liveReplies[id] ?? true)]
             #if os(macOS)

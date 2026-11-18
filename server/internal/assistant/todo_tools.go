@@ -160,7 +160,11 @@ func (s *Service) toolTodoGet(ctx context.Context, machine, self string, args js
 	var b strings.Builder
 	b.WriteString(todoLine(t, now, loc) + "\n")
 	fmt.Fprintf(&b, "created %s, updated %s\n", t.CreatedAt.In(loc).Format(toolTimeLayout), t.UpdatedAt.In(loc).Format(toolTimeLayout))
-	if t.DoneAt != nil {
+	if t.failedStart() {
+		// Stored done (#1077), but nothing was done: it is open and waits on the owner, as the app shows it (#10365).
+		fmt.Fprintf(&b, "did not start %s: not done, it still waits on the owner; task_retry starts it again (optionally with "+
+			"another launcher), or task_plan with this todo_id takes it up\n", t.DoneAt.In(loc).Format(toolTimeLayout))
+	} else if t.DoneAt != nil {
 		fmt.Fprintf(&b, "done %s", t.DoneAt.In(loc).Format(toolTimeLayout))
 		if t.DoneBy != "" {
 			fmt.Fprintf(&b, " (by %s: %s)", t.DoneBy, clip(oneLine(t.DoneReason), 200))
@@ -276,6 +280,9 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	bindings, err := parseCreateBindings(a.RepositoryBindings)
 	if err != nil {
 		return "", err
+	}
+	if err := s.resolveCreateBindings(ctx, bindings); err != nil { // before the store, outside todos.writing
+		return "", s.taskRepositoryToolError(ctx, err)
 	}
 	title := strings.TrimSpace(a.Title)
 	if title == "" {

@@ -120,8 +120,9 @@ Responses relays that refuse the output bound fail closed, without retrying unbo
 lease precedes dispatch; failures back off from ten minutes and stop after three consecutive failures.
 Each failed attempt logs its computer/session and a static reason code (for example `no_dialogue`,
 `model_call_failed`, `invalid_name`, `model_output_truncated` or `naming_timeout`), even if a subsequent title
-or settings recheck discards the result. Provider error bodies, prompts and model replies never enter these
-logs. The ledger retains `last_failure` until a successful naming clears it; old silent failures have no
+or settings recheck discards the result. `model_not_configured` (no model set up for Sorting) is logged once
+and not again until a naming call reaches a model (#10435); each session still records it. Provider error
+bodies, prompts and model replies never enter these logs. The ledger retains `last_failure` until a successful naming clears it; old silent failures have no
 recoverable reason. A deployed hub does not add missing provenance to old nodes: those nodes remain excluded
 until an explicitly authorized compatible node update reports it.
 Before committing, the worker checks settings, counters, current provenance, native title and eligibility again.

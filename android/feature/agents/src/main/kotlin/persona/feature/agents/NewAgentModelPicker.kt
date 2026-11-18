@@ -60,6 +60,7 @@ internal fun NewAgentModelSheet(
     JModelSheet(
         note = if (agent == PaseoAgent) stringResource(R.string.agents_model_sheet_note_provider, state.modelLauncherTitle)
             else stringResource(R.string.agents_model_sheet_note, state.modelLauncherTitle, agent.agentLabel()),
+        owner = state.launchers.firstOrNull { it.name == state.modelLauncher }?.title ?: state.modelLauncher,
         models = list.models, selected = state.model, defaultDetail = defaultModelDetail(agentResources(), state),
         loading = state.models.loading, error = state.models.error?.text(),
         onPick = onPick, onRefresh = onRefresh, onDismiss = onDismiss, initialQuery = initialQuery,

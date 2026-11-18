@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -86,6 +87,13 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		} `json:"error"`
 		WillRetry bool            `json:"willRetry"`
 		RequestID json.RawMessage `json:"requestId"`
+		// TokenUsage: thread/tokenUsage/updated, a request's usage and the model's window (#10278).
+		TokenUsage struct {
+			Last struct {
+				InputTokens int64 `json:"inputTokens"`
+			} `json:"last"`
+			ModelContextWindow int64 `json:"modelContextWindow"`
+		} `json:"tokenUsage"`
 	}
 	if json.Unmarshal(params, &ev) != nil {
 		return
@@ -109,6 +117,7 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 	case "turn/started":
 		c.mu.Lock()
 		c.turnID = ev.Turn.ID
+		c.loop = codexCompactionLoop{}
 		c.mu.Unlock()
 		p.mu.Lock()
 		had := p.partial.Len() > 0
@@ -156,6 +165,8 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		if text != "" {
 			n.emitDelta(p.id, text)
 		}
+	case "thread/tokenUsage/updated":
+		c.noteRequest(ev.TokenUsage.Last.InputTokens, ev.TokenUsage.ModelContextWindow, c.turnModel())
 	case "thread/compacted":
 		c.compacted()
 	case "item/completed":
@@ -186,6 +197,13 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 			if failure == "" && (ev.Turn.Status == "failed" || (ev.Turn.Status != "completed" && ev.Turn.Status != "")) {
 				failure = transcript.CodexTurnFailed
 			}
+		}
+		if stop, model := c.endTurnLoop(); stop != "" {
+			// The loop's interrupt (assistant_codex_compaction_loop.go): the user's to act on, never a "Continue".
+			if failure == "" {
+				failure, failureKind, modelServiceFailure = stop, proto.TurnErrorUser, false
+			}
+			n.leaveLoopingFallback(p.id, model)
 		}
 		if failure != "" {
 			n.logger.Printf("assistant codex %s: turn %s: %s", short(p.id), ev.Turn.Status, failure)

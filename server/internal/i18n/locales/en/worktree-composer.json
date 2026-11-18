@@ -28,6 +28,7 @@
   "checkout_unverified": "Cannot verify that branch {branch} at {path} is safe to reuse: {reason}",
   "checkout_in_use": "Branch {branch} is checked out at {path} and is in use by Agent {owner}",
   "checkout_dirty": "Branch {branch} is checked out at {path} and has uncommitted changes; use that checkout explicitly or keep the changes before retrying",
+  "path_taken": "The checkout path {path} already exists and is not empty; Persona neither reuses nor overwrites it",
   "dirty": "The worktree has uncommitted changes",
   "github_unavailable": "Some GitHub sources could not be loaded. Check Orca's GitHub connection or try another search.",
   "workspace_ambiguous": "The workspace identity is ambiguous; refresh Orca before continuing",

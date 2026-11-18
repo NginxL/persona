@@ -20,7 +20,7 @@ func TestTodosListValidator(t *testing.T) {
 			r.Header.Set("If-None-Match", inm)
 		}
 		w := httptest.NewRecorder()
-		writeTaggedList(w, r, "todos", a)
+		writeTaggedList(w, r, "todos", a, todoListSums(a))
 		return w
 	}
 

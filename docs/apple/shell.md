@@ -86,6 +86,7 @@ All three use `.shellTopBarScaled()`, so the font stops growing at `Theme.Shell.
 - **The switcher reads only page**: the selected state is page; a segment is a Menu (tap again for options) only when the strip is at rest on that page, and both segments are plain buttons during a slide.
   A tap calls `select` directly, not through a Binding. The switcher on the stand-in `ShellMovingBar` during a slide also takes taps: taps during the animation aren't lost, and the last one wins.
   If the strip stops while a finger is down (the tap lands just as the animation ends), `ShellMovingBar` stays until that finger lifts (`ShellPager.lingering`; a `Watcher` on the window reports finger down / up).
+  Under iPhone Duo's side bars it also stays until the tab bar's lens has glided (`ShellPager.standsIn`, #10270): the strip rests about 0.55 s into the lens's 0.65 s, and putting the pages' own rails back then held up a frame of the lens's fade.
   Before, it was removed as soon as the strip stopped and the press on its switcher went nowhere; animations are slower under BeautifulUI, and `testQuickTapsEndOnTheLast` hit this almost every time (the third tap was lost).
 - **The page not in front**: a page takes touches and is read by VoiceOver only when "the strip is at rest on it and page is this page"; `tabIsActive` follows page (half a drag isn't a page change).
   Only the front page's top bar is drawn; during a slide there's only the shell's.

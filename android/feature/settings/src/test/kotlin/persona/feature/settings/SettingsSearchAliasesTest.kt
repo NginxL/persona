@@ -18,7 +18,7 @@ class SettingsSearchAliasesTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val entries = listOf(
             Triple(SettingsPage.ModelConfig, R.string.settings_home_models, listOf(R.string.settings_providers_title, R.string.settings_src_model_title)),
-            Triple(SettingsPage.AgentSettings, R.string.settings_home_agents, listOf(R.string.settings_row_claude, R.string.settings_row_codex, R.string.settings_triage_title)),
+            Triple(SettingsPage.AgentSettings, R.string.settings_home_agents, listOf(R.string.settings_row_claude, R.string.settings_row_codex, R.string.settings_row_agy, R.string.settings_triage_title)),
             Triple(SettingsPage.NotificationBackground, R.string.settings_notification_background_title,
                 listOf(R.string.settings_ready_notifications, R.string.settings_capsule_title, R.string.settings_row_background, R.string.settings_desktops_mute)),
             Triple(SettingsPage.Diagnostics, R.string.settings_home_connection, listOf(R.string.settings_diag_title, R.string.settings_hub_address, R.string.settings_row_pairing)),

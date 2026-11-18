@@ -1,0 +1,10 @@
+{
+  "environment": "Environment",
+  "worktree": "Worktree",
+  "subagents": "Subagents",
+  "running_count": "{count} running",
+  "ended": "Ended",
+  "ended_count": "{count} ended",
+  "finished_count": "{count} finished",
+  "show_in_chat": "Show in chat"
+}

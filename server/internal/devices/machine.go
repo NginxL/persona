@@ -85,9 +85,10 @@ type Machine struct {
 	peer *rpc.Peer
 	info proto.NodeInfo
 	// pingPeer is the connection measureNodes' last ping went on, pingMisses how many pings in a row it left
-	// unanswered there (paths_view.go).
+	// unanswered there, pingJudged when the last of them was counted (paths_view.go).
 	pingPeer   *rpc.Peer
 	pingMisses int
+	pingJudged time.Time
 	// online: shown online (its node answered on the current connection, or warm); connectedAt: when the node's
 	// current connection began.
 	online      bool
@@ -255,6 +256,7 @@ func (m *Machine) snapshot() proto.Machine {
 		icon = "laptop"
 	}
 	blocked := m.canDeployLocked()
+	onlyPackage := blocked == nil && noPackage != nil // the node could take an update; the hub has none for it
 	if blocked == nil {
 		blocked = noPackage
 	}
@@ -283,7 +285,7 @@ func (m *Machine) snapshot() proto.Machine {
 		NodeVersion: m.info.Version, NodeMismatch: m.online && nodeMismatch(version, m.info),
 		NodeProtocol: m.info.Protocol, NodeIncompatible: incompatible,
 		Deploying: m.deploying, DeployError: deployErr,
-		CanDeploy: &canDeploy, DeployReason: deployReason, DeployPhase: m.deployPhase,
+		CanDeploy: &canDeploy, DeployReason: deployReason, DeployNoPackage: onlyPackage, DeployPhase: m.deployPhase,
 		Transport: m.via, TailcatPath: m.path, Tailcat: m.cfg.TailcatAddr != "",
 		Engine: engine, Engines: engines, EngineHosts: choice.Hosts, EngineDefault: choice.Default,
 		EngineSuggested: suggested, EngineSetsUnsupported: setsUnsupported, Link: link, System: d.metrics.system(m.cfg.ID),
@@ -874,6 +876,9 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 		} else {
 			devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", "store_unavailable")
 		}
+		return // the manager's alone
+	case proto.EventModeRestart: // what became of a queued restart into a mode (mode_changes.go)
+		m.onModeRestart(params)
 		return // the manager's alone
 	case "claude.dirs":
 		m.rememberClaudeDirs(params)

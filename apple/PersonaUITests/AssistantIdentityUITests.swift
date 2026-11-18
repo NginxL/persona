@@ -42,7 +42,7 @@ final class AssistantIdentityUITests: XCTestCase {
         let header = switcherHeader(app)
         XCTAssertTrue(header.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertFalse(identityHeading(app).exists, "the switcher replaces the old plain-text heading")
-        XCTAssertTrue(app.buttons["sidebar-main"].label.contains("Persona"))
+        XCTAssertTrue(app.buttons["sidebar-main"].label.hasPrefix("主对话"), "the main row names the conversation; the head names Persona (#9973)")
 
         header.tap()
         let row = app.descendants(matching: .any).matching(identifier: "assistant-switcher-row-assistant").firstMatch
@@ -138,7 +138,7 @@ final class AssistantIdentityUITests: XCTestCase {
         XCTAssertTrue(app.drawerSettingsButton.waitForExistence(timeout: 10), app.debugDescription)
         let header = switcherHeader(app)
         XCTAssertTrue(header.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(app.buttons["sidebar-main"].label.contains("Persona"))
+        XCTAssertTrue(app.buttons["sidebar-main"].label.hasPrefix("主对话"), "the main row names the conversation; the head names Persona (#9973)")
         header.tap()
         let work = app.descendants(matching: .any).matching(identifier: "assistant-switcher-row-m-3fa21c").firstMatch
         XCTAssertTrue(work.waitForExistence(timeout: 10), app.debugDescription)

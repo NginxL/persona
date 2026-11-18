@@ -102,10 +102,10 @@ func settleCompression(current, snapshot *Chat) bool {
 
 // compressFailed records that compressing c (the copy the call started from) failed with err, and returns the error to
 // log. A refused snapshot is settled without a summary only when no new live work arrived; otherwise that work stays
-// eligible for another judgment. Any other failure puts the chat off (compressRetry). A paused connection or an ended
-// run changes nothing: the chat stays due.
+// eligible for another judgment. Any other failure puts the chat off (compressRetry). A paused connection, no model set
+// up and an ended run change nothing: the chat stays due.
 func (e *Engine) compressFailed(ctx context.Context, c *Chat, err error) error {
-	if ai.IsPaused(err) || ctx.Err() != nil {
+	if deferred(ctx, err) {
 		return err
 	}
 	e.Store.chatMu.Lock() // read and written whole: what archiving or a history import wrote meanwhile stays

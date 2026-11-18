@@ -165,6 +165,9 @@
     <string name="assistant_settings_supervise_header">タスクのフォロー</string>
     <string name="assistant_settings_supervise_own">メインチャットが自分のタスクを監督する</string>
     <string name="assistant_settings_supervise_caption">オフのときはメインチャットが出したタスクをバックグラウンド監督が見守るので、メインチャットはあなたへの返答を優先でき、オンにするとメインチャット自身が見守ります。</string>
+    <string name="assistant_settings_terminals_header">ターミナル</string>
+    <string name="assistant_settings_close_ended_terminals">エージェントが終了したらターミナルを閉じる</string>
+    <string name="assistant_settings_close_ended_terminals_caption">Persona が開始したエージェントが完了・キャンセル・自分で終了したら、そのターミナルのタブも閉じます。作業中のエージェントや自分で開いたターミナルは閉じません。会話は残り、あとで再開できます。</string>
     <string name="assistant_settings_supervise_model">バックグラウンド監督のモデル</string>
     <string name="assistant_settings_unavailable">アシスタント設定を開けません</string>
     <string name="assistant_settings_unavailable_detail">先に hub とペアリングするか、体験モードを終了してください。</string>

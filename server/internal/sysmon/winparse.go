@@ -124,3 +124,23 @@ func parseDriveStrings(u []uint16) []string {
 	}
 	return roots
 }
+
+// parseSystemPowerStatus decodes Win32 SYSTEM_POWER_STATUS (ACLineStatus, BatteryFlag, BatteryLifePercent).
+// Returns (nil, nil) when no system battery is present (BatteryFlag & 128 != 0), status is unknown (255),
+// or BatteryLifePercent > 100.
+func parseSystemPowerStatus(acLine, batteryFlag, batteryLifePct byte) (pct *float64, charging *bool) {
+	if batteryFlag&128 != 0 || batteryFlag == 255 || batteryLifePct > 100 {
+		return nil, nil
+	}
+	v := float64(batteryLifePct)
+	pct = &v
+	switch {
+	case batteryFlag&8 != 0:
+		c := true
+		charging = &c
+	case acLine == 0 || acLine == 1:
+		c := false
+		charging = &c
+	}
+	return pct, charging
+}

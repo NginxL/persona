@@ -3,7 +3,7 @@
 // agent" also lists the IDs typed before (each can be forgotten) and "Other model…", a field for a model ID (#1644).
 import { useEffect, useState } from "react";
 import type { ModelBinding } from "../lib/model-config";
-import { customModel, defaultDetail, defaultModel, modelDetail, modelName, modelRows, type AgentModel, type LauncherModels } from "../lib/launcher-models";
+import { customModel, defaultDetail, defaultModel, listedModel, modelDetail, modelName, modelRows, type AgentModel, type LauncherModels } from "../lib/launcher-models";
 import { cleanModelId, typedModelProblem } from "../lib/model-id";
 import { Collapse, cx, IconButton, Spinner } from "./atoms";
 import { Icon } from "./icons";
@@ -45,7 +45,8 @@ export function ModelPicker({ models, model, followed = {}, ownModel, open, onTo
   const all = models.list?.models ?? [];
   const locked = models.list?.locked;
   const loading = models.status === "loading";
-  const picked = all.find((m) => m.id === model);
+  // a model saved as a spelling the hub folded into another row (`opus` under the concrete model's id) is that row's
+  const picked = model ? listedModel(all, model) : undefined;
   const unlisted = !picked && model ? model : ""; // "Models"' id from before, or one typed in
   const { showDefault, rows } = modelRows(all, query, followed);
   const own = rows.filter((m) => !m.custom);
@@ -53,7 +54,7 @@ export function ModelPicker({ models, model, followed = {}, ownModel, open, onTo
   const takesTyped = custom || typing;
   const typed = takesTyped ? customModel(all, query) : "";
   // what is typed in the search, when it is no model's and the hub wouldn't take it as one: why
-  const typedProblem = takesTyped && !rows.length && !all.some((m) => m.id === cleanModelId(query)) ? typedModelProblem(query) : "";
+  const typedProblem = takesTyped && !rows.length && !listedModel(all, cleanModelId(query)) ? typedModelProblem(query) : "";
   const [entering, setEntering] = useState(false);
   useEffect(() => {
     if (!open) setEntering(false);
@@ -132,7 +133,7 @@ export function ModelPicker({ models, model, followed = {}, ownModel, open, onTo
             {showDefault && <ModelRow name={t("ui-modelpicker.default")} detail={defaultDetail(all, followed)} note={defaultModel(all)?.description} selected={!picked && !unlisted} onPick={() => onPick("")} />}
             {unlisted && !query.trim() && <ModelRow name={modelName({ id: unlisted })} note={typing ? t("ui-modelpicker.typed") : t("ui-modelpicker.current_unlisted")} selected onPick={() => onPick(unlisted)} mono />}
             {own.map((m) => (
-              <ModelRow key={m.id} name={modelName(m)} detail={modelDetail(m)} note={m.description} selected={m.id === model} onPick={() => onPick(m.id)} />
+              <ModelRow key={m.id} name={modelName(m)} detail={modelDetail(m)} note={m.description} selected={m === picked} onPick={() => onPick(m.id)} />
             ))}
             {remembered.length > 0 && (
               <div role="presentation" className="px-2 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">{t("ui-modelpicker.typed_before")}</div>

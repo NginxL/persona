@@ -135,10 +135,15 @@
   "source_auto_named": "自动选择：{provider}（hub 上能直接调用的接入）",
   "err_model_invalid": "模型 ID {model} 不能用：要以字母或数字开头（或 ~ 后接字母或数字），只能有字母、数字和 . _ - / : @ [ ]，最多 256 个字符",
   "custom_model_description": "之前用过的模型 ID",
+  "model_route_name": "{name}（{route}）",
   "err_role_forget": "删除用过的模型 ID 需要完整权限。",
   "err_via_offline": "{name} 不在线。这个接入要通过它发请求：让它上线，或在 设置 › 模型供应商 的「通过…发送」里换一台电脑",
   "err_run_no_machine": "这个供应商要在主对话的电脑上运行，但还没设置：在 设置 › 助手 里选一台",
   "err_run_offline": "{name} 不在线。这项用途要在它上面运行 {launcher}：让它上线，或在 设置 › 模型配置 换一个供应商",
   "err_run_logged_out": "{launcher} 在 {name} 上没有登录：到那台电脑上登录，或在 设置 › 模型配置 换一个供应商",
-  "err_run_timeout": "{name} 上的 {launcher} 没有及时回答"
+  "err_run_timeout": "{name} 上的 {launcher} 没有及时回答",
+  "err_candidates_extension_only": "只有扩展的用途才有候选模型",
+  "err_candidates_invalid": "候选模型：请选择“extension”“off”或“custom”，只有“custom”时才列出供应商和模型，每项只出现一次",
+  "err_candidates_count": "候选模型：请列出 1 到 {most} 个",
+  "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商"
 }

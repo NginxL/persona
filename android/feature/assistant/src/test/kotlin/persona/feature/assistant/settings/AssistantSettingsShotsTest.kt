@@ -81,6 +81,7 @@ class AssistantSettingsShotsTest {
             timezone = "Asia/Shanghai", notesEffective = "~/code", main = "main", mainTasksQuiet = true,
             // #5084: the background supervisor's off switch and its model row
             mainSupervisesOwnTasks = false, backgroundSupervisor = "supervisor", manager = "assistant", defaultPermissionMode = "bypassPermissions",
+            closeEndedTerminals = false, // #10355: the Terminals switch, off
             permissionDefaults = AssistantPermissionDefaults(1, "assistant", AssistantPermissionDefaults.MODES))
         val files = listOf(
             MemoryFile("MEMORY.md", "- [$memoryTitle](morning.md)", updated),

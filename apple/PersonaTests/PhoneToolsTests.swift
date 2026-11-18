@@ -55,9 +55,14 @@ struct PhoneToolsTests {
         }
     }
 
+    /// Alarms and timers need AlarmKit (iOS 26): before it they are not offered at all (#6730).
+    private static func offered(_ name: String) -> Bool {
+        AlarmsAccess.isSupported || !(name.hasPrefix("phone_alarm") || name.hasPrefix("phone_timer"))
+    }
+
     @Test func coversEveryDataSource() {
         let covered = Set(PhoneToolRegistry.all.map(\.source))
-        for source in PhoneDataSource.allCases {
+        for source in PhoneDataSource.allCases where source != .alarms || AlarmsAccess.isSupported {
             #expect(covered.contains(source), "no tool for data source \(source.rawValue)")
         }
     }
@@ -114,7 +119,7 @@ struct PhoneToolsTests {
             "phone_home_control",
             "phone_home_run_scene",
         ]
-        for name in expected {
+        for name in expected where Self.offered(name) {
             #expect(names.contains(name), "missing tool \(name)")
         }
     }
@@ -377,7 +382,7 @@ struct PhoneToolsTests {
         for tool in PhoneToolRegistry.all where tool.confirmation != nil {
             #expect(writes.contains(tool.spec.name), "unexpected confirmation on \(tool.spec.name)")
         }
-        for name in writes {
+        for name in writes where Self.offered(name) {
             let tool = PhoneToolRegistry.all.first { $0.spec.name == name }
             #expect(tool?.confirmation != nil, "\(name) changes data and must ask first")
         }

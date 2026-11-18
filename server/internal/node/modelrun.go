@@ -109,7 +109,7 @@ func (n *Node) modelRun(ctx context.Context, params json.RawMessage) (any, error
 		return nil, timedOut
 	}
 	if r, ok := claudeResult(text); ok && !r.isError {
-		return proto.ModelRunAnswer{Text: r.result, Model: r.model}, nil
+		return proto.ModelRunAnswer{Text: r.result, Model: r.model, Usage: r.usage}, nil
 	} else if ok {
 		text = r.result
 	}

@@ -12,9 +12,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -92,6 +94,66 @@ class AgentRepoTreeShotsTest {
             assertTrue("the tree must draw", drawn > 100)
             File(out(), "repo-tree-${nextStyle.name.lowercase()}-${if (nextDark) "dark" else "light"}.png").outputStream().use {
                 assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+    }
+
+    @Test fun drawsOfflineHistoryUnderItsComputerAndHidesItWithComputerFold() {
+        val computers = listOf(Machine("mac", "MacBook", online = true), Machine("box", "Server", online = true))
+        val rows = listOf(
+            at("running", "正在构建", "/tmp/example-project", "working"),
+            at("other", "检查服务", "/srv/api", "working", machine = "box"),
+            AgentSession(Session(machineId = "mac", sessionId = "old", title = "旧会话", cwd = "/tmp/example-project",
+                state = "offline", status = "offline", updatedAt = "2026-01-02T00:00:00Z")),
+            AgentSession(Session(machineId = "box", sessionId = "old", title = "另一台旧会话", cwd = "/tmp/example-project",
+                state = "offline", status = "offline", updatedAt = "2026-01-01T00:00:00Z")),
+        )
+        var dark by mutableStateOf(false)
+        var folded by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(style = AppStyle.Glass, darkTheme = dark, reduceMotion = true) {
+                val settings = AgentListSettings(grouping = AgentGrouping.Repo,
+                    folded = if (folded) setOf("machine/mac", "machine/box") else emptySet())
+                val entries = agentTreeEntries(scopedAgentList(rows, computers,
+                    AgentsPreferencesSnapshot(range = AgentRange.All), settings), "")
+                Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background).padding(Tokens.Space.l)) {
+                    entries.forEach { entry ->
+                        when (entry) {
+                            is TreeMachineEntry -> AgentTreeHeader(entry.machine.machine.displayName, entry.machine.folded, {}, first = entry.first,
+                                icon = entry.machine.machine.deviceIcon, online = entry.machine.machine.online,
+                                detail = "${entry.machine.repoCount} 个仓库，${entry.machine.sessionCount} 个会话", counts = entry.machine.headingCounts)
+                            is TreeGroupEntry -> AgentSpaceHeader(entry.group.title.text(), entry.group.folded, {}, depth = entry.depth, first = entry.first,
+                                quiet = entry.quiet, sessions = entry.group.rows.size, counts = entry.group.headingCounts, icon = entry.group.repo?.icon,
+                                kind = entry.group.repo?.kind ?: "空间")
+                            is TreeRowEntry -> AgentRow(entry.row.session.displayTitle, entry.row.state.designStatus, {}, depth = entry.depth,
+                                position = GroupPosition(entry.first, entry.last), time = "刚刚",
+                                statusText = entry.row.state.takeIf { it != persona.core.contracts.AgentState.Idle }?.label)
+                            is TreeChildrenEntry -> error("Fixture has no Codex subtasks")
+                            is TreeIdleEntry -> AgentIdleRow(entry.hidden, {}, depth = entry.depth)
+                            is TreeIdleReposEntry -> error("Only Glass's By Repository on the page heads idle repositories")
+                            is TreeShowAllEntry -> AgentShowAllRow(entry.count, entry.expanded, {}, depth = entry.depth)
+                            is TreeTabEntry -> error("按仓库 lists one agent a row")
+                        }
+                    }
+                }
+            }
+        }
+        for (nextDark in listOf(false, true)) {
+            rule.runOnIdle { dark = nextDark; folded = false }
+            rule.onAllNodesWithText("example-project").assertCountEquals(1)
+            rule.onAllNodesWithText("/tmp/example-project · 未运行").assertCountEquals(2)
+            rule.onNodeWithText("MacBook").assertIsDisplayed()
+            rule.onNodeWithText("Server").assertIsDisplayed()
+            val expanded = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(out(), "repo-history-${if (nextDark) "dark" else "light"}.png").outputStream().use {
+                assertTrue(expanded.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+            rule.runOnIdle { folded = true }
+            rule.onAllNodesWithText("example-project").assertCountEquals(0)
+            rule.onAllNodesWithText("/tmp/example-project · 未运行").assertCountEquals(0)
+            val collapsed = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(out(), "repo-history-folded-${if (nextDark) "dark" else "light"}.png").outputStream().use {
+                assertTrue(collapsed.compress(Bitmap.CompressFormat.PNG, 100, it))
             }
         }
     }

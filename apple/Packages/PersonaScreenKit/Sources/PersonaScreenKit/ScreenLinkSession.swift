@@ -482,8 +482,7 @@ public actor ScreenLinkSession {
             chans[ch]?.closeAt = off
             finishIfClosed(ch)
         case let .reset(ch, off):
-            chans[ch]?.receiver.reset(to: off)
-            chans[ch]?.assembler?.reset()
+            resetChannel(ch, to: off)
             if let c = chans[ch] { out(id, .ack(channel: ch, offset: c.receiver.offset)) }
         case let .udpReady(r):
             udpReady(r, from: id)
@@ -932,10 +931,17 @@ extension ScreenLinkSession {
         return true
     }
 
+    /// The node's reset of a channel, over a route or a flow: the channel goes on at `off`, and a partial message from
+    /// before it is dropped. A reset at or behind the receiver changes nothing (#10005): it is a late copy, from a route
+    /// the channel has left, of a reset already applied, and the message the phone has received in part since is the
+    /// one the stream goes on with.
+    private func resetChannel(_ ch: UInt8, to off: UInt64) {
+        if chans[ch]?.receiver.reset(to: off) == true { chans[ch]?.assembler?.reset() }
+    }
+
     private func flowReset(_ route: String, _ ch: UInt8, _ off: UInt64, at t: Double) {
         guard var f = flows[route], f.carrying == ch, var rx = f.receiver else { return }
-        chans[ch]?.receiver.reset(to: off)
-        chans[ch]?.assembler?.reset()
+        resetChannel(ch, to: off)
         let d = rx.reset(to: off, at: t)
         f.receiver = rx
         flows[route] = f

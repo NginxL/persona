@@ -142,3 +142,29 @@ func TestDriveStrings(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestParseSystemPowerStatus(t *testing.T) {
+	// Desktop (no system battery: BatteryFlag & 128 != 0).
+	if pct, chg := parseSystemPowerStatus(1, 128, 255); pct != nil || chg != nil {
+		t.Fatalf("desktop = (%v, %v)", pct, chg)
+	}
+	// Unknown battery status or > 100%.
+	if pct, chg := parseSystemPowerStatus(255, 255, 255); pct != nil || chg != nil {
+		t.Fatalf("unknown = (%v, %v)", pct, chg)
+	}
+	if pct, chg := parseSystemPowerStatus(1, 1, 101); pct != nil || chg != nil {
+		t.Fatalf("invalid pct = (%v, %v)", pct, chg)
+	}
+	// Laptop discharging on battery.
+	if pct, chg := parseSystemPowerStatus(0, 1, 68); pct == nil || *pct != 68 || chg == nil || *chg {
+		t.Fatalf("discharging = (%v, %v)", pct, chg)
+	}
+	// Laptop / handheld charging on AC.
+	if pct, chg := parseSystemPowerStatus(1, 9, 45); pct == nil || *pct != 45 || chg == nil || !*chg {
+		t.Fatalf("charging = (%v, %v)", pct, chg)
+	}
+	// Laptop on AC, full (not charging).
+	if pct, chg := parseSystemPowerStatus(1, 1, 100); pct == nil || *pct != 100 || chg == nil || *chg {
+		t.Fatalf("ac full = (%v, %v)", pct, chg)
+	}
+}

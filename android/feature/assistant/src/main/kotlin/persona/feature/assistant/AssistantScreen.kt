@@ -415,8 +415,8 @@ fun AssistantScreen(
         clearConversation()
         scope.launch { drawerOpen = false }
     }
-    // There is no home page (#4339 C11, as iOS): Back, "Back to main chat", a closed or put-away conversation and Ask
-    // Persona land on the main conversation; with none yet, on the page that starts it (or its messages on their way).
+    // There is no home page (#4339 C11, as iOS): Back, "Back to main chat", a closed conversation and Ask Persona land
+    // on the main conversation; with none yet, on the page that starts it (or its messages on their way). Archiving stays open.
     fun openMain() {
         snapshot.mainSession?.let(::openConversation) ?: run {
             newConversation()
@@ -440,8 +440,7 @@ fun AssistantScreen(
                 target.archiveConversation(session.key)
                 if (feedback?.notice(archivedWords, persona.core.designsystem.FeedbackStyle.Success) != true)
                     toast.show(persona.core.designsystem.FeedbackNotice(archivedWords, style = persona.core.designsystem.FeedbackStyle.Success))
-                // The main conversation in place of the archived one; keep the list open for the next archive.
-                if (activeMachine == session.machineId && activeSession == session.sessionId) openMain()
+                // Archiving only hides the row; the open conversation stays open and the list stays ready for the next archive.
                 assistantAttempt { repository.refresh() }.onSuccess { archived = archived - session.key }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {

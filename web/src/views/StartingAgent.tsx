@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { shortPath } from "../lib/format";
 import { deliverLaunch, type AgentLaunch } from "../lib/new-agent";
 import { namedLauncher, providerIdNote, providerLabel, providerTitle, useProviderNames } from "../lib/provider-names";
@@ -9,6 +9,9 @@ import { AttachmentTray } from "../ui/AttachmentTray";
 import { Button, Loading } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { t } from "../i18n";
+
+// the question the start's terminal tab stopped on, answered from here (#10365): only for such a failure
+const ShellQuestion = lazy(() => import("./ShellQuestionCard"));
 
 export function StartingAgent({ launch, onToggleSidebar }: { launch: AgentLaunch; onToggleSidebar?: () => void }) {
   const machine = useStore((s) => s.machines.find((m) => m.id === launch.machineId));
@@ -48,6 +51,7 @@ export function StartingAgent({ launch, onToggleSidebar }: { launch: AgentLaunch
           </div>}
           {launch.phase === "failed" ? <div role="alert" className="flex flex-col items-start gap-3">
             <p className="text-[13px] text-red">{launch.error}</p>
+            {launch.shellWaiting && <Suspense fallback={null}><ShellQuestion launch={launch} /></Suspense>}
             <p className="text-[12px] text-ink-3">{launch.uncertain ? t("startingagent.uncertain") : t("startingagent.kept")}</p>
             {editable && <div className="flex w-full flex-col gap-2">
               <label className="text-[12px] text-ink-2">{t("startingagent.launcher_label")}<input value={launcher} onChange={(e) => setLauncher(e.target.value)} className="mt-1 w-full rounded-control bg-inset px-3 py-2 font-mono text-[12px] text-ink shadow-hairline outline-none" /></label>

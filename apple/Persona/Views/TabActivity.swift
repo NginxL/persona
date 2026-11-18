@@ -210,7 +210,7 @@ extension View {
     /// are a crash (`NSToolbar … already contains an item with the identifier com.apple.SwiftUI.search`). On the Mac the
     /// field hangs off a view in the page's background, so the page's own views do not see `isSearching` /
     /// `dismissSearch`; use `isPresented` instead.
-    func pageSearchable(text: Binding<String>, isPresented: Binding<Bool>? = nil, placement: SearchFieldPlacement = .automatic,
+    func pageSearchable(text: Binding<String>, isPresented: Binding<Bool>? = nil, placement: SearchFieldPlacement? = nil,
                         prompt: String) -> some View {
         modifier(PageSearchable(text: text, isPresented: isPresented, placement: placement, prompt: prompt))
     }
@@ -219,9 +219,13 @@ extension View {
 private struct PageSearchable: ViewModifier {
     let text: Binding<String>
     let isPresented: Binding<Bool>?
-    let placement: SearchFieldPlacement
+    /// nil: the system's (`resolvedPlacement`).
+    let placement: SearchFieldPlacement?
     let prompt: String
     @Environment(\.tabIsActive) private var active
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var widthClass
+    #endif
 
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -234,10 +238,23 @@ private struct PageSearchable: ViewModifier {
 
     @ViewBuilder private func field<V: View>(_ v: V) -> some View {
         if let isPresented {
-            v.searchable(text: text, isPresented: isPresented, placement: placement, prompt: Text(prompt))
+            v.searchable(text: text, isPresented: isPresented, placement: resolvedPlacement, prompt: Text(prompt))
         } else {
-            v.searchable(text: text, placement: placement, prompt: Text(prompt))
+            v.searchable(text: text, placement: resolvedPlacement, prompt: Text(prompt))
         }
+    }
+
+    /// iPadOS 18 puts an automatic field in a regular-width bar beside the title, and a wide one squeezed Inbox's title
+    /// to "In…" (#6730). There, before iOS 26, a page that names no placement gets the field under its title; iOS 26
+    /// folds it into a button, and compact widths keep the system's.
+    private var resolvedPlacement: SearchFieldPlacement {
+        if let placement { return placement }
+        #if os(iOS)
+        if #available(iOS 26.0, *) { return .automatic }
+        return widthClass == .regular ? .navigationBarDrawer(displayMode: .automatic) : .automatic
+        #else
+        return .automatic
+        #endif
     }
 }
 

@@ -175,7 +175,7 @@ struct FileViewer: View {
         NavigationStack {
             content
                 .navigationTitle(page?.file?.name ?? (ref.path as NSString).lastPathComponent)
-                .navigationSubtitle(model.machine(ref.machineRef)?.name ?? ref.machineID)
+                .navigationSubtitleWhenSupported(model.machine(ref.machineRef)?.name ?? ref.machineID)
                 .navigationBarTitleDisplayMode(.inline)
                 .pageToolbar {
                     // ‹ after following a file link, else the sheet's ✕ (#9653).

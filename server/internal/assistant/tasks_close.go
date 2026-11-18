@@ -12,7 +12,7 @@ import (
 // Stopping the agents of finished tasks (docs/assistant/todos.md "Stop Agents of completed tasks"). Once a task opened from an
 // assistant conversation is done — by the user or by the assistant's judge (done.go) — its agents that have stayed
 // still for a while are stopped: the node quits the agent process and keeps its terminal, the shell it ran in (node
-// retire.go, session.stop; #4754: Persona never closes an agent's terminal on its own). The todo keeps the agents
+// retire.go, session.stop; #4754; the node closes that terminal itself only after its grace period, #10111). The todo keeps the agents
 // (machine, session id, directory) and the node keeps how each was started (launcher, model, modes), so reading one
 // goes on from its transcript and its terminal stays open on its computer.
 //
@@ -42,11 +42,30 @@ type taskCloseRefusal struct {
 // changed.
 type taskCloseRefused map[[2]string]taskCloseRefusal
 
+// doneSeen: (machine, session) → what the pass saw of a done task's agent since the task was done (#10311). Kept in
+// memory across passes, as idleSeen is: a manager restart forgets it, and the first sight of a running agent then
+// only holds off its stop.
+type doneSeen map[[2]string]doneSeenAgent
+
+// doneSeenAgent is what the pass saw of one agent of a task done at done.
+type doneSeenAgent struct {
+	done time.Time // the task's done time it is about: a task done again later starts over
+	// running is when the pass first saw it running in a pane, zero while it is stopped: its stillness counts from
+	// no earlier, so an agent resumed with no message (its last step is old) is not stopped on the next pass.
+	running time.Time
+	stopped bool // seen stopped since the task was done, or stopped by this pass
+	// resumed: running again after that. Someone brought it back on purpose (the owner's Resume, a message that
+	// resumed it): this pass leaves it to the idle rule (tasks_idle.go), which covers resumed agents.
+	resumed bool
+}
+
 func (s *Service) taskCloseLoop(ctx context.Context) {
 	t := time.NewTicker(taskCloseEvery)
 	defer t.Stop()
 	refused := taskCloseRefused{}
+	doneSeen := doneSeen{}
 	idleSeen := idleSeen{}
+	endedSeen := endedSeen{}
 	var archived time.Time
 	for {
 		select {
@@ -54,9 +73,10 @@ func (s *Service) taskCloseLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		s.closeDoneTaskAgents(ctx, refused)
+		s.closeDoneTaskAgents(ctx, refused, doneSeen)
 		s.closeIdleAgents(ctx, refused, idleSeen)
-		s.orphanWatch(ctx, time.Now()) // open to-dos whose agents are all gone (tasks_orphan.go)
+		s.closeEndedAgentTerminals(ctx, endedSeen) // Agents that quit, with close_ended_terminals on (agent_terminal_close.go)
+		s.orphanWatch(ctx, time.Now())             // open to-dos whose agents are all gone (tasks_orphan.go)
 		if now := time.Now(); now.Sub(archived) >= autoArchiveEvery {
 			archived = now
 			s.archiveClosedSessions(ctx, now) // closed sessions idle for days (agent_archive_auto.go)
@@ -133,13 +153,14 @@ func retirableAfter(s proto.Session, doneAt, now time.Time, idle time.Duration) 
 }
 
 // closeDoneTaskAgents retires the agents of done tasks that may be closed now (retirable); refused remembers the
-// sessions a node would not close.
-func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefused) {
+// sessions a node would not close, seen what each agent did since its task was done.
+func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefused, seen doneSeen) {
 	if !s.todosLoaded() {
 		return
 	}
 	agents := s.doneTaskAgents()
 	if len(agents) == 0 {
+		clear(seen)
 		return
 	}
 	now := time.Now()
@@ -148,20 +169,64 @@ func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefu
 		reachable[d.ID] = d.Reachable
 	}
 	lists := map[string]map[string]proto.Session{}
+	done := make(map[[2]string]bool, len(agents))
 	for _, a := range agents {
+		key := [2]string{a.machine, a.session}
+		done[key] = true // an unreachable machine keeps what was seen
 		if !reachable[a.machine] {
 			continue
 		}
 		c, ok := s.doneTaskAgentRow(ctx, lists, a)
-		key := [2]string{a.machine, a.session}
-		if !ok || !retirable(c, a.doneAt, now) {
+		if !ok {
+			continue
+		}
+		w := seen.see(key, a.doneAt, c, now)
+		if w.resumed || w.running.IsZero() {
+			continue
+		}
+		since := a.doneAt
+		if w.running.After(since) {
+			since = w.running
+		}
+		if !retirable(c, since, now) {
 			continue
 		}
 		if r, ok := refused[key]; ok && r.updated.Equal(c.UpdatedAt) && now.Sub(r.at) < taskCloseRetry {
 			continue
 		}
-		s.retireAgent(ctx, refused, "task "+a.todo, a.machine, c, now)
+		if s.retireAgent(ctx, refused, "task "+a.todo, a.machine, c, now) {
+			// Stopped by this pass: running again before a pass sees it stopped is a resume too.
+			w.stopped, w.running = true, time.Time{}
+			seen[key] = w
+		}
 	}
+	for k := range seen {
+		if !done[k] { // its task reopened, or the agent left it
+			delete(seen, k)
+		}
+	}
+}
+
+// see notes c, the row of an agent of a task done at done, and returns what has been seen of it by now.
+func (seen doneSeen) see(key [2]string, done time.Time, c proto.Session, now time.Time) doneSeenAgent {
+	w := seen[key]
+	if !w.done.Equal(done) {
+		w = doneSeenAgent{done: done}
+	}
+	switch {
+	case c.Starting: // still launching (the task was done before it started, #2954): neither stopped nor running yet
+	case c.Status == proto.StatusOffline || c.PaneID == "":
+		w.stopped, w.running = true, time.Time{}
+	default:
+		if w.stopped {
+			w.resumed = true
+		}
+		if w.running.IsZero() {
+			w.running = now
+		}
+	}
+	seen[key] = w
+	return w
 }
 
 // doneTaskAgentRow is a's session as the apps get it (the state and the cards waiting count). With the fleet in this
@@ -190,8 +255,8 @@ func (s *Service) doneTaskAgentRow(ctx context.Context, lists map[string]map[str
 }
 
 // retireAgent asks c's node to stop its agent and keep its terminal (session.stop with retire) and remembers a
-// refusal; who names the reason in the log.
-func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who, machine string, c proto.Session, now time.Time) {
+// refusal; who names the reason in the log. True when the node answered: the agent is not running any more.
+func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who, machine string, c proto.Session, now time.Time) bool {
 	key := [2]string{machine, c.SessionID}
 	var res struct {
 		Stopped bool `json:"stopped"`
@@ -201,15 +266,27 @@ func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who
 	if who == "idle" {
 		cause = proto.StopIdle
 	}
-	err := s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": c.SessionID, "retire": true, "stop_cause": cause}, &res)
+	// A done task ends its Agent's session: with the owner's close-on-end setting its terminal goes too (#10355,
+	// agent_terminal_close.go). An idle stop is no end: that Agent keeps its terminal either way.
+	closeIt := cause == proto.StopTaskCompleted && !agentCloseBusy(c) && s.closeEndedTerminals(ctx)
+	var err error
+	if closeIt {
+		res.Stopped, err = s.closeEndedTerminal(cctx, machine, c.SessionID, cause)
+	} else {
+		err = s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": c.SessionID, "retire": true, "stop_cause": cause}, &res)
+	}
 	cancel()
 	var re *rpc.Error
 	switch {
 	case err == nil:
 		delete(refused, key)
-		if res.Stopped {
+		switch {
+		case res.Stopped && closeIt:
+			s.logf("%s: closed agent %s/%s and its terminal (close_ended_terminals)", who, machine, c.SessionID)
+		case res.Stopped:
 			s.logf("%s: stopped agent %s/%s (its terminal stays)", who, machine, c.SessionID)
 		}
+		return true
 	case errors.As(err, &re): // the node refused (or is too old to know session.stop: nothing closed): not again for a while
 		if prev, ok := refused[key]; !ok || prev.why != err.Error() {
 			s.logf("%s: agent %s/%s left open: %v", who, machine, c.SessionID, err)
@@ -218,4 +295,5 @@ func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who
 	default:
 		s.logf("%s: close agent %s/%s: %v", who, machine, c.SessionID, err)
 	}
+	return false
 }

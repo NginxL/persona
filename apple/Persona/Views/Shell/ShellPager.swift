@@ -39,6 +39,13 @@ import SwiftUI
     /// The page at rest (or nearest).
     var page: Int { min(pageCount - 1, max(0, Int(position.rounded()))) }
 
+    /// The moving bar stands in for the pages' own (`ShellMovingBar`, `ShellBarAtRest`) while the strip moves, or while a
+    /// finger that was down as it came to rest stays (`lingering`). In the side column (iPhone Duo, `rail`) it also stays
+    /// until the tab bar's lens has glided (`TabBarGlide`, #10270): the strip comes to rest about 0.55 s into the lens's
+    /// 0.65 s, and the pages' own rails put back then (their glass and menus) held up a frame of its fade by 33–42 ms on
+    /// the simulator. Once the lens is gone, nothing moves as they come back.
+    func standsIn(rail: Bool) -> Bool { moving || lingering || (rail && TabBarGlide.shared.running) }
+
     /// A finger came down on the window, or the last one let go.
     func fingers(down: Bool) {
         touching = down
@@ -243,12 +250,13 @@ struct ShellPageSlide: ViewModifier {
 /// offered first hit neither segment (`ShellSwitchTests`). It comes back, transparent, as soon as a slide starts.
 struct ShellBarAtRest: ViewModifier {
     @Environment(\.shell) private var shell
+    @Environment(\.shellRailEdge) private var railEdge
     /// The bar's page on the strip: 0 = Assistant, 1 = Agents.
     let page: Int
 
     func body(content: Content) -> some View {
         if let pager = shell?.pager {
-            let standIn = pager.moving || pager.lingering
+            let standIn = pager.standsIn(rail: railEdge != nil)
             // The bar comes and goes with `pager.page`, which a slide changes in its animated transaction, and a page pushed
             // over it (now or before the spring ends) takes it out of the window, where that transition never runs: the
             // slide waited for it (`ShellPager.settle`). Opening an agent from the inbox, pushed on Assistant, left the strip

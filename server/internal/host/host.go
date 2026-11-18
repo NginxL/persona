@@ -124,6 +124,15 @@ type Launcher interface {
 	NameAgent(ctx context.Context, pane PaneRef, name string) error
 }
 
+// EnvLauncher is a Launcher that can start the new pane's shell with extra environment ("KEY=VALUE"): herdr's
+// workspace.create / tab.create env, the Herdr App's terminal.run env. The node opens an Agent's terminal this way so
+// the shell's own startup files can tell it from one the user opened (PERSONA_AGENT, #10111) and skip the questions
+// that would stop the start (#10365).
+type EnvLauncher interface {
+	CreateSpaceEnv(ctx context.Context, cwd, label string, env []string) (*Created, error)
+	CreateSlotEnv(ctx context.Context, space, cwd, label string, env []string) (*Created, error)
+}
+
 // Organizer renames and closes.
 type Organizer interface {
 	RenameSpace(ctx context.Context, space, name string) error

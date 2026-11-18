@@ -19,14 +19,15 @@ type todoRepositoryLinkDetailsStore interface {
 	ImportTodoRepositoryLinkDetails(context.Context, string, []repository.LinkInput, string) (repository.TaskSet, bool, error)
 }
 
-func knownTodoLinks(todo Todo) []string {
-	out := []string{}
+// knownTodoLinks are the links a to-do kept before repository associations, read offline, with the addresses they
+// were found as.
+func knownTodoLinks(todo Todo) (raws, urls []string) {
 	for _, raw := range append(append([]string{}, todo.PRs...), todo.PRURL) {
 		if _, link, err := repository.ParseTaskLink(raw); err == nil {
-			out = append(out, link.CanonicalURL)
+			raws, urls = append(raws, raw), append(urls, link.CanonicalURL)
 		}
 	}
-	return out
+	return raws, urls
 }
 
 func (s *Service) importTodoRepositoryLinks(ctx context.Context, id string, urls []string, source string) error {
@@ -52,7 +53,21 @@ func (s *Service) importLegacyTodoRepositoryLinks(ctx context.Context, id string
 	if !ok {
 		return db.ErrTodoNotFound
 	}
-	return s.importTodoRepositoryLinks(ctx, id, knownTodoLinks(todo), "legacy")
+	// This runs on every read: it never asks a provider and leaves the links one answers for alone. Until the providers
+	// are listed (right after a restart) it waits for a later read, so their hosts never get the built-in guess.
+	raws, known := knownTodoLinks(todo)
+	src, urls := s.linkSources(ctx, id), []string{}
+	for i, raw := range raws {
+		in := repository.LinkInput{URL: raw}
+		_, route, err := s.routeLinkURL(src, &in)
+		if route == routeUnknown {
+			return nil
+		}
+		if err == nil && route == routeBuiltin {
+			urls = append(urls, known[i])
+		}
+	}
+	return s.importTodoRepositoryLinks(ctx, id, urls, "legacy")
 }
 
 func (s *Service) toolTodoRepositoryLinksAdd(ctx context.Context, machine, self, name string, args json.RawMessage) (string, error) {
@@ -86,29 +101,28 @@ func (s *Service) toolTodoRepositoryLinksAdd(ctx context.Context, machine, self,
 	if err := s.importLegacyTodoRepositoryLinks(ctx, in.ID); err != nil {
 		return "", err
 	}
-	if len(in.Links) == 0 {
+	// Links on an extension provider's repositories are resolved first, outside the store's transaction.
+	links := make([]repository.LinkInput, 0, len(in.URLs)+len(in.Links))
+	for _, raw := range in.URLs {
+		links = append(links, repository.LinkInput{URL: raw})
+	}
+	for _, link := range in.Links {
+		links = append(links, repository.LinkInput{URL: link.URL, Title: link.Title})
+	}
+	src, budget, resolved := s.linkSources(ctx, in.ID), withProviderBudget(ctx), false
+	for i := range links {
+		handled, err := s.resolveLinkURL(budget, src, &links[i], "")
+		if err != nil {
+			return "", s.taskRepositoryToolError(ctx, err)
+		}
+		resolved = resolved || handled
+	}
+	if len(in.Links) == 0 && !resolved {
 		if err := s.importTodoRepositoryLinks(ctx, in.ID, in.URLs, "explicit"); err != nil {
 			return "", err
 		}
-	} else {
-		st, ok := s.store().(todoRepositoryLinkDetailsStore)
-		if !ok {
-			return "", repository.Problem("store_unavailable")
-		}
-		links := make([]repository.LinkInput, 0, len(in.URLs)+len(in.Links))
-		for _, raw := range in.URLs {
-			links = append(links, repository.LinkInput{URL: raw})
-		}
-		for _, link := range in.Links {
-			links = append(links, repository.LinkInput{URL: link.URL, Title: link.Title})
-		}
-		_, changed, err := st.ImportTodoRepositoryLinkDetails(ctx, in.ID, links, "explicit")
-		if err != nil {
-			return "", err
-		}
-		if changed {
-			s.todosChanged(ctx)
-		}
+	} else if err := s.importTodoRepositoryLinkDetails(ctx, in.ID, links, "explicit"); err != nil {
+		return "", err
 	}
 	set, err := s.readTodoRepositories(ctx, in.ID)
 	if err != nil {
@@ -160,13 +174,11 @@ func (s *Service) agentRepositoryTool(ctx context.Context, machine, session, nam
 	return s.toolTodoRepositories(ctx, machine, session, name, args)
 }
 
+// taskRepositoryReportLinks are the addresses in an agent's report, without the punctuation after them.
 func taskRepositoryReportLinks(text string) []string {
 	urls := []string{}
 	for _, raw := range inboxTaskURL.FindAllString(text, -1) {
-		raw = strings.TrimRight(raw, ".,;:!?)]}，。；：！）》」』") // i18n-ignore: report punctuation, not displayed text
-		if _, link, err := repository.ParseTaskLink(raw); err == nil && link.Kind == "pull_request" {
-			urls = append(urls, link.CanonicalURL)
-		}
+		urls = append(urls, strings.TrimRight(raw, ".,;:!?)]}，。；：！）》」』")) // i18n-ignore: report punctuation, not displayed text
 	}
 	return urls
 }

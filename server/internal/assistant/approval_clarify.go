@@ -113,12 +113,38 @@ func (s *Service) waitPreparedCard(ctx context.Context, ix proto.Interaction, op
 
 // awaitPrepared releases only the original tool call on clarification. Final
 // resolution, expiry and replacement still finish the interaction normally.
+// Every waiter listens to the broadcast, never the one-shot p.done: a snapshot
+// waiter cannot steal the original caller's terminal result.
 func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resolution, error) {
-	select {
-	case r := <-p.done:
+	s.fleet.mu.Lock()
+	if p.resolved == nil {
+		p.resolved = make(chan struct{})
+	}
+	resolved := p.resolved
+	s.fleet.mu.Unlock()
+	terminal := func() (proto.Resolution, error) {
+		s.fleet.mu.Lock()
+		r := p.prepared.result
+		s.fleet.mu.Unlock()
 		s.finishInteraction(p.ix.ID)
 		return r, nil
+	}
+	// Prefer an already published terminal result over a clarification release
+	// left closed by an earlier question (a snapshot can attach after both).
+	select {
+	case <-resolved:
+		return terminal()
+	default:
+	}
+	select {
+	case <-resolved:
+		return terminal()
 	case <-p.prepared.release:
+		select {
+		case <-resolved:
+			return terminal()
+		default:
+		}
 		return proto.Resolution{}, errApprovalClarifying
 	case <-ctx.Done():
 		s.endPrepared(p, "cancelled", "The approval was cancelled before the owner answered; nothing changed.")
@@ -394,6 +420,11 @@ func (s *Service) clarify(ctx context.Context, id, text, clientMsgID string, ori
 			MsgIDs: []string{clientMsgID}, Ext: map[string]string{"clarify": id, "chat": origin.ChatID}}
 	}
 	s.UserSpoke(ctx, SessionRef{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID})
+	if p.ix.Private {
+		// The owner's question starts a new turn after the original Just me turn
+		// may have ended. Mark that answer turn before dispatch, not at its end.
+		s.justMeSent(p.ix.MachineID, p.ix.SessionID)
+	}
 	err = s.sendOnce(ctx, p.ix.MachineID, params)
 	if err != nil && !relayInDoubt(err) {
 		s.finishClarifyAttempt(p, attempt, nil, err)

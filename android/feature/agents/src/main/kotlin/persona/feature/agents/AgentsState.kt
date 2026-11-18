@@ -152,8 +152,16 @@ data class AgentRowMetadata(
 }
 
 private val Session.readVersion: String get() = "${updatedAt.orEmpty()}|${rev ?: ""}"
+
+/**
+ * The session as the list shows it: one seen on this phone and not yet recorded by the hub is seen at once, no longer
+ * Unread nor Just finished (#9786, the web's `seenCopy`).
+ */
 fun Session.listSession(preferences: AgentsPreferencesSnapshot): AgentSession {
-    val visible = if (agentState == AgentState.Unread && preferences.seen[key.path] == readVersion) copy(state = "idle") else this
+    val unseen = agentState == AgentState.Unread || work?.justFinished == true
+    val visible = if (unseen && preferences.seen[key.path] == readVersion)
+        copy(state = if (agentState == AgentState.Unread) "idle" else state, work = work?.copy(justFinished = false))
+    else this
     return AgentSession(visible, stateSince, (runningSubagents ?: subagents.orEmpty().count { it.running == true }) > 0)
 }
 

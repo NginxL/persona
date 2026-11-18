@@ -1,0 +1,2643 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "kyoto_needs_your_choice",
+      "audience": "everyday",
+      "description": "The everyday page (proposal 3.5's first column): the to-do's own decision has its card under the state line, the owner's notes and what they asked both show, and the card's recommended answer is the one primary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/prototypes/todos/v1 iphone/kyoto",
+        "docs/design/prototypes/todos/v1 iphone/kyoto~scrolled"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_kyoto",
+            "title": "Plan the Kyoto trip",
+            "notes": "Two of us. Ryokan near Gion, under ¥60k a night.",
+            "done_at": null,
+            "created_at": "2026-11-16T09:12:00Z",
+            "updated_at": "2026-11-18T10:11:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-18T10:11:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ]
+                }
+              ],
+              "updated_at": "2026-11-18T10:11:00Z"
+            },
+            "due_date": "2027-04-03",
+            "project": "kyoto-trip",
+            "brief": {
+              "id": "brief_kyoto",
+              "created_at": "2026-11-16T09:12:00Z",
+              "request": {
+                "text": "Plan the Kyoto trip, Apr 3–9, ryokan near Gion, budget ¥60k a night.",
+                "truncated": false,
+                "at": "2026-11-16T09:12:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_kyoto"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Plan a week in Kyoto for two, Apr 3–9",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "log": [],
+              "criteria": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "clock_at": "2026-11-16T09:12:00Z",
+              "due_at": "2026-11-17T09:12:00Z"
+            },
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Ryokan Hanami",
+              "asked_at": "2026-11-18T10:11:00Z",
+              "question": "Which ryokan?",
+              "options": [
+                {
+                  "label": "Ryokan Hanami",
+                  "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                },
+                {
+                  "label": "Kaede",
+                  "leads_to": "¥52k a night"
+                },
+                {
+                  "label": "Tsuki",
+                  "leads_to": "¥59k a night"
+                }
+              ],
+              "deadline": "2026-11-20T18:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            },
+            "decision_review": {
+              "review_at": "2026-11-18T10:11:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "owner_decides",
+              "line": {
+                "key": "decision",
+                "args": {
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami"
+                }
+              },
+              "since": "2026-11-18T10:11:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "todo:decision@2026-11-18T10:11:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T10:11:00Z",
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ],
+                  "default_at": "2026-11-20T18:00:00Z"
+                }
+              ],
+              "steps": {
+                "done": 2,
+                "total": 5
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 4,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_card",
+          "chips",
+          "notes",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "kyoto_selected_beside_the_list",
+      "audience": "everyday",
+      "description": "The same page selected beside the list at a regular width: what the paper shows does not depend on its host.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/prototypes/todos/v1 ipad11-landscape/closed~kyoto"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_kyoto",
+            "title": "Plan the Kyoto trip",
+            "notes": "Two of us. Ryokan near Gion, under ¥60k a night.",
+            "done_at": null,
+            "created_at": "2026-11-16T09:12:00Z",
+            "updated_at": "2026-11-18T10:11:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-18T10:11:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ]
+                }
+              ],
+              "updated_at": "2026-11-18T10:11:00Z"
+            },
+            "due_date": "2027-04-03",
+            "project": "kyoto-trip",
+            "brief": {
+              "id": "brief_kyoto",
+              "created_at": "2026-11-16T09:12:00Z",
+              "request": {
+                "text": "Plan the Kyoto trip, Apr 3–9, ryokan near Gion, budget ¥60k a night.",
+                "truncated": false,
+                "at": "2026-11-16T09:12:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_kyoto"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Plan a week in Kyoto for two, Apr 3–9",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "log": [],
+              "criteria": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "clock_at": "2026-11-16T09:12:00Z",
+              "due_at": "2026-11-17T09:12:00Z"
+            },
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Ryokan Hanami",
+              "asked_at": "2026-11-18T10:11:00Z",
+              "question": "Which ryokan?",
+              "options": [
+                {
+                  "label": "Ryokan Hanami",
+                  "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                },
+                {
+                  "label": "Kaede",
+                  "leads_to": "¥52k a night"
+                },
+                {
+                  "label": "Tsuki",
+                  "leads_to": "¥59k a night"
+                }
+              ],
+              "deadline": "2026-11-20T18:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            },
+            "decision_review": {
+              "review_at": "2026-11-18T10:11:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "owner_decides",
+              "line": {
+                "key": "decision",
+                "args": {
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami"
+                }
+              },
+              "since": "2026-11-18T10:11:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "todo:decision@2026-11-18T10:11:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T10:11:00Z",
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ],
+                  "default_at": "2026-11-20T18:00:00Z"
+                }
+              ],
+              "steps": {
+                "done": 2,
+                "total": 5
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": true,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 4,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_card",
+          "chips",
+          "notes",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "kyoto_from_the_main_chat",
+      "audience": "everyday",
+      "description": "Opened from a card in the main chat (decision 2 (v)): pushed on the Assistant's stack, the same elements, and the composer still writes to Persona.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (v)",
+        "docs/design/prototypes/todos/v1 iphone/kyoto~from-assistant"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_kyoto",
+            "title": "Plan the Kyoto trip",
+            "notes": "Two of us. Ryokan near Gion, under ¥60k a night.",
+            "done_at": null,
+            "created_at": "2026-11-16T09:12:00Z",
+            "updated_at": "2026-11-18T10:11:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-18T10:11:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ]
+                }
+              ],
+              "updated_at": "2026-11-18T10:11:00Z"
+            },
+            "due_date": "2027-04-03",
+            "project": "kyoto-trip",
+            "brief": {
+              "id": "brief_kyoto",
+              "created_at": "2026-11-16T09:12:00Z",
+              "request": {
+                "text": "Plan the Kyoto trip, Apr 3–9, ryokan near Gion, budget ¥60k a night.",
+                "truncated": false,
+                "at": "2026-11-16T09:12:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_kyoto"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Plan a week in Kyoto for two, Apr 3–9",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "log": [],
+              "criteria": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "clock_at": "2026-11-16T09:12:00Z",
+              "due_at": "2026-11-17T09:12:00Z"
+            },
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Ryokan Hanami",
+              "asked_at": "2026-11-18T10:11:00Z",
+              "question": "Which ryokan?",
+              "options": [
+                {
+                  "label": "Ryokan Hanami",
+                  "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                },
+                {
+                  "label": "Kaede",
+                  "leads_to": "¥52k a night"
+                },
+                {
+                  "label": "Tsuki",
+                  "leads_to": "¥59k a night"
+                }
+              ],
+              "deadline": "2026-11-20T18:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            },
+            "decision_review": {
+              "review_at": "2026-11-18T10:11:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "owner_decides",
+              "line": {
+                "key": "decision",
+                "args": {
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami"
+                }
+              },
+              "since": "2026-11-18T10:11:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "todo:decision@2026-11-18T10:11:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T10:11:00Z",
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ],
+                  "default_at": "2026-11-20T18:00:00Z"
+                }
+              ],
+              "steps": {
+                "done": 2,
+                "total": 5
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "assistant"
+        },
+        "timeline": {
+          "rounds": 4,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_card",
+          "chips",
+          "notes",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "kyoto_pane_on_the_steward",
+      "audience": "everyday",
+      "description": "The to-do's conversation open beside the paper: the card stays (its home is the paper, not the pane), the conversation block becomes its one-line pointer and the composer has moved into the pane.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.6",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Drawn once per screen\"",
+        "docs/design/prototypes/todos/v1 ipad11-portrait/open"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_kyoto",
+            "title": "Plan the Kyoto trip",
+            "notes": "Two of us. Ryokan near Gion, under ¥60k a night.",
+            "done_at": null,
+            "created_at": "2026-11-16T09:12:00Z",
+            "updated_at": "2026-11-18T10:11:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-18T10:11:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ]
+                }
+              ],
+              "updated_at": "2026-11-18T10:11:00Z"
+            },
+            "due_date": "2027-04-03",
+            "project": "kyoto-trip",
+            "brief": {
+              "id": "brief_kyoto",
+              "created_at": "2026-11-16T09:12:00Z",
+              "request": {
+                "text": "Plan the Kyoto trip, Apr 3–9, ryokan near Gion, budget ¥60k a night.",
+                "truncated": false,
+                "at": "2026-11-16T09:12:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_kyoto"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Plan a week in Kyoto for two, Apr 3–9",
+              "done_when": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "log": [],
+              "criteria": [
+                "Flights booked",
+                "Ryokan booked",
+                "Day plan ready"
+              ],
+              "clock_at": "2026-11-16T09:12:00Z",
+              "due_at": "2026-11-17T09:12:00Z"
+            },
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Ryokan Hanami",
+              "asked_at": "2026-11-18T10:11:00Z",
+              "question": "Which ryokan?",
+              "options": [
+                {
+                  "label": "Ryokan Hanami",
+                  "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                },
+                {
+                  "label": "Kaede",
+                  "leads_to": "¥52k a night"
+                },
+                {
+                  "label": "Tsuki",
+                  "leads_to": "¥59k a night"
+                }
+              ],
+              "deadline": "2026-11-20T18:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            },
+            "decision_review": {
+              "review_at": "2026-11-18T10:11:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "owner_decides",
+              "line": {
+                "key": "decision",
+                "args": {
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami"
+                }
+              },
+              "since": "2026-11-18T10:11:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "todo:decision@2026-11-18T10:11:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T10:11:00Z",
+                  "text": "Which ryokan?",
+                  "recommend": "Ryokan Hanami",
+                  "options": [
+                    {
+                      "label": "Ryokan Hanami",
+                      "leads_to": "4 min from Gion with a late check-in, ¥58k a night"
+                    },
+                    {
+                      "label": "Kaede",
+                      "leads_to": "¥52k a night"
+                    },
+                    {
+                      "label": "Tsuki",
+                      "leads_to": "¥59k a night"
+                    }
+                  ],
+                  "default_at": "2026-11-20T18:00:00Z"
+                }
+              ],
+              "steps": {
+                "done": 2,
+                "total": 5
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": true,
+          "pane_open": true,
+          "pane_channel": "steward",
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 4,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_card",
+          "chips",
+          "notes",
+          "brief",
+          "steps",
+          "results",
+          "conversation_pointer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "login_fix_waits_for_merge",
+      "audience": "agents",
+      "description": "The developer page (proposal 3.5's second column): waiting for its code change to merge, no ask; the brief with Done when instead of empty notes, and Work details folded for the code work.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/proposals/todos-redesign.md 6.3 row 10"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_login",
+            "title": "Fix login crash for SSO users",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-16T14:05:00Z",
+            "updated_at": "2026-11-18T09:30:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-login",
+                "linked_at": "2026-11-16T14:06:00Z",
+                "title": "Login fix",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "stage": "merge",
+            "pr_url": "https://github.com/example/weather-app/pull/812",
+            "pr_status": {
+              "url": "https://github.com/example/weather-app/pull/812",
+              "state": "open",
+              "draft": false,
+              "review": "required",
+              "checks": "passing",
+              "conflicts": false,
+              "checked_at": "2026-11-18T10:05:00Z"
+            },
+            "stage_kind": "code",
+            "priority": "high",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_login",
+              "created_at": "2026-11-16T14:05:00Z",
+              "request": {
+                "text": "Fix the login crash for SSO users in the Weather App; crash log attached.",
+                "truncated": false,
+                "at": "2026-11-16T14:05:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_login"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "SSO users no longer see a blank page after signing in",
+              "done_when": [
+                "Fixed",
+                "Merged",
+                "Deployed"
+              ],
+              "log": [],
+              "criteria": [
+                "Fixed",
+                "Merged",
+                "Deployed"
+              ],
+              "clock_at": "2026-11-16T14:05:00Z",
+              "due_at": "2026-11-17T14:05:00Z"
+            },
+            "view": {
+              "phase": "waiting",
+              "section": "waiting",
+              "reason": "pr_open",
+              "line": {
+                "key": "pr_open"
+              },
+              "next_change_at": "2026-11-18T10:20:00Z",
+              "rank": 0,
+              "steps": {
+                "done": 2,
+                "total": 4
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 3,
+          "results": 1,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "work_details",
+          "composer"
+        ],
+        "primary": "tick",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "release_door_from_widget",
+      "audience": "agents",
+      "description": "The page with several Agents (proposal 3.5's third column): the run's plan is a door headed by the run, whose Review Plan is the one primary; its home stays at the foot of the run's own conversation.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Homes\"",
+        "docs/design/prototypes/todos/v1 iphone/release",
+        "docs/design/prototypes/todos/v1 iphone/release~scrolled"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_release",
+            "title": "Release Weather App 1.3",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T09:40:00Z",
+            "updated_at": "2026-11-18T10:08:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-widget",
+                "linked_at": "2026-11-18T10:06:00Z",
+                "title": "Widget",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-notes",
+                "linked_at": "2026-11-17T09:42:00Z",
+                "title": "Release notes",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-shots",
+                "linked_at": "2026-11-17T09:41:00Z",
+                "title": "Screenshots",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/weather-app/pull/301",
+            "due_date": "2026-11-20",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_release",
+              "created_at": "2026-11-17T09:40:00Z",
+              "request": {
+                "text": "Ship 1.3 on Friday, no beta this time.",
+                "truncated": false,
+                "at": "2026-11-17T09:40:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_release"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Ship Weather App 1.3 with the new forecast view and its release notes by Friday",
+              "done_when": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "log": [],
+              "criteria": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "clock_at": "2026-11-17T09:40:00Z",
+              "due_at": "2026-11-18T09:40:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Widget",
+                  "text": "Plan awaiting approval"
+                }
+              },
+              "since": "2026-11-18T10:08:00Z",
+              "rank": 1,
+              "asks": [
+                {
+                  "id": "run:m1/s-widget@2026-11-18T10:08:00Z",
+                  "kind": "plan",
+                  "home": "run",
+                  "text": "Plan awaiting approval",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-widget",
+                    "title": "Widget"
+                  }
+                }
+              ],
+              "steps": {
+                "done": 1,
+                "total": 3
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 2,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_door",
+          "chips",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "work_details",
+          "composer"
+        ],
+        "primary": "ask_door",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "release_from_agents",
+      "audience": "agents",
+      "description": "Opened from one of its runs under Agents: the same page, kept on Agents' stack, and the composer addresses that run.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.6 \"The addressee chip\"",
+        "#10465 (a page opened from Agents)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_release",
+            "title": "Release Weather App 1.3",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T09:40:00Z",
+            "updated_at": "2026-11-18T10:08:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-widget",
+                "linked_at": "2026-11-18T10:06:00Z",
+                "title": "Widget",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-notes",
+                "linked_at": "2026-11-17T09:42:00Z",
+                "title": "Release notes",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-shots",
+                "linked_at": "2026-11-17T09:41:00Z",
+                "title": "Screenshots",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/weather-app/pull/301",
+            "due_date": "2026-11-20",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_release",
+              "created_at": "2026-11-17T09:40:00Z",
+              "request": {
+                "text": "Ship 1.3 on Friday, no beta this time.",
+                "truncated": false,
+                "at": "2026-11-17T09:40:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_release"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Ship Weather App 1.3 with the new forecast view and its release notes by Friday",
+              "done_when": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "log": [],
+              "criteria": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "clock_at": "2026-11-17T09:40:00Z",
+              "due_at": "2026-11-18T09:40:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Widget",
+                  "text": "Plan awaiting approval"
+                }
+              },
+              "since": "2026-11-18T10:08:00Z",
+              "rank": 1,
+              "asks": [
+                {
+                  "id": "run:m1/s-widget@2026-11-18T10:08:00Z",
+                  "kind": "plan",
+                  "home": "run",
+                  "text": "Plan awaiting approval",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-widget",
+                    "title": "Widget"
+                  }
+                }
+              ],
+              "steps": {
+                "done": 1,
+                "total": 3
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "run:m1/s-notes"
+        },
+        "timeline": {
+          "rounds": 2,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_door",
+          "chips",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "work_details",
+          "composer"
+        ],
+        "primary": "ask_door",
+        "addressee": "run:m1/s-notes"
+      }
+    },
+    {
+      "name": "release_pane_on_the_steward",
+      "audience": "agents",
+      "description": "The pane shows the to-do's conversation: the run's door stays a door (the pane is not its home), the conversation block becomes the pointer and the composer is in the pane.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Drawn once per screen\"",
+        "docs/design/prototypes/todos/v1 ipad11-landscape/open"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_release",
+            "title": "Release Weather App 1.3",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T09:40:00Z",
+            "updated_at": "2026-11-18T10:08:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-widget",
+                "linked_at": "2026-11-18T10:06:00Z",
+                "title": "Widget",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-notes",
+                "linked_at": "2026-11-17T09:42:00Z",
+                "title": "Release notes",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-shots",
+                "linked_at": "2026-11-17T09:41:00Z",
+                "title": "Screenshots",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/weather-app/pull/301",
+            "due_date": "2026-11-20",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_release",
+              "created_at": "2026-11-17T09:40:00Z",
+              "request": {
+                "text": "Ship 1.3 on Friday, no beta this time.",
+                "truncated": false,
+                "at": "2026-11-17T09:40:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_release"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Ship Weather App 1.3 with the new forecast view and its release notes by Friday",
+              "done_when": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "log": [],
+              "criteria": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "clock_at": "2026-11-17T09:40:00Z",
+              "due_at": "2026-11-18T09:40:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Widget",
+                  "text": "Plan awaiting approval"
+                }
+              },
+              "since": "2026-11-18T10:08:00Z",
+              "rank": 1,
+              "asks": [
+                {
+                  "id": "run:m1/s-widget@2026-11-18T10:08:00Z",
+                  "kind": "plan",
+                  "home": "run",
+                  "text": "Plan awaiting approval",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-widget",
+                    "title": "Widget"
+                  }
+                }
+              ],
+              "steps": {
+                "done": 1,
+                "total": 3
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": true,
+          "pane_open": true,
+          "pane_channel": "steward",
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 2,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_door",
+          "chips",
+          "brief",
+          "steps",
+          "results",
+          "conversation_pointer",
+          "work_details"
+        ],
+        "primary": "ask_door",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "release_pane_on_the_widget_run",
+      "audience": "agents",
+      "description": "The pane shows the run whose plan waits: the door shrinks to the pointer, the plan's Approve in the pane is the screen's one primary, the paper keeps its conversation block, and the pane's composer addresses the run.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Drawn once per screen\"",
+        "docs/design/prototypes/todos/v1 ipad11-landscape/open~widget",
+        "docs/design/prototypes/todos/v1 duo-inner-landscape/release-pane-on-widget"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_release",
+            "title": "Release Weather App 1.3",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T09:40:00Z",
+            "updated_at": "2026-11-18T10:08:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-widget",
+                "linked_at": "2026-11-18T10:06:00Z",
+                "title": "Widget",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-notes",
+                "linked_at": "2026-11-17T09:42:00Z",
+                "title": "Release notes",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              },
+              {
+                "machine_id": "m1",
+                "session_id": "s-shots",
+                "linked_at": "2026-11-17T09:41:00Z",
+                "title": "Screenshots",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "spawned"
+              }
+            ],
+            "quiet": false,
+            "pr_url": "https://github.com/example/weather-app/pull/301",
+            "due_date": "2026-11-20",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_release",
+              "created_at": "2026-11-17T09:40:00Z",
+              "request": {
+                "text": "Ship 1.3 on Friday, no beta this time.",
+                "truncated": false,
+                "at": "2026-11-17T09:40:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_release"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Ship Weather App 1.3 with the new forecast view and its release notes by Friday",
+              "done_when": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "log": [],
+              "criteria": [
+                "Build uploaded",
+                "Release notes approved",
+                "Widget ships"
+              ],
+              "clock_at": "2026-11-17T09:40:00Z",
+              "due_at": "2026-11-18T09:40:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Widget",
+                  "text": "Plan awaiting approval"
+                }
+              },
+              "since": "2026-11-18T10:08:00Z",
+              "rank": 1,
+              "asks": [
+                {
+                  "id": "run:m1/s-widget@2026-11-18T10:08:00Z",
+                  "kind": "plan",
+                  "home": "run",
+                  "text": "Plan awaiting approval",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-widget",
+                    "title": "Widget"
+                  }
+                }
+              ],
+              "steps": {
+                "done": 1,
+                "total": 3
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": true,
+          "pane_open": true,
+          "pane_channel": "run:m1/s-widget",
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 2,
+          "results": 2,
+          "recap": true
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "recap",
+          "ask_pointer",
+          "chips",
+          "brief",
+          "steps",
+          "results",
+          "conversation_block",
+          "work_details"
+        ],
+        "primary": "none",
+        "addressee": "run:m1/s-widget"
+      }
+    },
+    {
+      "name": "fresh_todo",
+      "audience": "everyday",
+      "description": "A to-do just written down: title, its chips with +, the Add Notes line and the composer. Persona can help waits for the steps routes, so stage 2 draws four of the proposal's five things.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5 \"A new to-do shows five things\"",
+        "docs/design/prototypes/todos/v1 iphone/passport",
+        "#10465 (no Persona can help in stage 2)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_passport",
+            "title": "Renew passport",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-18T10:13:00Z",
+            "updated_at": "2026-11-18T10:13:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-20",
+            "view": {
+              "phase": "todo",
+              "section": "todo",
+              "reason": "rest",
+              "rank": 1
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 0,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "chips",
+          "notes",
+          "composer"
+        ],
+        "primary": "tick",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "closed_done_by_persona",
+      "audience": "agents",
+      "description": "Closed by Persona and not seen yet: it says how it ended, its chips have no +, the composer asks about it without reopening it, and the tick (done) is the primary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/proposals/todos-redesign.md 6.3 row 6"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_widget_crash",
+            "title": "Fix widget refresh crash",
+            "notes": "",
+            "done_at": "2026-11-18T08:55:00Z",
+            "created_at": "2026-11-17T16:20:00Z",
+            "updated_at": "2026-11-18T08:55:00Z",
+            "origin": "conv_main",
+            "done_by": "auto",
+            "done_reason": "Merged and live",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-crash",
+                "linked_at": "2026-11-17T16:21:00Z",
+                "title": "Widget crash fix",
+                "cwd": "/home/user/weather-app",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "stage": "verify",
+            "pr_url": "https://github.com/example/weather-app/pull/296",
+            "pr_status": {
+              "url": "https://github.com/example/weather-app/pull/296",
+              "state": "merged",
+              "draft": false,
+              "review": "approved",
+              "checks": "passing",
+              "conflicts": false,
+              "checked_at": "2026-11-18T08:50:00Z"
+            },
+            "stage_kind": "code",
+            "project": "weather-app",
+            "brief": {
+              "id": "brief_crash",
+              "created_at": "2026-11-17T16:20:00Z",
+              "request": {
+                "text": "The home-screen widget crashes when it refreshes; fix it.",
+                "truncated": false,
+                "at": "2026-11-17T16:20:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_crash"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "The home-screen widget refreshes without crashing",
+              "done_when": [
+                "Merged",
+                "Deployed"
+              ],
+              "log": [],
+              "criteria": [
+                "Merged",
+                "Deployed"
+              ],
+              "clock_at": "2026-11-17T16:20:00Z",
+              "due_at": "2026-11-18T16:20:00Z"
+            },
+            "view": {
+              "phase": "done",
+              "section": "just_finished",
+              "reason": "closed_unseen",
+              "line": {
+                "key": "completed",
+                "args": {
+                  "by": "auto"
+                }
+              },
+              "since": "2026-11-18T08:55:00Z",
+              "next_change_at": "2026-11-19T08:55:00Z",
+              "rank": 1
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 1,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "brief",
+          "results",
+          "conversation_block",
+          "work_details",
+          "composer"
+        ],
+        "primary": "tick",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "failed_start_with_origin",
+      "audience": "everyday",
+      "description": "Didn't start, on a to-do the main chat handed out: the to-do's retry ask has its card, whose Retry is the one primary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4",
+        "#10465 (Retry only on a to-do with an origin)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_photos",
+            "title": "Sort last year’s photos",
+            "notes": "",
+            "done_at": "2026-11-18T09:58:00Z",
+            "created_at": "2026-11-18T09:57:00Z",
+            "updated_at": "2026-11-18T09:58:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "brief": {
+              "id": "brief_photos",
+              "created_at": "2026-11-18T09:57:00Z",
+              "request": {
+                "text": "Sort last year’s photos by trip and delete the blurry duplicates.",
+                "truncated": false,
+                "at": "2026-11-18T09:57:00Z",
+                "conversation": "conv_main",
+                "message_id": "feed_photos"
+              },
+              "started_by": "owner",
+              "conversation": "conv_main",
+              "goal": "Last year’s photos grouped by trip, blurry duplicates gone",
+              "done_when": [
+                "Grouped by trip",
+                "Blurry duplicates deleted",
+                "Originals kept"
+              ],
+              "log": [],
+              "criteria": [
+                "Grouped by trip",
+                "Blurry duplicates deleted",
+                "Originals kept"
+              ],
+              "clock_at": "2026-11-18T09:57:00Z",
+              "due_at": "2026-11-19T09:57:00Z"
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "failed_start",
+              "line": {
+                "key": "failed_start",
+                "args": {
+                  "error": "Desk Mac is offline"
+                }
+              },
+              "since": "2026-11-18T09:58:00Z",
+              "next_change_at": "2026-11-20T09:58:00Z",
+              "rank": 2,
+              "asks": [
+                {
+                  "id": "todo:retry@2026-11-18T09:58:00Z",
+                  "kind": "retry",
+                  "home": "todo"
+                }
+              ]
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "ask_card",
+          "chips",
+          "brief",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "failed_start_without_origin",
+      "audience": "everyday",
+      "description": "Didn't start, on a to-do written by hand: the retry route refuses it, so from #10465 the hub lists no retry ask; the state line says why, and with nothing on the page to answer, nothing is filled with the accent.",
+      "source": [
+        "#10465 (Retry only on a to-do with an origin)",
+        "docs/protocol/protocol.md /api/v1/todos/{id}/retry"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_videos",
+            "title": "Rename the holiday videos by date",
+            "notes": "Keep the originals.",
+            "done_at": "2026-11-18T09:40:00Z",
+            "created_at": "2026-11-17T20:00:00Z",
+            "updated_at": "2026-11-18T09:40:00Z",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "failed_start",
+              "line": {
+                "key": "failed_start",
+                "args": {
+                  "error": "Desk Mac is offline"
+                }
+              },
+              "since": "2026-11-18T09:40:00Z",
+              "next_change_at": "2026-11-20T09:40:00Z",
+              "rank": 3
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 0,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "notes",
+          "composer"
+        ],
+        "primary": "none",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "failed_start_without_origin_older_hub",
+      "audience": "everyday",
+      "description": "The same to-do from a hub that lists a retry ask on every failed start (every hub before #10465), and without the timeline's members: the paper leaves out the Retry the hub would refuse, draws no results or conversation, and fills nothing with the accent.",
+      "source": [
+        "#10465 (Retry only on a to-do with an origin; results, recap and rounds only with todo_timeline)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_videos",
+            "title": "Rename the holiday videos by date",
+            "notes": "Keep the originals.",
+            "done_at": "2026-11-18T09:40:00Z",
+            "created_at": "2026-11-17T20:00:00Z",
+            "updated_at": "2026-11-18T09:40:00Z",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "failed_start",
+              "line": {
+                "key": "failed_start",
+                "args": {
+                  "error": "Desk Mac is offline"
+                }
+              },
+              "since": "2026-11-18T09:40:00Z",
+              "next_change_at": "2026-11-20T09:40:00Z",
+              "rank": 3,
+              "asks": [
+                {
+                  "id": "todo:retry@2026-11-18T09:40:00Z",
+                  "kind": "retry",
+                  "home": "todo"
+                }
+              ]
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "notes",
+          "composer"
+        ],
+        "primary": "none",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "failed_start_three_days_on",
+      "audience": "everyday",
+      "description": "Three days after its start failed, and edited since, which keeps the Inactive mark off: a plain To do row with no line, but its page still says why it did not start.",
+      "source": [
+        "spec/fixtures/todo-view/README.md \"Judgement calls\"",
+        "docs/design/proposals/todos-redesign.md 6.3 rows 1, 13, 14"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_photo_book",
+            "title": "Print the holiday photo book",
+            "notes": "",
+            "done_at": "2026-11-15T09:00:00Z",
+            "created_at": "2026-11-15T08:55:00Z",
+            "updated_at": "2026-11-17T12:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "view": {
+              "phase": "todo",
+              "section": "todo",
+              "reason": "rest",
+              "next_change_at": "2026-11-19T12:00:00Z",
+              "rank": 2
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "notes",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "tick",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "just_finished_mark_done",
+      "audience": "everyday",
+      "description": "Finished and not seen (the ask says it is done): Mark Done is the one primary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.5 \"One primary action\"",
+        "docs/design/proposals/todos-redesign.md 6.3 row 9"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_dentist",
+            "title": "Book the dentist",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T18:00:00Z",
+            "updated_at": "2026-11-18T10:06:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "ask": {
+              "outcome": "done",
+              "verdict": "Done",
+              "asked_at": "2026-11-18T10:06:00Z"
+            },
+            "view": {
+              "phase": "ready",
+              "section": "just_finished",
+              "reason": "finished_unseen",
+              "line": {
+                "key": "finished"
+              },
+              "since": "2026-11-18T10:06:00Z",
+              "rank": 0
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 1,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "notes",
+          "results",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "mark_done",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "inactive_todo",
+      "audience": "everyday",
+      "description": "A To do with the Inactive mark has something to say, so its state line shows.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4",
+        "docs/design/proposals/todos-redesign.md 6.3 row 13"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_plumber",
+            "title": "Call the plumber about the boiler",
+            "notes": "Ask about the yearly service too.",
+            "done_at": null,
+            "created_at": "2026-11-14T08:00:00Z",
+            "updated_at": "2026-11-16T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "view": {
+              "phase": "todo",
+              "section": "todo",
+              "reason": "rest",
+              "inactive": "2026-11-16T08:00:00Z",
+              "rank": 0
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "chips",
+          "notes",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "tick",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "nara_step_and_plan_both_ask",
+      "audience": "agents",
+      "description": "A step's run asks, and the to-do's own decision can wait: the page draws the decision's card under the state line and the run's door after it, and the door's Review holds the primary, since the hub lists the run's ask first, as the row shows it.",
+      "source": [
+        "spec/fixtures/todo-view/README.md \"Judgement calls\"",
+        "docs/design/proposals/todos-redesign.md 3.5",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Homes\""
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_sb1",
+            "title": "Plan the Nara day",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Morning",
+              "asked_at": "2026-11-10T09:00:00Z",
+              "question": "Go in the morning or the afternoon?",
+              "options": [
+                {
+                  "label": "Morning",
+                  "leads_to": "The deer park before the crowds, lunch in town"
+                },
+                {
+                  "label": "Afternoon",
+                  "leads_to": "Lunch first, the temples in the late light"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Guide booking",
+                  "text": "Which guide should I book?",
+                  "step": "Book the deer park guide"
+                }
+              },
+              "since": "2026-11-10T11:00:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "step:todo_sb2/run:m1/s-guide@2026-11-10T11:00:00Z",
+                  "kind": "question",
+                  "home": "run",
+                  "text": "Which guide should I book?",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-guide",
+                    "title": "Guide booking"
+                  }
+                },
+                {
+                  "id": "todo:decision@2026-11-10T09:00:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-10T09:00:00Z",
+                  "text": "Go in the morning or the afternoon?",
+                  "recommend": "Morning",
+                  "options": [
+                    {
+                      "label": "Morning",
+                      "leads_to": "The deer park before the crowds, lunch in town"
+                    },
+                    {
+                      "label": "Afternoon",
+                      "leads_to": "Lunch first, the temples in the late light"
+                    }
+                  ],
+                  "can_wait": true
+                }
+              ],
+              "steps": {
+                "done": 0,
+                "total": 1
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "ask_card",
+          "ask_door",
+          "chips",
+          "notes",
+          "steps",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_door",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "nara_pane_on_the_guide_run",
+      "audience": "agents",
+      "description": "The pane shows the step's run that asks: its door shrinks to the pointer and its home in the pane holds the screen's one primary, while the to-do's own card stays on the paper and the pane's composer addresses the run.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Drawn once per screen\"",
+        "spec/fixtures/todo-view/README.md \"Judgement calls\""
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_sb1",
+            "title": "Plan the Nara day",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T08:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Morning",
+              "asked_at": "2026-11-10T09:00:00Z",
+              "question": "Go in the morning or the afternoon?",
+              "options": [
+                {
+                  "label": "Morning",
+                  "leads_to": "The deer park before the crowds, lunch in town"
+                },
+                {
+                  "label": "Afternoon",
+                  "leads_to": "Lunch first, the temples in the late light"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "agent_asks",
+              "line": {
+                "key": "agent_asks",
+                "args": {
+                  "run": "Guide booking",
+                  "text": "Which guide should I book?",
+                  "step": "Book the deer park guide"
+                }
+              },
+              "since": "2026-11-10T11:00:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "step:todo_sb2/run:m1/s-guide@2026-11-10T11:00:00Z",
+                  "kind": "question",
+                  "home": "run",
+                  "text": "Which guide should I book?",
+                  "run": {
+                    "machine_id": "m1",
+                    "session_id": "s-guide",
+                    "title": "Guide booking"
+                  }
+                },
+                {
+                  "id": "todo:decision@2026-11-10T09:00:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-10T09:00:00Z",
+                  "text": "Go in the morning or the afternoon?",
+                  "recommend": "Morning",
+                  "options": [
+                    {
+                      "label": "Morning",
+                      "leads_to": "The deer park before the crowds, lunch in town"
+                    },
+                    {
+                      "label": "Afternoon",
+                      "leads_to": "Lunch first, the temples in the late light"
+                    }
+                  ],
+                  "can_wait": true
+                }
+              ],
+              "steps": {
+                "done": 0,
+                "total": 1
+              }
+            }
+          }
+        },
+        "context": {
+          "wide": true,
+          "pane_open": true,
+          "pane_channel": "run:m1/s-guide",
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "ask_card",
+          "ask_pointer",
+          "chips",
+          "notes",
+          "steps",
+          "conversation_block"
+        ],
+        "primary": "none",
+        "addressee": "run:m1/s-guide"
+      }
+    },
+    {
+      "name": "can_wait_decision",
+      "audience": "everyday",
+      "description": "A decision that can wait for the briefing (Can wait: listed, not counted): the to-do still needs the owner, so its card holds the primary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Can wait\"",
+        "docs/design/proposals/todos-redesign.md 3.5 \"One primary action\""
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_blossom",
+            "title": "Pick the cherry blossom spot",
+            "notes": "Saturday afternoon, six of us.",
+            "done_at": null,
+            "created_at": "2026-11-17T08:00:00Z",
+            "updated_at": "2026-11-18T09:30:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "supervision": {
+              "supervisor": "conv_main",
+              "done_when": [
+                "A picnic spot is chosen"
+              ],
+              "criteria": [],
+              "state": "needs_user",
+              "round": 0,
+              "reviews": [
+                {
+                  "at": "2026-11-18T09:30:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Which spot for the picnic?",
+                  "recommend": "Maruyama Park",
+                  "options": [
+                    {
+                      "label": "Maruyama Park",
+                      "leads_to": "A picnic under the big weeping cherry"
+                    },
+                    {
+                      "label": "Philosopher's Path",
+                      "leads_to": "A walk along the canal, no picnic spot"
+                    }
+                  ],
+                  "deadline": "2026-11-21T09:00:00Z",
+                  "reversible": true
+                }
+              ],
+              "updated_at": "2026-11-18T09:30:00Z"
+            },
+            "project": "home",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Maruyama Park",
+              "asked_at": "2026-11-18T09:30:00Z",
+              "question": "Which spot for the picnic?",
+              "options": [
+                {
+                  "label": "Maruyama Park",
+                  "leads_to": "A picnic under the big weeping cherry"
+                },
+                {
+                  "label": "Philosopher's Path",
+                  "leads_to": "A walk along the canal, no picnic spot"
+                }
+              ],
+              "deadline": "2026-11-21T09:00:00Z",
+              "default": "taken",
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ],
+              "for_briefing": true
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "can_wait",
+              "reason": "can_wait",
+              "line": {
+                "key": "decision_default",
+                "args": {
+                  "text": "Which spot for the picnic?",
+                  "recommend": "Maruyama Park",
+                  "default_at": "2026-11-21T09:00:00Z"
+                }
+              },
+              "since": "2026-11-18T09:30:00Z",
+              "rank": 0,
+              "can_wait": true,
+              "asks": [
+                {
+                  "id": "todo:decision@2026-11-18T09:30:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T09:30:00Z",
+                  "text": "Which spot for the picnic?",
+                  "recommend": "Maruyama Park",
+                  "options": [
+                    {
+                      "label": "Maruyama Park",
+                      "leads_to": "A picnic under the big weeping cherry"
+                    },
+                    {
+                      "label": "Philosopher's Path",
+                      "leads_to": "A walk along the canal, no picnic spot"
+                    }
+                  ],
+                  "can_wait": true,
+                  "default_at": "2026-11-21T09:00:00Z"
+                }
+              ]
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "ask_card",
+          "chips",
+          "notes",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    },
+    {
+      "name": "row_from_an_older_manager",
+      "audience": "everyday",
+      "description": "A row from a manager that does not name todo_view (one of several, or one reconnecting): it has no view, and its item route is not there, so the client draws the to-do's page as it did before the view, as the list files the row.",
+      "source": [
+        "schema/wire/todo-view.schema.json TodoSummary",
+        "#10465 (old hubs fall back to today's screens)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_groceries",
+            "title": "Buy groceries",
+            "notes": "Milk, eggs, miso, tofu",
+            "done_at": null,
+            "created_at": "2026-11-17T19:00:00Z",
+            "updated_at": "2026-11-17T19:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home"
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        }
+      },
+      "expected": {
+        "page": "as_before"
+      }
+    },
+    {
+      "name": "section_from_a_newer_hub",
+      "audience": "everyday",
+      "description": "A view whose section this version does not know: the list files the row as before, and so does the page, which draws as it did before the view.",
+      "source": [
+        "schema/wire/todo-view.schema.json TodoSummary",
+        "#10465 (a section this build does not know)"
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_car_service",
+            "title": "Book the car service",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-16T08:00:00Z",
+            "updated_at": "2026-11-17T08:00:00Z",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "due_date": "2026-11-28",
+            "project": "home",
+            "view": {
+              "phase": "todo",
+              "section": "scheduled",
+              "reason": "rest",
+              "rank": 0
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 0,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "as_before"
+      }
+    },
+    {
+      "name": "unknown_ask_is_skipped",
+      "audience": "everyday",
+      "description": "A newer hub lists an ask of a kind this version cannot answer before the to-do's decision: the page leaves that one out, as it leaves out a Retry the hub would refuse, and draws the decision's card, which holds the primary.",
+      "source": [
+        "schema/wire/todo-view.schema.json OwnerAskKind",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Homes\""
+      ],
+      "input": {
+        "item": {
+          "todo": {
+            "id": "todo_music",
+            "title": "Renew the music school term",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-17T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "home",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Tuesday",
+              "asked_at": "2026-11-18T09:00:00Z",
+              "question": "Which day for the lessons?",
+              "options": [
+                {
+                  "label": "Tuesday"
+                },
+                {
+                  "label": "Thursday"
+                }
+              ],
+              "responses": [
+                "decide_yourself",
+                "not_what_i_asked",
+                "explain_first"
+              ]
+            },
+            "view": {
+              "phase": "needs_you",
+              "section": "needs_you",
+              "reason": "owner_decides",
+              "line": {
+                "key": "decision",
+                "args": {
+                  "text": "Which day for the lessons?",
+                  "recommend": "Tuesday"
+                }
+              },
+              "since": "2026-11-18T09:00:00Z",
+              "rank": 0,
+              "asks": [
+                {
+                  "id": "todo:payment@2026-11-18T08:30:00Z",
+                  "kind": "payment",
+                  "home": "todo",
+                  "round": "2026-11-18T08:30:00Z",
+                  "text": "Pay the winter term"
+                },
+                {
+                  "id": "todo:decision@2026-11-18T09:00:00Z",
+                  "kind": "decision",
+                  "home": "todo",
+                  "round": "2026-11-18T09:00:00Z",
+                  "text": "Which day for the lessons?",
+                  "recommend": "Tuesday",
+                  "options": [
+                    {
+                      "label": "Tuesday"
+                    },
+                    {
+                      "label": "Thursday"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "context": {
+          "wide": false,
+          "pane_open": false,
+          "pane_channel": null,
+          "opened_from": "list"
+        },
+        "timeline": {
+          "rounds": 1,
+          "results": 0,
+          "recap": false
+        }
+      },
+      "expected": {
+        "page": "paper",
+        "elements": [
+          "bar",
+          "title",
+          "state_line",
+          "ask_card",
+          "chips",
+          "notes",
+          "conversation_block",
+          "composer"
+        ],
+        "primary": "ask_card",
+        "addressee": "steward"
+      }
+    }
+  ]
+}

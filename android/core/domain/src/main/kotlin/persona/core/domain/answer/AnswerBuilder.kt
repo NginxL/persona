@@ -166,7 +166,8 @@ internal object KotlinAnswerBuilder {
         }
 
         return when (action) {
-            AnswerAction.ApproveAll, AnswerAction.ApproveEdits, AnswerAction.ApproveStepwise -> resolved(Resolution(approve = true, mode = policy.mode))
+            AnswerAction.ApproveAll, AnswerAction.ApproveEdits, AnswerAction.ApproveStepwise -> resolved(Resolution(
+                approve = true, mode = interaction.recordedPlanThen ?: policy.mode))
             AnswerAction.Reject -> resolved(Resolution(approve = false, feedback =
                 if (context.entry == AnswerEntry.Notification) draft.feedback.trim() else draft.feedback))
             AnswerAction.Allow -> resolved(Resolution(allow = true,

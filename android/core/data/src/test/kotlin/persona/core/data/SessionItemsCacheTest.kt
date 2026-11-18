@@ -280,4 +280,22 @@ class SessionItemsCacheTest {
         db.query("SELECT (SELECT COUNT(*) FROM items) + (SELECT COUNT(*) FROM cursors)").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         db.close()
     }
+
+    /** Version 7 drops Codex coordination items cached as notices; the hub now serves them as tool calls under the same ids. */
+    @Test fun migratingToSevenEmptiesTheCache() {
+        val db = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication()).name(null)
+                .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(6) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE items (scope TEXT, machine TEXT, session TEXT, seq INTEGER, part INTEGER, id TEXT, json TEXT)")
+                        db.execSQL("CREATE TABLE cursors (scope TEXT, machine TEXT, session TEXT)")
+                        db.execSQL("INSERT INTO items VALUES ('s','m','x',1,0,'u','{}')")
+                        db.execSQL("INSERT INTO cursors VALUES ('s','m','x')")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()).writableDatabase
+        ItemsDatabase.MIGRATION_6_7.migrate(db)
+        db.query("SELECT (SELECT COUNT(*) FROM items) + (SELECT COUNT(*) FROM cursors)").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        db.close()
+    }
 }

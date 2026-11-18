@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -109,6 +110,12 @@ func (n *Node) noteModel(id, model, from string) {
 
 // setModel switches a running Claude Code session to model.
 func (n *Node) setModel(ctx context.Context, id, model string) error {
+	if st, ok := n.state.get(id); ok && strings.TrimSpace(model) != "" {
+		// A tier alias on a gateway provider is its model for that tier (#10365); one it names none for is left out as a
+		// start leaves out its --model: `/model default` puts the session back on the provider's default, and no alias
+		// reaches the gateway as a model's name.
+		model = cmp.Or(n.claudeModelArg(st.Launcher, strings.TrimSpace(model)), "default")
+	}
 	cmd, err := modelCommand(model)
 	if err != nil {
 		return err

@@ -20,12 +20,17 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
@@ -39,12 +44,17 @@ import java.io.File
 class ConversationLauncherShotsTest {
     @get:Rule val rule = createComposeRule()
 
+    private val sharedCase = JsonCodec.parseToJsonElement(
+        File(checkNotNull(System.getProperty("persona.repo.root")), "spec/fixtures/assistant-launchers/cases.json").readText(),
+    ).jsonObject.getValue("cases").jsonArray.single().jsonObject
+    private val sharedCandidates = sharedCase.getValue("candidates").jsonArray.map {
+        JsonCodec.decodeFromJsonElement<AgentLauncher>(it)
+    }
+    private val sharedAssistantNames = sharedCase.getValue("assistant").jsonArray.map { it.jsonPrimitive.content }
+
     private val management = object : AssistantManagement {
         override suspend fun config() = AssistantConfig(machineId = "box", launcher = "claude", main = "main")
-        override suspend fun assistantLaunchers(machineId: String) = listOf(
-            AgentLauncher("claude"), AgentLauncher("runtime", model = "默认", agentType = "runtime", assistant = true),
-            AgentLauncher("team-api", agentType = "api", assistant = true),
-        )
+        override suspend fun assistantLaunchers(machineId: String) = sharedCandidates.filter { it.name in sharedAssistantNames }
         override suspend fun launcherModels(machineId: String, launcher: String) = LauncherModels(agent = "claude",
             models = listOf(AgentModel("default", name = "Default", isDefault = true), AgentModel("opus", name = "Opus")))
         override suspend fun warm() = Unit
@@ -104,8 +114,13 @@ class ConversationLauncherShotsTest {
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("Default: claude")).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Default: claude").performClick()
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("Opus")).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(listOf("runtime", "codex-gw", "team-api"), sharedCandidates.map { it.name })
+        assertEquals(sharedAssistantNames, listOf("runtime", "team-api"))
         rule.onNodeWithText("runtime").assertExists()
-        rule.onNodeWithText("team-api").assertExists()
+        rule.onNodeWithText("team-api", substring = true).assertExists()
+        rule.onNodeWithText("codex-gw").assertDoesNotExist()
+        rule.onNodeWithText("默认").assertDoesNotExist()
+        rule.onNodeWithText("runtime · 默认").assertDoesNotExist()
         rule.onNodeWithText("The pick applies from your next message until you change it. Assistant settings stay unchanged.").assertExists()
         val out = File(System.getProperty("persona.shots") ?: "build/conversation-launcher-shots").apply { mkdirs() }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {

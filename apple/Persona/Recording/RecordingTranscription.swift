@@ -22,6 +22,7 @@ final class RecordingTranscription {
     }
 
     nonisolated static func onDevice(_ url: URL, _ locale: Locale) async throws -> [RecordingSentence] {
+        guard #available(iOS 26.0, *) else { throw RecordingSpeechError.needsNewerSystem }
         guard let (engine, resolved) = await RecordingAnalyzerEngine.best(for: locale) else {
             throw RecordingSpeechError.unsupportedLanguage
         }

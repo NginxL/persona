@@ -203,15 +203,16 @@ func TestAssistantCodexCapacity(t *testing.T) {
 // the declared window, else the default until Claude Code reports one (TestAssistantIdleCompactFromWindow).
 func TestAssistantShellLauncherCompaction(t *testing.T) {
 	for _, tt := range []struct {
-		name, rc  string
-		auto, max string // what claude sees, "" for unset
-		idle      int
+		name, rc   string
+		auto, max  string // what claude sees, "" for unset
+		idle       int
+		toolSearch string // ENABLE_TOOL_SEARCH as claude sees it (toolSearchFor, #10365)
 	}{
-		{"declares window and capacity", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000; command claude "$@"; }`, "200000", "1000000", 150000},
-		{"declared 200K backend", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; command claude "$@"; }`, "", "200000", 150000},
-		{"small backend", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=128000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=128000; command claude "$@"; }`, "128000", "128000", 96000},
-		{"declares a 1M window", `function testproxy { export CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000; command claude "$@"; }`, "1000000", "", 750000},
-		{"gateway function declaring nothing", `function testproxy { ( export ANTHROPIC_BASE_URL=http://127.0.0.1:9; command claude --model opus "$@" ) }`, "", "", 150000},
+		{"declares window and capacity", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000; command claude "$@"; }`, "200000", "1000000", 150000, "true"},
+		{"declared 200K backend", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; command claude "$@"; }`, "", "200000", 150000, "true"},
+		{"small backend", `function testproxy { export CLAUDE_CODE_MAX_CONTEXT_TOKENS=128000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=128000; command claude "$@"; }`, "128000", "128000", 96000, "true"},
+		{"declares a 1M window", `function testproxy { export CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000; command claude "$@"; }`, "1000000", "", 750000, "true"},
+		{"gateway function declaring nothing", `function testproxy { ( export ANTHROPIC_BASE_URL=http://127.0.0.1:9; command claude --model opus "$@" ) }`, "", "", 150000, "false"},
 	} {
 		for _, main := range []bool{true, false} {
 			t.Run(tt.name+"/main="+strconv.FormatBool(main), func(t *testing.T) {
@@ -260,10 +261,10 @@ func TestAssistantShellLauncherCompaction(t *testing.T) {
 						t.Fatalf("claude saw %s=%q, want %q (the launcher's own)", k, got, want)
 					}
 				}
-				// Tool search is on, also for a conversation that ran without it (#7317), and never disabled
-				// process-wide: false would load every MCP server's tools up front (#5838).
-				if got := envValue(lines, "ENABLE_TOOL_SEARCH"); got != "true" {
-					t.Fatalf("claude saw ENABLE_TOOL_SEARCH=%q, want \"true\" (never false: #5838)", got)
+				// Tool search on Anthropic's own API, also for a conversation that ran without it (#7317); off behind
+				// a gateway, where true would lift Claude Code's own rule and send deferred tools it may refuse (#10365).
+				if got := envValue(lines, "ENABLE_TOOL_SEARCH"); got != tt.toolSearch {
+					t.Fatalf("claude saw ENABLE_TOOL_SEARCH=%q, want %q", got, tt.toolSearch)
 				}
 			})
 		}

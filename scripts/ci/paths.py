@@ -15,8 +15,8 @@ SERVER_CLIENT_INPUTS = [
 ]
 
 FILTERS = {
-    "server": ["server/**", "sdk/go/**", "sdk/ts/src/**", "schema/**", "spec/**", "integrations/**", "docs/assistant/prompts.md", "docs/protocol/**", "scripts/test/server_test_env.py", "scripts/ci/*server*", "scripts/ci/postgres.py", "scripts/ci/gofmt.py", ".github/workflows/server-test.yml"] + SERVER_CLIENT_INPUTS,
-    "web": ["web/**", "schema/extension/**", "spec/fixtures/injected/**", "spec/fixtures/sync/**", "spec/fixtures/attention/**", "spec/fixtures/chat-search/**", "scripts/mock/inbox_events.json", "scripts/ci/web.sh", ".github/workflows/web-test.yml"],
+    "server": ["server/**", "sdk/go/**", "sdk/ts/src/**", "schema/**", "spec/**", "integrations/**", "docs/assistant/prompts.md", "docs/protocol/**", "scripts/test/server_test_env.py", "scripts/test/go_trimpath.sh", "scripts/ci/*server*", "scripts/ci/postgres.py", "scripts/ci/gofmt.py", ".github/workflows/server-test.yml"] + SERVER_CLIENT_INPUTS,
+    "web": ["web/**", "schema/extension/**", "spec/fixtures/injected/**", "spec/fixtures/sync/**", "spec/fixtures/attention/**", "spec/fixtures/chat-search/**", "spec/fixtures/triage/**", "spec/fixtures/todo-view/**", "scripts/mock/inbox_events.json", "scripts/ci/web.sh", ".github/workflows/web-test.yml"],
     "android": ["android/**", "native/app-core/**", "schema/**", "spec/**", "scripts/app/*android*", "scripts/ci/*android*", ".github/workflows/android-test.yml"],
     "apple": ["apple/**", "native/app-core/**", "schema/**", "spec/**", "scripts/app/sim-boot.sh", "scripts/i18n/**", "scripts/ci/apple*", "scripts/test/isolation-lint*", "scripts/test/isolation-lint/**", "scripts/test/apple_isolation_baseline.json", "scripts/test/test_apple_no_callkit.py", "scripts/release/check_no_callkit.py", ".github/workflows/apple-test.yml"],
     "core": ["native/app-core/**", "spec/fixtures/continuity/**", "android/core/rustcore/src/main/kotlin/**", "apple/Packages/PersonaCore/**", "harmony/entry/src/main/ets/core/rustcore/**", "harmony/entry/src/main/ets/core/PersonaCore.ts",

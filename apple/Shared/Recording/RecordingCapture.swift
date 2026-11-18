@@ -87,15 +87,24 @@ final class RecordingCapture {
     /// The microphone's recent level, 0...1 (the writer's smoothed, perceptual level, read-only), for the live page's meter.
     /// Not observed: a meter reads it from its own clock, many times a second.
     var inputLevel: Double {
-        #if DEBUG
         if writer == nil { return sampleLevel }
-        #endif
         return Double(writer?.level ?? 0)
     }
-    #if DEBUG
-    /// Screenshots and the DEBUG flow (`-showMeetingSample`): the level a recording with no microphone shows.
+    /// The level a recording with no microphone shows: a replayed meeting tape's (`advanceReplay`), and in DEBUG the
+    /// screenshots' and the made-up flow's (`-showMeetingSample`).
     @ObservationIgnored var sampleLevel: Double = 0
-    #endif
+    /// A replayed meeting tape is being "recorded" (#10589, `MeetingReplay`): no microphone, no files, no audio session.
+    /// Its clock and level are the replay's (`advanceReplay`); Pause and Stop work as for a recording.
+    @ObservationIgnored private(set) var replaying = false
+
+    /// A recording with no microphone behind it: a replayed tape, or in DEBUG a made-up one once its clock moved.
+    private var withoutMicrophone: Bool {
+        guard writer == nil, recordingID != nil else { return false }
+        #if DEBUG
+        if sampleElapsed > 0 { return true }
+        #endif
+        return replaying
+    }
     @ObservationIgnored private var input: RecordingInput = .phone
     /// Persona may answer out loud during this recording (#2981: a meeting it takes part in). The phone's microphone
     /// session then also lets a Bluetooth headset play (A2DP is listening only, so the recording keeps its microphone);
@@ -508,12 +517,10 @@ final class RecordingCapture {
     }
 
     func togglePause() {
-        #if DEBUG
-        if writer == nil, recordingID != nil, sampleElapsed > 0 {
+        if withoutMicrophone {
             if state == .recording { state = .paused } else if state == .paused { state = .recording }
             return
         }
-        #endif
         guard let writer else { return }
         if state == .recording {
             interrupted = false
@@ -589,7 +596,7 @@ final class RecordingCapture {
             return
         }
         #if DEBUG
-        if writer == nil, let id = recordingID, sampleElapsed > 0 {
+        if writer == nil, let id = recordingID, sampleElapsed > 0, !replaying {
             let time = sampleElapsed
             RecordingLibrary.shared.change(id) { entry in
                 if let last = entry.marks.last, time - last < 1 { return }
@@ -639,9 +646,7 @@ final class RecordingCapture {
 
     @discardableResult private func finishStop(_ ending: Ending) -> UUID? {
         if state == .starting { cancelStarting(); return nil }
-        #if DEBUG
-        if writer == nil, let id = recordingID, sampleElapsed > 0 { return stopSample(id) }
-        #endif
+        if withoutMicrophone, let id = recordingID { return stopWithoutMicrophone(id) }
         guard let writer, let started = recordingID else {
             if ending != .system, state == .idle { Self.rememberIntent(false) }
             return nil
@@ -1473,7 +1478,7 @@ final class RecordingCapture {
 
     #if DEBUG
     /// Screenshots (`-showMeetingSample`, `-showAllDaySample`): `id` shows as being recorded `elapsed` seconds in, paused
-    /// or paused by a call, as an all-day recording or not, with no microphone (Stop ends it through `stopSample`).
+    /// or paused by a call, as an all-day recording or not, with no microphone (Stop ends it through `stopWithoutMicrophone`).
     func showSample(_ id: UUID, elapsed: Double, paused: Bool = false, interrupted: Bool = false, allDay: Bool = false) {
         recordingID = id; self.elapsed = elapsed; sampleElapsed = elapsed
         self.interrupted = interrupted
@@ -1486,11 +1491,31 @@ final class RecordingCapture {
         guard writer == nil, state != .idle else { return }
         sampleElapsed = elapsed; self.elapsed = elapsed; sampleLevel = level
     }
+    #endif
 
-    /// Stop for a sample recording: what `stop()` does for a real one after the microphone is closed (the entry ends; a
-    /// sample day, which has no recording behind it, just stops; the same callbacks run), so the wrap-up steps advance
-    /// as they would.
-    private func stopSample(_ id: UUID) -> UUID {
+    #if os(iOS)
+    /// A replayed meeting tape begins (#10589, `MeetingReplay`): `id` shows as being recorded from 0, with no microphone.
+    /// Only while nothing records (a meeting, a note or all day): false, and nothing changes, otherwise.
+    func beginReplay(_ id: UUID) -> Bool {
+        guard state == .idle, writer == nil, recordingID == nil, !allDay else { return false }
+        replaying = true
+        recordingID = id; elapsed = 0; sampleElapsed = 0; sampleLevel = 0
+        interrupted = false; notice = nil
+        state = .recording
+        return true
+    }
+
+    /// The replay's clock and meter: where the tape is, and the level to show.
+    func advanceReplay(elapsed: Double, level: Double) {
+        guard replaying, writer == nil, state != .idle else { return }
+        sampleElapsed = elapsed; self.elapsed = elapsed; sampleLevel = level
+    }
+    #endif
+
+    /// Stop for a recording with no microphone (a replayed tape; in DEBUG a made-up one): what `stop()` does for a real
+    /// one after the microphone is closed (the entry ends; a sample day, which has no recording behind it, just stops; the
+    /// same callbacks run), so the wrap-up steps advance as they would.
+    private func stopWithoutMicrophone(_ id: UUID) -> UUID {
         onStopping?(id)
         uplinkListener = nil
         if !allDay {
@@ -1501,10 +1526,10 @@ final class RecordingCapture {
             }
         }
         recordingID = nil; state = .idle; interrupted = false; notice = nil; sampleElapsed = 0; sampleLevel = 0; allDay = false
+        replaying = false
         onSaved?(id)
         return id
     }
-    #endif
 
     /// Chunk length now: an all-day recording's follows the phone link, every other recording's as before.
     private var chunkLength: Double { allDay ? Self.dayChunkLength(reachable: linkReachable) : Self.segmentLength(short: shortSegments) }

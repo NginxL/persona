@@ -164,6 +164,12 @@ Times are UTC (ISO 8601); \`manifest.json\` has the device's offset (\`utc_offse
   - \`foreground\`: one per visible period: its length, requests, bytes, frames, connects, drops, pages and their seconds.
   - \`app\` (recording, visible, hidden), \`page\` (the page in front changed), \`network\` (online / offline), \`socket\`
     (the hub WebSocket connected or dropped), \`request_error\` (the first of each failing route and status in a minute).
+  - \`todo_view\` and \`todo_view_mismatch\`: the hub's view of the to-dos against the web's own sections. The summary
+    counts the rows with a view (\`compared\`): read the same (\`same\`), apart by a decided difference (\`by_design\`, by
+    why), a section or reason of a newer hub's (\`unknown\`), a run whose session the page lacks (\`client_gap\`), a view
+    that time alone changes within 2 minutes (\`boundary\`), a run that moved since the list was read (\`stale_view\`),
+    apart until a run 10 s later still sees it (\`unsettled\`), apart with nothing to explain it (\`mismatch\`), and the
+    runs that failed (\`errors\`). Each mismatch line names the to-do, its manager and both sides' section and reason.
 - \`errors.jsonl\`: the page's error reports (uncaught errors, unhandled rejections, what its boundaries caught, freezes of
   5 s or more), in the hub's error report format, kept here whether or not the hub takes error reports.
 - \`log.txt\`: the page's \`console.error\` and \`console.warn\` lines.

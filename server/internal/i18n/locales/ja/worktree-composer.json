@@ -28,6 +28,7 @@
   "checkout_unverified": "{path} のブランチ {branch} を安全に再利用できるか確認できません：{reason}",
   "checkout_in_use": "ブランチ {branch} は {path} でチェックアウト済みで、Agent {owner} が使用中です",
   "checkout_dirty": "ブランチ {branch} は {path} でチェックアウト済みで、未コミットの変更があります。このワークスペースを明示的に選ぶか、変更を保存してから再試行してください",
+  "path_taken": "チェックアウトパス {path} はすでに存在し、空のディレクトリではありません。Persona は再利用も上書きもしません",
   "dirty": "このワークツリーには未コミットの変更があります",
   "github_unavailable": "一部の GitHub 作成元を読み込めませんでした。Orca の GitHub 接続を確認するか、検索をやり直してください。",
   "workspace_ambiguous": "ワークスペースの識別情報が曖昧です。Orca を更新して再試行してください",

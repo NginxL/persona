@@ -955,7 +955,7 @@ func TestTaskFinishedWhileItsAgentStarts(t *testing.T) {
 	taskCloseIdle = 0
 	t.Cleanup(func() { taskCloseIdle = old })
 	f.setSessions("box", idleAgent(time.Now().Add(-time.Hour)))
-	s.closeDoneTaskAgents(ctx, taskCloseRefused{})
+	s.closeDoneTaskAgents(ctx, taskCloseRefused{}, doneSeen{})
 	if got := f.retires(); len(got) != 1 || got[0] != "s1" {
 		t.Fatalf("the agent that started is not retired: %v", got)
 	}

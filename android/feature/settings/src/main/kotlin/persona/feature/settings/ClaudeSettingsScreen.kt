@@ -26,7 +26,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Settings › Claude Code settings / Codex settings: the common options of each computer's Claude Code or Codex ([kind]), written to
+ * Settings › Claude Code / Codex / Antigravity settings: the common options of each computer's agent ([kind]), written to
  * one or all online machines. [owns] keeps the computers listed (the current assistant's, docs/assistant/managers.md "Clients").
  */
 @Composable

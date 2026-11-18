@@ -561,6 +561,10 @@
       "sf": "safari",
       "phosphor": "globe-simple"
     },
+    "scanCode": {
+      "sf": "qrcode.viewfinder",
+      "phosphor": "qr-code"
+    },
     "screen": {
       "sf": "display",
       "phosphor": "monitor"

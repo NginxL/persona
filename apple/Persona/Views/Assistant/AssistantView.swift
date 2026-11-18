@@ -397,14 +397,13 @@ struct AssistantView: View {
             // Erased here and in `dressedRoot` (#6735): unoptimized, this getter reserved a stack slot for every
             // modifier below, each holding the whole page (375 KB of an iPhone's 1 MB main-thread stack).
             AnyView(dressedRoot)
-            // Full Screen in an agent's sheet (TasksStore.expand): its page pushed here, as from the Agents tab.
+            // A task's card in the conversation, or Full Screen in an agent's sheet (TasksStore.expand): its page pushed
+            // here, a drill-down from the conversation in every layout (#9971). In the Sidebar layout too it is pushed, not
+            // made a root (a root is what the sidebar picks, #8359): it has Back to the conversation, and the sidebar's
+            // selection stays on the conversation.
             .onChange(of: TasksStore.shared.fullAgent, initial: true) { _, key in
                 guard let key else { return }
                 TasksStore.shared.fullAgent = nil
-                #if os(iOS)
-                // The Sidebar layout: an Agent's chat is a root of the page, as its row opens it (#8359).
-                if embedded, let unified { unified.select(.page(AnyHashable(key)), path: navPath); return }
-                #endif
                 navPath.wrappedValue.append(key)
             }
             // On appear too (a cold launch onto Inbox asks before this page exists), but each request once: the root

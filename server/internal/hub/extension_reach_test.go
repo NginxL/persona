@@ -201,6 +201,34 @@ func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
 	}
 }
 
+// The To-dos view's reads (todo_view.go): one to-do goes to its own manager (byTodo), another manager's is refused; the
+// places are asked of the extension's own manager alone (mergedAsk), and naming another is refused.
+func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
+	h, url, a, b := reachHub(t)
+	h.noteTodoOwner("todo-a", assistantwire.AssistantID)
+	h.noteTodoOwner("todo-b", "m-0b0b0b")
+	beforeA, beforeB := len(reached(a)), len(reached(b))
+	if code, out := extDo(t, url, "GET", "/api/v1/todos/todo-a", "", nil); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+		t.Errorf("another manager's to-do: %d %s", code, clip(out, 200))
+	}
+	if code, out := extDo(t, url, "GET", "/api/v1/todos/places", "", map[string]string{ManagerHeader: assistantwire.AssistantID}); code != http.StatusForbidden ||
+		!strings.Contains(out, codeOtherManager) {
+		t.Errorf("another manager's places: %d %s", code, clip(out, 200))
+	}
+	for _, path := range []string{"/api/v1/todos/todo-b", "/api/v1/todos/places"} {
+		if code, out := extDo(t, url, "GET", path, "", nil); code != http.StatusOK {
+			t.Errorf("%s: %d %s", path, code, clip(out, 200))
+		}
+	}
+	if got := reached(a)[beforeA:]; len(got) != 0 {
+		t.Errorf("A was reached: %v", got)
+	}
+	calls := reached(b)[beforeB:]
+	if len(calls) != 2 || !strings.Contains(calls[0], "/api/v1/todos/todo-b") || !strings.Contains(calls[1], "/api/v1/todos/places") {
+		t.Errorf("B got %v", calls)
+	}
+}
+
 // Every route an extension's token can open (extwire.RouteScopes) is bounded to its manager one way or another; a new
 // one has to say how here. "path": its machine, session, card or conversation is in the path (extensionReach);
 // "manager": it goes to the extension's own manager (requestManager, byConversation, byTodo, mergeList), which is held to its
@@ -270,6 +298,7 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/assistant/start-defaults":             "manager",
 		"PUT /api/v1/assistant/start-defaults":             "manager",
 		"GET /api/v1/todos":                                "manager", "GET /api/v1/todos/{id}/decisions": "manager",
+		"GET /api/v1/todos/{id}": "manager", "GET /api/v1/todos/places": "manager", // TestTodoViewRoutesStayOnTheirManager
 		"GET /api/v1/todos/{id}/repositories":                 "manager", // associations stay with the todo's manager
 		"PUT /api/v1/todos/{id}/repositories":                 "manager",
 		"PUT /api/v1/todos/{id}/repositories/{repo_id}/links": "manager",

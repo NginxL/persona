@@ -21,5 +21,6 @@
   "board_remove": "Remove “{title}”",
   "auto_review_title": "Independent review",
   "auto_review_show": "Show report",
-  "auto_review_hide": "Hide report"
+  "auto_review_hide": "Hide report",
+  "use_launcher_instead": "Use {launcher} instead"
 }

@@ -17,10 +17,10 @@ func (n *Node) listedCodexSource(id string, src codexSource, pass *codexListPass
 				n.logf("codex inventory: stat %s: %v", src.thread, err)
 				return src, true
 			}
-			src.path = rolloutPath(src.home, src.thread)
+			src.path = rolloutPathIn(src.home, src.thread, pass)
 		}
 	} else {
-		src.path = rolloutPath(src.home, src.thread)
+		src.path = rolloutPathIn(src.home, src.thread, pass)
 	}
 	if src.path != "" {
 		return src, pass.realPath(filepath.Dir(src.path)) != filepath.Join(src.home, "archived_sessions")

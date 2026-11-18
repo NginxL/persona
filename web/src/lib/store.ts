@@ -1134,6 +1134,8 @@ export function upsertSession(s: Session) {
   const next = i < 0 ? [...list, s] : list.map((x, j) => {
     if (j !== i) return x;
     const merged = { ...x, ...s };
+    // A Persona chat's row leaves the kept messages out once none is left (#10194): not kept from the old row then.
+    if (s.assistant) merged.undelivered = s.undelivered;
     merged.background_working = s.background_working;
     merged.background_waiting = s.background_waiting;
     // An optimistic action can start from getSession's summary fallback. A later complete info response must
@@ -1146,6 +1148,7 @@ export function upsertSession(s: Session) {
       delete merged.background_tasks_count;
       delete merged.workflow_progress;
       merged.background = s.background;
+      merged.background_ended = s.background_ended;
       merged.subagents = s.subagents;
       merged.workflows = s.workflows;
     } else {

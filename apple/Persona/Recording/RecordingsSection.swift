@@ -1208,7 +1208,8 @@ struct RecordingDetailView: View {
     /// meeting's one thread. Only with a hub that lists the meeting conversation.
     @ViewBuilder private func meetingSection(_ entry: RecordingEntry) -> some View {
         let meeting = conversation.meeting(id)
-        let offered = MeetingAttendees.conversation(model)
+        // Never the replayed meeting (`ReplayedMeeting`, #10589): no hub has its conversation.
+        let offered = MeetingAttendees.conversation(model) && !ReplayedMeeting.holds(entry.id)
         let showsPrivate = entry.isMeeting && !notMeeting
         let showsThread = !fromMeetingPage && MeetingTalk.offered(entry, conversation: offered, minutes: minutes.ready != nil, meeting: meeting,
                                               text: hasText, expired: sync.isExpired(entry))

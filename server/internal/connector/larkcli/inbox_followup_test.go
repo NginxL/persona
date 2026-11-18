@@ -30,6 +30,9 @@ func TestInboxPollFollowupAfterOwnReply(t *testing.T) {
 			followup := request
 			followup.MessageID, followup.MessagePosition = "om_a_followup", "12"
 			followup.Content = json.RawMessage(`"Still need help"`)
+			earlier := request // the chat's background, an hour before
+			earlier.MessageID, earlier.MessagePosition, earlier.CreateTime = "om_b_earlier", "5", "2029-12-31T23:00:00Z"
+			earlier.Content = json.RawMessage(`"Earlier question"`)
 			for _, onlyRequest := range []bool{false, true} {
 				name := "all_search_results"
 				search := []adapter.Message{followup, reply, request}
@@ -37,7 +40,7 @@ func TestInboxPollFollowupAfterOwnReply(t *testing.T) {
 					name, search = "only_request_is_indexed", []adapter.Message{request}
 				}
 				t.Run(name, func(t *testing.T) {
-					history := []adapter.Message{followup, reply, request}
+					history := []adapter.Message{followup, reply, request, earlier}
 					for i := range history {
 						history[i].ChatType = "" // Chat reads omit the type supplied by search.
 					}
@@ -55,6 +58,12 @@ func TestInboxPollFollowupAfterOwnReply(t *testing.T) {
 					}
 					if topic == "" && got.Kind != "dm" {
 						t.Fatalf("history lost direct chat metadata: %+v", got)
+					}
+					// The new messages start at the request, the follow-up only search did not index among them, after
+					// the earlier message as background.
+					if want := contextText(history[3:], "ou_example_user") + "\n" + markNew + "\n" +
+						contextText([]adapter.Message{history[2], history[1], history[0]}, "ou_example_user"); got.Context != want {
+						t.Fatalf("context:\n%s\nwant\n%s", got.Context, want)
 					}
 					if moved, err := c.Poll(context.Background()); err != nil || moved {
 						t.Fatalf("unchanged poll duplicated the item: moved=%v err=%v", moved, err)

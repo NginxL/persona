@@ -240,9 +240,12 @@ data class AssistantLaunchers(
     val unavailable: List<UnavailableLauncher> = emptyList(),
 )
 
-/** The model a launcher names, short. Older nodes used the Chinese display placeholder for no model. */
-fun launcherModel(launcher: AgentLauncher): String? = launcher.model
-    ?.takeUnless { it == "默认" } // i18n-ignore: legacy wire value, never displayed
+/** The explicit model a launcher names. Older nodes used the Chinese display placeholder for no model. */
+fun launcherExplicitModel(launcher: AgentLauncher): String? = launcher.model
+    ?.takeUnless { it.isBlank() || it == "默认" } // i18n-ignore: legacy wire value, never displayed
+
+/** The model a launcher names, short. */
+fun launcherModel(launcher: AgentLauncher): String? = launcherExplicitModel(launcher)
     ?.substringAfterLast('/')
     ?.takeIf(String::isNotBlank)
 

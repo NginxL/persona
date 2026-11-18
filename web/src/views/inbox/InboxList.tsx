@@ -43,6 +43,7 @@ import { folderCrumbs, UNFILED } from "../../lib/inbox-folders";
 import { AgentWorking, Chip, Count, DraftCard, Glyph, ItemAvatar, Spark, StatusMenu, Tag, type GlyphName } from "./InboxParts";
 import { CheckMark } from "../settings/ProviderFields";
 import { InboxBar } from "./InboxBar";
+import { groupClear, type GroupClear } from "./group-clear";
 import { OfflineState, useShownOffline } from "../ManagerParts";
 
 function useStored(key: string): [string, (v: string) => void] {
@@ -597,12 +598,12 @@ export function InboxList({ selected, routed, picked = null, onPicked, listBesid
           );
           const openRow = (it: InboxItem) => row(it);
           const doneRow = (it: InboxItem) => row(it, true);
-          const groupOf = (section: string, g: { key: string; title: string; items: InboxItem[] }, body: React.ReactNode, opts: { more?: boolean; pickable?: boolean; count?: number } = {}) => {
+          const groupOf = (section: string, g: { key: string; title: string; items: InboxItem[] }, body: React.ReactNode, opts: { more?: boolean; pickable?: boolean; count?: number; clear?: GroupClear } = {}) => {
             const id = `${group}|${section}|${g.key}`;
             const n = picking && opts.pickable ? g.items.filter((it) => picked.has(itemKey(it))).length : 0;
             return (
               <Group key={id} id={id} title={g.title} count={opts.count ?? g.items.length} more={opts.more} open={groupOpen(group, section, g.key)} onToggle={(open) => putGroupFold(id, open)}
-                pick={picking && opts.pickable ? { state: n === 0 ? "none" : n === g.items.length ? "all" : "some", picked: n, run: () => pickGroup(g.items) } : undefined}>
+                pick={picking && opts.pickable ? { state: n === 0 ? "none" : n === g.items.length ? "all" : "some", picked: n, run: () => pickGroup(g.items) } : undefined} clear={picking ? undefined : opts.clear}>
                 {body}
               </Group>
             );
@@ -621,7 +622,7 @@ export function InboxList({ selected, routed, picked = null, onPicked, listBesid
                     {titled ? (
                       <>
                         {waiting.length > 0 && groupOf(tier.key, { key: "agents", title: t("lib-inbox-groups.group_agents"), items: [] }, agentRows, { count: waiting.length })}
-                        {groups.map((g) => groupOf(tier.key, g, <Rows items={g.items} row={openRow} keep={isSelected} all={view.restored} />, { pickable: true }))}
+                        {groups.map((g) => groupOf(tier.key, g, <Rows items={g.items} row={openRow} keep={isSelected} all={view.restored} />, { pickable: true, clear: groupClear(tier.key, tier.title, g, list, filtered ? bulkScopeName(filterNames, query) : undefined) }))}
                       </>
                     ) : (
                       <>
@@ -796,7 +797,7 @@ function GroupTick({ state }: { state: "none" | "some" | "all" }) {
  * A group inside a section (#2059): its title sticks to the top while its rows scroll by, and folds it to the title and
  * count. Selecting, its tick picks or unpicks all of it, folded or not; "n selected" says what is picked in it.
  */
-function Group({ id, title, count, more, open, onToggle, pick, children }: { id: string; title: string; count: number; more?: boolean; open: boolean; onToggle: (open: boolean) => void; pick?: { state: "none" | "some" | "all"; picked: number; run: () => void }; children: React.ReactNode }) {
+function Group({ id, title, count, more, open, onToggle, pick, clear, children }: { id: string; title: string; count: number; more?: boolean; open: boolean; onToggle: (open: boolean) => void; pick?: { state: "none" | "some" | "all"; picked: number; run: () => void }; /** FYI's / Collapsed's pull-down for the group or the whole section (#10422). */ clear?: GroupClear; children: React.ReactNode }) {
   return (
     <div data-group={id}>
       <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1.5 bg-canvas/95 px-2 pt-2 pb-0.5 backdrop-blur-sm">
@@ -812,6 +813,7 @@ function Group({ id, title, count, more, open, onToggle, pick, children }: { id:
           <span className="shrink-0 text-ink-3 tabular-nums">{more ? `${count}+` : count}</span>
         </button>
         {pick && pick.picked > 0 && <span className="shrink-0 text-[11px] text-accent-ink tabular-nums">{t("inbox-inboxlist.group_picked", { count: pick.picked })}</span>}
+        {clear && <GroupClearMenu clear={clear} />}
       </div>
       {/* the same 2px of room as the section's (#2703), so a selected card's ring isn't cut inside a group; the header's
           bottom padding gives up those 2px to keep its 4px */}
@@ -819,6 +821,26 @@ function Group({ id, title, count, more, open, onToggle, pick, children }: { id:
         <div inert={!open} className="flex flex-col gap-1.5 pb-1">{children}</div>
       </Collapse>
     </div>
+  );
+}
+
+/**
+ * A group title's "Mark all seen ⌄" (#10422): the group's items or the whole section's, each filed at once with Undo on
+ * the toast, as the section's own button. With a filter, a folder or a search on, each choice says what "all" covers.
+ */
+function GroupClearMenu({ clear }: { clear: GroupClear }) {
+  const menu = useMenu();
+  return (
+    <>
+      <button type="button" onClick={menu.open} aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} data-group-clear className="touch-hit inline-flex h-6 shrink-0 items-center gap-0.5 rounded-[6px] px-1.5 text-submeta whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink">
+        {clear.label}
+        <Icon name="chevron" size={10} stroke={2.4} />
+      </button>
+      {menu.anchor && (
+        <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={288}
+          items={clear.choices.map((c) => ({ key: c.key, label: c.label, detail: clear.scope, onSelect: () => void setAllDone(c.items, true) }))} />
+      )}
+    </>
   );
 }
 

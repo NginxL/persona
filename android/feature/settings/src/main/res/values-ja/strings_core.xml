@@ -323,6 +323,8 @@
     <string name="settings_row_claude_subtitle">お使いのコンピューターのよく使うオプションをまとめて変更</string>
     <string name="settings_row_codex">Codexの設定</string>
     <string name="settings_row_codex_subtitle">お使いのコンピューターのCodexのよく使うオプションをまとめて変更</string>
+    <string name="settings_row_agy">Antigravityの設定</string>
+    <string name="settings_row_agy_subtitle">お使いのコンピューターのAntigravityのよく使うオプションをまとめて変更</string>
     <string name="settings_section_connectors">コネクタ</string>
     <string name="settings_row_phone_subtitle">連絡先、カレンダー、写真、位置情報、クリップボード</string>
     <string name="settings_row_mail">メール</string>

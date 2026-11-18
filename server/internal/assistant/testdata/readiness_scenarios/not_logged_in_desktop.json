@@ -36,7 +36,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "Claude Code CLI isn't signed in"
+        "title": "Model not connected: claude isn't signed in"
       },
       {
         "action": {
@@ -100,7 +100,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "Claude Code CLI にログインしていません"
+        "title": "claudeにログインしてください"
       },
       {
         "action": {
@@ -164,7 +164,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "Claude Code 命令行还没登录"
+        "title": "模型没接好：claude 没登录"
       },
       {
         "action": {

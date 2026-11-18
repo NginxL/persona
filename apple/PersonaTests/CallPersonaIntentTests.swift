@@ -8,15 +8,23 @@ import Testing
 struct CallPersonaIntentTests {
     /// The call's Start needs the app in front, so Call Persona opens it before it runs.
     @Test func callPersonaOpensTheApp() {
-        #expect(CallPersonaIntent.supportedModes == .foreground(.immediate))
+        if #available(iOS 26.0, *) {
+            #expect(CallPersonaIntent.supportedModes == .foreground(.immediate))
+        } else {
+            #expect(CallPersonaIntent.openAppWhenRun)
+        }
     }
 
     /// The car's conversation still starts in the background (the phone may stay locked in the car); only the phone's
     /// call comes to the front.
     @Test func talkToPersonaStaysInTheBackgroundUntilItCalls() {
-        #expect(TalkToPersonaIntent.supportedModes.contains(.background))
-        #expect(TalkToPersonaIntent.supportedModes.contains(.foreground(.dynamic)))
-        #expect(!TalkToPersonaIntent.supportedModes.contains(.foreground(.immediate)))
+        if #available(iOS 26.0, *) {
+            #expect(TalkToPersonaIntent.supportedModes.contains(.background))
+            #expect(TalkToPersonaIntent.supportedModes.contains(.foreground(.dynamic)))
+            #expect(!TalkToPersonaIntent.supportedModes.contains(.foreground(.immediate)))
+        } else {
+            #expect(!TalkToPersonaIntent.openAppWhenRun)
+        }
     }
 
     /// Apple allows ten App Shortcuts; more and the build's App Intents metadata is refused.

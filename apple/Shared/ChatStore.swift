@@ -1534,8 +1534,10 @@ nonisolated enum ChatCache {
     /// v18: Codex commentary is assistant text rather than thinking; older cached items would keep hiding mid-turn answers.
     /// v19: Paseo's input to an agent is another session's message, a subagent's task note or a notice (#8220); v18's
     /// copies would keep the raw <paseo-system> envelopes as the user's bubbles.
+    /// v20: Codex sleeps, subagent activity and subagent waits are tool calls, not notices (#10436); v19's copies would
+    /// keep the notice under the call's id.
     /// Bump it whenever the item structure or the text the hub gives an item changes.
-    static let folder = "chats-v19"
+    static let folder = "chats-v20"
 
     /// Once per launch, before the first copy is read or written (a static let runs once, on whichever thread asks first).
     private static let dropOlder: Void = {

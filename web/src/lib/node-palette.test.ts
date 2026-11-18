@@ -154,9 +154,16 @@ describe("the node the user is on", () => {
     const session = { machine_id: "m1", session_id: "s1", cwd: "/home/me/proj", title: "t", status: "idle", space_kind: "herdr", space_id: "w1", space_name: "proj", pane_id: "w1:p1" };
     const state = getState();
     state.sessions = { m1: [session as never] };
-    const where = nodesFor({ route: { name: "session", mid: "m1", sid: "s1" }, pane: { mid: "m1", sid: "s1" } });
+    const ctx = { route: { name: "session" as const, mid: "m1", sid: "s1" }, pane: { mid: "m1", sid: "s1" } };
+    const where = nodesFor(ctx);
     expect(where.find((w) => w.node.kind === "workspace")?.node.canWorktree).toBe(true);
     // the agent's pane under its title, its space under its name
     expect(where.map((w) => w.section)).toEqual(["窗格 · t", "空间 · proj"]);
+    const ids = nodeCommands(ctx).filter((c) => c.section === "窗格 · t").map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining([
+      "node:pane:w1:p1:node-split:node-split-right",
+      "node:pane:w1:p1:node-close-pane",
+      "node:pane:w1:p1:node-copy-id",
+    ]));
   });
 });

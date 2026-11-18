@@ -23,9 +23,9 @@ var testLimits = Limits{
 	Tick:         10 * time.Millisecond,
 }
 
-// phone is the phone's end of a session as the released app keeps it: per channel, an ordered receiver that trims
-// copies and rejects gaps, and a video message assembler that every reset starts over. Complete messages received in
-// order are in got; failures are kept for a test to inspect.
+// phone is the phone's end of a session as the app keeps it: per channel, an ordered receiver that trims copies and
+// rejects gaps, and a video message assembler that a reset ahead of the receiver starts over. Complete messages
+// received in order are in got; failures are kept for a test to inspect.
 type phone struct {
 	t   *testing.T
 	ack bool // acknowledge what arrives
@@ -210,21 +210,18 @@ func (p *phone) finishIfClosedLocked(id byte) {
 	}
 }
 
-// reset is the released app's handling on either TCP or UDP: the receiver only moves forward, but the assembler is
-// reset on every reset, even one at or behind its offset. It does not re-check closeAt; only close and data do that.
+// reset is the app's handling on either TCP or UDP: a reset ahead of the receiver moves it and starts the assembler
+// over; one at or behind it, a late copy from a route the channel left, changes neither (#10005). It does not re-check
+// closeAt; only close and data do that.
 func (p *phone) reset(id byte, off uint64) uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.resets++
-	if off > p.recv[id] {
-		p.recv[id] = off
+	if off <= p.recv[id] {
+		return p.recv[id]
 	}
-	if id >= FirstVideo {
-		parser := p.parsers[id]
-		if parser == nil {
-			parser = &phoneVideoParser{}
-			p.parsers[id] = parser
-		}
+	p.recv[id] = off
+	if parser := p.parsers[id]; parser != nil {
 		parser.reset()
 	}
 	return p.recv[id]

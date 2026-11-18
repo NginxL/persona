@@ -21,5 +21,6 @@
   "board_remove": "移除「{title}」",
   "auto_review_title": "独立评审",
   "auto_review_show": "展开报告",
-  "auto_review_hide": "收起报告"
+  "auto_review_hide": "收起报告",
+  "use_launcher_instead": "改用 {launcher}"
 }

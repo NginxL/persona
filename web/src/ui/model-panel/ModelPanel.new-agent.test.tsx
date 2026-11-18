@@ -128,7 +128,7 @@ describe("the model panel for a new Agent", () => {
   it("a preset is picked through onPreset, with no star or Customize, and its setup goes into Recent", async () => {
     const { onPreset, onPick } = await open();
     const preset = row("review", "预设");
-    expect(preset.textContent).toContain("Code review");
+    expect(preset.textContent).toContain("Claude · Code review");
     expect(preset.querySelector('button[aria-label="收藏"], [data-row-customize]')).toBeNull();
     act(() => preset.click());
     await flush();

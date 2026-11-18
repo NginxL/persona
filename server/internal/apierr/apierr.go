@@ -252,6 +252,10 @@ var rpcFailureKeys = map[string]string{
 	// a start's new tab stopped on its shell (node/shellsettle.go, #2570)
 	proto.CodeShellWaiting:               "rpc-errors.shell_waiting",
 	proto.CodeStartLineRejected:          "rpc-errors.start_line_rejected",
+	"start_tab_gone":                     "rpc-errors.start_tab_gone", // the app's answer to its question (node/startcontinue.go, #10365)
+	"start_not_waiting":                  "rpc-errors.start_not_waiting",
+	"choice_not_offered":                 "rpc-errors.choice_not_offered",
+	proto.CodeSecretEnvGone:              "rpc-errors.secret_env_gone", // a hand-off's values went with the start that took them
 	"node_outdated":                      "rpc-errors.node_outdated",
 	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
@@ -431,16 +435,49 @@ func OnMachine(err error, name string) error {
 
 // explain makes body say code's refusal in plain words in l (none: the default language): error is the sentence for
 // people, detail what the caller wrote (the shell's own words: only for the "Details"), action what to do unless the caller
-// said. The caller's data may name the machine (machine_name, OnMachine; else the text says "this computer"), the launcher,
-// and where it failed (Sentence).
+// said (Action), summary a short line for a row when there is one (Summary). The caller's data may name the machine
+// (machine_name, OnMachine; else the text says "this computer"), the launcher, and where it failed (Sentence).
 func explain(body map[string]any, code, message string, l i18n.Lang) {
 	body["error"] = Sentence(l, code, body)
 	if d, _ := body["detail"].(string); d == "" {
 		body["detail"] = message
 	}
 	if a, _ := body["action"].(string); a == "" {
-		body["action"] = codeActions[code]
+		body["action"] = Action(code, body)
 	}
+	if s := Summary(l, code, body); s != "" {
+		body["summary"] = s
+	}
+}
+
+// ActionSwitchLauncher: start with another launcher of the same computer (a task's "Use <launcher> instead", the
+// launcher picker), for a launcher the new terminal tab could not run (#10365).
+const ActionSwitchLauncher = "switch_launcher"
+
+// Action is what a client offers to fix code's refusal (codeActions), by its data: a launcher the new terminal tab
+// could not run (launcher_missing, where "terminal") is the terminal's, not a model to connect: the way out is another
+// launcher of that computer (switch_launcher), as Persona-managed launchers are already connected providers (#10365).
+func Action(code string, data map[string]any) string {
+	if where, _ := data["where"].(string); code == proto.CodeLauncherMissing && where == "terminal" {
+		return ActionSwitchLauncher
+	}
+	return codeActions[code]
+}
+
+// Summary is code's refusal in a short line in l, for a list row whose details carry Sentence; "" when it has none:
+// a launcher the new terminal tab could not run, naming it and the computer (machine_name, else "this computer").
+func Summary(l i18n.Lang, code string, data map[string]any) string {
+	where, _ := data["where"].(string)
+	if code != proto.CodeLauncherMissing || where != "terminal" {
+		return ""
+	}
+	machine, _ := data["machine_name"].(string)
+	launcher, _ := data["launcher"].(string)
+	key := "apierr-apierr.launcher_missing_terminal_short"
+	if machine == "" {
+		key += "_here"
+	}
+	return i18n.T(l, key, i18n.Args{"machine": machine, "launcher": launcher})
 }
 
 // Sentence is the plain words in l of code, one of the refusals the hub words itself ("" for any other): a start refused

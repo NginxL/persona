@@ -3,12 +3,12 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/nwverse/persona/server/internal/compat"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -275,6 +275,7 @@ func ixToolName(ix proto.Interaction) string {
 // toolDisplayName is a tool's name for a sentence: an MCP tool as "Persona · mail send" (Persona's own server keeps
 // its old id persona, which allow lists and hooks match), others as written.
 func toolDisplayName(name string) string {
+	name = compat.CanonicalMCPToolName(name)
 	rest, ok := strings.CutPrefix(name, "mcp__")
 	if !ok {
 		return name

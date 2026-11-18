@@ -205,7 +205,7 @@ private struct ShellMovingBar: View {
     let pager: ShellPager
 
     var body: some View {
-        if let railEdge, pager.moving || pager.lingering {
+        if let railEdge, pager.standsIn(rail: true) {
             movingRail(railEdge)
         } else if pager.moving || pager.lingering {
             let p = Double(min(CGFloat(pager.pageCount - 1), max(0, pager.position)))

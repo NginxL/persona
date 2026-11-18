@@ -18,6 +18,8 @@ export interface DetailPoint {
   rx?: number;
   tx?: number;
   disk?: number;
+  battery_percent?: number;
+  temp_c?: number;
   gap?: boolean;
 }
 
@@ -35,6 +37,9 @@ export interface DetailSample {
   net_tx?: number;
   disk_used?: number;
   disk_total?: number;
+  battery_percent?: number;
+  battery_charging?: boolean;
+  temp_c?: number;
 }
 
 /** Machine.system (docs/server/machines.md "System information"). */
@@ -119,6 +124,10 @@ export function isEmpty(points: DetailPoint[]): boolean {
 /** A percent of the memory total; undefined without either. */
 export function memPercent(used: number | undefined, total: number | undefined): number | undefined {
   return used !== undefined && total ? (100 * used) / total : undefined;
+}
+
+export function temperature(v: number | undefined): string {
+  return v !== undefined && Number.isFinite(v) ? `${v.toFixed(1)}°C` : "—";
 }
 
 // ── scales and ticks ──

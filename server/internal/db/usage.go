@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // ---- token usage by machine (docs/server/machines.md "Token usage") ----
@@ -27,28 +28,69 @@ const putUsageSQL = `INSERT INTO machine_usage (machine_id, ts, step, model, lau
 	ON CONFLICT (machine_id, ts, step, model, launcher, agent) DO UPDATE SET input = $6, cache_write = $7,
 		cache_read = $8, output = $9, requests = $10`
 
+const addUsageSQL = `INSERT INTO machine_usage AS u (machine_id, ts, step, model, launcher, agent, input, cache_write,
+cache_read, output, requests) VALUES ($1, to_timestamp($2), 60, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (machine_id, ts, step, model, launcher, agent) DO UPDATE SET input = u.input + excluded.input,
+cache_write = u.cache_write + excluded.cache_write, cache_read = u.cache_read + excluded.cache_read,
+output = u.output + excluded.output, requests = u.requests + excluded.requests`
+
+// AddUsage stores usage that has no local record to reconstruct on reconnect.
+func (d *DB) AddUsage(ctx context.Context, machine string, buckets []proto.UsageBucket) error {
+	rejected, err := d.PutUsages(ctx, []UsageWrite{{Machine: machine, Buckets: buckets, Add: true}})
+	if err == nil && len(rejected) > 0 {
+		return rejected[0]
+	}
+	return err
+}
+
+// RecentRuntimeUsage restores the minute buckets the nodes cannot reconstruct.
+func (d *DB) RecentRuntimeUsage(ctx context.Context, from time.Time) (map[string][]proto.UsageBucket, error) {
+	rows, err := d.pool.Query(ctx, `SELECT machine_id, extract(epoch FROM ts)::bigint, model, launcher, agent,
+		input, cache_write, cache_read, output, requests FROM machine_usage
+		WHERE step = 60 AND ts >= $1 AND agent <> ALL($2)`, from, append(tokenuse.FileAgents(), ""))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]proto.UsageBucket)
+	for rows.Next() {
+		var machine string
+		var b proto.UsageBucket
+		if err := rows.Scan(&machine, &b.Minute, &b.Model, &b.Launcher, &b.Agent, &b.Input, &b.CacheWrite, &b.CacheRead, &b.Output, &b.Requests); err != nil {
+			return nil, err
+		}
+		out[machine] = append(out[machine], b)
+	}
+	return out, rows.Err()
+}
+
 // UsageWrite is one node's "usage" notification to store (PutUsage's arguments).
 type UsageWrite struct {
 	Machine     string
 	Buckets     []proto.UsageBucket
 	ReplaceFrom time.Time
+	Add         bool // runtime-only deltas, never reconstructed by a file scan
 }
 
 func queueUsage(b *pgx.Batch, w UsageWrite) {
 	if !w.ReplaceFrom.IsZero() {
-		b.Queue(`DELETE FROM machine_usage WHERE machine_id = $1 AND step = 60 AND ts >= to_timestamp($2)`,
-			w.Machine, w.ReplaceFrom.Unix())
+		b.Queue(`DELETE FROM machine_usage WHERE machine_id = $1 AND step = 60 AND ts >= to_timestamp($2) AND agent = ANY($3)`,
+			w.Machine, w.ReplaceFrom.Unix(), append(tokenuse.FileAgents(), ""))
+	}
+	sql := putUsageSQL
+	if w.Add {
+		sql = addUsageSQL
 	}
 	for _, x := range w.Buckets {
-		b.Queue(putUsageSQL, w.Machine, x.Minute, x.Model, x.Launcher, x.Agent, x.Input, x.CacheWrite, x.CacheRead, x.Output,
+		b.Queue(sql, w.Machine, x.Minute, x.Model, x.Launcher, x.Agent, x.Input, x.CacheWrite, x.CacheRead, x.Output,
 			x.Requests)
 	}
 }
 
 // PutUsage stores a node's buckets: a bucket is its minute's whole total, so it replaces what was there. With
-// replaceFrom set (the node's whole window, "full"), the machine's minute rows from then on that it did not send
-// are deleted first: what the node counts now is the record (an older node's rows without a launcher, a reply it no
-// longer counts twice).
+// replaceFrom set (the node's whole window, "full"), only the file-metered agents' minute rows and legacy
+// unknown-agent rows from then on are deleted first. Runtime-only agents survive; file records replace older
+// attribution and duplicate counting.
 func (d *DB) PutUsage(ctx context.Context, machine string, buckets []proto.UsageBucket, replaceFrom time.Time) error {
 	_, err := d.PutUsages(ctx, []UsageWrite{{Machine: machine, Buckets: buckets, ReplaceFrom: replaceFrom}})
 	return err

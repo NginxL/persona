@@ -137,6 +137,35 @@ func TestArchiveAndCloseKeepsArchiveWhenTheCloseFails(t *testing.T) {
 	})
 }
 
+func TestArchiveAndCloseUsesRuntimeCloseCapability(t *testing.T) {
+	closeAllowed := true
+	ft, row := closeTestService(t, func(s *proto.Session) {
+		s.SessionID, s.Agent, s.PaneID = "agy-session", "agy", ""
+		s.SourceKind = proto.SourceRuntime
+		s.Capabilities = &proto.SessionCapabilities{Close: &closeAllowed}
+	})
+	ft.f.mu.Lock()
+	ft.f.retireErr = &rpc.Error{Code: "not_retirable", Message: "this session belongs to another tool"}
+	ft.f.mu.Unlock()
+	var closed []string
+	ft.f.answerNode("session.close", func(_ string, raw json.RawMessage) (any, error) {
+		var params map[string]string
+		_ = json.Unmarshal(raw, &params)
+		closed = append(closed, params["session_id"])
+		return map[string]any{"ok": true}, nil
+	})
+	res, err := ft.s.archiveAndCloseAgentSession(context.Background(), "mac", row.SessionID)
+	if err != nil || !res.Closed || res.Outcome != archiveCloseClosed {
+		t.Fatalf("runtime close: %+v %v", res, err)
+	}
+	if len(closed) != 1 || closed[0] != row.SessionID || len(retiredOf(ft)) != 0 {
+		t.Fatalf("close calls %v, retire calls %v", closed, retiredOf(ft))
+	}
+	if !archivedIDs(t, ft.s)[row.SessionID] {
+		t.Fatal("runtime session not archived")
+	}
+}
+
 func TestArchiveAndCloseOfflineAgentOnlyArchives(t *testing.T) {
 	ft, row := closeTestService(t, func(s *proto.Session) {
 		s.Status, s.State, s.PaneID = proto.StatusOffline, proto.StateOffline, ""

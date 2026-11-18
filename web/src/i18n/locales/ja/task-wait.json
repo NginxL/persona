@@ -16,7 +16,6 @@
   "parked_age": "{age}保留中",
   "last_contact": "最後の依頼者：{sender} · {time} · {channel}",
   "contact_unknown": "送信済みの依頼の記録なし",
-  "no_person_request": "相手への問い合わせの記録なし",
   "wake": "待っている変化：{wake}",
   "wake_unknown": "再開条件の記録なし",
   "source": "参照元 {number}",

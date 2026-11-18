@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -145,8 +144,13 @@ func TestSendReceiptOverHTTPAndWebSocket(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.CommandContext(ctx, binary, "-test.run=^TestSendSocketNodeProcess$", "-test.timeout=5m")
 	cmd.Env = append(os.Environ(), "PERSONA_SEND_SOCKET_DIR="+dir)
-	_, file, _, _ := runtime.Caller(0)
-	cmd.Dir = filepath.Join(filepath.Dir(file), "..", "node") // fake screen fixtures, relative to this checkout
+	// The node's fake screen fixtures, next to this package. go test runs in the package directory; runtime.Caller's
+	// file is module-relative under -trimpath (#10614).
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Dir = filepath.Join(wd, "..", "node")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

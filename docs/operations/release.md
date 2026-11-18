@@ -59,14 +59,22 @@ What `release.sh` does:
    with the watch App embedded.
 3. `check_bundle_strings.py` checks `Persona.app` and `Persona.app/Watch/Persona.app`: `*UsageDescription` in Info.plist
    must not be empty or equal to the key, and the same for `*.lproj/InfoPlist.strings` (placeholder text gets auto-rejected by App Review).
-4. `strings` checks that the Release binary contains none of the simulator switches that exist only under `#if DEBUG`, such as `pairURL`, `openSession`, `showNewChat`.
+4. `debug_switches.py check` reads the Release binary's `strings` and fails when a line equals one of the simulator switches that exist only under `#if DEBUG`, such as `pairURL`, `openSession`, `showNewChat`,
+   or when a line contains a name of the DEBUG runtime CLI (`runtimeCLI`, `RuntimeCLI`, the accessibility hooks it turns on; `docs/operations/runtime-cli.md`).
+   It reads all of the output: under `set -o pipefail`, `if strings … | grep -q …` passed when the match came early, since `strings` dies of SIGPIPE once grep stops reading (#10654).
+   The switches are listed one per line, sorted and without duplicates, in `scripts/release/debug_switches.txt`: a new switch is one line there, never an edit to `release.sh`.
+   `.gitattributes` merges the file with `merge=union`, so two branches that each add a switch merge cleanly; when both added theirs in the same place the result can be out of order,
+   which `scripts/release/test_debug_switches.py` reports and `python3 scripts/release/debug_switches.py sort` fixes. A union merge can also bring back a name another branch removed, so check union merges that delete names.
+   Comments go in the file's header; the checker refuses a comment or a blank line below the first name. The list is kept by hand rather than read from the Swift sources:
+   switches are read in many shapes (UserDefaults `forKey:` on the standard store or a local alias, arrays of keys, `ProcessInfo` arguments), DEBUG code also reads settings keys that do ship, and the list keeps retired switches.
    `check_bundle_privacy.py` checks that the whole bundle has no personal values (external testing is a public link, see the end).
 5. `xcodebuild -exportArchive`: manual signing + `method=app-store-connect` + the two profile mappings. **This step is the App Store signing**:
    the archive uses automatically signed development profiles (so `aps-environment` in the archive is `development`), and export re-signs with the App Store profiles to
    `production`. With `NO_UPLOAD=1`, `destination` changes from `upload` to `export`, and it additionally checks that `aps-environment` in the exported ipa
    really is `production`.
 6. `scripts/release/entitlements.py check`: in the archive (plus the exported ipa with `NO_UPLOAD=1`), every bundle carries its target's keychain groups, and the group name in Info.plist is among them; see "entitlements" below. It also fails when any binary in the app links CallKit; see "No CallKit" below.
-7. `git tag -f testflight/<build number>`.
+7. `scripts/release/check_mac_imports.py` checks the archived iPhone executable's strong imports against MacOSX.sdk TBD exports, preferring each framework's `System/iOSSupport` copy. An iPhone app on an Apple silicon Mac must not bind a symbol the Mac lacks: dyld otherwise ends its launch before app code. Weak imports pass; libraries with neither a Mac nor an iOS-support stub are outside this comparison. Run it by hand with `python3 scripts/release/check_mac_imports.py <path to Persona.app>/Persona`; findings are printed, a clean check prints nothing.
+8. `git tag -f testflight/<build number>`.
 
 A build shows up in TestFlight about 10–30 minutes after archiving. `asc_testflight.py wait [minutes] [build number]` checks every 30 seconds until
 `processingState=VALID`, then writes the default What to Test and adds it to the `Internal` group; `INVALID` / `FAILED` exits with an error

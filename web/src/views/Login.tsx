@@ -38,7 +38,7 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
   const [masterError, setMasterError] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [noHub, setNoHub] = useState(false);
-  const [otherWays, setOtherWays] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   useEffect(() => void rememberHub(here()), []);
 
   const submit = (from: "link" | "master") => async (e: React.FormEvent) => {
@@ -76,8 +76,10 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
           </div>
         </div>
 
-        <BrowserLoginQR onDone={onDone} />
-        <div className="mt-3"><Disclosure open={otherWays} onToggle={() => setOtherWays((v) => !v)} label={t("login.qr_alternatives")} id="login-phone">
+        <section className="rounded-card bg-surface p-4 shadow-card" aria-labelledby="login-phone">
+          <h2 id="login-phone" className="text-[13.5px] font-semibold text-ink">
+            {t("login.phone_title")}
+          </h2>
           <ol className="mt-2.5 space-y-2 text-[12.5px] leading-relaxed text-ink-2">
             {[
               tRich("login.phone_step_open", { path: <span className="font-medium text-ink">{t("login.phone_path")}</span> }),
@@ -92,12 +94,13 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
               </li>
             ))}
           </ol>
-        </Disclosure></div>
+        </section>
 
         <form onSubmit={submit("link")} className="mt-3 rounded-card bg-surface p-1.5 shadow-card">
           <label className={field}>
             <Icon name="link" size={14} className="text-ink-3" />
             <input
+              autoFocus
               type="text"
               value={link}
               onChange={(e) => {
@@ -123,6 +126,10 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
         <p className="text-center text-[11.5px] leading-relaxed text-ink-3">{t("login.credential_note")}</p>
 
         <div className="mt-5 flex flex-col gap-1">
+          {/* A code is made only once this is opened, by someone who means to scan it (#10291). */}
+          <Disclosure open={qrOpen} onToggle={() => setQrOpen((v) => !v)} label={t("login.qr_open")} id="login-qr">
+            {qrOpen && <div className="px-1 pb-2"><BrowserLoginQR onDone={onDone} /></div>}
+          </Disclosure>
           <Disclosure open={noHub} onToggle={() => setNoHub((v) => !v)} label={t("login.no_hub")} id="login-no-hub">
             <div className="space-y-1.5 px-3 pb-2 text-[12px] leading-relaxed text-ink-2">
               <p>{t("login.no_hub_what")}</p>

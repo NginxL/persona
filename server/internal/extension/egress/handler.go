@@ -19,8 +19,16 @@ func (p *Proxy) handler(fixed string) http.Handler {
 				http.Error(w, "persona: this proxy is for the hub's extensions", http.StatusProxyAuthRequired)
 				return
 			}
-		case r.URL.Path != RuntimeFetchPath:
+		default:
 			chk = p.checkOf(r, fixed) // a sandbox's socket says who it is; a check's credential says which check
+			if bound, ok := r.Context().Value(runtimeCheckKey{}).(*check); ok {
+				chk = bound
+			} else if r.URL.Path == RuntimeFetchPath && chk == nil && credential(r) != "" {
+				// A runtime request with no credential is ordinary. A presented credential must name a live
+				// check of this extension, never fall back to that ordinary authority.
+				http.Error(w, "persona: settings check credential unavailable", http.StatusForbidden)
+				return
+			}
 		}
 		ctx, finish, live := p.requestLifetime(r.Context(), ext, chk)
 		if !live {
@@ -33,7 +41,7 @@ func (p *Proxy) handler(fixed string) http.Handler {
 		}
 		r = r.WithContext(ctx)
 		if fixed != "" && r.URL.Host == "" && r.URL.Path == RuntimeFetchPath {
-			p.runtimeFetch(w, r, fixed)
+			p.runtimeFetch(w, r, fixed, chk)
 			return
 		}
 		rule, ok := p.rule(ext)

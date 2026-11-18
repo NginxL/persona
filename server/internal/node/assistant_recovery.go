@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -36,6 +37,9 @@ type assistantTurnRecovery struct {
 	lastReset  *time.Time
 	// triedOrder keeps r.used in first-use order for the marker's tried-model list.
 	triedOrder []string
+	// toolSearchRetried: the turn was resent once in a new process with every tool loaded after its endpoint refused
+	// tool search (#10365). Its own budget: the same-model and next-model ones stay as they were.
+	toolSearchRetried bool
 }
 
 // newAssistantRecovery is a conversation's chain begun by a failure of launcher running execution (key and current as
@@ -295,7 +299,15 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	transient404 := missing && !unavailable && p.replyModel != "" && !p.repliedAt.IsZero() &&
 		time.Since(p.repliedAt) < assistantAnsweredRecently
 	p.mu.Unlock()
-	if !unavailable && !transient404 && !assistantRecoverable(failed, result, kinds) {
+	ordinary := unavailable || transient404 || assistantRecoverable(failed, result, kinds)
+	// The endpoint refused Claude Code's tool search (#10365): remembered for the launcher and model, so their next
+	// start loads every tool, and the turn resent once in such a process, unseen. A process that started that way and
+	// is refused again ends the turn on the refusal (nothing loops).
+	toolSearch := failed && p.agent == "claude" && !p.toolSearch.forceOff && assistantwire.ToolSearchRefused(result)
+	if toolSearch && n.noteToolSearchRefused(p.launcher, p.model.Model, p.endpoint) {
+		n.logger.Printf("assistant %s: %s refused tool search for model %q: remembered, its next start loads every tool", short(p.id), p.launcher, p.model.Model)
+	}
+	if !ordinary && !toolSearch {
 		return false
 	}
 	p.mu.Lock()
@@ -373,6 +385,34 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 		p.busy = true
 		p.mu.Unlock()
 		return true
+	}
+	if toolSearch && !r.toolSearchRetried {
+		// The same model in a new process (runAssistantRecovery restarts a stale one); no other budget spent.
+		r.toolSearchRetried = true
+		r.running = true
+		done := make(chan struct{})
+		r.done = done
+		n.mu.Unlock()
+		p.mu.Lock()
+		p.busy = true
+		p.mu.Unlock()
+		n.logger.Printf("assistant %s: resent once with every tool loaded", short(p.id))
+		go func() {
+			defer func() {
+				n.mu.Lock()
+				if r.done == done {
+					r.done = nil
+				}
+				n.mu.Unlock()
+				close(done)
+			}()
+			n.runAssistantRecovery(p, r, launcher, cwd, execution, current, true)
+		}()
+		return true
+	}
+	if !ordinary { // a refusal again, its one retry spent: the user's to see
+		n.mu.Unlock()
+		return false
 	}
 	if unavailable {
 		n.noteUnavailable(launcher, key)
@@ -570,7 +610,8 @@ func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, 
 		n.recordRecoverySwitch(p.id, launcher, r.from.Model, r.probeFrom, next,
 			ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
 	}
-	err := assistantRecoverySend(withAssistantRecovery(ctx, r, !same), n, p, launcher, cwd, execution)
+	// Another model, or the same one where its endpoint has refused tool search since this process started: a new process.
+	err := assistantRecoverySend(withAssistantRecovery(ctx, r, !same || n.toolSearchStale(p)), n, p, launcher, cwd, execution)
 	var pending *assistantPendingFailure
 	var currentProc *assistantProc
 	n.mu.Lock()
@@ -630,8 +671,11 @@ func (n *Node) finishAssistantRecovery(p *assistantProc, r *assistantTurnRecover
 	delete(n.recoveries, p.id) // an exhausted chain leaves no per-conversation bookkeeping behind
 	n.mu.Unlock()
 	// The failure card needs the exhausted marker so it can offer Retry with the cause and reset time. A chain that
-	// switched keeps its From/To on the record; one that never moved leaves them empty.
-	n.recordRecoveryExhausted(p.id, ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
+	// switched keeps its From/To on the record; one that never moved leaves them empty. A chain that only resent a
+	// tool-search refusal (#10365) records none: the model service did not fail, and the hub words that error itself.
+	if !r.toolSearchRetried || r.switched || len(r.retried) > 0 {
+		n.recordRecoveryExhausted(p.id, ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
+	}
 	if current {
 		p.mu.Lock()
 		p.busy = false

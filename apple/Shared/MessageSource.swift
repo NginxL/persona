@@ -17,6 +17,7 @@ nonisolated struct MessageSource: Hashable, Sendable {
         case "conversation": return String(localized: "Conversation [Message Source]")
         case "patrol": return String(localized: "Patrol [Message Source]")
         case "followup": return String(localized: "Follow-up [Message Source]")
+        case "scheduled_task": return String(localized: "Sent by a scheduled task")
         case "supervision": return String(localized: "Supervision [Message Source]")
         // A batch from a recorded meeting the session attends (#2981); its title is the meeting's name when it has one.
         case "meeting": return String(localized: "Meeting [Message Source]")
@@ -24,7 +25,7 @@ nonisolated struct MessageSource: Hashable, Sendable {
         }
     }
 
-    var mention: String { "@" + name }
+    var mention: String { kind == "scheduled_task" ? name : "@" + name }
     var origin: String? {
         guard kind == "conversation", let title, !title.isEmpty else { return nil }
         return String(localized: "From conversation “\(title)” [Message Source]")

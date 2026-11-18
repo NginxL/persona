@@ -32,6 +32,8 @@
   "approve_mode": "Approval mode",
   "permission_kicker": "Waiting for your approval",
   "permission_title": "Allow {tool}?",
+  "permission_load_failed": "The approval controls didn’t load",
+  "permission_load_hint": "The request is still waiting. Check your connection and retry.",
   "denied_message": "The user denied this",
   "deny": "Deny",
   "edit_text": "Edit text",

@@ -55,6 +55,22 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "android/core/data/src/test/kotlin/persona/core/data/PortDiscoveryMockServer.kt": {
+      "reason": "Exact discovery-request regression fixture retaining both protocol generations.",
+      "tokens": [
+        "jarvis-ports"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "android/core/data/src/test/kotlin/persona/core/data/PortDiscoveryMockServerTest.kt": {
+      "reason": "Exact discovery-request regression fixture retaining both protocol generations.",
+      "tokens": [
+        "jarvis-ports"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "android/core/contracts/src/test/kotlin/persona/core/contracts/ProtocolCompatibilityTest.kt": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -314,6 +330,14 @@
     },
     "desktop/src/urls.ts": {
       "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/test/page-routes.test.ts": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
         "jarvis"
       ],

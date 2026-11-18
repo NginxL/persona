@@ -42,6 +42,7 @@ final class ModelsSettingsHierarchyTests: XCTestCase {
         agents.tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings-agent-claude"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings-agent-codex"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["settings-agent-agy"].exists)
         let triage = app.descendants(matching: .any)["settings-triage"].firstMatch
         XCTAssertTrue(triage.exists)
         triage.tap()

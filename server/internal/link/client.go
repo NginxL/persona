@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -88,10 +89,12 @@ type Status struct {
 	// Pending, while connected: the hub waits for the user to confirm this computer ("It's mine" in the app);
 	// missing once confirmed, and with older hubs.
 	Pending bool `json:"pending,omitempty"`
-	// connected: the hub URL in use, its kind (lan | ipv6 | name | ipv4) and since when.
+	// connected: the hub URL in use, its kind (lan | ipv6 | name | ipv4, ssh, proxy) and since when.
 	Address string     `json:"address,omitempty"`
 	Kind    string     `json:"kind,omitempty"`
 	Since   *time.Time `json:"since,omitempty"`
+	// Proxy, connected with kind proxy: the outbound proxy the link runs through, never its user name or password.
+	Proxy string `json:"proxy,omitempty"`
 	// Trust: "system" when the hub is checked with the system's CAs and host name (it sits behind an HTTPS reverse
 	// proxy, Config.Trust); empty when it is pinned.
 	Trust string `json:"trust,omitempty"`
@@ -283,14 +286,15 @@ func watchMode(ctx context.Context, path, mode string, cancel context.CancelFunc
 func runActive(ctx context.Context, o Options, rep *reporter) {
 	rep.switchTo(ModeActive)
 	var b backoff
-	var lastSSH bool
-	var lastToken string
+	// last is the kind of the link that worked last: a proxy or SSH route goes first next time (routeOrder). A new
+	// credential, tunnel or proxy setting starts over from direct.
+	var last, lastToken, lastProxy string
 	var lastSSHConfig *SSH
 	for ctx.Err() == nil {
 		was := stampOf(o.Path) // a change from here on (paired again, an address added) cuts the wait below short
 		c, err := Load(o.Path)
 		if err != nil {
-			lastSSH, lastToken, lastSSHConfig = false, "", nil
+			last, lastToken, lastProxy, lastSSHConfig = "", "", "", nil
 			if errors.Is(err, os.ErrNotExist) {
 				rep.set(func(s *Status) { *s = Status{State: "unpaired"} })
 			} else {
@@ -299,23 +303,23 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 			o.wait(ctx, time.Hour, was)
 			continue
 		}
-		if c.Token != lastToken || !c.SSH.Equal(lastSSHConfig) {
-			lastSSH = false
-			lastToken = c.Token
+		if c.Token != lastToken || !c.SSH.Equal(lastSSHConfig) || c.Proxy != lastProxy {
+			last = ""
+			lastToken, lastProxy = c.Token, c.Proxy
 			lastSSHConfig = cloneSSH(c.SSH)
 		}
 		rep.set(func(s *Status) {
 			*s = Status{State: "connecting", Machine: c.Machine, HubName: c.HubName, MachineName: c.MachineName, Trust: trustOf(c),
 				Endpoints: ranked(c.Endpoints), SSH: cloneSSH(c.SSH)}
 		})
-		l, err := dialActive(ctx, c, o.SSHBin, lastSSH)
+		l, err := dialActive(ctx, c, o.SSHBin, last)
 		var end error
 		state := "waiting"
 		if err != nil {
 			end = err
 		} else {
 			for {
-				lastSSH = l.ep.Kind == KindSSH
+				last = l.ep.Kind
 				start := time.Now()
 				rep.links++
 				l.gen = rep.links
@@ -336,14 +340,14 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 				// Serve the exact socket the SSH probe connected, under the configuration that validated it. A redial
 				// here would both lose that ownership and reintroduce the gap that dropped working SSH links.
 				l, c = handoff.candidate, handoff.config
-				lastSSH = false
+				last = ""
 				b = backoff{}
 			}
 			// The link writes link.json itself (the hub's addresses and names): from here only a new credential or tunnel
 			// change, written while the link was up, counts as a change since it was read. The stamp is taken before the
 			// read, so a change written in between still counts.
 			now := stampOf(o.Path)
-			if f, err := Read(o.Path); err != nil || (f.Token == c.Token && f.SSH.Equal(c.SSH)) {
+			if f, err := Read(o.Path); err != nil || (f.Token == c.Token && f.SSH.Equal(c.SSH) && f.Proxy == c.Proxy) {
 				was = now
 			}
 		}
@@ -354,7 +358,7 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 		var he *httpError
 		switch {
 		case errors.Is(end, errDirectReady):
-			lastSSH = false
+			last = ""
 			b, wait = backoff{}, 0
 		case errors.Is(end, errRedial), errors.Is(end, errRepaired):
 			b, wait = backoff{}, 0
@@ -380,37 +384,67 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 	}
 }
 
-func dialActive(ctx context.Context, c *Config, sshBin string, preferSSH bool) (*link, error) {
-	switch {
-	case c.SSH == nil:
+// dialActive dials c's hub over its routes in routeOrder. A pinned hub that refused the credential, on whichever
+// route, ends the attempt: no other route can do better.
+func dialActive(ctx context.Context, c *Config, sshBin string, last string) (*link, error) {
+	p, eps, perr := proxied(c)
+	return tryRoutes(routeOrder(c, p != nil || perr != nil, last), func(kind string) (*link, error) {
+		switch kind {
+		case KindSSH:
+			return dialSSH(ctx, c, sshBin)
+		case KindProxy:
+			if perr != nil {
+				return nil, perr
+			}
+			return dialVia(ctx, c, eps, p)
+		}
 		return dial(ctx, c)
-	case c.SSH.Always || len(c.Endpoints) == 0:
-		return dialSSH(ctx, c, sshBin)
-	case preferSSH:
-		l, sshErr := dialSSH(ctx, c, sshBin)
-		if sshErr == nil || ctx.Err() != nil {
-			return l, sshErr
-		}
-		l, directErr := dial(ctx, c)
-		if directErr == nil {
-			return l, nil
-		}
-		return nil, errors.Join(sshErr, directErr)
-	default:
-		l, directErr := dial(ctx, c)
-		if directErr == nil || ctx.Err() != nil {
-			return l, directErr
-		}
+	}, func(err error) bool {
 		var he *httpError
-		if c.FP != "" && errors.As(directErr, &he) && (he.status == http.StatusUnauthorized || he.status == http.StatusForbidden) {
-			return nil, directErr
-		}
-		l, sshErr := dialSSH(ctx, c, sshBin)
-		if sshErr == nil {
-			return l, nil
-		}
-		return nil, errors.Join(directErr, sshErr)
+		return ctx.Err() != nil || (c.FP != "" && errors.As(err, &he) &&
+			(he.status == http.StatusUnauthorized || he.status == http.StatusForbidden))
+	})
+}
+
+// routeOrder is the order c's routes are tried in (docs/operations/link.md "Outbound proxy"): direct candidates
+// (""), the outbound proxy when there is one, the SSH tunnel when there is one; last, the kind of the link that worked
+// last, first when it is one of these. Always use SSH, or a tunnel and no candidates, leaves the tunnel alone.
+func routeOrder(c *Config, proxy bool, last string) []string {
+	if c.SSH != nil && (c.SSH.Always || len(c.Endpoints) == 0) {
+		return []string{KindSSH}
 	}
+	order := []string{""}
+	if proxy {
+		order = append(order, KindProxy)
+	}
+	if c.SSH != nil {
+		order = append(order, KindSSH)
+	}
+	if i := slices.Index(order, last); i > 0 {
+		order = slices.Insert(slices.Delete(order, i, i+1), 0, last)
+	}
+	return order
+}
+
+// tryRoutes tries each route in order until one works; stop ends it early after a failure no other route can mend.
+// The error is the one failure, or all of them in order.
+func tryRoutes[T any](order []string, try func(kind string) (T, error), stop func(error) bool) (T, error) {
+	var errs []error
+	for _, kind := range order {
+		v, err := try(kind)
+		if err == nil {
+			return v, nil
+		}
+		errs = append(errs, err)
+		if stop(err) {
+			break
+		}
+	}
+	var zero T
+	if len(errs) == 1 {
+		return zero, errs[0]
+	}
+	return zero, errors.Join(errs...)
 }
 
 // wait sleeps up to d, less if the network changed, a reconnect was asked for or link.json changed (paired again,

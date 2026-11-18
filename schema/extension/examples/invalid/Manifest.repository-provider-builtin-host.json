@@ -1,0 +1,9 @@
+{
+  "manifest_version": 1,
+  "id": "acme-code",
+  "name": "Acme Code",
+  "version": "1.0.0",
+  "engines": {"extension_protocol": 1},
+  "runtime": {"command": {"linux-amd64": "bin/acme-code"}},
+  "contributes": {"repository_providers": [{"id": "acme", "name": "Acme Code", "hosts": ["code.acme.test", "github.com"]}]}
+}

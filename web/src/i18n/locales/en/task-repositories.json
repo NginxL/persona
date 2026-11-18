@@ -40,5 +40,9 @@
   "options": "Options for {name}",
   "no_links": "No repositories linked",
   "agent_hint": "Your agent keeps repositories and related work here as it works. You can also add or remove links.",
-  "legacy_note": "Linked before repositories were stored here."
+  "legacy_note": "Linked before repositories were stored here.",
+  "unavailable": "Unavailable",
+  "provider_unavailable": "{provider} is unavailable. Its links still open; adding a new one needs it.",
+  "link_pending": "Checked when you save",
+  "another_source": "Another source"
 }

@@ -425,7 +425,7 @@ func TestOnlyABriefingThatReachedTheOwnerEndsTheWait(t *testing.T) {
 	}
 	t.Run("the turn failed", func(t *testing.T) {
 		s, f, todo, _ := start(t)
-		if run := s.briefClaim("conv-briefing", "⏰ morning", true); run != nil {
+		if run, claimed := s.briefClaim("conv-briefing", "⏰ morning", "failed-turn", true); run != nil || claimed {
 			t.Fatal("a failed turn got the briefing card")
 		}
 		if got := s.briefPush("conv-briefing", i18n.ZhHans, false); got != "" || !askOf(s, todo.ID).ForBriefing {

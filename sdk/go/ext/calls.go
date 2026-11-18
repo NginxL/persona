@@ -61,6 +61,11 @@ type Empty = wire.Empty
 // connector.<method>, with the connector's id as the contribution.
 const ConnectorNamespace = "connector"
 
+// RepositoryNamespace is the repository_providers extension point's: the manager asks repo.parse, repo.check, repo.link
+// and repo.describe (schema/extension/repository.schema.json), with the repository_providers item's id as the
+// contribution. A provider answers them with ext.Methods under this namespace.
+const RepositoryNamespace = "repo"
+
 // SentNamespace is the hub's own namespace for the sent-as-user ledger: RecordSent is sent.record.
 const SentNamespace = "sent"
 

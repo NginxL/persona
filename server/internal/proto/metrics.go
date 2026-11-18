@@ -20,21 +20,26 @@ type MetricSample struct {
 	// ClaudeProcs is the node user's running claude processes at sampling time (the admission gate's process cap).
 	// Nil when the platform cannot count them (older nodes, non-Linux): callers skip the process check, never read it
 	// as zero.
-	ClaudeProcs *int `json:"claude_procs,omitempty"`
+	ClaudeProcs     *int     `json:"claude_procs,omitempty"`
+	BatteryPercent  *float64 `json:"battery_percent,omitempty"`  // battery charge % (0–100), nil when absent/unreadable
+	BatteryCharging *bool    `json:"battery_charging,omitempty"` // true while charging, nil when absent/unknown
+	TempC           *float64 `json:"temp_c,omitempty"`           // host/SoC/CPU temperature in °C (0, 125], nil when absent/invalid
 }
 
 // MetricPoint is one step of a machine's history (GET /api/v1/machines/{id}/metrics): the average over the step,
 // or a break (Gap) where the machine sent nothing, which charts must not bridge. Memory, swap and disk are bytes used.
 type MetricPoint struct {
-	T    int64    `json:"t"` // Unix seconds, the step's start
-	Gap  bool     `json:"gap,omitempty"`
-	CPU  *float64 `json:"cpu,omitempty"`
-	Load *float64 `json:"load,omitempty"`
-	Mem  *float64 `json:"mem,omitempty"`
-	Swap *float64 `json:"swap,omitempty"`
-	Rx   *float64 `json:"rx,omitempty"`
-	Tx   *float64 `json:"tx,omitempty"`
-	Disk *float64 `json:"disk,omitempty"`
+	T              int64    `json:"t"` // Unix seconds, the step's start
+	Gap            bool     `json:"gap,omitempty"`
+	CPU            *float64 `json:"cpu,omitempty"`
+	Load           *float64 `json:"load,omitempty"`
+	Mem            *float64 `json:"mem,omitempty"`
+	Swap           *float64 `json:"swap,omitempty"`
+	Rx             *float64 `json:"rx,omitempty"`
+	Tx             *float64 `json:"tx,omitempty"`
+	Disk           *float64 `json:"disk,omitempty"`
+	BatteryPercent *float64 `json:"battery_percent,omitempty"`
+	TempC          *float64 `json:"temp_c,omitempty"`
 }
 
 // MetricEvery is how often a node samples (and the finest step of the history).

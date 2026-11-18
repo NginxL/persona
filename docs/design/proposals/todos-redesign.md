@@ -308,6 +308,9 @@ draw the everyday page (`iphone/kyoto`) and the multi-agent page (`iphone/releas
 adds Done when and Work details, and its default lines name no runtime, repository, path or PR number: "Code change"
 stands for the pull request on the paper, and its number is inside Work details.
 
+`spec/fixtures/todo-detail` pins this section's table; its README's "Judgement calls" settle where the section is silent
+or differs from the prototype, such as notes beside the brief and the primary with several asks.
+
 ### 3.6 The conversation
 
 **One timeline, two zooms.** Each to-do has one **Conversation**, stored once as typed entries on the to-do. On the
@@ -498,7 +501,7 @@ region by arithmetic; there is no accessibility-size branch (DESIGN_SYSTEM 6.2,
 | Token | Value | Status |
 | --- | --- | --- |
 | `Theme.Size.sidebar` / `sidebarPhone` | 400 (iPad) / 320 (Duo) | existing |
-| `todoList` | 320; 340 at ≥ 1032; 300 in iPad windows of 600–759 | new |
+| `todoList` | 320; 340 where the window's shorter side is 1032 or more; 300 in iPad windows of 600–759 | new |
 | paper minimum | `Theme.Size.splitPageMin` (400); **320 on the Duo's inner display, for To-dos only** (owner decision 2) | existing + one new value |
 | paper content | `Theme.Size.readable` (560) unless screenshots show the ask card and steps need more; a wider token needs that reason | existing |
 | `todoConversation` | 400; 440 on the web | new |
@@ -510,7 +513,7 @@ region by arithmetic; there is no accessibility-size branch (DESIGN_SYSTEM 6.2,
 | Duo outer 466 × 678 (382 + side column 84) | 1 page | 1 page, pinned header 92 | — | push, cross-fade |
 | Duo inner portrait 669 × 951 | List 334 ┊ Paper 335 | Paper 334 ┊ Conversation 335 | the list | pane at the crease; each half cross-fades |
 | Duo inner landscape 951 × 669 (867 usable) | List 320 │ Paper 547 | Paper 467 │ Conversation 400 | the list | pane, cross-fade |
-| iPad mini portrait 744 | List 320 │ Paper 424 | pushed with the pinned header (400 + 400 > 744) | — | push |
+| iPad mini portrait 744 | List 300 │ Paper 444 | pushed with the pinned header (400 + 400 > 744) | — | push |
 | iPad 11" portrait 834 × 1194 | List 320 │ Paper 514 | Paper 434 │ Conversation 400 | the list | pane |
 | iPad 13" portrait 1032 × 1376 | List 340 │ Paper 692 | Paper 632 │ Conversation 400 | the list | pane |
 | iPad 11" landscape 1194 × 834 | Sidebar 400 │ List 320 │ Paper 474 | List 320 │ Paper 474 │ Conversation 400 | the sidebar (transient) | pane; a pure −400-pt shift |
@@ -519,6 +522,9 @@ region by arithmetic; there is no accessibility-size branch (DESIGN_SYSTEM 6.2,
 | Web 1440 | Sidebar 284 │ List 360 │ Paper 796 | Rail 56 │ List 360 │ Paper 584 │ Conversation 440 | sidebar → rail | column |
 | Web ≥ 1600 | Sidebar 284 │ List 360 │ Paper (the rest) | Sidebar 284 │ List 360 │ Paper ≥ 516 │ Conversation 440 | — | column |
 | Android open foldable, book posture | List ┊ Paper at the hinge | Paper ┊ Conversation | the list | supporting pane |
+
+`spec/fixtures/todo-layout` pins this table and its rule; its README's "Judgement calls" settle where the section is
+silent, such as how the 24-pt band holds a region.
 
 - **Per-place overlay.** While To-dos is in front, the sidebar lies over the page on windows where list and paper
   don't fit beside it: iPad 11" portrait, iPad 13" portrait and the Duo inner landscape. Today the rule is "beside or

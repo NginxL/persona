@@ -16,6 +16,8 @@ func TestProxyBodyRefusesOnlyANullBody(t *testing.T) {
 		{"null/proxyBody", "/api/v1/sessions/box/s1/attach", "null", true},
 		{"null/sendMessage", sendPath, "null", true},
 		{"null/renameSession", "/api/v1/sessions/box/s1/rename", "null", true},
+		{"null/interruptSession", "/api/v1/sessions/box/s1/interrupt", "null", true},
+		{"null/sessionModes", "/api/v1/sessions/box/s1/modes", "null", true},
 		{"emptyObject", "/api/v1/sessions/box/s1/attach", "{}", false},
 		{"normalObject", "/api/v1/sessions/box/s1/attach", `{"foo":"bar"}`, false},
 	}

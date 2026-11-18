@@ -404,7 +404,7 @@ func (n *Node) runtimeWorktreeCreate(ctx context.Context, h *runtimeConn, worksp
 	if err != nil {
 		return res, err
 	}
-	dest, err := n.checkoutPath(src.repo.root, path)
+	dest, err := n.checkoutPath(ctx, src.repo.root, path)
 	if err != nil {
 		return res, err
 	}
@@ -454,7 +454,7 @@ func (n *Node) runtimeFolder(ctx context.Context, h *runtimeConn, root, checkout
 	if _, err := os.Lstat(dest); err == nil {
 		return "", composerError(ctx, "runtime_folder_taken", i18n.Args{"engine": h.label(), "path": dest})
 	}
-	if _, err := n.checkoutPath(root, dest); err != nil {
+	if _, err := n.checkoutPath(ctx, root, dest); err != nil {
 		return "", err
 	}
 	return folder, nil

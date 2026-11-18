@@ -131,6 +131,26 @@ func TestDeletePersonaStorageFailure(t *testing.T) {
 	}
 }
 
+func TestListedSessionUnreadDeletionLedger(t *testing.T) {
+	ft := newFleetTest(t)
+	setSettings(t, ft.s, func(v *Settings) { v.MachineID = "mac" })
+	row := proto.Session{MachineID: "mac", SessionID: "chat", Assistant: true, Cwd: "/home/me/.persona/assistant", Status: proto.StatusIdle}
+	ft.d.setSessions("mac", []proto.Session{row})
+	if got, ok := ft.s.listedSession("mac", row.SessionID); !ok || !got.Assistant {
+		t.Fatalf("fixture does not exercise an assistant row: %+v, %v", got, ok)
+	}
+	// A non-durable store caches the first read. Make the failure a fresh Service's first read of the same ledger.
+	ft.s.deletedConversations.mu.Lock()
+	ft.s.deletedConversations.loaded = false
+	ft.s.deletedConversations.rows = nil
+	ft.s.deletedConversations.mu.Unlock()
+	ft.st.failKey(deletedConversationsKey, errors.New("synthetic read failure"))
+	// The privacy-preserving filter leaves no assistant row; listedSession must not index it (#10305).
+	if got, ok := ft.s.listedSession("mac", row.SessionID); ok || got.SessionID != "" {
+		t.Fatalf("unread deletion ledger exposed a listed assistant row: %+v, %v", got, ok)
+	}
+}
+
 func TestDeletePersonaFleetTombstone(t *testing.T) {
 	ft := newFleetTest(t)
 	setSettings(t, ft.s, func(v *Settings) { v.MachineID = "mac" })

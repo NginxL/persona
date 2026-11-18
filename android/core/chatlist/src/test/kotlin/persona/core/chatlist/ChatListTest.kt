@@ -28,6 +28,59 @@ class ChatListTest {
         assertEquals(0, window.newMessageCount(live))
     }
 
+    @Test fun deferredStreamingCountDoesNotRescanAndSettlesWithOriginalRule() {
+        var idCalls = 0
+        var unreadCalls = 0
+        val window = ChatListWindow<Message>(
+            { idCalls++; it.id },
+            compareBy { it.seq },
+            { unreadCalls++; it.incoming },
+        )
+        val last = Message("last", 10)
+        window.freeze(listOf(last))
+        val draft = Message("draft", 11)
+        assertEquals(1, window.newMessageCount(listOf(last, draft, draft)))
+        idCalls = 0
+        unreadCalls = 0
+
+        val firstChunk = listOf(last, draft.copy(text = "一"), draft.copy(text = "一"))
+        val secondChunk = listOf(
+            last,
+            draft.copy(text = "一二"),
+            draft.copy(text = "一二"),
+            Message("own", 12, incoming = false),
+        )
+        val settled = listOf(
+            last,
+            draft.copy(text = "完成"),
+            draft.copy(text = "完成"),
+            Message("new", 12),
+            Message("own", 13, incoming = false),
+            Message("own", 13, incoming = false),
+        )
+        listOf(firstChunk, secondChunk, settled).forEach { update ->
+            assertEquals(1, window.newMessageCount(update, defer = true))
+            assertEquals(0, idCalls)
+            assertEquals(0, unreadCalls)
+        }
+
+        // The oracle is the original rule: de-duplicate by ID, then count unread rows after the boundary.
+        val expected = settled.distinctBy { it.id }.count { it.seq > last.seq && it.incoming }
+        assertEquals(2, expected)
+        assertEquals(expected, window.newMessageCount(settled, defer = false))
+        assertTrue(idCalls > 0)
+        assertTrue(unreadCalls > 0)
+
+        window.follow()
+        assertEquals(0, window.newMessageCount(settled, defer = true))
+        window.freeze(listOf(last))
+        idCalls = 0
+        unreadCalls = 0
+        assertEquals(expected, window.newMessageCount(settled, defer = true))
+        assertTrue(idCalls > 0)
+        assertTrue(unreadCalls > 0)
+    }
+
     @Test fun prefetchRequiresUserIntentWhileLastLineUsesMeasuredExtent() {
         assertFalse(shouldPrefetch(false, true, false, 95, 100, 5))
         assertFalse(shouldPrefetch(true, true, true, 95, 100, 5))

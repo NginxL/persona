@@ -102,11 +102,12 @@ func TestModelConfigReadsEachSettingOnce(t *testing.T) {
 			t.Errorf("GET model-config read %s %d times, want once: %v", key, reads[key], reads)
 		}
 	}
-	// One purpose's page: the providers, the hidden ones and the category's record; an extension's own record besides.
+	// One purpose's page: the providers, the hidden ones and the category's record; an extension's own record besides,
+	// and the candidate lists it sent (model_candidates.requested.<id>, kept apart from the record and its revision).
 	for _, c := range []struct {
 		id   string
 		most int
-	}{{"kb", 3}, {"inbox.draft", 3}, {"extension.curator", 4}} {
+	}{{"kb", 3}, {"inbox.draft", 3}, {"extension.curator", 5}} {
 		if r := modelRequest(s, "GET", c.id, ""); r.Code != 200 {
 			t.Fatalf("%s: %d %s", c.id, r.Code, r.Body.String())
 		}

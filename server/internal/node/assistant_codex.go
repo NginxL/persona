@@ -54,6 +54,7 @@ type codexConn struct {
 	serviceTier         string
 	serviceTierRevision uint64
 	models              map[string]codexModelEfforts
+	loop                codexCompactionLoop // the running turn's compactions that made no room (#10278)
 }
 
 type codexReply struct {

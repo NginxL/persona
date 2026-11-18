@@ -244,6 +244,71 @@ class AssistantSidebarContentTest {
         rule.onAllNodesWithContentDescription("隐藏侧边栏").assertCountEquals(0)
     }
 
+    @Test fun archivingDoesNotRetireTheOpenConversationButEndingDoes() {
+        val choice = AssistantManagerChoice.current.value
+        val main = Session(machineId = "hub", sessionId = "main", title = "主对话", assistant = true)
+        val first = Session(machineId = "hub", sessionId = "first", title = "First conversation", assistant = true)
+        val second = Session(machineId = "hub", sessionId = "second", title = "Second conversation", assistant = true)
+        var snapshot by mutableStateOf(AssistantSnapshot(
+            mainSession = main.key,
+            conversations = listOf(main, first, second),
+            manager = choice.manager,
+            managerId = choice.shown,
+        ))
+        val archived = mutableListOf<SessionKey>()
+        val ended = mutableListOf<SessionKey>()
+        val retired = mutableListOf<SessionKey>()
+        val management = object : AssistantManagement by testManagement(emptyList()) {
+            override fun forManager(manager: String?): AssistantManagement = this
+            override suspend fun archiveConversation(session: SessionKey) { archived += session }
+            override suspend fun endConversation(session: SessionKey) { ended += session }
+            override suspend fun archivedConversations(): List<Session> =
+                listOf(first, second).filter { it.key in archived }.map { it.copy(archived = true) }
+        }
+        val repository = object : AssistantRepository {
+            override val assistant = MutableStateFlow(snapshot)
+            override suspend fun refresh() {
+                val next = snapshot.copy(conversations = snapshot.conversations.filter { it.key !in archived })
+                snapshot = next
+                assistant.value = next
+            }
+        }
+        var active by mutableStateOf(first.key)
+        rule.setContent {
+            PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
+                CompositionLocalProvider(LocalAssistantHost provides testBindings(management)) {
+                    Box(Modifier.width(400.dp).height(1200.dp)) {
+                        AssistantSidebarContent(
+                            snapshot, repository, active, operations, demo = false,
+                            onOpen = {}, onAction = {}, onSettings = {},
+                            onInbox = {}, onKnowledge = {}, onTodos = {}, todoCount = 0, showTodos = false,
+                            inboxCount = 0, settingsCount = 0, settingsDot = false, settingsBadge = null,
+                            pages = emptyList(), onPage = {}, onRetired = { retired += it },
+                        )
+                    }
+                }
+            }
+        }
+        rule.onAllNodesWithContentDescription("对话操作")[1].performClick()
+        rule.onNodeWithText("归档").performClick()
+        rule.waitUntil(5_000) { archived == listOf(first.key) }
+        rule.waitForIdle()
+        assertEquals(listOf(first.key), archived)
+        assertTrue(retired.isEmpty())
+        rule.onAllNodesWithText(first.title!!).assertCountEquals(0)
+        rule.onNodeWithText("已归档（1）").assertExists()
+
+        active = second.key
+        rule.waitForIdle()
+        rule.onAllNodesWithContentDescription("对话操作")[1].performClick()
+        rule.onNodeWithText("结束…").performClick()
+        rule.onNodeWithText("结束对话").performClick()
+        rule.waitUntil(5_000) { ended == listOf(second.key) && retired == listOf(second.key) }
+        rule.waitForIdle()
+        assertEquals(listOf(second.key), ended)
+        assertEquals(listOf(second.key), retired)
+    }
+
     private fun testManagement(archived: List<Session>) = object : AssistantManagement {
         override suspend fun warm() = Unit
         override suspend fun endConversation(session: SessionKey) = Unit

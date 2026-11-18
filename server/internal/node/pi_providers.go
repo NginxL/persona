@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -173,7 +174,13 @@ func piProviderOf(l proto.ManagedLauncher) (piProvider, bool) {
 		p.BaseURL = cmp.Or(l.LaunchBaseURL(), "https://api.anthropic.com")
 		p.AuthHeader = l.BearerAuth() // the same key as Authorization: Bearer as well
 	} else {
-		p.BaseURL = cmp.Or(strings.TrimRight(l.BaseURL, "/"), "https://api.openai.com/v1")
+		p.BaseURL = cmp.Or(strings.TrimRight(l.LaunchBaseURL(), "/"), "https://api.openai.com/v1")
+	}
+	if modelhttp.OpenCodeGo(p.BaseURL) && !modelhttp.HasOpenCodeSessionHeader(l.Headers) {
+		if p.Headers == nil {
+			p.Headers = map[string]string{}
+		}
+		p.Headers[modelhttp.OpenCodeSessionHeader] = modelhttp.OpenCodeSessionID("launcher:" + cmp.Or(l.Name, p.BaseURL))
 	}
 	var ids []string
 	add := func(id string) {

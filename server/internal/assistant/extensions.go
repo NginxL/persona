@@ -7,6 +7,7 @@ import (
 	"time"
 
 	approvalops "github.com/nwverse/persona/server/internal/approval"
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -116,6 +117,11 @@ func (s *Service) SetExtensions(e ExtensionTools) {
 		s.refs = r
 	}
 	s.trans, _ = e.(transcribers)
+	s.repoExt, _ = e.(repository.Extensions)
+	s.repoStarted = nil
+	if started, ok := e.(interface{ Started() <-chan struct{} }); ok && s.repoExt != nil {
+		s.repoStarted = started.Started()
+	}
 	s.transcriptionReadinessReset()
 }
 

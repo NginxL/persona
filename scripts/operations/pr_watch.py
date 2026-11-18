@@ -30,7 +30,7 @@ from pr_watch_review import review as semantic_review
 from pr_watch_verify import verify
 
 FORMAT_VERSION = 1
-VERIFICATION_POLICY_VERSION = 2
+VERIFICATION_POLICY_VERSION = 3
 REVIEW_POLICY_VERSION = 3
 REPAIR_LIMIT = 3
 INFRASTRUCTURE_ATTEMPT_LIMIT = 3
@@ -556,6 +556,9 @@ class Watcher:
                     "Local checks completed:\n%s\n\n"
                     "This records only the checks listed above; it does not claim unrun device or visual acceptance.") % (
                 pr["headRefOid"][:9], checks)
+        if self.repositories[repo]["verify"].get("profile") == "semantic_only":
+            body += ("\n\nSemantic-only mode: no full build/vet, cross-platform, build-tag or full-test suite was run. "
+                     "Only the lightweight checks listed above and the exact-head merge gates apply.")
         if visual_missing:
             body += "\n\nScreenshot acceptance was not performed: no UI evidence adapter is configured."
         result = run(["gh", "pr", "review", str(number), "--repo", repo, "--comment", "--body", body], timeout=90)

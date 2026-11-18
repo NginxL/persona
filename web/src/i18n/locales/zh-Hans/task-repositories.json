@@ -40,5 +40,9 @@
   "options": "{name} 的选项",
   "no_links": "尚未关联仓库",
   "agent_hint": "Agent 会在工作时维护仓库和相关事项。你也可以自行添加或移除关联。",
-  "legacy_note": "在支持仓库关联之前添加的链接。"
+  "legacy_note": "在支持仓库关联之前添加的链接。",
+  "unavailable": "不可用",
+  "provider_unavailable": "{provider} 不可用。已有链接仍可打开；添加新链接需要它。",
+  "link_pending": "保存时检查",
+  "another_source": "其他来源"
 }

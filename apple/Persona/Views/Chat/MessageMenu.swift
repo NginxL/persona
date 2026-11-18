@@ -232,12 +232,20 @@ struct LeftDrag: UIGestureRecognizerRepresentable {
 /// chat list would take its scrolling).
 struct SwipeTo: UIGestureRecognizerRepresentable {
     var direction: UISwipeGestureRecognizer.Direction
+    /// Off, it takes no touch at all: another recognizer that wants the same swipe (the system's swipe back from anywhere
+    /// on a pushed page, #9971) is not kept waiting on it.
+    var enabled = true
     var action: () -> Void
 
     func makeUIGestureRecognizer(context: Context) -> UISwipeGestureRecognizer {
         let g = UISwipeGestureRecognizer()
         g.direction = direction
+        g.isEnabled = enabled
         return g
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UISwipeGestureRecognizer, context: Context) {
+        recognizer.isEnabled = enabled
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: UISwipeGestureRecognizer, context: Context) {

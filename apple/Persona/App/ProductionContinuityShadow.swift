@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG && os(iOS) // PersonaCore is linked into the iPhone app only (apple/project.yml)
 import Foundation
 import OSLog
 import PersonaCore
@@ -81,11 +81,7 @@ nonisolated final class ProductionContinuityShadow: @unchecked Sendable {
     }
 
     @MainActor func install() {
-        #if os(iOS)
         install(enabled: UserDefaults.standard.object(forKey: "showContinuityShadow") as? Bool ?? true)
-        #else
-        install(enabled: true)
-        #endif
     }
 
     /// Production adapter tests explicitly require a real comparison; they do not inherit the simulator's A/B opt-out.

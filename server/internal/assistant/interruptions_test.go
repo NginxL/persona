@@ -18,7 +18,8 @@ func cutTask(t *testing.T, s *Service, title, machine, errText string) Todo {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.appendInterrupted(ctx, todo, receiptBody{Title: title, State: "interrupted", Machine: machine, Error: errText}, false)
+	s.appendInterrupted(ctx, todo, SessionRef{MachineID: machine, SessionID: "s1"},
+		receiptBody{Title: title, State: "interrupted", Machine: machine, Error: errText}, false)
 	return todo
 }
 
@@ -260,7 +261,8 @@ func TestInterruptedReceiptsBatchCountsTasks(t *testing.T) {
 	s, _ := newTaskService(t)
 	ctx := context.Background()
 	a := cutTask(t, s, "任务一", "mlx", gatewayDown)
-	s.appendInterrupted(ctx, a, receiptBody{Title: "任务一", State: "interrupted", Machine: "mlx", Error: gatewayDown}, false)
+	s.appendInterrupted(ctx, a, SessionRef{MachineID: "mlx", SessionID: "s1"},
+		receiptBody{Title: "任务一", State: "interrupted", Machine: "mlx", Error: gatewayDown}, false)
 	items, _, _ := s.feed(ctx, "conv1", time.Time{})
 	var bodies []receiptBody
 	for _, it := range items {

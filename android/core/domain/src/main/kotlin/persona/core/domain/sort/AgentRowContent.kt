@@ -15,7 +15,8 @@ import persona.core.domain.modelShortName
  */
 data class AgentRowContent(
     /**
-     * Before the latest words: Needs you, Awaiting reply or Waiting in the background; null where its mark says it alone.
+     * Before the latest words: Needs you, Awaiting reply, Just finished or Waiting in the background; null where its mark
+     * says it alone.
      * State Cards spell every state but Seen out at the card's foot instead ([cardStateWord]).
      */
     val stateWord: CoreText?,
@@ -106,12 +107,14 @@ fun AgentSession.rowContent(
 
 /**
  * The row's state in words, as iOS's default row: only what its dot doesn't say alone, Needs you (unless muted),
- * Awaiting reply and Waiting in the background. Working, Unread and the rest are the dot's.
+ * Awaiting reply, Just finished (#9786: Unread's color, as Awaiting reply) and Waiting in the background. Working, Unread
+ * and the rest are the dot's.
  */
 fun AgentSession.rowStateWord(muted: Boolean): CoreText? = when {
     muted -> null
     state == AgentState.NeedsYou -> CoreText.of(Key.StateNeedsYou)
     asksYou -> CoreText.of(Key.StateAwaitingReply)
+    showsJustFinished -> CoreText.of(Key.StateJustFinished)
     waitsInBackground -> CoreText.of(Key.StateBackgroundWaiting)
     else -> null
 }

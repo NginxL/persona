@@ -1,7 +1,9 @@
 package assistantwire
 
 import (
+	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -47,4 +49,25 @@ func containsAny(s string, words []string) bool {
 		}
 	}
 	return false
+}
+
+// toolSearchWords name Claude Code's tool search in an endpoint's refusal (#10365): its ToolSearch tool, the
+// defer_loading flag of a deferred tool, the tool_reference blocks that load one, the tool_search_* tool types. Lower
+// case: matched against lower-cased text.
+var toolSearchWords = []string{"toolsearch is not supported", "defer_loading", "tool_reference", "tool_search", "tool search"}
+
+// badRequest is an HTTP 400 in an error's words. Compiled on first use (see usageLimitLine).
+var badRequest = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\b400\b`) })
+
+// ToolSearchRefused: text, the words of a turn that failed, is an endpoint refusing Claude Code's tool search (#10365):
+// a 400, or a gateway's "not representable", that names it, as "API Error: 400 request is not representable on this
+// edge: ToolSearch is not supported on this endpoint (defer_loading:true, tool_search_*, tool_reference)" or "400
+// tools.3.defer_loading: Extra inputs are not permitted". Only a failed turn's words: a reply may talk about tool search.
+// The node resends such a turn once with every tool loaded; the hub gives what is left its own code.
+func ToolSearchRefused(text string) bool {
+	t := strings.ToLower(text)
+	if !strings.Contains(t, "not representable") && !badRequest().MatchString(t) {
+		return false
+	}
+	return containsAny(t, toolSearchWords)
 }

@@ -55,6 +55,8 @@ interface AgentsDependencies {
     /** The current Agent chat and the id the shell captured as Unread on entry, before its read receipt could arrive. */
     fun visibleChat(): kotlinx.coroutines.flow.StateFlow<persona.core.contracts.SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     fun heldChat(): kotlinx.coroutines.flow.StateFlow<persona.core.contracts.SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+    /** The id the shell captured as Just finished on entry (#9786): its row keeps that place until the chat is left. */
+    fun finishedChat(): kotlinx.coroutines.flow.StateFlow<persona.core.contracts.SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null)
 }
 
 /** Supply one immutable pairing scope; close callbacks synchronize navigation and notifications. */
@@ -111,7 +113,8 @@ fun EntryProviderScope<NavKey>.agentsEntries(
                 AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(), dependencies.preferences(), operations, wiring.mainSender,
                     wiring.scope.ifEmpty { operations?.operations?.scope.orEmpty() }, renamer, tasksStore, hubUpdates = dependencies.hubUpdates(), machineManagement = dependencies.machines(),
                     hubGroups = dependencies.groups(), listContext = kotlinx.coroutines.Dispatchers.Default, archiveService = wiring.archives,
-                    listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat())
+                    listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat(),
+                    finishedChat = dependencies.finishedChat())
                     .also { it.machine(initialMachine); it.show(assistant) }
             }
             val source = LocalAgentsDraftSource.current

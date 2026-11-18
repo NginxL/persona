@@ -147,7 +147,7 @@ func TestAssistantReadinessChecksAssistantExecution(t *testing.T) {
 		}
 		return proto.LauncherCheck{OK: true, Model: model}, nil
 	})
-	got := s.readinessProbe(context.Background(), "server", "shared")
+	got := s.readinessProbe(context.Background(), "server", s.settings(context.Background()))
 	if got == nil || got.Model != "shell-model" {
 		t.Fatalf("assistant readiness tested a different process: %+v", got)
 	}

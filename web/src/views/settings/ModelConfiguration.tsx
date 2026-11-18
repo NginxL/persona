@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
-  providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel,
+  providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel, usageTokens,
   type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
 import {
@@ -15,7 +15,8 @@ import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import type { AssistantLaunchers } from "../../lib/session-models";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
-import { t } from "../../i18n";
+import { formatTokens } from "../../lib/tokens";
+import { formatNumber, t } from "../../i18n";
 import { Button, Dialog, IconButton, Loading, toast } from "../../ui/atoms";
 import { Segmented } from "../assistant/parts";
 import { Icon } from "../../ui/icons";
@@ -131,6 +132,12 @@ function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { p
     : p.inherited_from ? t("settings-modelconfiguration.follows", { name: sourceName(p.inherited_from) ?? "" })
     : !p.status ? t("settings-modelconfiguration.custom") : "";
   const description = purposeDescription(p);
+  // the last 7 days' calls and tokens (#10498): which tokens, and the rest, in the line's tooltip and the help below
+  const usage = p.usage?.calls ? p.usage : undefined;
+  const usageDetail = usage ? t("settings-modelconfiguration.usage_detail", {
+    input: formatTokens(usage.input_tokens), output: formatTokens(usage.output_tokens), cache_write: formatTokens(usage.cache_creation_input_tokens),
+    cache_read: formatTokens(usage.cache_read_input_tokens), failures: formatNumber(usage.failures),
+  }) : "";
   return <div ref={row} data-model-purpose={p.id} onMouseLeave={() => { if (!pinned) setHelp(false); }}
     onKeyDown={(event) => { if (event.key === "Escape") { setHelp(false); setPinned(false); event.stopPropagation(); } }}>
     <div className="flex items-center pr-1">
@@ -144,6 +151,9 @@ function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { p
             {inheritance && <span className="whitespace-normal">{inheritance}</span>}
             {status && <span>{status}</span>}
           </div>
+          {usage && <div data-testid="purpose-usage" className="mt-1 truncate" title={usageDetail}>
+            {t("settings-modelconfiguration.usage", { count: usage.calls, calls: formatNumber(usage.calls), tokens: formatTokens(usageTokens(usage)) })}
+          </div>}
         </>} />
       </div>
       <button type="button" className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-hover focus-visible:outline-accent"
@@ -159,6 +169,7 @@ function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { p
       <p>{t(`settings-modelconfiguration.execution_${purposeLaunch(p) || p.kind}`)}</p>
       <p className="mt-2 font-medium">{t("settings-modelconfiguration.execution_current", { backend: form.backend, provider: providerName(p.effective?.provider, providers) ?? t("settings-modelconfiguration.not_configured") })}</p>
       {p.kind === "launcher" && <p className="mt-2 text-ink-3">{t("settings-modelconfiguration.execution_unverified")}</p>}
+      {usage && <p className="mt-2">{usageDetail}</p>}
     </div>}
   </div>;
 }

@@ -85,7 +85,11 @@ same piece of work finished in a related to-do (the same plan, PR, issue or titl
 retry: rule 1a files it with that work and it counts as closed, on the page, the sidebar's badge and the assistant's
 entries alike (`supersededFailedStarts` in each copy). A failed start that still waits on the owner reads as one on every
 client: not ticked or struck through, why it did not start in red, and its checkbox closes it for good (`"done": true`
-on it clears `start_error`: the owner closed it; `docs/assistant/todos.md`, API overview).
+on it clears `start_error`: the owner closed it; `docs/assistant/todos.md`, API overview). The hub's assistant reads it
+the same way (#10365): its snapshot counts such a to-do open (the open index marks it as not started) for exactly as long
+as this table does (`triageCountsAsOpen`), so a start failing does not take one off the assistant's count, and
+`task_plan`'s `todo_id` takes it up again, reopening it, instead of refusing it as done (`docs/assistant/todos.md`,
+"Retrying on another launcher" for its other way out).
 
 **Waiting on you is only for what the owner must do in person**: answer a question, grant a permission, decide on a
 large feature. A deployed to-do's "Please verify" ask and a "done" conclusion are not: the supervising assistant
@@ -257,8 +261,11 @@ concern never shelves either: it waits for its report, however long.
 - Shelved to-dos are folded under **Shelved**, not counted as open, and not changed on the hub: nothing is deleted, closed
   or released. Any new activity (an agent working, a report, a review, an edit) takes it out again at once.
 - **Restore** on a shelved row counts as activity now: the to-do goes back to its section and shelves again only after
-  another 48 hours without a move. The restore is kept in this browser (`localStorage`, `persona.todos.restored`), not
-  on the hub; another browser or device still shows it shelved until it moves.
+  another 48 hours without a move. The restore is kept in this browser (`localStorage`, `persona.todos.restored`);
+  another browser or device still shows it shelved until it moves. The hub now stores restores too (`restored_at`,
+  `PUT /api/v1/todos/{id}/restored`, `docs/assistant/todos.md` "Restores and Someday"), but today's triage still uses
+  each device's own restore, and the hub's copy of the triage uses none, until the clients switch to the status the hub
+  works out (`view`, `docs/design/proposals/todos-redesign.md` section 6.1), from stage 2 of #10226.
 
 ## Related to-dos
 
@@ -352,3 +359,54 @@ has no Status | Folder switch (it had no folder view), and the Mac shows a merge
 lead. The iOS list draws a row's "N related" inside the lead's row, under its words (Android's card already had it). iOS and
 Android filter and sort the list on the device (`docs/assistant/todos.md`, "List filter and sort"; the web follows). Moving the classification to the hub, so the clients only draw the section it sends, would remove the copies; it
 is not done yet.
+
+## The hub's view (#10226)
+
+The manager works out each to-do's `view` (`schema/wire/todo-view.schema.json`: phase, section, reason, line 2,
+times, marks, asks, steps and rank) and the list's counts and places, by the redesign's decision table
+(`docs/design/proposals/todos-redesign.md` 6.3), in `server/internal/assistant/todo/projection`, fed by
+`server/internal/assistant/todo_projection.go`. The rules' source is the shared cases: `spec/fixtures/todo-view` and
+`spec/fixtures/todo-counts`, whose READMEs list every rule, field, line key (a stable key with string arguments, never
+words: "Line keys"), judgement call and the reasons not produced yet. It differs from the rules above where the
+redesign changes them:
+
+- **A failed start stays open**: Needs you for 48 hours after the failure, then To do with the Inactive mark, never
+  Done, though `done_at` stays stored (rule 1). One whose work finished in a related to-do is closed (rule 1a).
+- **Rule 9a**: finished work the owner has seen stays in Just finished for 24 hours after `seen_at`, then is a To do to
+  tick (`finished_seen`), never Done while it is open. Finished work nobody has seen stays in Just finished however
+  long, accepted and deployed work included (this table's rules 6 and 7).
+- **Parked is Waiting**, on the hub too (this table's rule 5a, until now the web's alone) and above finished work; an
+  open PR and a usage limit wait there with it.
+- **A run that waits on another Agent or an outside event it names is Waiting** (`someone_else`, line `run_waits`),
+  not Working (rule 4); background work and a `/loop`, which end by themselves, stay Working, and so does a moment's
+  model failure while the hub's "Continue" is on its way, which rule 2 reads as cut off.
+- **Can wait**: a decision marked for the briefing (`can_wait`) and a run that ended on a plain-text question
+  (`awaits_reply`) are listed under Needs you's fold, not counted in its number.
+- **Inactive is a mark, not a section**: the to-do keeps its section (To do) with the time activity stopped. A restore
+  counts as activity: the view reads the hub's `restored_at` ("Restores and Someday" in `docs/assistant/todos.md`),
+  not each device's own.
+- **Every ask says how risky answering it is** (#10465): `risk` `safe`, which a row, its card or a push may answer in
+  place, or `open`, which the owner answers after a look, at its home, with `lockscreen` `open_only` so a push about it
+  offers nothing on the lock screen. A decision is `open` when it cannot be undone or other people will see it (the
+  manager's `askRisk`, also written on the list's `ask`, one rule for every place that answers it); a retry is
+  `safe`; a run's ask is what its pending card asks (`question`, `plan`, `tool`, `form` or `secret`, the card's id as
+  `interaction`; the session's own card before Persona's about its turn, then the oldest), `safe` only when a
+  notification may answer that card too (one question with options, not a Just me turn's or a health conversation's)
+  and its asker did not say going ahead cannot be undone. A failed start of a to-do no conversation opened
+  carries no retry, since the hub would refuse it; its row still says why it did not start. The table is in
+  `spec/fixtures/todo-view/README.md` ("Risk and the lock screen").
+
+The list carries it: every row of `GET /api/v1/todos` has its `view` and the answer the list's `counts`, worked out
+once per read over the whole list (`server/internal/assistant/todo_view_routes.go`); `GET /api/v1/todos/{id}` answers
+one row the same way and `GET /api/v1/todos/places` the places (`docs/protocol/protocol.md`, the to-dos rows). Every
+time in a view is absolute, so the list's bytes, and its `ETag`, stay the same while neither the to-dos nor their runs
+change (a working run's latest line is in its row's view). Across managers the hub only adds the counts up and joins
+the places; it never works out a view. The hello features `todo_view` and `todo_places` say every manager serves them,
+and only while they are listed do the counts cover every manager. The manager also pushes `{"type":"todos"}` when a
+run's change or time alone changes what a row is filed under (`docs/assistant/todos.md` "Live WebSocket pushes").
+
+No client draws from `view` by default yet: the clients switch to it in stage 2, falling back to the rules above for a
+row without one. Until then every client, and the hub's own triage for the direction tree and leader reports
+(`todo_triage.go`), follows the rules above. The web's Developing Persona shadow compares the two on real data and
+records what the decided differences (the list above, Steps rolling up and Someday;
+`web/src/features/todos/model/view-legacy.ts` `BY_DESIGN`) do not explain (`docs/web/web.md` "Developing Persona").

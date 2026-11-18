@@ -64,6 +64,8 @@ type sessionState struct {
 	Tasks []string `json:"tasks,omitempty"`
 	// Compaction: the last compaction the user asked for (assistant_compact.go).
 	Compaction *proto.Compaction `json:"compaction,omitempty"`
+	// IdleCompaction is the main chat's user-idle clock and unattended compaction latch.
+	IdleCompaction *idleCompactionState `json:"idle_compaction,omitempty"`
 	// Guest: a guest conversation's tools (assistant_guest.go): every process it runs in has no built-in tools and
 	// only these of Persona's. Nil is an ordinary conversation.
 	Guest []string `json:"guest,omitempty"`
@@ -397,6 +399,8 @@ func (s *stateFile) put(id string, v sessionState) bool {
 	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	if old, ok := s.Sessions[id]; ok {
+		// Owned by state.update: a send's earlier copy must not erase a user's newer arrival.
+		v.IdleCompaction = old.IdleCompaction
 		if old.CreationID != "" {
 			v.CreationID, v.Incarnation = old.CreationID, old.Incarnation
 		}

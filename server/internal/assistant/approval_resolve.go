@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	approvalops "github.com/nwverse/persona/server/internal/approval"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -23,7 +24,7 @@ func (s *Service) resolvePreparedAnswer(ctx context.Context, p *pending, r proto
 	}
 	for _, f := range p.ix.Fields {
 		if r.Allow != nil && *r.Allow && !f.Optional && strings.TrimSpace(r.Values[f.Key]) == "" {
-			return fmt.Errorf("%s was left empty on the phone: nothing changed", f.Label)
+			return i18n.Err("hub-hub.fill_in", i18n.Args{"field": f.Label})
 		}
 	}
 	r.Values = declaredValues(p.ix, r.Values)
@@ -89,21 +90,25 @@ func (s *Service) resolvePreparedAnswer(ctx context.Context, p *pending, r proto
 		}
 		if clarified {
 			if err := s.approvalJournalApplying(ctx, p.ix); err != nil {
-				status = "failed"
-				a.reportStatus = "failed"
-				applyErr = fmt.Errorf("execution was not started because the approval journal could not record it: %w", err)
-				text = applyErr.Error() + " Nothing was applied; ask for a fresh approval."
-				break
+				applyErr = fmt.Errorf("%w: the approval journal could not record execution: %v", approvalops.ErrNotApplied, err)
 			}
 		}
-		// UserAllowed is checked by the coordinator, and the owner operation
-		// rechecks current state immediately before its one apply.
-		text, applyErr = a.op.Apply(applyCtx, r)
+		if applyErr == nil {
+			// UserAllowed is checked by the coordinator, and the owner operation
+			// rechecks current state immediately before its one apply.
+			text, applyErr = a.op.Apply(applyCtx, r)
+		}
 		if errors.Is(applyErr, approvalops.ErrStale) {
 			status = "cancelled"
 			a.reportStatus = "stale"
 			r = proto.Resolution{Dismiss: true, Reason: "stale"}
 			text = fmt.Sprintf("The setting or resource changed after this card was prepared. Nothing was applied; a fresh approval card is required. (%v)", applyErr)
+			applyErr = nil
+		} else if errors.Is(applyErr, approvalops.ErrNotApplied) {
+			status = "cancelled"
+			a.reportStatus = "cancelled"
+			r = proto.Resolution{Dismiss: true, Reason: "not_applied"}
+			text = fmt.Sprintf("The approved change was not started: %v. Nothing was applied; correct the request or ask for a fresh approval before retrying.", applyErr)
 			applyErr = nil
 		} else if applyErr != nil {
 			status = "failed"
@@ -130,6 +135,20 @@ func (s *Service) resolvePreparedAnswer(ctx context.Context, p *pending, r proto
 		s.keepAlways(p.ix, r)
 	}
 	return nil
+}
+
+// endPreparedByID routes a lifecycle ending through the prepared card's one
+// terminal boundary. False means the card is not prepared and keeps its old path.
+func (s *Service) endPreparedByID(id, status, text string) bool {
+	s.fleet.mu.Lock()
+	p := s.fleet.interactions[id]
+	prepared := p != nil && p.prepared != nil
+	s.fleet.mu.Unlock()
+	if !prepared {
+		return false
+	}
+	s.endPrepared(p, status, text)
+	return true
 }
 
 // endPrepared is expiry/cancellation outside resolve. It loses to a final claim

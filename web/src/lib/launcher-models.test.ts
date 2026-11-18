@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  customModel, defaultDetail, defaultLabel, effortChoices, effortRule, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, listedModes, modelDetail,
+  customModel, defaultDetail, defaultLabel, effortChoices, effortRule, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, listedModel, listedModes, modelDetail,
   modelName, modelRows, pickerLauncher, machineLaunchers, providerModels, startPicks, takesEffort, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom,
   type AgentModel, type LauncherModels,
 } from "./launcher-models";
@@ -299,6 +299,24 @@ describe("手动输入的模型 ID（#1644）", () => {
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.method).toBe("DELETE");
     expect(url).toContain("/api/v1/machines/mac/launchers/cc%20gw/models/custom?model=~vendor%2Fmodel-latest%5B1m%5D");
+  });
+});
+
+describe("spellings the hub folded into one row (#10365)", () => {
+  const gateway: LauncherModels = { agent: "claude", models: [
+    { id: "default", name: "Default (recommended)", resolved: "claude-opus-5-5", default: true, efforts: all },
+    { id: "claude-opus-5-5", name: "Opus 5.5", aliases: ["opus", "fable", "sonnet", "haiku"], efforts: ["low", "high"] },
+    { id: "kiro/claude-opus-5-5", name: "Opus 5.5 (kiro)" },
+  ] };
+
+  it("a model saved as an alias finds its row: its efforts, no typed row for it, a search by it", () => {
+    expect(listedModel(gateway.models, "sonnet")?.id).toBe("claude-opus-5-5");
+    expect(listedModel(gateway.models, "kiro/claude-opus-5-5")?.id).toBe("kiro/claude-opus-5-5");
+    expect(listedModel(gateway.models, "claude-opus-4-8")).toBeUndefined();
+    expect(effortChoices(gateway, "haiku")).toEqual(["low", "high"]);
+    expect(effortChoices(gateway, "", { provider: "launcher.gateway-api", model: "opus" })).toEqual(["low", "high"]);
+    expect(customModel(gateway.models, "fable")).toBe("");
+    expect(ids(modelRows(gateway.models, "fable").rows)).toEqual(["claude-opus-5-5"]);
   });
 });
 

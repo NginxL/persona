@@ -16,10 +16,11 @@ import (
 
 // Resuming a Codex thread nothing runs, from the phone (#5220): a message to it, or a resume (session.start with
 // resume), brings it back in a new tab of the engine with `codex resume <id>` (resumeCodex, retire.go). One Persona
-// started comes back with the launcher, directory and model it ran with; one started elsewhere (`codex` in a terminal,
-// since closed) lists as a Codex history row and comes back in the directory its rollout names, through the launcher
-// the caller picked when that one runs Codex, else plain codex. Afterwards it is Persona's like any other: retired and
-// resumed again the same way.
+// started comes back with the launcher, directory, model and effort it ran with (an effort Codex's config already runs
+// is left out of the words, as at the start); one started elsewhere (`codex` in a terminal, since closed) lists as a
+// Codex history row and comes back in the directory its rollout names, through the launcher the caller picked when
+// that one runs Codex, else plain codex. Afterwards it is Persona's like any other: retired and resumed again the same
+// way.
 //
 // Only a thread nothing has open: no app-server owns it (codex_remote.go: sends go there), no process holds its
 // rollout (a Codex CLI still running it, the Codex App's own app-server: a second writer would fork it), not the

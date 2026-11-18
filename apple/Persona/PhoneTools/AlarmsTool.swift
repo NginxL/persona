@@ -10,7 +10,8 @@ import PersonaWire
 enum AlarmsTool {
     static var tools: [PhoneTool] {
         #if os(iOS) && canImport(AlarmKit)
-        [
+        guard #available(iOS 26.0, *) else { return [] } // AlarmKit came with iOS 26
+        return [
             PhoneTool(
                 spec: ToolSpec(
                     name: "phone_alarms_list",
@@ -226,10 +227,13 @@ enum AlarmsTool {
             set { UserDefaults.standard.set(newValue, forKey: key) }
         }
     }
+}
 
-    // MARK: - AlarmKit
+// MARK: - AlarmKit
 
-    #if os(iOS) && canImport(AlarmKit)
+#if os(iOS) && canImport(AlarmKit)
+@available(iOS 26.0, *)
+extension AlarmsTool {
     static func list() throws -> [ToolContent] {
         try AlarmsAccess.require()
         let alarms = try AlarmManager.shared.alarms
@@ -378,19 +382,26 @@ enum AlarmsTool {
         }
         return .null
     }
-    #endif
 }
+#endif
 
 #if os(iOS) && canImport(AlarmKit)
 /// What Persona keeps with an alarm it sets (AlarmKit's metadata).
+@available(iOS 26.0, *)
 nonisolated struct PersonaAlarmData: AlarmMetadata {
     var label: String?
 }
 
 /// AlarmKit's permission (`NSAlarmKitUsageDescription`).
 enum AlarmsAccess {
+    /// AlarmKit came with iOS 26: before it there are no alarm tools (`PhoneDataSource.onThisDevice`).
+    static var isSupported: Bool {
+        if #available(iOS 26.0, *) { true } else { false }
+    }
+
     static func status() -> PhoneAuthStatus {
-        switch AlarmManager.shared.authorizationState {
+        guard #available(iOS 26.0, *) else { return .denied }
+        return switch AlarmManager.shared.authorizationState {
         case .authorized: .granted
         case .denied: .denied
         case .notDetermined: .notDetermined
@@ -399,6 +410,7 @@ enum AlarmsAccess {
     }
 
     static func request() async -> PhoneAuthStatus {
+        guard #available(iOS 26.0, *) else { return .denied }
         _ = try? await AlarmManager.shared.requestAuthorization()
         return status()
     }
@@ -414,6 +426,7 @@ enum AlarmsAccess {
 #elseif os(iOS)
 /// An SDK without AlarmKit: no alarm tools.
 enum AlarmsAccess {
+    static var isSupported: Bool { false }
     static func status() -> PhoneAuthStatus { .denied }
     static func request() async -> PhoneAuthStatus { .denied }
 }

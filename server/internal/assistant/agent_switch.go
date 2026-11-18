@@ -82,7 +82,7 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 	if _, theirs, err := s.supervisedElsewhere(ctx, self, am, c); err != nil {
 		return "", err
 	} else if theirs {
-		text = prompts.RenderSideConversation(prompts.SideConversation{From: self, Text: text})
+		text = prompts.RenderSideConversation(text)
 	}
 	if err := s.moveAgent(ctx, am, c, t, text); err != nil {
 		return "", fmt.Errorf("%s was not moved to %s: %w. Nothing was sent", label, t.Launcher, err)

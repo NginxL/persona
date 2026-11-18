@@ -30,6 +30,8 @@
   "clear_search": "検索をクリア",
   "clear_fyi": "すべて確認済み",
   "clear_noise": "すべてクリア",
+  "clear_in_fyi": "「{name}」の{count}件をすべて確認済みにする",
+  "clear_in_noise": "「{name}」の{count}件をすべてクリア",
   "done": "対応済み",
   "refreshing": "更新中",
   "translated": "翻訳済み",

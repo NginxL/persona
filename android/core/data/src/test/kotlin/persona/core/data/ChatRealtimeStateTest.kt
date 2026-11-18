@@ -35,6 +35,26 @@ class ChatRealtimeStateTest {
         assertEquals(transcript, state.items(transcript))
     }
 
+    @Test
+    fun `ordinary text deltas keep transcript projection identity and update only live text`() {
+        val state = ChatRealtimeState(key)
+        val transcript = List(200) { index ->
+            Item("history#$index", index, role = if (index % 2 == 0) "user" else "assistant",
+                kind = "text", text = "settled $index")
+        }
+        state.delta(DeltaEvent("m1", "s1", "hello"), transcript)
+        val before = state.items(transcript)
+        val settled = before.dropLast(1)
+
+        state.delta(DeltaEvent("m1", "s1", "hello world"), transcript)
+        val after = state.items(transcript)
+
+        assertSame(before, after)
+        assertEquals(settled, after.dropLast(1))
+        assertEquals("hello world", after.last().text)
+        assertEquals(transcript, state.items(transcript).dropLast(1))
+    }
+
     @Test fun aToolCallForAnotherSessionKeepsTheProjection() {
         val state = ChatRealtimeState(key)
         val transcript = listOf(Item("tool#0", 1, role = "assistant", kind = "tool_use", toolUseId = "mine"))

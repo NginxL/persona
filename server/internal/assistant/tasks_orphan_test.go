@@ -30,6 +30,13 @@ func TestAgentGone(t *testing.T) {
 	}{
 		{"closed", func(*orphanAgent) {}, orphanClosed},
 		{"closed after a model error", func(a *orphanAgent) { a.c.TurnError = "API Error: 400 invalid request" }, orphanError},
+		// The hub's own word on a turn with no output is no error that ended it (#10187).
+		{"closed after a turn with no output", func(a *orphanAgent) {
+			a.c.TurnError, a.c.TurnErrorKind = "This turn had no output", proto.TurnErrorNoOutput
+		}, orphanClosed},
+		{"closed after Persona's Stop", func(a *orphanAgent) {
+			a.c.TurnError, a.c.TurnErrorKind = "Stopped with its conversation", proto.TurnErrorStopped
+		}, orphanClosed},
 		{"computer offline", func(a *orphanAgent) { a.reachable = false }, orphanOffline},
 		{"no longer listed", func(a *orphanAgent) { a.listed = false }, orphanClosed},
 		{"open in a tab, stopped", func(a *orphanAgent) { a.c.Status, a.c.PaneID = proto.StatusIdle, "w1:p1" }, ""},
@@ -68,6 +75,13 @@ func TestAgentGone(t *testing.T) {
 			a.c.TurnError, a.c.TurnErrorKind, a.c.TurnErrorResetsAt = "usage limit", proto.TurnErrorUsageLimit, &reset
 		}, ""},
 		{"work done, nothing pending", func(a *orphanAgent) { a.c.Work = &proto.WorkState{Phase: proto.WorkDone} }, orphanClosed},
+		// A node that connected again a moment ago may not list the agent yet, or list it as it is.
+		{"not listed, its node just connected again", func(a *orphanAgent) { a.listed, a.connected = false, now.Add(-30*time.Second) }, ""},
+		{"closed, its node just connected again", func(a *orphanAgent) { a.connected = now.Add(-30 * time.Second) }, ""},
+		{"not listed, its node connected a while ago", func(a *orphanAgent) {
+			a.listed, a.connected = false, now.Add(-orphanReconnectWait-time.Minute)
+		}, orphanClosed},
+		{"offline, its node connected a moment before", func(a *orphanAgent) { a.reachable, a.connected = false, now.Add(-30*time.Second) }, orphanOffline},
 	}
 	for _, c := range cases {
 		a := orphanAgent{machine: "box", session: "s1", reachable: true, listed: true, c: closedAgent(now.Add(-time.Hour))}
@@ -375,5 +389,37 @@ func TestWorkOfInterrupted(t *testing.T) {
 		if got := workOf(i18n.En, alive, &c.w, nil); got == nil {
 			t.Errorf("%s: dropped for a live agent", c.name)
 		}
+	}
+}
+
+// An ssh node whose link dropped starts over, and its first lists do not have the task's agent yet: the supervisor is
+// not told nobody works on the task until the node has had a reconnect window to list it.
+func TestOrphanWaitsForAReconnectedNodeToListItsAgents(t *testing.T) {
+	ctx := context.Background()
+	ft := newFleetTest(t)
+	s := ft.s
+	ft.f.devices = []Device{{ID: "mac", Name: "Mac", Online: true, Reachable: true}}
+	todo, err := s.createTodo(ctx, "Example task", "Collect task evidence.", "conv1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv1", []string{"Tests pass"}, 30)
+	if err := s.linkTodoAgent(ctx, todo.ID, "mac", "s1", "Example task", "/code/app", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	ft.d.mu.Lock()
+	ft.d.machines["mac"].connected = now.Add(-20 * time.Second) // the node is back after a dropped link
+	ft.d.mu.Unlock()
+	ft.sessions("mac", proto.Session{SessionID: "other", Status: proto.StatusIdle, PaneID: "w1:p1"})
+
+	s.orphanWatch(ctx, now)
+	if g, ok := s.orphanSignal(todoNow(s, todo.ID)); ok {
+		t.Fatalf("orphaned the moment its node connected again: %+v", g)
+	}
+	later := now.Add(orphanReconnectWait)
+	s.orphanWatch(ctx, later)
+	if g, ok := s.orphanSignal(todoNow(s, todo.ID)); !ok || g.Orphan != orphanClosed {
+		t.Fatalf("still not listed a reconnect window later: %+v %v", g, ok)
 	}
 }

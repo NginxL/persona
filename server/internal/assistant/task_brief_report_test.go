@@ -12,9 +12,10 @@ import (
 )
 
 // The done receipt lists the brief's criteria as they stood when the agent stopped, read from the supervision
-// ledger's per-criterion state (the one the agent reported is met with its evidence, the other still unchecked), and the
-// conclusion card lists each with its result once the review accepted the work, then what was done beyond the brief.
-func TestReceiptAndConclusionListTheBriefsCriteria(t *testing.T) {
+// ledger's per-criterion state (the one the agent reported is met with its evidence, the other still unchecked). Once the
+// review accepted the work, the conclusion card leads with the result and leaves the criteria to the task's page, which
+// keeps each with its result and what was done beyond the brief (#10380).
+func TestReceiptListsTheBriefsCriteria(t *testing.T) {
 	s, f, todo, posts, _ := conclusionService(t, false)
 	ctx := context.Background()
 	agentTurn(s, f, proto.StatusWorking, "", 0)
@@ -48,40 +49,48 @@ func TestReceiptAndConclusionListTheBriefsCriteria(t *testing.T) {
 		"also_done": []string{"补了回归测试"}})
 	waitFor(t, "the conclusion card", func() bool { return len(cardsWith(posts()[before:], "结论：修登录崩溃")) == 1 })
 	card := cardsWith(posts()[before:], "结论：修登录崩溃")[0]
-	for _, want := range []string{"对照当初的要求", "✅ PR 合并到 master", "✅ 浅色 / 深色截图贴进 PR", "另外做了：补了回归测试", "✅ 做完了"} {
-		if !strings.Contains(card, want) {
-			t.Errorf("card lacks %q:\n%s", want, card)
+	// The card leads with the result; the criteria stay on the task's page (#10380).
+	if !strings.Contains(card, "✅ 做完了") {
+		t.Errorf("card lacks the verdict:\n%s", card)
+	}
+	for _, unwanted := range []string{"对照当初的要求", "PR 合并到 master", "补了回归测试"} {
+		if strings.Contains(card, unwanted) {
+			t.Errorf("card lists the criteria (%q):\n%s", unwanted, card)
 		}
 	}
-	// A decision's card is about what to choose: it lists no result.
-	a := askOf(s, todo.ID)
-	if a == nil {
-		t.Fatal("no ask")
+	if strings.Contains(card, "未达成") {
+		t.Errorf("every criterion was met, yet the card names a shortfall:\n%s", card)
 	}
-	decide := *a
-	decide.Outcome = outcomeDecide
-	if raw, _ := json.Marshal(s.conclusionCard(ctx, todoNow(s, todo.ID), decide)); strings.Contains(string(raw), "对照当初的要求") {
-		t.Errorf("a decision's card lists the result:\n%s", raw)
+	if brief, ok := s.briefOfTodo(todo.ID); !ok || brief.Result == nil || brief.Result.Todo != todo.ID || len(brief.Result.Criteria) != 2 ||
+		brief.Result.Criteria[0].State != criterionMet || brief.Result.Criteria[1].State != criterionMet ||
+		len(brief.Result.AlsoDone) != 1 {
+		t.Fatalf("the task's result was not kept for its page: %+v", brief.Result)
+	}
+	// A decision's card is about what to choose: it names no result.
+	if a := askOf(s, todo.ID); a != nil {
+		decide := *a
+		decide.Outcome = outcomeDecide
+		if raw, _ := json.Marshal(s.conclusionCard(ctx, todoNow(s, todo.ID), decide)); strings.Contains(string(raw), "PR 合并到 master") {
+			t.Errorf("a decision's card lists the result:\n%s", raw)
+		}
 	}
 }
 
-// A result as a card lists it: every state in words and a mark, a long list counted past the first eight.
-func TestBriefResultMarkdown(t *testing.T) {
-	r := &BriefResult{AlsoDone: []string{"removed a dead flag", "updated the doc"}, Criteria: []BriefCriterion{
-		{Criterion: "PR merged", State: criterionMet}, {Criterion: "a test covers it", State: criterionNotMet},
-		{Criterion: "screenshots", State: criterionDropped, Change: "no UI change after all"}, {Criterion: "changelog", State: criterionUnchecked}}}
-	want := "**Against what was asked**\n✅ PR merged\n❌ a test covers it (not met)\n➖ screenshots (dropped: no UI change after all)\n" +
-		"▫️ changelog (not checked)\nAlso done: removed a dead flag; updated the doc"
-	if got := briefResultMarkdown(i18n.En, r); got != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+// The card's one line for a shortfall: only criteria not met, the first three and how many more; nothing when all
+// were met or only some were not checked (#10380).
+func TestNotMetLine(t *testing.T) {
+	r := &BriefResult{Criteria: []BriefCriterion{{Criterion: "PR merged", State: criterionMet},
+		{Criterion: "a test covers it", State: criterionNotMet}, {Criterion: "changelog", State: criterionUnchecked}}}
+	if got, want := notMetLine(i18n.En, r), "**Not met**: a test covers it"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
-	for range 7 {
-		r.Criteria = append(r.Criteria, BriefCriterion{Criterion: "more", State: criterionMet})
+	for _, c := range []string{"b", "c", "d", "e"} {
+		r.Criteria = append(r.Criteria, BriefCriterion{Criterion: c, State: criterionNotMet})
 	}
-	if got := briefResultMarkdown(i18n.En, r); !strings.Contains(got, "… and 3 more") || strings.Count(got, "\n") != 10 {
-		t.Fatalf("got:\n%s", got)
+	if got, want := notMetLine(i18n.En, r), "**Not met**: a test covers it; b; c and 2 more"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
-	if briefResultMarkdown(i18n.En, nil) != "" || briefResultMarkdown(i18n.En, &BriefResult{}) != "" {
-		t.Fatal("an empty result says something")
+	if notMetLine(i18n.En, nil) != "" || notMetLine(i18n.En, &BriefResult{Criteria: []BriefCriterion{{Criterion: "x", State: criterionUnchecked}}}) != "" {
+		t.Fatal("a line with nothing missed")
 	}
 }

@@ -6,7 +6,7 @@ import PackageDescription
 // so the watch, the widgets and the notification extensions link it too; its tests run with `swift test`.
 let package = Package(
     name: "PersonaWire",
-    platforms: [.iOS(.v26), .macOS(.v26), .visionOS(.v26), .watchOS(.v10)],
+    platforms: [.iOS(.v18), .macOS(.v26), .visionOS(.v26), .watchOS(.v10)],
     products: [
         .library(name: "PersonaWire", targets: ["PersonaWire"]),
     ],

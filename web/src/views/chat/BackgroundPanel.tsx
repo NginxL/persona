@@ -1,11 +1,11 @@
 // An Agent's Background tasks side panel (#5421, after cindy's right-sidebar Background tasks tab, BackgroundTasksBody;
 // lib/background-panel.ts opens it): what keeps the Agent going besides its turn. A list in two sections: Running (the
 // /loop first, Persona's own; then the workflow runs, oldest start first, and the background commands, Monitors and
-// subagents) and Completed (the ended workflow runs the node still lists, newest end first). A row is a round kind mark,
-// a status mark and the title, with "status · progress · duration · tokens · tool uses" under it. A workflow row opens
-// its detail in the panel (Back, the run's head, progress and phases: WorkflowCard); a background task with an output
-// file opens its live output here, with Back to the list. The panel reads the session from the store, live; clocks tick only while
-// something runs.
+// subagents) and Completed (the ended workflow runs and retained shell / Monitor outcomes the node still lists, newest
+// end first). A row is a round kind mark, a status mark and the title, with "status · progress · duration · tokens ·
+// tool uses" under it. A workflow row opens its detail in the panel (Back, the run's head, progress and phases:
+// WorkflowCard); a background task with an output file opens its result, full command and bounded output here, with
+// Back to the list. The panel reads the session from the store, live; clocks tick only while something runs.
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { credentialOwner, subscribeCredentialOwner } from "../../lib/api";
@@ -13,7 +13,7 @@ import { useBackgroundChat, type BackgroundPanel as BackgroundPanelObject } from
 import { openPanel } from "../../lib/panel";
 import { composing } from "../../lib/send-history";
 import { getSession, useStore } from "../../lib/store";
-import { backgroundTitle, loopCadence, loopNext, loopTask } from "../../lib/tasks";
+import { backgroundDurationMs, backgroundStatus, backgroundTitle, loopCadence, loopNext, loopTask } from "../../lib/tasks";
 import { compactTokens } from "../../lib/tokens";
 import type { BackgroundTask, LoopInfo, Session, Workflow } from "../../lib/types";
 import { mediaMatches, NARROW } from "../../lib/viewport";
@@ -32,14 +32,17 @@ const startOf = (w: Workflow) => Date.parse(w.started_at ?? "") || 0;
 const endOf = (w: Workflow) => Date.parse(w.ended_at ?? "") || Date.parse(w.updated_at ?? "") || startOf(w);
 
 /** What the list shows, in its order: the running runs oldest start first, the background tasks as the hub lists them,
- *  the ended runs newest end first. */
-export function backgroundSections(s: Session | undefined, now: number): { loop?: LoopInfo; running: Workflow[]; tasks: BackgroundTask[]; completed: Workflow[] } {
+ *  the ended runs and commands newest end first. */
+export function backgroundSections(s: Session | undefined, now: number): { loop?: LoopInfo; running: Workflow[]; tasks: BackgroundTask[]; completed: Workflow[]; completedTasks: BackgroundTask[] } {
   const recent = recentWorkflows(s, now);
+  const ended = s?.background_ended ?? [];
+  const endedIDs = new Set(ended.map((task) => task.id));
   return {
     loop: s?.loop,
     running: recent.filter((w) => w.running).sort((a, b) => startOf(a) - startOf(b)),
-    tasks: otherBackground(s),
+    tasks: otherBackground(s).filter((task) => !endedIDs.has(task.id)),
     completed: recent.filter((w) => !w.running).sort((a, b) => endOf(b) - endOf(a)),
+    completedTasks: [...ended].sort((a, b) => (Date.parse(b.ended_at ?? "") || 0) - (Date.parse(a.ended_at ?? "") || 0)),
   };
 }
 
@@ -64,7 +67,7 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   const asks = (p: BackgroundPanelObject, previous?: Selection | null): Selection | null => {
     if (p.run) return { kind: "run", id: p.run, fromRow: false };
     if (!p.task) return null;
-    const task = otherBackground(session).find((entry) => entry.id === p.task);
+    const task = [...otherBackground(session), ...(session?.background_ended ?? [])].find((entry) => entry.id === p.task);
     const same = previous?.kind === "command" && previous.task.id === p.task && previous.owner === owner && previous.manager === session?.manager;
     return task ? { kind: "command", task, cwd: same ? previous.cwd : session?.cwd, owner, manager: session?.manager, fromRow: Boolean(same && previous.fromRow) }
       : same ? previous : null;
@@ -93,9 +96,11 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   const run = shown?.kind === "run" ? session?.workflows?.find((w) => w.task_id === shown.id) : undefined;
   const command = shown?.kind === "command" ? shown : undefined;
   const commandCurrent = Boolean(command && owned && session && command.owner === owner && command.manager === session.manager);
-  const liveCommand = commandCurrent && command ? otherBackground(session).find((entry) => entry.id === command.task.id) : undefined;
-  // Keep the last task metadata when it leaves the running list; disappearance does not report its outcome.
-  if (command && liveCommand && command.task !== liveCommand) setShown({ ...command, task: liveCommand });
+  const runningCommand = commandCurrent && command ? otherBackground(session).find((entry) => entry.id === command.task.id) : undefined;
+  const endedCommand = commandCurrent && command ? session?.background_ended?.find((entry) => entry.id === command.task.id) : undefined;
+  const currentCommand = endedCommand ?? runningCommand;
+  // Keep the last task metadata when it leaves both lists; disappearance does not report its outcome.
+  if (command && currentCommand && command.task !== currentCommand) setShown({ ...command, task: currentCommand });
   useEffect(() => {
     if ((shown?.kind === "run" && !run) || (command && !commandCurrent)) setShown(null);
   }, [shown, run, command, commandCurrent]);
@@ -129,13 +134,13 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
       ) : command && commandCurrent ? (
         <BackgroundCommandDetail
           key={JSON.stringify([mid, sid, command.task.id, command.task.output_file])}
-          mid={mid} sid={sid} cwd={command.cwd} task={liveCommand ?? command.task}
-          running={Boolean(liveCommand)} focus={command.fromRow} owner={command.owner} manager={command.manager}
+          mid={mid} sid={sid} cwd={command.cwd} task={currentCommand ?? command.task}
+          running={Boolean(runningCommand && !endedCommand)} focus={command.fromRow} owner={command.owner} manager={command.manager}
           onBack={goBack}
           onOpenFile={() => {
             const current = getSession(mid, sid);
             if (credentialOwner() !== command.owner || !current || current.manager !== command.manager) return;
-            openPanel({ kind: "file", mid, path: (liveCommand ?? command.task).output_file!, cwd: command.cwd });
+            openPanel({ kind: "file", mid, path: (currentCommand ?? command.task).output_file!, cwd: command.cwd });
           }}
         />
       ) : (
@@ -155,15 +160,48 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   );
 }
 
-function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask }: { session: Session | undefined; mid: string; sid: string; onOpenRun: (task: string) => void; onOpenTask: (task: BackgroundTask) => void }) {
+export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOverview }: {
+  session: Session | undefined;
+  mid: string;
+  sid: string;
+  onOpenRun: (task: string) => void;
+  onOpenTask: (task: BackgroundTask) => void;
+  inOverview?: boolean;
+}) {
   const owner = credentialOwner();
   // an ended run leaves the list a day after it ended (recentWorkflows): the list's clock moves while something runs
   const busy = Boolean(session?.loop) || (session?.background?.length ?? 0) > 0 || (session?.workflows ?? []).some((w) => w.running);
   const now = useNow(60_000, busy);
-  const { loop, running, tasks, completed } = backgroundSections(session, now);
+  const { loop, running, tasks: allTasks, completed, completedTasks } = backgroundSections(session, now);
+  const subagentIds = inOverview ? new Set(session?.subagents?.map((agent) => agent.id)) : undefined;
+  const tasks = subagentIds ? allTasks.filter((task) => task.kind !== "agent" || !subagentIds.has(task.id)) : allTasks;
   const runningId = useId();
   const completedId = useId();
-  if (!loop && !running.length && !tasks.length && !completed.length) {
+  const commandRow = (task: BackgroundTask, listedRunning: boolean) => {
+    const status = backgroundStatus(task, listedRunning);
+    const since = Date.parse(task.started_at ?? "");
+    const took = backgroundDurationMs(task, status === "running", now);
+    return (
+      <TaskRow
+        key={task.id}
+        icon={taskIcon(task)}
+        title={backgroundTitle(task)}
+        status={status}
+        meta={[<span key="status">{status ? taskStatusWord(status) : t("chat-activity.output_not_running")}</span>,
+          ...(status === "running" && Number.isFinite(since) ? [<LiveDuration key="time" since={since} />]
+            : took !== null ? [<span key="time" className="tabular-nums">{workDuration(took)}</span>] : [])]}
+        command={task.command}
+        onCopy={() => {
+          const current = getSession(mid, sid);
+          if (owner === credentialOwner() && current && current.manager === session?.manager && task.command) void copyText(task.command);
+        }}
+        onClick={task.output_file ? () => onOpenTask(task) : undefined}
+        data={{ "data-bg-task": task.id }}
+      />
+    );
+  };
+  if (!loop && !running.length && !tasks.length && !completed.length && !completedTasks.length) {
+    if (inOverview) return null;
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center" data-background-empty>
         <Icon name="list" size={20} className="text-ink-3" />
@@ -172,7 +210,8 @@ function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask }: { session:
     );
   }
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2" data-background-list>
+    <div className={inOverview ? "pb-2" : "min-h-0 flex-1 overflow-y-auto px-1 pb-2"} data-background-list>
+      {inOverview && <h3 className="px-2 pt-3 text-xs font-semibold text-ink-2">{t("sidepanel.background")}</h3>}
       {(loop || running.length > 0 || tasks.length > 0) && (
         <section aria-labelledby={runningId} data-background-section="running">
           <SectionHeader id={runningId} label={t("chat-activity.section_running")} />
@@ -180,34 +219,16 @@ function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask }: { session:
           {running.map((w) => (
             <RunRow key={w.task_id} run={w} onOpen={onOpenRun} />
           ))}
-          {tasks.map((task) => {
-            const title = backgroundTitle(task);
-            const since = Date.parse(task.started_at ?? "");
-            return (
-              <TaskRow
-                key={task.id}
-                icon={taskIcon(task)}
-                title={title}
-                status="running"
-                meta={[<span key="status">{taskStatusWord("running")}</span>, ...(Number.isFinite(since) ? [<LiveDuration key="time" since={since} />] : [])]}
-                command={task.command}
-                onCopy={() => {
-                  const current = getSession(mid, sid);
-                  if (owner === credentialOwner() && current && current.manager === session?.manager && task.command) void copyText(task.command);
-                }}
-                onClick={task.output_file ? () => onOpenTask(task) : undefined}
-                data={{ "data-bg-task": task.id }}
-              />
-            );
-          })}
+          {tasks.map((task) => commandRow(task, true))}
         </section>
       )}
-      {completed.length > 0 && (
+      {(completed.length > 0 || completedTasks.length > 0) && (
         <section aria-labelledby={completedId} data-background-section="completed">
           <SectionHeader id={completedId} label={t("chat-activity.section_completed")} />
           {completed.map((w) => (
             <RunRow key={w.task_id} run={w} onOpen={onOpenRun} />
           ))}
+          {completedTasks.map((task) => commandRow(task, false))}
         </section>
       )}
     </div>

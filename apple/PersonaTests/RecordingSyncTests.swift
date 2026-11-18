@@ -320,4 +320,57 @@ private final class FakeRecordingHub: @unchecked Sendable {
         }
         #expect(pending.deletes == [RecordingDayDelete(recording: day)])
     }
+
+    // MARK: The replayed meeting (#10589)
+
+    /// A replayed tape's meeting (`ReplayedMeeting`), as `MeetingReplay.play` saves it.
+    private func replayed(_ lib: RecordingLibrary) throws -> RecordingEntry {
+        var entry = RecordingEntry(id: ReplayedMeeting.id, createdAt: .now, source: .phone, title: "Weekly sync", active: false, expectedSegments: 1)
+        entry.attendance = RecordingAttendance.room(.listener, private: false, photos: false, liveView: true, highlights: true)
+        entry.segments = [RecordingSegment(index: 0, start: 0, duration: 30, sentences: [RecordingSentence(start: 1, end: 3, text: "Hello")])]
+        lib.restore(entry.id)
+        try lib.save(entry)
+        return lib.entry(entry.id)!
+    }
+
+    /// Never uploaded, however much it looks like a recording to upload.
+    @Test func theReplayedMeetingIsNeverUploaded() async throws {
+        let (lib, sync, hub, root) = setup()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = try replayed(lib)
+        #expect(RecordingSync.uploadable(entry))
+        #expect(sync.status(entry) == .waiting)
+        await sync.syncNow()
+        #expect(!hub.calls.contains { $0.contains(ReplayedMeeting.id.uuidString.lowercased()) }, "\(hub.calls)")
+    }
+
+    /// Delete is this phone's only: no `DELETE` for its fixed id, which would leave the hub a tombstone that deletes every
+    /// later replay while it plays.
+    @Test func deletingTheReplayedMeetingSendsNothing() async throws {
+        let (lib, sync, hub, root) = setup()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = try replayed(lib)
+        try sync.delete(entry.id)
+        #expect(lib.entry(entry.id) == nil)
+        #expect(!sync.store.deletes.contains(entry.id))
+        await sync.syncNow()
+        #expect(!hub.calls.contains { $0.hasPrefix("DELETE") }, "\(hub.calls)")
+    }
+
+    /// A hub that holds a tombstone for its id (an older app deleted a replay there) has no say on the replay playing now;
+    /// reconciliation (a relaunch asks the hub what it has first) still deletes here what was deleted there.
+    @Test func aTombstoneOnTheHubLeavesTheReplayAlone() async throws {
+        let (lib, sync, hub, root) = setup()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let other = try transcribed(lib)
+        await sync.syncNow()
+        let entry = try replayed(lib)
+        hub.deleteThere(ReplayedMeeting.id)
+        hub.deleteThere(other.id)
+        let api = api(hub)
+        let relaunched = RecordingSync(library: lib, api: { api }, recordingDaysChanged: { _ in })
+        await relaunched.syncNow()
+        #expect(lib.entry(entry.id) != nil)
+        #expect(lib.entry(other.id) == nil, "a recording deleted there still goes here")
+    }
 }

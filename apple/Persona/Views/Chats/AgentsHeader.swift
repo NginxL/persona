@@ -1,10 +1,30 @@
 import SwiftUI
 #if os(iOS) || os(visionOS)
 import UIKit
+#endif
 
+/// Search visibility is a pure decision so a retained query and an empty field cannot share a fold by accident (#7332).
+/// The new retained state is iOS-only; visionOS and Mac keep their existing presentation.
+nonisolated enum AgentsSearchVisibility {
+    static func retained(query: String) -> Bool {
+        #if os(iOS)
+        !query.isEmpty
+        #else
+        false
+        #endif
+    }
+
+    /// The row copy keeps its band but has no visible, hittable or accessible field whenever the overlay owns it.
+    static func rowShown(scrolled: CGFloat, band: CGFloat, floating: Bool, query: String) -> CGFloat {
+        guard !floating, !retained(query: query) else { return 0 }
+        return min(max(band - scrolled, 0), band)
+    }
+}
+
+#if os(iOS) || os(visionOS)
 /// The top of the Agents page on a phone (#2478): the search field, the room over the list for the shell's top bar and
-/// the list's first row (the quick filters), laid out here from two things only: whether the page is searching
-/// (`ChatsView.searching`) and how far the list is scrolled past its top (`scrolled`).
+/// the list's first row (the quick filters), laid out here from whether the page is searching
+/// (`ChatsView.searching`), whether a query is retained, and how far the list is scrolled past its top (`scrolled`).
 ///
 /// It used to be the system's `navigationBarDrawer` search with our corrections around it: the drawer moved the field,
 /// the navigation bar's height and the list's inset; `SearchCloseWatcher` wrote the list's offset to start it folded
@@ -12,12 +32,15 @@ import UIKit
 /// searching; the shell's bar faded on its own clock. Closing a search, four of them moved at once on their own
 /// timings (the list overshot ~140 pt and sprang back 138 pt in a frame, the field ended half folded, 2026-11-05;
 /// #314, #413, #740, #1051, #2189 were this layer too). Now the navigation bar never changes height, nothing else
-/// writes the list's insets, and everything that moves is a function of the two values above:
+/// writes the list's insets, and everything that moves is a function of the searching and scroll values above (the
+/// retained query owns a stationary overlay, not another animation):
 ///
-/// - At rest the field sits in the list's first row, above the filters: it scrolls with the list, and is cut off at the
-///   list's top as it goes under the bar (`AgentsHeaderRow`), as the drawer folded it. The page starts folded (the list
-///   scrolled by the field's band) and comes back folded when its tab is picked again (#740). Let go half way, the
-///   list settles folded or shown. In the shell the list has room over it for the taller top bar (`room`).
+/// - At rest with an empty query the field sits in the list's first row, above the filters: it scrolls with the list,
+///   and is cut off at the list's top as it goes under the bar (`AgentsHeaderRow`), as the drawer folded it. The page
+///   starts folded (the list scrolled by the field's band) and comes back folded when its tab is picked again (#740).
+///   Let go half way, the list settles folded or shown. In the shell the list has room over it for the taller top bar
+///   (`room`). A retained query instead keeps the same field in the overlay at that row's resting position; the row copy
+///   is suppressed and neither scrolling nor the idle/tab-return fold can take the query away (#7332).
 /// - Searching, the field floats in the navigation bar's row (`AgentsSearchOverlay`). One animated value moves it, the
 ///   list (slid as a picture, `ListShift`) and the shell's bar's opacity (`AgentsTopBarFade`), so they move as one and
 ///   the bar is gone before the field gets to it. The list is laid out for searching (`compact`) only where that looks
@@ -48,6 +71,8 @@ import UIKit
     /// where the two layouts look the same, the list shifted by the difference (`ListShift`): at the end of the field's
     /// way up, at the start of its way down. Between, the list only slides, as a picture, with the field.
     var compact = false
+    /// A retained query opts out of the ordinary fold, including an attempt already queued when it became retained.
+    @ObservationIgnored var retainsQuery = false
 
     /// How much higher the list's content is laid out searching than at rest: the field's band and the shell's room.
     static func shift(shell: Bool) -> CGFloat { band + room(shell: shell) }
@@ -65,9 +90,6 @@ import UIKit
     /// The room's bar: the page's color, so faint it draws nothing, but not clear (a clear bar gets no blur).
     static var roomFill: some View { Theme.pageBackground.opacity(0.01) }
 
-    /// How much of the field shows at rest: all at the list's top, less as the list scrolls (0 folded).
-    static func shown(scrolled: CGFloat) -> CGFloat { min(max(band - scrolled, 0), band) }
-
     @ObservationIgnored fileprivate weak var probe: UIView?
     @ObservationIgnored private weak var foundList: UIScrollView?
     @ObservationIgnored private var folded = false
@@ -77,11 +99,11 @@ import UIKit
     /// just enough room at its end to. Again when the page comes back to the front (`refold`); never on the way back
     /// from a chat, which keeps the list as it was.
     func foldOnce() {
-        guard !folded else { return }
+        guard !folded, !retainsQuery else { return }
         var tries = 0
         func attempt() {
             tries += 1
-            guard !folded else { return }
+            guard !folded, !retainsQuery else { return }
             if let list = listScrollView, list.contentSize.height > 0, list.bounds.height > 0 {
                 folded = true
                 measureListTop()
@@ -107,7 +129,7 @@ import UIKit
 
     /// Let go with the field part way out: the list goes on to show it all, or fold it, whichever is nearer.
     func settle() {
-        guard !floating, let list = listScrollView, !list.isTracking, !list.isDecelerating else { return }
+        guard !floating, !retainsQuery, let list = listScrollView, !list.isTracking, !list.isDecelerating else { return }
         let s = list.contentOffset.y + list.adjustedContentInset.top
         guard s > 0.5, s < Self.band - 0.5 else { return }
         let top = -list.adjustedContentInset.top
@@ -222,17 +244,18 @@ private struct AgentsFoldingField: View {
     var begin: () -> Void
 
     var body: some View {
-        let shown = AgentsHeader.shown(scrolled: header.scrolled)
         let band = AgentsHeader.band
+        let shown = AgentsSearchVisibility.rowShown(scrolled: header.scrolled, band: band,
+                                                    floating: header.floating, query: query)
         AgentsSearchField(text: $query, active: false, begin: begin)
             .modifier(AgentsFieldPlace())
             .frame(height: band, alignment: .top)
             .mask(alignment: .bottom) { Rectangle().frame(height: shown) }
-            .opacity(header.floating ? 0 : Double(shown / band))
+            .opacity(Double(shown / band))
             #if os(iOS)
-            .allowsHitTesting(!header.floating && shown >= band / 2)
+            .allowsHitTesting(shown >= band / 2)
             #endif
-            .accessibilityHidden(header.floating || shown < band / 2)
+            .accessibilityHidden(shown < band / 2)
             .searchTraceMark("field")
     }
 }
@@ -275,6 +298,7 @@ struct AgentsSearchOverlay: View {
     let header: AgentsHeader
     var shell: Bool
     @Binding var query: String
+    var begin: () -> Void
     var focused: () -> Void
     var cancel: () -> Void
 
@@ -282,16 +306,25 @@ struct AgentsSearchOverlay: View {
         // From the top of the safe area: the navigation bar's row.
         GeometryReader { proxy in
             let from = header.listTop + AgentsHeader.room(shell: shell) - proxy.frame(in: .global).minY // the row's field
-            if header.floating {
+            let retained = AgentsSearchVisibility.retained(query: query)
+            if header.floating || retained {
                 HStack(alignment: .top, spacing: Theme.Size.searchCloseGap) {
-                    AgentsSearchField(text: $query, active: true, focused: focused)
-                    // Its bar puts the item at its trailing margin: the page's edge.
-                    SystemCloseButton(action: cancel)
-                        .frame(width: Theme.Size.tapTarget + Theme.Space.page, height: AgentsHeader.band) // the bar's own row
+                    // A retained field is the ordinary flat capsule and never autofocuses. Explicit activation changes
+                    // its identity, so the active field gets the existing gesture, accessibility and keyboard setup.
+                    AgentsSearchField(text: $query, active: header.floating, begin: begin, focused: focused)
+                        .id(header.floating)
+                    if header.floating {
+                        // Its bar puts the item at its trailing margin: the page's edge.
+                        SystemCloseButton(action: cancel)
+                            .frame(width: Theme.Size.tapTarget + Theme.Space.page, height: AgentsHeader.band) // the bar's own row
+                    }
                 }
                 .padding(.leading, Theme.Space.page)
+                .padding(.trailing, header.floating ? 0 : Theme.Space.page)
+                .frame(maxWidth: header.floating ? nil : .infinity)
                 .frame(height: AgentsHeader.band, alignment: .top)
-                .searchTraceMark("float")
+                .background { if !header.floating { Theme.groupedPage } }
+                .searchTraceMark(header.floating ? "float" : "retained")
                 .modifier(Rise(progress: header.up ? 1 : 0, from: from, to: 0))
             }
         }
@@ -358,6 +391,16 @@ struct AgentsSearchField: UIViewRepresentable {
 
     static var prompt: String { AgentsSearchPrompt.text }
 
+    /// The text size the field's words stop growing at: the top bars' (`Theme.Shell.topBarLargestTypeSize`), whose row
+    /// it rises into. Its capsule and its band keep their height at every size, so the fold, the pull and the rise do
+    /// not change with the text (#10165).
+    static let largestTypeSize = UIContentSizeCategory(Theme.Shell.topBarLargestTypeSize)
+
+    /// The size the field's words are drawn at for its own text size.
+    static func textSize(for size: UIContentSizeCategory) -> UIContentSizeCategory {
+        size == .unspecified ? size : min(size, largestTypeSize)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> Holder {
@@ -383,6 +426,7 @@ struct AgentsSearchField: UIViewRepresentable {
             holder.accessibilityTraits = .searchField
             holder.accessibilityLabel = Self.prompt
             holder.accessibilityValue = text.isEmpty ? Self.prompt : text
+            context.coordinator.updateClearAction(for: holder)
             field.isAccessibilityElement = false
         }
         #endif
@@ -412,9 +456,28 @@ struct AgentsSearchField: UIViewRepresentable {
             super.init(frame: .zero)
             field.frame = bounds
             field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            // `fitText` sizes the words; UIKit's own following would undo the cap.
+            field.adjustsFontForContentSizeCategory = false
             addSubview(field)
+            registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (holder: Holder, _: UITraitCollection) in
+                holder.fitText()
+            }
         }
         required init?(coder: NSCoder) { nil }
+
+        /// The field's words (what is typed and the placeholder) at its text size, no larger than `largestTypeSize`.
+        /// UIKit sizes them once, as the bar is made, and then follows only a change of the field's own size: the field
+        /// in the list's row is made at launch, before the window's cap is set, and kept the system's AX5 words (53 pt)
+        /// in its 44 pt capsule while everything around it was drawn at xxxLarge (#10165). Fitted again on entering a
+        /// window and on every change of the text size.
+        func fitText() {
+            let size = AgentsSearchField.textSize(for: traitCollection.preferredContentSizeCategory)
+            guard size != .unspecified, let font = field.font else { return }
+            let style = (font.fontDescriptor.object(forKey: .textStyle) as? String).map(UIFont.TextStyle.init) ?? .body
+            let points = UIFont.preferredFont(forTextStyle: style, compatibleWith: UITraitCollection(preferredContentSizeCategory: size)).pointSize
+            // The placeholder's words take the field's font with them.
+            if font.pointSize != points { field.font = font.withSize(points) }
+        }
 
         override func accessibilityActivate() -> Bool {
             guard let activateSearch else { return super.accessibilityActivate() }
@@ -442,6 +505,7 @@ struct AgentsSearchField: UIViewRepresentable {
                 cell = nil
             } else {
                 unclipCell()
+                fitText()
             }
         }
 
@@ -468,6 +532,7 @@ struct AgentsSearchField: UIViewRepresentable {
         if !active {
             #if os(iOS)
             holder.accessibilityValue = text.isEmpty ? Self.prompt : text
+            context.coordinator.updateClearAction(for: holder)
             #endif
             if field.isFirstResponder { field.resignFirstResponder() }
         }
@@ -490,6 +555,39 @@ struct AgentsSearchField: UIViewRepresentable {
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             true
         }
+
+        /// The clear button is an edit, not a request to open the floating search. Its touch must not also run the
+        /// holder's tap-to-begin gesture (important when clearing a retained query leaves the field folded).
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var view = touch.view
+            while let current = view, current !== gestureRecognizer.view {
+                if current is UIButton { return false }
+                view = current.superview
+            }
+            return true
+        }
+
+        #if os(iOS)
+        private var clearActionInstalled: Bool?
+
+        /// Only emptiness changes rebuild this rotor action, never a scroll-frame update or an edit within the query.
+        func updateClearAction(for holder: Holder) {
+            let hasText = !parent.text.isEmpty
+            guard clearActionInstalled != hasText else { return }
+            clearActionInstalled = hasText
+            holder.accessibilityCustomActions = hasText ? [
+                UIAccessibilityCustomAction(name: String(localized: "Clear Search"), target: self,
+                                            selector: #selector(clearSearch(_:)))
+            ] : nil
+        }
+
+        /// VoiceOver's equivalent of the field's clear button: no search activation and no stranded focus on a removed field.
+        @objc func clearSearch(_ action: UIAccessibilityCustomAction) -> Bool {
+            parent.text = ""
+            UIAccessibility.post(notification: .layoutChanged, argument: nil)
+            return true
+        }
+        #endif
 
         func textFieldShouldBeginEditing(_ field: UITextField) -> Bool {
             #if os(iOS)

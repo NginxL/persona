@@ -169,11 +169,10 @@
     ]
   },
   "mcp/agents": {
-    "count": 13,
+    "count": 12,
     "files": [
       "mcp/agents/agent_send.md",
       "mcp/agents/agent_start.md",
-      "mcp/agents/agent_supervise.md",
       "mcp/agents/ask_escalate.md",
       "mcp/agents/direction_name.md",
       "mcp/agents/interaction_answer.md",
@@ -240,16 +239,6 @@
       "todo/thread_open.md",
       "todo/thread_reply.md",
       "todo/title_input.md"
-    ]
-  },
-  "tools": {
-    "count": 5,
-    "files": [
-      "tools/session_title_input.md",
-      "tools/translate.md",
-      "tools/translate_mail.md",
-      "tools/translate_mail_input.md",
-      "tools/translate_texts.md"
     ]
   }
 }

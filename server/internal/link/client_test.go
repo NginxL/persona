@@ -690,7 +690,7 @@ func TestSystemTrustChecksTheCAAndTheHostName(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	get := func(raw string) error {
-		resp, err := systemTrusted(nil).Get(raw)
+		resp, err := hubClient(&Config{Trust: TrustSystem}, nil, nil).Get(raw)
 		if err == nil {
 			resp.Body.Close()
 		}
@@ -716,7 +716,7 @@ func TestAPinNeverFallsBackToSystemTrust(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	testCA(t, srv) // the system would trust it...
-	resp, err := hubClient(&Config{FP: "not-its-pin", Trust: TrustSystem}, nil).Get(srv.URL)
+	resp, err := hubClient(&Config{FP: "not-its-pin", Trust: TrustSystem}, nil, nil).Get(srv.URL)
 	if err == nil {
 		resp.Body.Close()
 		t.Fatal("a pinned pairing talked to a hub the system trusts but the pin does not")

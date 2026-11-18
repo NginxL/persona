@@ -1290,7 +1290,7 @@ struct VoiceDeps { var api: () -> APIClient?                 // Refetch each con
 
 ### 6.8 DEBUG and screenshots
 
-- **Launch arguments** (add all to `scripts/release/release.sh`, ensure no Swift-identifier collision):
+- **Launch arguments** (add all to `scripts/release/debug_switches.txt`, ensure no Swift-identifier collision):
   - `-showVoiceSample listening|speaking|working|paused|asking|approval|refused|plan_feedback|unprompted|ended|setup`: no socket/mic, fake states; may combine `-openSession`. `unprompted` (#5904): an instruction the user-speech gate held back, with "Send Anyway" (its `ready` lists `speech_gate`, as every sample's does);
   - `-openVoice YES`: real mock flow (starts the voice chat in the app once the page offers a call, whatever the device: on the iPhone the phone icon itself places a system call, #9887).
   - `-showCallFallback YES` (#9887): the Simulator's stand-in for the system's calls refuses every Start, so the iPhone's phone icon falls back to the voice chat in the app, with its line. `-openVoice silent`: the same real socket, bar and thread with no microphone or speaker (`VoiceSample.SilentAudio` reports playing for as long as the received PCM lasts): on a simulator whose Mac does not let it record, `-openVoice YES` ends after the 3-second probe with "Something went wrong with the microphone or speaker" (6.4, lessons "The iOS voice mode", #5029), so such a simulator walks the flow this way.

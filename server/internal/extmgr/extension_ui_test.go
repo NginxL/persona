@@ -142,9 +142,9 @@ func serveUIExtensionForTest() {
 		if seen != "" {
 			items = append(items, map[string]any{"type": "text", "text": seen})
 		}
-		return map[string]any{"title": "示例", "state": "page=1", "sections": []any{map[string]any{"title": "概况", "items": items}}}, nil
+		return map[string]any{"title": cmp.Or(os.Getenv("EXAMPLE_UI_ID"), "示例"), "state": "page=1", "sections": []any{map[string]any{"title": "概况", "items": items}}}, nil
 	}
-	_ = pserve.Serve(context.Background(), os.Stdin, os.Stdout, pserve.Program{ID: "example-ui", Version: cmp.Or(os.Getenv("EXAMPLE_UI_VERSION"), "1.0.0"),
+	_ = pserve.Serve(context.Background(), os.Stdin, os.Stdout, pserve.Program{ID: cmp.Or(os.Getenv("EXAMPLE_UI_ID"), "example-ui"), Version: cmp.Or(os.Getenv("EXAMPLE_UI_VERSION"), "1.0.0"),
 		Init: func(_ context.Context, _ extension.InitializeParams, h *pserve.Hub) (map[string]any, error) {
 			hub = h
 			return nil, nil

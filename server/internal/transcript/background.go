@@ -101,8 +101,8 @@ func (m *Meta) trackBackground(toolUseID, name string, raw json.RawMessage, ts t
 		}
 		m.pend(toolUseID, proto.BackgroundTask{Kind: "workflow", Description: name, StartedAt: ts})
 	case "TaskStop", "KillShell", "KillBash":
-		m.removeBackground(in.TaskID + in.ShellID)
-		m.workflowEnded(in.TaskID+in.ShellID, proto.WorkflowKilled, ts)
+		// The call is only a request. Its result decides whether the task actually stopped.
+		m.pend(toolUseID, proto.BackgroundTask{ID: in.TaskID + in.ShellID, Kind: "stop"})
 	}
 }
 
@@ -147,6 +147,18 @@ func (m *Meta) pend(toolUseID string, t proto.BackgroundTask) {
 		m.bgPending = map[string]proto.BackgroundTask{}
 	}
 	m.bgPending[toolUseID] = t
+	m.noteBackgroundPending()
+}
+
+// BackgroundPending is the ids of background tool calls still waiting for their result, for readers that skip lines:
+// a Stop result names only its call's id, not the tool. Callers must not change it.
+func (m *Meta) BackgroundPending() [][]byte { return m.bgPendingIDs }
+
+func (m *Meta) noteBackgroundPending() {
+	m.bgPendingIDs = nil // a new slice: a copy of the Meta may hold the old one
+	for id := range m.bgPending {
+		m.bgPendingIDs = append(m.bgPendingIDs, []byte(id))
+	}
 }
 
 func (m *Meta) backgroundStarted(toolUseID, result string, isError bool, ts time.Time) {
@@ -197,6 +209,14 @@ func (m *Meta) backgroundStarted(toolUseID, result string, isError bool, ts time
 		return
 	}
 	delete(m.bgPending, toolUseID)
+	m.noteBackgroundPending()
+	if t.Kind == "stop" {
+		if !isError {
+			m.finishBackground(t.ID, "stopped", nil, "", ts)
+			m.workflowEnded(t.ID, proto.WorkflowKilled, ts)
+		}
+		return
+	}
 	match := bgIDRe.FindStringSubmatch(result)
 	if isError || match == nil {
 		return // ran in the foreground after all, or failed to start
@@ -232,6 +252,9 @@ func workflowLaunch(result string) bool {
 
 // workflowsKept: how many workflow runs a session's Meta remembers.
 const workflowsKept = 8
+
+// backgroundEndedKept bounds retained shell / Monitor outcomes independently of running tasks.
+const backgroundEndedKept = 8
 
 func (m *Meta) workflowStarted(t *proto.BackgroundTask, toolUseID, result string) {
 	w := proto.Workflow{TaskID: t.ID, Name: t.Description, Status: proto.WorkflowRunning, Running: true, StartedAt: t.StartedAt,
@@ -308,15 +331,62 @@ func outputFile(result string) string {
 }
 
 func (m *Meta) taskFinished(notification string, ts time.Time) {
-	if n, _ := taskNote(notification); n.Kind == "agent" && !agentTerminal(n.Status) {
+	n, _ := taskNote(notification)
+	if n.Kind == "agent" && !agentTerminal(n.Status) {
+		return
+	}
+	if n.Status == "event" {
+		for i := range m.Background {
+			if m.Background[i].ID == n.TaskID && n.OutputFile != "" {
+				m.Background[i].OutputFile = n.OutputFile
+			}
+		}
 		return
 	}
 	if id := firstTag(notification, "task-id"); id != "" {
-		m.removeBackground(id)
-		m.workflowEnded(id, firstTag(notification, "status"), ts)
+		m.finishBackground(id, n.Status, n.ExitCode, n.OutputFile, ts)
+		m.workflowEnded(id, n.Status, ts)
 	}
 }
 
+// finishBackground moves a shell / Monitor to bounded outcome history. Agents and workflows keep their own histories.
+func (m *Meta) finishBackground(id, status string, exitCode *int, output string, ts time.Time) {
+	for i, t := range m.Background {
+		if t.ID != id {
+			continue
+		}
+		m.Background = append(m.Background[:i:i], m.Background[i+1:]...)
+		m.removeBackgroundEnded(id)
+		if t.Kind != "shell" && t.Kind != "monitor" {
+			return
+		}
+		t.Status, t.EndedAt, t.ExitCode = strings.Clone(status), &ts, exitCode
+		if output != "" {
+			t.OutputFile = output
+		}
+		m.BackgroundEnded = append(m.BackgroundEnded, t)
+		if n := len(m.BackgroundEnded) - backgroundEndedKept; n > 0 {
+			m.BackgroundEnded = append([]proto.BackgroundTask(nil), m.BackgroundEnded[n:]...)
+		}
+		return
+	}
+	// A stop result can precede the terminal notification. Add its details without moving the first end time.
+	for i := range m.BackgroundEnded {
+		t := &m.BackgroundEnded[i]
+		if t.ID != id {
+			continue
+		}
+		if output != "" {
+			t.OutputFile = output
+		}
+		if exitCode != nil {
+			t.ExitCode = exitCode
+		}
+		return
+	}
+}
+
+// A reused task id supersedes both its running entry and any retained outcome.
 func (m *Meta) removeBackground(id string) {
 	if id == "" {
 		return
@@ -324,6 +394,16 @@ func (m *Meta) removeBackground(id string) {
 	for i, t := range m.Background {
 		if t.ID == id {
 			m.Background = append(m.Background[:i:i], m.Background[i+1:]...)
+			break
+		}
+	}
+	m.removeBackgroundEnded(id)
+}
+
+func (m *Meta) removeBackgroundEnded(id string) {
+	for i, t := range m.BackgroundEnded {
+		if t.ID == id {
+			m.BackgroundEnded = append(m.BackgroundEnded[:i:i], m.BackgroundEnded[i+1:]...)
 			return
 		}
 	}

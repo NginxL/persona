@@ -129,10 +129,13 @@ struct SideSessionPage: View {
                     if model.session(side) != nil {
                         page
                     } else {
+                        // Its own header with the way out (#9971): pushed (regular width), the page hid the bar and drew
+                        // none, so nothing led back to the parent.
+                        DetailHeader(title: String(localized: "Agent"), mark: EmptyView(), menu: EmptyView())
+                        Divider()
                         EmptyStateView(symbol: Theme.Icon.sideSessions, title: String(localized: "This agent is gone"),
                                        message: String(localized: "It may have been closed."))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .toolbarVisibility(.hidden, for: .navigationBar)
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .top) // the sheet's height, not the page's wish
@@ -144,9 +147,11 @@ struct SideSessionPage: View {
         .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.6)))
         #if os(iOS)
         // A sheet has no edge-back of its own: a rightward swipe from the leading edge closes it like ✕ (#5603).
+        // Not when pushed: the stack's own swipes go back there, and a drag over the whole page took the swipe back from
+        // anywhere from it (#9971).
         .simultaneousGesture(DragGesture(minimumDistance: Theme.Size.edgeBackZone / 2).onEnded { drag in
             if !pushed && TaskDetailSheet.edgeSwipeCloses(start: drag.startLocation, translation: drag.translation) { dismiss() }
-        })
+        }, including: pushed ? .subviews : .all)
         #endif
     }
 

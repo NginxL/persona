@@ -1,9 +1,9 @@
 # A bounded Refract pilot for a native settings surface (#9620)
 
-**Decision: audit only; do not integrate or enable Refract yet.** This document records a candidate, its native
-boundaries and the evidence needed for a later, separately reviewed experiment. It does not change a production
-screen, build dependency, setting, generated source, navigation route or default. Refract's production-readiness
-evidence has not been accepted for Persona.
+**Decision: #9694 authorizes one bounded, Android-only consumer experiment, not production integration or rollout.**
+The audit below retains the original boundaries and the evidence that remains open. The experiment adds no production
+screen selection, build dependency, setting, generated navigation route or default change. Refract's production-readiness
+evidence has not been accepted for Persona, and no release or three-platform readiness is claimed.
 
 The audience of the existing surface is anyone checking which Persona build is installed. The audience of this
 engineering evaluation is a maintainer deciding whether one implementation can reduce native UI duplication without
@@ -294,6 +294,25 @@ No gate is met by this document. Only after A–D pass may a maintainer consider
 variant. Default rollout is a separate product and engineering decision, with fresh evidence and an unchanged
 handwritten rollback available. Failure of any gate stops the pilot; it does not justify weakening a baseline or
 claiming partial native evidence as readiness.
+
+## #9694: one generated Android Version row
+
+The audit's candidate is narrowed to **one read-only Version row**, rather than its proposed Version and Build pair.
+`AboutVersionRow.swift` and `refract.json` under `android/refract/about/` map directly to the existing `JRow` and
+localized resources. `AboutVersionSnapshot.kt` supplies a typed immutable app-owned model. Build and Commit, including
+parsing, short-hash display and full-value copy, stay native. `AboutSettingsPage` and its production route are unchanged.
+
+The generated Kotlin and its model adapter are compiled only in `:feature:settings`'s test source set, never in an
+ordinary debug/release source set, and exercised only by the comparison test; no application route chooses them. `AboutVersionRefractTest` compares it with the unchanged native row in all three Android styles,
+light/dark, en/zh-Hans/ja and standard/2x text. These captures are Native JVM component evidence, not device evidence.
+`scripts/app/refract_about_version.py` pins a complete public source commit/archive checksum and the SwiftSyntax lock;
+it is the only regeneration command, with a read-only drift check in the Android CI lane. No generator runtime or
+opaque binary enters an app. The CLI's second-backend output is temporary schema validation, not a HarmonyOS
+implementation or destination. `android/refract/about/README.md` records the exact invocation and rollback.
+
+This is a consumer experiment, not the audit's production integration: the general Gates A–D and the other open
+readiness decisions below remain open. An Android-only compile and paired Native JVM captures do not satisfy the
+three-platform build, device or performance gates.
 
 ## Audit verification and limits
 

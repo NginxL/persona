@@ -7,6 +7,9 @@ import PersonaWire
 /// and the app warms the disk cache of recent chats not retained in memory. A retained hidden chat keeps its covered
 /// sequence until it becomes visible again; its subscription then replays what it missed without hidden rendering.
 /// Chats on screen are live over their own subscription and are left alone, unless it stops bringing items (`checkStall`).
+/// The warming is for a tap in the Agents list, so it runs only while one is in sight (`warmWhileInSight`): on every page
+/// it read 7–14 transcripts and rewrote about 0.7 MB of cache a minute on a busy hub (#10582). A chat opened from
+/// anywhere else (a notification, a link) opens from its cache and its subscription replays what came after it.
 @MainActor
 final class AgentSync {
     static let shared = AgentSync()
@@ -31,7 +34,11 @@ final class AgentSync {
     /// (docs/archive/apple/live-updates.md「Forced refreshes while scrolling」).
     private var synced: [String: Int64]
     private var queue: [SessionKey] = []
-    private var running = Set<SessionKey>()
+    /// The pulls on their way, cancelled when the last Agents list goes out of sight (`stopWarming`).
+    private var running: [SessionKey: Task<Void, Never>] = [:]
+    /// The Agents lists in sight now (`warmWhileInSight`): hidden chats are pulled only while there is one.
+    private var inSight = Set<UUID>()
+    var warming: Bool { !inSight.isEmpty }
     private var scheduled = false
     private var lastPull: [SessionKey: Date] = [:]
     /// Chats whose pulls failed in a row: tried again by `AgentSyncPacing.retryAt`, not on every push of any session.
@@ -91,6 +98,34 @@ final class AgentSync {
         catchingUp = []
     }
 
+    /// Hidden chats are warmed while the calling task runs: an Agents list in sight, its tab in front and the app active
+    /// (`AgentsCoverWatch`, from `.tabActiveTask`). Coming into sight, what moved meanwhile is pulled at once; going out of
+    /// it (the task cancelled), nothing more is, and the pulls on their way stop.
+    func warmWhileInSight() async {
+        let id = UUID() // the task's own: an old task's leaving never takes a newer one's place
+        listInSight(id, true)
+        while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
+        listInSight(id, false)
+    }
+
+    /// An Agents list came into sight (`shown`) or went out of it.
+    func listInSight(_ id: UUID, _ shown: Bool) {
+        let before = warming
+        if shown { inSight.insert(id) } else { inSight.remove(id) }
+        guard warming != before else { return }
+        #if DEBUG || PERF_SIGNPOST
+        PerfTrace.event("Agent sync warming", warming ? "on" : "off")
+        #endif
+        if warming { plan() } else { stopWarming() }
+    }
+
+    /// No list in sight: the plan waiting goes, and so do the pulls on their way (a cancelled one is no failure).
+    private func stopWarming() {
+        queue = []
+        replanAt = nil
+        for task in running.values { task.cancel() }
+    }
+
     /// After a burst of events, look once.
     func schedule() {
         guard !scheduled else { return }
@@ -129,7 +164,7 @@ final class AgentSync {
             guard let rev = known[s.key] ?? s.rev, synced[s.id] != rev else { continue }
             if model.isSubscribed(s.key) {
                 synced[s.id] = rev // on screen: its subscription brings what is new
-            } else if !running.contains(s.key), canPrefetch(s.key) {
+            } else if warming, running[s.key] == nil, canPrefetch(s.key) { // out of sight: pulled once a list is back
                 if let failure = failed[s.key], let at = AgentSyncPacing.retryAt(failure, rev: rev, now: now) {
                     if at != .distantFuture { later = min(later ?? at, at) } // refused: its own next push looks again
                 } else if let at = Self.heldUntil(working: s.state == .working, lastPull: lastPull[s.key], now: now) {
@@ -227,14 +262,14 @@ final class AgentSync {
     }
 
     private func pump() {
-        while running.count < Self.concurrency, !queue.isEmpty {
+        while warming, running.count < Self.concurrency, !queue.isEmpty {
             let key = queue.removeFirst()
             guard let rev = known[key], canPrefetch(key) else { continue }
-            running.insert(key)
+            let pulledBefore = lastPull[key]
             lastPull[key] = .now
-            Task {
+            running[key] = Task {
                 let outcome = await pull(key)
-                running.remove(key)
+                running[key] = nil
                 switch outcome {
                 case .pulled:
                     failed[key] = nil
@@ -247,6 +282,11 @@ final class AgentSync {
                     if let at = AgentSyncPacing.retryAt(failure, rev: rev, now: .now), at != .distantFuture { replan(at: at) }
                 case .skipped:
                     break
+                case .stopped:
+                    // Not pulled: a working agent's next pull is not held for `workingGap` by this one, and a list back
+                    // in sight meanwhile (which skipped it as running) has it looked at again.
+                    lastPull[key] = pulledBefore
+                    if warming { schedule() }
                 }
                 pump()
             }
@@ -270,6 +310,8 @@ final class AgentSync {
         case failed(refused: Bool)
         /// Not pulled, and not a failure: the chat was retained or subscribed meanwhile (`canPrefetch`).
         case skipped
+        /// Cancelled on its way: the last Agents list went out of sight (`stopWarming`). Not a failure either.
+        case stopped
     }
 
     /// Brings one session up to date. A failure is tried again after a back-off, one the hub refused once its
@@ -277,12 +319,15 @@ final class AgentSync {
     /// every push of any session, dozens of times a minute.
     private func pull(_ key: SessionKey) async -> PullOutcome {
         let model = self.model()
+        guard !Task.isCancelled else { return .stopped }
         guard canPrefetch(key) else { return .skipped }
         guard let api = model.api(key.group) else { return .failed(refused: false) }
 
         do {
             try await Self.pullToDisk(key, api, cacheFolder: model.stateFolder)
             return .pulled
+        } catch let error where Task.isCancelled || error.isCancellation {
+            return .stopped
         } catch let e as APIError {
             return .failed(refused: AgentSyncPacing.refused(status: e.status))
         } catch {
@@ -310,7 +355,7 @@ final class AgentSync {
 
     /// No store in memory: update the disk cache the chat will open from (decoding and writing off the main thread).
     /// What comes after the cache's `covered` is added when it continues it; anything else (a capped catch-up, a
-    /// replaced transcript) writes the latest page instead.
+    /// replaced transcript) writes the latest page instead. Not cancelled once it writes: a file is never left half done.
     private nonisolated static func pullToDisk(_ key: SessionKey, _ api: APIClient, cacheFolder: URL?) async throws {
         let cached = await Task.detached(priority: .utility) { ChatCache.load(key, in: cacheFolder) }.value
         if let cached, let covered = cached.covered ?? cached.items.last?.seq {
@@ -318,20 +363,35 @@ final class AgentSync {
             let sameFile = r.history == nil || cached.history == nil || r.history == cached.history
             if sameFile && r.moreAfter != true && (r.fromSeq ?? covered) <= covered {
                 if r.items.isEmpty && r.toSeq == nil { return }
+                try Task.checkCancellation()
                 await Task.detached(priority: .utility) {
                     let have = Set(cached.items.map(\.id))
                     let all = ChatStore.ordered(cached.items + ChatStore.withImageRefs(r.items, key).filter { !have.contains($0.id) })
                     let tail = ChatCache.tail(all, turns: 2)
-                    ChatCache.save(key, items: tail, hasMore: cached.hasMore || tail.count < all.count,
-                                   history: r.history ?? cached.history, covered: max(covered, r.toSeq ?? all.last?.seq ?? covered), in: cacheFolder)
+                    let hasMore = cached.hasMore || tail.count < all.count
+                    let history = r.history ?? cached.history
+                    // Nothing it shows changed (lines it already had, or none to show): the file stays. Its `covered`
+                    // lags then, and the next pull or the chat's subscription asks from there, which only costs a request.
+                    guard !AgentSync.unchanged(cached, items: tail, hasMore: hasMore, history: history) else { return }
+                    ChatCache.save(key, items: tail, hasMore: hasMore,
+                                   history: history, covered: max(covered, r.toSeq ?? all.last?.seq ?? covered), in: cacheFolder)
                 }.value
                 return
             }
         }
         let page = try await api.items(key, beforeSeq: nil)
+        try Task.checkCancellation()
         await Task.detached(priority: .utility) {
-            ChatCache.save(key, items: ChatStore.withImageRefs(page.items, key), hasMore: page.hasMore,
-                           history: page.history, covered: page.toSeq, in: cacheFolder)
+            let items = ChatStore.withImageRefs(page.items, key)
+            if let cached, AgentSync.unchanged(cached, items: items, hasMore: page.hasMore, history: page.history) { return }
+            ChatCache.save(key, items: items, hasMore: page.hasMore, history: page.history, covered: page.toSeq, in: cacheFolder)
         }.value
+    }
+
+    /// What the chat would show from the cache is what it shows already (#10582): a pull whose lines were all there, or
+    /// none of whose lines show, rewrote the whole file (a working agent's last two turns, 120–175 KB) for nothing.
+    private nonisolated static func unchanged(_ cached: (items: [Item], hasMore: Bool, history: String?, covered: Int?),
+                                              items: [Item], hasMore: Bool, history: String?) -> Bool {
+        cached.hasMore == hasMore && cached.history == history && cached.items == items
     }
 }

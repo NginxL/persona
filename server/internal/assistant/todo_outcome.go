@@ -380,12 +380,18 @@ const (
 // its projects' one line and latest todo outcomes (todo/project); empty when the directory is no project's or the
 // knowledge base is not open (the agent starts without it).
 func (s *Service) projectContext(ctx context.Context, machine, dir string) string {
+	c, _ := s.projectContextSlugs(ctx, machine, dir)
+	return c
+}
+
+// projectContextSlugs is projectContext and the slugs of the projects dir belongs to.
+func (s *Service) projectContextSlugs(ctx context.Context, machine, dir string) (string, []string) {
 	if strings.TrimSpace(dir) == "" || s.isWorkMachine(machine) {
-		return ""
+		return "", nil
 	}
 	e, err := s.kbGet(ctx)
 	if err != nil || e == nil {
-		return ""
+		return "", nil
 	}
 	projects := e.ProjectsForWork(machine, dir)
 	// What extensions wrote for these projects (extension_context.go): asked once for all of them.
@@ -407,17 +413,25 @@ func (s *Service) projectContext(ctx context.Context, machine, dir string) strin
 			break
 		}
 	}
-	return strings.Join(blocks, "\n\n")
+	return strings.Join(blocks, "\n\n"), slugs
 }
 
-// withProjectContext puts the project background of dir on machine before a new agent's first prompt; the prompt as
-// it is without any (or when it is empty: nothing to put it before).
-func (s *Service) withProjectContext(ctx context.Context, machine, dir, prompt string) string {
+// withProjectContext puts the project background of dir on machine before a new agent's first prompt, and the notes
+// of the directions the work belongs to (lead: the leader conversation supervising or starting it, "" none;
+// direction_notes.go) before that; the prompt as it is without any (or when it is empty: nothing to put it before).
+func (s *Service) withProjectContext(ctx context.Context, machine, dir, lead, prompt string) string {
 	if strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	if c := s.projectContext(ctx, machine, dir); c != "" {
-		return c + "\n\n" + prompt
+	var parts []string
+	c, slugs := s.projectContextSlugs(ctx, machine, dir)
+	if s.isWorkMachine(machine) {
+		lead = "" // a work machine's agent is told nothing of the owner's own directions either
+	} else if d := s.directionContext(ctx, lead, slugs); d != "" {
+		parts = append(parts, d)
 	}
-	return prompt
+	if c != "" {
+		parts = append(parts, c)
+	}
+	return strings.Join(append(parts, prompt), "\n\n")
 }

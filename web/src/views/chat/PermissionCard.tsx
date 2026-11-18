@@ -7,8 +7,11 @@ import { lazyPage } from "../../lib/lazy-page";
 import { cardToolName } from "../../lib/turns";
 import type { Interaction } from "../../lib/types";
 import { Button, Kbd } from "../../ui/atoms";
+import { Icon } from "../../ui/icons";
+import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
+import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { useChatCardTapGuard } from "./card-tap-guard";
-import { Card, PermissionBody, resolve, useCardKeys } from "./Interactions";
+import { Card, CODE_BOX, permissionFrom, resolve, useCardKeys } from "./Interactions";
 import { usePermissionText } from "./permission-text";
 
 const ApprovalQuestion = lazyPage(() => import("./ApprovalQuestion").then((m) => m.ApprovalQuestion));
@@ -71,5 +74,53 @@ export function PermissionCard({ ix }: { ix: Interaction }) {
       {questionOpen && <Suspense fallback={null}><ApprovalQuestion ix={ix} busy={busy} onClose={() => setQuestionOpen(false)} /></Suspense>}
       {alwaysScope(ix) && <p className="mt-2 text-label leading-relaxed text-ink-3">{alwaysScope(ix)}</p>}
     </Card>
+  );
+}
+
+/** What the tool will do, field by field (Android PermissionRequestSummary): the agent's sentence, then the command,
+ *  file or address under a small label, an edit's changes; a tool it does not know shows the hub's summary. The raw
+ *  input stays one click away, open from the start only when nothing else says what the tool does. */
+export function PermissionBody({ ix }: { ix: Interaction }) {
+  const input = ix.tool_input ?? {};
+  const hasInput = Object.keys(input).length > 0;
+  const detail = permissionDetail(ix.tool_name, input);
+  const diffs = detail && DIFF_TOOLS.has(ix.tool_name ?? "") ? editDiffs({ id: ix.id, seq: 0, role: "assistant", kind: "tool_use", tool_name: ix.tool_name, tool_input: input }) : null;
+  const reason = permissionReason(ix.agent, ix.reason);
+  const extra = detail ? summaryExtra(ix.summary, detail.fields) : "";
+  const extraShown = extra && extra !== detail?.note && extra !== reason && !detail?.fields.some((f) => f.value === extra);
+  const lead = detail ? undefined : ix.summary?.trim();
+  const [showInput, setShowInput] = useState(!detail && !lead);
+  // a subagent's call (Claude Code sends its parent's session with agent_id and agent_type): say which one asks
+  // (#4376); the main session's own cards (agent_type alone, as `claude --agent x` sets it, or "main") say nothing
+  const from = permissionFrom(ix);
+  return (
+    <div className="flex flex-col gap-2">
+      {from && <p data-permission-from title={from} className="truncate text-[12px] leading-snug text-ink-3">{from}</p>}
+      {reason && <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink-2">{reason}</p>}
+      {detail?.note && <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink">{detail.note}</p>}
+      {detail?.fields.map((f) => (
+        <div key={f.label}>
+          <div className="mb-1 text-[11px] font-medium text-ink-3">{t(`chat-interactions.field_${f.label}`)}</div>
+          <pre className={CODE_BOX}>{f.value}</pre>
+        </div>
+      ))}
+      {diffs && diffs.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] font-medium text-ink-3">{t(ix.tool_name === "Write" ? "chat-interactions.field_content" : "chat-interactions.field_changes")}</div>
+          <div className="flex max-h-48 flex-col gap-2 overflow-auto">
+            <DiffBlocks diffs={diffs} />
+          </div>
+        </div>
+      )}
+      {extraShown && <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2">{extra}</p>}
+      {lead && <pre className={CODE_BOX}>{lead}</pre>}
+      {hasInput && (detail || lead) && (
+        <button type="button" aria-expanded={showInput} onClick={() => setShowInput((v) => !v)} className="touch-hit flex items-center gap-1 self-start text-[11.5px] whitespace-nowrap text-ink-3 transition-colors hover:text-ink">
+          <Icon name="chevron" size={11} stroke={2.4} style={{ transform: showInput ? "none" : "rotate(-90deg)", transition: "transform 150ms" }} />
+          {t(showInput ? "chat-interactions.hide_input" : "chat-interactions.show_input")}
+        </button>
+      )}
+      {showInput && <pre className={CODE_BOX}>{JSON.stringify(input, null, 2)}</pre>}
+    </div>
   );
 }

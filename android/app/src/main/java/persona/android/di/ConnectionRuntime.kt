@@ -114,7 +114,7 @@ class ConnectionRuntime @Inject constructor(application: Application) : HubConne
     val desktops: StateFlow<List<HubDesktop>> = groupDesktops.selected
     override val lastHello: Hello? get() = selected.value?.hello?.value
     private var started = false
-    private var startup: Job? = null
+    @Volatile private var startup: Job? = null
     /** Live cadence: the app is in front, or the floating capsule is usable on an unlocked screen. */
     @Volatile private var foreground = false
     @Volatile private var appForeground = false
@@ -259,26 +259,20 @@ class ConnectionRuntime @Inject constructor(application: Application) : HubConne
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = refreshNetwork()
             override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) = refreshNetwork()
         })
-        try {
-            // Receivers query pairing synchronously after Application.onCreate returns.
-            val restored = runBlocking(Dispatchers.IO) {
+        val job = scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
                 clearUnversionedPairingData(app)
-                gate.withLock { restoreLocked() }
+                val restored = gate.withLock { restoreLocked() }
+                if (!restored) gate.withLock { app.pairings.load()?.let { pairLegacyLocked(it) } }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                failClosed()
+                Log.w("ConnectionRuntime", "Cannot restore pairing; stored data retained")
             }
-            if (!restored) startup = scope.launch {
-                try {
-                    gate.withLock { app.pairings.load()?.let { pairLegacyLocked(it) } }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) {
-                    failClosed()
-                    Log.w("ConnectionRuntime", "Cannot migrate pairing; stored data retained")
-                }
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) {
-            failClosed()
-            Log.w("ConnectionRuntime", "Cannot restore pairing; stored data retained")
         }
+        // Publish the barrier before the restore can begin, so settled() cannot miss it.
+        startup = job
+        job.start()
     }
 
     private fun failClosed() {

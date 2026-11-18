@@ -324,6 +324,8 @@
     <string name="settings_row_claude_subtitle">Common options on your computers, changed together</string>
     <string name="settings_row_codex">Codex settings</string>
     <string name="settings_row_codex_subtitle">Codex options on your computers, changed together</string>
+    <string name="settings_row_agy">Antigravity settings</string>
+    <string name="settings_row_agy_subtitle">Antigravity options on your computers, changed together</string>
     <string name="settings_section_connectors">Connectors</string>
     <string name="settings_row_phone_subtitle">Contacts, calendar, photos, location and clipboard</string>
     <string name="settings_row_mail">Mail</string>

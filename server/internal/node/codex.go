@@ -51,14 +51,24 @@ type rolloutCache struct {
 	segments []codexRollout // every file of rollouts', a continued thread's older segments too (rolloutSegments)
 	older    []rolloutFile  // rollouts in day directories before the window and archived ones, listed once a minute
 	olderAt  time.Time
-	// misses are the ids rolloutPath globbed for and found nowhere, with missStamp then: a thread with no rollout (an
-	// app-server thread that never wrote one) was globbed across all of history every second. A miss holds while the
-	// recent day directories and archived_sessions are unchanged, and until the older days are listed again.
-	misses   map[string][]int64
-	metas    map[string]rolloutMeta // path → its session_meta (never changes once written); gone paths leave it once a minute
-	titles   map[string]string
-	former   map[string][]string // id → the names session_index.jsonl gave the thread before its latest (a rename)
-	titlesAt time.Time
+	// misses are the ids rolloutPath globbed for and found nowhere: a thread with no rollout (an app-server thread that
+	// never wrote one, an App chat whose rollout Codex compressed to .jsonl.zst or deleted) was globbed across all of
+	// history every second. A miss holds while the directories a new rollout appears in (missDirs) are unchanged; when
+	// they changed, while no rollout name in them has the thread's id (recentNames). A rollout put into an older day
+	// directory is seen when rollouts lists the older days again (a minute), which lets that thread's miss go.
+	misses map[string]rolloutMiss
+	// hits are the paths rolloutPath found for an id with that missLook's stamp. Their file and header are checked again
+	// on every call; a recentNames look without the id or the next older-day relist keeps the hit from going stale.
+	hits map[string]rolloutHit
+	// recentNames are the rollout names in missDirs when their missStamp was recentStamp ("\n" after each name): listed
+	// again only when a directory changes.
+	recentNames string
+	recentStamp []int64
+	relistedAt  time.Time              // when the look of the last relistMisses was taken
+	metas       map[string]rolloutMeta // path → its session_meta (never changes once written); gone paths leave it once a minute
+	titles      map[string]string
+	former      map[string][]string // id → the names session_index.jsonl gave the thread before its latest (a rename)
+	titlesAt    time.Time
 }
 
 var rolloutCaches = struct {
@@ -170,6 +180,7 @@ func rollouts(home string) []codexRollout {
 		}
 	}
 	if now.Sub(c.olderAt) > time.Minute {
+		look := newMissLook(home) // before listing: a rollout written meanwhile moves a directory past this stamp
 		all, _ := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*.jsonl"))
 		archived, _ := filepath.Glob(filepath.Join(home, "archived_sessions", "rollout-*.jsonl"))
 		all = append(all, archived...)
@@ -180,7 +191,7 @@ func rollouts(home string) []codexRollout {
 			}
 		}
 		c.olderAt = now
-		c.misses = nil
+		c.relistMisses(all, look)
 		c.pruneMetas(files)
 	}
 	firstOlder := len(files)
@@ -344,8 +355,15 @@ func mainThread(home, id string) string {
 	return id
 }
 
+// rolloutGlob is what rolloutPath globs with (a test counts the globs).
+var rolloutGlob = filepath.Glob
+
 // rolloutPath finds a session's rollout under a home by id.
-func rolloutPath(home, id string) string {
+func rolloutPath(home, id string) string { return rolloutPathIn(home, id, nil) }
+
+// rolloutPathIn is rolloutPath with the look at the directories a miss depends on (missLook) taken once per home in a
+// list pass (codexListPass): the list asks for every thread with no rollout each second, most of them twice.
+func rolloutPathIn(home, id string, pass *codexListPass) string {
 	for _, r := range rollouts(home) {
 		if r.id == id && fileExists(r.path) {
 			return r.path
@@ -354,49 +372,269 @@ func rolloutPath(home, id string) string {
 	if !validID(id) {
 		return ""
 	}
-	looked := time.Now()
-	stamp := missStamp(home)
+	look := pass.missLook(home)
 	rolloutCaches.Lock()
-	missed, ok := cacheFor(home).misses[id]
+	c := cacheFor(home)
+	hit, hitOK := c.hits[id]
+	missed, ok := c.misses[id]
+	if ok && look.at.Sub(missed.asked) > missAskedEvery {
+		missed.asked = look.at
+		c.misses[id] = missed
+	}
 	rolloutCaches.Unlock()
-	if ok && slices.Equal(missed, stamp) {
+	if hitOK {
+		var matches []string
+		if slices.Equal(dirStamps(hit.dirs), hit.dirStamp) {
+			matches = rolloutMatches(home, id, hit.paths)
+		}
+		if len(matches) > 0 {
+			if slices.Equal(hit.stamp, look.stamp) {
+				return newestFirst(matches)[0]
+			}
+			// Another thread's recent rollout does not invalidate this one. A name for this thread may be its move or
+			// continuation: look across history again, as the original lookup did.
+			if !strings.Contains(look.recentNames(), "-"+id) {
+				look.keepHit(id, matches)
+				return newestFirst(matches)[0]
+			}
+		}
+	}
+	if ok && slices.Equal(missed.stamp, look.stamp) {
 		return ""
 	}
-	matches, _ := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*-"+id+"*.jsonl"))
+	// A directory changed since the miss, but no rollout name in them has this id: no glob across all of history (each
+	// new rollout made every thread with none glob it again, 528 of them for 14 s of CPU).
+	if ok && !strings.Contains(look.recentNames(), "-"+id) {
+		look.keepMiss(id)
+		return ""
+	}
+	matches, _ := rolloutGlob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*-"+id+"*.jsonl"))
 	matches = slices.DeleteFunc(matches, func(path string) bool { return rolloutThreadID(home, path) != id })
 	if len(matches) == 0 {
-		matches, _ = filepath.Glob(filepath.Join(home, "archived_sessions", "rollout-*-"+id+"*.jsonl"))
+		matches, _ = rolloutGlob(filepath.Join(home, "archived_sessions", "rollout-*-"+id+"*.jsonl"))
 		matches = slices.DeleteFunc(matches, func(path string) bool { return rolloutThreadID(home, path) != id })
 	}
 	if len(matches) == 0 {
-		// A directory changed in the last second may change again within its mtime's granularity (a coarse clock
-		// tick) without its mtime moving: no miss kept on it.
-		if slices.Max(stamp) < looked.Add(-time.Second).UnixNano() {
-			rolloutCaches.Lock()
-			c := cacheFor(home)
-			if c.misses == nil {
-				c.misses = map[string][]int64{}
-			}
-			c.misses[id] = stamp
-			rolloutCaches.Unlock()
+		// A rollout moved between the two globs (unarchived from archived_sessions into an older day) is in neither.
+		// The move changed a directory the look stamped: no miss on this look, so the next one globs again.
+		if slices.Equal(dirStamps(look.dirs), look.stamp) {
+			look.keepMiss(id)
 		}
 		return ""
 	}
+	look.keepHit(id, matches)
 	return newestFirst(matches)[0]
 }
 
-// missStamp is when the directories a new rollout appears in were last changed (0: not there): the day directories of
-// the window, where a thread's rollout is created, and archived_sessions, where an archived one moves. A file created
-// or moved into one changes its mtime.
-func missStamp(home string) []int64 {
+// rolloutMatches revalidates cached paths without holding rolloutCaches' lock: rolloutThreadID's metadata cache takes
+// that lock itself. A vanished file or a header that no longer names id is not a hit, and forces a fresh glob.
+func rolloutMatches(home, id string, paths []string) []string {
+	matches := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if fileExists(path) && rolloutThreadID(home, path) == id {
+			matches = append(matches, path)
+		}
+	}
+	return matches
+}
+
+// rolloutMiss is a thread rolloutPath found no rollout of: the missStamp it holds for, and when it was last asked about
+// (to within missAskedEvery). One not asked about for missKeptFor is let go when the older days are listed, so the
+// misses kept are those of threads still asked about.
+type rolloutMiss struct {
+	stamp []int64
+	asked time.Time
+}
+
+// rolloutHit is a thread's matching paths at one missLook. Unlike a miss it is checked against the files on every call;
+// several continuation segments stay together so newestFirst still picks among all of them. Their parent directories'
+// stamps notice a new segment in the same old day directory immediately, without waiting for the minute listing.
+type rolloutHit struct {
+	paths    []string
+	dirs     []string
+	stamp    []int64
+	dirStamp []int64
+}
+
+const (
+	missAskedEvery = 10 * time.Second
+	missKeptFor    = 2 * time.Minute
+)
+
+// missLook is one look at the directories a new rollout appears in (missDirs): their missStamp, when it was taken and,
+// once asked for, the rollout names in them.
+type missLook struct {
+	home  string
+	at    time.Time
+	dirs  []string
+	stamp []int64
+	names *string
+}
+
+func newMissLook(home string) *missLook {
 	now := time.Now()
+	dirs := missDirs(home, now)
+	return &missLook{home: home, at: now, dirs: dirs, stamp: dirStamps(dirs)}
+}
+
+// settled: no directory changed in the second before the look. One changed within it may change again within its
+// mtime's granularity (a coarse clock tick) without its mtime moving, so nothing seen then is kept for later looks.
+func (l *missLook) settled() bool { return slices.Max(l.stamp) < l.at.Add(-time.Second).UnixNano() }
+
+// relistedSince: a listing of every directory of home (relistMisses) began after at.
+func relistedSince(home string, at time.Time) bool {
+	rolloutCaches.Lock()
+	defer rolloutCaches.Unlock()
+	return cacheFor(home).relistedAt.After(at)
+}
+
+// keepHit records the paths found for id as of the look, under the same settled and relist safeguards as a miss. A hit
+// and a miss for one id cannot coexist. The older-day listing lets every hit go: it may name a continuation the hit did
+// not have, and the next lookup reads the current set once.
+func (l *missLook) keepHit(id string, paths []string) {
+	if !l.settled() {
+		return
+	}
+	dirs := rolloutMatchDirs(paths)
+	dirStamp := dirStamps(dirs)
+	if slices.Max(dirStamp) >= l.at.Add(-time.Second).UnixNano() {
+		return // a segment was added or moved in the old directory just now: the next look checks it again
+	}
+	rolloutCaches.Lock()
+	defer rolloutCaches.Unlock()
+	c := cacheFor(l.home)
+	if c.relistedAt.After(l.at) {
+		return
+	}
+	if c.hits == nil {
+		c.hits = map[string]rolloutHit{}
+	}
+	delete(c.misses, id)
+	c.hits[id] = rolloutHit{paths: slices.Clone(paths), dirs: dirs, stamp: slices.Clone(l.stamp), dirStamp: dirStamp}
+}
+
+func rolloutMatchDirs(paths []string) []string {
+	dirs := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if dir := filepath.Dir(path); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	slices.Sort(dirs)
+	return dirs
+}
+
+// keepMiss records that id has no rollout as of the look, unless it is not settled, or a listing of every directory
+// began after it: that listing knows more, and may just have let this miss go for a rollout written meanwhile into an
+// older day. The next look decides then.
+func (l *missLook) keepMiss(id string) {
+	if !l.settled() {
+		return
+	}
+	rolloutCaches.Lock()
+	defer rolloutCaches.Unlock()
+	c := cacheFor(l.home)
+	if c.relistedAt.After(l.at) {
+		return
+	}
+	if c.misses == nil {
+		c.misses = map[string]rolloutMiss{}
+	}
+	delete(c.hits, id)
+	asked := l.at
+	if m, ok := c.misses[id]; ok && m.asked.After(asked) {
+		asked = m.asked
+	}
+	c.misses[id] = rolloutMiss{stamp: l.stamp, asked: asked}
+}
+
+// recentNames are the rollout names in the look's directories, "\n" after each: listed once per look, and kept for
+// later looks while the directories stay as they were when the look was settled. A name with "-<id>" in it may be the
+// thread's rollout, which only rolloutPath's glob and the rollout's header tell; a name without it is not.
+func (l *missLook) recentNames() string {
+	if l.names != nil {
+		return *l.names
+	}
+	rolloutCaches.Lock()
+	c := cacheFor(l.home)
+	names, ok := c.recentNames, c.recentStamp != nil && slices.Equal(c.recentStamp, l.stamp)
+	rolloutCaches.Unlock()
+	if !ok {
+		var paths []string
+		for _, dir := range l.dirs {
+			found, _ := rolloutGlob(filepath.Join(dir, "rollout-*.jsonl"))
+			paths = append(paths, found...)
+		}
+		names = rolloutNames(paths)
+		// Kept only when no directory changed while they were listed: a rollout moved between two of them meanwhile
+		// may be in neither list.
+		if l.settled() && slices.Equal(dirStamps(l.dirs), l.stamp) {
+			rolloutCaches.Lock()
+			c.recentNames, c.recentStamp = names, l.stamp
+			rolloutCaches.Unlock()
+		}
+	}
+	l.names = &names
+	return names
+}
+
+func rolloutNames(paths []string) string {
+	var b strings.Builder
+	for _, p := range paths {
+		b.WriteString(filepath.Base(p))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// relistMisses checks the misses against every rollout on disk (all, listed after look was taken). A thread whose id
+// is in no name has no rollout anywhere: its miss holds, from now on for look's stamp when look is settled. One whose
+// id is in a name is let go, to be globbed (and the rollout's header read) at its next look, and so is one not asked
+// about for missKeptFor. Every hit is let go too: this listing may name a continuation it did not have. Into a new map
+// for the misses: deleting from a map never gives its memory back.
+func (c *rolloutCache) relistMisses(all []string, look *missLook) {
+	c.relistedAt = look.at
+	clear(c.hits)
+	if len(c.misses) == 0 {
+		return
+	}
+	names := rolloutNames(all)
+	settled := look.settled()
+	kept := make(map[string]rolloutMiss, len(c.misses))
+	for id, m := range c.misses {
+		switch {
+		case look.at.Sub(m.asked) > missKeptFor || strings.Contains(names, "-"+id):
+		case settled:
+			kept[id] = rolloutMiss{stamp: look.stamp, asked: m.asked}
+		default:
+			kept[id] = m
+		}
+	}
+	c.misses = kept
+}
+
+// missDirs are the directories a new rollout appears in: the day directories of the window, where a thread's rollout
+// is created, and archived_sessions, where an archived one moves.
+func missDirs(home string, now time.Time) []string {
 	days := int(codexWindow / (24 * time.Hour))
-	out := make([]int64, 0, days+2)
+	out := make([]string, 0, days+2)
 	for d := 0; d <= days; d++ {
 		day := now.AddDate(0, 0, -d)
-		out = append(out, dirStamp(filepath.Join(home, "sessions", day.Format("2006"), day.Format("01"), day.Format("02"))))
+		out = append(out, filepath.Join(home, "sessions", day.Format("2006"), day.Format("01"), day.Format("02")))
 	}
-	return append(out, dirStamp(filepath.Join(home, "archived_sessions")))
+	return append(out, filepath.Join(home, "archived_sessions"))
+}
+
+// missStamp is when the directories a new rollout appears in (missDirs) were last changed (0: not there). A file
+// created or moved into one changes its mtime.
+func missStamp(home string) []int64 { return dirStamps(missDirs(home, time.Now())) }
+
+func dirStamps(dirs []string) []int64 {
+	out := make([]int64, len(dirs))
+	for i, dir := range dirs {
+		out[i] = dirStamp(dir)
+	}
+	return out
 }
 
 func dirStamp(dir string) int64 {

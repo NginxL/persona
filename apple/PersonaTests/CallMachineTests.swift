@@ -62,6 +62,25 @@ struct CallMachineTests {
         #expect(reports(m.handle(.known, at: at(1.2))).isEmpty, "said once")
     }
 
+    @Test func conversationJoinedReReportsMembersForAnOutgoingCall() {
+        var m = owner()
+        _ = m.handle(.known, at: at(0))
+        _ = m.handle(.startAction, at: at(0))
+        #expect(reports(m.handle(.conversationJoined, at: at(0.1))) == [.members], "re-reported once the conversation joined (#10495)")
+    }
+
+    @Test func conversationJoinedDoesNothingForAnIncomingCall() {
+        var m = urgent()
+        _ = m.handle(.known, at: at(0))
+        _ = m.handle(.joinAction, at: at(0))
+        #expect(m.handle(.conversationJoined, at: at(0.1)).isEmpty, "an incoming call's members went with its ring")
+    }
+
+    @Test func conversationJoinedDoesNothingBeforeKnown() {
+        var m = owner()
+        #expect(m.handle(.conversationJoined, at: at(0)).isEmpty, "not known yet: nothing to re-report")
+    }
+
     @Test func aCallToPersonaConnectsOnTheVoicesFirstReady() {
         var m = owner()
         _ = m.handle(.known, at: at(0))

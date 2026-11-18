@@ -33,7 +33,7 @@
    | [oh-my-zsh] Would you like to update? [Y/n]
    还能重试 3 次。
 
-5. 任务「跑基准」（todo_8，signal=failed）：Agent 没开起来（新开的终端标签两次都没接住启动命令）；在 box
+5. 任务「跑基准」（todo_8，signal=failed）：Agent 没开起来（终端运行不了「work」）；可换启动器：claude；在 box
    验收标准：未记录
 
 6. 任务「整理日志」（todo_9，signal=started）：重试后 Agent 开起来了，之前没开起来是因为（新标签里的 shell 停在一个提问上）；在 box

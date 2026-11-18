@@ -19,7 +19,8 @@ import (
 
 // todoAsk is a to-do's open ask, as GET /api/v1/todos carries it: the verdict line in the words of its Lark card; outcome a
 // conclusion's verdict (done, cannot or decide; none for a deployed task's "Please verify"); recommend a decision's
-// recommended option, which OK takes; asked_at the round, which the accept route takes.
+// recommended option, which OK takes; asked_at the round, which the accept route takes; risk how risky answering it is
+// (askRisk), which the view's decision reads.
 //
 // A decision also carries what makes it answerable where it is listed (#3804, decision.go): question, what is to be
 // decided; why_owner, why only the owner can decide; options, the recommended first, each with what it leads to;
@@ -32,6 +33,7 @@ type todoAsk struct {
 	Verdict   string    `json:"verdict"`
 	Recommend string    `json:"recommend,omitempty"`
 	AskedAt   time.Time `json:"asked_at"`
+	Risk      string    `json:"risk,omitempty"`
 
 	Question      string           `json:"question,omitempty"`
 	WhyOwner      string           `json:"why_owner,omitempty"`
@@ -59,12 +61,14 @@ const (
 )
 
 // listedTodo is a to-do as GET /api/v1/todos lists it: with its ask while one waits (none: no `ask`, which a client that
-// does not know it never reads), and, while it is open and nobody works on it, why (`orphaned`, tasks_orphan.go).
+// does not know it never reads), and, while it is open and nobody works on it, why (`orphaned`, tasks_orphan.go); on
+// the routes, its view (todo_view_routes.go).
 type listedTodo struct {
 	Todo
-	Ask            *todoAsk        `json:"ask,omitempty"`
-	DecisionReview *decisionReview `json:"decision_review,omitempty"`
-	Orphaned       *TodoOrphan     `json:"orphaned,omitempty"`
+	Ask            *todoAsk                   `json:"ask,omitempty"`
+	DecisionReview *decisionReview            `json:"decision_review,omitempty"`
+	Orphaned       *TodoOrphan                `json:"orphaned,omitempty"`
+	View           *assistantwire.TodoSummary `json:"view,omitempty"`
 }
 
 // todoAsks are the open asks by to-do id, in the request's language: the ones the briefing lists (not passed, not ended,
@@ -73,7 +77,7 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 	l, loc := s.botLang(ctx), s.location(ctx)
 	out := map[string]todoAsk{}
 	for _, w := range s.awaitingAcceptance(ctx) {
-		a := todoAsk{Outcome: w.ask.Outcome, Verdict: verdictText(l, &w.ask), AskedAt: w.ask.AskedAt}
+		a := todoAsk{Outcome: w.ask.Outcome, Verdict: verdictText(l, &w.ask), AskedAt: w.ask.AskedAt, Risk: askRisk(&w.ask)}
 		if decideAsk(&w.ask) {
 			a.Recommend = w.ask.Recommend
 			a.Question, a.Responses, a.Response = w.ask.Reason, ownerResponses, w.ask.Response
@@ -97,6 +101,17 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 		out[w.todo] = a
 	}
 	return out
+}
+
+// askRisk is how risky answering ask a is (assistantwire.OwnerAskRisk): open when it cannot be undone or other people
+// will see it (cannotUndo, from its raw deadline, which the list stops showing once the deadline was handled), else
+// safe. The list's ask carries it and the view's decision reads it from there (todo/projection), so whatever answers a
+// decision, a row or a push about it, can keep this one rule.
+func askRisk(a *acceptAsk) string {
+	if cannotUndo(a.WhyOwner, a.Deadline, a.Reversible) {
+		return assistantwire.OwnerAskRiskOpen
+	}
+	return assistantwire.OwnerAskRiskSafe
 }
 
 // askChanged: a to-do's ask came up, was taken or ended: the apps read the to-dos again ({"type":"todos"}) and the board

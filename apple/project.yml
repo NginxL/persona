@@ -18,7 +18,7 @@ configFiles:
   Release: Config.xcconfig
 options:
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.6"
     watchOS: "10.0"
     macOS: "26.0"
     visionOS: "26.0"
@@ -95,6 +95,9 @@ targets:
       - path: Shared
       - path: LiveActivity
     dependencies:
+      # The Mac framework lacks delegate descriptors the iPhone framework exports (#9948).
+      - sdk: LiveCommunicationKit.framework
+        weak: true
       - package: PersonaWire
       - target: PersonaWatch
       - target: PersonaWidgets
@@ -664,6 +667,9 @@ targets:
     dependencies:
       - package: PersonaWire
       - target: Persona
+      # The test bundle directly imports LiveCommunicationKit too; keep its symbols weak on a Mac.
+      - sdk: LiveCommunicationKit.framework
+        weak: true
       # The continuity fixture reader and C replay, test-only; it brings PersonaCore with it. The app never links it.
       - package: PersonaCore
         product: PersonaCoreTestSupport

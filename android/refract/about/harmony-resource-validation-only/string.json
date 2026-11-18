@@ -1,0 +1,6 @@
+{
+  "string": [
+    { "name": "settings_about_version", "value": "Version" },
+    { "name": "settings_not_provided", "value": "Not provided" }
+  ]
+}

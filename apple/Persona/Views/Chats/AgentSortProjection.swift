@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 import PersonaWire
-#if DEBUG
+#if DEBUG && os(iOS) // PersonaCore is linked into the iPhone app only (apple/project.yml)
 import OSLog
 import PersonaCore
 #endif
@@ -18,7 +18,7 @@ nonisolated struct AgentSortProjectionAdapter: Sendable {
         AgentListProjection.scopeKey(scope)
     }
 
-    #if DEBUG
+    #if DEBUG && os(iOS)
     static func coreInput(_ input: AgentListProjection.Input,
                           settings: AgentListProjection.Settings? = nil,
                           presentation: AgentSortPresentation = .init(), now: Date? = nil) throws -> String {
@@ -324,7 +324,7 @@ nonisolated struct ShadowToken: Equatable, Sendable {
     var presentation: AgentSortPresentation
 }
 
-#if DEBUG
+#if DEBUG && os(iOS)
 /// A cheap launch-owned switch. The view submits immutable snapshots; this object never publishes view state.
 @MainActor final class AgentSortShadowObserver {
     private var worker: AgentSortShadow?
@@ -355,7 +355,7 @@ nonisolated struct ShadowToken: Equatable, Sendable {
 }
 #endif
 
-#if DEBUG
+#if DEBUG && os(iOS)
 /// A latest-only serial queue. The worker converts and calls Rust off the main actor; production never waits for it.
 nonisolated final class AgentSortShadow: @unchecked Sendable {
     typealias Report = @Sendable (AgentSortShadowMismatch) -> Void
@@ -487,7 +487,7 @@ nonisolated private enum AgentSortCoreInput {
         let forest = CodexTasks.build(AgentListProjection.preparedSessions(input),
                                       ownRows: input.settings.filter == .all ? [] : input.settings.kept, runs: runs)
         let visible = forest.roots
-        return visible.sorted { $0.key.path < $1.key.path }
+        return visible
     }
 
     static func encode(_ input: AgentListProjection.Input,

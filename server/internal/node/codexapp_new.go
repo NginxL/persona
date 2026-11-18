@@ -58,13 +58,23 @@ var (
 	// codexAppCLI is the Codex CLI the App bundles (the same version as the App's own app-server), else one on PATH or
 	// where Codex installs (a variable: tests use their own).
 	codexAppCLI = func() (string, error) {
-		if runtime.GOOS == "darwin" {
-			p := "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
-			if st, err := os.Stat(p); err == nil && !st.IsDir() {
-				return p, nil
-			}
+		if p := bundledCodexCLI(); p != "" {
+			return p, nil
 		}
 		return agentExecutable("codex")
+	}
+
+	// bundledCodexCLI is the Codex CLI the ChatGPT app bundles on a Mac, "" when there is none (a variable: tests use
+	// their own). Its base name is codex, so herdr, codex-start and codexEffortInherited take it for plain codex.
+	bundledCodexCLI = func() string {
+		if runtime.GOOS != "darwin" {
+			return ""
+		}
+		p := "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode().Perm()&0111 != 0 {
+			return p
+		}
+		return ""
 	}
 
 	// seedCodexAppChat starts a chat named title in dir with codex in home, and returns its thread id (a variable:

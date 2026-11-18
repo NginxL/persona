@@ -1,25 +1,22 @@
-// What the pages show of the managers once there is more than one (docs/assistant/managers.md "Clients"): the assistant page's
-// title, and what an offline manager's pages say. With one manager none of it renders, so those pages stay as they
-// were. The switcher itself is the sidebar's head (views/AssistantSwitcher.tsx).
+// The assistant title shares the sidebar head's identity. Offline restrictions still apply only with multiple managers
+// (docs/assistant/managers.md "Clients"). The switcher itself is views/AssistantSwitcher.tsx.
 import { useRef, useState } from "react";
 import { t } from "../i18n";
 import { managerOrder, multiManager, useRoster, type Manager } from "../lib/managers";
-import { pickedName, useChosenManager, useShownManager } from "../lib/manager-choice";
+import { useShownManager } from "../lib/manager-choice";
 import { ago } from "../lib/format";
 import { api, enc, errorText } from "../lib/api";
 import { Button, cx, Menu, toast, useMenu } from "../ui/atoms";
 import { AssistantAvatar } from "../ui/AssistantAvatar";
-import { MAIN_TITLE } from "./assistant/conversations";
+import { useAssistantIdentity } from "../lib/assistant-identity";
+import { usePersona } from "./assistant/Persona";
 
-/** The assistant page's title: the current assistant's name once there are several (the sidebar's switcher picks it,
- *  views/AssistantSwitcher.tsx), else Persona as before. */
+/** The header names the same current assistant as the sidebar, including a single assistant and reloads.
+ *  An older hub without a roster keeps the chosen look's name. */
 export function useAssistantTitle(): string {
-  const roster = useRoster();
-  const shown = useShownManager();
-  const picked = useChosenManager();
-  // before the roster is read (a reload): a kept pick's name as the roster last gave it
-  if (!roster && picked) return pickedName() || MAIN_TITLE;
-  return (multiManager(roster) && roster.managers.find((m) => m.id === shown)?.name) || MAIN_TITLE;
+  const identity = useAssistantIdentity();
+  const persona = usePersona();
+  return identity?.name || persona.name;
 }
 
 /** What a composer says for a conversation of manager id while it is offline (several managers only): "<name> · last

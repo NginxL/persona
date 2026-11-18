@@ -77,7 +77,8 @@ final class TaskPageBackTests: XCTestCase {
     @MainActor private func chat(_ app: XCUIApplication) -> XCUIElement { app.buttons["action-bar.running"].firstMatch }
 
     @MainActor private func backs(_ app: XCUIApplication) -> XCUIElementQuery {
-        app.buttons.matching(NSPredicate(format: "label IN %@", ["返回", "Back"]))
+        // Under side bars a pushed page's Back is the system's (#9971), named by the page under it: its identifier says Back.
+        app.buttons.matching(NSPredicate(format: "identifier == 'BackButton' OR label IN %@", ["返回", "Back"]))
     }
 
     /// The widget fix's row: In Progress opened, the row tapped (it closes the tray and opens the task).

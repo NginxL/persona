@@ -65,6 +65,7 @@ func TestMatchLauncher(t *testing.T) {
 		{Name: "claude", Model: "默认"},
 		{Name: "cc_a", BaseURL: "https://gw.example.com", Model: "model-a"},
 		{Name: "cc_b", BaseURL: "https://gw.example.com", Model: "model-b"},
+		{Name: "cc_default", BaseURL: "https://gw.example.com"},
 		{Name: "cc_pick", BaseURL: "https://gw.example.com", Model: "(claude-choose)"},
 		{Name: "cc_solo", BaseURL: "https://solo.example.com", Model: "(claude-choose)"},
 		{Name: "cc_x", BaseURL: "https://twin.example.com", Model: "model-x"},

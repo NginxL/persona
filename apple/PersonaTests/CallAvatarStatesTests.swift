@@ -406,7 +406,7 @@ struct CallAvatarStatesTests {
             .hearing: String(localized: "Hearing you"),
             .thinking: String(localized: "Thinking [Call Screen]"),
             .speaking: String(localized: "Speaking"),
-            .working: String(localized: "Working [Call Screen]"),
+            .working: StateName.working.text,
             .needsYou: String(localized: "Waiting for your decision [Call Screen]"),
             .muted: String(localized: "Muted [Inbox Mutes View e5e468]"),
         ]
@@ -417,17 +417,18 @@ struct CallAvatarStatesTests {
         // From what the call screen observes: a card coming, the conversation working, the voice thinking.
         let live = (VoicePhase.live(.listening), VoiceLink.live)
         #expect(Self.state(voice: live, asking: true).avatar.words == String(localized: "Waiting for your decision [Call Screen]"))
-        #expect(Self.state(voice: live, working: true).avatar.words == String(localized: "Working [Call Screen]"))
+        #expect(Self.state(voice: live, working: true).avatar.words == StateName.working.text)
         #expect(Self.state(voice: live, thinking: true).avatar.words == String(localized: "Thinking [Call Screen]"))
         #expect(Self.state(voice: live, working: true).line == .duration(since: Self.since), "the line still shows the running time")
     }
 
-    /// The new words in each language.
+    /// The new words in each language. Working is the state's own name (`StateName.working`, #10502), not a word of the
+    /// call screen's: 「工作中」, never the retired 「正在工作」.
     @Test func theRowsWordsInEachLanguage() throws {
-        let keys = ["Thinking [Call Screen]", "Working [Call Screen]", "Waiting for your decision [Call Screen]"]
+        let keys = ["Thinking [Call Screen]", "Working [State Names]", "Waiting for your decision [Call Screen]"]
         let words: [String: [String]] = [
             "en": ["Thinking", "Working", "Waiting for your decision"],
-            "zh-Hans": ["正在思考", "正在工作", "等你拿主意"], // i18n-ignore: the catalog's words
+            "zh-Hans": ["正在思考", "工作中", "等你拿主意"], // i18n-ignore: the catalog's words
             "ja": ["考え中", "作業中", "あなたの判断待ち"], // i18n-ignore: the catalog's words
         ]
         for (language, expected) in words.sorted(by: { $0.key < $1.key }) {

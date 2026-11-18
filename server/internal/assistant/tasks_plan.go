@@ -82,7 +82,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			asked = ""
 		}
 		t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
-		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs = "", "", "", nil
+		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", "", nil, nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)
 		// The hub's too: the scheduled round this plan comes from is the hub's to tell (scheduledRoundOf, #8045).

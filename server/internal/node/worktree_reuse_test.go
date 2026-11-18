@@ -13,9 +13,10 @@ import (
 
 func TestWorktreePrepareFindsCheckedOutBranch(t *testing.T) {
 	w := worktreeNode(t)
+	// Git says where the checkout is with the home's links resolved (#9114); the node answers the home's own
+	// spelling, the one a terminal opens (#10365). The same on a home that is no link.
 	at := filepath.Join(w.home, "retained")
 	runPullGit(t, w.repo, "worktree", "add", "-b", "fix/reuse", "--", at)
-	at = resolved(t, at) // where git and the node say the checkout is (#9114)
 	params := map[string]any{"cwd": w.repo, "branch": "fix/reuse", "lang": "en"}
 	got, err := request(t, w.n, "worktree.prepare", params)
 	if err != nil {
@@ -38,9 +39,10 @@ func TestWorktreePrepareFindsCheckedOutBranch(t *testing.T) {
 
 func TestWorktreePrepareCheckedOutBranchRefusesAgentOwner(t *testing.T) {
 	w := worktreeNode(t)
+	// Git says where the checkout is with the home's links resolved (#9114); the node answers the home's own
+	// spelling, the one a terminal opens (#10365). The same on a home that is no link.
 	at := filepath.Join(w.home, "retained")
 	runPullGit(t, w.repo, "worktree", "add", "-b", "fix/reuse", "--", at)
-	at = resolved(t, at) // where git and the node say the checkout is (#9114)
 	sub := mkdir(t, filepath.Join(at, "sub"))
 	w.f.reply("session.snapshot", snapshot(
 		[]any{map[string]any{"workspace_id": "w1", "label": "proj", "number": 1, "branch": "main"}},
@@ -56,9 +58,10 @@ func TestWorktreePrepareCheckedOutBranchRefusesAgentOwner(t *testing.T) {
 
 func TestWorktreePrepareCheckedOutBranchRequiresCompleteInventory(t *testing.T) {
 	w := worktreeNode(t)
+	// Git says where the checkout is with the home's links resolved (#9114); the node answers the home's own
+	// spelling, the one a terminal opens (#10365). The same on a home that is no link.
 	at := filepath.Join(w.home, "retained")
 	runPullGit(t, w.repo, "worktree", "add", "-b", "fix/reuse", "--", at)
-	at = resolved(t, at) // where git and the node say the checkout is (#9114)
 	h := &inventoryHost{bareHost: bareHost{kind: host.Orca}, snapshotErr: errors.New("source unavailable"), listErr: errors.New("source unavailable")}
 	w.n.hosts = host.NewRegistry(w.n.hosts.Get(host.Herdr), h)
 	_, err := request(t, w.n, "worktree.prepare", map[string]any{"kind": host.Herdr, "cwd": w.repo, "branch": "fix/reuse", "lang": "en"})

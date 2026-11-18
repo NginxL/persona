@@ -5,25 +5,28 @@
 // 600 px the pill takes the width its words need (the name at most 108 px, a bracketed qualifier left out but for a
 // context size, `pillShortName`) and gives way
 // only when the row is short, under 520 px its text and marks are a step smaller, under 420 px it keeps only the
-// provider's tile and the chevron (64 px). An agent that can switch neither its model nor its effort gets the same
+// provider's tile and the chevron (64 px), except an explicit Agent launcher label (#10248).
+// An agent that can switch neither its model nor its effort gets the same
 // words as a label, except Codex: its panel explains why. A Persona chat (and the new-chat page) has `AssistantModelPill`
 // (#5033): the same pill over what the assistant's computer can run Persona chats on, its panel saying whether the chat
 // follows the default.
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { t } from "../../i18n";
 import { agentName } from "../../lib/agent-kind";
-import { onModelPicker, sessionLauncher } from "../../lib/model-switch";
+import { onModelPicker, requestModelPicker, sessionLauncher } from "../../lib/model-switch";
 import { modelSupportsFast } from "../../lib/launcher-models";
 import { effortTitle } from "../../lib/session-actions";
 import { dropPick, launcherOffered, pickFast, usePickedEffort, usePickedFast, usePickedLauncher, usePickedModel } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
+import { launcherTitle } from "../../lib/provider-names";
 import { ASSISTANT_MODEL_PICK_FEATURE, ASSISTANT_START_SERVICE_TIER_FEATURE, assistantPickKey, assistantPillView, assistantSetup, type AssistantChat } from "../../lib/assistant-models";
 import {
-  agentCatalogScope, assistantCatalogScope, assistantLaunchers, modelList, pendingView, pillView, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
+  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
 } from "../../lib/session-models";
-import { hubHas, useStore } from "../../lib/store";
+import { turnErrorFix, type TurnFix } from "../../lib/readiness";
+import { getSession, hubHas, useStore } from "../../lib/store";
 import { CODEX_ULTRA, ultracodeOn } from "../../lib/ultracode";
-import type { Session } from "../../lib/types";
+import type { AssistantInfo, Session } from "../../lib/types";
 import { AgentMark } from "../../ui/AgentMark";
 import { cx, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -84,23 +87,23 @@ export function ModelPill({
   buttonRef?: Ref<HTMLButtonElement>;
 }) {
   const shown = pending ?? current;
+  const launcher = shown.launcherName;
   const unknown = !shown.model;
   const name = shown.model ?? (loading ? t("chat-modelpill.loading") : failed ? t("chat-modelpill.failed") : t("chat-modelpill.default_model"));
   const describe = (x: PillSetup) =>
-    [agentName(x.engine, x.engineLabel), x.model ?? name, x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
+    [agentName(x.engine, x.engineLabel), x.model ?? name, x.launcherName || x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
   const title = pending
     ? t("chat-modelpill.current_and_next", { current: describe(current), next: describe(pending) })
     : [describe(current), failed && !unknown ? t("chat-modelpill.failed") : ""].filter(Boolean).join(" · ");
   const short = pillShortName(name);
   const effort = shown.effort ? effortTitle(shown.effort) : "";
-  // what the next message runs on, before its model: the engine when it changes (Cindy's case), else the launcher
-  // (Persona's in-session switch, #5035)
-  const target = pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "";
+  // An explicit Agent launcher matches the panel even across engines; other pills keep the existing pending label.
+  const target = launcher || (pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "");
   const label = t(
     pending
       ? (effort ? "chat-modelpill.aria_pending_effort" : "chat-modelpill.aria_pending")
       : (effort ? "chat-modelpill.aria_effort" : "chat-modelpill.aria"),
-    { agent: target, model: name, effort },
+    { agent: target, model: !pending && launcher ? `${launcher} · ${name}` : name, effort },
   );
 
   const body: ReactNode = (
@@ -109,22 +112,22 @@ export function ModelPill({
       {unknown && loading && <Spinner size={13} />}
       {unknown && failed && !loading && <Icon name="warning" stroke={2} className="size-[13px] shrink-0 text-red @max-[520px]/composer:size-[12px]" />}
       <ProviderMark name={shown.provider} className={cx("mr-1.5", failed && !unknown ? "text-red" : "text-ink-2")} />
-      {pending && (
+      {(launcher || pending) && (
         <>
-          <span data-pill-target className="max-w-[96px] shrink-0 truncate text-ink-3 @max-[600px]/composer:hidden">{target}</span>
-          <span aria-hidden className="shrink-0 text-ink-3 @max-[600px]/composer:hidden">·</span>
+          <span data-pill-target title={target} className={cx("max-w-[96px] truncate text-ink-3", launcher ? "min-w-[3ch] shrink" : "shrink-0 @max-[600px]/composer:hidden")}>{target}</span>
+          <span aria-hidden className={cx("shrink-0 text-ink-3", !launcher && "@max-[600px]/composer:hidden")}>·</span>
         </>
       )}
       {/* the name gives way first (a far larger shrink than the effort's): narrow, the effort truncates only once the
           name has no room left */}
-      <span title={name} className={cx("min-w-0 shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", short !== name && "@max-[600px]/composer:hidden", ULTRA_HIDDEN)}>{name}</span>
+      <span title={name} className={cx("shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", short !== name && "@max-[600px]/composer:hidden", !launcher && ULTRA_HIDDEN)}>{name}</span>
       {/* narrow, the name without its bracketed qualifier, a context size kept short (the tooltip keeps all of it): the
           108 px would cut it there */}
       {short !== name && (
-        <span title={name} data-pill-short className={cx("hidden min-w-0 shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", ULTRA_HIDDEN)}>{short}</span>
+        <span title={name} data-pill-short className={cx("hidden shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", !launcher && ULTRA_HIDDEN)}>{short}</span>
       )}
       {/* the engine's mark is the separator before the effort: no "·" */}
-      <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", ULTRA_HIDDEN)}>
+      <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", !launcher && ULTRA_HIDDEN)}>
         <AgentMark agent={shown.engine} label={shown.engineLabel} size={12} decorative className="text-ink-2" />
       </span>
       {shown.effort && (
@@ -145,9 +148,8 @@ export function ModelPill({
     // narrow, it still takes the width its words need (a fixed width cut "Opus 5.5" to "Opus …" beside free room) and
     // shrinks, the name first, only when the row is short of room
     "@max-[520px]/composer:text-[12px] @max-[520px]/composer:[--provider-mark:14.2px] @max-[420px]/composer:min-w-[64px]",
-    // under 420 px the tile and the chevron: 64 px, as the pill always was there; only a waiting switch's clock before
-    // them makes it grow to hold it
-    pending ? "@max-[420px]/composer:w-auto" : "@max-[420px]/composer:w-[64px]",
+    // Under 420 px an explicit launcher keeps its model label; other pills retain their compact fallback.
+    (pending || launcher) ? "@max-[420px]/composer:w-auto" : "@max-[420px]/composer:w-[64px]",
   );
   // the clip is inside, so the touch target (touch-hit) can reach past the pill's 30 px
   const inner = "flex min-w-0 flex-1 items-center gap-1 overflow-hidden";
@@ -218,14 +220,20 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   useEffect(() => {
     if (target && target !== own) void readModels(mid, target);
   }, [target, own, mid, scope]);
+  const namesLauncher = Boolean((opens || view.model) && (session.launcher || target));
+  useEffect(() => {
+    if (namesLauncher) void readAgentLauncherNames(mid);
+  }, [namesLauncher, mid, scope]);
 
-  const pending = pendingView(session, (name) => modelList(mid, name));
+  const launchers = machineLauncherList(mid);
+  const waiting = pendingView(session, (name) => modelList(mid, name));
+  const pending = waiting ? { ...waiting, launcherName: launcherTitle(waiting.provider, launchers) } : null;
   if (!opens && !view.model) return null;
   const workflow = ultracodeOn(session) ? {} : view.engine === "codex" && session.effort === CODEX_ULTRA ? { label: t("ultracode.codex_ultra_title"), title: t("ultracode.codex_ultra_title") } : undefined;
   return (
     <>
       <ModelPill
-        current={view}
+        current={{ ...view, launcherName: session.launcher ? launcherTitle(session.launcher, launchers) : undefined }}
         pending={pending}
         loading={view.loading}
         failed={view.failed}
@@ -240,6 +248,36 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
 });
 
 const AssistantModelPanel = lazyOverlay(() => import("./AssistantModelPanel").then((m) => m.AssistantModelPanel));
+
+/** The key a Persona chat's pill opens its panel on (requestModelPicker): apart from an Agent's, which `/model` Enter
+ *  opens, so the text still goes to a Persona chat as it is. */
+export const assistantPickerKey = (mid: string, sid: string) => `assistant:${mid}/${sid}`;
+
+/** AssistantChat.followsDefault of chat `session` (the pill's rule below). */
+function followsDefaultOf(assistant: AssistantInfo | null, session: Session): boolean {
+  return assistant?.main === session.session_id || isBackgroundSupervisor(assistant, session.session_id) ||
+    Boolean(assistant?.leaders?.includes(session.session_id)) || session.origin === "task";
+}
+
+/** A Persona chat's card for its last turn's model error (turnErrorFix of the session's turn_error_code): a model the chat
+ *  can't run opens the chat's own model panel, where another one is picked; while the hub keeps a pick for the chat the
+ *  card also offers the panel's way back (follow the default again, or undo the pick), whose code (lib/assistant-pick.ts)
+ *  loads on the tap, not with the first screen (startup-preload's budget). `on`: a Persona chat. */
+export function useAssistantTurnFix(session: Session | undefined, on: boolean): TurnFix | null {
+  const assistant = useStore((s) => s.assistant);
+  const kept = useStore((s) => hubHas(s.features, ASSISTANT_MODEL_PICK_FEATURE));
+  const fix = on ? turnErrorFix(session?.turn_error_code, session?.launcher) : null;
+  if (!fix || !session || fix.action !== "pick_model") return fix;
+  const { machine_id: mid, session_id: sid } = session;
+  fix.onPickModel = () => requestModelPicker(assistantPickerKey(mid, sid));
+  if (kept && session.model_pick) {
+    fix.back = {
+      label: t(followsDefaultOf(assistant, session) ? "chat-modelpill.follow_default" : "chat-modelpill.undo_pick"),
+      run: () => void import("../../lib/assistant-pick").then((m) => m.dropConversationPick(getSession(mid, sid) ?? session)),
+    };
+  }
+  return fix;
+}
 
 /** A Persona chat's pill (#5033): the launcher, model and effort its next message runs on (its own pick, the default, or
  *  what it started with: lib/assistant-models.ts), opening the unified panel (scope "assistant"). `session` absent: the
@@ -256,7 +294,7 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   // Without a pick, what the next message runs on is a default: Main chat's for the main conversation, a leader and a
   // scheduled task's own conversation (origin "task"); the supervisor's own model purpose for the background supervisor.
   const supervisor = Boolean(session && isBackgroundSupervisor(assistant, session.session_id));
-  const followsDefault = isMain || supervisor || Boolean(session && (assistant?.leaders?.includes(session.session_id) || session.origin === "task"));
+  const followsDefault = Boolean(session && followsDefaultOf(assistant, session));
   const chat: AssistantChat = { session, isMain, followsDefault, kept, config: assistant?.launcher, ...(supervisor ? { def: superviseDefault(mid) } : {}) };
   const key = assistantPickKey(chat);
   // this page's picks (an older hub, the new-conversation page) draw it again
@@ -307,6 +345,9 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   const button = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setAnchor(null), []);
   useEffect(close, [close, scope]);
+  // a model error's "Fix it" opens it (useAssistantTurnFix): the chat's own pick, not a new provider
+  const sid = session?.session_id;
+  useEffect(() => (sid && mid ? onModelPicker(assistantPickerKey(mid, sid), () => setAnchor(button.current)) : undefined), [mid, sid]);
   const shown = Boolean(anchor) && Boolean(mid);
   // every list again behind the one shown, once per opening
   useEffect(() => {

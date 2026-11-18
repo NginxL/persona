@@ -146,7 +146,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   const fit = useMedia(PHONE) ? "phone" : "wide";
   const { hits, saidBy } = useMemo(() => {
     const shown = all.filter((s) => matchesOrigin(s, filter, background));
-    const merged = mergeSearch(filterConversations(shown, query), said.answer, all, (r): Conversation => ({
+    const merged = mergeSearch(filterConversations(shown, query, assistant?.main), said.answer, all, (r): Conversation => ({
       machine_id: r.machine_id, session_id: r.session_id, title: r.title, cwd: "", status: "idle", assistant: true, archived: r.archived, updated_at: r.updated_at, origin: r.origin,
       // a backend-only hit carries no tags of its own; the known row does when this chat is in the list
       tags: all.find((c) => c.session_id === r.session_id)?.tags,
@@ -154,7 +154,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
     const byId = new Map<string, AssistantSearchHit>();
     for (const r of said.answer?.results ?? []) if (r.hits[0] && !r.title_match) byId.set(r.session_id, r.hits[0]);
     return { hits: merged.map((m) => m.chat), saidBy: byId };
-  }, [all, query, filter, background, said.answer]);
+  }, [all, query, filter, background, said.answer, assistant?.main]);
   // the sources there are (#3264): "All" · "Mine" · one per kind of automatic conversation, when there are any
   const sources = useMemo(() => autoConversations(all, assistant?.main, background).groups, [all, assistant?.main, background]);
   // the labels in use, each once: the tag chips narrow the list the same way the origin chips do
@@ -411,7 +411,7 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive, onEditTags }: {
   const owner = credentialOwner(), epoch = conversationDeletionScope(), manager = shownManager();
   // the background supervisor is built in (#5082): its own name and mark, and nothing to rename, archive or make 常驻
   const builtIn = useStore((x) => isBackgroundSupervisor(x.assistant, s.session_id));
-  const title = builtIn ? backgroundSupervisorTitle(s) : conversationTitle(s, main);
+  const title = main ? t("sidebar.main_chat") : builtIn ? backgroundSupervisorTitle(s) : conversationTitle(s);
   const split = builtIn ? null : splitTitle(title);
   const st = stateOf(s);
   const flagged = st === "needs_you" || st === "working" || st === "unread";
@@ -449,7 +449,7 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive, onEditTags }: {
         className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 focus-visible:outline-none"
       >
         <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-full", main ? "bg-ink text-surface" : markTone(s.session_id))}>
-          <Icon name={main ? "spark" : builtIn ? "target" : "chat"} size={main ? 13 : 14} />
+          <Icon name={main ? "home" : builtIn ? "target" : "chat"} size={14} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
@@ -463,9 +463,8 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive, onEditTags }: {
                 title
               )}
             </span>
-            {main && <span className={pill("bg-accent-tint", "text-accent-ink")}>{t("assistant-history.main_chat")}</span>}
             {builtIn && <span data-testid="built-in" className={pill("bg-field", "text-ink-2")}>{t("assistant-history.built_in")}</span>}
-            {origin ? <OriginMark origin={origin} size={16} /> : <ConvChannel ids={s.channels} />}
+            {origin ? <OriginMark origin={origin} size={16} session={s} /> : <ConvChannel ids={s.channels} />}
           </span>
           {said ? (
             <span className={ROW_LINE} data-said>

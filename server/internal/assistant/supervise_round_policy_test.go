@@ -186,7 +186,8 @@ func namedTools(text string) []string {
 // where: the description (and schema) of a tool it lists, or "context", the background supervisor's <persona-context>.
 // Each names one in passing (where an id comes from, what undoes or replaces a call, a step a round never takes: the
 // Agent presets agent_start takes beside task_plan, the questions ask_user turned into to-dos that are not to be asked
-// again, the main conversation's model profile) or beside the round's own way (task_plan with continues for a
+// again, the main conversation's model profile, task_retry for a start that did not come up, which only the main
+// conversation's failed signal leads to) or beside the round's own way (task_plan with continues for a
 // replacement, task_review needs_user for the owner), so none sends a round to a tool it lacks. A new mention is worded
 // for the round's tools, or listed here when it is one of these.
 var roundPassingMentions = map[string][]string{
@@ -198,7 +199,7 @@ var roundPassingMentions = map[string][]string{
 	"kb_search":          {"kb_list"},
 	"schedule_followup":  {"inbox_post"},
 	"supervision_finish": {"ask_user"},
-	"task_plan":          {"kb_list", "repositories_list", "repository_get", "todo_create"},
+	"task_plan":          {"kb_list", "repositories_list", "repository_get", "task_retry", "todo_create"},
 	"task_review":        {"agent_start"},
 	"task_scope":         {"agent_supervise", "ask_user"},
 	"todo_get":           {"todo_repository_links_add"},

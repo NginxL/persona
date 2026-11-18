@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +43,10 @@ type kbLane struct {
 
 	running bool // only the loop's goroutine reads and writes these two
 	due     bool
+
+	// unconfigured: the model uses (kb.topics, inbox.triage, ...) the lane's runs found no model set up for, each said
+	// once in the log; only the lane's own runs, one at a time, read and write it.
+	unconfigured map[string]bool
 }
 
 // kbLanes are the loop's lanes and where they say they ended.
@@ -219,32 +225,80 @@ func kbIndexCause(err error) string {
 }
 
 // kbRunLane runs one go of l with e, under kbRun, and logs what it did when it called the model or took longer than a
-// round: how long, how many calls, how many failed and how many were put off (a paused connection).
+// round: how long, how many calls, how many failed and how many were put off (a paused connection). A call with no
+// model set up for it is none of these: the lane says once for each model use that it has no model, and once that one
+// answered it again.
 func (s *Service) kbRunLane(ctx context.Context, e *kb.Engine, l *kbLane) {
 	st := &kbLaneStats{}
 	start := time.Now()
 	s.kbRun(ctx, func() { l.run(context.WithValue(ctx, kbLaneStatsKey{}, st), e) })
 	took := time.Since(start)
-	if calls := st.calls.Load(); calls > 0 || took >= kbPoll {
+	calls := st.calls.Load()
+	for _, use := range st.uses(st.unset) {
+		if !l.unconfigured[use] {
+			if l.unconfigured == nil {
+				l.unconfigured = map[string]bool{}
+			}
+			l.unconfigured[use] = true
+			s.logf("kb: %s lane: no model is set up for %s (Settings › Model configuration); not logged again until one answers", l.name, use)
+		}
+	}
+	for _, use := range st.uses(st.answered) {
+		if l.unconfigured[use] && !st.unset[use] {
+			delete(l.unconfigured, use)
+			s.logf("kb: %s lane: a model answers %s again", l.name, use)
+		}
+	}
+	if calls > 0 || took >= kbPoll {
 		s.logf("kb: %s lane: %s, %d model call(s), %d failed, %d put off", l.name, took.Round(time.Second), calls, st.failed.Load(), st.putOff.Load())
 	}
 }
 
-// kbLaneStats counts a lane run's model calls (kbCountedModel, through the run's context).
-type kbLaneStats struct{ calls, failed, putOff atomic.Int32 }
+// kbLaneStats counts a lane run's model calls (kbCountedModel, through the run's context); unset holds the model uses
+// that had no model to go to, answered those a model answered.
+type kbLaneStats struct {
+	calls, failed, putOff atomic.Int32
+
+	mu              sync.Mutex
+	unset, answered map[string]bool
+}
+
+func (st *kbLaneStats) mark(set *map[string]bool, use string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if *set == nil {
+		*set = map[string]bool{}
+	}
+	(*set)[use] = true
+}
+
+// uses lists set, sorted; for the run's end, when no call is left.
+func (st *kbLaneStats) uses(set map[string]bool) []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := make([]string, 0, len(set))
+	for use := range set {
+		out = append(out, use)
+	}
+	sort.Strings(out)
+	return out
+}
 
 type kbLaneStatsKey struct{}
 
 // kbCountedModel counts each call in the lane run its context belongs to; calls from elsewhere (tools, the history
 // import) carry none and are not counted. A call cancelled with its run counts as nothing; one that ran out of its own
 // time (DeadlineExceeded) failed.
-type kbCountedModel struct{ m kb.Model }
+type kbCountedModel struct {
+	use string
+	m   kb.Model
+}
 
-func kbCounted(m kb.Model) kb.Model {
+func kbCounted(use string, m kb.Model) kb.Model {
 	if m == nil {
 		return nil
 	}
-	return kbCountedModel{m}
+	return kbCountedModel{use, m}
 }
 
 func (c kbCountedModel) JSONMax(ctx context.Context, system, user string, maxTokens int, out any) error {
@@ -254,11 +308,14 @@ func (c kbCountedModel) JSONMax(ctx context.Context, system, user string, maxTok
 		case errors.Is(err, context.Canceled): // the run was stopped (shutdown): neither answered nor failed
 		case ai.IsPaused(err):
 			st.putOff.Add(1)
+		case ai.IsNotConfigured(err): // no model set up: no call was made
+			st.mark(&st.unset, c.use)
 		case err != nil:
 			st.calls.Add(1)
 			st.failed.Add(1)
 		default:
 			st.calls.Add(1)
+			st.mark(&st.answered, c.use)
 		}
 	}
 	return err

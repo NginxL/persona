@@ -34,10 +34,11 @@ func TestSessionLiveGoesToSubscribersWithTheFeature(t *testing.T) {
 	<-viaHello.out // the ack
 
 	m.onEvent("session.live", json.RawMessage(`{"session_id":"s1","live":{"verb":"Frosting","elapsed_s":975,"tokens_down":22800,"thinking":true}}`))
+	m.onEvent("session.live", json.RawMessage(`{"session_id":"s1","live":{"retry_error":"429 Synthetic rate limit for retry capture","retry_attempt":6,"retry_max":10}}`))
 	m.onEvent("session.live", json.RawMessage(`{"session_id":"s1","live":null}`))
 	for name, c := range map[string]*client{"url": viaURL, "client_hello": viaHello} {
-		if len(c.out) != 2 {
-			t.Fatalf("%s: %d messages, want 2", name, len(c.out))
+		if len(c.out) != 3 {
+			t.Fatalf("%s: %d messages, want 3", name, len(c.out))
 		}
 		var on struct {
 			Type      string             `json:"type"`
@@ -49,6 +50,12 @@ func TestSessionLiveGoesToSubscribersWithTheFeature(t *testing.T) {
 		if on.Type != "live" || on.MachineID != "box" || on.SessionID != "s1" || on.Live == nil ||
 			*on.Live != (proto.SessionLive{Verb: "Frosting", ElapsedS: 975, TokensDown: 22800, Thinking: true}) {
 			t.Fatalf("%s: %+v", name, on)
+		}
+		on.Live = nil
+		_ = json.Unmarshal(<-c.out, &on)
+		if on.Type != "live" || on.MachineID != "box" || on.SessionID != "s1" || on.Live == nil ||
+			*on.Live != (proto.SessionLive{RetryError: "429 Synthetic rate limit for retry capture", RetryAttempt: 6, RetryMax: 10}) {
+			t.Fatalf("%s retry: %+v", name, on)
 		}
 		raw := <-c.out
 		off := map[string]any{}

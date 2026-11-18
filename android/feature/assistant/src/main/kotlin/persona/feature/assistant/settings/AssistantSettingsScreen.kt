@@ -165,6 +165,7 @@ private fun AssistantSettingsDetails(
             foldBackground = { scope.launch { controller.setMainBackgroundFolded(it) } },
             nextSuggestions = { scope.launch { controller.setNextSuggestions(it) } },
             superviseOwn = { scope.launch { controller.setMainSupervisesOwnTasks(it) } },
+            closeEndedTerminals = { scope.launch { controller.setCloseEndedTerminals(it) } },
             supervisorModel = onModelConfiguration?.let { open -> { open(BackgroundSupervisor.PURPOSE, owner) } },
             onStandingAuthorizations = onStandingAuthorizations, standingCount = standingCount,
             owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } })
@@ -254,6 +255,7 @@ private fun SettingsHome(
     foldBackground: (Boolean) -> Unit = {},
     nextSuggestions: (Boolean) -> Unit = {},
     superviseOwn: (Boolean) -> Unit = {},
+    closeEndedTerminals: (Boolean) -> Unit = {},
     /** Opens the background supervisor's model (Settings › Models); null leaves the row out. */
     supervisorModel: (() -> Unit)? = null,
     /** Opens Standing Authorizations; null leaves the row out. [standingCount] is shown when it is at least one. */
@@ -388,6 +390,16 @@ private fun SettingsHome(
                 }
                 rows("supervise", superviseRows)
                 item("supervise-caption") { Caption(stringResource(R.string.assistant_settings_supervise_caption)) }
+            }
+
+            // #10355: closing an Agent's terminal when its session ends, off by default; only from a hub that has it.
+            config.closeEndedTerminals?.let { closing ->
+                item("terminals") { JSectionHeader(stringResource(R.string.assistant_settings_terminals_header)) }
+                rows("terminals", listOf(
+                    { JSwitchRow(stringResource(R.string.assistant_settings_close_ended_terminals), closing, closeEndedTerminals,
+                        leadingIcon = PersonaIcons.terminal, enabled = !state.busy) },
+                ))
+                item("terminals-caption") { Caption(stringResource(R.string.assistant_settings_close_ended_terminals_caption)) }
             }
 
             item("zone") { JSectionHeader(stringResource(R.string.assistant_settings_zone)) }

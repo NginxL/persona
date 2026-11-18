@@ -1144,7 +1144,8 @@ func TestAskLauncherModelsAddsOnlyExactCatalogPrices(t *testing.T) {
 	own := &proto.ModelPrice{Input: 9, Output: 99}
 	f.agentModels = map[string][]proto.AgentModel{"relay": {
 		{ID: "opus", Resolved: "claude-opus-5-5"},
-		{ID: "other-alias", Resolved: "claude-opus-5-5", Price: own},
+		// its 1M window keeps it a row of its own (two aliases of one model and window are one row, foldModels)
+		{ID: "other-alias", Resolved: "claude-opus-5-5[1m]", Price: own},
 		{ID: "claude-opus-5-6", Price: own},
 		{ID: "private-model", Price: &proto.ModelPrice{Input: 4}},
 	}}

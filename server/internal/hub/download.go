@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -33,9 +32,7 @@ func (h *Hub) downloadFile(w http.ResponseWriter, r *http.Request, m *Machine) {
 	}
 	info, err := get(p)
 	if err != nil {
-		var re *rpc.Error
-		if errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method") {
-			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-download.outdated_file"), nil)
+		if h.nodeOutdated(w, r, err, "hub-download.outdated_file", nil) {
 			return
 		}
 		callErr(w, err)
@@ -89,8 +86,7 @@ func (h *Hub) fileThumb(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if err := m.call(ctx, "file.thumb", p, &out); err != nil {
 		var re *rpc.Error
 		switch {
-		case errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method"):
-			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-download.outdated_thumbnail"), nil)
+		case h.nodeOutdated(w, r, err, "hub-download.outdated_thumbnail", nil):
 		case errors.As(err, &re) && re.Code == proto.CodeNoThumbnail:
 			writeCode(w, http.StatusNotFound, proto.CodeNoThumbnail, re.Message, nil)
 		default:
@@ -182,8 +178,7 @@ func (h *Hub) fileConvert(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if err := m.call(ctx, "file.convert", p, &out); err != nil {
 		var re *rpc.Error
 		switch {
-		case errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method"):
-			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-download.outdated_convert"), nil)
+		case h.nodeOutdated(w, r, err, "hub-download.outdated_convert", nil):
 		case errors.As(err, &re) && re.Code == proto.CodeNoConverter:
 			writeCode(w, http.StatusNotFound, proto.CodeNoConverter, re.Message, nil)
 		default:

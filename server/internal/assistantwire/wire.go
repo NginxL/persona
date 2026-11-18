@@ -426,6 +426,8 @@ type SessionView struct {
 	// Tags are the conversation's user-defined labels (assistant/conversation_tags.go); absent or empty for one without.
 	Tags   []string `json:"tags,omitempty"`
 	Queued []string `json:"queued,omitempty"` // messages from other conversations waiting for its turn to end
+	// Undelivered: the owner's messages it keeps after they could not go in (proto.Session.Undelivered, #10194).
+	Undelivered []proto.UndeliveredMessage `json:"undelivered,omitempty"`
 	// Origin is who opened the conversation (docs/protocol/protocol.md "Origin of assistant chats": user, channel, inbox, task, spawned,
 	// lark_agent, extension) and OriginRef what of (the inbox item, the task, the conversation, the channel, the
 	// extension); both "" while it is not known.

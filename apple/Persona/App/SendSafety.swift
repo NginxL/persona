@@ -44,10 +44,17 @@ extension AppModel {
             // types it once. Through a short drop (a hub restart) it keeps trying with that id instead of going to
             // the outbox's clock; once the drop's grace is over the outbox takes it (flushOutbox).
             let launcher = assistantLaunchers[key], model = assistantModels[key]
-            let waits = try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
-                try await api.send(key, text: msg.text, images: msg.images, launcher: launcher, model: model,
-                                   clientMsgID: msg.id.uuidString, clearDraft: clearDraft, via: msg.via, opID: msg.id)
+            let reply = try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
+                try await api.sendReply(key, text: msg.text, images: msg.images, launcher: launcher, model: model,
+                                        clientMsgID: msg.id.uuidString, clearDraft: clearDraft, via: msg.via, opID: msg.id)
             }
+            if reply.kept {
+                // It did not go in (the assistant did not start, its computer was away) and the assistant keeps it to
+                // send by itself (#10194): the chat's row shows it from now on, on every device, so this bubble goes.
+                keptUndelivered(key, msg.id, reply.undelivered)
+                return .kept
+            }
+            let waits = reply.waitsOnComputer == true
             if waits, visibleSession == key {
                 // Sent, but the Agent reads it only after the question on the computer is answered (#5890). Only on
                 // that chat's screen: the toast does not name the chat, and an outbox flush can run from anywhere.
@@ -88,6 +95,46 @@ extension AppModel {
             show(error)
             return .failed
         }
+    }
+
+    /// A message the assistant keeps after it could not go in (#10194): off the outbox, onto the row at once (the
+    /// hub's next list carries it too).
+    func keptUndelivered(_ key: SessionKey, _ id: UUID, _ kept: UndeliveredMessage?) {
+        chat(key).settleSendFeedback(id, state: SendOutcome.kept.state) // no Processing left hanging (`settleSend` finds no bubble)
+        chat(key).pending.removeAll { $0.id == id }
+        saveOutbox()
+        guard let kept else { return }
+        patchListedSession(key) { row in
+            var list = row.undelivered ?? []
+            if !list.contains(where: { $0.id == kept.id }) { list.append(kept) }
+            row.undelivered = list
+        }
+    }
+
+    /// Retry on a kept message that gave up (#10194). A second tap while the first is on its way does nothing.
+    func retryUndelivered(_ key: SessionKey, _ id: String) async {
+        guard undeliveredActions.insert(id).inserted else { return }
+        defer { undeliveredActions.remove(id) }
+        do {
+            try await api(key.group)?.retryUndelivered(conversation: key.sessionID, id: id)
+            patchListedSession(key) { row in
+                row.undelivered = row.undelivered?.map { m in
+                    var m = m
+                    if m.id == id { m.state = "waiting"; m.error = nil }
+                    return m
+                }
+            }
+        } catch { show(error) }
+    }
+
+    /// Delete on a kept message (#10194): it is never sent. A second tap while the first is on its way does nothing.
+    func deleteUndelivered(_ key: SessionKey, _ id: String) async {
+        guard undeliveredActions.insert(id).inserted else { return }
+        defer { undeliveredActions.remove(id) }
+        do {
+            try await api(key.group)?.deleteUndelivered(conversation: key.sessionID, id: id)
+            patchListedSession(key) { row in row.undelivered = row.undelivered?.filter { $0.id != id } }
+        } catch { show(error) }
     }
 
     private func noteFailure(_ key: SessionKey, _ id: UUID, _ reason: String?) {

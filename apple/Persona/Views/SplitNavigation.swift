@@ -594,16 +594,20 @@ struct DrawerButtonItem: ViewModifier {
     @Environment(\.splitShowList) private var showList
 
     func body(content: Content) -> some View {
-        if shown {
-            content.toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ShellPersonaButton(id: "sidebar-drawer-button") { showList?.show() }
-                        .overlay(alignment: .topTrailing) { SidebarWaitingBadge() }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
-        } else {
+        if !shown {
             content
+        } else if #available(iOS 26.0, *) {
+            content.toolbar { item.sharedBackgroundVisibility(.hidden) }
+        } else {
+            // iOS 18 (#6730): no glass behind the item to hide.
+            content.toolbar { item }
+        }
+    }
+
+    private var item: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            ShellPersonaButton(id: "sidebar-drawer-button") { showList?.show() }
+                .overlay(alignment: .topTrailing) { SidebarWaitingBadge() }
         }
     }
 }

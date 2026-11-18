@@ -4,7 +4,8 @@ export type RepositoryIdentity = { provider: string; instance_url: string; path:
 const githubPages = new Set("tree blob raw blame commit commits pull pulls issues actions releases tags branches compare discussions wiki projects settings security network deployments packages graphs stargazers watchers forks".split(" "));
 const credentialKeys = new Set(["token", "access_token", "private_token", "auth", "authorization", "password", "api_key", "apikey", "signature"]);
 
-export function parseRepository(remote: string, provider = ""): RepositoryIdentity | undefined {
+/** An address cut into its parts, `git@host:path` read as ssh; undefined when it has credentials or is not an address. */
+function splitRemote(remote: string) {
   if (!remote || remote.length > 2048 || /[\s\\]/u.test(remote)) return;
   if (remote.startsWith("git@") && !remote.includes("://")) {
     const scp = /^git@([^/:@]+):(.+)$/.exec(remote);
@@ -22,7 +23,29 @@ export function parseRepository(remote: string, provider = ""): RepositoryIdenti
   if (authority.includes("@") || authority.includes("%")) return;
   const hostPort = /^(\[[0-9a-fA-F:.]+\]|[^:]+)(?::([0-9]+))?$/.exec(authority);
   if (!hostPort) return;
-  let host = hostPort[1].toLowerCase(), port = hostPort[2] ?? "";
+  return { scheme, ssh: scheme === "ssh", host: hostPort[1].toLowerCase(), port: hostPort[2] ?? "", rawPath, query, fragment };
+}
+
+/**
+ * The lowercase host of an http(s), ssh:// or `git@host:path` address, read as the parser reads it, to match an
+ * address to the source that declares that exact host. Undefined for an address with credentials (a user, a password
+ * or a secret in its query), an IP literal in brackets or anything that is not an address, so such an address is never
+ * sent to a source.
+ */
+export function remoteHost(remote: string): string | undefined {
+  const parts = splitRemote(remote);
+  if (!parts || parts.host.startsWith("[") || parts.host.endsWith(".")) return;
+  try {
+    for (const key of new URLSearchParams(parts.query).keys()) if (credentialKeys.has(key.toLowerCase())) return;
+  } catch { return; }
+  return parts.host;
+}
+
+export function parseRepository(remote: string, provider = ""): RepositoryIdentity | undefined {
+  const remoteParts = splitRemote(remote);
+  if (!remoteParts) return;
+  let { scheme, host, port } = remoteParts;
+  const { rawPath, query, fragment } = remoteParts;
   try {
     // Only validate the authority here, keeping the raw path above intact.
     const parsed = new URL(`https://${host}`);
@@ -58,7 +81,7 @@ export function parseRepository(remote: string, provider = ""): RepositoryIdenti
     if (parts.length < 3 || parts[0] !== "repos") return;
     parts = parts.slice(1);
   }
-  if (match[1] !== "ssh") {
+  if (!remoteParts.ssh) {
     if (provider === "github" && parts.length > 2) {
       if (!githubPages.has(parts[2])) return;
       parts = parts.slice(0, 2);

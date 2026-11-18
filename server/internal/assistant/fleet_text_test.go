@@ -22,6 +22,10 @@ func TestLocalizedActivity(t *testing.T) {
 		{act("Grep", `{}`), "Searching", "検索中"},
 		{act("mcp__persona__mail_send", `{}`), "Calling mail_send", "mail_sendを呼び出し中"},
 		{act("AskUserQuestion", `{}`), "Asking you a question", "質問しています"},
+		{act("subagent", `{"name":"review_api","event":"started"}`), "Delegating: review_api", "サブタスク依頼中：review_api"},
+		{act("subagent", `{"name":"review_api","event":"interacted"}`), "Messaging subtask review_api", "サブタスクreview_apiに連絡中"},
+		{act("subagent", `{"name":"review_api","event":"completed"}`), "Subtask done: review_api", "サブタスク完了：review_api"},
+		{act("subagent", `{"event":"completed"}`), "Subtask done", "サブタスク完了"},
 		{"在做别的", "在做别的", "在做别的"},
 	} {
 		if got := activityText(i18n.En, c.zh); got != c.en {

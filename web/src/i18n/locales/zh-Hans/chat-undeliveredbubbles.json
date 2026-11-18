@@ -1,0 +1,6 @@
+{
+  "waiting": "未送达：{reason}。恢复后会自动发送。",
+  "failed": "未送达：{reason}",
+  "images": "图片：{count} 张",
+  "action_failed": "没有成功：{error}"
+}

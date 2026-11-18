@@ -57,10 +57,10 @@ function readableTitle(title: string): string {
 const fold = (s: string) => s.normalize("NFKC").toLowerCase();
 
 /** Matches the title or the last message, ignoring case and full / half width. */
-export function filterConversations<T extends Conversation>(list: T[], query: string): T[] {
+export function filterConversations<T extends Conversation>(list: T[], query: string, main?: string): T[] {
   const q = fold(query.trim());
   if (!q) return list;
-  return list.filter((s) => fold(conversationTitle(s)).includes(q) || fold(s.last_text ?? "").includes(q));
+  return list.filter((s) => (s.session_id === main && fold(t("sidebar.main_chat")).includes(q)) || fold(conversationTitle(s)).includes(q) || fold(s.last_text ?? "").includes(q));
 }
 
 /** Every tag in use, each once and sorted: the filter chips' row (docs/assistant/assistant.md "Conversation tags"). */

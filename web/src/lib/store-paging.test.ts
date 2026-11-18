@@ -123,7 +123,11 @@ describe("negotiated bounded runtime lists", () => {
   it("keeps chat details separate and consumes title-only invalidations via since", async () => {
     hello(["sessions_list", "sessions_lookup"]);
     await settle();
-    const complete = session("s0", { title: "Complete detail title", background: [{ id: "bg", kind: "shell", description: "Long detail" }] });
+    const complete = session("s0", {
+      title: "Complete detail title",
+      background: [{ id: "bg", kind: "shell", description: "Long detail" }],
+      background_ended: [{ id: "done", kind: "shell", status: "completed", ended_at: "2026-01-01T00:01:00Z" }],
+    });
     upsertSession(complete);
     changed = [session("s0", { title: "New summary", waiting: true })];
     Socket.last.push({ type: "sessions_list", revision: "not-the-baseline" });
@@ -131,6 +135,7 @@ describe("negotiated bounded runtime lists", () => {
     expect(requests.filter((r) => r.searchParams.has("since")).at(-1)?.searchParams.get("since")).toBe("r1");
     expect(getState().sessionSummaries.find((s) => s.session_id === "s0")?.title).toBe("New summary");
     expect(getSession("demo", "s0")?.background).toEqual(complete.background);
+    expect(getSession("demo", "s0")?.background_ended).toEqual(complete.background_ended);
     expect(getSession("demo", "s0")?.title).toBe("Complete detail title");
   });
 
@@ -173,10 +178,16 @@ describe("negotiated bounded runtime lists", () => {
   it("replaces complete snapshots and clears omitted task arrays", async () => {
     hello(["sessions_list", "sessions_lookup"]);
     await settle();
-    applyCompleteSessions([session("s0", { waiting: undefined, background: [{ id: "bg", kind: "shell" }], subagents: [], workflows: [], queued: ["Queued task"], permission_mode: "plan" })]);
+    applyCompleteSessions([session("s0", {
+      waiting: undefined,
+      background: [{ id: "bg", kind: "shell" }],
+      background_ended: [{ id: "done", kind: "shell", status: "completed" }],
+      subagents: [], workflows: [], queued: ["Queued task"], permission_mode: "plan",
+    })]);
     applyCompleteSessions([session("s0", { waiting: undefined, title: "Complete latest", permission_mode: "default" })]);
     expect(getSession("demo", "s0")?.title).toBe("Complete latest");
     expect(getSession("demo", "s0")?.background).toBeUndefined();
+    expect(getSession("demo", "s0")?.background_ended).toBeUndefined();
     expect(getSession("demo", "s0")?.queued).toBeUndefined();
     expect(getSession("demo", "s0")?.permission_mode).toBe("default");
   });

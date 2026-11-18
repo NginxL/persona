@@ -26,6 +26,9 @@ export interface PanelModel {
   description?: string;
   /** The concrete model an alias stands for under this provider. */
   resolved?: string;
+  /** The other spellings the hub folded into this row (lib/launcher-models.ts AgentModel.aliases): a saved setup naming
+   *  one is this row's, and a search finds it by them. */
+  aliases?: string[];
   /** Thinking efforts it takes, weakest first (lib/session-actions.ts EFFORTS / CODEX_EFFORTS ids); empty: no effort control. */
   efforts: string[];
   /** The running session cannot change effort here; keep its actual value visible and explain why. */
@@ -185,8 +188,8 @@ export function resetOverride(all: PanelOverrides, provider: string, model: stri
 
 /** Whether `model` of `provider` runs now: the row named exactly what runs when the list has one (so a typed ID and the
  *  default entry that stands for the same model are never both lit, as the pill names that one), else a row whose
- *  concrete model it is (lib/model-switch.ts isCurrentModel: an alias standing for it). */
-function runsNow(provider: Pick<PanelProvider, "id" | "models">, model: Pick<PanelModel, "id" | "resolved">, current: PanelConfig | null | undefined): boolean {
+ *  concrete model it is (lib/model-switch.ts isCurrentModel: an alias standing for it, or one folded into it). */
+function runsNow(provider: Pick<PanelProvider, "id" | "models">, model: Pick<PanelModel, "id" | "resolved" | "aliases">, current: PanelConfig | null | undefined): boolean {
   if (!current || current.provider !== provider.id) return false;
   const want = current.model.toLowerCase();
   if (provider.models?.some((m) => m.id.toLowerCase() === want)) return model.id.toLowerCase() === want;
@@ -242,9 +245,10 @@ export function rowCustomizable(row: Pick<PanelRow, "kind" | "current" | "provid
   return !rowBlock(row.provider, state);
 }
 
-/** The search (every word, any case): the model's name, id, the model it stands for, its description, the provider's name. */
-export function matchesQuery(provider: Pick<PanelProvider, "name">, model: Pick<PanelModel, "id" | "name" | "resolved" | "description">, query: string): boolean {
-  return matches([model.name, model.id, model.resolved, model.description, provider.name], query);
+/** The search (every word, any case): the model's name, id, the model it stands for, the spellings folded into it, its
+ *  description, the provider's name. */
+export function matchesQuery(provider: Pick<PanelProvider, "name">, model: Pick<PanelModel, "id" | "name" | "resolved" | "aliases" | "description">, query: string): boolean {
+  return matches([model.name, model.id, model.resolved, ...(model.aliases ?? []), model.description, provider.name], query);
 }
 
 /** What the list shows: one rail cell's view. A search shows "all" whatever cell is on. */

@@ -48,6 +48,14 @@ extension Interaction {
         return kind.title
     }
 
+    /// The one post-plan mode the card may approve (#3784). Absent, empty, `plan`, and unknown modes keep the legacy choices.
+    var recordedPlanThen: String? {
+        switch planThen {
+        case "default", "acceptEdits", "auto", "bypassPermissions": planThen
+        default: nil
+        }
+    }
+
     /// Whether the card offers Always: as the manager says where it does (`alwaysHonored`, #3590: its own cards keep
     /// nothing), else on a conversation's card, and on another agent's (Codex) only when it says what always allows.
     var offersAlways: Bool {
@@ -1021,6 +1029,21 @@ struct PlanForm: View {
                 } label: { Text("Send Back [Notification Actions cd3150]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity) }
                     .themedButton(prominent: true)
             }
+        } else if let mode = interaction.recordedPlanThen {
+            Text(PlanTaskRow.permissionLabel(mode))
+                .font(Theme.Font.secondary)
+                .foregroundStyle(.secondary)
+            Button {
+                Task { await model.resolve(interaction, Resolution(approve: true, mode: mode)) }
+            } label: {
+                Text("Approve [Interaction Views 905819]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+            }
+            .themedButton(prominent: true)
+            .controlSize(.large)
+            Button { withAnimation { rejecting = true } } label: {
+                Text("Send Back [Notification Actions a20f13]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+            }
+            .themedButton()
         } else {
             Button {
                 Task { await model.resolve(interaction, Resolution(approve: true, mode: "bypassPermissions")) }
@@ -2112,12 +2135,15 @@ struct BUIPlanForm: View {
     ]
 
     var body: some View {
-        ApprovalCard(questions: [ApprovalQuestion(String(localized: "Go ahead with this plan?"), choices: Self.choices,
+        let choices = interaction.recordedPlanThen.map { mode in
+            [ApprovalQuestion.Choice(String(localized: "Approve [Interaction Views 905819]"), detail: PlanTaskRow.permissionLabel(mode))]
+        } ?? Self.choices
+        ApprovalCard(questions: [ApprovalQuestion(String(localized: "Go ahead with this plan?"), choices: choices,
                                                   customPlaceholder: String(localized: "Send back with what to change…"))],
                      skipLabel: nil, sendLabel: String(localized: "Send"), sentMessage: String(localized: "Sent"),
                      options: .panel(maxHeight: formCap.isFinite && formCap > 0 ? formCap : nil)) { answers in
             Haptics.tap()
-            Task { await model.resolve(interaction, Self.resolution(answers)) }
+            Task { await model.resolve(interaction, Self.resolution(answers, recordedMode: interaction.recordedPlanThen)) }
         } context: { _ in
             // Its first lines, Show Full Text for the rest (#6605): it scrolled in a box of its own inside the card's scroll.
             CardPlan(plan: interaction.plan ?? "", lines: Self.planLines) { showFull = true }
@@ -2136,6 +2162,14 @@ struct BUIPlanForm: View {
         case 1: return Resolution(approve: true, mode: "acceptEdits")
         default: return Resolution(approve: false, feedback: "")
         }
+    }
+
+    static func resolution(_ a: ApprovalAnswers, recordedMode: String?) -> Resolution {
+        guard let recordedMode else { return resolution(a) }
+        let feedback = (a.custom[0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !feedback.isEmpty { return Resolution(approve: false, feedback: feedback) }
+        guard a.picks[0]?.first == 0 else { return Resolution(approve: false, feedback: "") }
+        return Resolution(approve: true, mode: recordedMode)
     }
 }
 

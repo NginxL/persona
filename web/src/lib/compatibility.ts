@@ -117,6 +117,8 @@ export const FILE_RE = /<(?:persona|jarvis)-file\b([^>]*?)\/?>(?:\s*<\/(?:person
 const TOOL_ALIASES: Record<string, string> = { ask_jarvis: "ask_persona", jarvis_settings: "persona_settings" };
 export const canonicalTool = (name: string): string => TOOL_ALIASES[name] ?? name;
 export const managedProvider = (source?: string): boolean => source === "persona" || source === "jarvis";
+/** A launcher's explicit model ID; older nodes sent Chinese display text when they meant no override. */
+export const explicitLauncherModel = (model?: string): string | undefined => model && model !== "默认" ? model : undefined; // i18n-ignore: legacy wire value, never displayed
 export const legacyBuiltins = ["jarvis", "jarvis-circuit", "jarvis-pixel", "jarvis-facet", "jarvis-blob"];
 
 /** Apply only to typed session objects; tool input and message text stay opaque. */

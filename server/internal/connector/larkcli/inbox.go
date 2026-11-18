@@ -35,6 +35,15 @@ const (
 	inboxDirectChats      = 10
 	inboxDirectCandidates = 50
 	inboxDirectLookback   = 2 * time.Hour
+	// The context the models read (contextFor): the new messages after a few earlier ones as background, the earlier
+	// ones from the contextHistory before the first new message, at most contextEarlier of them, but always the last
+	// contextEarlierKeep however old (a short answer keeps its question). The chat's page of 40 brought weeks-old
+	// messages and cards of thousands of characters into every triage of a quiet chat.
+	contextHistory      = 24 * time.Hour
+	contextEarlier      = 10
+	contextEarlierKeep  = 3
+	contextEarlierRunes = 300
+	contextNewRunes     = 2000
 )
 
 // StateStore is the small part of the manager's Postgres-backed settings store
@@ -762,7 +771,7 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 		Title:    title,
 		Sender:   latest.Sender.Name,
 		Preview:  firstLine(text),
-		Context:  contextText(contextMessages, me),
+		Context:  contextFor(contextMessages, group.messages, me),
 		At:       messageTime(latest),
 		Last:     latest.MessageID,
 		ReplyTo:  replyTo(lang, name, group.threadID != ""),
@@ -1153,17 +1162,93 @@ const (
 	markAll   = "（@所有人）" // i18n-ignore: the tier criteria's mark, read by the model
 )
 
-// contextText is the conversation as the models read it, a line a message: "<sender><marks>: <text>", the marks from
-// the message's structured mentions (both when it @'s the owner and everyone). me is the owner's id.
-func contextText(messages []adapter.Message, me string) string {
+// markNew divides the background from the new messages in a context (contextFor), as prompts/inbox/kinds/larkcli.md
+// tells the models.
+const markNew = "—— 新消息 ——" // i18n-ignore: the divider the models read
+
+// contextFor is the context of a chat's or topic's item, messages in time order: the background (the messages before
+// the first of fresh, the ones this round found; see contextHistory), markNew when there is any, then from the first of
+// fresh on. Without fresh every message is new.
+func contextFor(messages, fresh []adapter.Message, me string) string {
+	return contextAround(messages, firstFresh(messages, fresh), me)
+}
+
+// firstFresh is where the new messages start in messages: at the first one that is one of fresh by id. Ordering fresh
+// itself cannot say: search may print no positions, so its copies of one minute's messages order by id, not as the
+// chat has them. Without ids, at the first message not before the earliest of fresh; without fresh, at the start.
+func firstFresh(messages, fresh []adapter.Message) int {
+	ids := make(map[string]bool, len(fresh))
+	for _, message := range fresh {
+		if message.MessageID != "" {
+			ids[message.MessageID] = true
+		}
+	}
+	for i, message := range messages {
+		if ids[message.MessageID] {
+			return i
+		}
+	}
+	if len(fresh) == 0 {
+		return 0
+	}
+	first := fresh[0]
+	for _, message := range fresh[1:] {
+		if messageLess(message, first) {
+			first = message
+		}
+	}
+	split := 0
+	for split < len(messages) && messageLess(messages[split], first) {
+		split++
+	}
+	return split
+}
+
+// contextAround is contextFor's text, the new messages starting at messages[split].
+func contextAround(messages []adapter.Message, split int, me string) string {
+	earlier, recent := messages[:split], messages[split:]
+	// the earlier ones kept start at from: the last contextEarlier, less those older than contextHistory before the first
+	// new message (or of no known time), but never fewer than contextEarlierKeep
+	from := max(len(earlier)-contextEarlier, 0)
+	if len(recent) > 0 {
+		if first := messageTime(recent[0]); !first.IsZero() {
+			for from < len(earlier)-contextEarlierKeep {
+				if at := messageTime(earlier[from]); !at.IsZero() && first.Sub(at) <= contextHistory {
+					break
+				}
+				from++
+			}
+		}
+	}
+	background := contextLines(earlier[from:], me, contextEarlierRunes)
+	if background == "" {
+		return contextLines(recent, me, contextNewRunes)
+	}
+	return background + "\n" + markNew + "\n" + contextLines(recent, me, contextNewRunes)
+}
+
+// contextText is the conversation as the models read it, a line a message (contextLines), each kept whole.
+func contextText(messages []adapter.Message, me string) string { return contextLines(messages, me, 0) }
+
+// contextLines is a line a message: "<time> <sender><marks>: <text>", the time the hub's wall-clock minute (none when
+// the message has none), the marks from the message's structured mentions (both when it @'s the owner and everyone),
+// the text cut to runes (0: whole). me is the owner's id.
+func contextLines(messages []adapter.Message, me string, runes int) string {
 	var b strings.Builder
 	for _, message := range messages {
 		text := strings.TrimSpace(messageText(message))
 		if text == "" {
 			continue
 		}
+		if r := []rune(text); runes > 0 && len(r) > runes {
+			text = string(r[:runes]) + "…"
+		}
 		if b.Len() > 0 {
 			b.WriteString("\n")
+		}
+		if at := messageTime(message); !at.IsZero() {
+			b.WriteString(at.In(cliLocation()).Format("01-02 15:04"))
+			b.WriteString(" ")
 		}
 		start := b.Len()
 		name := message.Sender.Name

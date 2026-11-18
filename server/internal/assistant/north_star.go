@@ -914,7 +914,7 @@ func (s *Service) runFacts(ctx context.Context, t Task, now time.Time) string {
 	case t.Facts:
 		return s.briefStart(ctx, t, now)
 	case t.Report:
-		return s.northStarRunFacts(ctx, now)
+		return s.briefReportStart(ctx, t, now)
 	}
 	return ""
 }

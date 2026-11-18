@@ -41,7 +41,11 @@ type Machine struct {
 	// CanDeploy is explicit so clients can distinguish an older hub without capability reporting.
 	CanDeploy    *bool  `json:"can_deploy,omitempty"`
 	DeployReason string `json:"deploy_reason,omitempty"`
-	DeployPhase  string `json:"deploy_phase,omitempty"`
+	// DeployNoPackage: the node itself could be updated from here, and what stops it is the hub's side: no node build it
+	// can send for its platform now (none, or the release site cannot be reached; DeployReason says which): not a node
+	// to reinstall (#10566).
+	DeployNoPackage bool   `json:"deploy_no_package,omitempty"`
+	DeployPhase     string `json:"deploy_phase,omitempty"`
 	// System: OS and hardware, from the node's last connection (kept across hub restarts).
 	System *System `json:"system,omitempty"`
 	// Link: kind link, while the computer's persona-link is connected (docs/operations/link.md).

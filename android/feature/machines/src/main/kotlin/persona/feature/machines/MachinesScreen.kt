@@ -124,6 +124,7 @@ internal fun MachinesScreen(
     MachineGridWidth { contentWidth ->
     if (machineId == null) AdaptiveMachineGridProbe(stringResource(R.string.machines_title), machineGridColumns(contentWidth))
     val listState = rememberMachineGridListState(ids, machineGridColumns(contentWidth))
+    val chargingLabel = stringResource(R.string.machines_metric_charging)
     JListPage(
         title = if (machineId == null) stringResource(R.string.machines_title) else machine?.displayName ?: stringResource(R.string.machines_title_detail),
         summary = if (machineId == null) machineSummaryText(listSummary) else null,
@@ -211,14 +212,22 @@ internal fun MachinesScreen(
             }
             // Keyed by the label's resource, so the list keeps its rows when the language changes.
             val swapOff = current?.swapTotal == 0L
-            val values = listOf(
-                R.string.machines_metric_cpu to MetricFormat.percent(current?.cpu, locale),
-                R.string.machines_metric_memory to "${MetricFormat.bytes(current?.memUsed, locale)} / ${MetricFormat.bytes(current?.memTotal, locale)}",
-                R.string.machines_metric_network to "↓ ${MetricFormat.rate(current?.netRx, locale)}  ↑ ${MetricFormat.rate(current?.netTx, locale)}",
-                R.string.machines_metric_load to MetricFormat.number(current?.load, locale),
-                R.string.machines_metric_disk to "${MetricFormat.bytes(current?.diskUsed, locale)} / ${MetricFormat.bytes(current?.diskTotal, locale)}",
-                R.string.machines_metric_swap to if (swapOff) null else "${MetricFormat.bytes(current?.swapUsed, locale)} / ${MetricFormat.bytes(current?.swapTotal, locale)}",
-            )
+            val chargingSuffix = if (current?.batteryCharging == true) " · $chargingLabel" else ""
+            val values = buildList {
+                add(R.string.machines_metric_cpu to MetricFormat.percent(current?.cpu, locale))
+                add(R.string.machines_metric_memory to "${MetricFormat.bytes(current?.memUsed, locale)} / ${MetricFormat.bytes(current?.memTotal, locale)}")
+                add(R.string.machines_metric_network to "↓ ${MetricFormat.rate(current?.netRx, locale)}  ↑ ${MetricFormat.rate(current?.netTx, locale)}")
+                add(R.string.machines_metric_load to MetricFormat.number(current?.load, locale))
+                add(R.string.machines_metric_disk to "${MetricFormat.bytes(current?.diskUsed, locale)} / ${MetricFormat.bytes(current?.diskTotal, locale)}")
+                add(R.string.machines_metric_swap to if (swapOff) null else "${MetricFormat.bytes(current?.swapUsed, locale)} / ${MetricFormat.bytes(current?.swapTotal, locale)}")
+                current?.batteryPercent?.takeIf { it.isFinite() }?.let { pct ->
+                    val label = MetricFormat.percent(pct, locale) + chargingSuffix
+                    add(R.string.machines_metric_battery to label)
+                }
+                current?.tempC?.takeIf { it.isFinite() }?.let { temp ->
+                    add(R.string.machines_metric_temperature to "${MetricFormat.number(temp, locale)}°C")
+                }
+            }
             itemsIndexed(values, key = { _, it -> "now-${it.first}" }, contentType = { _, _ -> "value" }) { index, value ->
                 JGroupItem(GroupPosition.of(index, values.size)) {
                     JRow(stringResource(value.first), value = value.second ?: stringResource(R.string.machines_swap_off))

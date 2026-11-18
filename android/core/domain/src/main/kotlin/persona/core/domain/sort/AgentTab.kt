@@ -37,11 +37,12 @@ fun <T> launcherOf(panes: List<T>, session: (T) -> Session): T? =
 
 /**
  * What a tab's row speaks for (docs/protocol/agent-states.md "Unified states", as the web): needs you > working > unread > awaiting
- * reply (#5096, not muted) > seen.
+ * reply (#5096, not muted) > just finished (#9786, not muted) > seen.
  */
 private fun tabUrgency(row: AgentSession, mutes: AgentPreferences): Int = when {
     row.awaitsReply(mutes) -> TabUrgency.indexOf(AgentState.Unread) + 1
-    else -> TabUrgency.indexOf(row.state).let { if (it > TabUrgency.indexOf(AgentState.Unread)) it + 1 else it }
+    row.justFinished(mutes) -> TabUrgency.indexOf(AgentState.Unread) + 2
+    else -> TabUrgency.indexOf(row.state).let { if (it > TabUrgency.indexOf(AgentState.Unread)) it + 2 else it }
 }
 private val TabUrgency = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread, AgentState.Idle, AgentState.Unknown, AgentState.Offline)
 

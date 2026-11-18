@@ -340,6 +340,7 @@ export interface Contributes {
   error_reports?: ErrorReportsItem[];
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
+  repository_providers?: RepositoryProviderItem[];
   messaging?: MessagingItem[];
   /** Extra keys are opaque JSON; declared properties keep their own types. */
   [key: string]: unknown;
@@ -549,6 +550,46 @@ export interface SecretProviderItem {
   /** The reference schemes it resolves, without :// (op). */
   schemes: string[];
 }
+
+/**
+ * A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's repositories and links
+ * there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe; repository.schema.json) and
+ * re-checks every answer. Needs the program to speak the protocol. A host another installed extension claims, on or
+ * off, fails the install, and so does one host in two items.
+ */
+export interface RepositoryProviderItem {
+  id: string;
+  /**
+   * What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no
+   * control characters.
+   */
+  name: string;
+  /**
+   * The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or wildcard,
+   * not an IP address, and not a host the built-in GitHub and GitLab read.
+   */
+  hosts: string[];
+  /**
+   * What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels: the
+   * kinds stay issue and pull_request.
+   */
+  link_kinds?: RepositoryLinkLabel[];
+}
+
+/**
+ * The word a repository provider shows for one kind of its links (MR for a pull_request).
+ */
+export interface RepositoryLinkLabel {
+  kind: RepositoryLinkKind;
+  /** Not only spaces, no control characters. */
+  label: string;
+}
+
+/**
+ * The kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).
+ */
+export type RepositoryLinkKind = "issue" | "pull_request" | (string & {});
+export const REPOSITORY_LINK_KINDS = ["issue", "pull_request"] as const;
 
 /**
  * It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the
@@ -5314,10 +5355,11 @@ export interface LeaderReportEvent {
  * dropped connection); model_refused (the model declined to answer this input, a refusal or a content filter: sending
  * it again unchanged gets the same answer, so split it, drop a part or report it; data ModelRefusal); timeout (past
  * timeout_seconds); invalid_output (with json_schema, the reply was still not JSON matching it after one more try;
- * data ModelInvalidOutput).
+ * data ModelInvalidOutput); model_candidates_failed (with two or more candidates, every one failed; data
+ * ModelCandidatesFailed names how each did; a single candidate that fails answers with its own code and data).
  */
-export type ModelErrorCode = "invalid_params" | "assistant_offline" | "model_unavailable" | "model_paused" | "model_failed" | "model_refused" | "timeout" | "invalid_output" | (string & {});
-export const MODEL_ERROR_CODES = ["invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output"] as const;
+export type ModelErrorCode = "invalid_params" | "assistant_offline" | "model_unavailable" | "model_paused" | "model_failed" | "model_refused" | "timeout" | "invalid_output" | "model_candidates_failed" | (string & {});
+export const MODEL_ERROR_CODES = ["invalid_params", "assistant_offline", "model_unavailable", "model_paused", "model_failed", "model_refused", "timeout", "invalid_output", "model_candidates_failed"] as const;
 
 /**
  * One turn of the conversation: the user's, or the model's earlier answer.
@@ -5350,6 +5392,19 @@ export interface ModelCompleteParams {
   timeout_seconds?: number;
   /** What the call is for (daily, weekly…): it goes in the hub's log line with the usage. */
   label?: string;
+  /**
+   * Candidate model ids, tried in order (#10398): one that fails (model_failed, model_refused, model_paused), runs
+   * past timeout_seconds, answers with no text (model_failed) or, with json_schema, still does not match it after its
+   * second try (invalid_output) hands over to the next. Each runs on a provider the user configured in Settings ›
+   * Model providers that offers it, the purpose's own provider first (a model none offers is model_unavailable with
+   * data {model}, nothing sent). One candidate that fails answers with its own error; when two or more all fail the
+   * error is model_candidates_failed. timeout_seconds bounds each candidate; the whole call stops at 600 seconds. The
+   * user can switch these lists off (the result then has no candidate) or replace them with a list of their own
+   * (candidate names the user's model) on the extension's purpose in Settings › Model configuration. Without models
+   * the call runs on the purpose's model, as it always did; a hub older than this field answers invalid_params
+   * (unknown field "models").
+   */
+  models?: string[];
 }
 
 /**
@@ -5373,6 +5428,40 @@ export interface ModelCompleteResult {
   model: string;
   /** end_turn, or max_tokens when the answer was cut off. */
   stop_reason: string;
+  /** What the call spent; with models, every attempt's requests together. */
+  usage: ModelUsage;
+  /** With models (or the user's own list): the candidate that answered. */
+  candidate?: string;
+  /** The candidates that failed before it, in order. */
+  attempts?: ModelAttempt[];
+}
+
+/**
+ * A candidate that did not answer: its model, the error code it failed with (a ModelErrorCode; a reply with no text
+ * is model_failed), what happened, how long it took and what it spent.
+ */
+export interface ModelAttempt {
+  model: string;
+  code: string;
+  message: string;
+  /** model_paused: when its connection lets go, an RFC 3339 time. */
+  until?: string;
+  seconds: number;
+  usage: ModelUsage;
+}
+
+/**
+ * The data of model_unavailable for a candidate no provider the user configured offers.
+ */
+export interface ModelNotOffered {
+  model: string;
+}
+
+/**
+ * The data of model_candidates_failed: every candidate's failure in order, and what they spent together.
+ */
+export interface ModelCandidatesFailed {
+  attempts: ModelAttempt[];
   usage: ModelUsage;
 }
 
@@ -6176,6 +6265,116 @@ export interface TranscriptionFinishResult {
   seconds: number;
 }
 
+/**
+ * error.code a provider answers besides the base ErrorCode: not_found (no such repository or link, or the account it
+ * uses cannot see it), not_signed_in (the user has to sign in to the source first), refused (the source said no: say
+ * why in message), failed (anything else, say why in message). The manager shows the message on one line, clipped.
+ */
+export type RepoErrorCode = "not_found" | "not_signed_in" | "refused" | "failed" | (string & {});
+export const REPO_ERROR_CODES = ["not_found", "not_signed_in", "refused", "failed"] as const;
+
+/**
+ * repo.parse: what repository an address on one of the contribution's hosts names (a web address, an https clone
+ * address, ssh://git@host/... or git@host:...). Answer only from the address when it can; the manager asks repo.check
+ * before it saves one.
+ */
+export interface RepoParseParams {
+  /** The repository_providers item's id. */
+  contribution: string;
+  /** The address as the user or an Agent wrote it (an Agent's may be any page on the contribution's hosts). */
+  url: string;
+}
+
+/**
+ * The repository the address names. instance_url is exactly https://<host> or https://<host>:<port>, a lowercase host
+ * the contribution claims and nothing after it; the default port is left out (https://code.acme.test, never
+ * https://code.acme.test:443, which is refused), path its plain segments without a leading or trailing /
+ * (acme/tools), canonical_url exactly instance_url + "/" + path.
+ */
+export interface RepoParseResult {
+  instance_url: string;
+  path: string;
+  canonical_url: string;
+  /**
+   * How to clone it when that is not canonical_url: https or ssh on one of the contribution's hosts, no credentials,
+   * query or fragment.
+   */
+  clone_url?: string;
+  /** A name for people (Acme Tools): the catalog's default name for it. */
+  display_name?: string;
+}
+
+/**
+ * repo.check: whether the repository exists and the account the program uses can see it, before the manager saves it.
+ * Answered with Empty, or not_found / not_signed_in / refused / failed.
+ */
+export interface RepoCheckParams {
+  /** The repository_providers item's id. */
+  contribution: string;
+  /** The repository's canonical_url as repo.parse answered it. */
+  canonical_url: string;
+}
+
+/**
+ * A saved repository of the provider's, as repo.parse answered it.
+ */
+export interface RepoIdentity {
+  instance_url: string;
+  path: string;
+  canonical_url: string;
+}
+
+/**
+ * repo.link: one of the repository's issues or pull requests for a to-do, named by an address (url) or by kind and
+ * number. The manager asks only for a link it has not stored yet.
+ */
+export interface RepoLinkParams {
+  /** The repository_providers item's id. */
+  contribution: string;
+  repo: RepoIdentity;
+  /**
+   * The link's address as the user or an Agent wrote it; empty when kind and number name it. The hub only checks that
+   * the answer is under repo, so answer the link this address names, or an error when it names none.
+   */
+  url?: string;
+  /** With number, when there is no url: the answer must be this kind. */
+  kind?: RepositoryLinkKind;
+  /** With kind: the answer must have this number. */
+  number?: string;
+}
+
+/**
+ * The link: its kind and number, and its canonical address under the repository's canonical_url (https, no
+ * credentials, query or fragment).
+ */
+export interface RepoLinkResult {
+  kind: RepositoryLinkKind;
+  number: string;
+  canonical_url: string;
+  /** Its title when the program knows it; kept on one line. */
+  title?: string;
+}
+
+/**
+ * repo.describe (optional): the title and state of a link the manager has stored, by its canonical address.
+ */
+export interface RepoDescribeParams {
+  /** The repository_providers item's id. */
+  contribution: string;
+  /** The link's canonical_url as repo.link answered it. */
+  canonical_url: string;
+}
+
+/**
+ * What the link is called and where it stands.
+ */
+export interface RepoDescribeResult {
+  /** Kept on one line. */
+  title: string;
+  /** Left out when the source has no such word for it. */
+  state?: string;
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -6274,4 +6473,8 @@ export const CALLS: Record<string, Call> = {
   "transcription.audio": { from: "program", params: "TranscriptionAudioParams", result: "Empty" },
   "transcription.finish": { from: "program", params: "TranscriptionJobParams", result: "TranscriptionFinishResult" },
   "transcription.cancel": { from: "program", params: "TranscriptionJobParams", result: "Empty" },
+  "repo.parse": { from: "hub", params: "RepoParseParams", result: "RepoParseResult" },
+  "repo.check": { from: "hub", params: "RepoCheckParams", result: "Empty" },
+  "repo.link": { from: "hub", params: "RepoLinkParams", result: "RepoLinkResult" },
+  "repo.describe": { from: "hub", params: "RepoDescribeParams", result: "RepoDescribeResult" },
 };

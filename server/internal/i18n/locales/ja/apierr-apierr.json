@@ -9,12 +9,14 @@
   "launcher_missing_terminal_here": "このコンピューターの新しいターミナルタブ（{pane_shell}）には「{launcher}」というコマンドがありません。Persona は {launcher_shell}（{rc_file}）でこれを見つけました。ターミナルのシェルが読む起動ファイルで定義するか、Persona でモデルプロバイダーとして追加してください。",
   "launcher_missing_terminal_path": "{machine} の新しいターミナルタブ（{pane_shell}）では、モデルの入口「{launcher}」を起動する「{missing}」を実行できません。ターミナルの環境にそのファイルがないか、実行できません（コンテナなど）。それが見えるターミナルで Agent を起動するか、別のモデルの入口を選んでください。",
   "launcher_missing_terminal_path_here": "このコンピューターの新しいターミナルタブ（{pane_shell}）では、モデルの入口「{launcher}」を起動する「{missing}」を実行できません。ターミナルの環境にそのファイルがないか、実行できません（コンテナなど）。それが見えるターミナルで Agent を起動するか、別のモデルの入口を選んでください。",
+  "launcher_missing_terminal_short": "「{launcher}」は {machine} のターミナルで開始できません",
+  "launcher_missing_terminal_short_here": "「{launcher}」はこのコンピューターのターミナルで開始できません",
   "claude_missing_terminal": "{machine} の新しいターミナルタブ（{pane_shell}）では、モデルの入口「{launcher}」の起動に必要な Claude Code（「{missing}」）が見つかりません。ターミナルから見える場所に Claude Code をインストールするか、そのシェルの PATH に追加してください。",
   "claude_missing_terminal_here": "このコンピューターの新しいターミナルタブ（{pane_shell}）では、モデルの入口「{launcher}」の起動に必要な Claude Code（「{missing}」）が見つかりません。ターミナルから見える場所に Claude Code をインストールするか、そのシェルの PATH に追加してください。",
   "terminal_default_shell": "既定のシェル",
   "assistant_control_failed": "Claudeはこの設定を適用できませんでした：{reason}",
-  "shell_waiting": "{machine} で新しく開いたターミナルのタブが質問で止まり、エージェントを起動できませんでした：「{line}」。何も実行されていません。質問に答えられるよう、タブはしばらく開いたままです。",
-  "shell_waiting_here": "このコンピューターで新しく開いたターミナルのタブが質問で止まり、エージェントを起動できませんでした：「{line}」。何も実行されていません。質問に答えられるよう、タブはしばらく開いたままです。",
+  "shell_waiting": "{machine} で新しく開いたターミナルのタブが質問で止まり、エージェントを起動できませんでした：「{line}」。何も実行されていません。Persona にこの質問の回答が表示されていれば、それを選ぶとそのタブでエージェントが起動します。{machine} のそのタブで答えてから、エージェントをもう一度起動することもできます。タブはしばらく開いたままです。",
+  "shell_waiting_here": "このコンピューターで新しく開いたターミナルのタブが質問で止まり、エージェントを起動できませんでした：「{line}」。何も実行されていません。Persona にこの質問の回答が表示されていれば、それを選ぶとそのタブでエージェントが起動します。このコンピューターのそのタブで答えてから、エージェントをもう一度起動することもできます。タブはしばらく開いたままです。",
   "start_line_rejected": "{machine} で新しく開いたターミナルのタブが起動コマンドを2回とも受け付けませんでした（表示：「{line}」）。何も実行されていません。そのシェルの起動時の処理を確認してから、もう一度お試しください。",
   "start_line_rejected_here": "このコンピューターで新しく開いたターミナルのタブが起動コマンドを2回とも受け付けませんでした（表示：「{line}」）。何も実行されていません。そのシェルの起動時の処理を確認してから、もう一度お試しください。"
 }

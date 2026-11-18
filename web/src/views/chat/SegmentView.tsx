@@ -16,7 +16,7 @@ import { channelOf, useChannels } from "../../lib/channels";
 import { splitQuotes } from "../../lib/drafts";
 import { EASE } from "../../ui/atoms";
 import { ChannelMark, OriginMark } from "../../ui/ChannelMark";
-import { externalFrom, type ExternalOrigin } from "../../lib/conversation-origins";
+import { openerFrom, type ExternalOrigin } from "../../lib/conversation-origins";
 import { Markdown } from "../../ui/Markdown";
 import { CardConversation, CardItem } from "../../ui/AssistantCard";
 import { cardReply } from "../../lib/assistant-blocks";
@@ -103,7 +103,7 @@ export function UserBubble({ msg, mid, sid, pending, sendState, starting, onDele
   const pinned = useIsLatestMessage(msg.ts) && !pending && !starting;
   // the message an extension opened the conversation with (#3758)
   const { opening } = useChatContext();
-  const openedBy = opening && opening.id === msg.id ? opening.origin : undefined;
+  const openedBy = opening && opening.id === msg.id ? opening : undefined;
   // forwards (#3899) are cards at the top of the bubble (several at once, #3838: ForwardCards); the other contexts fold in
   // the row above it
   const forwards = msg.contexts.filter((c) => c.kind === "forward");
@@ -208,14 +208,18 @@ function BubbleText({ text: full, blocks, ts, mid, sid, own, pending }: { text: 
 }
 
 /** "From WeChat" under a message that came from a channel (its client_msg_id is `<channel>-…`, docs/extensions/channels.md);
- *  else, under the message an extension opened the conversation with, "From Lark /agent" / "From an extension" (#3758). */
-function ChannelSource({ clientMsgId, openedBy }: { clientMsgId?: string; openedBy?: ExternalOrigin }) {
+ *  else, under the message an extension opened the conversation with, "From Lark /agent" / "From an extension" (#3758),
+ *  its mark the opening extension's icon as on the conversation's rows and its words that extension's name while the icon
+ *  is drawn (#10358). */
+function ChannelSource({ clientMsgId, openedBy }: { clientMsgId?: string; openedBy?: { origin: ExternalOrigin; opened_by?: string; manager?: string } }) {
   const via = channelOf(clientMsgId, useChannels());
+  // the extension whose own icon the mark draws, which the words then name (#10358)
+  const [name, setName] = useState<string>();
   if (!via && openedBy) {
     return (
-      <span data-opened-by={openedBy} className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-3">
-        <OriginMark origin={openedBy} size={14} decorative />
-        {externalFrom(openedBy)}
+      <span data-opened-by={openedBy.origin} className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-3">
+        <OriginMark origin={openedBy.origin} size={14} decorative session={openedBy} onName={setName} />
+        {openerFrom(openedBy.origin, name)}
       </span>
     );
   }

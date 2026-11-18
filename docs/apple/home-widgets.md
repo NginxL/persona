@@ -242,7 +242,7 @@ The gallery draws every widget at its Home Screen sizes in light and dark with m
 from the system, so the gallery supplies stand-ins for them. For the Home Screen itself, `-showHomeWidgetSample YES`
 writes the same made-up snapshot instead of the app's, so the widgets added to a simulator's Home Screen show it
 without a hub (`-showHomeWidgetSample ticked`: two to-dos just ticked, one on its way and one the hub refused); those
-shots, on each PR, are the proof (both DEBUG launch arguments, in `release.sh`'s list). `-showHomeWidgets calendar:<page>`
+shots, on each PR, are the proof (both DEBUG launch arguments, in `scripts/release/debug_switches.txt`). `-showHomeWidgets calendar:<page>`
 draws the Calendar widget's views a page at a time (`medium`, `large`, `large2`, `more`; an iPad's screen holds one).
 
 ## Phases

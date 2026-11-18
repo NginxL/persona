@@ -129,6 +129,11 @@ struct RecordingLiveSheet: View {
         .onChange(of: capture.state, initial: true) { old, new in follow(from: old, to: new) }
         .onChange(of: capture.error, initial: true) { if capture.state != .idle { liveError = capture.error } }
         .onChange(of: ask.exchanges) { mirror() }
+        // A replayed tape's meeting (#10589) leaves the recordings once its page after it closed (not when the room is
+        // swiped away while it plays).
+        .onDisappear {
+            if let held, ReplayedMeeting.holds(held), capture.state == .idle { MeetingReplay.shared.clearEnded() }
+        }
     }
 
     /// A meeting recorded here as a room meeting: the one kind whose sheet is the meeting page. Read from the recording

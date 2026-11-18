@@ -367,3 +367,116 @@ func TestLoadAverage(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePowerSupplies(t *testing.T) {
+	// Desktop or AC-only: no Battery entry -> nil, nil.
+	if pct, chg := parsePowerSupplies([]powerSupply{{Type: "Mains", Status: "1"}}); pct != nil || chg != nil {
+		t.Fatalf("mains only = (%v, %v)", pct, chg)
+	}
+	// Peripheral battery (scope=Device) must be ignored.
+	if pct, chg := parsePowerSupplies([]powerSupply{
+		{Type: "Battery", Scope: "Device", Present: "1", Capacity: "55", Status: "Discharging"},
+	}); pct != nil || chg != nil {
+		t.Fatalf("peripheral battery = (%v, %v)", pct, chg)
+	}
+	// Absent battery (present=0) must be ignored.
+	if pct, chg := parsePowerSupplies([]powerSupply{
+		{Type: "Battery", Present: "0", Capacity: "0", Status: "Unknown"},
+	}); pct != nil || chg != nil {
+		t.Fatalf("absent battery = (%v, %v)", pct, chg)
+	}
+	// Laptop battery with capacity.
+	pct, chg := parsePowerSupplies([]powerSupply{
+		{Type: "Battery", Scope: "System", Present: "1", Capacity: "82", Status: "Discharging"},
+		{Type: "Battery", Scope: "Device", Present: "1", Capacity: "15", Status: "Discharging"},
+	})
+	if pct == nil || *pct != 82 || chg == nil || *chg {
+		t.Fatalf("laptop = (%v, %v)", pct, chg)
+	}
+	// Energy fallback and Charging status.
+	pct, chg = parsePowerSupplies([]powerSupply{
+		{Type: "Battery", Present: "1", EnergyNow: "25000000", EnergyFull: "50000000", Status: "Charging"},
+	})
+	if pct == nil || *pct != 50 || chg == nil || !*chg {
+		t.Fatalf("energy fallback = (%v, %v)", pct, chg)
+	}
+	// Charge fallback and Full status.
+	pct, chg = parsePowerSupplies([]powerSupply{
+		{Type: "Battery", Present: "1", ChargeNow: "4000", ChargeFull: "4000", Status: "Full"},
+	})
+	if pct == nil || *pct != 100 || chg == nil || *chg {
+		t.Fatalf("charge fallback = (%v, %v)", pct, chg)
+	}
+}
+
+func TestParseTermuxBatteryStatus(t *testing.T) {
+	if pct, chg := parseTermuxBatteryStatus([]byte(`{"percentage":76,"status":"CHARGING"}`)); pct == nil || *pct != 76 || chg == nil || !*chg {
+		t.Fatalf("charging = (%v, %v)", pct, chg)
+	}
+	if pct, chg := parseTermuxBatteryStatus([]byte(`{"percentage":0,"status":"DISCHARGING"}`)); pct == nil || *pct != 0 || chg == nil || *chg {
+		t.Fatalf("zero pct = (%v, %v)", pct, chg)
+	}
+	if pct, _ := parseTermuxBatteryStatus([]byte(`{"status":"UNKNOWN"}`)); pct != nil {
+		t.Fatalf("missing pct = %v", *pct)
+	}
+	if pct, _ := parseTermuxBatteryStatus([]byte(`not json`)); pct != nil {
+		t.Fatalf("invalid json = %v", *pct)
+	}
+}
+
+func TestParsePmsetBatt(t *testing.T) {
+	// Mac mini / Mac Studio: no InternalBattery.
+	if pct, chg := parsePmsetBatt([]byte("Now drawing from 'AC Power'\n")); pct != nil || chg != nil {
+		t.Fatalf("desktop = (%v, %v)", pct, chg)
+	}
+	// MacBook discharging.
+	macBookDischarging := "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=12345)\t84%; discharging; 5:12 remaining present: true\n"
+	if pct, chg := parsePmsetBatt([]byte(macBookDischarging)); pct == nil || *pct != 84 || chg == nil || *chg {
+		t.Fatalf("discharging = (%v, %v)", pct, chg)
+	}
+	// MacBook charging.
+	macBookCharging := "Now drawing from 'AC Power'\n -InternalBattery-0 (id=12345)\t92%; charging; 0:25 remaining present: true\n"
+	if pct, chg := parsePmsetBatt([]byte(macBookCharging)); pct == nil || *pct != 92 || chg == nil || !*chg {
+		t.Fatalf("charging = (%v, %v)", pct, chg)
+	}
+	// MacBook charged.
+	macBookCharged := "Now drawing from 'AC Power'\n -InternalBattery-0 (id=12345)\t100%; charged; 0:00 remaining present: true\n"
+	if pct, chg := parsePmsetBatt([]byte(macBookCharged)); pct == nil || *pct != 100 || chg == nil || *chg {
+		t.Fatalf("charged = (%v, %v)", pct, chg)
+	}
+}
+
+func TestSelectTempC(t *testing.T) {
+	// Invalid/virtual/RF probes only -> nil.
+	if got := selectTempC([]thermalReading{
+		{Name: "pa", MilliC: 48283},
+		{Name: "pa1", MilliC: 48698},
+		{Name: "sdr0-pa", MilliC: 45000},
+		{Name: "bcl-warn", MilliC: -273000},
+		{Name: "ibat0", MilliC: 50000},
+		{Name: "vbat", MilliC: 42000},
+		{Name: "cpu-0-0", MilliC: 0},
+		{Name: "cpu-0-1", MilliC: -273000},
+		{Name: "cpu-0-2", MilliC: 130000},
+	}); got != nil {
+		t.Fatalf("invalid probes = %v", *got)
+	}
+	// Prefers CPU/SoC/Package over aoss/acpitz.
+	got := selectTempC([]thermalReading{
+		{Name: "pa", MilliC: 90000},
+		{Name: "aoss-0", MilliC: 56300},
+		{Name: "cpuss-0", MilliC: 59400},
+		{Name: "cpu-1-7", MilliC: 62100},
+	})
+	if got == nil || *got != 62.1 {
+		t.Fatalf("cpu temp = %v, want 62.1", got)
+	}
+	// x86_pkg_temp / Package id 0 must not be excluded by "pa*" rule.
+	got = selectTempC([]thermalReading{
+		{Name: "coretemp", Label: "Package id 0", MilliC: 54500},
+		{Name: "acpitz", MilliC: 40000},
+	})
+	if got == nil || *got != 54.5 {
+		t.Fatalf("package temp = %v, want 54.5", got)
+	}
+}

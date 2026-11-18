@@ -94,6 +94,7 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         StateAwaitingReply("Awaiting reply"),
         StateWorking("Working"),
         StateBackgroundWaiting("Waiting in the background"),
+        StateJustFinished("Just finished"),
         StateWorkingBackground("Working (Background)"),
         StateWaiting("Waiting"),
         StateMuted("Muted"),

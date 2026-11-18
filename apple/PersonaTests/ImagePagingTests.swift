@@ -46,12 +46,14 @@ struct ImagePagingTests {
 
     @Test func debugLaunchFlagsFollowNamingAndReleaseChecks() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let release = try String(contentsOf: root.appending(path: "scripts/release/release.sh"), encoding: .utf8)
+        // release.sh refuses a Release binary whose `strings` has a line equal to a name in this file (one per line).
+        let switches = try String(contentsOf: root.appending(path: "scripts/release/debug_switches.txt"), encoding: .utf8)
+        let listed = Set(switches.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) })
         let viewer = try String(contentsOf: root.appending(path: "apple/Persona/Views/Chat/ImageViewer.swift"), encoding: .utf8)
         let probe = try String(contentsOf: root.appending(path: "apple/Persona/Debug/RuntimeCLI+ImageViewer.swift"), encoding: .utf8)
         for flag in ["showViewerDecodeDelay", "showViewerDecodeDuringPan", "showViewerPagingProbe"] {
             #expect(flag.hasPrefix("show"))
-            #expect(release.contains("|" + flag + "|"))
+            #expect(listed.contains(flag))
         }
         #expect(!viewer.contains("\"viewerDecodeDelay\""))
         #expect(probe.hasPrefix("#if DEBUG && (os(iOS) || os(visionOS))"))

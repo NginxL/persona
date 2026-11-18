@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -8,6 +9,67 @@ import (
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+func TestPlanThenCardApprovalUsesRecordedMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, recorded, clientMode, want string
+	}{
+		{"recorded edits beats an older client's bypass", "acceptEdits", proto.ModeBypass, "acceptEdits"},
+		{"recorded bypass beats an older client's edits", proto.ModeBypass, "acceptEdits", proto.ModeBypass},
+		{"unknown recorded mode keeps the client's choice", "futureMode", "default", "default"},
+		{"recorded plan keeps the client's choice", "plan", "acceptEdits", "acceptEdits"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := codexTestNode(t)
+			n.state.put(decidedSession, sessionState{PlanThen: tc.recorded})
+			fh := withFakeHub(t, n)
+			fh.answer = func(ix proto.Interaction) proto.Resolution {
+				if ix.Kind != proto.IxPlan || ix.ToolName != "ExitPlanMode" {
+					t.Errorf("plan approval interaction = %+v", ix)
+				}
+				if ix.PlanThen != tc.recorded {
+					t.Errorf("plan_then on the wire = %q, want %q", ix.PlanThen, tc.recorded)
+				}
+				approve := true
+				return proto.Resolution{Approve: &approve, Mode: tc.clientMode}
+			}
+			out, _ := runPermissionHook(t, n, hookInput{HookEventName: "PermissionRequest", SessionID: decidedSession,
+				PermissionMode: "plan", ToolName: "ExitPlanMode", ToolInput: json.RawMessage(`{"plan":"Ship the fix."}`)})
+			raw, err := json.Marshal(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				Output struct {
+					Event    string `json:"hookEventName"`
+					Decision struct {
+						Behavior     string `json:"behavior"`
+						UpdatedInput struct {
+							Plan string `json:"plan"`
+						} `json:"updatedInput"`
+						UpdatedPermissions []struct {
+							Type, Mode, Destination string
+						} `json:"updatedPermissions"`
+					} `json:"decision"`
+				} `json:"hookSpecificOutput"`
+			}
+			if err := json.Unmarshal(raw, &response); err != nil {
+				t.Fatal(err)
+			}
+			d := response.Output.Decision
+			if response.Output.Event != "PermissionRequest" || d.Behavior != "allow" || d.UpdatedInput.Plan != "Ship the fix." {
+				t.Fatalf("plan approval output = %s", raw)
+			}
+			if len(d.UpdatedPermissions) != 1 {
+				t.Fatalf("updatedPermissions = %+v, want one recorded mode update", d.UpdatedPermissions)
+			}
+			update := d.UpdatedPermissions[0]
+			if update.Type != "setMode" || update.Mode != tc.want || update.Destination != "session" {
+				t.Fatalf("mode update = %+v, want setMode %q for the session; client answered %q", update, tc.want, tc.clientMode)
+			}
+		})
+	}
+}
 
 func TestPlanThenOfAndFlags(t *testing.T) {
 	for _, tc := range []struct{ mode, then, want, flags string }{

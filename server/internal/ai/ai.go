@@ -35,10 +35,11 @@ var errNotConfigured = errors.New("还没有能直接调用的模型：在 设�
 func IsNotConfigured(err error) bool { return errors.Is(err, errNotConfigured) }
 
 type Client struct {
-	cfg     Config
-	http    *http.Client
-	resolve func(context.Context) (*Client, error)
-	run     func(context.Context, Request) (Reply, error)
+	cfg      Config
+	http     *http.Client
+	resolve  func(context.Context) (*Client, error)
+	run      func(context.Context, Request) (Reply, error)
+	onResult func(Reply, error)
 }
 
 // NewResolved resolves the execution configuration at the start of every request.
@@ -48,6 +49,13 @@ func NewResolved(resolve func(context.Context) (*Client, error)) *Client {
 
 // Config returns the immutable connection configuration, never an API response.
 func (c *Client) Config() Config { return c.cfg }
+
+// WithResult returns a client that reports each completed Chat call.
+func (c *Client) WithResult(report func(Reply, error)) *Client {
+	copied := *c
+	copied.onResult = report
+	return &copied
+}
 
 func New(cfg Config) *Client {
 	return NewWith(cfg, nil)
@@ -59,7 +67,8 @@ func NewWith(cfg Config, transport http.RoundTripper) *Client {
 }
 
 // net/http copies headers from the first request on every redirect, so check the entire chain before retaining its
-// potentially private User-Agent. Once a chain leaves its original origin, all later hops use Persona's identity.
+// potentially private User-Agent or gateway session header. Once a chain leaves its original origin, all later hops
+// use Persona's identity and drop gateway-scoped session headers.
 func checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
@@ -67,11 +76,13 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	origin := via[0].URL
 	if !sameOrigin(origin, req.URL) {
 		req.Header.Set("User-Agent", modelhttp.UserAgent())
+		modelhttp.ClearOpenCodeSession(req.Header)
 		return nil
 	}
 	for _, previous := range via[1:] {
 		if !sameOrigin(origin, previous.URL) {
 			req.Header.Set("User-Agent", modelhttp.UserAgent())
+			modelhttp.ClearOpenCodeSession(req.Header)
 			break
 		}
 	}
@@ -146,24 +157,15 @@ type Request struct {
 	System    string
 	Messages  []Message
 	MaxTokens int // output limit for Messages and Chat Completions
+	// SessionID optionally scopes session-routed gateways (such as OpenCode Go) across turns; empty falls back to ctx
+	// (WithSessionID) or the client's stable session identifier.
+	SessionID string
 	// BoundOutput also enforces MaxTokens on Responses. Cost-sensitive background calls
 	// fail closed when a relay refuses the bound; legacy callers keep their existing behavior.
 	BoundOutput bool
 }
 
-// Usage is what one request spent, as the upstream counted it (zero where it did not say).
-type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-}
-
-// Add is u and v together (a call made of several requests).
-func (u Usage) Add(v Usage) Usage {
-	return Usage{InputTokens: u.InputTokens + v.InputTokens, OutputTokens: u.OutputTokens + v.OutputTokens,
-		CacheReadInputTokens: u.CacheReadInputTokens + v.CacheReadInputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens + v.CacheCreationInputTokens}
-}
+type Usage = aiwire.Usage
 
 // Reply is the model's answer: its text, whether it stopped at MaxTokens, the model the upstream says answered
 // (the one asked for when it does not say) and what it spent.
@@ -177,6 +179,14 @@ type Reply struct {
 // Chat sends a conversation and returns the reply. A context with a deadline bounds the request by it instead of the
 // client's 60 seconds (a long answer).
 func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
+	reply, err := c.chat(ctx, r)
+	if c.onResult != nil {
+		c.onResult(reply, err)
+	}
+	return reply, err
+}
+
+func (c *Client) chat(ctx context.Context, r Request) (Reply, error) {
 	if c.resolve != nil {
 		resolved, err := c.resolve(ctx)
 		if err != nil {
@@ -198,7 +208,7 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 	}
 	// Every client of one address and key goes through the same gate, which holds requests back while the upstream
 	// is out of quota or busy (limit.go).
-	g := gateFor(c.cfg.BaseURL, key)
+	g := gateForAPI(c.cfg.API, c.cfg.BaseURL, key)
 	t, err := g.admit(ctx)
 	if err != nil {
 		return Reply{}, err
@@ -248,9 +258,59 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 // errUnwound is what the gate is told of a request a panic unwound through: it ended, with no answer to read.
 var errUnwound = errors.New("ai: the request did not return")
 
-// apiEndpoint preserves deployment prefixes and accepts bases with or without /v1.
+// trimSingleEndpointPath drops one pasted endpoint suffix (e.g. /chat/completions) from the URL path of base,
+// leaving scheme, host, query and fragment intact.
+func trimSingleEndpointPath(base, suffix string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" {
+		return base
+	}
+	authority := strings.Index(base, "//") + len("//")
+	slash := strings.IndexByte(base[authority:], '/')
+	if slash < 0 {
+		return base
+	}
+	root, path := base[:authority+slash], base[authority+slash:]
+	if rest, ok := strings.CutSuffix(path, suffix); ok {
+		return root + strings.TrimRight(rest, "/")
+	}
+	return root + path
+}
+
+// trimVersionedEndpointPath drops a single pasted /v1<suffix> endpoint (e.g. /v1/messages or /v1/responses) while
+// keeping the preceding /v1 and leaving bare deployment prefixes ("https://gw/messages", "https://gw/responses") intact.
+func trimVersionedEndpointPath(base, suffix string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" {
+		return base
+	}
+	authority := strings.Index(base, "//") + len("//")
+	slash := strings.IndexByte(base[authority:], '/')
+	if slash < 0 {
+		return base
+	}
+	root, path := base[:authority+slash], base[authority+slash:]
+	rest, ok := strings.CutSuffix(path, suffix)
+	if !ok {
+		return root + path
+	}
+	rest = strings.TrimRight(rest, "/")
+	if !strings.HasSuffix(rest, "/v1") {
+		return root + path
+	}
+	return root + rest
+}
+
+// apiEndpoint preserves deployment prefixes, strips a pasted endpoint suffix, and accepts bases with or without /v1.
 func apiEndpoint(base, path string) string {
-	base = strings.TrimRight(base, "/")
+	switch path {
+	case "messages", "responses":
+		base = trimVersionedEndpointPath(base, "/"+path)
+	default:
+		base = trimSingleEndpointPath(base, "/"+path)
+	}
 	if !strings.HasSuffix(base, "/v1") {
 		base += "/v1"
 	}
@@ -289,7 +349,7 @@ func (c *Client) messages(ctx context.Context, hc *http.Client, key string, r Re
 		req.Header.Set("x-api-key", key)
 	}
 	req.Header.Set("anthropic-version", "2023-06-01")
-	c.setUserAgent(req)
+	c.setGatewayHeaders(ctx, req, r)
 	resp, err := hc.Do(req)
 	if err != nil {
 		return reply, false, fmt.Errorf("ai: %w", err)
@@ -605,7 +665,7 @@ func (c *Client) respond(ctx context.Context, hc *http.Client, key string, r Req
 	hreq.Header.Set("content-type", "application/json")
 	hreq.Header.Set("accept", "text/event-stream")
 	hreq.Header.Set("authorization", "Bearer "+key)
-	c.setUserAgent(hreq)
+	c.setGatewayHeaders(ctx, hreq, r)
 	resp, err := hc.Do(hreq)
 	if err != nil {
 		return reply, false, fmt.Errorf("ai: %w", err)

@@ -32,6 +32,8 @@
   "approve_mode": "承認方法",
   "permission_kicker": "承認を待っています",
   "permission_title": "{tool}の使用を許可しますか？",
+  "permission_load_failed": "承認の読み込み失敗",
+  "permission_load_hint": "待機中。接続後に再試行。",
   "denied_message": "ユーザーが拒否しました",
   "deny": "拒否",
   "edit_text": "本文を編集",

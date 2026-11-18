@@ -139,6 +139,8 @@ nonisolated enum CallEvent: Equatable, Sendable {
     case known
     case audioActivated
     case audioDeactivated
+    /// The conversation joined: the system accepts updates from now on (it discards them while idle).
+    case conversationJoined
     /// The conversation left without an End action (the system ended it).
     case systemEnded
     /// The manager reset: every call is gone.
@@ -357,6 +359,12 @@ nonisolated struct CallMachine: Equatable, Sendable {
                 requestedMute = true
                 out.append(.performMute(true))
             }
+
+        case .conversationJoined:
+            // The system discards conversationUpdated while the conversation is idle (#10495): the members update sent
+            // right after the Start's fulfil is lost. Once the conversation joins the system accepts it, so report again.
+            guard phase.isLive, known, direction == .outgoing else { return [] }
+            out += [.report(.members)]
 
         case .audioActivated:
             guard phase.isLive else { return [] }

@@ -340,6 +340,7 @@ export interface Contributes {
   error_reports?: ErrorReportsItem[];
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
+  repository_providers?: RepositoryProviderItem[];
   messaging?: MessagingItem[];
   /** Extra keys are opaque JSON; declared properties keep their own types. */
   [key: string]: unknown;
@@ -549,6 +550,46 @@ export interface SecretProviderItem {
   /** The reference schemes it resolves, without :// (op). */
   schemes: string[];
 }
+
+/**
+ * A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's repositories and links
+ * there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe; repository.schema.json) and
+ * re-checks every answer. Needs the program to speak the protocol. A host another installed extension claims, on or
+ * off, fails the install, and so does one host in two items.
+ */
+export interface RepositoryProviderItem {
+  id: string;
+  /**
+   * What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no
+   * control characters.
+   */
+  name: string;
+  /**
+   * The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or wildcard,
+   * not an IP address, and not a host the built-in GitHub and GitLab read.
+   */
+  hosts: string[];
+  /**
+   * What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels: the
+   * kinds stay issue and pull_request.
+   */
+  link_kinds?: RepositoryLinkLabel[];
+}
+
+/**
+ * The word a repository provider shows for one kind of its links (MR for a pull_request).
+ */
+export interface RepositoryLinkLabel {
+  kind: RepositoryLinkKind;
+  /** Not only spaces, no control characters. */
+  label: string;
+}
+
+/**
+ * The kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).
+ */
+export type RepositoryLinkKind = "issue" | "pull_request" | (string & {});
+export const REPOSITORY_LINK_KINDS = ["issue", "pull_request"] as const;
 
 /**
  * It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the

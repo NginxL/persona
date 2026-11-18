@@ -304,12 +304,23 @@ final class ReadinessUITests: XCTestCase {
         app.launchPinned()
         // The first launch after pairing lands on the new conversation whatever is asked: pair, then open the page.
         sleep(4)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyNotifications = springboard.buttons["不允许"].firstMatch
+        if denyNotifications.exists { denyNotifications.tap() }
         app.terminate()
         app.launchArguments = ["-tab", "assistant", "-openAssistant", main, "-openDraftsFresh", "YES"]
         app.launchPinned()
+        if denyNotifications.waitForExistence(timeout: 2) { denyNotifications.tap() }
         let fix = app.buttons["去修"].firstMatch
         XCTAssertTrue(fix.waitForExistence(timeout: 25), "no 模型没接好 card:\n\(app.debugDescription)")
         sleep(1)
         shot(app, "readiness-\(scenario)-main")
+        if let expected = ProcessInfo.processInfo.environment["PERSONA_EXPECT_TITLE"] {
+            let title = app.staticTexts[expected].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 5), "the error must name its launcher:\n\(app.debugDescription)")
+            fix.tap()
+            let detail = app.descendants(matching: .any)["launcher.detail"].firstMatch
+            XCTAssertTrue(detail.waitForExistence(timeout: 10), "the repair must open the named launcher, not the wizard:\n\(app.debugDescription)")
+        }
     }
 }

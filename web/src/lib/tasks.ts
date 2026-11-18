@@ -223,6 +223,23 @@ export function backgroundTitle(task: BackgroundTask): string {
   return task.command?.split("\n")[0] || (task.kind === "agent" ? t("lib-tasks.background_agent") : t("lib-tasks.kind_shell"));
 }
 
+/** A retained terminal outcome is authoritative; list membership is only the running fallback. */
+export function backgroundStatus(task: BackgroundTask, listedRunning: boolean): AgentStatus | undefined {
+  if (task.status === "killed" || task.status === "stopped") return "stopped";
+  if (task.status === "failed" || ((task.exit_code ?? 0) !== 0 && task.status !== "running")) return "failed";
+  if (["completed", "ended", "done"].includes(task.status ?? "") || (!listedRunning && task.exit_code === 0)) return "completed";
+  if (listedRunning || task.status === "running") return "running";
+  return undefined;
+}
+
+/** Elapsed time while running, or the recorded final duration. Never infer a final duration from the current clock. */
+export function backgroundDurationMs(task: BackgroundTask, running: boolean, now: number): number | null {
+  const started = Date.parse(task.started_at ?? "");
+  if (!Number.isFinite(started)) return null;
+  const end = running ? now : Date.parse(task.ended_at ?? "");
+  return Number.isFinite(end) ? Math.max(0, end - started) : null;
+}
+
 /** "40s" / "5m 12s" / "1h 5m". */
 export function elapsed(fromIso: string | undefined, now: number): string {
   const start = Date.parse(fromIso ?? "");

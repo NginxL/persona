@@ -97,7 +97,7 @@ A non-main conversation reviewing another supervisor's task may only accept/canc
       "type": "array",
       "maxItems": 6,
       "items": {"type": "string"},
-      "description": "accepted, optional: what was done beyond the task's brief (one line each); the completion report lists it after the criteria"
+      "description": "accepted, optional: what was done beyond the task's brief (one line each); the task's page lists it after the criteria"
     },
     "user_check": {
       "type": "boolean",

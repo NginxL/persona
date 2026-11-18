@@ -105,6 +105,30 @@ func TestCompressBacksOffAfterFailures(t *testing.T) {
 	}
 }
 
+// No model set up is no failure of the chat: it stays due with no failure counted and no wait, so it is compressed at
+// the first round once a model is set up (it used to wait up to compressRetryMax, and log a line per chat each time).
+func TestCompressWithNoModelKeepsTheChatDue(t *testing.T) {
+	m := &failingModel{err: notConfigured(t)}
+	e := testEngine(t, m)
+	c := dueChat(t, e)
+	for range 3 {
+		if err := e.Compress(context.Background(), c); !ai.IsNotConfigured(err) || strings.Contains(err.Error(), "in a row") {
+			t.Fatalf("err = %v, want the not-configured error as is", err)
+		}
+	}
+	got, _ := e.Store.Chat(c.ID)
+	if got.CompressFailures != 0 || !got.CompressRetryAt.IsZero() || got.Pending != 1 || !isDue(e, c.ID, time.Now()) {
+		t.Fatalf("failures %d, retry at %v, pending %d, due %v; want 0, zero, 1, true", got.CompressFailures, got.CompressRetryAt, got.Pending, isDue(e, c.ID, time.Now()))
+	}
+	m.err = nil
+	if err := e.Compress(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.Store.Chat(c.ID); got.Pending != 0 || got.CompressedAt.IsZero() {
+		t.Fatalf("with a model: pending %d, compressed at %v", got.Pending, got.CompressedAt)
+	}
+}
+
 func TestCompressRetryIsCapped(t *testing.T) {
 	m := &failingModel{err: errors.New("boom")}
 	e := testEngine(t, m)

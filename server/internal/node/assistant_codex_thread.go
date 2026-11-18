@@ -242,6 +242,7 @@ func (c *codexConn) compacted() {
 	manual := c.p.manual
 	c.p.manual, c.p.compacting = false, false
 	c.p.mu.Unlock()
+	c.compactedInTurn(manual) // whether it made room, the next request says (assistant_codex_compaction_loop.go)
 	if manual {
 		c.p.ownerOr(c.n).compactionEnded(c.p.id, "")
 	}

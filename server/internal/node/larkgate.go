@@ -60,6 +60,7 @@ type larkVerdict struct {
 	unsure   bool   // a command-word substitution prevents bypass and requires whole-command confirmation
 	unparsed bool   // the command could not be split into its parts at all
 	unknown  bool   // a CLI call or indirect execution could not be classified
+	dynamic  bool   // an expansion supplies an executable name
 	cliWrite bool   // a lark-cli call that is not a known read, even in a command the gate cannot follow
 	unread   []int  // gates (indexes in the config's Gates) called in a way the gate could not read
 }
@@ -317,9 +318,9 @@ func callTitle(gates []proto.CommandGate, c larkCall) string {
 
 // wholeCommandReads says whether every call the gate identified is an ordinary read. An opaque non-Lark part may
 // still need the whole-command card, but does not turn those identified reads into writes. Zero calls, an explicit
-// write, an outbound/delete action or an unknown CLI risk keeps the existing wording.
+// write, an outbound/delete action, an unknown CLI risk or an expanded command name keeps the existing wording.
 func wholeCommandReads(v larkVerdict, write bool) bool {
-	if write || v.cliWrite || len(v.calls) == 0 {
+	if write || v.cliWrite || v.dynamic || len(v.calls) == 0 {
 		return false
 	}
 	return !slices.ContainsFunc(v.calls, func(c larkCall) bool { return !larkRead(c) || !larkBypassSafe(c) })

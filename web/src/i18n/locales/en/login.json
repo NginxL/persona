@@ -24,9 +24,13 @@
   "qr_expired": "Code expired. Refresh to try again.",
   "qr_failed": "Could not load the sign-in code. Try again.",
   "qr_denied": "Sign-in declined.",
-  "qr_scanned": "Scanned. Confirm on your phone.",
-  "qr_hint": "Scan in the signed-in Persona phone app, then confirm to sign in here. The code expires in 5 minutes.",
+  "qr_scanned": "Scanned. Allow it on your phone.",
+  "qr_hint": "In Persona on your phone, open Settings › Devices › Scan browser sign-in code and allow it. The code expires in 5 minutes.",
   "qr_refresh": "Refresh code",
-  "qr_alternatives": "Other ways to sign in",
-  "qr_retry": "Reconnecting… Your sign-in request is kept."
+  "qr_retry": "Reconnecting… Your sign-in request is kept.",
+  "qr_open": "Scan a code with Persona on your phone",
+  "qr_title": "Scan this code with Persona on your phone",
+  "qr_number_label": "Number shown on your phone",
+  "qr_number_hint": "Type the number your phone shows. One try: a wrong number cancels this sign-in.",
+  "qr_voided": "That number didn't match, so this sign-in was cancelled. Refresh the code to try again."
 }

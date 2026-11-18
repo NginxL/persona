@@ -55,7 +55,11 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
     val cut = item.fullSize != null && whole == null && update?.streaming != true
     val text = (whole ?: update?.text ?: item.text.orEmpty().let { if (item.fullSize != null) cutText(it) else it })
         .let { if (hideCloseout) persona.core.domain.sort.stripCloseout(it) else it }
-    val model = remember(text, item.from, user) { messageModel(text, item.from, user) }
+    val ancillaryStream = remember(item.id, update?.streaming == true) { AssistantAncillaryStream { _, _ -> } }
+    val ancillary = if (update?.streaming == true && !user && item.from.isNullOrBlank()) {
+        ancillaryStream.update(text, hostnames = LocalChatPorts.current?.hostnames.orEmpty(), linkable = emptySet())
+    } else null
+    val model = ancillary?.model ?: remember(text, item.from, user) { messageModel(text, item.from, user) }
     val uri = LocalUriHandler.current
     val target = MessageTarget(item.id, model.plain, user, model.editText(), time = item.ts)
     Column(Modifier.fillMaxWidth().messageMenu(target)) {
@@ -66,7 +70,8 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
             // "Select" selects these words where they are
             SelectableWords(target) {
                 Column(Modifier.fillMaxWidth()) {
-                    MessageParts(model.parts, user, item.id, boxed = boxed, streaming = update?.streaming == true)
+                    MessageParts(model.parts, user, item.id, boxed = boxed, streaming = update?.streaming == true,
+                        ancillaryCards = ancillary?.cards)
                 }
             }
         }
@@ -78,7 +83,7 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
             FileChips(model.files.filterNot(FileThumbnails::isDocument), alignEnd = false)
             DocumentCards(model.files.filter(FileThumbnails::isDocument))
         }
-        if (!user) PortBadges(text)
+        if (!user) PortBadges(text, ancillary?.ports)
     }
 }
 
@@ -92,17 +97,19 @@ private fun StreamingCursor() {
 
 @Composable
 private fun MessageParts(parts: List<MessagePart>, user: Boolean, id: String, onLastLine: ((Int) -> Unit)? = null, boxed: Boolean = false,
-    streaming: Boolean? = null) {
+    streaming: Boolean? = null, ancillaryCards: List<persona.core.domain.views.AssistantFence>? = null) {
     // Bubble padding below the last text line, so the reported extent reaches the bottom of the row.
     val bottomPadding = with(LocalDensity.current) { Tokens.Space.m.roundToPx() }
     // A reply's ```persona-view blocks are numbered across the whole text item: `<item id>/<n>`, the hub's key.
-    val firstCard = remember(parts) {
-        var seen = 0
-        parts.map { part ->
-            val first = seen
-            if (part is MessagePart.Text && persona.core.domain.views.AssistantFences.mentions(part.text))
-                seen += persona.core.domain.views.AssistantFences.blocks(part.text).count { it.isView }
-            first
+    val firstCard = remember(parts, ancillaryCards) {
+        if (ancillaryCards != null && parts.size == 1) listOf(0) else {
+            var seen = 0
+            parts.map { part ->
+                val first = seen
+                if (part is MessagePart.Text && persona.core.domain.views.AssistantFences.mentions(part.text))
+                    seen += persona.core.domain.views.AssistantFences.blocks(part.text).count { it.isView }
+                first
+            }
         }
     }
     parts.forEachIndexed { index, part ->

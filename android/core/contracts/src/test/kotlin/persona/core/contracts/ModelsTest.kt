@@ -163,6 +163,15 @@ class ModelsTest {
         assertEquals(false, own.alwaysHonored)
     }
 
+    @Test fun interactionDecodesOptionalPlanThen() {
+        val plan = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix_plan_then","kind":"plan","plan":"1. Ship it","plan_then":"default"}""",
+        )
+        val encoded = JsonCodec.encodeToString(plan)
+        assertTrue(encoded, encoded.contains(""""plan_then":"default""""))
+        assertEquals(plan, JsonCodec.decodeFromString<Interaction>(encoded))
+    }
+
     @Test fun interactionDecodesOptionalToolTitles() {
         val titled = JsonCodec.decodeFromString<Interaction>(
             """{"id":"ix_titles","kind":"permission","tool_name":"mcp__persona__report_to_supervisor",""" +
@@ -240,6 +249,11 @@ class ModelsTest {
     @Test fun personaOwnMcpServerShowsAsPersona() {
         assertEquals("Persona · agent read", toolDisplayName("mcp__persona__agent_read"))
         assertEquals("Persona · agent send", toolDisplayName("mcp__plugin_persona__agent_send"))
+        assertEquals("Persona · notify user", toolDisplayName("mcp_persona_notify_user"))
+        assertEquals("Persona · notify user", toolDisplayName("mcp_persona_0c671287_notify_user"))
+        for (server in ProtocolCompatibility.personaServers) {
+            assertEquals("mcp__persona__task_review", canonicalMcpToolName("mcp_${server}_55a1c59d_task_review"))
+        }
         assertEquals("Persona", toolDisplayName("mcp__persona"))
         assertEquals("github · create issue", toolDisplayName("mcp__github__create_issue"))
         assertEquals("persona_extra · x", toolDisplayName("mcp__persona_extra__x"))

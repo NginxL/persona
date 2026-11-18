@@ -6,7 +6,7 @@
 // NEW_CONVERSATION (launcher, model and effort), sent with POST /assistant/conversations.
 import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
-import { managedProvider } from "./compatibility";
+import { explicitLauncherModel, managedProvider } from "./compatibility";
 import { shellPath } from "./format";
 import { modelName } from "./launcher-models";
 import { onManagerChoice } from "./manager-choice";
@@ -58,7 +58,8 @@ export function effectiveLauncher(o: { isNew?: boolean; isMain?: boolean; picked
 
 /** The model a launcher names, shortened (Fmt.model): the last path part, with raw GPT ids made readable. */
 export function shortModel(model?: string): string {
-  return modelName({ id: model ? model.split("/").pop() ?? model : "" });
+  const explicit = explicitLauncherModel(model);
+  return modelName({ id: explicit ? explicit.split("/").pop() ?? explicit : "" });
 }
 
 /** What "Copy info" copies (AssistantCopyText.info): enough for another agent, or a terminal, to find the conversation. */

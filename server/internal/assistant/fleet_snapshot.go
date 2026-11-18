@@ -95,9 +95,11 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 			add(k[0])
 		}
 	}
-	for k := range oldLinks {
-		if _, ok := r.links[k]; !ok {
+	var left []SessionRef // the agents that left the open task they had (silent_turns.go quietTasksLeft)
+	for k, o := range oldLinks {
+		if l, ok := r.links[k]; !ok || l.TodoID != o.TodoID {
 			add(k[0])
+			left = append(left, SessionRef{MachineID: k[0], SessionID: k[1]})
 		}
 	}
 	for k, l := range r.completed {
@@ -131,6 +133,7 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 		}
 	}
 	r.mu.Unlock()
+	s.quietTasksLeft(left) // before the lists are told: the rows go without it
 	s.askOnPhone(snap.Interactions)
 	for _, mid := range changed {
 		s.sessionsChanged(mid)

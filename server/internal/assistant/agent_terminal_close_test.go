@@ -1,0 +1,282 @@
+package assistant
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
+)
+
+// The owner's "close an Agent's terminal when its session ends" (#10355, agent_terminal_close.go).
+
+func closeOnEnd(t *testing.T, s *Service, on bool) {
+	t.Helper()
+	setSettings(t, s, func(v *Settings) { v.CloseEndedTerminals = &on })
+}
+
+// retireCalls are the node calls that stop or close an agent, each with what it asked.
+func retireCalls(f *fakeHub) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, c := range f.calls {
+		if c.Method != deviceSessionStop && c.Method != deviceSessionRetire && c.Method != "session.close" {
+			continue
+		}
+		var a map[string]any
+		_ = json.Unmarshal(c.Params, &a)
+		out = append(out, c.Method+" "+closeArgs(a))
+	}
+	return out
+}
+
+func closeArgs(a map[string]any) string {
+	var parts []string
+	for _, k := range []string{"retire", "close_terminal", "after_exit", "stop_cause"} {
+		if v, ok := a[k]; ok {
+			parts = append(parts, k+"="+strings.Trim(strings.ReplaceAll(closeArgString(v), `"`, ""), " "))
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+func closeArgString(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func TestCloseEndedTerminalsIsOffByDefault(t *testing.T) {
+	s, _ := newTaskService(t)
+	if s.closeEndedTerminals(context.Background()) {
+		t.Fatal("close-on-end is on by default")
+	}
+	if v := s.view(context.Background(), false); v.CloseEndedTerminals {
+		t.Fatal("the view says on by default")
+	}
+}
+
+// A done task's idle agent: off, it is stopped and keeps its terminal (as before); on, it is closed through
+// session.retire with close_terminal, recording task_completed.
+func TestDoneTaskAgentTerminalFollowsTheSetting(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		t.Run(map[bool]string{false: "off", true: "on"}[on], func(t *testing.T) {
+			ctx := context.Background()
+			s, f := newTaskService(t)
+			closeOnEnd(t, s, on)
+			todo := startedTask(t, s, f)
+			f.setSessions("box", idleAgent(time.Now().Add(-time.Hour)))
+			if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
+				t.Fatalf("auto done: %v %v", ok, err)
+			}
+			old := taskCloseIdle
+			taskCloseIdle = 0
+			t.Cleanup(func() { taskCloseIdle = old })
+			s.closeDoneTaskAgents(ctx, taskCloseRefused{}, doneSeen{})
+			want := "session.stop retire=true,stop_cause=task_completed"
+			if on {
+				want = "session.retire close_terminal=true,after_exit=true,stop_cause=task_completed"
+			}
+			if got := retireCalls(f); len(got) != 1 || got[0] != want {
+				t.Fatalf("calls %v, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A busy agent is never closed, whatever the setting: the done-task pass leaves it alone.
+func TestDoneTaskBusyAgentIsNeverClosed(t *testing.T) {
+	busy := map[string]func(*proto.Session){
+		"working":  func(c *proto.Session) { c.Status = proto.StatusWorking },
+		"waiting":  func(c *proto.Session) { c.PendingInteractions = 1; c.State = proto.StateNeedsYou },
+		"queued":   func(c *proto.Session) { c.Queued = []string{"next"} },
+		"workflow": func(c *proto.Session) { c.Workflows = []proto.Workflow{{TaskID: "w", Running: true}} },
+		"subagent": func(c *proto.Session) { c.Subagents = []proto.Subagent{{Running: true}} },
+		"loop":     func(c *proto.Session) { c.Loop = &proto.LoopInfo{} },
+		"port":     func(c *proto.Session) { c.Ports = []proto.Port{{}} },
+		"bg shell": func(c *proto.Session) { c.Background = []proto.BackgroundTask{{}} },
+	}
+	for name, edit := range busy {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s, f := newTaskService(t)
+			closeOnEnd(t, s, true)
+			todo := startedTask(t, s, f)
+			c := idleAgent(time.Now().Add(-time.Hour))
+			edit(&c)
+			f.setSessions("box", c)
+			if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Time{}); err != nil || !ok {
+				t.Fatalf("auto done: %v %v", ok, err)
+			}
+			old := taskCloseIdle
+			taskCloseIdle = 0
+			t.Cleanup(func() { taskCloseIdle = old })
+			s.closeDoneTaskAgents(ctx, taskCloseRefused{}, doneSeen{})
+			if got := retireCalls(f); len(got) != 0 {
+				t.Fatalf("a busy agent was asked: %v", got)
+			}
+		})
+	}
+}
+
+// An agent stopped for being idle is not an ended session: it keeps its terminal with the setting on.
+func TestIdleStopKeepsTheTerminal(t *testing.T) {
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	closeOnEnd(t, s, true)
+	c := idleAgent(time.Now().Add(-48 * time.Hour))
+	f.setSessions("box", c)
+	s.retireAgent(ctx, taskCloseRefused{}, "idle", "box", c, time.Now())
+	if got := retireCalls(f); len(got) != 1 || !strings.HasPrefix(got[0], deviceSessionStop+" ") {
+		t.Fatalf("idle stop asked %v", got)
+	}
+}
+
+// A cancelled task's idle agent is closed with the setting on; a working one is only stopped (it keeps its
+// terminal), and with the setting off nothing changes.
+func TestCancelledTaskAgentTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		on   bool
+		edit func(*proto.Session)
+		want string
+	}{
+		{"off", false, nil, "session.stop "},
+		{"on idle", true, nil, "session.retire close_terminal=true,after_exit=true,stop_cause=user"},
+		{"on working", true, func(c *proto.Session) { c.Status, c.State = proto.StatusWorking, proto.StateWorking }, "session.stop "},
+		{"on loop", true, func(c *proto.Session) { c.Loop = &proto.LoopInfo{} }, "session.stop "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ft, row := closeTestService(t, tc.edit)
+			closeOnEnd(t, ft.s, tc.on)
+			ft.f.answerNode(deviceSessionStop, func(_ string, _ json.RawMessage) (any, error) {
+				gone := row
+				gone.Status, gone.State, gone.PaneID, gone.Loop = proto.StatusOffline, proto.StateOffline, "", nil
+				ft.d.setSessions("mac", []proto.Session{gone})
+				return map[string]any{"stopped": true}, nil
+			})
+			ft.f.answerNode(deviceSessionRetire, func(_ string, _ json.RawMessage) (any, error) {
+				gone := row
+				gone.Status, gone.State, gone.PaneID = proto.StatusOffline, proto.StateOffline, ""
+				ft.d.setSessions("mac", []proto.Session{gone})
+				return map[string]any{"closed": true}, nil
+			})
+			s, ctx := ft.s, context.Background()
+			todo, err := s.createTodo(ctx, "做", "做", "conv1", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.linkTodoAgent(ctx, todo.ID, "mac", row.SessionID, "x", "/code", "claude"); err != nil {
+				t.Fatal(err)
+			}
+			s.stopCancelledAgent(ctx, todo.ID, "mac", row.SessionID)
+			if got := retireCalls(ft.f); len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("calls %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An agent that quit by itself (cause unknown) or was told to (/exit) has the shell it left closed once the manager
+// saw it running and then stopped; one the user stopped, one stopped for being idle, one never seen running, one
+// Persona did not start and everything with the setting off keep their terminals.
+func TestEndedAgentTerminalIsClosed(t *testing.T) {
+	stopped := func(c proto.Session, cause proto.StopCause) proto.Session {
+		c.Status, c.State, c.PaneID = proto.StatusOffline, proto.StateOffline, ""
+		c.Capabilities = &proto.SessionCapabilities{Read: true, Terminal: true, StopCause: cause}
+		return c
+	}
+	for _, tc := range []struct {
+		name     string
+		on       bool
+		seen     bool
+		cause    proto.StopCause
+		edit     func(*proto.Session)
+		closes   bool
+		listFail bool
+	}{
+		{name: "exited by itself", on: true, seen: true, cause: proto.StopUnknown, closes: true},
+		{name: "/exit", on: true, seen: true, cause: proto.StopExit, closes: true},
+		{name: "off", on: false, seen: true, cause: proto.StopExit},
+		{name: "user stop", on: true, seen: true, cause: proto.StopUser},
+		{name: "idle stop", on: true, seen: true, cause: proto.StopIdle},
+		{name: "restart", on: true, seen: true, cause: proto.StopRestart},
+		{name: "never seen running", on: true, seen: false, cause: proto.StopExit},
+		{name: "not Persona's", on: true, seen: true, cause: proto.StopUnknown, edit: func(c *proto.Session) { c.StartedByPersona = false }},
+		{name: "interrupted", on: true, seen: true, cause: proto.StopUnknown, edit: func(c *proto.Session) { c.Status = proto.StatusInterrupted }},
+		{name: "waiting card", on: true, seen: true, cause: proto.StopUnknown, edit: func(c *proto.Session) { c.PendingInteractions = 1 }},
+		{name: "queued", on: true, seen: true, cause: proto.StopUnknown, edit: func(c *proto.Session) { c.Queued = []string{"next"} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s, f := newTaskService(t)
+			closeOnEnd(t, s, tc.on)
+			seen := endedSeen{}
+			running := idleAgent(time.Now())
+			if tc.seen {
+				f.setSessions("box", running)
+				s.closeEndedAgentTerminals(ctx, seen)
+			}
+			if got := retireCalls(f); len(got) != 0 {
+				t.Fatalf("a running agent was asked: %v", got)
+			}
+			c := stopped(running, tc.cause)
+			if tc.edit != nil {
+				tc.edit(&c)
+			}
+			f.setSessions("box", c)
+			s.closeEndedAgentTerminals(ctx, seen)
+			got := retireCalls(f)
+			if !tc.closes {
+				if len(got) != 0 {
+					t.Fatalf("closed: %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0] != "session.retire close_terminal=true,after_exit=true" {
+				t.Fatalf("calls %v", got)
+			}
+			s.closeEndedAgentTerminals(ctx, seen) // once per end
+			if got := retireCalls(f); len(got) != 1 {
+				t.Fatalf("asked again: %v", got)
+			}
+		})
+	}
+}
+
+// A node refusing the after-exit close (something else runs in the shell) is logged and not asked again for that end.
+func TestEndedAgentRefusalIsNotRepeated(t *testing.T) {
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	closeOnEnd(t, s, true)
+	f.answerNode(deviceSessionRetire, func(_ string, _ json.RawMessage) (any, error) {
+		return nil, &rpc.Error{Code: "agent_busy", Message: "the stopped terminal changed or is in use"}
+	})
+	seen := endedSeen{}
+	running := idleAgent(time.Now())
+	f.setSessions("box", running)
+	s.closeEndedAgentTerminals(ctx, seen)
+	c := running
+	c.Status, c.PaneID = proto.StatusOffline, ""
+	c.Capabilities = &proto.SessionCapabilities{Read: true, Terminal: true}
+	f.setSessions("box", c)
+	s.closeEndedAgentTerminals(ctx, seen)
+	s.closeEndedAgentTerminals(ctx, seen)
+	if got := retireCalls(f); len(got) != 1 {
+		t.Fatalf("calls %v", got)
+	}
+}
+
+// The apps switch it with PUT /api/v1/assistant and read it back from the view (GET).
+func TestCloseEndedTerminalsHTTP(t *testing.T) {
+	s, _ := newTaskService(t)
+	for _, on := range []bool{true, false} {
+		w, view := permissionSettingsRequest(t, s, "PUT", "/api/v1/assistant", "", "full", `{"close_ended_terminals":`+closeArgString(on)+`}`)
+		if w.Code != 200 || view.CloseEndedTerminals != on || s.closeEndedTerminals(context.Background()) != on {
+			t.Fatalf("PUT %v: %d %v", on, w.Code, view.CloseEndedTerminals)
+		}
+	}
+}

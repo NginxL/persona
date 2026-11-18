@@ -1,4 +1,4 @@
-import { SNAPSHOT_RE, SNAPSHOT_END_RE } from '../../runtime-sdk/lib/compat.js'
+import { MCP_SERVER_NAMES, SNAPSHOT_RE, SNAPSHOT_END_RE } from '../../runtime-sdk/lib/compat.js'
 // Mapping between Antigravity CLI (agy) transcripts / ACP updates and Persona runtime items.
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -58,8 +58,28 @@ export function cleanUserText(raw) {
   return body.trim()
 }
 
+const PERSONA_MCP_TOOL_RE = new RegExp(`^mcp_(?:${MCP_SERVER_NAMES.join('|')})(?:_[0-9a-fA-F]{8,16})?_([a-z][a-z0-9_]*)$`)
+const BARE_TOOL_NAME_RE = /^[a-z][a-z0-9_]*$/
+
 export function mapToolName(name) {
+  if (typeof name === 'string') {
+    const m = PERSONA_MCP_TOOL_RE.exec(name)
+    if (m) return `mcp__persona__${m[1]}`
+  }
   return appToolName(name, OWN_TOOLS)
+}
+
+export function mapToolCall(name, args) {
+  const rawName = name || 'tool'
+  const mapped = mapToolName(rawName)
+  if (mapped === 'mcp__persona__persona_call' && args && typeof args === 'object' && !Array.isArray(args)) {
+    const target = typeof args.name === 'string' ? args.name.trim() : ''
+    if (BARE_TOOL_NAME_RE.test(target)) {
+      const inner = args.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments) ? args.arguments : {}
+      return { toolName: `mcp__persona__${target}`, toolInput: clipInput(inner) }
+    }
+  }
+  return { toolName: mapped, toolInput: mapToolInput(rawName, args) }
 }
 
 export function mapToolInput(name, args) {
@@ -182,8 +202,7 @@ export function stepsToItems(steps, opts = {}) {
           const tc = calls[k]
           if (!tc || typeof tc !== 'object') continue
           const callId = `call_${line}_${k}`
-          const toolName = mapToolName(tc.name || 'tool')
-          const toolInput = mapToolInput(tc.name || 'tool', tc.args)
+          const { toolName, toolInput } = mapToolCall(tc.name || 'tool', tc.args)
           pendingCalls.push({ callId, idx })
           const item = {
             id: `${line}#${sub++}`,

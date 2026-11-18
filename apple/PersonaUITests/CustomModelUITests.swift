@@ -355,4 +355,16 @@ final class CustomModelUITests: XCTestCase {
         app.buttons["typedModel.use"].tap()
         see(labelled("vendor/model-y"), "the toast naming it")
     }
+
+    /// Every row in the main chat's model sheet names its launcher, not just the section header.
+    @MainActor func testTheMainChatsModelRowsNameTheirLauncher() throws {
+        launch(["-tab", "assistant", "-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001"])
+        let pill = modesButton()
+        pill.tap()
+        see(app.buttons["sessionModes.assistantModel"], "the main chat's model sheet").tap()
+        let row = see(app.buttons["assistantModel.claude.opus"], "the Opus row")
+        shot("assistant-model-launcher")
+        let detail = app.staticTexts["claude · opus → claude-opus-5-5"].firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 2), row.label)
+    }
 }

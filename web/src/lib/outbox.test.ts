@@ -22,7 +22,7 @@ import { acceptOutgoing, arrived, checkOutbox, forgetOutgoing, askPersona, disca
 import { messageFeedback, resetMessageFeedback } from "./message-send";
 import type { ChatLine } from "./turns";
 import { ApiError } from "./api";
-import { pickLauncher } from "./assistant-chat";
+import { pickedLauncher, pickedModel, pickLauncher, pickModel } from "./assistant-chat";
 import { navigate } from "./router";
 import { getState } from "./store";
 import { toast } from "../ui/atoms";
@@ -204,6 +204,46 @@ describe("sending from another page", () => {
     expect(again.clear_draft).toBe("old");
     discardOutbox("m", "s", again.client_msg_id);
     expect(outbox()["m/s"]).toBeUndefined();
+  });
+
+  it("keeps an existing conversation's launcher and model on sends and Retry, and drops both on Default", async () => {
+    const key = "m/s";
+    const saved = { machine_id: "m", main: "s", launcher: "saved-launcher", model: "saved-model", conversations: [] };
+    const originalConfig = structuredClone(saved);
+    (getState() as { assistant: unknown }).assistant = saved;
+    pickLauncher(key, undefined);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ ok: true }))
+      .mockResolvedValueOnce(response({ code: "input_draft", error: "draft", delivered: "none" }, 409))
+      .mockResolvedValue(response({ ok: true }));
+    vi.stubGlobal("fetch", fetcher);
+    const send = (text: string) => sendToSession("m", "s", { text }, { launcher: pickedLauncher(key), model: pickedModel(key) });
+    try {
+      pickLauncher(key, "team-api");
+      pickModel(key, "claude-sonnet-5-5");
+      expect(await send("first")).toBe(true);
+      expect(await send("second")).toBe(false);
+      const failed = outbox()[key].find((e) => e.text === "second")!;
+      expect(failed).toMatchObject({ state: "failed", launcher: "team-api", model: "claude-sonnet-5-5" });
+      expect(await retryOutbox("m", "s", failed.id)).toBe(true);
+
+      pickLauncher(key, undefined); // AssistantModelPanel.back: Default clears its model with the launcher.
+      expect(pickedModel(key)).toBeUndefined();
+      expect(await send("default")).toBe(true);
+
+      const bodies = fetcher.mock.calls.map((call) => JSON.parse(call[1].body));
+      expect(fetcher.mock.calls.map((call) => call[0])).toEqual(Array(4).fill("/api/v1/sessions/m/s/messages"));
+      for (const [i, text] of ["first", "second", "second"].entries()) {
+        expect(bodies[i]).toMatchObject({ text, launcher: "team-api", model: "claude-sonnet-5-5" });
+      }
+      expect(bodies[2].client_msg_id).not.toBe(bodies[1].client_msg_id);
+      expect(bodies[3]).toMatchObject({ text: "default" });
+      expect(bodies[3]).not.toHaveProperty("launcher");
+      expect(bodies[3]).not.toHaveProperty("model");
+      expect((getState() as { assistant: unknown }).assistant).toEqual(originalConfig);
+    } finally {
+      pickLauncher(key, undefined);
+    }
   });
 
   it("checks an uncertain send under its original id instead of posting another message", async () => {

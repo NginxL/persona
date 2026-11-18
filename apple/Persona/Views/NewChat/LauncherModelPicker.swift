@@ -112,6 +112,12 @@ extension AgentModel {
     }
 }
 
+/// A model row names its launcher without dropping the ID, resolved model or typed-model explanation.
+nonisolated func launcherModelRowDetail(owner: String?, detail: String?) -> String? {
+    let parts = [owner, detail].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+}
+
 /// The list behind New Agent's Model row: Default first, then every model the launcher's agent offers, the IDs typed
 /// before (each can be forgotten), and "Other Model…" for one the list doesn't have (#1644); searchable.
 struct LauncherModelPicker: View {
@@ -119,6 +125,8 @@ struct LauncherModelPicker: View {
     @Binding var picked: String
     /// Asks the CLI again (pull to refresh).
     var refresh: () async -> Void
+    /// New Agent's owning launcher, repeated on every row; Model Settings leaves this nil.
+    var owner: String? = nil
     /// Model Settings: an id the list does not have can be used (what is typed), and the current one stays shown.
     var allowsCustom = false
     /// New Agent: "Other Model…" opens a field for a model ID (`TypedModelSheet`), and a typed pick stays shown.
@@ -222,7 +230,8 @@ struct LauncherModelPicker: View {
 
     /// `mono`: a model ID typed by hand, drawn as the field and the other lists draw one.
     private func row(title: String, detail: String?, description: String?, id: String, mono: Bool = false) -> some View {
-        Button {
+        let second = launcherModelRowDetail(owner: owner, detail: detail)
+        return Button {
             picked = id
             Haptics.tap()
             dismiss()
@@ -231,8 +240,8 @@ struct LauncherModelPicker: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(title).font(mono ? Theme.Font.heading.monospaced() : Theme.Font.heading).foregroundStyle(.primary)
                         .lineLimit(1).truncationMode(mono ? .middle : .tail)
-                    if let detail {
-                        Text(detail).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary)
+                    if let second {
+                        Text(second).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                     }
                     if let description, !description.isEmpty {

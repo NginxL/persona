@@ -8,6 +8,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Item, ItemsPage } from "../../lib/types";
+import { liveEntry, receiveLive, resetLive } from "../../lib/live";
 import { useTranscript } from "./useTranscript";
 
 interface Pending {
@@ -66,6 +67,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   clearConversationDeletions();
+  resetLive();
 });
 
 describe("useTranscript subscribe", () => {
@@ -90,6 +92,15 @@ describe("useTranscript subscribe", () => {
     expect(subscribes()).toHaveLength(1);
     expect(subscribes()[0].since_seq).toBeUndefined();
   });
+});
+
+it("clears the session's cached live retry on unmount", async () => {
+  await settleFirstRead({ items: [item("a10", 10)], to_seq: 10 });
+  receiveLive({ machine_id: "m", session_id: "A", live: { retry_error: "429 Synthetic rate limit for retry capture", retry_attempt: 5, retry_max: 10 } }, 1000);
+  expect(liveEntry("m", "A")).toBeDefined();
+  act(() => root.unmount());
+  expect(liveEntry("m", "A")).toBeUndefined();
+  root = createRoot(host);
 });
 
 it("never resubscribes or displays a page that arrives after deletion", async () => {

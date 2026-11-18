@@ -17,10 +17,12 @@ import java.time.Instant
 import java.util.UUID
 
 private data class GroupListCounts(val filter: SessionListFilter, val revision: String, val counts: SessionListCounts)
+/** The chats the shell held on entry: one that was Unread, one that was Just finished (#9786). */
+private data class HeldChats(val unread: SessionKey?, val finished: SessionKey?)
 private data class HeldInputs(val settings: AgentListSettings, val group: GroupFilter?, val assistant: persona.core.contracts.api.CurrentAssistant?,
-                              val visible: SessionKey?, val held: SessionKey?)
+                              val visible: SessionKey?, val held: HeldChats)
 private data class ListInputs(val settings: AgentListSettings, val group: GroupFilter?, val assistant: persona.core.contracts.api.CurrentAssistant?,
-                              val visible: SessionKey?, val held: SessionKey?, val workspaces: List<AgentWorkspace>)
+                              val visible: SessionKey?, val held: HeldChats, val workspaces: List<AgentWorkspace>)
 
 /** What the hub's paged search matches: the search's words, not its conditions ([AgentQuery]), which it does not read. */
 internal fun hubQuery(query: String): String = AgentQuery.parse(query).text.take(256)
@@ -88,6 +90,8 @@ internal class AgentsViewModel(
     private val visibleChat: kotlinx.coroutines.flow.StateFlow<SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null),
     /** Captured by the shell on chat entry, before any read receipt can turn that Unread row idle. */
     private val heldChat: kotlinx.coroutines.flow.StateFlow<SessionKey?> = visibleChat,
+    /** Captured by the shell on chat entry as Just finished (#9786), before its seen can take the flag off. */
+    private val finishedChat: kotlinx.coroutines.flow.StateFlow<SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null),
 ) : ViewModel() {
     val archives = archiveService?.let { api -> AgentArchivesState(api, viewModelScope) { key, archived ->
         if (archived) bindings?.onSessionClosed?.invoke(key)
@@ -256,7 +260,7 @@ internal class AgentsViewModel(
         bindings?.assistant?.assistant?.map { it.directionTree }?.distinctUntilChanged() ?: flowOf(null)
     private val projectedPage = combine(renamer?.project(repository.sessions) ?: repository.sessions, repository.machines,
         preferences.snapshots(pairingScope).combine(repository.listStatus) { prefs, status -> prefs to status },
-        combine(settings, groupFilter, assistant, visibleChat, heldChat) { settings, group, assistant, visible, held -> HeldInputs(settings, group, assistant, visible, held) }
+        combine(settings, groupFilter, assistant, visibleChat, heldChat.combine(finishedChat, ::HeldChats)) { settings, group, assistant, visible, held -> HeldInputs(settings, group, assistant, visible, held) }
             .combine(workspaceCatalog.rows) { inputs, workspaces -> ListInputs(inputs.settings, inputs.group, inputs.assistant, inputs.visible, inputs.held, workspaces) },
         combine(operationState, todosFlow.combine(directionsFlow, ::Pair), todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant, visible, held, workspaces), (ops, todosAndTree, todosSupported) ->
         val (todos, directions) = todosAndTree
@@ -270,9 +274,12 @@ internal class AgentsViewModel(
         val grouping = resolvedGrouping(settings.pendingGrouping ?: localPrefs.grouping, todosSupported)
         val prefs = localPrefs.copy(pins = ops.pins?.domain() ?: localPrefs.pins, mutes = ops.mutes?.domain() ?: localPrefs.mutes,
             grouping = grouping, foldedTabs = settings.pendingFoldedTabs ?: localPrefs.foldedTabs)
-        val rows = sessions.map { it.listSession(prefs).copy(hierarchyKnown = repository.supportsFeature(it.machineId, "sessions_hierarchy")) }
-        // The shell records this before its read receipt, so a conflated Idle snapshot cannot erase an Unread entry.
-        val heldSession = held?.takeIf { it == visible }?.path
+        // The shell records these before its read receipt, so a conflated Idle snapshot cannot erase an Unread entry, nor
+        // the hub's list without the flag a Just finished one (#9786): while its chat is open the row keeps that place.
+        val heldSession = held.unread?.takeIf { it == visible }?.path
+        val finishedSession = held.finished?.takeIf { it == visible }?.path
+        val rows = sessions.map { it.listSession(prefs).copy(hierarchyKnown = repository.supportsFeature(it.machineId, "sessions_hierarchy"))
+            .let { row -> if (finishedSession != null && row.id == finishedSession) row.heldAsFinished() else row } }
         // A partial machine snapshot must not hide sessions in machine grouping.
         val knownMachines = machines + sessions.map { it.machineId }.distinct().filter { id -> machines.none { it.id == id } }
             .map { Machine(it) } // named by the list as not updated yet (AgentsScreen.kt)

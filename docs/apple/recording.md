@@ -928,10 +928,11 @@ Settings › Meetings, the meeting page, the Live Activity, the recording's page
 
 ## A meeting's tape and its replay
 
-For development and tests only (#9417): DEBUG builds, launch arguments, no UI and no setting. Tuning how the live
-transcript, the highlights and the map work together needs the same meeting played many times; a real meeting is slow to
-hold and never the same twice. So a meeting can be recorded from an audio file, everything the meeting room was shown is
-written down as it arrives (a *tape*), and a tape plays back in the room at its own pace.
+For development and tests (#9417). Tuning how the live transcript, the highlights and the map work together needs the
+same meeting played many times; a real meeting is slow to hold and never the same twice. So a meeting can be recorded
+from an audio file, everything the meeting room was shown is written down as it arrives (a *tape*), and a tape plays back
+in the room at its own pace. Recording from a file and writing tapes are DEBUG-only (launch arguments, no UI). Replaying a
+tape is also on every build, under Developing Persona (#10589, "Replaying a tape on any build" below).
 
 ### An audio file in place of the microphone
 
@@ -974,35 +975,86 @@ room holds at a moment.
 
 ### Replay
 
+`MeetingReplay` plays a tape; DEBUG starts one from launch arguments, every build from Developing Persona (below).
 `-showMeetingReplay <tape>` (an absolute path to a tape or a tape folder, a name in Documents/meeting-tapes, or `sample`
 for the made-up `MeetingTapeSample`), with `-showMeetingReplaySpeed 1|2|4` (0.25 to 16) and `-showMeetingReplayEnd YES`
 (the meeting ends by itself at the tape's end; otherwise it goes on, silent, until End). Open the Recordings page
-(`-openShellPage recordings`) and the room comes up: a made-up room meeting (`MeetingReplay.id`), Persona answering on
-screen, started with the live view and the highlights, records itself with no microphone while the tape's events reach
-the room's stores at `t` divided by the speed: the captions and lines into `MeetingTranscription` as hub transcription
-has them, the room, the topics and the highlights into `MeetingConversation`. The replayed meeting stays off every hub
-(`MeetingReplay.holds`): `RecordingSync.status` never makes it pending, `MeetingConversation` never reads its `…/live`,
-it asks for no hub transcription (so no audio socket and no gap upload), and after End its minutes are the tape's.
+(`-openShellPage recordings`) and the room comes up: a made-up room meeting (`ReplayedMeeting.id`), Persona answering on
+screen, started with the live view and the highlights, records itself with no microphone (`RecordingCapture.beginReplay`:
+only while nothing else records) while the tape's events reach the room's stores when the tape's clock passes their `t`:
+the captions and lines into `MeetingTranscription` as hub transcription has them, the room, the topics and the
+highlights into `MeetingConversation`.
+
+The tape's clock (`MeetingReplayClock`) runs at the speed, which can change while it plays, and stands still while the
+meeting is paused. The tape's audio, where it has one and Sound is on, plays along at 1× and 2× (`AVAudioPlayer` with its
+rate, in a `.playback` session opened off the main actor) and is the clock while it plays; at 4× it is silent. The tape
+never goes back, and its time stops at its length. After End its minutes are the tape's, without their `version` (the hub
+has no such minutes, so Add to To-Dos is never offered); the replayed meeting leaves the recordings when its page after
+the meeting closes, and at the next launch.
+
+The replayed meeting stays off every hub (`ReplayedMeeting`, in `apple/Shared/Recording/`):
+
+- `APIClient` refuses every request that names its id, in the path or the query (`request`, `conditionalGet`,
+  `streamed`, `putBytes`, `uploadBytes`, `download`): an `APIError` with the code `replayed_meeting`, nothing sent.
+- `RecordingSync.status` never makes it pending. Its Delete is this phone's only and is never queued: a `DELETE` for its
+  fixed id would leave the hub a tombstone, and reconciliation would then delete every later replay while it plays
+  (DEBUG replays before #10589 did this). Reconciliation ignores the hub's word on it; a queued delete for it is dropped.
+- `MeetingConversation` never reads its `…/live`; Private Meeting, Just Me and the follow-up refuse it before anything
+  waits for an upload; so do Hand to Agent, the meeting's photos, Add to To-Dos and Regenerate. `MeetingAsk.canAsk` is
+  false for it. It asks for no hub transcription (no audio socket, no gap upload), and the DEBUG tape recorder never tapes it.
+- The room offers none of it (`MeetingRoomOffers.replay`): no composer, Talk, Just Me, Bookmark, Photo, Speaker, Invite or
+  page menu, only Pause and End; the line under the title is the tape's time of its length ("1:23 / 3:46"), Replaying or
+  Paused, and the speed, a menu (`MeetingReplayStateLine`); the subtitle says it replays a tape on this iPhone only, not
+  on the hub. End asks "End the Replay?". After it, no ⋯ menu (Rename, Recording Details, Hand to Agent) and no
+  follow-up composer; Recording Details has no Private Meeting or Talk about this meeting.
 
 The tape holds what the room's stores held, not the room's own conversation: Persona's messages in the thread aren't
 on it, so the replayed Live box keeps its last lines unfolded where the meeting's folded to its newest line under the
 thread.
 
 To see the hub's current highlights and map logic on the same audio, record it again: start a meeting with
-`-openMeetingAudio` and the tape's audio, then compare the new tape with the old one.
+`-openMeetingAudio` and the tape's audio, then compare the new tape with the old one. (On TestFlight builds that re-run
+is not available: #10590.)
+
+### Replaying a tape on any build
+
+Settings › About › Developing Persona › **Replay a Meeting Tape…** (#10589, `MeetingTapesPage`; who it serves and what
+it keeps: docs/operations/developing-persona.md "Replaying a meeting tape"). The page sets the speed and the sound, lists
+the tapes on this phone, those on the owner's computers and Choose from Files; a tap starts the tape and the page
+presents the room (`recordingLiveSheet`). A tape is a folder with `tape.json` and the audio it names.
+
+- **On this phone** (`MeetingTapeLibrary`): Application Support/meeting-tapes, a folder per tape, the whole folder out of
+  backups. Swipe to delete. Turning Developing Persona off deletes them all.
+- **On your computers**: each online computer's `~/.persona/meeting-tapes` is listed (`GET /api/v1/machines/{id}/fs`), a
+  folder per tape; a tap downloads its `tape.json`, then the audio it names (`…/file/download`, with progress), and keeps
+  them here. The hub relays the bytes and keeps nothing. The folder is under the node's own data folder: not in iCloud
+  Drive (which the node never reads), Desktop, Documents or Downloads (macOS asks before a background service reads
+  those), and readable by the node's path guard.
+- **Choose from Files…**: a tape's folder, or its `tape.json` and audio picked together (the audio is kept under the name
+  the tape gives it). Anything else is refused ("That isn't a meeting tape").
+- A tape is at most 32 MB, its audio at most 1 GB.
+
+`-openMeetingTapes sample|empty` (DEBUG) turns Developing Persona on and opens the page, with the made-up tape on this
+phone or none.
 
 Real meetings' audio and tapes hold other people's words: they stay on the machine that made them, never in the
 repository, a gist, an issue or a PR. The repository has only the made-up sample: `MeetingTapeSample` and its
 JSON, apple/PersonaTests/Fixtures/meeting-tape/tape.json, with its audio, apple/PersonaTests/Fixtures/meeting-tape/audio.m4a
 (macOS `say` in two voices, the same words at the same times).
 
-Tests: `MeetingTapeTests` (the fixture is the made-up tape and survives a round trip, a frame at each moment, a line read
+Tests: `MeetingReplayGuardTests` (#10589: every request naming the replayed meeting refused in `APIClient`, Private
+Meeting, Just Me, the follow-up, Hand to Agent, photos, Add to To-Dos, Regenerate and Ask refused, what the room offers,
+the tape's clock at each speed, paused and following the audio, the time's words, the minutes without their version, the
+tapes kept from a folder or picked files, refused when no tape, deleted with the switch); `RecordingSyncTests` (never
+uploaded, Delete never sent, a hub's tombstone ignored); `MeetingTapeTests` (the fixture is the made-up tape and survives a round trip, a frame at each moment, a line read
 again in its place, the schedule at 1×, 2× and 4×, the speed's bounds, the replay held away from sync and showing the
 hub's lines and the room's lists, the launch argument, the file's real-time pace and pause, a writer recording the
 file as a microphone); `MeetingReplayUITests` against the mock hub (the made-up tape at 2×: the lines one by one, the
 two highlights, the map's three topics, End with the tape's minutes and nothing at the mock; a meeting started with
 `-openMeetingAudio`: no prompt, the file's audio up the audio socket in hub transcription and the hub's lines back in
-the room). PERSONA_SHOTS saves `replay-<appearance>-live|live-end|highlights|map|end|after|minutes|file-input`.
+the room; the made-up tape from Developing Persona's page at 2×: only Pause and End in the room, Pause holding the tape,
+the speed changed while it plays, End with the tape's minutes and no Hand to Agent, nothing at the mock, no delete there).
+PERSONA_SHOTS saves `replay-<appearance>-live|live-end|highlights|map|end|after|minutes|file-input|tapes|about|paused|speed`.
 
 ## All-day recording (Apple)
 

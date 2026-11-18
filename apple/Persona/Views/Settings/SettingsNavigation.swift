@@ -3,7 +3,7 @@ import SwiftUI
 extension SettingsPage {
     @MainActor func belongsToCurrentAssistant(in model: AppModel) -> Bool {
         switch self {
-        case .models, .agents, .assistant, .claude, .codex, .modelConfiguration, .triage, .standingAuthorizations, .agentFollowUp,
+        case .models, .agents, .assistant, .claude, .codex, .agy, .modelConfiguration, .triage, .standingAuthorizations, .agentFollowUp,
              .connectors, .plugins, .channels,
              .mail, .feishuBot, .sent, .skills,
              .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .inboxSources, .sourcesGraph, .computers:
@@ -96,6 +96,8 @@ enum SettingsCatalog {
                   aliases: "Claude Code"),
             .init(id: "codex", title: String(localized: "Codex Settings"), symbol: Theme.Icon.options, group: .assistant, page: .codex,
                   aliases: "Codex"),
+            .init(id: "agy", title: String(localized: "Antigravity Settings"), symbol: Theme.Icon.options, group: .assistant, page: .agy,
+                  aliases: "Antigravity agy"),
             .init(id: "themeColor", title: String(localized: "Theme Color"), symbol: Theme.Icon.themeColor, group: .device, page: .themeColor,
                   aliases: String(localized: "settings.search.colors")),
             .init(id: "style", title: String(localized: "Interface Style"), symbol: Theme.Icon.style, group: .device, page: .style,

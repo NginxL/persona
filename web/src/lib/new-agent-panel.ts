@@ -139,6 +139,7 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
         const row: PanelModel = { id: m.id, name: modelName(m), efforts: effortsOf(m) };
         if (m.description) row.description = m.description;
         if (m.resolved) row.resolved = m.resolved;
+        if (m.aliases?.length) row.aliases = m.aliases;
         if (m.default_effort) row.defaultEffort = m.default_effort;
         if (m.custom) row.custom = true;
         models.push(row);

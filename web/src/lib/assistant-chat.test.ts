@@ -62,6 +62,7 @@ describe("the assistant's launchers", () => {
     expect(shortModel("gpt-")).toBe("gpt-");
     expect(shortModel("")).toBe("");
     expect(shortModel(undefined)).toBe("");
+    expect(shortModel("默认")).toBe(""); // i18n-ignore: legacy wire value, never displayed
   });
 });
 

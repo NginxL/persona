@@ -4,21 +4,12 @@ import SwiftUI
 import Testing
 @testable import Persona
 
-/// iPhone Duo's tab bar in the Separate layout (#4231, `TabSwitchLayout`): the same items on both displays (the page's
-/// symbol over its name), down the system's side column, centred on the status bar and in its lower middle, or along the
-/// foot of the inner display upright, where the pages keep its room as for the system's tab bar. Settings › Appearance ›
-/// Sidebar (Merged / Separate) chooses it, kept on this device.
+/// iPhone Duo's tab bar in the Separate layout (#4231, `TabSwitchLayout`): on the outer display the shell's switch as a
+/// tab bar (the page's symbol over its name) down the system's side column, centred on the status bar and in its lower
+/// middle; the open Duo shows the system's tab bar on the tabs. Settings › Appearance › Sidebar (Merged / Separate)
+/// chooses the layout, kept on this device.
 @MainActor
 struct TabSwitchLayoutTests {
-    /// Where the tab bar stands in each posture of the open Duo, and nowhere on the iPad, which keeps the system's tab bar.
-    @Test func itStandsWhereTheSystemsBarsAre() {
-        #expect(TabSwitchLayout.placement(phone: true, barEdge: nil) == .bottom) // open, upright: bars across the top
-        #expect(TabSwitchLayout.placement(phone: true, barEdge: .trailing) == .rail(.trailing)) // open, on its side
-        #expect(TabSwitchLayout.placement(phone: true, barEdge: .leading) == .rail(.leading))
-        #expect(TabSwitchLayout.placement(phone: false, barEdge: nil) == nil) // the iPad
-        #expect(TabSwitchLayout.placement(phone: false, barEdge: .trailing) == nil)
-    }
-
     /// An item is a tap target and more (its symbol over its name), at every text size (a bar of fixed items,
     /// DESIGN_SYSTEM.md 6.2); the side bar fits the side column the status bar is centred on.
     @Test func theItemsAndTheBarsSizes() {
@@ -28,8 +19,6 @@ struct TabSwitchLayoutTests {
         #expect(TabSwitchLayout.sideWidth == 64)
         #expect(TabSwitchLayout.sideHeight(items: 3) == 184)
         #expect(TabSwitchLayout.sideHeight(items: 2) == 128)
-        #expect(TabSwitchLayout.bottomHeight == 64)
-        #expect(TabSwitchLayout.bottomWidth(items: 3) == 184)
         #expect(TabSwitchLayout.items(messages: true) == 3)
         #expect(TabSwitchLayout.items(messages: false) == 2)
         // The Duo's 84 pt inset (both displays) less the screen edge's strip: 70 pt, the bar within it.
@@ -48,7 +37,7 @@ struct TabSwitchLayoutTests {
 
     /// In the lower middle of the column, not a small block at its foot: on both displays the room of the outer
     /// display's face and page's action under it (144 pt at the default text size), so it stands as high when the Duo
-    /// folds or unfolds (`DuoTabBarAlignmentTests` lays both out).
+    /// folds or unfolds.
     @Test func theSideBarStandsInTheLowerMiddle() {
         let button = Theme.Size.tapTarget * Theme.sizeScale(.xLarge) // the rail's buttons, a size up at the default size
         let foot = TabSwitchLayout.sideFoot(button: button)
@@ -57,14 +46,6 @@ struct TabSwitchLayoutTests {
             let top = height - foot - TabSwitchLayout.sideHeight(items: 3)
             #expect(top > height * 0.4 && height - foot < height * 0.8) // its middle in the column's lower half
         }
-    }
-
-    /// Along the foot upright the pages keep the bar's room, as the system's tab bar makes them keep; with the keyboard up
-    /// the bar is away and the room goes; on its side there is none.
-    @Test func theRoomUnderTheBottomBar() {
-        #expect(TabSwitchLayout.bottomRoom(bottomBar: true, keyboardUp: false) == TabSwitchLayout.bottomHeight + TabSwitchLayout.bottomGap)
-        #expect(TabSwitchLayout.bottomRoom(bottomBar: true, keyboardUp: true) == 0)
-        #expect(TabSwitchLayout.bottomRoom(bottomBar: false, keyboardUp: false) == 0)
     }
 
     /// A page's buttons in the side column stand clear of the tab bar (#9837): the leading ones that fit stay, Back and ⋯
@@ -129,6 +110,57 @@ struct TabSwitchLayoutTests {
         #expect(back.at == 0 && back.opacity == 0)
     }
 
+    /// The lens never jumps (#10270): the page a choice brings in is swapped in under the bar in the same frames. Frames
+    /// held up by that before it sets off keep it where it starts, and it sets off on the first frame on time; one held up
+    /// once it moves moves it on by `longestStep` only, not by the time it took. Every bar drawing the same frame gets the
+    /// same lens, and a choice made midway starts from where the lens was drawn.
+    @Test func aHeldUpFrameDoesNotMakeTheLensJump() {
+        let glide = TabBarGlide()
+        glide.begin(from: 0, to: 2)
+        let tap = Date(timeIntervalSinceReferenceDate: 1000)
+        let frame = 1.0 / 60
+        func lens(_ g: TabBarGlide, _ at: Date, is t: TimeInterval) -> Bool {
+            let a = g.frame(at: at), b = TabBarGlide.frame(from: g.from, to: g.to, at: t)
+            return abs(a.at - b.at) < 1e-6 && abs(a.swell - b.swell) < 1e-6 && abs(a.opacity - b.opacity) < 1e-6
+        }
+        #expect(lens(glide, tap, is: 0)) // drawn first where it starts
+        // The tab's page swapped in, then drawn for the first time: frames 140 ms and 40 ms apart. It waits.
+        #expect(lens(glide, tap + 0.14, is: 0))
+        #expect(lens(glide, tap + 0.145, is: 0)) // another bar, the same frame
+        #expect(lens(glide, tap + 0.18, is: 0))
+        // Sets off on time.
+        var at = tap + 0.18 + frame
+        #expect(lens(glide, at, is: frame))
+        // Held up on the way: on by `longestStep`.
+        at += 0.1
+        #expect(lens(glide, at, is: frame + TabBarGlide.longestStep))
+        // On time, frame after frame, it goes on to its end and is gone there.
+        while glide.elapsed < TabBarGlide.length {
+            at += frame
+            _ = glide.frame(at: at)
+        }
+        #expect(glide.frame(at: at) == TabBarGlide.frame(from: 0, to: 2, at: TabBarGlide.length))
+        // Frames slow from the start (a busy phone): it waits `longestWait` at most, then goes on `longestStep` a frame.
+        let slow = TabBarGlide()
+        slow.begin(from: 0, to: 1)
+        _ = slow.frame(at: tap)
+        var late = tap
+        for _ in 0..<20 where slow.elapsed == 0 {
+            late += 0.05
+            _ = slow.frame(at: late)
+        }
+        #expect(abs(slow.elapsed - TabBarGlide.longestStep) < 1e-9)
+        #expect(late.timeIntervalSince(tap) < TabBarGlide.longestWait + 0.1 + 0.001)
+        // Chosen again midway: from where it was drawn, the clock from 0.
+        let other = TabBarGlide()
+        other.begin(from: 0, to: 2)
+        _ = other.frame(at: tap)
+        let midway = other.frame(at: tap + frame).at
+        other.begin(from: 2, to: 1)
+        #expect(other.from == midway && other.to == 1)
+        #expect(lens(other, tap + 2 * frame, is: 0))
+    }
+
     /// The choice is Settings › Appearance › Sidebar's, this device's own: picking Separate is written at once and read
     /// back by a new reader of the same defaults, as the app's root after a relaunch; nothing picked stays Merged on the
     /// open Duo and Separate on its outer display (#4206's default, unchanged).
@@ -153,18 +185,13 @@ struct TabSwitchLayoutTests {
 
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
-    /// The tabs hide the system's tab bar on a phone (the open Duo) and the Duo's stands in its place; every tab's page
-    /// hides it and keeps the bottom bar's room (`PhoneTabBarHidden`), or the system's bar comes back on that tab, or its
-    /// composer goes under the bar.
-    @Test func everyTabHidesTheSystemsBarOnAPhone() throws {
+    /// The open Duo's tabs keep the system's tab bar (Apple's iPhone Duo guidance: iOS places it along the foot upright
+    /// and down the side column on its side): no tab hides it and nothing stands in its place.
+    @Test func theTabsKeepTheSystemsBar() throws {
         let source = try String(contentsOf: Self.apple.appending(path: "Persona/Views/RootView.swift"), encoding: .utf8)
-        #expect(source.contains(".modifier(TabSwitchOverlay())"))
-        for tab in ["struct AssistantRootTab", "struct AgentsRootTab", "struct FeishuRootTab"] {
-            let start = try #require(source.range(of: tab), "\(tab) not in RootView.swift")
-            let rest = source[start.upperBound...]
-            let body = rest[..<(rest.range(of: "\n}\n")?.upperBound ?? rest.endIndex)]
-            #expect(body.contains("PhoneTabBarHidden()"), "\(tab) shows the system's tab bar under the Duo's")
-        }
+        #expect(!source.contains("TabSwitchOverlay"))
+        #expect(!source.contains("PhoneTabBarHidden"))
+        #expect(!source.contains("toolbarVisibility(.hidden, for: .tabBar)"))
     }
 }
 #endif

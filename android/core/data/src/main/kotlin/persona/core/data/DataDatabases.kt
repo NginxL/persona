@@ -282,7 +282,7 @@ interface ItemsDao {
     suspend fun insert(items: List<ItemRow>)
 }
 
-@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 6,
+@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 7,
     autoMigrations = [AutoMigration(from = 2, to = 3)], exportSchema = true)
 abstract class ItemsDatabase : RoomDatabase() {
     abstract fun items(): ItemsDao
@@ -321,6 +321,17 @@ abstract class ItemsDatabase : RoomDatabase() {
          * session's message, a subagent's task note or a notice (#8220); these are only cache rows.
          */
         val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM `items`")
+                db.execSQL("DELETE FROM `cursors`")
+            }
+        }
+
+        /**
+         * Codex sleeps, subagent activity and subagent waits cached as notices must be read again as the tool calls the
+         * hub now serves under the same ids (#10436); these are only cache rows.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DELETE FROM `items`")
                 db.execSQL("DELETE FROM `cursors`")

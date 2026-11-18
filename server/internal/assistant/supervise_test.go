@@ -472,10 +472,11 @@ func TestGoldenSupervise(t *testing.T) {
 		{ID: "todo_5", Title: "迁移数据库", Kind: sigReport, Report: upReportQuestion, Said: "要不要先停写？\n停写约 2 分钟", Step: 2, Steps: 4,
 			Evidence: []string{"https://github.com/o/r/pull/902"}, Machine: "box", Session: "e5f6a7b8"},
 		{ID: "todo_6", Title: "整理文档", Kind: sigReport, Report: upReportProgress, Said: "写完了一半"},
-		// #2570: a start whose tab the computer keeps, one that failed for good, one that started after a retry
+		// #2570: a start whose tab the computer keeps, one that failed for good (its launcher could not start there, with
+		// the others it may retry with, #10365), one that started after a retry
 		{ID: "todo_7", Title: "修崩溃", Kind: sigFailed, Machine: "box", KeptUntil: "10:12", Question: "[oh-my-zsh] Would you like to update? [Y/n]",
 			Screen: "Last login: Mon Nov  9 22:01:13 on ttys004\n[oh-my-zsh] Would you like to update? [Y/n]", RetriesLeft: 3},
-		{ID: "todo_8", Title: "跑基准", Kind: sigFailed, Detail: "新开的终端标签两次都没接住启动命令", Machine: "box"},
+		{ID: "todo_8", Title: "跑基准", Kind: sigFailed, Detail: "终端运行不了「work」", RetryWith: []string{"claude"}, Machine: "box"},
 		{ID: "todo_9", Title: "整理日志", Kind: sigStarted, Detail: "新标签里的 shell 停在一个提问上", Machine: "box"},
 		// #3618: nobody works on it any more: closed after a model error, closed, its computer away
 		{ID: "todo_10", Title: "升级依赖", Kind: sigOrphaned, Orphan: orphanError, Detail: "API Error: 400 prompt is too long", Machine: "box", Session: "c3d4e5f6",

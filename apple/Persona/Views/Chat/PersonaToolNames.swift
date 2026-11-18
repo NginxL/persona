@@ -9,7 +9,8 @@ enum PersonaToolNames {
     nonisolated static let servers: Set<String> = ["persona", LegacyNames.product, "plugin_persona", "plugin_" + LegacyNames.product]
 
     /// The server of an MCP tool's full name ("mcp__persona__agent_read" → "persona"), nil for any other tool.
-    nonisolated static func server(_ name: String) -> String? {
+    nonisolated static func server(_ raw: String) -> String? {
+        let name = HubNaming.canonicalMCPTool(raw)
         guard name.hasPrefix("mcp__") else { return nil }
         let rest = name.dropFirst(5)
         guard let r = rest.range(of: "__", options: .backwards), r.lowerBound > rest.startIndex else { return nil }

@@ -9,5 +9,12 @@
   "duplicate_repo": "各リポジトリは一度だけ選択してください。",
   "duplicate_alias": "各リポジトリに異なるディレクトリ名を指定してください。",
   "duplicate_link": "このIssueまたはPRはすでに関連付けられています。",
-  "link_repository_mismatch": "このリポジトリのIssueまたはPRリンクを使用してください。"
+  "link_repository_mismatch": "このリポジトリのIssueまたはPRリンクを使用してください。",
+  "no_provider": "{provider} がインストールされていません。保存済みのリンクはそのままです。新しいリンクを追加するには「設定 › 拡張機能」でインストールしてください。",
+  "provider_off": "{provider} がオフになっているか、動いていません。保存済みのリンクはそのままです。新しいリンクを追加するには「設定 › 拡張機能」でオンにしてください。",
+  "provider_not_found": "{provider} でこのIssueまたはPRが見つかりません。リンクを確認してください。",
+  "provider_not_signed_in": "{provider} にサインインしていません。「設定 › 拡張機能」で設定を確認してください。",
+  "provider_refused": "{provider} が拒否しました：{why}",
+  "provider_failed": "{provider} でこのリンクを確認できませんでした：{why}",
+  "providers_starting": "拡張機能がまだ起動中のため、新しいリンクを確認できません。保存済みのリンクはそのままです。少し待ってから再試行してください。"
 }

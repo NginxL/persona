@@ -4,12 +4,16 @@ source "$(dirname "$0")/common.sh"
 lane="${1:-all}"
 [ "$#" -le 1 ] || { printf 'Usage: scripts/ci/server.sh [all|node|managers|other|build]\n' >&2; exit 2; }
 case "$lane" in all|node|managers|other|build) ;; *) printf 'Unknown server lane: %s\n' "$lane" >&2; exit 2 ;; esac
+# Go's build cache key holds each package's directory unless -trimpath is set: add it, so checkouts and worktrees
+# share compiled packages (#10614). The helper keeps the caller's GOFLAGS; vet clears -ldflags on its command line.
+GOFLAGS=$(sh scripts/test/go_trimpath.sh)
+export GOFLAGS
 
 if [ "$lane" = all ] || [ "$lane" = build ]; then
   ci_run 'Go formatting' 120 python3 scripts/ci/gofmt.py server sdk/go
-  ci_run 'Server vet' 600 bash -c 'cd server && go vet ./...'
+  ci_run 'Server vet' 600 bash -c 'cd server && go vet -ldflags= ./...'
   ci_run 'Server build' 600 bash -c 'cd server && go build ./...'
-  ci_run 'Windows node build and vet' 600 bash -c 'cd server && GOOS=windows GOARCH=amd64 go build ./... && GOOS=windows GOARCH=amd64 go vet ./...'
+  ci_run 'Windows node build and vet' 600 bash -c 'cd server && GOOS=windows GOARCH=amd64 go build ./... && GOOS=windows GOARCH=amd64 go vet -ldflags= ./...'
   # The release's tags (server/build-tags.txt, server/internal/buildtags): the programs build with them on Linux and
   # macOS, and the tunnel works with the tailscale.com subset they leave.
   ci_run 'Server programs with build-tags.txt' 600 bash -c 'cd server && t="$(cat build-tags.txt)" && go build -tags "$t" ./cmd/... && GOOS=darwin GOARCH=arm64 go build -tags "$t" ./cmd/...'

@@ -229,7 +229,7 @@ func TestWorkspaceResolveCanonicalDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := &Node{home: home, state: newState()}
-	w, err := n.resolveWorkspace("~/alias")
+	w, err := n.resolveWorkspace("~/alias", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestWorkspaceResolveCanonicalDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"", "project", "~other/project", filename, filepath.Join(home, "missing"), cloud, cloudAlias} {
-		if _, err := n.resolveWorkspace(path); err == nil {
+		if _, err := n.resolveWorkspace(path, false); err == nil {
 			t.Errorf("accepted invalid directory %q", path)
 		}
 	}
@@ -292,7 +292,7 @@ func TestWorkspaceSessionCanonicalDirectory(t *testing.T) {
 	if len(w) != 1 || w[0].Cwd != sessions[sidA].WorkspaceCwd {
 		t.Fatalf("workspace and session physical paths differ: %+v / %+v", w, sessions[sidA])
 	}
-	resolved, err := n.resolveWorkspace(alias)
+	resolved, err := n.resolveWorkspace(alias, false)
 	if err != nil || resolved.Cwd != sessions[sidA].WorkspaceCwd {
 		t.Fatalf("directory binding and session physical paths differ: %+v / %v", resolved, err)
 	}

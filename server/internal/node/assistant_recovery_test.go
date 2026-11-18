@@ -343,6 +343,8 @@ func TestAssistantRecoverableErrorClasses(t *testing.T) {
 		{"503", "API Error: 503 no eligible upstream", true, true},
 		{"529", "API Error: 529 overloaded", true, true},
 		{"own 400", "API Error: 400 invalid request", true, false},
+		// Its own one resend in a new process, never an ordinary retry or a move to another model (#10365).
+		{"tool search refused", "API Error: 400 request is not representable on this edge: ToolSearch is not supported on this endpoint (defer_loading:true, tool_search_*, tool_reference)", true, false},
 		{"400 with upstream detail", "API Error: 400 rejected; upstream 500 was only diagnostic", true, false},
 		{"401", "API Error: 401 invalid API key", true, false},
 		{"model route", "API Error: 404 model not found", true, false},

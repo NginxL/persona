@@ -11,6 +11,7 @@ struct SendClipboardIntent: AppIntent {
         categoryName: "Clipboard",
         searchKeywords: ["Clipboard", "Copy", "Paste"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Computer")
@@ -47,6 +48,7 @@ struct GetClipboardIntent: AppIntent {
         categoryName: "Clipboard",
         searchKeywords: ["Clipboard", "Copy", "Paste"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Computer")

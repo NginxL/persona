@@ -51,6 +51,9 @@
     <string name="machines_metric_load">负载</string>
     <string name="machines_metric_disk">磁盘</string>
     <string name="machines_metric_swap">交换</string>
+    <string name="machines_metric_battery">电量</string>
+    <string name="machines_metric_charging">充电中</string>
+    <string name="machines_metric_temperature">温度</string>
     <string name="machines_swap_off">未启用</string>
     <string name="machines_no_sample">还没有新的采样</string>
     <string name="machines_offline_history">机器离线，以下曲线保留历史采样</string>

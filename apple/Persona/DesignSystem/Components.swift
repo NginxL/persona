@@ -517,10 +517,15 @@ struct EmptyStateView: View {
     }
 }
 
+/// `card()`'s measures: from a card's edge to its content (off the 4 pt grid, DS-09).
+enum CardStyle {
+    static let padding: CGFloat = 14
+}
+
 extension View {
     /// Rounded card surface used across lists; in the BeautifulUI style its surface (the style's card color, its ring and
     /// soft shadow).
-    @ViewBuilder func card(padding: CGFloat = 14, radius: CGFloat = Theme.Radius.card) -> some View {
+    @ViewBuilder func card(padding: CGFloat = CardStyle.padding, radius: CGFloat = Theme.Radius.card) -> some View {
         if AppStyle.current.usesBeautifulUI {
             self.padding(padding)
                 .buiSurface(radius: radius, elevation: .card)

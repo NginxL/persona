@@ -58,6 +58,7 @@ class AssistantSettingsStateTest {
                 mainBackgroundFolded = update.mainBackgroundFolded ?: config.mainBackgroundFolded,
                 nextSuggestions = update.nextSuggestions ?: config.nextSuggestions,
                 mainSupervisesOwnTasks = update.mainSupervisesOwnTasks ?: config.mainSupervisesOwnTasks,
+                closeEndedTerminals = update.closeEndedTerminals ?: config.closeEndedTerminals,
                 defaultPermissionMode = update.defaultPermissionMode ?: config.defaultPermissionMode,
             )
             return updateAnswer?.invoke(update) ?: config
@@ -199,6 +200,27 @@ class AssistantSettingsStateTest {
         api.fail = true
         state.setMainSupervisesOwnTasks(false)
         assertEquals(true, state.state.value.config?.mainSupervisesOwnTasks)
+        assertTrue(state.state.value.notice?.error == true)
+    }
+
+    /** #10355: "Close an Agent's terminal when it ends", off by default; only from a hub that has it. */
+    @Test fun closeEndedTerminalsSwitchSavesAndComesBackOnFailure() = runTest {
+        val api = FakeApi()
+        val state = AssistantSettingsState(api, Zone())
+        state.load()
+        state.setCloseEndedTerminals(true)
+        assertTrue("a hub without it: nothing to switch", api.updates.isEmpty())
+        api.config = api.config.copy(closeEndedTerminals = false)
+        state.load()
+        state.setCloseEndedTerminals(false)
+        assertTrue("already off: nothing is sent", api.updates.isEmpty())
+        state.setCloseEndedTerminals(true)
+        assertEquals(true, api.updates.single().closeEndedTerminals)
+        assertEquals(null, api.updates.single().mainSupervisesOwnTasks)
+        assertEquals(true, state.state.value.config?.closeEndedTerminals)
+        api.fail = true
+        state.setCloseEndedTerminals(false)
+        assertEquals(true, state.state.value.config?.closeEndedTerminals)
         assertTrue(state.state.value.notice?.error == true)
     }
 

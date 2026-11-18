@@ -334,6 +334,7 @@
     <string name="chat_tasks_interrupt_cause_auth">登录或密钥失效</string>
     <string name="chat_tasks_interrupt_cause_model_route">模型名不对</string>
     <string name="chat_tasks_interrupt_cause_no_output">一轮没有输出</string>
+    <string name="chat_tasks_interrupt_cause_stopped">随对话一起停下</string>
     <string name="chat_tasks_interrupt_batch">%1$s，%2$d 个任务被打断</string>
     <string name="chat_tasks_interrupt_batch_on">%2$s %1$s，%3$d 个任务被打断</string>
     <string name="chat_tasks_interrupt_counts">→ 已处理 %1$d / 待处理 %2$d</string>

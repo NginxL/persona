@@ -89,6 +89,8 @@ Use synthetic conversations for screenshots, not the user's real main conversati
 - Claude Code writes `&gt;`, `&lt;`, and `&amp;` itself into the summary / event / result of background task notifications (`<task-notification>`); decode them during parsing. For background commands without a description,
   the summary is the whole command (a heredoc can span dozens of lines). Do not use the summary as notice text: the node parses it into `Item.task`, and the App renders a single tool-style row (`TaskNoteRow`).
   Monitor events carry only task-id; map them back to the call using the tool_result `Monitor started (task <id>` (`TaskIndex`).
+  An event notification is non-terminal (#10356): keep the Monitor's background record and expiry until its stream
+  ends, it is stopped or it expires. Do not remove every task named by a notification; use its parsed kind/status.
 - The App merges its on-disk chat cache by item id. If the hub changes the contents of a type of item (for example, adding fields to notices), new pages do not overwrite old cached items. When the item structure or the hub's kind / text for an existing item changes,
   bump the `ChatCache` directory version (`ChatCache.folder`) so the old representation is dropped.
 - Backward pagination has a parsing budget, but must not return an empty page while earlier content remains. An empty page + `has_more: true` leaves the App with no seq to fetch next, making earlier history permanently inaccessible (large Codex rollouts can have tens of MB of lines that produce no entries between two turns).
@@ -377,3 +379,12 @@ A view that fetches once per id cannot recover when the store puts the same id b
   final output: fall back to a standalone call and result pair, as a cold read does when it no longer tracks the call.
 - Keep the pending queue and map in sync and remove the entry on completion. Otherwise a later command that reuses the
   id inherits the old queue position, and the cap evicts it instead of the oldest live command.
+
+## Codex's scheduled checks are not user-authored XML (#10251)
+
+- The desktop scheduler writes a whole `<heartbeat>` item with the automation id, scheduled time and instructions;
+  the final answer writes the same envelope with a decision and optional message. Decode these before clipping the
+  transcript. Only recognize the complete role-specific shapes, so an example in prose or fenced code stays a message.
+- Keep the request as a user-role turn boundary with explicit scheduled provenance and its existing item id. Show the
+  instructions in a constrained preview. The quiet decision is an answer with no updates, not protocol text or a signal
+  to close a turn early; `task_complete` still determines completion and recorded duration.

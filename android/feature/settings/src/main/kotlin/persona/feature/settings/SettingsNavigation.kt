@@ -28,6 +28,7 @@ fun SettingsPage.toInitialPage(): String = when (this) {
     SettingsPage.Capsule -> "capsule"
     SettingsPage.Language -> "language"
     SettingsPage.Codex -> "codex"
+    SettingsPage.Agy -> "agy"
     SettingsPage.Providers -> "providers"
     SettingsPage.Storage -> "storage"
     SettingsPage.Desktops -> "desktops"
@@ -52,7 +53,7 @@ fun settingsPageFromInitialPage(initialPage: String): SettingsPage? =
  */
 private val assistantPages = setOf(SettingsPage.Providers, SettingsPage.ModelConfig, SettingsPage.Triage, SettingsPage.Connectors,
     SettingsPage.Mail, SettingsPage.Feishu, SettingsPage.FeishuBot, SettingsPage.Sent, SettingsPage.Extensions, SettingsPage.Channels,
-    SettingsPage.ClaudeCode, SettingsPage.Codex, SettingsPage.AgentSettings, SettingsPage.KnowledgeSelection, SettingsPage.StandingAuthorizations)
+    SettingsPage.ClaudeCode, SettingsPage.Codex, SettingsPage.Agy, SettingsPage.AgentSettings, SettingsPage.KnowledgeSelection, SettingsPage.StandingAuthorizations)
 
 /** Whether [page] (an in-place page key, [SettingsPage.toInitialPage]) is one of the current assistant's settings pages. */
 internal fun isAssistantSettingsPage(page: String): Boolean =

@@ -205,6 +205,8 @@ describe("while editing", () => {
     await act(async () => sendButton().click());
     expect(calls).toEqual(["commit", "send"]);
     expect(onSend.mock.calls[0][0].text).toBe("> Quoted text\n\nRevised paragraph");
+    // Restoring the old quote for an edit is not a new quote reply: its existing follow behavior stays unchanged (#10346).
+    expect(onSend.mock.calls[0][0].quoteReply).toBeUndefined();
     expect(box().value).toBe("");
     expect(bar()).toBeNull();
   });

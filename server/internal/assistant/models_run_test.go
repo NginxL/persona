@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +20,8 @@ import (
 // runDevs answers model.run as a node would, or with err.
 type runDevs struct {
 	viaDevs
-	saw []proto.ModelRunParams
+	saw   []proto.ModelRunParams
+	usage ai.Usage
 }
 
 func (d *runDevs) CallNode(ctx context.Context, id, method string, params json.RawMessage) (json.RawMessage, error) {
@@ -33,7 +36,7 @@ func (d *runDevs) CallNode(ctx context.Context, id, method string, params json.R
 	if d.err != nil {
 		return nil, d.err
 	}
-	return json.Marshal(proto.ModelRunAnswer{Text: "answer to " + p.Prompt, Model: "m-run"})
+	return json.Marshal(proto.ModelRunAnswer{Text: "answer to " + p.Prompt, Model: "m-run", Usage: d.usage})
 }
 
 // An API purpose may pick plain claude (no gateway, no key): Model configuration offers it with the main chat's computer,
@@ -116,6 +119,55 @@ func TestAPIPurposeRunsOnALauncher(t *testing.T) {
 	s.settingsChanged(context.Background())
 	if p := purposeOf(t, s, "kb"); !slices.Contains(p.ProviderIDs, "launcher.claude") || p.Status != i18n.T(lang, "assistant-models.err_run_no_machine") {
 		t.Fatalf("no machine: %v %q", p.ProviderIDs, p.Status)
+	}
+}
+
+func TestInboxGroupUsageReportsBothRoutes(t *testing.T) {
+	s, hub, _ := modelService(t)
+	ctx := context.Background()
+	var logs logBuffer
+	s.logf = logs.logf
+	usage := ai.Usage{InputTokens: 14, OutputTokens: 7, CacheReadInputTokens: 95, CacheCreationInputTokens: 83}
+	s.devs = &runDevs{usage: usage}
+
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "relay-model", "usage": usage,
+			"content": []map[string]string{{"type": "text", "text": "relay reply"}},
+		})
+	}))
+	defer relay.Close()
+	hub.hello.Models.AI = ai.Config{BaseURL: relay.URL, APIKey: "private-test-key", Model: "relay-model"}
+
+	call := func(want string) {
+		t.Helper()
+		text, err := s.purposeModelFor(purposeTriage, "inbox_group").Complete(ctx, "", "private-test-prompt", 64)
+		if err != nil || text != want {
+			t.Fatalf("reply: %q %v, want %q", text, err, want)
+		}
+	}
+	call("relay reply")
+	if r := modelRequest(s, "PATCH", "inbox.triage", `{"revision":0,"provider":"launcher.claude"}`); r.Code != http.StatusOK {
+		t.Fatalf("pick claude: %d %s", r.Code, r.Body.String())
+	}
+	call("answer to private-test-prompt")
+
+	got := logs.String()
+	if strings.Count(got, "model_usage ") != 2 || strings.Contains(got, "private-test-") {
+		t.Fatalf("usage log: %s", got)
+	}
+	const fields = `result=ok usage_reported=true input_tokens=14 output_tokens=7 cache_read_input_tokens=95 cache_creation_input_tokens=83`
+	for _, want := range []string{
+		`model_usage purpose="inbox.triage" operation="inbox_group" route=api provider="legacy.triage" model="relay-model" ` + fields,
+		`model_usage purpose="inbox.triage" operation="inbox_group" route=cli provider="launcher.claude" model="m-run" ` + fields,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 

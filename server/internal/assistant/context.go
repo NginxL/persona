@@ -47,6 +47,7 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 	case c.Leader:
 		c.LeaderName = s.leaderNames(ctx, []string{p.SessionID})[p.SessionID]
+		c.LeaderStatus = s.directionStatus(ctx, p.SessionID)
 	}
 	text := prompts.RenderAssistantContext(c)
 	errs, receipts := s.viewErrors(ctx, p)
@@ -366,8 +367,8 @@ func snapshotAgentGroup(c proto.Session, now time.Time) snapshotAgentGroupKind {
 	recent := now.Sub(c.UpdatedAt) < 24*time.Hour
 	w := c.Work
 	switch {
-	case c.State == proto.StateNeedsYou:
-		return snapshotAgentNeedsYou
+	case c.State == proto.StateNeedsYou, silentRow(c):
+		return snapshotAgentNeedsYou // a turn with no output is the owner's to continue, not finished (#10187)
 	case c.State == proto.StateWorking:
 		return snapshotAgentWorking
 	case c.AwaitsReply && c.State == proto.StateIdle && recent:
@@ -411,6 +412,9 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 			}
 			if a.Line == "" && c.AwaitsReply {
 				a.Line = c.Asks // what it asks (#5096)
+			}
+			if silentRow(c) {
+				a.Line = c.TurnError // why it is the owner's: no output, or Persona's Stop (#10187)
 			}
 			a.Line = clip(oneLine(a.Line), 160)
 			group := snapshotAgentGroup(c, now)

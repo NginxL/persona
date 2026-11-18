@@ -38,6 +38,10 @@ final class AgentsTopMotionTests: XCTestCase {
     /// the field came into the bar's rows while the bar was still fading (#4928).
     @MainActor func testTheTopMovesAsOnePieceInLargerText() throws { try walk(size: "UICTContentSizeCategoryXXXL") }
 
+    /// At the largest accessibility size the field's words stop at the top bars' size and its capsule and band stay as
+    /// they are (#10165): the same walk, the field's way unchanged.
+    @MainActor func testTheTopMovesAsOnePieceAtTheLargestText() throws { try walk(size: "UICTContentSizeCategoryAccessibilityXXXL") }
+
     @MainActor private func walk(size: String? = nil) throws {
         app = XCUIApplication()
         app.launchArguments = ["-demo.on", "YES", "-app.tab", "chats", "-dev.openChat", "",

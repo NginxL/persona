@@ -6,6 +6,7 @@ import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.AgentModel
 import persona.core.contracts.api.AssistantLaunchers
 import persona.core.contracts.api.LauncherModels
+import persona.core.contracts.api.launcherExplicitModel
 
 /**
  * The model pill and panel of a Persona chat (#5055, the web's `lib/assistant-models.ts` and `lib/assistant-panel.ts`
@@ -72,14 +73,15 @@ object PersonaModelPanel {
         val providers = launchers.map { l ->
             val kind = engineOf(l)
             val e = listFor(l.name)
+            val configuredModel = launcherExplicitModel(l)
             var models: List<PanelModel>? = null
             if (e.read) {
                 var list = e.list?.models.orEmpty().map { panelModel(it, kind) }
                 // a launcher that fixes its own --model takes no model with a pick: what it runs by default, only
                 if (e.list?.locked != null) list = list.filter { it.id == AgentModelPanel.defaultModel(e.list.models)?.id }
                 // no list to read (a direct API the computer can't ask, an older hub): the model it is set up with
-                if (list.isEmpty() && !l.model.isNullOrBlank())
-                    list = listOf(PanelModel(l.model!!, AgentModelPanel.modelLabel(l.model!!), efforts = if (kind == "claude") AgentModelPanel.CLAUDE_EFFORTS else emptyList()))
+                if (list.isEmpty() && configuredModel != null)
+                    list = listOf(PanelModel(configuredModel, AgentModelPanel.modelLabel(configuredModel), efforts = if (kind == "claude") AgentModelPanel.CLAUDE_EFFORTS else emptyList()))
                 models = list
             }
             // the provider it runs on stays as it is, whatever its kind: it is what the panel says the chat runs
@@ -105,7 +107,7 @@ object PersonaModelPanel {
         }
         val own = providers.firstOrNull { it.id == setup.provider }
         val row = if (own?.models != null) AgentModelPanel.currentModelRow(listFor(setup.provider).list?.models.orEmpty(), setup.model) else null
-        val model = row?.id ?: setup.model ?: launchers.firstOrNull { it.name == setup.provider }?.model
+        val model = row?.id ?: setup.model ?: launchers.firstOrNull { it.name == setup.provider }?.let(::launcherExplicitModel)
         val state = PanelState(
             current = model?.takeIf(String::isNotEmpty)?.let { PanelConfig(setup.provider, it, setup.effort).clean() },
             recommended = if (own != null && own.unavailable == null) listOf(setup.provider) else emptyList(),
@@ -129,7 +131,7 @@ object PersonaModelPanel {
     fun pill(chat: Chat, setup: Setup, info: AssistantLaunchers?, own: ModelList): PillView {
         val launcher = info?.launchers?.firstOrNull { it.name == setup.provider }
         val row = AgentModelPanel.currentModelRow(own.list?.models.orEmpty(), setup.model)
-        val id = setup.model ?: launcher?.model
+        val id = setup.model ?: launcher?.let(::launcherExplicitModel)
         val model = row?.label ?: id?.takeIf(String::isNotEmpty)?.let(AgentModelPanel::modelLabel)
         val engine = launcher?.let(::engineOf) ?: chat.session?.let(AgentModelPanel::engine) ?: "claude"
         return PillView(PillSetup(engine, launcher?.title ?: setup.provider, model, setup.effort),

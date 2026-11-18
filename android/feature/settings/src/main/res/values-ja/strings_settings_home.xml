@@ -16,7 +16,7 @@
     <string name="settings_search_empty">一致する設定がありません</string>
     <string name="settings_search_empty_detail">別の名前で検索するか、検索をクリアしてください。</string>
     <string name="settings_search_models_aliases">プロバイダー モデル設定 用途 API キー 実行方式</string>
-    <string name="settings_search_agents_aliases">Claude Code Codex セッション 振り分け ランタイム</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy セッション 振り分け ランタイム</string>
     <string name="settings_search_notifications_aliases">通知設定 通知 チャンネル バッテリー 自動起動 カプセル ミュート パソコン ロック画面 バックグラウンド</string>
     <string name="settings_search_connectors_aliases">メール スマホ Lark Feishu あなたの名前で送信</string>
     <string name="settings_search_extensions_aliases">拡張機能 プラグイン マーケット</string>

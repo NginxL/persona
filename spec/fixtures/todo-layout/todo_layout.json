@@ -1,0 +1,2992 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "iphone_list",
+      "window": "iphone",
+      "description": "An iPhone: the list is the page.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 iphone/list"
+      ],
+      "input": {
+        "width": 402,
+        "height": 874,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "iphone",
+        "crease_split": false,
+        "wants": {
+          "deepest": "list"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 402
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "iphone_paper",
+      "window": "iphone",
+      "description": "An iPhone: the paper is pushed over the list.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 iphone/kyoto"
+      ],
+      "input": {
+        "width": 402,
+        "height": 874,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "iphone",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 402
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "iphone_conversation",
+      "window": "iphone",
+      "description": "An iPhone: the conversation is pushed with the to-do pinned as its header.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 iphone/conversation-kyoto-keyboard"
+      ],
+      "input": {
+        "width": 402,
+        "height": 874,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "iphone",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 402
+          }
+        ]
+      }
+    },
+    {
+      "name": "iphone_drawer",
+      "window": "iphone",
+      "description": "An iPhone: ☰ brings the drawer over the list, as wide as the app's drawer.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.2",
+        "docs/design/prototypes/todos/v1 iphone/list~drawer"
+      ],
+      "input": {
+        "width": 402,
+        "height": 874,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "iphone",
+        "crease_split": false,
+        "wants": {
+          "deepest": "list",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 329.64
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 402
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_outer_paper",
+      "window": "duo_outer",
+      "description": "The Duo folded: the paper takes what the side column leaves.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 duo-outer/conversation-kyoto-keyboard~paper"
+      ],
+      "input": {
+        "width": 466,
+        "height": 678,
+        "side_column": 84,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_outer",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 382
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_outer_conversation",
+      "window": "duo_outer",
+      "description": "The Duo folded: the conversation pushed, cross-faded in place.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 3.9",
+        "docs/design/prototypes/todos/v1 duo-outer/conversation-kyoto-keyboard"
+      ],
+      "input": {
+        "width": 466,
+        "height": 678,
+        "side_column": 84,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_outer",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 382
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_halves",
+      "window": "duo_inner_portrait",
+      "description": "The open Duo upright with decision 2 (iv): list and paper take the crease's halves.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iv)",
+        "docs/design/prototypes/todos/v1 duo-inner-portrait/list-paper"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 334
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 335
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_halves_half_folded",
+      "window": "duo_inner_portrait",
+      "description": "Half-folded like a book, the same halves: posture moves no region.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 3.9"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "half_folded",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 334
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 335
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_pane",
+      "window": "duo_inner_portrait",
+      "description": "The conversation open: paper and conversation take the halves; the list steps aside.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 duo-inner-portrait/paper-conversation"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 334
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 335
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_sidebar_over_the_half",
+      "window": "duo_inner_portrait",
+      "description": "☰ lays the sidebar over the left half, up to the crease.",
+      "source": [
+        "docs/design/prototypes/todos/v1 duo-inner-portrait/list-paper~sidebar"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 334
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 334
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 335
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_list_over_the_half",
+      "window": "duo_inner_portrait",
+      "description": "‹ List lays the list over the paper's half while the conversation shows.",
+      "source": [
+        "docs/design/prototypes/todos/v1 duo-inner-portrait/paper-conversation~list-over"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "conversation",
+          "called": "list"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "over",
+            "width": 334
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 334
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 335
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_one_page",
+      "window": "duo_inner_portrait",
+      "description": "Until decision 2 (iv): list and a 400-pt paper don't fit in 669, so the paper is pushed (proposal risk 5).",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.8 risk 5",
+        "#10465 (the Duo waits for its measurement)"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 669
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_one_page_conversation",
+      "window": "duo_inner_portrait",
+      "description": "Until decision 2 (iv): the conversation is pushed too.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.8 risk 5"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 669
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_list_alone",
+      "window": "duo_inner_portrait",
+      "description": "Until decision 2 (iv), nothing selected: the list is the page.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.8 risk 5"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "list"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 669
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_one_page_sidebar_over",
+      "window": "duo_inner_portrait",
+      "description": "Until decision 2 (iv): the sidebar lies over the page at its own width.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.8 risk 5",
+        "docs/design/proposals/todos-redesign.md 3.2"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "list",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 320
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 669
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_halves_at_xlarge",
+      "window": "duo_inner_portrait",
+      "description": "At xLarge the halves (334) hold no 320-pt minimum scaled (357.6): one page.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)",
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 669
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_pane_at_xlarge",
+      "window": "duo_inner_portrait",
+      "description": "At xLarge the conversation is pushed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 669
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_portrait_text_size_skips_the_band",
+      "window": "duo_inner_portrait",
+      "description": "The owner turns the text up from the default to xLarge: the band holds nothing across a text size change.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 669,
+        "height": 951,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 334
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 335
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 669
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_landscape_closed",
+      "window": "duo_inner_landscape",
+      "description": "The open Duo on its side: list 320 │ paper 547; the sidebar lies over while To-dos is in front.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iii)",
+        "docs/design/prototypes/todos/v1 duo-inner-landscape/release-pane-on-widget~closed"
+      ],
+      "input": {
+        "width": 951,
+        "height": 669,
+        "side_column": 84,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 547
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_landscape_open",
+      "window": "duo_inner_landscape",
+      "description": "The conversation open: paper 467 │ conversation 400; the list steps aside.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 duo-inner-landscape/release-pane-on-widget"
+      ],
+      "input": {
+        "width": 951,
+        "height": 669,
+        "side_column": 84,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 467
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_landscape_sidebar_over",
+      "window": "duo_inner_landscape",
+      "description": "The side column's Sidebar item lays the sidebar (320) over the page.",
+      "source": [
+        "docs/design/prototypes/todos/v1 duo-inner-landscape/release-pane-on-widget~sidebar"
+      ],
+      "input": {
+        "width": 951,
+        "height": 669,
+        "side_column": 84,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 320
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 547
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_landscape_open_at_xlarge",
+      "window": "duo_inner_landscape",
+      "description": "At xLarge a 400-pt paper and the conversation (894) don't fit in 867: the conversation is pushed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 951,
+        "height": 669,
+        "side_column": 84,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 867
+          }
+        ]
+      }
+    },
+    {
+      "name": "duo_inner_landscape_open_at_xlarge_with_the_320_paper",
+      "window": "duo_inner_landscape",
+      "description": "With decision 2 (iv) the paper's minimum is 320 on the Duo's inner display, so the pane stays at xLarge.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iv)",
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 951,
+        "height": 669,
+        "side_column": 84,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "duo_inner",
+        "crease_split": true,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 419.96
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 447.04
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_mini_portrait_closed",
+      "window": "ipad_mini_portrait",
+      "description": "An iPad mini upright: a window of 600-759, so the list is 300 and the paper takes 444.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 744,
+        "height": 1133,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 300
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 444
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_mini_portrait_open",
+      "window": "ipad_mini_portrait",
+      "description": "An iPad mini upright: 400 + 400 > 744, so the conversation is pushed with the pinned header.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 744,
+        "height": 1133,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 744
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_portrait_closed",
+      "window": "ipad11_portrait",
+      "description": "An 11-inch iPad upright: list 320 │ paper 514, the sidebar over (per-place overlay).",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iii)",
+        "docs/design/prototypes/todos/v1 ipad11-portrait/closed"
+      ],
+      "input": {
+        "width": 834,
+        "height": 1194,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 514
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_portrait_open",
+      "window": "ipad11_portrait",
+      "description": "The conversation open: paper 434 │ conversation 400; the list steps aside.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 ipad11-portrait/open"
+      ],
+      "input": {
+        "width": 834,
+        "height": 1194,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 434
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_portrait_sidebar_over",
+      "window": "ipad11_portrait",
+      "description": "☰ lays the sidebar (400) over list and paper.",
+      "source": [
+        "docs/design/prototypes/todos/v1 ipad11-portrait/closed~sidebar"
+      ],
+      "input": {
+        "width": 834,
+        "height": 1194,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 514
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_portrait_list_over",
+      "window": "ipad11_portrait",
+      "description": "‹ List lays the list over the paper while the conversation shows.",
+      "source": [
+        "docs/design/prototypes/todos/v1 ipad11-portrait/open~list-over"
+      ],
+      "input": {
+        "width": 834,
+        "height": 1194,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation",
+          "called": "list"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "over",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 434
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_portrait_open_at_xlarge",
+      "window": "ipad11_portrait",
+      "description": "At xLarge paper and conversation need 894 of 834: the conversation is pushed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 834,
+        "height": 1194,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 834
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_portrait_closed",
+      "window": "ipad13_portrait",
+      "description": "A 13-inch iPad upright: list 340 │ paper 692, the sidebar over.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 1032,
+        "height": 1376,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 340
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 692
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_portrait_open",
+      "window": "ipad13_portrait",
+      "description": "The conversation open: paper 632 │ conversation 400.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 1032,
+        "height": 1376,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 632
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_portrait_open_at_xxlarge",
+      "window": "ipad13_portrait",
+      "description": "At xxLarge paper and conversation (988) still fit in 1032.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 1032,
+        "height": 1376,
+        "side_column": 0,
+        "text_scale": 1.2353,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 537.88
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 494.12
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_portrait_open_at_xxxlarge",
+      "window": "ipad13_portrait",
+      "description": "At xxxLarge they need 1082: the conversation is pushed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 1032,
+        "height": 1376,
+        "side_column": 0,
+        "text_scale": 1.3529,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 1032
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_landscape_closed",
+      "window": "ipad11_landscape",
+      "description": "An 11-inch iPad on its side: sidebar 400 │ list 320 │ paper 474.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 ipad11-landscape/closed"
+      ],
+      "input": {
+        "width": 1194,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 474
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_landscape_open",
+      "window": "ipad11_landscape",
+      "description": "The conversation open: the sidebar steps aside for the pane's lifetime and list and paper keep their widths.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (ii)",
+        "docs/design/prototypes/todos/v1 ipad11-landscape/open"
+      ],
+      "input": {
+        "width": 1194,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 474
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_landscape_open_sidebar_over",
+      "window": "ipad11_landscape",
+      "description": "☰ brings the sidebar back over the list while the pane shows; the regions never move.",
+      "source": [
+        "docs/design/prototypes/todos/v1 ipad11-landscape/open~sidebar-over"
+      ],
+      "input": {
+        "width": 1194,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation",
+          "called": "sidebar"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "over",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 474
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_landscape_at_xlarge",
+      "window": "ipad11_landscape",
+      "description": "At xLarge list and paper need 804.7 beside a 400-pt sidebar, which leaves 794: the sidebar lies over.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 1194,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 357.63
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 836.37
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad11_landscape_open_at_xlarge",
+      "window": "ipad11_landscape",
+      "description": "At xLarge list, paper and conversation need 1251.7 of 1194: the list steps aside too.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (minimums scale with the text size, the sidebar does not)"
+      ],
+      "input": {
+        "width": 1194,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1.1176,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 746.96
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 447.04
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_landscape_summary",
+      "window": "ipad13_landscape",
+      "description": "A 13-inch iPad on its side with nothing selected: the paper's region holds the place summary.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/proposals/todos-redesign.md 3.8 \"Nothing selected on wide screens\"",
+        "docs/design/prototypes/todos/v1 ipad13-landscape/summary"
+      ],
+      "input": {
+        "width": 1376,
+        "height": 1032,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "list"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 340
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 636
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_landscape_closed",
+      "window": "ipad13_landscape",
+      "description": "A to-do selected: sidebar 400 │ list 340 │ paper 636.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 ipad13-landscape/paper"
+      ],
+      "input": {
+        "width": 1376,
+        "height": 1032,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 340
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 636
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad13_landscape_open",
+      "window": "ipad13_landscape",
+      "description": "The conversation open: a pure −400-pt shift, list 340 │ paper 636 │ conversation 400.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 ipad13-landscape/open"
+      ],
+      "input": {
+        "width": 1376,
+        "height": 1032,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 340
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 636
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_list_and_paper",
+      "window": "ipad_window",
+      "description": "A 700-pt iPad window: list 300 │ paper 400.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 700,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 300
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 400
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_open",
+      "window": "ipad_window",
+      "description": "A 700-pt iPad window: the conversation is pushed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 700,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "conversation",
+            "form": "pushed",
+            "width": 700
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_one_page",
+      "window": "ipad_window",
+      "description": "A 650-pt iPad window: list and paper don't fit, one page.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 650,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 650
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_shrinks_inside_the_band",
+      "window": "ipad_window",
+      "description": "Narrowed from 700 to 690: the list keeps its place, 10 pt short, inside the 24-pt band.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 690,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 300
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 400
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 300
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 390
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_shrinks_past_the_band",
+      "window": "ipad_window",
+      "description": "Narrowed from 700 to 670, 30 pt short: past the band, one page.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 670,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 300
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 400
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 670
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_grows_inside_the_band",
+      "window": "ipad_window",
+      "description": "Widened from 670 to 690: the list comes back only once it fits.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 690,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "paper",
+              "form": "pushed",
+              "width": 670
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "pushed",
+            "width": 690
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_window_selection_keeps_the_band",
+      "window": "ipad_window",
+      "description": "Inside the band with nothing selected, then a to-do picked: the list stays, as list and paper are one arrangement whatever the paper's region holds.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 690,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "list"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 300
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 390
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 300
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 390
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_split_sidebar_held",
+      "window": "other",
+      "description": "A 1110-pt window narrowed from 1120: the sidebar keeps its place 10 pt short.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iii)"
+      ],
+      "input": {
+        "width": 1110,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "beside",
+              "width": 400
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 320
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 400
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 400
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 390
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_split_sidebar_first_layout",
+      "window": "other",
+      "description": "The same 1110-pt window laid out the first time: the sidebar lies over.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)",
+        "docs/design/proposals/todos-redesign.md 5 decision 2 (iii)"
+      ],
+      "input": {
+        "width": 1110,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 320
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 790
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_split_pane_held",
+      "window": "other",
+      "description": "A 790-pt window narrowed from 800 with the conversation open: the pane keeps its place 10 pt short.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 790,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "conversation"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 400
+            },
+            {
+              "region": "conversation",
+              "form": "beside",
+              "width": 400
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 390
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "ipad_split_opening_the_pane_skips_the_band",
+      "window": "other",
+      "description": "In an 1100-pt window the owner opens the conversation: list, paper and pane need 1120, and the band holds nothing across opening it, so the list steps aside.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)"
+      ],
+      "input": {
+        "width": 1100,
+        "height": 834,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "ipad",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "paper"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "hidden",
+              "width": 0
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 320
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 780
+            },
+            {
+              "region": "conversation",
+              "form": "hidden",
+              "width": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 700
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_1440_closed",
+      "window": "web_1440",
+      "description": "The web at 1440: sidebar 284 │ list 360 │ paper 796.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 web/open~closed"
+      ],
+      "input": {
+        "width": 1440,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "web",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 284
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 360
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 796
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_1440_open",
+      "window": "web_1440",
+      "description": "The conversation open at 1440: the sidebar becomes the rail, rail 56 │ list 360 │ paper 584 │ conversation 440.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 web/open"
+      ],
+      "input": {
+        "width": 1440,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "web",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "rail",
+            "width": 56
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 360
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 584
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 440
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_1600_closed",
+      "window": "web_1600",
+      "description": "The web at 1600: the paper takes the rest.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 1600,
+        "height": 1000,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "web",
+        "crease_split": false,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 284
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 360
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 956
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_1600_open",
+      "window": "web_1600",
+      "description": "The conversation open at 1600: nothing steps aside, the paper keeps 516.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8"
+      ],
+      "input": {
+        "width": 1600,
+        "height": 1000,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "web",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "beside",
+            "width": 284
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 360
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 516
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 440
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_band_holds_the_rail_not_the_sidebar",
+      "window": "other",
+      "description": "A 1460-pt browser window widened from 1440 with the conversation open: the rail it had stays the rail, since the full sidebar needs 1484 and the band holds a region only in the form it had.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8 (24 pt of hysteresis)",
+        "docs/design/prototypes/todos/v1 web/open"
+      ],
+      "input": {
+        "width": 1460,
+        "height": 900,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "flat",
+        "device": "web",
+        "crease_split": false,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": {
+          "text_scale": 1,
+          "wants": {
+            "deepest": "conversation"
+          },
+          "regions": [
+            {
+              "region": "sidebar",
+              "form": "rail",
+              "width": 56
+            },
+            {
+              "region": "list",
+              "form": "beside",
+              "width": 360
+            },
+            {
+              "region": "paper",
+              "form": "beside",
+              "width": 584
+            },
+            {
+              "region": "conversation",
+              "form": "beside",
+              "width": 440
+            }
+          ]
+        }
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "rail",
+            "width": 56
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 360
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 604
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 440
+          }
+        ]
+      }
+    },
+    {
+      "name": "android_book_closed",
+      "window": "android_book",
+      "description": "An Android foldable in book posture: list and paper at the hinge.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 android-fold/paper-conversation~list-paper"
+      ],
+      "input": {
+        "width": 673,
+        "height": 841,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "half_folded",
+        "device": "android",
+        "crease_split": true,
+        "wants": {
+          "deepest": "paper"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "beside",
+            "width": 336
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 337
+          },
+          {
+            "region": "conversation",
+            "form": "hidden",
+            "width": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "android_book_open",
+      "window": "android_book",
+      "description": "The conversation open: paper and conversation at the hinge, the list steps aside.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.8",
+        "docs/design/prototypes/todos/v1 android-fold/paper-conversation"
+      ],
+      "input": {
+        "width": 673,
+        "height": 841,
+        "side_column": 0,
+        "text_scale": 1,
+        "posture": "half_folded",
+        "device": "android",
+        "crease_split": true,
+        "wants": {
+          "deepest": "conversation"
+        },
+        "previous": null
+      },
+      "expected": {
+        "regions": [
+          {
+            "region": "sidebar",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "list",
+            "form": "hidden",
+            "width": 0
+          },
+          {
+            "region": "paper",
+            "form": "beside",
+            "width": 336
+          },
+          {
+            "region": "conversation",
+            "form": "beside",
+            "width": 337
+          }
+        ]
+      }
+    }
+  ]
+}

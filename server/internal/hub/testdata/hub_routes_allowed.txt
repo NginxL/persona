@@ -237,4 +237,5 @@ PUT /api/v1/admin/password-login
 /api/v1/auth/browser-login/
 POST /api/v1/auth/browser-login/start
 POST /api/v1/auth/browser-login/poll
+POST /api/v1/auth/browser-login/confirm
 POST /api/v1/auth/browser-login/approve

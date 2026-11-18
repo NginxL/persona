@@ -345,6 +345,21 @@ internal class AssistantSettingsState(
         if (!ok) set { copy(config = this.config?.copy(mainSupervisesOwnTasks = !on)) }
     }
 
+    /**
+     * "Close an Agent's terminal when it ends" (#10355): off by default. Moves at once; a failure puts it back and says
+     * so.
+     */
+    suspend fun setCloseEndedTerminals(on: Boolean) {
+        val config = state.value.config ?: return
+        if (config.closeEndedTerminals == null || config.closeEndedTerminals == on) return
+        set { copy(config = config.copy(closeEndedTerminals = on)) }
+        val ok = perform(SettingsText(R.string.assistant_settings_save_failed)) {
+            val updated = api.updateConfig(AssistantConfigUpdate(closeEndedTerminals = on))
+            set { copy(config = updated) }
+        }
+        if (!ok) set { copy(config = this.config?.copy(closeEndedTerminals = !on)) }
+    }
+
     suspend fun saveNotes(text: String): Boolean = perform(SettingsText(R.string.assistant_settings_save_failed)) {
         val updated = api.updateConfig(AssistantConfigUpdate(notes = text))
         set { copy(config = updated) }

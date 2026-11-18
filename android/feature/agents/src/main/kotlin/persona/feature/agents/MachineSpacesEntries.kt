@@ -27,11 +27,15 @@ import persona.core.contracts.Session
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.AgentSpace
 
-/** Keep every project member, with the held marker captured by the main projection, rather than its idle-folded rows. */
+/** Keep every project member, with the held markers captured by the main projection, rather than its idle-folded rows. */
 internal fun machineSpaceRows(sessions: List<Session>, spaces: List<AgentSpace>, machineId: String,
     preferences: AgentsPreferencesSnapshot): List<AgentSession> = spaces.filter { it.machineId == machineId }.flatMap { space ->
     sessions.filter { it.machineId == space.machineId && it.spaceId == space.members.first().session.spaceId }
-        .map { member -> member.listSession(preferences).copy(heldInList = space.members.any { it.session.key == member.key && it.heldInList }) }
+        .map { member ->
+            val own = space.members.filter { it.session.key == member.key }
+            member.listSession(preferences).copy(heldInList = own.any { it.heldInList })
+                .let { row -> if (own.any { it.heldFinished }) row.heldAsFinished() else row }
+        }
 }
 
 /**
@@ -63,7 +67,7 @@ private fun MachineSpacesDestination(route: MachineSpacesRoute, navigator: Navig
             AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(),
                 dependencies.preferences(), operations, wiring.mainSender, scope, renamer, hubGroups = dependencies.groups(),
                 listContext = kotlinx.coroutines.Dispatchers.Default, listAdapter = dependencies.listAdapter(),
-                visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat())
+                visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat(), finishedChat = dependencies.finishedChat())
         }
         MachineSpacesPage(route, model, navigator)
     }

@@ -50,6 +50,14 @@ import PersonaWire
         #expect(m.context.size == "compact" && s.model(for: s.cards[0]) === m)
     }
 
+    @Test func slotsWithTheSameLocalIDHaveDistinctListIdentities() throws {
+        let slots = try JSON.decoder.decode([ExtensionUIPlace].self, from: Data(
+            #"[{"extension":"example-a","id":"status","title":"A","placement":"overview_card"},{"plugin":"example-b","id":"status","title":"B","placement":"overview_card"}]"#.utf8
+        ))
+        #expect(slots.map(\.id) == ["status", "status"])
+        #expect(slots.map(\.scopedID) == ["example-a/status", "example-b/status"])
+    }
+
     @Test func anOlderHubIsNotAsked() async throws {
         let hub = FakeHub()
         let s = slots(hub, features: ["plugins", "plugin_manager"])

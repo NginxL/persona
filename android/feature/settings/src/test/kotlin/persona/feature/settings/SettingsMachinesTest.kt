@@ -161,6 +161,13 @@ class ClaudeSettingsModelTest {
             codexWrites += Triple(machineId, key, value)
             return listOf(ClaudeSetting(key, "思考强度", type = "enum", options = listOf("low", "high"), value = value))
         }
+        val agyWrites = mutableListOf<Triple<String, String, JsonElement>>()
+        override suspend fun agySettings(machineId: String) =
+            listOf(ClaudeSetting("toolPermission", "工具权限", type = "enum", options = listOf("ask", "always-proceed"), value = JsonPrimitive("ask")))
+        override suspend fun setAgySetting(machineId: String, key: String, value: JsonElement): List<ClaudeSetting> {
+            agyWrites += Triple(machineId, key, value)
+            return listOf(ClaudeSetting(key, "工具权限", type = "enum", options = listOf("ask", "always-proceed"), value = value))
+        }
         override suspend fun launchers(machineId: String) = emptyList<AgentLauncher>()
         override suspend fun launcherQuota(machineId: String, name: String, refresh: Boolean) = persona.core.contracts.api.LauncherQuotaAnswer()
         override suspend fun reconnect(machineId: String) = Unit
@@ -212,10 +219,26 @@ class ClaudeSettingsModelTest {
         assertEquals("low", model.state.value.settings.single().stringValue)
     }
 
+    @Test fun agyKindReadsAndWritesAgySettingsOnly() = runBlocking {
+        val api = Api()
+        val model = ClaudeSettingsModel(api, Choices(), AgentSettingsKind.Agy)
+        model.follow(listOf(mac, hub))
+        model.load()
+        assertEquals(0, api.reads)
+        assertEquals("ask", model.state.value.settings.single().stringValue)
+        assertEquals("已应用到 2 台机器", model.set("toolPermission", JsonPrimitive("always-proceed"), listOf(mac, hub))?.resolve(res))
+        assertEquals(listOf("mac", "hub"), api.agyWrites.map { it.first })
+        assertTrue(api.writes.isEmpty())
+        assertTrue(api.codexWrites.isEmpty())
+        assertEquals("always-proceed", model.state.value.settings.single().stringValue)
+    }
+
     @Test fun eachKindHasItsOwnWords() {
         assertEquals("Codex 设置", res.getString(AgentSettingsKind.Codex.title))
         assertEquals("Claude Code 设置", res.getString(AgentSettingsKind.Claude.title))
+        assertEquals("Antigravity 设置", res.getString(AgentSettingsKind.Agy.title))
         assertTrue(res.getString(AgentSettingsKind.Codex.caption).contains("~/.codex/config.toml"))
+        assertTrue(res.getString(AgentSettingsKind.Agy.caption).contains("~/.gemini/antigravity-cli/settings.json"))
     }
 
     @Test fun failuresAreListedPerMachineAndTheTableIsReadAgain() = runBlocking {

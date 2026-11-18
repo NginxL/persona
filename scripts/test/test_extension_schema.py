@@ -31,6 +31,38 @@ def load_schemas():
     return files
 
 
+# The keywords both validators check, and the annotations they skip (test_schema_keywords_are_known; schema/wire too).
+VALIDATED = {"$ref", "oneOf", "allOf", "anyOf", "not", "type", "const", "enum", "minLength", "maxLength", "pattern",
+             "minimum", "maximum", "items", "minItems", "maxItems", "uniqueItems", "properties", "required",
+             "additionalProperties", "minProperties", "maxProperties", "propertyNames", "$defs"}
+ANNOTATIONS = {"$schema", "$id", "title", "description", "format"}
+
+
+def unknown_keywords(doc, where):
+    """The keywords doc uses that are neither validated nor an annotation, as "<where>: <keyword>"."""
+    unknown = set()
+
+    def walk(node, where):
+        if isinstance(node, list):
+            for item in node:
+                walk(item, where)
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key in ("properties", "$defs"):  # names, not keywords
+                for name, sub in value.items():
+                    walk(sub, f"{where}/{name}")
+                continue
+            if key.startswith("x-"):  # an annotation: what it holds is not keywords (x-methods' names)
+                continue
+            if key not in VALIDATED and key not in ANNOTATIONS:
+                unknown.add(f"{where}: {key}")
+            walk(value, where)
+
+    walk(doc, where)
+    return unknown
+
+
 class Validator:
     def __init__(self, files):
         self.files = files
@@ -177,31 +209,9 @@ class ExtensionSchemaTests(unittest.TestCase):
     def test_schema_keywords_are_known(self):
         # A keyword neither validator knows is silently ignored (maxProperties and uniqueItems were, #4012): every
         # keyword the schemas use is one both validate, or an annotation (description, title, format, x-*).
-        validated = {"$ref", "oneOf", "allOf", "anyOf", "not", "type", "const", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum",
-                     "items", "minItems", "maxItems", "uniqueItems", "properties", "required", "additionalProperties",
-                     "minProperties", "maxProperties", "propertyNames", "$defs"}
-        annotations = {"$schema", "$id", "title", "description", "format"}
         unknown = set()
-
-        def walk(node, where):
-            if isinstance(node, list):
-                for item in node:
-                    walk(item, where)
-            if not isinstance(node, dict):
-                return
-            for key, value in node.items():
-                if key in ("properties", "$defs"):  # names, not keywords
-                    for name, sub in value.items():
-                        walk(sub, f"{where}/{name}")
-                    continue
-                if key.startswith("x-"):  # an annotation: what it holds is not keywords (x-methods' names)
-                    continue
-                if key not in validated and key not in annotations:
-                    unknown.add(f"{where}: {key}")
-                walk(value, where)
-
         for name, doc in load_schemas().items():
-            walk(doc, name)
+            unknown |= unknown_keywords(doc, name)
         self.assertEqual(sorted(unknown), [])
 
     def test_max_properties_and_unique_items(self):

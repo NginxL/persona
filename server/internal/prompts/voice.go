@@ -102,7 +102,8 @@ type VoiceReport struct {
 	Reason     string // failed: why there is no answer
 	// Failure is what sort of model error the turn ended on, said instead of its text (voice/failure): not_logged_in,
 	// auth_failed, model_route, rate_limited (proto.Session.TurnErrorCode), transient (the model service failed for a
-	// moment, and nobody went on), retried (it failed again after a "Continue"), error (another). failed: the turn has no
+	// moment, and nobody went on), retried (it failed again after a "Continue"), no_output (the model service answered
+	// nothing: the hub's proto.TurnErrorNoOutput, #10187), error (another). failed: the turn has no
 	// answer; done: Answer is what it wrote before that.
 	Failure string
 	// Observed: the turn was not handed over by voice: the bound conversation began it otherwise (typed on the phone or

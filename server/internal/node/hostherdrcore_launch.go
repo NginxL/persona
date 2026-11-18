@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,23 @@ const herdrSeenLabel = "herdr.seen"
 
 // hcAppTerminalEnv is the terminal identity the Herdr app gives the shells it opens (its viewer is Ghostty's).
 var hcAppTerminalEnv = map[string]string{"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "ghostty"}
+
+// shellEnv is what a new terminal's shell gets: hcAppTerminalEnv, with env ("KEY=VALUE", what a start's tab is opened
+// with: host.EnvLauncher) added. terminal.run takes env on every herdr-core, so nothing is probed; the app's own
+// variables are never replaced.
+func shellEnv(env []string) map[string]string {
+	if len(env) == 0 {
+		return hcAppTerminalEnv
+	}
+	out := map[string]string{}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			out[k] = v
+		}
+	}
+	maps.Copy(out, hcAppTerminalEnv)
+	return out
+}
 
 // layoutTries bounds one change of the layout document: each conflict (the app wrote it meanwhile) reads it again.
 const layoutTries = 4
@@ -181,17 +199,28 @@ func (h *herdrCoreHost) editLayout(ctx context.Context, change func(*appLayout) 
 }
 
 func (h *herdrCoreHost) CreateSpace(ctx context.Context, cwd, label string) (*host.Created, error) {
-	return h.createTerminal(ctx, "", cwd, label, "")
+	return h.CreateSpaceEnv(ctx, cwd, label, nil)
 }
 
 func (h *herdrCoreHost) CreateSlot(ctx context.Context, space, cwd, label string) (*host.Created, error) {
-	return h.createTerminal(ctx, space, cwd, "", label)
+	return h.CreateSlotEnv(ctx, space, cwd, label, nil)
+}
+
+// CreateSpaceEnv is CreateSpace whose shell starts with env added (host.EnvLauncher: terminal.run's env, shellEnv).
+func (h *herdrCoreHost) CreateSpaceEnv(ctx context.Context, cwd, label string, env []string) (*host.Created, error) {
+	return h.createTerminal(ctx, "", cwd, label, "", env)
+}
+
+// CreateSlotEnv is CreateSlot whose shell starts with env added (host.EnvLauncher: terminal.run's env, shellEnv).
+func (h *herdrCoreHost) CreateSlotEnv(ctx context.Context, space, cwd, label string, env []string) (*host.Created, error) {
+	return h.createTerminal(ctx, space, cwd, "", label, env)
 }
 
 // createTerminal opens a shell in cwd as a new tab named tabName of the app's space. An automatic or directory-group
 // start reuses the space for cwd, else adds one named spaceName unless that is its folder's name. Nothing is typed. A
-// terminal the layout document did not take is ended, not left running where the app does not show it.
-func (h *herdrCoreHost) createTerminal(ctx context.Context, space, cwd, spaceName, tabName string) (*host.Created, error) {
+// terminal the layout document did not take is ended, not left running where the app does not show it. The shell
+// starts with env added (shellEnv).
+func (h *herdrCoreHost) createTerminal(ctx context.Context, space, cwd, spaceName, tabName string, env []string) (*host.Created, error) {
 	inSpace := space != "" && !strings.HasPrefix(space, dirSpace)
 	raw, _, err := h.c.DocRaw(ctx, herdrAppDoc)
 	if err != nil {
@@ -202,7 +231,7 @@ func (h *herdrCoreHost) createTerminal(ctx context.Context, space, cwd, spaceNam
 		if inSpace {
 			return nil, host.Mark(fmt.Errorf("herdr-core: cannot resolve app space %s: %w", space, err), host.ErrNotDelivered)
 		}
-		return h.createUnplaced(ctx, cwd)
+		return h.createUnplaced(ctx, cwd, env)
 	}
 	if spaceName == filepath.Base(cwd) {
 		spaceName = ""
@@ -233,7 +262,7 @@ func (h *herdrCoreHost) createTerminal(ctx context.Context, space, cwd, spaceNam
 		herdrSpaceLabel: spaceID, herdrTabLabel: tabID, herdrSeenLabel: "0",
 		herdrWhereLabel: where(s),
 	}
-	t, err := h.openShell(ctx, cwd, labels)
+	t, err := h.openShell(ctx, cwd, labels, env)
 	if err != nil {
 		return nil, hcErr(err)
 	}
@@ -261,8 +290,8 @@ func (h *herdrCoreHost) createTerminal(ctx context.Context, space, cwd, spaceNam
 }
 
 // createUnplaced opens the shell outside the app's layout, in the directory group of an `hc run` terminal.
-func (h *herdrCoreHost) createUnplaced(ctx context.Context, cwd string) (*host.Created, error) {
-	t, err := h.openShell(ctx, cwd, nil)
+func (h *herdrCoreHost) createUnplaced(ctx context.Context, cwd string, env []string) (*host.Created, error) {
+	t, err := h.openShell(ctx, cwd, nil, env)
 	if err != nil {
 		return nil, hcErr(err)
 	}
@@ -270,9 +299,10 @@ func (h *herdrCoreHost) createUnplaced(ctx context.Context, cwd string) (*host.C
 }
 
 // openShell records the core's actual shell, which can differ from the node's login shell. An unknown program
-// cannot safely select command syntax, even if a later terminal.get happens to show a shell in front.
-func (h *herdrCoreHost) openShell(ctx context.Context, cwd string, labels map[string]string) (*herdrcore.Terminal, error) {
-	t, err := h.c.Run(ctx, herdrcore.RunOpts{Cwd: cwd, Env: hcAppTerminalEnv, Keep: true, NoParent: true, Labels: labels})
+// cannot safely select command syntax, even if a later terminal.get happens to show a shell in front. The shell gets
+// the app's terminal identity and env (for a start's tab, startShellEnv: shellEnv).
+func (h *herdrCoreHost) openShell(ctx context.Context, cwd string, labels map[string]string, env []string) (*herdrcore.Terminal, error) {
+	t, err := h.c.Run(ctx, herdrcore.RunOpts{Cwd: cwd, Env: shellEnv(env), Keep: true, NoParent: true, Labels: labels})
 	if err != nil {
 		return nil, hcErr(err)
 	}

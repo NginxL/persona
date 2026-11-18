@@ -53,10 +53,12 @@ cat > "$TMP/relay.json" <<JSON
 {"listen": "127.0.0.1:$RELAY_PORT", "apns": {"key_id": "TESTKEY", "team_id": "TESTTEAM", "key_path": "$TMP/key.p8"},
  "topics": ["$BUNDLE"], "secret_path": "$TMP/relay.secret", "apns_base": "http://127.0.0.1:$APNS_PORT"}
 JSON
-# -mod=readonly: a GOFLAGS=-mod=mod in the environment must not rewrite go.mod here.
-export GOFLAGS=-mod=readonly
+# The caller's GOFLAGS with -trimpath, so checkouts share compiled packages (#10614). -mod=readonly goes on each go
+# command line, which overrides GOFLAGS: a -mod=mod there must not rewrite go.mod here.
+GOFLAGS=$(sh scripts/test/go_trimpath.sh)
+export GOFLAGS
 # Built as the release is (server/build-tags.txt).
-(cd server && go build -tags "$(cat build-tags.txt)" -o "$TMP/personad" ./cmd/personad)
+(cd server && go build -mod=readonly -tags "$(cat build-tags.txt)" -o "$TMP/personad" ./cmd/personad)
 "$TMP/personad" relay "$TMP/relay.json" > "$OUT/relay.log" 2>&1 & pids+=($!)
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$RELAY_PORT/relay/v1/health" >/dev/null && break; sleep 0.1; done
 curl -fs "http://127.0.0.1:$RELAY_PORT/relay/v1/health" >/dev/null || { say "FAIL: relay did not start"; cat "$OUT/relay.log"; exit 1; }
@@ -68,7 +70,7 @@ GRANT=$(curl -fs "http://127.0.0.1:$RELAY_PORT/relay/v1/register" -H 'Content-Ty
 # 5. The hub's code seals and pushes (an interaction, then a finished turn).
 for kind in interaction done; do
   (cd server && PERSONA_RELAY_URL="http://127.0.0.1:$RELAY_PORT/relay" PERSONA_RELAY_GRANT="$GRANT" PERSONA_PUSH_KEY="$PUSH_KEY" \
-    PERSONA_RELAY_KIND=$kind go test ./internal/hub/ -run TestManualRelayPush -count=1 >"$OUT/hub-$kind.log" 2>&1) \
+    PERSONA_RELAY_KIND=$kind go test -mod=readonly ./internal/hub/ -run TestManualRelayPush -count=1 >"$OUT/hub-$kind.log" 2>&1) \
     || { say "FAIL: hub push ($kind)"; cat "$OUT/hub-$kind.log"; exit 1; }
 done
 [ -s "$OUT/apns-2.json" ] || { say "FAIL: fake APNs got nothing"; exit 1; }

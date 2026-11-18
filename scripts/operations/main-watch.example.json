@@ -1,0 +1,18 @@
+{
+  "repository": "owner/repository",
+  "checkout": "/absolute/path/to/trusted-checkout",
+  "base": "main",
+  "verify": {
+    "profile": "persona",
+    "timeout_seconds": 3600,
+    "extra_lanes": []
+  },
+  "repair": {
+    "command": "claude",
+    "timeout_seconds": 3600
+  },
+  "publish": false,
+  "machine_id": "maintainer-machine",
+  "poll_seconds": 60,
+  "state": "/absolute/path/to/private-main-watch-state/state.json"
+}

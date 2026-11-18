@@ -328,3 +328,33 @@ func TestTranslateMailUnknownAccount(t *testing.T) {
 		t.Fatalf("other failure: %d %v", status, body)
 	}
 }
+
+func TestGoldenTranslationLanguage(t *testing.T) {
+	for _, locale := range []string{"en", "zh-Hans", "ja"} {
+		t.Run(locale, func(t *testing.T) {
+			h := newInboxHub(t)
+			h.f.hello.Locale = locale
+			model, calls := captureModel(t, `{"texts":["Bonjour"],"subject":"Avis","text":"Le 5 juin."}`)
+			h.in.mu.Lock()
+			h.in.models[purposeTranslate] = model
+			h.in.mail = &fakeMail{bodies: map[uint32]assistantwire.InboxMailMessage{7: {Subject: "Notice <X>", Text: "June 5."}}}
+			h.in.mu.Unlock()
+			ctx := context.Background()
+			texts, err := h.translateTexts(ctx, []string{"Hello <X>"}, "fr")
+			if err != nil || len(texts) != 1 || texts[0] != "Bonjour" {
+				t.Fatalf("batch: %q, %v", texts, err)
+			}
+			ref := assistantwire.InboxMailRef{AccountID: "acc1", UID: 7, Mailbox: "INBOX"}
+			mail, err := h.translateMail(ctx, ref, "fr")
+			if err != nil || mail.Subject != "Avis" || mail.Text != "Le 5 juin." {
+				t.Fatalf("mail: %+v, %v", mail, err)
+			}
+			got := calls()
+			if len(got) != 2 {
+				t.Fatalf("model calls: %d", len(got))
+			}
+			goldenCall(t, "translate_texts."+locale, got[0])
+			goldenCall(t, "translate_mail."+locale, got[1])
+		})
+	}
+}
