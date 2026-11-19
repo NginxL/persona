@@ -246,6 +246,9 @@ func (n *Node) claudeAssistantMCPAndToolsFor(id, cwd string, legacyMCP bool, too
 	var allow, deny []string
 	builtins := assistantBuiltinTools
 	if toolSet == "" {
+		if n.assistantOrigin(id) == originInbox {
+			builtins = assistantInboxBuiltinTools
+		}
 		var extra map[string]any
 		extra, allow, deny = assistantMCPServers(n.assistantLark(context.Background()).MCPServers)
 		for name, s := range extra {

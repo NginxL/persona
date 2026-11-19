@@ -389,6 +389,8 @@ Agent SDK; what older data, clients and nodes get:
   older node starts the CLI. A conversation an older node ran on the Agent SDK continues on the CLI with `--resume`, keeping its
   id and history (`docs/protocol/rolling-upgrade-compatibility.md`, "Assistant conversations on the CLI only (#9799)").
 
+For an ordinary assistant chat that retains its running model, the next turn uses the model ID recorded when the node started its process, not the name echoed by the gateway in the transcript. A gateway may rewrite that display name without changing the requested model. An explicit launcher default stays the default. Older nodes without this metadata retain the previous transcript-based behavior. If the recorded model really disappears from a readable launcher list, the existing localized launcher notice explains that the message uses its default model. Conversation picks and chats that follow Model Settings keep their existing precedence.
+
 A binding without a model means the launcher's default, on a resume too (#2487). Claude Code resumes a session on the model it last ran on unless `--model` or a model variable (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL`) names one; a `model` in its settings does not. So when node resumes a conversation the hub resolved with no model, it passes what a new session of that launcher would use: the `model` from Claude Code's settings, else `default`. It passes nothing when the launcher names a model itself or when its start cannot be seen (a managed launcher, a wrapper script); see `node/assistant_resume_model.go`.
 
 ## Main chat's profile for new conversations (#4633)

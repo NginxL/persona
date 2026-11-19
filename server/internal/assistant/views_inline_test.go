@@ -273,6 +273,7 @@ func TestInlineTurnRegistersWhenStoppedAssistantRevAdvances(t *testing.T) {
 		f.mu.Unlock()
 
 		ctx := context.Background()
+		f.setSessions("mac") // the node's transcript reads go through the hub
 		machine, ok := s.fleetMachine("mac")
 		if !ok {
 			t.Fatal("missing fleet machine mac")

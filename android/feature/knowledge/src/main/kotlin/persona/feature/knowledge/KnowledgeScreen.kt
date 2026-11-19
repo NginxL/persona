@@ -47,6 +47,7 @@ import com.mikepenz.markdown.model.State as MarkdownState
 import com.mikepenz.markdown.model.parseMarkdown
 import com.mikepenz.markdown.compose.components.CurrentComponentsBridge
 import persona.core.contracts.AgentState
+import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.navigation.AppTab
@@ -55,6 +56,7 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
@@ -62,6 +64,7 @@ import java.time.OffsetDateTime
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 
 /** Timeline lines shown before "Show all", related entries of one kind before "All" (as iOS and the old app). */
 private const val LOG_SHOWN = 6
@@ -267,6 +270,15 @@ internal fun KnowledgeDetailScreen(
     val sending by model.sending.collectAsStateWithLifecycle()
     val tagging by model.tagging.collectAsStateWithLifecycle()
     val minutesWork by model.minutesWork.collectAsStateWithLifecycle()
+    val meetingWork by model.meetingHandoffWork.collectAsStateWithLifecycle()
+    val handoffSheet by model.meetingHandoffSheet.collectAsStateWithLifecycle()
+    val sessionFlow = remember(model) { model.sessions?.sessions ?: flowOf(emptyList<Session>()) }
+    val machineFlow = remember(model) { model.sessions?.machines ?: flowOf(emptyList<Machine>()) }
+    val sessionRows by sessionFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val machineRows by machineFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val meetingTargets = remember(sessionRows, machineRows, model.namespace) {
+        meetingHandoffTargets(sessionRows, machineRows, model.namespace)
+    }
     val listState = rememberLazyListState()
     val scrolls = rememberCoroutineScope()
     var allLog by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
@@ -313,6 +325,10 @@ internal fun KnowledgeDetailScreen(
     val copyText = rememberCopy()
     val detail = page.detail
     val entry = detail?.entry()
+    val canHand = detail?.let { meetingHandoffEligible(it, meetingTargets) } == true
+    val latestHandoff = newerMeetingHandoff(meetingWork.made, latestMeetingHandoff(detail?.meta, model.namespace))
+    val handoffOpen = handoffSheet != null
+    fun showHandoff(again: MeetingHandoff?) { model.showMeetingHandoff(again) }
     val kindName = KnowledgeKind.fromWire(detail?.kind.orEmpty())?.label().orEmpty()
     fun startAgent(detail: KnowledgeDetail) {
         val start = agentStart(detail, kindName)
@@ -326,6 +342,7 @@ internal fun KnowledgeDetailScreen(
         JListPage(entry?.name ?: stringResource(R.string.knowledge_detail_title), onBack = navigator::back,
             refreshing = page.loading && detail != null, onRefresh = model::refresh, state = listState,
             actions = {
+                if (canHand) JIconButton(PersonaIcons.handToAI, stringResource(R.string.knowledge_handoff_title), { showHandoff(null) })
                 JIconButton(PhIcons.Hash, stringResource(R.string.knowledge_tag_action), { model.dismissTagError(); editing = true }, enabled = detail != null)
                 JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.knowledge_refresh_detail), model::refresh, enabled = !page.loading)
             }) {
@@ -355,6 +372,13 @@ internal fun KnowledgeDetailScreen(
                             }
                             sending.message?.let { JNotice(stringResource(it)) }
                             linkMessage?.let { JNotice(it) }
+                        }
+                    }
+                    latestHandoff?.let { handoff ->
+                        item("meeting-handoff", contentType = "meeting-handoff") {
+                            MeetingHandoffRow(handoff, navigator,
+                                modifier = if (handoffOpen) Modifier.clearAndSetSemantics {} else Modifier,
+                                onRetry = if (canHand) { { showHandoff(handoff) } } else null)
                         }
                     }
                     agents(page.agents, navigator)
@@ -429,6 +453,11 @@ internal fun KnowledgeDetailScreen(
         PointSheet(point, crumbs, detail?.links.orEmpty(), { source -> openPoint = null; navigator.open(source, model.owner) }, { openPoint = null })
     }
     if (editing && entry != null) KnowledgeTagEditor(entry, tagging, onSave = model::saveTags, onDismiss = { editing = false })
+    if (handoffOpen && detail != null && meetingTargets.isNotEmpty()) {
+        MeetingHandoffSheet(meetingTargets, machineRows, meetingHandoffTranscriptOffered(detail), handoffSheet?.again, meetingWork,
+            onSend = model::handOff,
+            onDismiss = model::dismissMeetingHandoff)
+    }
 }
 
 /** "Agents on this project": the hub's live sessions in the project's code directories; a tap opens the conversation. */

@@ -381,8 +381,10 @@ func TestCurrentNumberedArtifactKeepsOfflineDeploymentProof(t *testing.T) {
 			if _, err := acceptReview(s, todo.ID, nil); err != nil {
 				t.Fatalf("an already-recorded delivery lost its local deployment proof: %v", err)
 			}
-			if got := todoNow(s, todo.ID); got.DoneAt == nil || forge.calls != 0 {
-				t.Fatalf("local delivery was not accepted without forge access: done=%v, calls=%d", got.DoneAt, forge.calls)
+			// Upstream is asked for the merge state (#10799) and fails; the running build's receipt still proves the
+			// deployment, so the review is accepted all the same.
+			if got := todoNow(s, todo.ID); got.DoneAt == nil || forge.calls != 1 {
+				t.Fatalf("local delivery was not accepted while the forge failed: done=%v, calls=%d", got.DoneAt, forge.calls)
 			}
 		})
 	}

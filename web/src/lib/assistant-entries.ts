@@ -2,7 +2,7 @@ import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./backg
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
 import { decisionDismissed, reviewState } from "./supervision";
-import { supersededFailedStarts, triage } from "./todo-triage";
+import { finishedAt, JUST_DONE_MS, supersededFailedStarts, triage } from "./todo-triage";
 import { awaitsReview, dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
@@ -11,7 +11,8 @@ import type { Interaction, Session } from "./types";
 /**
  * The Assistant's entries above the composer (docs/assistant/unified-entry.md "Needs you and In progress"):
  * Needs you lists the user's turn, In progress the active work, and Parked the external waits, including ready PRs.
- * Each thing has one home and one count; finished things are on the board, not counted in these entries. A
+ * Each thing has one home and one count. Finished things are not open work: the handed-out ones that finished in the
+ * last 24 hours are under Finished (`finished`, #10922), everything else on the board. A
  * task waiting for its supervisor's review is in neither: the web lists it under Persona reviewing (`review`, #8678),
  * however long it has waited. A task is one row whatever its agents: they are not listed on their own. In the main
  * conversation an Agent that belongs to no task (opened by hand) is a row of its own.
@@ -34,6 +35,11 @@ export type RunningItem =
   /** A working Agent that belongs to no task. */
   | { kind: "agent"; key: string; session: Session; activity?: BackgroundWork };
 
+/** A task the conversation handed out that finished in the last 24 hours (Finished, #10922). `fresh`: the owner has not
+ *  opened it since it finished (the To-dos page's Just finished), so it is drawn as new; seeing it changes only that.
+ *  `at`: when it finished (ms, `finishedAt`). */
+export interface FinishedItem { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; fresh: boolean; at: number }
+
 export interface AssistantEntries {
   needsYou: NeedsYouItem[];
   running: RunningItem[];
@@ -46,10 +52,11 @@ export interface AssistantEntries {
    *  the review has waited (web only, #8678): Persona's to do, not the owner's, so outside Needs you; still open tasks,
    *  counted like the other entries. An asking agent, an open `ask` or `needs_user` makes such a task Needs you instead. */
   review: RunningItem[];
-  /** Handed-out tasks that finished in the last 24 hours and that the owner has not opened since (the To-dos page's Just
-   *  finished, todo-triage), newest first: a group under In progress, not counted (#8237). How a task ended is told
-   *  here, not by a card in the chat. */
-  justFinished: RunningItem[];
+  /** Handed-out tasks that finished in the last 24 hours (JUST_DONE_MS, the To-dos page's Just finished window), seen or
+   *  not, newest finished first: the Finished entry (#10922). How a task ended is told here, not by a card in the chat
+   *  (#8237). Not open work: its count is its rows, and opening one marks it seen without taking it out. Until #10922
+   *  only the unseen ones were listed, as a group under In progress that went as soon as one was opened. */
+  finished: FinishedItem[];
 }
 
 export interface AssistantEntriesInput {
@@ -142,7 +149,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const shelved: { item: RunningItem; at: string }[] = [];
   const parked: { item: RunningItem; at: string }[] = [];
   const review: { item: RunningItem; rank: number; at: string }[] = [];
-  const finished: { item: RunningItem; at: number }[] = [];
+  const finished: FinishedItem[] = [];
   const folded = new Set<string>();
   const slots = taskCardSlots(conversation, input.cards ?? [], feed, plans, todos, isMain);
   const activeAgents = (todo: Todo) => (todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at));
@@ -195,9 +202,13 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     else if (bucket === "open" || reviewState(todo) === "pending_review") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
     else {
-      // finished work a conversation handed out (a failed start a related to-do finished is history, not news)
+      // finished work a conversation handed out, for a day after it finished, seen or not (#10922); a failed start a
+      // related to-do finished is history, not news
       const tr = triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
-      if (tr.section === "just_done" && status !== "failed" && todo.origin) finished.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: tr.last });
+      const ended = finishedAt(todo, tr);
+      if ((tr.section === "just_done" || tr.section === "done") && status !== "failed" && todo.origin && ended > 0 && now - ended < JUST_DONE_MS) {
+        finished.push({ kind: "task", key, card, todo, status, fresh: tr.section === "just_done", at: ended });
+      }
       continue;
     }
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
@@ -232,7 +243,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     shelved: shelved.sort(newest).map((row) => row.item),
     parked: parked.sort(newest).map((row) => row.item),
     review: review.sort(newest).map((row) => row.item),
-    justFinished: finished.sort((a, b) => b.at - a.at).map((row) => row.item),
+    // newest finished first; the same moment by id, so every client lists them in one order
+    finished: finished.sort((a, b) => b.at - a.at || (a.todo.id < b.todo.id ? -1 : a.todo.id > b.todo.id ? 1 : 0)),
   };
 }
 

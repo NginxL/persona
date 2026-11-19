@@ -68,7 +68,7 @@ fun mapOperationFailure(
         "node_unreachable" -> result(FailureReason.ComputerOffline, FailureAction.WakeComputer)
         "claude_missing" -> result(FailureReason.ClaudeMissing, FailureAction.InstallClaude)
         "launcher_missing" -> result(FailureReason.LauncherMissing, FailureAction.ConnectModel)
-        "not_logged_in" -> result(FailureReason.NotLoggedIn, FailureAction.LoginClaude)
+        "not_logged_in" -> result(FailureReason.NotLoggedIn, FailureAction.ConnectModel)
         "auth_failed" -> result(FailureReason.AuthFailed, FailureAction.EditProvider)
         "launcher_out_of_scope", "launcher_own_service" -> result(FailureReason.ProviderOutOfScope, FailureAction.EditProvider)
         // The assistant's process restarting: it comes back by itself in a few seconds.

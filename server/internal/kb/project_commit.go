@@ -36,7 +36,11 @@ func (e *Engine) commitProject(snapshot *Project, input prompts.KBProjectInput, 
 	}
 	before, _ := json.Marshal(current)
 	frozen, _ := json.Marshal(snapshot)
-	if !bytes.Equal(before, frozen) || prompts.RenderKBProjectInput(e.projectInput(current)) != prompts.RenderKBProjectInput(input) {
+	// Compare source snapshots in the same instruction language. A preference change
+	// while the model works is not a change to the source data it read.
+	currentInput := e.projectInput(current)
+	currentInput.Language = input.Language
+	if !bytes.Equal(before, frozen) || prompts.RenderKBProjectInput(currentInput) != prompts.RenderKBProjectInput(input) {
 		return nil
 	}
 	if !current.fieldLocked("one_line") {

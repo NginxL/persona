@@ -1,0 +1,12 @@
+# A development build of the iPhone app without the watch app and the share extension (#10713): they are about
+# 109K lines of Swift more per simulator build, Shared/ compiled for watchOS too. Merged into project.yml by its
+# `include:` (enable: ${PERSONA_LEAN_DEV_BUILD}), which scripts/app/sim.sh sets to YES unless it is given --with-watch;
+# nothing else sets it, and CI, release and the UI tests clear it, so they build and embed both
+# (docs/operations/testing.md "Development builds"). The iPhone app needs neither to build or run: WatchConnectivity
+# then finds no watch app, and Share › Persona is not offered.
+# A later include's `:REPLACE` key replaces what the includes before it merged, so this empties the dependencies
+# watch-and-share.yml added; project.yml's own dependencies merge after every include and stay. Keep it right after
+# watch-and-share.yml, before any include that adds a dependency of its own (siri-calls.yml, meta-wearables.yml).
+targets:
+  Persona:
+    dependencies:REPLACE: []

@@ -55,8 +55,9 @@ type TodoRow struct {
 	InboxItem string `json:"inbox_item"`
 	// PartOf is the to-do whose request this one is a piece of, "" for none; After the pieces of that request it waits
 	// for, never nil (docs/assistant/todos.md "Requests in pieces"). The manager checks them before they are written.
-	PartOf string   `json:"part_of"`
-	After  []string `json:"after"`
+	PartOf               string   `json:"part_of"`
+	After                []string `json:"after"`
+	RequireAcceptedAfter bool     `json:"require_accepted_after"`
 	// RestoredAt is when the owner last brought it back from Inactive (#10226): activity for its status only, never an
 	// edit (updated_at stays). Nil when never. Only RestoreTodo writes it.
 	RestoredAt *time.Time `json:"restored_at"`
@@ -120,13 +121,13 @@ type TodoAgentRow struct {
 }
 
 const todoColumns = `id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by, done_reason, reopened_at, quiet,
-	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item, part_of, after_ids, restored_at, someday_until`
+	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item, part_of, after_ids, restored_at, someday_until, require_accepted_after`
 
 // todoDest is where a row of todoColumns is scanned to.
 func todoDest(r *TodoRow) []any {
 	return []any{&r.ID, &r.Title, &r.Notes, &r.DoneAt, &r.CreatedAt, &r.UpdatedAt, &r.Origin, &r.PlanID, &r.StartError, &r.DoneBy,
 		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind,
-		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After, &r.RestoredAt, &r.SomedayUntil}
+		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After, &r.RestoredAt, &r.SomedayUntil, &r.RequireAcceptedAfter}
 }
 
 // ListTodos returns all todos ordered by created_at DESC.
@@ -211,10 +212,10 @@ func createTodo(ctx context.Context, executor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, t TodoRow) error {
 	_, err := executor.Exec(ctx, `INSERT INTO todos (id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by,
-		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind, inbox_item, part_of, after_ids)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind, inbox_item, part_of, after_ids, require_accepted_after)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
 		t.ID, t.Title, t.Notes, t.DoneAt, t.CreatedAt, t.UpdatedAt, t.Origin, t.PlanID, t.StartError, t.DoneBy, t.DoneReason, t.ReopenedAt, t.Quiet,
-		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem, t.PartOf, nonNilIDs(t.After))
+		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem, t.PartOf, nonNilIDs(t.After), t.RequireAcceptedAfter)
 	return err
 }
 
@@ -242,8 +243,9 @@ type TodoEdit struct {
 	Origin *string
 	// PartOf and After: the request it is a piece of ("" none) and the pieces it waits for (empty none); the caller has
 	// checked them (assistant/todo_pieces.go).
-	PartOf *string
-	After  *[]string
+	PartOf               *string
+	After                *[]string
+	RequireAcceptedAfter *bool
 }
 
 // Apply makes the edit to cur at the moment at: done stamps done_at (once), not done reopens it (reopened_at, no
@@ -298,6 +300,9 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	if e.After != nil {
 		cur.After = nonNilIDs(*e.After)
 	}
+	if e.RequireAcceptedAfter != nil {
+		cur.RequireAcceptedAfter = *e.RequireAcceptedAfter
+	}
 	cur.UpdatedAt = at
 }
 
@@ -340,10 +345,10 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		_, err = tx.Exec(ctx, `UPDATE todos SET title = $2, notes = $3, done_at = $4, updated_at = $5, start_error = $6,
 			done_by = $7, done_reason = $8, reopened_at = $9, due_at = $10, due_date = $11, remind_at = $12, reminded_at = $13,
 			priority = $14, project = $15, origin = $16, part_of = $17, after_ids = $18, inbox_item = $19,
-			someday_until = $20 WHERE id = $1`,
+			someday_until = $20, require_accepted_after = $21 WHERE id = $1`,
 			cur.ID, cur.Title, cur.Notes, cur.DoneAt, cur.UpdatedAt, cur.StartError, cur.DoneBy, cur.DoneReason, cur.ReopenedAt,
 			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin, cur.PartOf, nonNilIDs(cur.After), cur.InboxItem,
-			cur.SomedayUntil)
+			cur.SomedayUntil, cur.RequireAcceptedAfter)
 		if err != nil {
 			return err
 		}
@@ -498,14 +503,34 @@ func (d *DB) AutoDoneTodo(ctx context.Context, id, reason string, at, workSince 
 
 // DeleteTodo deletes a todo by id. Cascading deletes remove its todo_agents.
 func (d *DB) DeleteTodo(ctx context.Context, id string) error {
-	tag, err := d.pool.Exec(ctx, `DELETE FROM todos WHERE id = $1`, id)
+	var deleted bool
+	err := d.pool.QueryRow(ctx, `WITH removed AS (DELETE FROM todos WHERE id = $1 RETURNING id, require_accepted_after),
+		remembered AS (INSERT INTO deleted_request_gates (id) SELECT id FROM removed WHERE require_accepted_after ON CONFLICT DO NOTHING)
+		SELECT EXISTS (SELECT 1 FROM removed)`, id).Scan(&deleted)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if !deleted {
 		return ErrTodoNotFound
 	}
 	return nil
+}
+
+func (d *DB) DeletedRequestGates(ctx context.Context) (map[string]bool, error) {
+	rows, err := d.pool.Query(ctx, `SELECT id FROM deleted_request_gates`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	gates := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		gates[id] = true
+	}
+	return gates, rows.Err()
 }
 
 // LinkTodoSpace links a project space to a todo.

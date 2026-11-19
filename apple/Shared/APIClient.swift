@@ -337,7 +337,8 @@ nonisolated struct APIClient: Sendable {
 
     func request(_ method: String, _ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], body: (any Encodable)? = nil,
                  timeout: TimeInterval = 30, opID: UUID? = nil, extraHeaders: [String: String] = [:]) async throws -> Data {
-        func send() async throws -> Data {
+        // Keep the non-Sendable Encodable body in this request's task instead of sending it to a concurrent local function.
+        nonisolated(nonsending) func send() async throws -> Data {
             try await sendRequest(method, path, query: query, repeated: repeated, body: body, timeout: timeout, opID: opID, extraHeaders: extraHeaders)
         }
         do {
@@ -1401,6 +1402,18 @@ nonisolated struct APIClient: Sendable {
     /// Changes a session's permission mode, effort level and / or model (nil leaves it); a TUI agent takes a second or two.
     func setModes(_ k: SessionKey, permissionMode: String? = nil, effort: String? = nil, model: String? = nil) async throws {
         try await post(sp(k) + "/modes", body: ModesBody(permissionMode: permissionMode, effort: effort, model: model), timeout: 30)
+    }
+
+    private struct ServiceTierBody: Encodable {
+        var tier: String
+        enum CodingKeys: String, CodingKey { case tier = "service_tier" }
+    }
+
+    /// POST …/modes {"service_tier": tier}, always alone (docs/protocol/protocol.md "Codex speed settings"). The hub
+    /// acknowledges the native value through the session; an HTTP success does not make `tier` the value to draw.
+    func setServiceTier(_ k: SessionKey, tier: String) async throws {
+        // The hub's native speed call may take 90 seconds; leave it five seconds to answer for itself, as the web does.
+        try await post(sp(k) + "/modes", body: ServiceTierBody(tier: tier), timeout: 95)
     }
 
     /// POST …/modes {"ultracode": on} (docs/protocol/protocol.md "Claude Code ultracode"): its own request, never with

@@ -132,5 +132,5 @@
   "paseo_ui_state_blocked": "ブロック中",
   "paseo_ui_state_skipped": "スキップ",
   "paseo_ui_reply_with": "次のいずれかで返信できます：",
-  "omp_stopped": "この omp セッションは停止しています。今はコンピューターでのみ続けられます（omp --resume）。ここからはまだメッセージを送れません。"
+  "omp_stopped": "この omp セッションは停止しています。メッセージを送ると、コンピューターの新しいターミナルタブで続きを再開します（omp --resume）。"
 }

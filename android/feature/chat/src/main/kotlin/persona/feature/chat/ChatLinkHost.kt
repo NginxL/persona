@@ -25,6 +25,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -257,8 +261,17 @@ fun ChatLinkHost(
                         onDispose { pool.release(view) }
                     }
                 }
-                fun close() { scope.launch { drag.animateTo(LinkDetent.Hidden) } }
-                fun back() { if (view != null && !view.gone && view.canGoBack()) view.goBack() else close() }
+                fun close() {
+                    view?.exitCustomView()
+                    scope.launch { drag.animateTo(LinkDetent.Hidden) }
+                }
+                fun back() {
+                    when {
+                        view != null && view.exitCustomView() -> Unit
+                        view != null && !view.gone && view.canGoBack() -> view.goBack()
+                        else -> close()
+                    }
+                }
                 BackHandler { back() }
                 val pixels = geometry.pixels
                 val offset = drag.offset.takeIf { it.isFinite() } ?: pixels
@@ -369,6 +382,41 @@ fun ChatLinkHost(
                         onHandToPersona?.invoke(message)
                         handing = null
                         close()
+                    }
+                }
+                val customView = view?.takeUnless { it.gone }?.customView
+                if (view != null && customView != null) {
+                    JFullScreen(onDismiss = { view.exitCustomView() }) {
+                        val dialogView = LocalView.current
+                        SideEffect {
+                            (dialogView.parent as? DialogWindowProvider)?.window?.let { window ->
+                                WindowCompat.getInsetsController(window, dialogView).run {
+                                    isAppearanceLightStatusBars = false
+                                    isAppearanceLightNavigationBars = false
+                                }
+                            }
+                        }
+                        DisposableEffect(dialogView) {
+                            val controller = (dialogView.parent as? DialogWindowProvider)?.window?.let { window ->
+                                WindowCompat.getInsetsController(window, dialogView)
+                            }
+                            controller?.run {
+                                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                                hide(WindowInsetsCompat.Type.systemBars())
+                            }
+                            onDispose {
+                                controller?.show(WindowInsetsCompat.Type.systemBars())
+                            }
+                        }
+                        Box(Modifier.fillMaxSize().background(palette.mediaBackdrop).testTag("chat_link_custom_view")) {
+                            key(customView) {
+                                AndroidView(
+                                    factory = { (customView.parent as? ViewGroup)?.removeView(customView); customView },
+                                    modifier = Modifier.fillMaxSize(),
+                                    onRelease = { (it.parent as? ViewGroup)?.removeView(it) },
+                                )
+                            }
+                        }
                     }
                 }
             }

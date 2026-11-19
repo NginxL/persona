@@ -5,10 +5,15 @@ const directory = process.argv[2]
 const settings = () => JSON.parse(readFileSync(`${directory}/catalog.json`, 'utf8'))
 if (process.argv.includes('models')) {
   const catalog = settings()
+  appendFileSync(`${directory}/models-calls.jsonl`, `${JSON.stringify({ at: Date.now() })}\n`)
+  // An expired sign-in: agy models never answers (#11106).
+  if (catalog.hang) setInterval(() => {}, 1 << 30)
+  else {
   if (catalog.error) { console.error(catalog.error); process.exit(1) }
   console.error('Fetching available models...')
   for (const m of catalog.models) console.log(`${m.modelId}\t${m.name}`)
   process.exit(0)
+  }
 }
 const id = '11111111-2222-3333-4444-555555555555'
 let model = 'gemini-future-medium'

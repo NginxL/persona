@@ -37,6 +37,10 @@ class KnowledgeRouteTest {
             override suspend fun list(kind: KnowledgeKind, tag: String?): KnowledgeList { calls += "list"; return KnowledgeList() }
             override suspend fun detail(kind: KnowledgeKind, id: String): KnowledgeDetail = error("unused")
             override suspend fun search(query: String): List<KnowledgeHit> { calls += "search"; return emptyList() }
+            override suspend fun handOff(id: String, request: MeetingHandoffRequest): MeetingHandoff {
+                calls += "handOff ${request.machineId}"
+                return MeetingHandoff("h1", "2026-11-19T12:00:00Z", request.machineId, request.sessionId, state = "sent")
+            }
         }
         var route = false
         val kept = OnlyWithRoute(inner) { route }
@@ -47,6 +51,11 @@ class KnowledgeRouteTest {
         assertEquals(emptyList<String>(), calls)
         route = true
         kept.list(KnowledgeKind.entries.first())
-        assertEquals(listOf("list"), calls)
+        val request = MeetingHandoffRequest("mac", "site", "Website redesign", "", false)
+        route = false
+        assertTrue(runCatching { kept.handOff("r1", request) }.isFailure)
+        route = true
+        kept.handOff("r1", request)
+        assertEquals(listOf("list", "handOff mac"), calls)
     }
 }

@@ -211,3 +211,25 @@ it.each(["unknown", "omp", "paseo", "desktop", "credential"])("preserves handoff
   expect(starts[0].init.json?.agent_type).toBeUndefined();
   expect(starts[0].init.json).not.toHaveProperty("prompt");
 });
+
+it("blocks button and keyboard starts when every computer goes offline", async () => {
+  vi.useFakeTimers();
+  launchers = [{ name: "claude" }];
+  await open();
+  const launch = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("todos.launch_and_hand"))!;
+  const prompt = document.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(prompt, "Keep this draft");
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await open(() => {}, [{ id: "mac", name: "Mac", online: false }]);
+  await act(async () => launch.click());
+  await act(async () => prompt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  expect(requests.filter((r) => r.path === "/sessions" && r.init.method === "POST")).toHaveLength(0);
+  expect(launch.disabled).toBe(true);
+  expect(prompt.value).toBe("Keep this draft");
+  await open();
+  expect(launch.disabled).toBe(false);
+  expect(prompt.value).toBe("Keep this draft");
+});

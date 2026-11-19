@@ -12,7 +12,7 @@ import { AppMark } from "../ui/AppMark";
 import { Icon } from "../ui/icons";
 import { formatChord, jumpHint, useBindings } from "../lib/shortcuts";
 import { takeFocusHandoff, toggleSidebarColumn } from "../lib/layout";
-import { CURRENT_ROW, DOT_CLASS, morePagesMenu, type NavPage, useActiveKey, useGo, useNavPages } from "./SidebarParts";
+import { CURRENT_ROW, DOT_CLASS, morePagesMenu, pageLabel, type NavPage, useActiveKey, useGo, useNavPages } from "./SidebarParts";
 
 /** The button that folds the sidebar to the rail and opens it again (⌘⌥B by default; the hint follows a rebinding). */
 export function CollapseButton({ collapsed, chord }: { collapsed: boolean; chord?: string }) {
@@ -42,7 +42,7 @@ export function PagesTally({ pages }: { pages: NavPage[] }) {
   const counted = pages.filter((p) => p.badge !== undefined);
   const tones = [...new Set(counted.map((p) => p.badgeTone ?? "accent"))];
   if (!tones.length) return null;
-  const label = counted.map((p) => `${p.label} ${p.badge}`).join(t("sidebar.list_separator"));
+  const label = counted.map(pageLabel).join(t("sidebar.list_separator"));
   return (
     <span title={label} className="flex items-center gap-1">
       <span className="sr-only">{label}</span>
@@ -107,7 +107,7 @@ export function SidebarRail({ route, onSearch, onNewAgent }: { route: Route; onS
         {pages.map((p) => link(
           p.k,
           p.to,
-          p.badge !== undefined ? `${p.label} ${p.badge}` : p.label,
+          pageLabel(p),
           <Icon name={p.icon} size={16} stroke={1.8} />,
           p.badge !== undefined ? <span aria-hidden className={cx("absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-canvas", DOT_CLASS[p.badgeTone ?? "accent"])} /> : null,
           [p.title ?? p.label, p.badge ?? p.hint].filter((x) => x !== undefined).join(" · "),

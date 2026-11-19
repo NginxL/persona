@@ -729,7 +729,7 @@ func (h *Hub) adminLinkSwitchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/admin/machines/{mid}/link-switch", func(w http.ResponseWriter, r *http.Request) {
 		mid := r.PathValue("mid")
 		owner := h.machineOwner(mid)
-		_ = h.waitDevicesFor(r.Context(), owner) // wait for the machine's manager to report during hub startup
+		_ = h.waitDevicesFor(r.Context(), owner) // the hub just started: the manager is on its way (bounded), and its machines
 		if h.localMachine(mid) == nil {
 			writeErr(w, http.StatusNotFound, i18n.Err("devices-api.unknown_machine"))
 			return

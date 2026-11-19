@@ -1067,7 +1067,18 @@ func TestRuntimePageWithCounts(t *testing.T) {
 	if !slices.Contains(h.features(), featureSessionsPageCounts) || slices.Contains(proto.Features, featureSessionsPageCounts) {
 		t.Error("sessions_page_counts must be advertised by the hub")
 	}
-	if !slices.Contains(h.features(), featureAgentsPageCounts) || slices.Contains(proto.Features, featureAgentsPageCounts) {
-		t.Error("agents_page_counts must be advertised by the hub")
+}
+
+func TestRuntimeSummaryKeepsBypassPending(t *testing.T) {
+	body, err := json.Marshal(runtimeSummary(proto.Session{BypassPending: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := fields["bypass_pending"]; !ok || got != true {
+		t.Fatalf("summary lost the queued restart: %s", body)
 	}
 }

@@ -1,11 +1,11 @@
 // One folded execution summary while running or completed; manual expansion reveals its complete trace (#2602): with
-// intermediate narration, cindy's timeline of that narration and an inner summary for each run of work between (#5155).
+// intermediate narration and flat action groups, with one rail and one latest-text slot (#10247).
 import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { childSessionOf, isChildSessionStep } from "../../lib/child-cards";
 import { useSessionLive } from "../../lib/live";
 import { useStore } from "../../lib/store";
 import type { Item } from "../../lib/types";
-import { groupTitle, nestedLineDefault, togglesLiveOverride, workLineOpen, workLineOpens, isAgentStep, isPlanStep, isRowStep, isWorkflowStep, planTodos, workDuration, type AgentStatus, type ToolStep, type WorkGroupNode, type WorkLineStyle, type WorkNode } from "../../lib/work-groups";
+import { actionSummary, groupTitle, nestedLineDefault, togglesLiveOverride, workLineOpen, workLineOpens, isAgentStep, isPlanStep, isRowStep, isWorkflowStep, planTodos, workDuration, type AgentStatus, type ToolStep, type WorkGroupNode, type WorkLineStyle, type WorkNode } from "../../lib/work-groups";
 import type { WorkflowCalls } from "../../lib/workflows";
 import type { Step } from "../../lib/turns";
 import { Collapse, cx, Spinner, useNow } from "../../ui/atoms";
@@ -43,8 +43,10 @@ export interface WorkProps {
   agentStatus: (s: ToolStep) => AgentStatus;
   /** The Workflow calls whose run the hub lists (#3434): those draw the run's card. */
   workflowCalls?: WorkflowCalls;
-  /** Inside an open group: a timeline's inner groups, which open with it (nestedLineDefault). */
+  /** An action group inside the manually opened summary; it shares the outer rail and indentation. */
   nested?: boolean;
+  /** Inline edits belong only to the current action run inside the manually opened trace. */
+  currentRun?: boolean;
   /** Inside an open group: whether its outermost group is live. A call without its result spins while it is, in every
    *  inner group, a finished one too (the run was over, the call may not be); nested groups keep their outer's. */
   rowsLive?: boolean;
@@ -91,16 +93,24 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
   const style = p.lineStyle ?? "agents";
   const turnLive = Boolean(p.turnLive ?? g.live) && g.live && !p.nested;
   const key = `${p.scope}${g.id}`;
-  const [remembered, setRemembered] = useExpanded(key, p.nested ? nestedLineDefault(style) : inOpenedFold(p.scope, g.seq));
+  const [remembered, setRemembered] = useExpanded(key, p.nested ? (!p.rowsLive || g.live) && nestedLineDefault(style) : inOpenedFold(p.scope, g.seq));
   // All conversation styles keep manual run toggles separately, then collapse on completion (#2602).
   const runToggle = togglesLiveOverride(style, turnLive);
   const [liveOverride, setLiveOverride] = useLiveOverride(key, runToggle);
   const setOpen = runToggle ? setLiveOverride : setRemembered;
+  // A run just superseded by narration closes inside the trace the reader opened.
+  const [wasLive, setWasLive] = useState(g.live);
+  if (wasLive !== g.live) {
+    setWasLive(g.live);
+    if (p.nested && p.rowsLive && wasLive) setRemembered(false);
+  }
+  const actions = useMemo(() => actionSummary(g), [g]);
+  const heading = p.nested && actions.text ? actions.text : groupTitle(g);
   const [loading, setLoading] = useState(false);
   const opens = workLineOpens(g, style, turnLive);
   const open = workLineOpen({ style, turnLive, remembered, liveOverride }) && opens;
   const rowsLive = p.nested ? Boolean(p.rowsLive) : g.live;
-  const inside = useMemo(() => ({ ...p, nested: true, rowsLive }), [p, rowsLive]);
+  const inside = useMemo(() => ({ ...p, nested: true, rowsLive, currentRun: g.live }), [p, rowsLive, g.live]);
   const toggle = () => {
     const next = !open;
     setOpen(next);
@@ -153,15 +163,15 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
         onClick={opens ? toggle : undefined}
         disabled={!opens}
         aria-expanded={opens ? open : undefined}
-        title={g.clock ? t(g.clock === "run" ? "chat-workgroup.run_clock" : "chat-workgroup.exchange_clock") : undefined}
+        title={p.nested && actions.text ? actions.text : g.clock ? t(g.clock === "run" ? "chat-workgroup.run_clock" : "chat-workgroup.exchange_clock") : undefined}
         // on a touch screen 40 tall, the margin taking back what it adds, so nothing around it moves
         className={cx("flex w-full min-w-0 items-center gap-1.5 py-[2px] text-left select-none [@media(pointer:coarse)]:-my-[7.5px] [@media(pointer:coarse)]:min-h-10", opens ? "cursor-pointer transition-opacity hover:opacity-80" : "cursor-default")}
       >
-        <span className="inline-flex h-[1lh] shrink-0 items-center text-tool-ink">{g.live ? <Spinner size={14} /> : <Icon name="layers" size={14} />}</span>
-        <span className="min-w-0 translate-y-[1px] truncate text-[length:var(--chat-secondary)] text-tool-ink">{groupTitle(g)}</span>
+        <span className="inline-flex h-[1lh] shrink-0 items-center text-tool-ink">{p.nested ? <Icon name={actions.icon} size={14} /> : g.live ? <Spinner size={14} /> : <Icon name="layers" size={14} />}</span>
+        <span className="min-w-0 translate-y-[1px] truncate text-[length:var(--chat-secondary)] text-tool-ink">{heading}</span>
         <span className="flex-1" />
         {loading && <Spinner size={11} />}
-        {g.live && g.startedAt !== undefined && <Elapsed since={g.startedAt} />}
+        {!p.nested && g.live && g.startedAt !== undefined && <Elapsed since={g.startedAt} />}
         {opens && <Icon name="chevronRight" size={14} stroke={2.2} className="shrink-0 text-tool-ink transition-transform duration-150 motion-reduce:transition-none" style={{ transform: open ? "rotate(90deg)" : "none" }} />}
       </button>
       {open && failed && !loading && (
@@ -171,7 +181,7 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
         </div>
       )}
       <Collapse open={open} lazy>
-        <div className="mt-1 flex min-w-0 flex-col gap-2 border-l-2 border-tool-rail py-[2px] pl-3" data-work-detail>
+        <div className={cx("mt-1 flex min-w-0 flex-col gap-2 py-[2px]", !p.nested && "border-l-2 border-tool-rail pl-3")} data-work-detail>
           <WorkNodes nodes={g.children} p={inside} live={rowsLive} limit={drawn} />
           {/* once, in the innermost live group: a live timeline's last run is live too */}
           {g.live && !g.children.some((c) => c.kind === "group" && c.live) && <LiveThinking mid={p.mid} sid={p.sid} />}
@@ -201,7 +211,7 @@ export function WorkNodes({ nodes, p, live, fade, limit }: { nodes: WorkNode[]; 
         Array.isArray(run) ? (
           <div key={run[0].id} className="flex min-w-0 flex-col">
             {run.map((s) => (
-              <ActionRow key={s.id} step={s} running={live && !s.result} mid={p.mid} sid={p.sid} trace={p.trace} />
+              <ActionRow key={s.id} step={s} running={live && !s.result} mid={p.mid} sid={p.sid} trace={p.trace} inlineDiff={Boolean(p.nested && p.currentRun && p.rowsLive)} />
             ))}
           </div>
         ) : run.kind === "group" ? (

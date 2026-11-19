@@ -11,16 +11,21 @@ assert.ok(!base.username && !base.password && !base.search && !base.hash && base
 await mkdir(output, { recursive: true });
 const MID = "example-node", SID = "synthetic-timeline";
 const machine = { id: MID, name: "Example computer", online: true };
-const start = Date.now() - 12000;
+const start = Date.now() - 71000;
 const item = (seq, second, role, kind, extra) => ({ id: `item-${seq}#0`, seq, ts: new Date(start + second * 1000).toISOString(), role, kind, ...extra });
 const prefix = [
   item(1, 0, "user", "text", { text: "Check this example." }),
   item(2, 2, "assistant", "text", { text: "A: I’ll inspect the file." }),
-  item(3, 3, "assistant", "tool_use", { tool_name: "Bash", tool_use_id: "first", tool_input: { command: "echo first-check" } }),
-  item(4, 4, "user", "tool_result", { tool_use_id: "first", text: "ok" }),
-  item(5, 6, "assistant", "text", { text: "B: I found the file. Now I’ll verify it." }),
-  item(6, 7, "assistant", "tool_use", { tool_name: "Bash", tool_use_id: "later", tool_input: { command: "echo later-check" } }),
-  item(7, 9, "user", "tool_result", { tool_use_id: "later", text: "ok" }),
+  item(3, 3, "assistant", "tool_use", { tool_name: "Bash", tool_use_id: "first", tool_input: { command: "echo first-check", description: "Run the first check" } }),
+  item(4, 32, "user", "tool_result", { tool_use_id: "first", text: "ok" }),
+  item(5, 33, "assistant", "text", { text: "B: I found the file. Now I’ll verify it." }),
+  item(6, 34, "assistant", "tool_use", { tool_name: "Read", tool_use_id: "read", tool_input: { file_path: "src/example.ts" } }),
+  item(7, 35, "user", "tool_result", { tool_use_id: "read", text: "export const ready = false;" }),
+  item(8, 36, "assistant", "tool_use", { tool_name: "Grep", tool_use_id: "search", tool_input: { pattern: "ready", path: "src/example.ts" } }),
+  item(9, 37, "user", "tool_result", { tool_use_id: "search", text: "1: export const ready = false;" }),
+  item(10, 38, "assistant", "tool_use", { tool_name: "Edit", tool_use_id: "edit", tool_input: { file_path: "src/example.ts", old_string: "export const ready = false;", new_string: "export const ready = true;" } }),
+  item(11, 68, "user", "tool_result", { tool_use_id: "edit", text: "updated" }),
+  item(12, 69, "assistant", "tool_use", { tool_name: "Bash", tool_use_id: "later", tool_input: { command: "echo later-check", description: "Verify the example" } }),
 ];
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 try {
@@ -76,7 +81,7 @@ try {
       if (state === "streaming") {
         socket.send(JSON.stringify({ type: "delta", machine_id: MID, session_id: SID, text: d }));
       } else if (state === "persisted" || state === "completed") {
-        const next = state === "persisted" ? item(8, 10, "assistant", "text", { text: d }) : item(9, 11, "assistant", "text", { text: final });
+        const next = state === "persisted" ? item(13, 75, "assistant", "text", { text: d }) : item(14, 80, "assistant", "text", { text: final });
         items.push(next);
         socket.send(JSON.stringify({ type: "items", machine_id: MID, session_id: SID, items: [next] }));
         if (state === "completed") {
@@ -93,6 +98,20 @@ try {
       if (["live", "completed", "reloaded"].includes(state)) assert.equal(await button.getAttribute("aria-expanded"), "false");
       if (await button.getAttribute("aria-expanded") === "false") await button.press("Enter");
       const detail = group.locator("[data-work-detail]").first();
+      const runs = detail.locator("[data-work-group] > button");
+      assert.equal(await runs.count(), 2);
+      assert.equal(await runs.first().innerText(), "Ran 1 command");
+      assert.equal(await runs.last().innerText(), "Read 1 file · Searched 1 time · Edited 1 file");
+      if (state === "live") {
+        assert.equal(await runs.first().getAttribute("aria-expanded"), "false");
+        assert.equal(await runs.last().getAttribute("aria-expanded"), "true");
+        assert.equal(await detail.locator("[data-live-edit-diff]").count(), 1);
+        assert.equal(await detail.locator('[data-tool-use="edit"] [data-tool-duration]').innerText(), "30s");
+        assert.equal(await page.locator(".border-tool-rail").count(), 1, "one rail in the inspected trace");
+      }
+      for (const run of await runs.all()) if (await run.getAttribute("aria-expanded") === "false") await run.press("Enter");
+      assert.equal(await detail.locator('[data-tool-use="first"] [data-tool-duration]').count(), 0, "29 second call has no duration");
+      assert.equal(await detail.locator('[data-tool-use="first"] > button').getAttribute("title"), "Run the first check");
       await detail.getByText(/echo later-check/).waitFor();
       assert.equal(await count(current), 1, `${state}: latest text appears once`);
       assert.equal(await detail.getByText(current, { exact: true }).count(), 0, `${state}: latest stays outside the trace`);
@@ -105,16 +124,12 @@ try {
         position = next;
       }
       assert.match(await button.getAttribute("title"), /start of the exchange/);
-      const runs = detail.locator("[data-work-group] > button");
-      assert.equal(await runs.count(), 2);
-      assert.match(await runs.first().innerText(), /Worked for 4s/);
-      if (state === "live") assert.match(await runs.last().innerText(), /Working/);
       if (["completed", "reloaded"].includes(state)) {
-        assert.match(await button.innerText(), /Worked for 11s/);
+        assert.match(await button.innerText(), /Worked for 1m 20s/);
         assert.equal(await count(b), 1);
         assert.equal(await count(d), 1);
+        assert.equal(await detail.locator("[data-live-edit-diff]").count(), 0);
       }
-      assert.match(await runs.last().getAttribute("title"), /preceding message/);
       await page.waitForFunction(() => {
         const detail = document.querySelector("[data-work-detail]");
         return detail && detail.getBoundingClientRect().height > 100 && Number(getComputedStyle(detail.parentElement).opacity) > .99;
@@ -122,7 +137,7 @@ try {
       await slot.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
       assert.deepEqual(errors, [], "no page errors");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-      await page.locator("[data-segment]").filter({ has: slot }).screenshot({ path: join(output, `${state}-${theme}-${textSize}-${width}.png`) });
+      if (["live", "reloaded"].includes(state)) await page.locator("[data-segment]").filter({ has: slot }).screenshot({ path: join(output, `${state}-${theme}-${textSize}-${width}.png`) });
     }
     await context.close();
     console.log(`PASS ${theme}/${textSize}: ${width}px: live → streaming → persisted → completed → reload, unique text and clock boundaries`);

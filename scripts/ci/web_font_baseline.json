@@ -179,7 +179,7 @@
  "web/src/views/chat/WorkGroup.tsx": 3,
  "web/src/views/chat/WorkflowCard.tsx": 19,
  "web/src/views/chat/voice/VoiceBar.tsx": 8,
- "web/src/views/chat/voice/VoiceParts.tsx": 8,
+ "web/src/views/chat/voice/VoiceCall.tsx": 8,
  "web/src/views/extensions/ChartFrame.tsx": 6,
  "web/src/views/extensions/CodeViews.tsx": 27,
  "web/src/views/extensions/DiffReview.tsx": 36,

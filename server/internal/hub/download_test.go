@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,40 @@ type downloadNode struct {
 	bad      bool
 	mime     string
 	thumbs   []proto.FileThumbRequest
+	// revision is the file's (r1 when empty): a chunk asked at another one is refused, as the node does.
+	revision string
+	// fail, when set, may fail a chunk read before it is answered (f.mu is held).
+	fail func(p proto.FileChunkRequest) error
+
+	m       *Machine // the hub's machine for this node
+	connMu  sync.Mutex
+	cutConn func()
+}
+
+// connect gives the hub's machine a new connection to this node (a full reconnect); drop cuts the one it has, as a
+// lost relay would: a call out on it fails with rpc.ErrDropped, and the machine is offline until the next connect.
+func (f *downloadNode) connect() {
+	toNode, nodeIn := io.Pipe()
+	toHub, hubIn := io.Pipe()
+	hubPeer, nodePeer := rpc.New("h", nodeIn), rpc.New("n", hubIn)
+	nodePeer.OnRequest = f.handle
+	ctx, cancel := context.WithCancel(context.Background())
+	go hubPeer.Serve(ctx, toHub)
+	go nodePeer.Serve(ctx, toNode)
+	f.connMu.Lock()
+	f.cutConn = func() { cancel(); toNode.Close(); toHub.Close(); hubPeer.Close(rpc.ErrClosed) }
+	f.connMu.Unlock()
+	f.m.mu.Lock()
+	f.m.peer = hubPeer
+	f.m.mu.Unlock()
+}
+
+func (f *downloadNode) drop() {
+	f.connMu.Lock()
+	defer f.connMu.Unlock()
+	if f.cutConn != nil {
+		f.cutConn()
+	}
 }
 
 func (f *downloadNode) handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -66,11 +101,20 @@ func (f *downloadNode) handle(ctx context.Context, method string, params json.Ra
 		return nil, err
 	}
 	f.requests = append(f.requests, p)
+	if f.fail != nil {
+		if err := f.fail(p); err != nil {
+			return nil, err
+		}
+	}
+	revision := cmp.Or(f.revision, "r1")
+	if p.Revision != "" && p.Revision != revision {
+		return nil, &rpc.Error{Code: proto.CodeFileChanged, Message: "file changed during download; reopen it to try again"}
+	}
 	mime := f.mime
 	if mime == "" {
 		mime = "video/mp4"
 	}
-	out := proto.FileChunk{Path: "/work/preview.mp4", Name: "preview.mp4", Size: int64(len(f.data)), Mime: mime, Revision: "r1", Modified: time.Unix(1700000000, 0), Offset: p.Offset}
+	out := proto.FileChunk{Path: "/work/preview.mp4", Name: "preview.mp4", Size: int64(len(f.data)), Mime: mime, Revision: revision, Modified: time.Unix(1700000000, 0), Offset: p.Offset}
 	if p.Length > 0 {
 		out.Data = f.data[p.Offset:min(int64(len(f.data)), p.Offset+int64(p.Length))]
 		if f.bad {
@@ -82,23 +126,23 @@ func (f *downloadNode) handle(ctx context.Context, method string, params json.Ra
 
 func downloadHub(t *testing.T, f *downloadNode) http.Handler {
 	t.Helper()
+	_, mux := downloadFixture(t, f)
+	return mux
+}
+
+// downloadFixture is a hub with machine m1, connected to f, and the download routes alone.
+func downloadFixture(t *testing.T, f *downloadNode) (*Hub, *http.ServeMux) {
+	t.Helper()
 	h := newTestHub(t)
-	toNode, nodeIn := io.Pipe()
-	toHub, hubIn := io.Pipe()
-	hubPeer, nodePeer := rpc.New("h", nodeIn), rpc.New("n", hubIn)
-	nodePeer.OnRequest = f.handle
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() { cancel(); toNode.Close(); toHub.Close() })
-	go hubPeer.Serve(ctx, toHub)
-	go nodePeer.Serve(ctx, toNode)
-	m := newMachine(h, MachineConfig{ID: "m1", Name: "box"})
-	m.peer = hubPeer
-	h.byID["m1"] = m
+	f.m = newMachine(h, MachineConfig{ID: "m1", Name: "box"})
+	h.byID["m1"] = f.m
+	f.connect()
+	t.Cleanup(f.drop)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/machines/{mid}/file/download", h.withMachine(h.downloadFile))
 	mux.HandleFunc("GET /api/v1/machines/{mid}/file/thumb", h.withMachine(h.fileThumb))
 	mux.HandleFunc("GET /api/v1/machines/{mid}/file/convert", h.withMachine(h.fileConvert))
-	return mux
+	return h, mux
 }
 
 func TestDownloadStreamsWholeFileAndRanges(t *testing.T) {
@@ -158,9 +202,17 @@ func TestDownloadRefusesOldNodesAndBadChunks(t *testing.T) {
 			t.Fatalf("%d %s", rec.Code, rec.Body)
 		}
 	}
+	// A chunk of another revision is not sent, and the response is aborted rather than ended (#10855).
 	f := &downloadNode{data: []byte{0, 1, 2}, bad: true}
 	rec := httptest.NewRecorder()
-	downloadHub(t, f).ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/machines/m1/file/download?path=x.mp4", nil))
+	func() {
+		defer func() {
+			if v := recover(); v != http.ErrAbortHandler {
+				t.Fatalf("not aborted: %v", v)
+			}
+		}()
+		downloadHub(t, f).ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/machines/m1/file/download?path=x.mp4", nil))
+	}()
 	if rec.Body.Len() != 0 {
 		t.Fatal("changed chunk was sent")
 	}

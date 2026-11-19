@@ -176,3 +176,44 @@ describe("an extension page on reload", () => {
     expect(onWide).toHaveBeenLastCalledWith(true);
   });
 });
+
+describe("an Overview card on reload (#11091)", () => {
+  const card = { extension: "example-today", ui: "card", state: "", language: currentLanguage() };
+  const mountCard = async () => {
+    await act(async () => root.render(<div data-card className="flex flex-col"><ExtensionUI extension="example-today" ui="card" context={{ size: "compact" }} compact remember /></div>));
+    await flush();
+  };
+
+  it("draws its last view at once, inert, where the drawing's own sections go, and the extension's drawing replaces it", async () => {
+    keepView({ ...card, version: UI_VERSION, manager: "m-1" }, view("3 reviews wait"));
+    await hello(["extension_ui_slots"]);
+    await mountCard();
+    expect(gate.draws).toHaveLength(1);
+    expect(kept()?.textContent).toContain("3 reviews wait");
+    expect(kept()?.querySelector("[inert]")?.textContent).toContain("3 reviews wait");
+    // no box of its own between the card's column and its sections, and no visible "Updating" line to move them
+    expect(kept()?.className).toBe("contents");
+    expect(kept()?.querySelector("[inert]")?.className).toBe("contents");
+    const status = kept()?.querySelector("[role=status]");
+    expect(status?.textContent).toBe(t("settings-extensionview.updating"));
+    expect(status?.className).toBe("sr-only");
+    // heard by a screen reader: not inside what is inert
+    expect(status?.closest("[inert]")).toBeNull();
+
+    act(() => setRosterDefault("m-1"));
+    await answer(view("1 review waits"));
+    expect(kept()).toBeNull();
+    expect(host.textContent).toContain("1 review waits");
+    expect(host.textContent).not.toContain("3 reviews wait");
+    expect(readKeptView(card, [UI_VERSION], "m-1")?.view.sections[0].items[0]).toMatchObject({ text: "1 review waits" });
+  });
+
+  it("starts from Loading when the card was never drawn here, and keeps a page's view apart from the card's", async () => {
+    keepView({ ...page, version: UI_VERSION, manager: "m-1" }, view("the page, not the card"));
+    await hello(["extension_ui_slots"]);
+    await mountCard();
+    expect(kept()).toBeNull();
+    expect(host.textContent).not.toContain("the page, not the card");
+  });
+});
+

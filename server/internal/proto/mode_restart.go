@@ -15,6 +15,7 @@ type ModeRestartEvent struct {
 // The reasons of a ModeRestartEvent (#10297): codes, put in words by the apps.
 const (
 	ModeRestartReasonReplaced        = "replaced"         // dropped: another mode was picked before it ran
+	ModeRestartReasonCancelled       = "cancelled"        // dropped: the mode the session runs in was picked again (#11089)
 	ModeRestartReasonProcessExited   = "process_exited"   // dropped: the claude it was picked for has exited (#10296)
 	ModeRestartReasonProcessReplaced = "process_replaced" // dropped: the session runs in another claude now (#10296)
 	ModeRestartReasonProcessUnknown  = "process_unknown"  // dropped: it was not picked for a known claude process

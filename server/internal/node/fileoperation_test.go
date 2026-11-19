@@ -72,19 +72,24 @@ func TestFileCopyOperationCancelRemovesPartialFile(t *testing.T) {
 	var op proto.FileOperation
 	statusCtx, statusCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer statusCancel()
-	if err := f.peer.Call(statusCtx, "file.operation", map[string]any{"operation_id": "op-copy-cancel"}, &op); err != nil {
+	statusArgs := map[string]any{"operation_id": "op-copy-cancel"}
+	if err := f.peer.Call(statusCtx, "file.operation", statusArgs, &op); err != nil {
 		t.Fatal(err)
 	}
 	if op.State != proto.FileOperationRunning || op.BytesDone == 0 || op.BytesTotal != int64(len(data)) || op.FilesTotal != 1 {
 		t.Fatalf("running operation = %+v", op)
 	}
 	cancel()
-	unblock()
 	if err := awaitUpload(t, done); err == nil {
 		t.Fatal("cancelled copy succeeded")
 	}
+	// This request follows the cancel frame on the same connection. Wait for its reply before letting the copy finish.
+	if err := f.peer.Call(statusCtx, "file.operation", statusArgs, &op); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
 	waitFor(t, "cancelled file operation", func() bool {
-		return f.peer.Call(statusCtx, "file.operation", map[string]any{"operation_id": "op-copy-cancel"}, &op) == nil && op.State == proto.FileOperationCancelled
+		return f.peer.Call(statusCtx, "file.operation", statusArgs, &op) == nil && op.State == proto.FileOperationCancelled
 	})
 	if op.State != proto.FileOperationCancelled {
 		t.Fatalf("settled operation = %+v", op)
@@ -134,15 +139,20 @@ func TestFileCopyOperationCancelRestoresReplacedFile(t *testing.T) {
 		t.Fatal("copy did not reach its first write")
 	}
 	cancel()
-	unblock()
 	if err := awaitUpload(t, done); err == nil {
 		t.Fatal("cancelled replacement succeeded")
 	}
 	var op proto.FileOperation
 	statusCtx, statusCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer statusCancel()
+	statusArgs := map[string]any{"operation_id": "op-copy-replace-cancel"}
+	// This request follows the cancel frame on the same connection. Wait for its reply before letting the copy finish.
+	if err := f.peer.Call(statusCtx, "file.operation", statusArgs, &op); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
 	waitFor(t, "cancelled replacement operation", func() bool {
-		return f.peer.Call(statusCtx, "file.operation", map[string]any{"operation_id": "op-copy-replace-cancel"}, &op) == nil && op.State == proto.FileOperationCancelled
+		return f.peer.Call(statusCtx, "file.operation", statusArgs, &op) == nil && op.State == proto.FileOperationCancelled
 	})
 	got, err := os.ReadFile(filepath.Join(home, "dest", "a.txt"))
 	if err != nil {

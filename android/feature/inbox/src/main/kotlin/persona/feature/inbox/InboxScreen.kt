@@ -335,9 +335,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
     }
     // The title while the hub is out of reach opens why, since when and "Retry now" in place (iOS ConnectionTitle).
     val connectionDetails = rememberConnectionDetails(shownConnection, { navigator.navigate(ConnectionSettingsRoute) }, onRetry = { refresh(collectNow = false) })
-    fun allTargets(shown: List<InboxGroup>) = shown.filter { it.id != "done" }.flatMap { it.rows }
-        .filter { it.type == InboxRowType.Item }.mapNotNull { records[it.id] }
-        .filterNot { it.item.isDone }.distinctBy { it.item.id }.map { persona.core.contracts.api.InboxDoneTarget(it.item.id, it.item.version) }
+    fun allTargets(shown: List<InboxGroup>) = bulkTargets(shown, records)
     // Clean up all keeps its scope whatever the bar shows: every open item under the filters and search.
     val bulk = allTargets(displayGroups)
     // Groups (#2576): one row is one item. Only open ones Persona isn't working on can be picked.
@@ -650,6 +648,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
             val sections: (String, List<InboxGroup>) -> Unit = { prefix, shownGroups -> shownGroups.forEach { group ->
                 val manager = prefix.removeSuffix(":")
                 val subs = subsOf(group, manager)
+                val sectionTargets = allTargets(listOf(group))
                 val sectionPickable = if (selecting && subs.isEmpty()) group.rows.filter(::selectable).map { it.id } else emptyList()
                 item("section:$prefix${group.id}", contentType = "section") {
                     val title = if (group.id == "working") group.title.text() else inboxGroupTitle(group)
@@ -702,6 +701,27 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                 if (subs.isEmpty()) rows(prefix, group.visibleRows)
                 else subs.forEach { sub ->
                     val open = InboxGroups.isOpen(group.id, sub.key, folds)
+                    val clear = when (group.id) {
+                        "fyi" -> Triple(res.getString(R.string.inbox_mark_all_seen), res.getString(R.string.inbox_group_fyi),
+                            R.plurals.inbox_mark_all_in_seen)
+                        "noise" -> Triple(res.getString(R.string.inbox_clear_all), res.getString(R.string.inbox_section_folded),
+                            R.plurals.inbox_clear_all_in)
+                        else -> null
+                    }
+                    val groupTargets = bulkTargets(listOf(group.copy(rows = sub.rows)), records)
+                    // FYI and Collapsed group titles offer that group or the whole section (#10425). Needs you,
+                    // In progress and Done keep their existing titles; one group keeps the section's direct action.
+                    val clearChoices = if (selecting || clear == null || groupTargets.isEmpty() ||
+                        sectionTargets.size <= groupTargets.size) emptyList() else {
+                        listOf(
+                            JAction(res.getQuantityString(clear.third, sub.count, sub.count, sub.title), subtitle = scopeText) {
+                                markAll(groupTargets, InboxBulkAction.Done, animate = true)
+                            },
+                            JAction(res.getQuantityString(clear.third, group.count, group.count, clear.second), subtitle = scopeText) {
+                                markAll(sectionTargets, InboxBulkAction.Done, animate = true)
+                            },
+                        )
+                    }
                     // A group's title stays at the top while its rows scroll under it (#2059 "Jump to").
                     stickyHeader("group:$prefix${group.id}/${sub.key}", contentType = "group") { index ->
                         val pickable = sub.rows.filter(::selectable).map { it.id }
@@ -715,7 +735,15 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                                 animateChange { setFolds(InboxGroups.toggle(group.id, sub.key, folds)) }
                             },
                             leading = if (selecting && pickable.isNotEmpty()) ({ InboxGroupTick(pickable, picked, sub.title) { picked = it } }) else null,
-                            trailing = if (selecting && n > 0) androidx.compose.ui.res.pluralStringResource(R.plurals.inbox_group_picked, n, n) else null)
+                            trailing = if (selecting && n > 0) androidx.compose.ui.res.pluralStringResource(R.plurals.inbox_group_picked, n, n) else null,
+                            action = if (clearChoices.isEmpty() || clear == null) null else ({
+                                var menu by remember(group.id, sub.key) { mutableStateOf(false) }
+                                JTextButton(clear.first, { menu = true }, icon = PersonaIcons.expand)
+                                // Keep the pull-down at every text size; multiline choices prevent its capped width
+                                // from ellipsizing the count, destination, verb or filter scope at larger text.
+                                JMenu(menu, { menu = false }, clearChoices,
+                                    multilineActions = res.configuration.fontScale > 1f)
+                            }))
                     }
                     if (open) rows("$prefix${group.id}/${sub.key}:", sub.rows)
                     // A counted group not all in (#3016): its own first page as it opens, then Show older inside it.

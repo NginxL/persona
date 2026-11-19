@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "./types";
 import { makeSessionLookup, shownStatus, todoStatus, todoStatusLabel, type Todo } from "./todos";
 import { checkCount, checklist, reviewBadge, type Supervision } from "./supervision";
-import { FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos, waitingForMerge } from "./todo-triage";
+import { finishedAt, FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos, waitingForMerge } from "./todo-triage";
 import { resetRestoredCache, restoreTodo } from "./todo-restore";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -208,6 +208,20 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     const pr_status = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "required" as const, checks: "none" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
     expect(triage(todo("decision", { pr_url: pr_status.url, pr_status, supervision: { supervisor: "c", state: "needs_user" } }), lookup, NOW).section).toBe("waiting");
     expect(triage(todo("active", { pr_url: pr_status.url, pr_status, agents: [agent("run")] }), lookup, NOW).section).toBe("working");
+  });
+
+  it("says when a finished to-do finished: the moment its rule reads, else its last move (#10922)", () => {
+    const when = (td: Todo, superseded = false) => finishedAt(td, triage(td, lookup, NOW, 0, superseded));
+    // closed: its close, however late it moved after (an agent's session, a seen mark is no move)
+    expect(when(todo("t", { done_at: hoursAgo(3), updated_at: hoursAgo(1), seen_at: hoursAgo(0.5) }))).toBe(Date.parse(hoursAgo(3)));
+    // accepted: its accepting review; deployed: its deploy, else its last move
+    expect(when(todo("t", { agents: [agent("idle")], supervision: acceptedReopened() }))).toBe(Date.parse(hoursAgo(5)));
+    expect(when(todo("t", { delivery: { state: "live", at: hoursAgo(2) } }))).toBe(Date.parse(hoursAgo(2)));
+    expect(when(todo("t", { delivery: { state: "live" }, updated_at: hoursAgo(6) }))).toBe(Date.parse(hoursAgo(6)));
+    // a finished turn the owner saw (Done, rule 9a): its last move, here its Agent's
+    expect(when(todo("t", { agents: [agent("unseen")], updated_at: hoursAgo(3), seen_at: hoursAgo(0.5) }))).toBe(Date.parse(hoursAgo(1)));
+    // a failed start a related to-do finished: its close
+    expect(when(todo("f", { start_error: "x", done_at: hoursAgo(2) }), true)).toBe(Date.parse(hoursAgo(2)));
   });
 
   it("a task with no move for 48 hours is Shelved; a newer move of its agent keeps it", () => {

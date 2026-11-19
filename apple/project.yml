@@ -5,6 +5,13 @@ include:
   # The default entitlements path lives apart from this file so later includes can select generated opt-in copies.
   # XcodeGen derives CODE_SIGN_ENTITLEMENTS from the selected target entitlements path, not a target build setting.
   - path: app-entitlements.yml
+  # The watch app and the share extension the iPhone app embeds (watch-and-share.yml), then the switch that leaves them
+  # out of a development build (lean-dev-build.yml, PERSONA_LEAN_DEV_BUILD=YES, which only scripts/app/sim.sh sets;
+  # docs/operations/testing.md "Development builds"). Unset, as in CI, release and the UI tests, the project is whole.
+  # These two stay before every other include: the switch replaces the dependencies merged before it.
+  - path: watch-and-share.yml
+  - path: lean-dev-build.yml
+    enable: ${PERSONA_LEAN_DEV_BUILD}
   - path: carplay-voice-entitlements.yml
     enable: ${PERSONA_CARPLAY_VOICE}
   - path: health-background-delivery-entitlements.yml
@@ -105,10 +112,9 @@ targets:
       - sdk: LiveCommunicationKit.framework
         weak: true
       - package: PersonaWire
-      - target: PersonaWatch
+      # The watch app and the share extension are in watch-and-share.yml, which a development build can leave out.
       - target: PersonaWidgets
       - target: PersonaNotify
-      - target: PersonaShare
       - package: MarkdownUI
       - package: BeautifulUI
       - package: PersonaSSH
@@ -158,14 +164,18 @@ targets:
         # (scripts/persona_config.py, docs/operations/network.md「Connecting to hub through an in-app tunnel」); empty otherwise.
         "SWIFT_INCLUDE_PATHS[sdk=iphoneos*]": "$(inherited) $(PERSONA_TUNNEL_INCLUDE)"
         "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) $(PERSONA_TUNNEL_LDFLAGS)"
-    # Which commit a build is (Settings › About › Build): stamped into the built Info.plist on every build, before signing;
-    # "+" when the working tree had changes not committed.
+    # Which commit a build is (Settings › About › Build): stamped into the built Info.plist on every Release build,
+    # before signing; "+" when the working tree had changes not committed. Release only (#10713): editing the plist on
+    # every build made every task that reads it, the app's signature among them, run again on every build. A Debug build
+    # has no stamp (About shows Unknown) and an unchanged one redoes nothing; one that must name its commit (the README's
+    # captures, scripts/assets/make_readme_assets.py) passes the build setting PERSONA_STAMP_COMMIT=YES.
     postBuildScripts:
       - name: Stamp the commit
         basedOnDependencyAnalysis: false
         # Its input, so it runs after the Info.plist is written (ran before it once, and the stamp was lost).
         inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
         script: |
+          [ "$CONFIGURATION" = Release ] || [ "$PERSONA_STAMP_COMMIT" = YES ] || exit 0
           sha=$(git -C "$SRCROOT/.." rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
           git -C "$SRCROOT/.." diff --quiet HEAD -- 2>/dev/null || sha="$sha+"
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
@@ -290,11 +300,13 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Release only, as the iPhone app's.
     postBuildScripts:
       - name: Stamp the commit
         basedOnDependencyAnalysis: false
         inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
         script: |
+          [ "$CONFIGURATION" = Release ] || [ "$PERSONA_STAMP_COMMIT" = YES ] || exit 0
           sha=$(git -C "$SRCROOT/.." rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
           git -C "$SRCROOT/.." diff --quiet HEAD -- 2>/dev/null || sha="$sha+"
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
@@ -665,6 +677,9 @@ targets:
     sources:
       - path: PersonaTests
         excludes: ["*.json", "*.py"] # Static checks and TokenBaseline.json are read from the source tree, not the bundle
+      # The same shared source as #9694's Android consumer, compiled only into this iOS test bundle (#11069).
+      # Persona's production target, route and handwritten About row do not include it.
+      - path: ../android/refract/about/AboutVersionRow.swift
     dependencies:
       - package: PersonaWire
       - target: Persona

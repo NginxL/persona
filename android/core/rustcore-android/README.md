@@ -32,7 +32,10 @@ Every `LOAD` segment must report alignment `0x4000`. The App packages both libra
 checks their 16 KB APK alignment. Kernel page size is a separate device property: ELF/APK alignment does not establish
 that a test ran on a 16 KB kernel. Produce a size report (raw, stripped, gzip and actual APK bytes per ABI) with the
 command below; it measures the debug package, whose unoptimised core is larger than the one release ships, so for
-shipped sizes point it at `build/native/releaseJni`, `build/native/releaseSymbols` and the release APK instead:
+shipped sizes point it at `build/native/releaseJni`, `build/native/releaseSymbols` and the release APK instead. It
+checks both ABIs, in the build directories and in the APK, so build the debug APK with both first
+(`./gradlew :app:assembleDebug`, without `-Ppersona.abis`); after a one-ABI build it stops with
+`Android core size: FAILED`.
 
 ```sh
 python3 -I native/app-core/scripts/android-package-report.py \

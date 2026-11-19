@@ -9,7 +9,16 @@ const session = (id: string, state: AgentState, patch: Partial<Session> = {}): S
 describe("侧边栏的需要你角标（#1731）", () => {
   it("安静任务的 Agent 照样按状态计数，但不进角标", () => {
     const all = [session("a", "needs_you"), session("q", "needs_you", { quiet: true }), session("w", "working", { quiet: true }), session("u", "unread")];
-    expect(stateCounts(all)).toEqual({ needs: 2, working: 1, unread: 1, badge: 1 });
+    expect(stateCounts(all)).toEqual({ needs: 2, working: 1, waiting: 0, unread: 1, badge: 1 });
+  });
+});
+
+describe("stateCounts: waiting in the background (#10938)", () => {
+  it("counts an agent that only waits on background commands apart from the working ones", () => {
+    const all = [session("w", "working"), session("b", "working", { background_working: true, background_waiting: true }), session("c", "working", { background_working: true })];
+    expect(stateCounts(all)).toMatchObject({ working: 2, waiting: 1 });
+    // the field only says how a working agent works: an idle one is not waiting
+    expect(stateCounts([session("i", "idle", { background_waiting: true })])).toMatchObject({ working: 0, waiting: 0 });
   });
 });
 

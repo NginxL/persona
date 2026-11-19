@@ -31,6 +31,38 @@ of the app on its main thread: 55–70 ms each with the `assistant` perf suite's
 app switching on a cue (`FrameProbe.switchPages`, `testTabSwitchAssistantAgentsByCue`) and the test only sleeping; keep
 the tapping test for the tap's own path.
 
+## What a development build redid with nothing changed (2026-11-19, #10713)
+
+`scripts/app/sim.sh` rebuilt more than the change it was run for (`docs/operations/testing.md`, "Development builds"):
+
+- **A script that runs on every build and edits a built file makes every task that reads that file run again.** "Stamp
+  the commit" (no dependency analysis, so it always runs) edited the built Info.plist in place on every build, so on
+  every unchanged build App Intents' training step read it again (Xcode 26.3), and a signed build signs the app again.
+  Declaring the plist as the script's input only orders the script after the task that writes it; no declaration makes
+  an in-place edit free. Without the edit, the built plist kept its time through every unchanged and one-file build.
+  The stamp now runs in Release only (an archive builds from clean anyway) or when a build asks for it
+  (`PERSONA_STAMP_COMMIT=YES`). The opt-in overlays that edit the plist the same way (`apple/siri-calls.yml`,
+  `apple/meta-wearables.yml`) still cost a signature per build while they are on.
+- **An XcodeGen include can add to `project.yml` but never take anything out of it.** Dictionaries merge, arrays append,
+  and `project.yml`'s own values are merged last, over every include's. A later include's `key:REPLACE` replaces only
+  what the includes before it merged. So what a switch must be able to remove lives in an include that is always on
+  (`apple/watch-and-share.yml`), and the switch's include, right after it, replaces those dependencies with nothing
+  (`apple/lean-dev-build.yml`); an include after the switch (Siri calls, Meta glasses) keeps its own.
+- **`enable: ${VAR}` is false while `VAR` is unset.** XcodeGen leaves an unknown `${VAR}` as it is, which is no boolean.
+  A switch can only be on when set, so the whole project has to be what an unset switch gives: CI, release and every
+  script that has never heard of the switch get it.
+- **Xcode leaves in place a watch app it no longer embeds.** After the watch dependency goes, `Persona.app/Watch/` from
+  the last whole build stays in the app and is installed with it (Xcode 26.3; the share extension's `.appex` did go).
+  `sim.sh` removes both before a lean build.
+- **A hash of files that names their absolute paths is one checkout's.** `shasum -a 256 <file>` prints the path after
+  the hash, so `native/app-core/scripts/build-apple.sh`'s input hash held each worktree's root and no worktree could use
+  another's build. Hash `< <file>`, name each file by its path in the checkout, and add what the environment changes
+  about the output (SDKs, `RUSTFLAGS`, deployment targets) before sharing the result.
+- **A slice-only framework in the worktree breaks the next build for another platform.** After `sim.sh` asked for the
+  Rust core's simulator slice only, Xcode building for a phone or "My Mac (Designed for iPad)" stopped with "no library
+  for this platform was found in PersonaCoreC.xcframework", which reads like a broken build. Every way the builder leaves
+  a simulator-only framework now says to run it with no flag first, and the docs that send people to Xcode say the same.
+
 ## A machine's heartbeat used to tell every reader of `machines` (2026-11-18, #10231)
 
 A busy hub pushes the machines with a new `lastSeen` all the time. `AppModel.machines` was replaced on each push, so
@@ -1460,6 +1492,8 @@ Use an invalidation revision as the task key and handle the flag after completio
   Store results first when one argument changes a variable used by another.
 - Build-product Info.plist script stages (Settings › About › Build commit, `project.yml` `Stamp the commit`) must declare `$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)`
   as input, or Xcode may run the script then rewrite the plist, losing values (bundle-id changes trigger this, 2026-10-31). Reading `.git` requires disabling `ENABLE_USER_SCRIPT_SANDBOXING` for this target.
+  Run on every build, such a stage also makes everything that reads the plist (App Intents, the signature) run again on
+  every build, so the stamp runs in Release only ("What a development build redid with nothing changed", #10713).
 
 ### iOS 18.6 floor
 
@@ -3106,3 +3140,27 @@ The lens then jumped on by 33–50 ms of its 0.65 s glide in one frame, by up to
 - `GET /api/v1/metrics` answers for the default manager unless the request names one by the established header or query. Fan out once per installed, online manager, keep the default's request bare, and merge machine IDs in roster order. A failed manager keeps its last-good snapshot; only a success, including an empty one, replaces it. A routed `no_manager` 404 is not evidence that monitoring is unsupported.
 - Keep the request's hub and manager scopes distinct: a settings page keeps its one captured manager rather than widening to the whole roster, and a roster restored from a snapshot cannot name managers until this launch confirms it. Fence late answers by both pairing and read generation.
 - The mock must enforce the same manager scoping or the UI fixture hides the bug. Each assistant's Machines page lists only its own computers, so a UI regression selects the non-default assistant before requiring that computer's numbers. `MachineMetricsLoadingTests`, `MachineMetricsStoreTests` and `MachinesPageTests/testNonDefaultManagerMetricsInLightAndDark` cover the request, cache, cancellation and visible-sample contracts.
+
+## A menu in a list that live updates redraw is replaced while it is open (2026-11-19, #10738)
+
+- In the Sidebar layout the Agents heading's menu (grouping, sort, display, machines: long enough to scroll) jumped back to its
+  top while agents worked. Its content was not rebuilt (`ListMenu.content` stayed put), its environment did not change (a probe
+  logging `EnvironmentValues` beside it saw changes only at launch), and a row frozen whole (an `EquatableView` always equal) still
+  jumped. Giving the heading its own `Section` did not help either.
+- lldb on the simulator showed what did it: during 12 rounds of pushes SwiftUI's `UpdateContextMenuInteraction.updateValue()`
+  called `-[UIContextMenuInteraction updateVisibleMenuWithBlock:]` 42 times, from the view graph's render passes
+  (`ViewGraphRootValueUpdater.render`, run-loop observers), not from the list's batch updates. Each time UIKit ran
+  `replaceVisibleMenu:withMenu:` → `-[_UIContextMenuListView setDisplayedMenu:]` → `scrollToFirstSignificantAction`. The same
+  `AgentsListMenu` in the Agents page's toolbar, outside the list's graph, got none. `-[UIButton setMenu:]` was called only at
+  launch: a breakpoint there alone is a false lead.
+- A `Menu` inside a list that live updates redraw goes in a `MenuIsland` (`apple/Persona/DesignSystem/LayoutIsland.swift`): a
+  hosting controller of its own that gets a new root only when its Equatable content or the look changes, the rest followed through
+  Observation. After: no `updateVisibleMenuWithBlock:` during the pushes. The filter capsule's grouping menu had the same
+  replacements (8 in 12 rounds) and sits in one too; the rows' long-press menus (`.contextMenu`) had none.
+- Tracing with lldb: a UI test launches the app with arguments, so match `pgrep -f "Devices/<udid>/.*Persona.app/Persona -"`;
+  give breakpoint actions as a Python function (`breakpoint command add -s python -F module.fn <bp>`) that writes to a file and
+  returns False (a `-o "bt 30" -o "continue"` pair kept only the continue, and lldb's own output is lost when it is killed);
+  `script lldb.debugger.SetAsync(True)` before `process continue` so it can be interrupted and detached. A regex matching
+  thousands of methods (1,883 locations for every `_UIContextMenu*` method) slows the app until the test's own steps time out.
+- In a UI test, a held drag that starts on a menu item is the menu's slide-to-choose on a phone: letting go chose the item under
+  the finger and closed the menu. Swipe the menu's own list (`app.collectionViews.containing(.button, identifier: <an item>)`).

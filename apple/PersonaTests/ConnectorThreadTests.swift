@@ -232,5 +232,24 @@ struct ConnectorThreadTests {
         #expect(WatchInboxText.connectorSource(try item(#"{"thread":"t"}"#, name: "")) == "examplechat")
         #expect(try item(#"{"thread":"t","label":"转账"}"#).kindLabel == "转账") // the row's tag on the phone: the connector's word
     }
+
+    /// A connector row's picture is the avatars route's path (#10923), apart from Feishu's `avatar`; an older hub sends
+    /// none and the row keeps its initial. `ChatAvatar` asks at one of the sizes the route draws.
+    @Test func connectorRowPicture() throws {
+        func item(_ connector: String) throws -> InboxItem {
+            try JSON.decoder.decode(InboxItem.self, from: Data(#"""
+            {"id":"telegram:1","source":"telegram","kind":"dm","account":"telegram","account_name":"Telegram","title":"示例用户",
+             "preview":"","count":1,"avatar":"/api/v1/lark/media/k","connector":\#(connector)}
+            """#.utf8))
+        }
+        let pictured = try item(#"{"thread":"u1","avatar_url":"/api/v1/avatars/telegram/YS51MS41MDE"}"#)
+        #expect(pictured.connector?.avatarURL == "/api/v1/avatars/telegram/YS51MS41MDE")
+        #expect(pictured.avatar == "/api/v1/lark/media/k")
+        #expect(try item(#"{"thread":"u1"}"#).connector?.avatarURL == nil)
+        #expect(ChatAvatar.edge(pixels: 120) == 128)
+        #expect(ChatAvatar.edge(pixels: 64) == 64)
+        #expect(ChatAvatar.edge(pixels: 80) == 128)
+        #expect(ChatAvatar.edge(pixels: 2000) == 512)
+    }
 }
 

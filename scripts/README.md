@@ -21,6 +21,7 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 ## Shared tools
 
 - `mock/turn_folding_hub.py` serves isolated synthetic Apple chats for running/completed execution and compaction with a failed tool. Run it on an unused loopback port and point `AppleTurnFoldingTests` at it; never use a production hub for this suite.
+- `mock/mock_domains.py` is the mock hub's domain registry: a new made-up area of the hub is a module with `register(d)` and one line in its `DOMAINS`, not another edit of `mock/mock_hub.py` (`docs/operations/testing.md` "Mock hub domains").
 - `persona_config.py` reads private build/deploy configuration and generates Xcode settings without changing registered app IDs.
 - `persona_identity.py --service hub|node|link` resolves only a matching canonical service's root. It honors unit resets, ordered drop-ins, XDG paths, HOME-only environment files and unset rules; it never executes configuration or exposes other credentials. `--prepare` creates only the selected directory, with no directory aliases. `--prefix` resolves remote paths using the remote HOME.
 - `privacy_check.py` scans repository/staged content. Git hooks, web builds and CI use it.

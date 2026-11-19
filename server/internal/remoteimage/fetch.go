@@ -41,6 +41,18 @@ func CheckURL(rawURL string) (*url.URL, error) {
 	return u, nil
 }
 
+// check is CheckURL under the profile: an https address only, when it says so.
+func (f *Fetcher) check(rawURL string) (*url.URL, error) {
+	u, err := CheckURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if f.o.Profile.HTTPSOnly && u.Scheme != "https" {
+		return nil, fail(CodeBadURL, http.StatusBadRequest, "not an https address")
+	}
+	return u, nil
+}
+
 // notPublic are numbers the classes below call public that are no picture's host: cloud platforms' own services.
 var notPublic = []netip.Addr{netip.MustParseAddr("168.63.129.16")}
 
@@ -160,8 +172,8 @@ func (f *Fetcher) fetch(ctx context.Context, u *url.URL) ([]byte, error) {
 	if status != http.StatusOK {
 		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%s answered %d", u.Hostname(), status)
 	}
-	if _, ok := sniff(data); !ok {
-		return nil, fail(CodeUnsupported, http.StatusUnsupportedMediaType, "not a JPEG, PNG, GIF, WebP, HEIC or AVIF image")
+	if kind, _ := sniff(data); !f.o.Profile.served(kind) {
+		return nil, f.o.Profile.unsupported()
 	}
 	return data, nil
 }
@@ -183,7 +195,7 @@ func (f *Fetcher) get(ctx context.Context, u *url.URL, ownReferer bool) ([]byte,
 			if len(via) > maxRedirects {
 				return fail(CodeFetchFailed, http.StatusBadGateway, "more than %d redirects", maxRedirects)
 			}
-			if _, err := CheckURL(r.URL.String()); err != nil {
+			if _, err := f.check(r.URL.String()); err != nil {
 				return err
 			}
 			referer(r)
@@ -206,15 +218,16 @@ func (f *Fetcher) get(ctx context.Context, u *url.URL, ownReferer bool) ([]byte,
 		_, _ = io.CopyN(io.Discard, res.Body, 4<<10) // lets the connection be kept for the next picture
 		return nil, res.StatusCode, nil
 	}
-	if res.ContentLength > maxSource {
-		return nil, 0, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d bytes, more than %d", res.ContentLength, maxSource)
+	most := int64(f.o.Profile.MaxSource)
+	if res.ContentLength > most {
+		return nil, 0, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d bytes, more than %d", res.ContentLength, most)
 	}
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxSource+1))
+	data, err := io.ReadAll(io.LimitReader(res.Body, most+1))
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(data) > maxSource {
-		return nil, 0, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "more than %d bytes", maxSource)
+	if int64(len(data)) > most {
+		return nil, 0, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "more than %d bytes", most)
 	}
 	return data, http.StatusOK, nil
 }

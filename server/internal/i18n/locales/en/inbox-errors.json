@@ -1,4 +1,5 @@
 {
+  "retry_stale": "This item no longer has failed handling to retry",
   "no_item": "no such inbox item",
   "item_done": "the inbox item was filed: nothing was sent",
   "save_failed": "the inbox item could not be saved",

@@ -171,11 +171,13 @@ func (e *Engine) refreshProjectCall(ctx context.Context, p *Project) (called boo
 		return false, nil
 	}
 	p = current
+	owner := e.knowledgeOwner()
 	in := e.projectInput(p)
+	in.Language = owner.Language
 	var d projectDigest
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.project").JSONMax(cctx, prompts.RenderKBProject(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBProjectInput(in), 8000, &d); err != nil {
+	if err := e.modelFor("kb.project").JSONMax(cctx, prompts.RenderKBProject(owner), prompts.RenderKBProjectInput(in), 8000, &d); err != nil {
 		return true, err
 	}
 	return true, e.commitProject(p, in, d)

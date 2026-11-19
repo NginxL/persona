@@ -8,6 +8,7 @@ import { cardToolName } from "../../lib/turns";
 import type { Interaction } from "../../lib/types";
 import { Button, Kbd } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
+import { Markdown } from "../../ui/Markdown";
 import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
 import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { useChatCardTapGuard } from "./card-tap-guard";
@@ -113,7 +114,7 @@ export function PermissionBody({ ix }: { ix: Interaction }) {
         </div>
       )}
       {extraShown && <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2">{extra}</p>}
-      {lead && <pre className={CODE_BOX}>{lead}</pre>}
+      {lead && (ix.format === "markdown" ? <Markdown text={lead} small compact /> : <pre className={CODE_BOX}>{lead}</pre>)}
       {hasInput && (detail || lead) && (
         <button type="button" aria-expanded={showInput} onClick={() => setShowInput((v) => !v)} className="touch-hit flex items-center gap-1 self-start text-[11.5px] whitespace-nowrap text-ink-3 transition-colors hover:text-ink">
           <Icon name="chevron" size={11} stroke={2.4} style={{ transform: showInput ? "none" : "rotate(-90deg)", transition: "transform 150ms" }} />

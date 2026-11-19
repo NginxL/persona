@@ -757,6 +757,7 @@
         "open_url": {"type": "string", "description": "A link the system opens instead (sms:…)."},
         "reply_to": {"type": "string", "description": "Where a reply goes and who sees it."},
         "can_reply": {"type": "boolean"},
+        "avatar": {"type": "string", "maxLength": 2048, "description": "The thread's picture: one of the connector's own media refs (thread.media, as a ThreadChat's avatar) or an https address the hub fetches, either always naming the same bytes (docs \"Avatars\"). The other person of a private chat, a group's own. The Inbox row draws it; without one, the initial."},
         "tier": {"type": "string", "description": "ConnectorTier, or empty for the model."},
         "why": {"type": "string"},
         "rules": {"type": "string", "maxLength": 4000, "description": "The user's own triage rules for this source or account; when set the model gets them instead of the hub's."},

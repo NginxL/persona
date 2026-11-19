@@ -8,7 +8,6 @@
 
 - A viewer's Close button existing, or being non-hittable, does not prove that its picture and tap recognizers are ready, or that a tap hid the chrome (#8562). The full-screen presentation may still be settling, the decoded page may still be a spinner, or a SpringBoard alert may cover the app. Dismiss the known icon-change alert, wait for the decoded `viewer-page-N` and a hittable Close before the first tap, and only then assert the hide/show sequence. A delayed-decode launch turns the old race into a deterministic failure; a longer poll after a mistimed tap only hides the synchronization gap.
 
-
 - Fixture teardown is part of a test's elapsed time (#5730). A scripted terminal whose shell is ready immediately
   does not need a fixed startup pause. When a test has finished its assertions, cancel background prompt checks
   owned by that fixture and join them before restoring package settings or closing sockets. Delivery/recovery tests
@@ -149,6 +148,9 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Goroutines that outlive a test must not call `t.Logf` or read global switches changed after the test ends (2026-11-06, #4822). `computer.nolock` / `computer.cursor` send in their own goroutines; late logging panics (`Log in goroutine after ... has completed`). A fake Mac node reading global `fakeNodesBuiltin` per request sees changes from the preceding test's cleanup, letting late requests fail an already-finished test. Guard logging with a lock and `over` flag set by `t.Cleanup`; fake nodes capture the switch once at creation.
 
 - Assistant tests swap a service's hub with `setHub`, never `s.hub = h` (2026-11-11, #4006). The inbox's "Needs you" teller (`tellInboxNeedsYou`) reads `s.hub` on a goroutine of its own, and a test's service starts one at its first inbox read, so a plain assignment raced with it under `-race`. The teller reads the hub only under `needsYouMu`, and `setHub` swaps it under that lock. The teller is not the only reader: a timer armed while the service is set up (`directionsSoon`, which reads `s.hub` through `hello`) can fire during the test, on a `synctest` bubble's clock too, and nothing orders it after a swap. Where a test only needs a fake behavior, the fake hub does it under `f.mu` (`hangChannel`) and the hub is never swapped. A test with two racing readers can report one in a combined run and the other when run alone, so check each test in separate processes of its own. In the same run, two leader retry tests ended before their retry ran because `sendsTo` also counts sends the fake refused; the retry goroutine then read a package timing their cleanup restored. Such timings belong on the `Service` (`leaderResume`, like `taskRetry`), and a wait must see the effect it names (`deliveredTo`, the sends the fake took).
+
+- Prepared approval result counts need a resumable fake conversation and settled delivery lanes (#10455). Listing `s1` is not enough: the fake also needs `known["s1"]` for `resume_only`, or it records a refused direct try and its asynchronous queued retry as two sends. Mark the conversation known and wait for approval delivery plus relay draining before asserting exactly one terminal result; waiting for the first visible result hides the duplicate.
+
 - A fake's one-shot hook keyed only by machine runs for whoever lists that machine next, a background goroutine included (2026-11-18, #10331). `TestACardMessageReopensOnlyItsOwnTask` armed `fakeHub.afterList["box"]` for the card message's own look at the task's agents. The acceptance before it had started the todo-token sync (`syncTodoTokens`), which lists the same machine; on a busy machine that list was still out when the hook was armed, took it and ran it in the background, so the card message never did (6 of 1000 runs at `-cpu 4`). Tie such a hook to the call under test (a context value the test sets, `listHooked`), not to whichever call comes next. To find who took one, print `debug.Stack()` where the hook fires and run until it fails.
 
 - The assistant bus writes `m.sessions` and `h.clients`; tests modifying them need the same lock (2026-11-06, #4822). `takeFleetSessions` writes `fleet.sessions` under `m.mu`. Direct test assignment to `n.m.sessions` produces DATA RACE with `-race -count=30` and can be overwritten by an old list still in transit. Use `editSessions` (first `settleAssistant`, then edit under `m.mu`) and `appClient(h)`, not direct assignment.
@@ -793,7 +795,7 @@ Retain allow/deny assertions for data directories, private tmp, and proxy. Negat
 
 - Three-page-shell right-swipe regressions must end at the same height as the message row, not drag from a top row to window center. Header changes can make that path exceed 45°, testing vertical scrolling instead. Use a horizontal in-row path, then verify the target page; such failures do not prove missing paging capability.
 
-- New `proto.Features` capabilities also require updating shared hello/manifest wire samples (`go test ./internal/hub -run '^TestWireSamples$' -update`). Check the diff contains only intended flags; capability-handler-only tests miss protocol-snapshot failures.
+- A new or removed feature flag no longer changes the shared hello and health wire samples: they carry a fixed list (`wireFeatures` in `server/internal/hub/wire_samples_test.go`, #11022), and `TestHelloAndHealthCarryTheHubsFeatures` checks the real one. Other new hello or health fields still need `go test ./internal/hub -run '^TestWireSamples$' -update`; check the diff contains only the intended fields.
 
 - SwiftUI Form Toggle accessibility frames can span the row. Taps at row fractions 0.88 or 0.95 can still miss on different devices (no POST). Select internal `toggle.switches.firstMatch`, wait for enabled/hittable, tap center, and assert values after service response. After adding system-message fixtures, locate quoted messages by ID, not the last array item, so mock 500s are not blamed on live sync.
 - Collapsed shell status rows retain the previous toast for transition; XCUITest nodes can still `exists` while video shows nothing. To wait until later long presses are unobstructed, assert not `hittable`, not destroyed.
@@ -1091,6 +1093,16 @@ Use an executable fixture that logs calls and returns the documented result: 0 f
 
 In a UTF-8 locale, `/usr/bin/awk` on macOS (version 20200816) stops at the first invalid byte sequence with `towc: multibyte conversion failure`, prints the record's raw bytes and exits 2; gawk and mawk on Linux read on, so CI never sees it. `install.sh` read every launchd file with awk, and vendors often ship binary property lists: each printed its bytes, and the Python tests reading the script's output with `text=True` crashed with `UnicodeDecodeError`. An awk that reads files it did not write runs with `LC_ALL=C`; plain substring matches mean the same in bytes. The Mac in hand may have no binary plist at all: the regression test writes one with `plistlib` (`FMT_BINARY`) into its own home.
 
+## mawk holds a pipe's lines until 4 KiB or EOF (2026-11-19, #11017)
+
+mawk, the awk of Debian and Ubuntu (and so most likely of the hosted Linux runners, which install no gawk), reads a
+pipe in 4 KiB blocks and handles no line until a block fills or the input ends; `fflush()` only flushes its output.
+macOS awk, busybox awk and gawk handle each line as it arrives, so a filter meant to show a line live works on a Mac
+and stays silent on Linux until the producer exits: check-fast's "waiting for a go slot" line came out after the whole
+wait. `mawk -W interactive` fixes mawk but other awks reject it. A filter that must react to a line at once reads it in
+bash (`IFS= read -r`, which takes a pipe a byte at a time) and hands the rest to `cat`; check the live behaviour in a
+Debian container, not only on the Mac.
+
 ## Import guards read source files, not `go list` (2026-11-06, #5814)
 
 `go list -deps` resolves imports for the host's GOOS / GOARCH and no build tags, so a `server/internal` import in a `_darwin.go` file, a `//go:build public` file (release builds use the tags of `server/build-tags.txt`, `public` among them) or a `//go:build ignore` generator passed the plugin guard on Linux. A guard that must hold for every build parses each `.go` file's imports with `go/parser` (`parser.ImportsOnly`), whatever its constraints, and keeps `go list` as a second view of indirect dependencies, run for every GOOS / GOARCH pair the server ships and every set of build tags it is built with (with `CGO_ENABLED=0`, as the builds are made): an `_arm64.go` file is as invisible to an amd64 host as a `_darwin.go` file is to Linux, and a `// +build !public` line still counts.
@@ -1231,6 +1243,18 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - `-showFleetSample needsYou` is only an initial DEBUG sample. A paired hub's next Fleet event or foreground fetch replaces it; the default mock's empty Fleet turns it into All Caught Up before the Lock Screen appears. For an action test, enable the mock's permission Fleet and take the interaction id from that response, so the resolve assertion names the request whose Deny is visible.
 - The first Live Activities authorization prompt can appear after the Lock Screen wake, not before a single immediate `exists` check. Wait for either the activity's Deny or the system's Allow, answer the system prompt, and then wait for Deny. Clear any launch alert before Home, and keep the unlock teardown registered immediately after locking.
 
+## Workspace naming review reproductions (#7100)
+
+- Exercise a task save with Assistant defaults changed by another editor. Check the placeholder against the actual preview after the save, and keep the explicit draft separate from the refreshed saved baseline/revision. A failed follow-up read must not replay an acknowledged write or reset the preview computer/layout; include an empty computer choice as well as a different valid one.
+- A lazily imported editor can still add first-screen bytes through shared modules and preload metadata. Keep the general repository API free of React and reuse the existing editor-owned request-context guard when that avoids an extra shared chunk. Compare a normal build with one fixed clean main; retain the startup budget and the guard's credential/manager lifetime checks.
+- Tailwind's global stylesheet can also include utilities used only by a lazy editor. Keep that editor's unique rules in its own imported stylesheet, applying the existing utilities through a reference to the shared design tokens. This preserves its exact layout without charging those rules to every first screen.
+- Seed legacy PRs in persisted task progress without first reading the repository API: that read imports them. Pause the synthetic Node after source capture and inspect the real PostgreSQL association set and import receipt. Naming already imports before capture; a link-only edit changes the association revision but not the selected preparation digest. Changing a selected ref must still conflict, and a saved operation must survive restart without resolving again.
+- A Windows-looking `NodeContext` does not make a Linux process use Windows `filepath` semantics. Run the Windows-specific naming tests on Windows, or explicitly label any extracted lexical-path fixture and its substitutions. Cross-compilation checks compilation only. Keep settings syntax, target-native resolution, Node authorization and actual filesystem behavior as separate claims; never widen path permissions to make a host-mismatched reproduction pass.
+- Windows namespace prefixes can make `filepath.Rel` reject an equivalent ordinary path as a different volume. Test both workspace and private-state spellings, including drive and UNC forms; a failed containment comparison is not proof that a path is outside private state. Naming rejects these namespaces rather than stripping their special semantics.
+- A lazy settings subtree needs its own `PageBoundary` inside the surrounding settings page. Reproduce a chunk failure by blocking the browser's actual module request, then verify that sibling settings remain editable and their drafts can still save. Restore the resource and use the existing Reload action to verify recovery of the module and persisted rules; a mocked component or a JSX-shape assertion cannot establish that behavior.
+
+- An export-only change in a deferred editor need not reduce the first screen. Measure it, revert an ineffective trial, and inspect the shared code that startup actually ships. Remove duplicated work there while retaining validation and request-lifetime guards; keep the original budget and verify the normal app/public build.
+
 ## Raw TCP test listeners get the port probe too (2026-11-19, #10659)
 
 `TestProxyRouteCarriesTheLinkAndItsStreams` saw one more "direct attempt" than the link made. The extra connection was the
@@ -1243,3 +1267,14 @@ that open with a TLS record (first byte `0x16`) and replays that byte before for
 - Wrap the replayed connection by embedding the `net.Conn` interface, not `*net.TCPConn`. Embedding the concrete type
   promotes `WriteTo`, which `io.Copy` uses instead of the overriding `Read`, so the replayed byte is silently dropped
   and every forwarded TLS handshake fails.
+
+- A fresh test repository's first branch is whatever the machine's `init.defaultBranch` says (#11017): `main` on one
+  machine, `master` on another. A test that then runs `git branch main` or `git checkout -b master` fails only where
+  the setting matches. Name the first branch (`git init --initial-branch=<name>`, or `git branch -M` after the first
+  commit), and run the suite with `GIT_CONFIG_GLOBAL` pointing at a file that sets `init.defaultBranch` to `main`, then
+  to `master`.
+
+- A test that waits for a signal to end a command must give the command far longer to live than the wait (#11017). A
+  command that sleeps 20 s under a 20 s wait passes when the signal is lost and fails on a slow machine when it was
+  not, so the result says nothing. Let it sleep ten times the wait, keep the wait generous, and on a timeout say which
+  side stalled: the command never got the signal, or it got it and its parent had not exited yet.

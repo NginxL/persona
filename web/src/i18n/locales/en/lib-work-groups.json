@@ -5,12 +5,20 @@
   "searches_other": "Searched {count} times",
   "listings_one": "Listed files once",
   "listings_other": "Listed files {count} times",
-  "working": "Working…",
+  "working": "Working\u2026",
   "worked_for": "Worked for {duration}",
   "work": "Work details",
   "dur_seconds": "{s}s",
   "dur_minutes_seconds": "{m}m {s}s",
   "dur_minutes": "{m}m",
   "dur_hours_minutes": "{h}h {m}m",
-  "dur_days_hours_minutes": "{d}d {h}h {m}m"
+  "dur_days_hours_minutes": "{d}d {h}h {m}m",
+  "actions_read_one": "Read {count} file",
+  "actions_read_other": "Read {count} files",
+  "actions_edit_one": "Edited {count} file",
+  "actions_edit_other": "Edited {count} files",
+  "actions_run_one": "Ran {count} command",
+  "actions_run_other": "Ran {count} commands",
+  "actions_search_one": "Searched {count} time",
+  "actions_search_other": "Searched {count} times"
 }

@@ -85,7 +85,7 @@ func (n *Node) handleAsk(ctx context.Context, req sockRequest) nodeclient.AskRep
 	ix := proto.Interaction{
 		ID: scriptInteractionID(req.Attempt), SessionID: sid, SessionTitle: title, Cwd: a.Cwd,
 		CreatedAt: now.UTC(), ExpiresAt: now.Add(a.Timeout()).UTC(), ToolName: scriptAskTool,
-		Resumable: req.Attempt != "", Agent: scriptAgent, AgentLabel: scriptAgentLabel,
+		Resumable: req.Attempt != "", Agent: scriptAgent, AgentLabel: scriptAgentLabel, Format: a.Format,
 	}
 	if len(a.Options) > 0 {
 		ix.Kind = proto.IxQuestion

@@ -32,6 +32,41 @@ describe("inbox avatars", () => {
     expect(src).not.toContain("/agent/v1/");
   });
 
+  // A connector's thread picture (#10923): the avatars route's path the hub listed, asked at a size it draws; the letter
+  // without one or when it does not load; the source badge stays.
+  const telegramItem = (avatar_url?: string) =>
+    ({ id: "telegram:dm1", source: "telegram", title: "Example user", sender: "Example user", account_name: "Telegram",
+       connector: { thread: "u1", label: "DM", ...(avatar_url ? { avatar_url } : {}) } }) as unknown as InboxItem;
+  const face = () => [...host.querySelectorAll("img")].find((img) => img.getAttribute("src")?.includes("/api/v1/avatars/"));
+
+  it("draws a connector row's picture from the avatars route", () => {
+    act(() => root.render(<ItemAvatar it={telegramItem("/api/v1/avatars/telegram/YS51MS41MDE")} />));
+    const src = face()?.getAttribute("src") ?? "";
+    expect(src).toMatch(/^\/api\/v1\/avatars\/telegram\/YS51MS41MDE\?size=40(&|$)/); // 40 px at this screen's ratio, 1
+    expect(host.querySelector("[title='Telegram']")).not.toBeNull();
+  });
+
+  it("asks for the pixels drawn on this screen", () => {
+    const ratio = window.devicePixelRatio;
+    Object.defineProperty(window, "devicePixelRatio", { value: 3, configurable: true });
+    try {
+      act(() => root.render(<ItemAvatar it={telegramItem("/api/v1/avatars/telegram/YS51MS41MDE")} size={36} />));
+      expect(face()?.getAttribute("src")).toMatch(/\?size=108(&|$)/);
+    } finally {
+      Object.defineProperty(window, "devicePixelRatio", { value: ratio, configurable: true });
+    }
+  });
+
+  it("keeps a connector row's letter without a picture, and when it does not load", () => {
+    act(() => root.render(<ItemAvatar it={telegramItem()} />));
+    expect(face()).toBeUndefined();
+    expect(host.textContent).toContain("E");
+    act(() => root.render(<ItemAvatar it={telegramItem("/api/v1/avatars/telegram/YS51Lmdvbmu")} />));
+    act(() => face()!.dispatchEvent(new Event("error")));
+    expect(face()).toBeUndefined();
+    expect(host.textContent).toContain("E");
+  });
+
   it("shows the letter when the picture does not load, and tries a new one", () => {
     act(() => root.render(<Monogram name="Review group" src="/api/v1/lark/media/gone" />));
     const img = host.querySelector("img");

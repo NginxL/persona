@@ -113,6 +113,11 @@ describe("deep links: pages and paths", () => {
     }
   });
 
+  it("opens Labs settings from web and app links", () => {
+    expect(pageOfPath("/settings", "tab=labs")).toEqual({ page: "settings", tab: "labs" });
+    expect(appPage(new URL("persona://open/settings?tab=labs"))?.page).toEqual({ page: "settings", tab: "labs" });
+  });
+
   it("keeps the knowledge kinds and settings tabs of the pages that define them", () => {
     expect(DEEP_KB_KINDS).toEqual([...KB_KINDS]);
     expect(Object.keys(DEEP_SETTINGS_TABS).sort()).toEqual([...TABS].sort());

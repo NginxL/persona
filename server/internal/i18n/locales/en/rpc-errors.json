@@ -87,10 +87,12 @@
   "assistant_supervision_busy": "This conversation's task-follow-up role changed. Wait for its current work to finish, then try again. Nothing was sent.",
   "assistant_supervision_runtime": "Use a Claude Code or Codex conversation for task follow-up. This Agent does not support its separate instructions. Nothing was started or sent.",
   "assistant_supervision_node_outdated": "Update this computer's Persona Link before following up tasks here. Its current version cannot apply separate task instructions. Nothing was started or sent.",
-  "omp_resume_unknown": "Persona can’t resume this omp session from here yet. Continue it on the computer with omp --resume. Nothing was sent.",
+  "omp_resume_unknown": "Persona can’t find this omp session’s file, so it can’t resume it from here. Continue it on the computer with omp --resume. Nothing was sent.",
   "held_ahead": "Earlier messages to this Agent are still waiting to be sent. Send this one after them.",
   "held_not_kept": "Earlier messages are still waiting to be sent, and this one couldn't be saved. Try again in a moment.",
   "held_full": "Too many messages are waiting for this Agent. Delete some, or send this one when the computer is back.",
   "assistant_launcher_profile_switch": "Can’t switch this conversation to the selected connection. Nothing was sent. Choose the previous connection to continue here, or start a new conversation with the selected connection and one of its models.",
-  "turn_over_background": "This turn had already ended, so nothing was interrupted. Its background work is still running; stop it in the terminal on that computer."
+  "codex_writer_busy": "This Codex thread is already being written by another process on the computer. Nothing was sent. Continue in its original Codex window or terminal; if that process has exited, wait for it to disconnect, refresh, and try again.",
+  "turn_over_background": "This turn had already ended, so nothing was interrupted. Its background work is still running; stop it in the terminal on that computer.",
+  "omp_stopped": "This omp session has stopped, so this can’t be done. Send a message to continue it on the computer."
 }

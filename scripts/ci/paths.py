@@ -278,7 +278,8 @@ FILTERS = {
                    "scripts/ci/core.sh", ".github/workflows/core-test.yml"],
     "runtimes": ["integrations/**", "sdk/ts/**", "schema/**", "spec/**", "scripts/ci/runtimes.sh", ".github/workflows/runtimes-test.yml"],
     # The lane builds and loads the web client, drives the synthetic hub and compiles the shared bridge type.
-    "desktop": ["desktop/**", "web/**", "scripts/mock/mock_hub.py", "scripts/mock/stream_trace.py", "scripts/mock/test_desktops_mock.py", "spec/desktop-bridge.d.ts",
+    "desktop": ["desktop/**", "web/**", "scripts/mock/mock_hub.py", "scripts/mock/mock_domains.py", "scripts/mock/desktops_mock.py",
+                  "scripts/mock/stream_trace.py", "scripts/mock/test_desktops_mock.py", "spec/desktop-bridge.d.ts",
                   # web/scripts/build-pake.mjs compiles these Go sources into the sign-in WebAssembly.
                   "server/cmd/password-wasm/**", "server/internal/passwordpake/**", "server/go.mod", "server/go.sum", "scripts/ci/desktop*.sh", ".github/workflows/desktop-test.yml"],
     "scripts": ["**"],

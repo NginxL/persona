@@ -1,4 +1,5 @@
 {
+  "retry_requested": "Asked the AI twin to try again",
   "received_one": "{count} new message",
   "received_other": "{count} new messages",
   "received_from_one": "{count} new message · {sender}",

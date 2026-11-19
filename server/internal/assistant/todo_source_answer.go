@@ -184,6 +184,11 @@ func (s *Service) forgetSourceWait(id string) {
 // run's: a continuation for one of several tasks is still an interim answer. A Monitor reports
 // events, not an end, so it is not awaited (startsBackground). Tool results still identify
 // background work after its run is gone.
+//
+// A continuation that a matching wake started waits up to channel.HeldMost until its turn ends,
+// even when the wake ended the last background work and no channel run is held: the short wait
+// counts from the close and has usually passed by then. A continuation that ends without words
+// falls back to the short wait.
 func sourceMainReplyItems(items []proto.Item, heldThrough int) ([]proto.Item, time.Duration) {
 	owned, start := true, 0
 	wait := sourceReportWait
@@ -197,7 +202,7 @@ func sourceMainReplyItems(items []proto.Item, heldThrough int) ([]proto.Item, ti
 		if it.Wake {
 			if launchedIn(calls, it.Task) {
 				owned, start = true, i+1
-				reply, wait = nil, sourceReportWait
+				reply, wait = nil, channel.HeldMost
 			} else {
 				if owned {
 					wait = 0
@@ -235,6 +240,8 @@ func sourceMainReplyItems(items []proto.Item, heldThrough int) ([]proto.Item, ti
 			reply = words
 			if len(reply) != 0 || channel.Stopped(turn) != "" {
 				wait = 0
+			} else {
+				wait = sourceReportWait
 			}
 		}
 	}

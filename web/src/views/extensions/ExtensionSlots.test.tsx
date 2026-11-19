@@ -7,7 +7,13 @@ import { ExtensionNavPage, MachineExtensionSections, nameBesideTitle, OverviewCa
 type Place = { extension: string; id: string; title?: string; extension_name?: string; placement?: string; opens?: string };
 const data = vi.hoisted(() => ({ place: undefined as Place | undefined, slots: {} as Record<string, Place[]> }));
 vi.mock("../../lib/extension-slots", () => ({ useExtensionPlace: () => data.place, useExtensionSlot: (slot: string) => data.slots[slot] ?? [] }));
-vi.mock("../settings/ExtensionView", () => ({ ExtensionUI: () => null }));
+const seen = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+vi.mock("../settings/ExtensionView", () => ({
+  ExtensionUI: ({ extension, ui, compact, remember }: Record<string, unknown>) => {
+    if (compact) seen.push({ extension, ui, compact, remember });
+    return null;
+  },
+}));
 
 /** The page's top bar: its title, then the extension's name unless that only says the title again (#3115). */
 function header(place: typeof data.place) {
@@ -59,6 +65,26 @@ describe("the extension's name beside a title (#10940)", () => {
     expect(count(html, "data-extension-card=")).toBe(3);
     expect(names(html)).toEqual(["模型用量"]);
     expect(count(html, "行情")).toBe(1);
+  });
+
+  it("keeps the cards of a row one height: each as tall as its own content left ragged rows (#11093, back in #11109)", () => {
+    data.slots = { overview_card: [{ extension: "a", id: "card", title: "A", placement: "overview_card" }, { extension: "b", id: "card", title: "B", placement: "overview_card" }] };
+    const grid = renderToStaticMarkup(<OverviewCards />).match(/<div id="[^"]*" class="([^"]*)"/)![1]!.split(" ");
+    expect(grid).toContain("grid");
+    expect(grid).not.toContain("items-start");
+  });
+
+  it("asks for each Overview card's last view and marks its heading while that is on screen (#11091)", () => {
+    data.slots = { overview_card: [{ extension: "a", id: "card", title: "A", placement: "overview_card" }] };
+    seen.length = 0;
+    const html = renderToStaticMarkup(<OverviewCards />);
+    expect(seen).toEqual([{ extension: "a", ui: "card", compact: true, remember: true }]);
+    // the mark is in the card's heading, drawn only while the card holds a kept view (a CSS :has on the card)
+    const mark = html.match(/<span[^>]*data-card-updating[^>]*>/)![0];
+    expect(mark).toContain("hidden");
+    expect(mark).toContain("group-has-[[data-kept-view]]/card:inline-flex");
+    expect(mark).toContain('aria-hidden="true"');
+    expect(html).toMatch(/data-extension-card="a\/card"[^>]*class="group\/card /);
   });
 
   it("names a machine section's extension only when its title does not", () => {

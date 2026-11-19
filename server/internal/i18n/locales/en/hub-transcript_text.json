@@ -132,5 +132,5 @@
   "paseo_ui_state_blocked": "Blocked",
   "paseo_ui_state_skipped": "Skipped",
   "paseo_ui_reply_with": "Reply with one of these:",
-  "omp_stopped": "This omp session has stopped. For now you can only continue it on the computer (omp --resume); messages can’t be sent to it from here yet."
+  "omp_stopped": "This omp session has stopped. Send a message to continue it on the computer, in a new terminal tab (omp --resume)."
 }

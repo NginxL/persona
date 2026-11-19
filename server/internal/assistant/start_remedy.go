@@ -264,6 +264,9 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		return "", err
 	}
 	pt := p.Tasks[i]
+	if pt.RequestGate != "" || s.planRequestGate(pt) != "" {
+		return "", i18n.Err("assistant-tasks.request_new_plan")
+	}
 	pt.Permission = strings.TrimSpace(pt.Permission)
 	attempt := 1
 	if pt.Start != nil {

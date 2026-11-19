@@ -142,7 +142,9 @@ func retirableAfter(s proto.Session, doneAt, now time.Time, idle time.Duration) 
 			return false
 		}
 	}
-	if s.Agent != "" && s.Agent != "claude" && s.Agent != "codex" && s.Agent != "traex" {
+	// Only agents a node quits with Ctrl+C in their pane (node retire.go stoppable). agy quits that way too (#11087);
+	// a runtime's agent and other work agents are left alone.
+	if s.Agent != "" && s.Agent != "claude" && s.Agent != "codex" && s.Agent != "traex" && s.Agent != "agy" {
 		return false
 	}
 	last := doneAt

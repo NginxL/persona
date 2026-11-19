@@ -695,10 +695,15 @@ fun JumpToLatest(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier)
             .clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = spoken }
             .padding(horizontal = 14.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         val ink = if (style == AppStyle.Brief) palette.onAction else palette.ink
         JIcon(PhIcons.ArrowDown, null, size = 18.dp, tint = ink)
-        if (count > 0) { Spacer(Modifier.width(6.dp.dense)); Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink) }
+        if (count > 0) {
+            Spacer(Modifier.width(6.dp.dense))
+            Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -741,7 +746,8 @@ fun PlanPill(step: Int, total: Int, done: Int, onClick: () -> Unit, modifier: Mo
                     style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
             })
         }
-        Text(stringResource(R.string.designsystem_plan_step, step, total), style = PersonaTheme.type.caption, color = ink, maxLines = 1)
+        Text(stringResource(R.string.designsystem_plan_step, step, total), style = PersonaTheme.type.caption, color = ink,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

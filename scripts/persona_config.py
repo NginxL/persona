@@ -9,6 +9,7 @@ The config lives outside the repository so clean worktrees (releases) see it too
   python3 scripts/persona_config.py export-options <out.plist> [upload|export]
   python3 scripts/persona_config.py get <dotted.key>  # one value, e.g. hub.url
 """
+import io
 import json
 import os
 import plistlib
@@ -193,15 +194,32 @@ def app_entitlements(cfg: dict) -> str:
         entitlements = plistlib.load(f)
     for key in added:
         entitlements[key] = True
-    with open(os.path.join(ROOT, "apple", OPT_IN_ENTITLEMENTS), "wb") as f:
-        plistlib.dump(entitlements, f)
+    write_if_changed(os.path.join(ROOT, "apple", OPT_IN_ENTITLEMENTS), plistlib.dumps(entitlements))
     return OPT_IN_ENTITLEMENTS
 
 
+def write_if_changed(out: str, data: bytes) -> bool:
+    """Writes `data` to `out` unless it already holds exactly that, and says whether it wrote (#10713).
+
+    sim.sh and the other build scripts generate these files before every build. Rewriting an unchanged file still
+    changes its modification time, which Xcode takes as a change: a new xcconfig invalidates every target's settings,
+    a new entitlements file signs the app again."""
+    try:
+        with open(out, "rb") as f:
+            if f.read() == data:
+                return False
+    except FileNotFoundError:
+        pass
+    with open(out, "wb") as f:
+        f.write(data)
+    return True
+
+
 def xcconfig(cfg: dict):
-    # Generated, git-ignored: the committed project only says $(PERSONA_BUNDLE_ID).
+    # Generated, git-ignored: the committed project only says $(PERSONA_BUNDLE_ID). Written only when its content
+    # changed (write_if_changed).
     out = os.path.join(ROOT, "apple", "Config.xcconfig")
-    with open(out, "w") as f:
+    with io.StringIO() as f:
         f.write("// Generated from %s by scripts/persona_config.py; do not edit or commit.\n" % path())
         f.write("PERSONA_BUNDLE_ID = %s\n" % get(cfg, "app.bundle_id", ""))
         # The App Group the app shares files with the widget extension (docs/operations/release.md "App Group").
@@ -230,6 +248,7 @@ def xcconfig(cfg: dict):
         for suffix in ("BUNDLE_ID", "APP_GROUP", "PUSH_RELAY", "APP_ENTITLEMENTS", "GETTING_STARTED_URL",
                        "META_APP_ID", "META_CLIENT_TOKEN", "TUNNEL_INCLUDE", "TUNNEL_LDFLAGS"):
             f.write(LEGACY_PREFIX + suffix + " = $(PERSONA_" + suffix + ")\n")
+        write_if_changed(out, f.getvalue().encode())
 
 
 def tunnel_core(cfg: dict) -> tuple[str, str]:

@@ -61,6 +61,7 @@ func TestOnMachineNullAndAbsentData(t *testing.T) {
 		{proto.CodeMachinePending, "confirm_computer"},
 		{proto.CodeClaudeMissing, "install_claude"},
 		{proto.CodeLauncherMissing, "connect_model"},
+		{proto.TurnErrorNotLoggedIn, "connect_model"},
 	}
 	seen := make(map[string]bool, len(tests))
 	for _, tc := range tests {

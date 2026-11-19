@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localSubscriptionQuota } from "./panel-quotas";
+import { localLauncherProvider, localSubscriptionQuota } from "./panel-quotas";
 import { weeklyQuota } from "./quota";
 import type { UsageAccount } from "./usage-windows";
 
@@ -23,6 +23,14 @@ describe("localSubscriptionQuota", () => {
     const w = weeklyQuota(q);
     expect(w).toMatchObject({ remaining: 25, tone: "orange" });
     expect(w?.window.label).toBe("7d");
+  });
+
+  it("matches named local launchers via their agent or agent_type", () => {
+    const claude: UsageAccount = { ...sample, id: "claude-1", provider: "claude", name: "Claude Max" };
+    const provider = localLauncherProvider("claude-work", { name: "claude-work", agent: "claude" });
+    expect(provider).toBe("claude");
+    expect(localSubscriptionQuota([claude], provider, "MacBook")?.quota?.gateway_name).toBe("Claude Max");
+    expect(localLauncherProvider("work-codex", { name: "work-codex", agent_type: "Codex" })).toBe("codex");
   });
 
   it("refuses to guess when two local accounts match or the machine differs", () => {

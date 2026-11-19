@@ -37,6 +37,8 @@ export interface NewAgentModelProps {
   launchers: Launcher[];
   /** This computer's launchers are read (the panel opens only then). */
   ready: boolean;
+  /** They couldn't be read (#10952): the pill shows its failed state instead of the spinner, and a click reads again. */
+  onRetry?: () => void;
   choice: ModelChoice;
   /** The launcher the start runs on: the one picked, else the one Model settings › New agent runs; "": none known. */
   runs: string;
@@ -63,7 +65,7 @@ export interface NewAgentModelProps {
 }
 
 export function NewAgentModel(props: NewAgentModelProps) {
-  const { mid, launchers, ready, choice, runs, configured, fallback, ultracodeOn } = props;
+  const { mid, launchers, ready, onRetry, choice, runs, configured, fallback, ultracodeOn } = props;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const close = useCallback(() => setAnchor(null), []);
   // a different computer closes it (its providers are another computer's)
@@ -74,15 +76,16 @@ export function NewAgentModel(props: NewAgentModelProps) {
   }, [mid]);
   // the pill follows the one list it names; the panel, mounted only while open, follows every launcher's
   const pill = newAgentPill({ launchers, runs, list: useModelList(mid, runs), choice, configured, fallback });
+  // no launchers read: no model to name, only that it failed ("Model loading failed" after the warning)
   return (
     <>
       <ModelPill
-        current={pill}
-        loading={pill.loading || !ready}
-        failed={pill.failed}
+        current={onRetry ? { ...pill, model: undefined } : pill}
+        loading={!onRetry && (pill.loading || !ready)}
+        failed={Boolean(onRetry) || pill.failed}
         open={Boolean(anchor)}
-        disabled={!ready}
-        onOpen={(el) => setAnchor((a) => (a ? null : el))}
+        disabled={!ready && !onRetry}
+        onOpen={onRetry ? () => onRetry() : (el) => setAnchor((a) => (a ? null : el))}
         workflow={ultracodeOn ? {} : undefined}
       />
       {anchor && ready && <NewAgentPanel {...props} anchor={anchor} onClose={close} />}

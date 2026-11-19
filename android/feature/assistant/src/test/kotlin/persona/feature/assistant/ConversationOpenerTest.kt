@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -126,19 +127,23 @@ class ConversationOpenerTest {
         assertEquals("Chat Bridgeから", originMarkLabel(AssistantConversationOrigin.LarkAgent, "Chat Bridge", resourcesIn("ja")))
     }
 
-    /** The hub as the store sees it, answering at once. */
+    /** The hub as the store sees it, answering at once, or once [answer] completes with the list it had when asked. */
     private class FakeHub : OpenerIcons.Source {
         var lists = true
         var list = emptyList<HubExtension>()
         var listFails = false
         var iconFails = false
         var listReads = 0
+        var answer: CompletableDeferred<Unit>? = null
         val iconReads = mutableListOf<Pair<String, String?>>()
         override val listsExtensions get() = lists
         override suspend fun extensions(): List<HubExtension> {
             listReads++
-            if (listFails) error("offline")
-            return list
+            val asked = list
+            val fails = listFails
+            answer?.await()
+            if (fails) error("offline")
+            return asked
         }
         override fun iconPath(url: String) = url.takeIf(ExtensionIconPath::matches)
         override suspend fun icon(path: String, manager: String?): ByteArray {
@@ -229,8 +234,10 @@ class ConversationOpenerTest {
         runCurrent()
         assertEquals("not asked again", 1, hub.iconReads.size)
         hub.iconFails = false
+        val revision = store.revision
         store.stale()
         runCurrent()
+        assertTrue("the same list read again: the marks on screen ask again", store.revision > revision)
         store.load(icon, 42)
         runCurrent()
         assertEquals(2, hub.iconReads.size)
@@ -239,6 +246,44 @@ class ConversationOpenerTest {
         assertNull(decodeOpenerIcon(byteArrayOf(1, 2, 3), 42))
         assertNull(decodeOpenerIcon(ByteArray(MAX_OPENER_ICON_BYTES + 1), 42))
         assertNotNull(decodeOpenerIcon(png(), 42))
+    }
+
+    @Test fun aChangeWhileTheListIsReadHasItReadAgainOnceThatReadAnswers() = runTest {
+        val hub = FakeHub()
+        val store = store(hub) { 0L }
+        val first = CompletableDeferred<Unit>()
+        hub.answer = first
+        store.ensure()
+        runCurrent()
+        assertEquals(1, hub.listReads)
+        hub.list = listOf(bridge) // installed while the first read is on its way
+        hub.answer = null
+        store.stale()
+        store.ensure()
+        runCurrent()
+        assertEquals("one read at a time", 1, hub.listReads)
+        first.complete(Unit)
+        runCurrent()
+        assertEquals("read again: the first answer predates the install", 2, hub.listReads)
+        assertEquals(listOf(bridge), store.extensions)
+        store.ensure()
+        runCurrent()
+        assertEquals("the second answer is fresh", 2, hub.listReads)
+        // A read that fails after the change is asked again too, not a minute later.
+        val failing = CompletableDeferred<Unit>()
+        hub.answer = failing
+        hub.listFails = true
+        store.stale()
+        runCurrent()
+        assertEquals(3, hub.listReads)
+        hub.answer = null
+        hub.listFails = false
+        hub.list = emptyList() // removed
+        store.stale()
+        failing.complete(Unit)
+        runCurrent()
+        assertEquals(4, hub.listReads)
+        assertNull("removed: the origin's mark", store.icon(bridgeOpened, AssistantConversationOrigin.LarkAgent, { true }))
     }
 
     @Test fun anotherHubForgetsWhatTheLastOneRead() = runTest {

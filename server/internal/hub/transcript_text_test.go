@@ -154,7 +154,7 @@ func TestLocalizedNotices(t *testing.T) {
 		{"/loop 到点，开始新一轮：check the build", "/loop is due, starting a new round: check the build"},
 		{"Codex 事件：mcp_progress（完整记录在原会话中）", "Codex event: mcp_progress (the full record is in the original session)"},
 		{"Codex 扩展事件：x.y（完整记录在原会话中）", "Codex extension event: x.y (the full record is in the original session)"},
-		{transcript.OmpStoppedNotice, "This omp session has stopped. For now you can only continue it on the computer (omp --resume); messages can’t be sent to it from here yet."},
+		{transcript.OmpStoppedNotice, "This omp session has stopped. Send a message to continue it on the computer, in a new terminal tab (omp --resume)."},
 		{"上下文已压缩", "上下文已压缩"},                                   // the apps find the compaction divider by it
 		{"API 错误：Overloaded（正在重试）", "API 错误：Overloaded（正在重试）"}, // the apps' API error card parses it
 		{"something else", "something else"},

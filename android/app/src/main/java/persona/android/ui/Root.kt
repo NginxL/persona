@@ -969,7 +969,8 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
                 entry<persona.core.navigation.AddComputerRoute> { UnavailablePage(stringResource(R.string.app_demo_no_machines), navigator) }
                 entry<MachineDetailRoute> { UnavailablePage(stringResource(R.string.app_demo_no_machines), navigator) }
             }
-            session.knowledge?.let { knowledgeEntries(navigator, it, session.assistant, session.sender, uriHandler::openUri,
+            session.knowledge?.let { knowledgeEntries(navigator, it, session.assistant, session.sender, session.sessions,
+                session.knowledgeNamespace, uriHandler::openUri,
                 onNewAgent = { start -> navigator.navigate(NewAgentRoute(start.machineId, start.cwd, start.prompt)) }) } ?: run {
                 entry<KnowledgeRoute> { UnavailablePage(stringResource(R.string.app_demo_no_knowledge), navigator) }
                 entry<KnowledgeDetailRoute> { UnavailablePage(stringResource(R.string.app_demo_no_knowledge), navigator) }

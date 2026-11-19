@@ -343,9 +343,12 @@ func TestTopicsAreReadListedAndFound(t *testing.T) {
 }
 
 // The prompts and the summary, byte for byte.
-func TestTopicPromptsGolden(t *testing.T) {
+func TestTopicPromptsGolden(t *testing.T) { goldenTopics(t, "") }
+
+func goldenTopics(t *testing.T, language string) {
 	m := &captureModel{reply: `{"points":[]}`}
 	e := testEngine(t, m)
+	setKnowledgeLanguage(e, m, language)
 	putTopic(t, e, &Topic{Slug: "kb", Name: "知识库", Aliases: []string{"KB"}, Note: "知识库怎么整理"}, topicFile{})
 	quietProject(t, e, "p", "定下每轮最多重写 3 个项目", "测了搜索：热搜索 85ms")
 	e.DistillTopics(context.Background(), 1)

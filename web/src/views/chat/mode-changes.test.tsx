@@ -65,10 +65,14 @@ describe("ModeChangeDivider", () => {
     expect(outcome("restart_dropped", "process_replaced")).toBe("已取消，不会重启到「完全访问」：会话换了进程");
     expect(outcome("restart_dropped", "process_exited")).toBe("已取消，不会重启到「完全访问」：原进程已经退出");
     expect(outcome("restart_dropped", "replaced")).toBe("已取消，不会重启到「完全访问」：被另一次切换取代");
+    // the mode it runs in picked again (#11089): called off, not replaced
+    expect(outcome("restart_dropped", "cancelled")).toBe("已取消，不会重启到「完全访问」：会话保持当前模式");
     expect(outcome("restart_failed", "start_failed")).toBe("没能重启到「完全访问」：新进程没起来，会话按原来的模式继续");
     // no reason, or English words from before the codes: no colon
     expect(outcome("restart_failed")).toBe("没能重启到「完全访问」");
     expect(outcome("restart_dropped", "claude 4101, the process it was picked for, has exited")).toBe("已取消，不会重启到「完全访问」");
+    // a code this app does not know yet (a newer node): the plain line
+    expect(outcome("restart_dropped", "some_later_code")).toBe("已取消，不会重启到「完全访问」");
   });
 
   it("is a separator, not a control", () => {

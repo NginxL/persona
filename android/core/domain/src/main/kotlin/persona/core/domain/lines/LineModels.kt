@@ -205,6 +205,8 @@ sealed interface ChatLine {
      * line was written by [to], the visible one before it by [from], as the transcript names them.
      */
     data class ModelChange(override val id: String, val from: String, val to: String) : ChatLine
+    /** A permission mode change recorded outside the transcript, merged at presentation time (#10297). */
+    data class ModeChange(override val id: String, val change: persona.core.contracts.ModeChange) : ChatLine
 }
 
 data class WorkSummary(val full: List<CoreText>, val short: List<CoreText>) {

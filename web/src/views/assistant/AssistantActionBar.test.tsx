@@ -92,7 +92,7 @@ const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assi
 /** Opens the Needs you rows the tray folds to a line (#5569); a row with its key opens that one. */
 const openRows = (key?: string) => act(async () => host.querySelectorAll<HTMLButtonElement>(`button[data-needs-row${key ? `="${key}"` : ""}][aria-expanded="false"]`).forEach((b) => b.click()));
 
-const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), review: t("assistant-tasks.tray_review"), parked: t("todos.section_parked") };
+const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), review: t("assistant-tasks.tray_review"), parked: t("todos.section_parked"), finished: t("assistant-tasks.tray_finished") };
 // where a click went as a page (set to Full page, #5096); the side panel, the default, says so itself (getPanel)
 const opened = () => location.pathname + location.search;
 const trays = () => host.querySelector("[data-assistant-actionbar]")!.textContent;
@@ -504,7 +504,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(row.querySelector("[data-task-todo-state]")).toBeNull();
   });
 
-  it("updates the same row while it runs, opens the task, and moves it under Just finished once it is accepted", () => {
+  it("updates the same row while it runs, opens the task, and moves it to Finished once it is accepted", () => {
     act(() => entry("running").click());
     const row = host.querySelector("[data-task-slot]");
     act(() => putTodo({ ...todo, supervision: { ...todo.supervision!, progress: { kind: "blocked", step: 3, steps: 5, text: "Waiting for a decision" } } }));
@@ -523,14 +523,53 @@ describe("Assistant Needs you / In progress trays", () => {
     act(() => (host.querySelector("[data-task-slot]") as HTMLButtonElement).click());
     expect(opened()).toBe("/s/demo/worker");
     act(() => putTodo({ ...todo, done_at: at, supervision: { ...todo.supervision!, state: "accepted" } }));
-    // finished: counted in neither entry; In progress lists it under Just finished, not as work going on (#8237)
+    // finished: counted in neither entry and no longer work going on; the Finished entry lists it, new till it is opened
+    // (#8237, #10922)
     expect(entry("running").textContent).toBe(label.running);
     expect(entry("needs").textContent).toBe(label.needs);
     expect(host.textContent).toContain(t("assistant-tasks.tray_empty_progress"));
-    expect(host.querySelector("[data-progress-just-finished]")?.textContent).toBe(`${stateName("just_finished")}1`);
-    const finished = host.querySelector("[data-task-slot]")!;
+    expect(host.querySelector("[data-task-slot]")).toBeNull();
+    expect(entry("finished").textContent).toBe(`${label.finished}1`);
+    act(() => entry("finished").click());
+    const finished = host.querySelector("[data-tray-finished] [data-task-slot]")!;
     expect(finished.getAttribute("data-counts-open")).toBe("false");
-    expect(finished.querySelector("[data-task-mark]")?.getAttribute("data-task-mark")).toBe("done");
+    expect(finished.querySelector("[data-task-mark]")?.getAttribute("data-task-mark")).toBe("just_finished");
+    expect(finished.querySelector("[data-task-status]")?.textContent).toBe(stateName("just_finished"));
+  });
+
+  it("lists what finished in the last day under Finished, seen or not, newest first; opening a new one marks it seen and keeps it (#10922)", async () => {
+    const done = (id: string, title: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({ id, title, origin: conversation, created_at: "2026-11-09T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra });
+    moreTodos = [
+      done("f-seen", "Fix the export button", "2026-11-10T08:10:00Z", { seen_at: "2026-11-10T08:20:00Z" }),
+      done("f-new", "Rename the settings tab", "2026-11-10T08:30:00Z"),
+      done("f-old", "Move the docs", "2026-11-09T08:00:00Z"),
+    ];
+    await act(async () => refreshTodos());
+    // after the unfinished work, drawn quiet, with the done check's green mark; counted by its rows, not as open work
+    expect(entries().map((b) => b.dataset.trayEntry)).toEqual(["needs", "running", "finished"]);
+    expect(entry("finished").textContent).toBe(`${label.finished}2`);
+    expect(entry("finished").className).toContain("text-ink-2");
+    expect(entry("finished").querySelector(".bg-green")).not.toBeNull();
+    expect(entry("running").textContent).toBe(`${label.running}1`);
+    act(() => entry("finished").click());
+    const rows = () => [...host.querySelectorAll<HTMLButtonElement>("[data-tray-finished] [data-task-slot]")];
+    expect(rows().map((row) => row.dataset.taskSlot)).toEqual(["task:f-new", "task:f-seen"]);
+    expect(rows().map((row) => row.querySelector("[data-task-status]")!.getAttribute("data-task-status"))).toEqual(["just_finished", "done"]);
+    expect(rows()[0].querySelector('[data-state="just_finished"]')).not.toBeNull();
+    // opening the new one opens the task and marks it seen where the hub keeps the mark: it stays, as a seen row
+    Object.assign(getState() as unknown as Record<string, unknown>, { features: ["todo_seen"] });
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes("/todos/f-new/seen")) return answer(url, init);
+      writes.push(`${init?.method} ${String(url)}`);
+      return new Response(JSON.stringify({ todo: { ...moreTodos[1], seen_at: now.toISOString() } }), { headers: { "Content-Type": "application/json" } });
+    });
+    await act(async () => rows()[0].click());
+    expect(getPanel()).toEqual({ kind: "task", todo: "f-new" });
+    expect(writes.filter((path) => path.includes("/seen"))).toEqual([expect.stringMatching(/^PUT .*\/todos\/f-new\/seen$/)]);
+    expect(rows().map((row) => row.dataset.taskSlot)).toEqual(["task:f-new", "task:f-seen"]);
+    expect(rows().map((row) => row.querySelector("[data-task-status]")!.getAttribute("data-task-status"))).toEqual(["done", "done"]);
+    expect(entry("finished").textContent).toBe(`${label.finished}2`);
   });
 
   it("reuses round-bound owner acceptance and deduplicates its supervision decision", async () => {

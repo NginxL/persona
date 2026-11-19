@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/iphone"
 	"github.com/nwverse/persona/server/internal/mcpserver"
 	"github.com/nwverse/persona/server/internal/node"
@@ -69,6 +70,9 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 	}
 	rest := args[1:]
 	switch args[0] {
+	case sandbox.AgentExecCommand:
+		stop()
+		return true, sandbox.RunAgentExec(rest)
 	case "node":
 		return true, runNode(ctx, rest, b)
 	case "hook":

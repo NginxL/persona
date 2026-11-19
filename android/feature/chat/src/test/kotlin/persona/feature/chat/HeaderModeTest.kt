@@ -140,4 +140,10 @@ class HeaderModeTest {
         assertTrue(JsonCodec.decodeFromString<Session>(json).bypassAvailable)
         assertFalse(JsonCodec.decodeFromString<Session>("""{"machine_id":"m","session_id":"s"}""").bypassAvailable)
     }
+
+    @Test fun pendingRestartIsReadOffTheSession() {
+        val json = """{"machine_id":"m","session_id":"s","permission_mode":"default","bypass_pending":true}"""
+        assertTrue(JsonCodec.decodeFromString<Session>(json).bypassPending)
+        assertFalse(JsonCodec.decodeFromString<Session>("""{"machine_id":"m","session_id":"s"}""").bypassPending)
+    }
 }

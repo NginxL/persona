@@ -664,7 +664,9 @@ describe("a tool call's own elapsed time (#8163)", () => {
 
   it("measures the span purely from the call and result timestamps", () => {
     expect(toolDurationMs(stepOf(1000, 5000))).toBe(4000);
-    expect(toolDurationLabel(stepOf(1000, 5000))).toBe("4s");
+    expect(toolDurationLabel(stepOf(1000, 5000))).toBeNull();
+    expect(toolDurationLabel(stepOf(0, 29_999))).toBeNull();
+    expect(toolDurationLabel(stepOf(0, 30_000))).toBe("30s");
     expect(toolDurationLabel(stepOf(0, 252_000))).toBe("4m 12s");
     // the same formatter as the group total, including its rounding to whole seconds
     expect(toolDurationLabel(stepOf(0, 65_400))).toBe("1m 5s");

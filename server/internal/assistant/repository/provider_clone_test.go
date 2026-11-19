@@ -8,7 +8,7 @@ import (
 // A repository a to-do first gets through a provider's link is cloned from where the provider said (repo.parse's
 // clone_url); a saved catalog entry still gives its own transport, as binding it would.
 func TestNewProviderRowsCloneWhereTheProviderSays(t *testing.T) {
-	repo := Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}
+	repo := Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}
 	review := TaskLink{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12"}
 	source := SourceSnapshot{Identity: repo, CloneURL: "git@ssh.acme.test:team/app.git", TransportOrigin: "provider", ProviderName: "Acme Code"}
 	merge := func(src SourceSnapshot, catalog Catalog) SourceSnapshot {

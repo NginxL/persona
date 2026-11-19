@@ -335,6 +335,8 @@ extension Session {
         row.permissionMode = old.permissionMode
         row.effort = old.effort
         row.efforts = old.efforts
+        row.serviceTier = old.serviceTier
+        row.serviceTiers = old.serviceTiers
         row.ultracode = old.ultracode
         row.launcher = old.launcher
         row.suggestion = old.suggestion

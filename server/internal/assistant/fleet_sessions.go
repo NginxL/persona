@@ -107,7 +107,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		}
 	}
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
-	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
+	s.pruneGoneQuiet(machine) // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.fleetKeep(machine, list, connected, unsure)
 	for _, ref := range inlineUpdates {
 		s.inOrder(func() { go s.registerInlineTurn(context.Background(), ref) })
@@ -404,6 +404,52 @@ func (s *Service) decoratedUnarchived(machine string) []proto.Session {
 	return s.decorateInventory(machine, s.nodeSessions(machine), true) // a copy already: the devices' list stays as it is
 }
 
+// addHeldRows keeps held messages reachable when their Agent is absent from a complete node list. It only changes
+// the displayed inventory: a real listed row always wins, and the placeholder goes when no message is held for it.
+func (s *Service) addHeldRows(machine string, list []proto.Session, held map[string][]proto.UndeliveredMessage) []proto.Session {
+	f := &s.fleet
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(held) == 0 {
+		delete(f.heldRows, machine)
+		return list
+	}
+	previous := f.heldRows[machine]
+	next := make(map[string]proto.Session, len(held))
+	listed := make(map[string]bool, len(list))
+	for i := range list {
+		sid := list[i].SessionID
+		listed[sid] = true
+		if len(held[sid]) > 0 {
+			next[sid] = archiveSnapshot(list[i])
+		}
+	}
+	missing := make([]string, 0, len(held))
+	for sid, messages := range held {
+		if len(messages) > 0 && !listed[sid] {
+			missing = append(missing, sid)
+		}
+	}
+	sort.Strings(missing)
+	for _, sid := range missing {
+		if row, ok := previous[sid]; ok {
+			next[sid] = row
+			list = append(list, archiveSnapshot(row)) // a fresh copy: decoration must not change the cache
+		} else {
+			list = append(list, proto.Session{MachineID: machine, SessionID: sid, Status: proto.StatusOffline})
+		}
+	}
+	if len(next) == 0 {
+		delete(f.heldRows, machine)
+	} else {
+		if f.heldRows == nil {
+			f.heldRows = map[string]map[string]proto.Session{}
+		}
+		f.heldRows[machine] = next
+	}
+	return list
+}
+
 // decorateInventory owns list. A subset gets the same live fields as the full
 // inventory, but must not forget state marks belonging to rows it did not read.
 func (s *Service) decorateInventory(machine string, list []proto.Session, complete bool) []proto.Session {
@@ -436,6 +482,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	var held map[string][]proto.UndeliveredMessage
 	if s.devs != nil {
 		held = s.devs.HeldMessages(machine, lang)
+	}
+	if complete {
+		list = s.addHeldRows(machine, list, held)
 	}
 	// A done turn nobody has seen is Just finished when it ended after this (#9751).
 	finishedSince := time.Now().Add(-justFinishedFor(s.triageCfg(context.Background())))

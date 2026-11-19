@@ -33,12 +33,20 @@ async function fixture(t, options = {}) {
   writeFileSync(bin, `#!/bin/sh\nexec '${process.execPath}' '${fake}' '${home}' "$@"\n`)
   chmodSync(bin, 0o755)
   const n = await startFakeNode(t)
-  const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, checkTimeoutMs: options.checkTimeoutMs, personadBin: '/missing', socketPath: n.path, log: () => {} })
+  const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, checkTimeoutMs: options.checkTimeoutMs, personadBin: '/missing', socketPath: n.path, log: () => {},
+    modelsTimeoutMs: options.modelsTimeoutMs, catalogEveryMs: options.catalogEveryMs, catalogMaxMs: options.catalogMaxMs })
   t.after(() => runtime.stop())
   runtime.start()
   await n.ready
   const calls = () => readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
-  if (options.noStart) return { n, home, catalog, calls, settings }
+  const modelsCalls = () => {
+    try {
+      return readFileSync(join(home, 'models-calls.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line).at)
+    } catch {
+      return []
+    }
+  }
+  if (options.noStart) return { n, home, catalog, calls, settings, modelsCalls }
   const { session } = await n.peer.call('session.start', { cwd: home })
   const sessionId = session.session_id
   const row = () => n.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === sessionId)
@@ -138,4 +146,31 @@ test('resuming a session does not replace its native model with the configured d
   const { n, calls } = await fixture(t, { noStart: true })
   await n.peer.call('session.modes', { session_id: 'agy-11111111-2222-3333-4444-555555555555', permission_mode: 'default' })
   assert.equal(calls().filter((call) => call.method === 'session/set_model').length, 0)
+})
+
+// #11106: an expired sign-in makes agy models hang rather than fail. The timeout says what to do about it.
+test('a discovery that times out reports an expired sign-in', async (t) => {
+  const { n, catalog } = await fixture(t, { noStart: true, modelsTimeoutMs: 300 })
+  catalog({ hang: true })
+  await assert.rejects(n.peer.call('launchers.models', { refresh: true }), /sign-in may have expired\. Run agy once/)
+  catalog({ models: entries })
+  const result = await n.peer.call('launchers.models', { refresh: true })
+  assert.equal(result.models.length, entries.length)
+})
+
+// #11106: discoveries that keep timing out back off, doubling the wait; one that answers brings the usual pace back.
+test('periodic discovery backs off while it keeps timing out', { timeout: 30_000 }, async (t) => {
+  const { catalog, modelsCalls } = await fixture(t, { noStart: true, modelsTimeoutMs: 100, catalogEveryMs: 250, catalogMaxMs: 10_000 })
+  catalog({ hang: true })
+  await until('four periodic discoveries', () => modelsCalls().length >= 5, 20_000)
+  const at = modelsCalls()
+  // at[0] is the start's own discovery; each periodic one that times out doubles the next wait (250, 500, 1000, 2000 ms).
+  const gaps = [at[2] - at[1], at[3] - at[2], at[4] - at[3]]
+  assert.ok(gaps[1] > gaps[0] * 1.4 && gaps[2] > gaps[1] * 1.4, `gaps grow: ${gaps.join(', ')}`)
+  catalog({ models: entries })
+  const before = modelsCalls().length
+  await until('a discovery answers', () => modelsCalls().length > before, 20_000)
+  await until('the usual pace again', () => modelsCalls().length >= before + 2, 20_000)
+  const after = modelsCalls()
+  assert.ok(after.at(-1) - after.at(-2) < 1000, `back to every 250 ms: ${after.at(-1) - after.at(-2)} ms`)
 })

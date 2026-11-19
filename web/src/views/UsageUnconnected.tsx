@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { assistantLaunchers, readAssistantLaunchers, useModelLists } from "../lib/session-models";
 import { useStore } from "../lib/store";
-import { liveAccounts, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
+import { liveAccounts, useUsageWindowsReady, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
 
 export interface UsageProviderCandidate {
   name: string;
@@ -49,13 +49,14 @@ export function unconnectedUsageProviders(launchers: readonly UsageProviderCandi
 
 export function UsageUnconnected({ accounts, onChange }: { accounts: UsageAccount[]; onChange: (next: readonly UnconnectedProvider[]) => void }) {
   const version = useModelLists();
+  const usageReady = useUsageWindowsReady();
   const mid = useStore((s) => s.assistant?.machine_id || s.machines.find((m) => m.online)?.id || s.machines[0]?.id || "");
   useEffect(() => {
     if (mid) void readAssistantLaunchers(mid);
   }, [mid]);
   const launchers = mid ? assistantLaunchers(mid).info?.launchers : undefined;
   useEffect(() => {
-    onChange(launchers ? unconnectedUsageProviders(launchers, liveAccounts(accounts)) : []);
-  }, [launchers, accounts, version, onChange]);
+    onChange(usageReady && launchers ? unconnectedUsageProviders(launchers, liveAccounts(accounts)) : []);
+  }, [usageReady, launchers, accounts, version, onChange]);
   return null;
 }

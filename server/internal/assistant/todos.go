@@ -128,8 +128,9 @@ type Todo struct {
 	// PartOf: the to-do whose request this one is a piece of; After: the pieces of that request it waits for
 	// (todo_pieces.go, docs/assistant/todos.md "Requests in pieces"). Both empty for a to-do that is no piece. Clients
 	// that do not know them show the to-do as ever.
-	PartOf string   `json:"part_of,omitempty"`
-	After  []string `json:"after,omitempty"`
+	PartOf               string   `json:"part_of,omitempty"`
+	After                []string `json:"after,omitempty"`
+	RequireAcceptedAfter bool     `json:"require_accepted_after,omitempty"`
 	// Brief: what was asked when the work was handed out, with its log, and Lineage: the to-dos that carried the work
 	// (#3822, task_brief.go). Filled in where the apps read the to-dos (withBrief); absent for a to-do with no brief.
 	Brief   *TaskBrief    `json:"brief,omitempty"`
@@ -199,13 +200,14 @@ type todoBook struct {
 	// under it before storing (todo_pieces.go). Automatic links take it for memory changes and again for background persistence, so a
 	// removed workspace cannot gain a late stored agent. Agent snapshots do not take it. Taken before mu, never
 	// while mu is held; node calls and change notifications run after it is released.
-	writing         sync.Mutex
-	loaded          bool
-	todos           map[string]*Todo
-	activeBySession map[[2]string]string  // (machine_id, session_id) -> the open todo it works for
-	snapshotSyncing map[[2]string]bool    // (machine_id, session_id) whose title is being written
-	spacesByKey     map[string]string     // "<machine_id>/<space>" -> todo_id
-	botmux          map[string]botmuxSeen // by machine: its botmux sessions' chats and dispatches (todo_sessions.go)
+	writing             sync.Mutex
+	loaded              bool
+	todos               map[string]*Todo
+	deletedRequestGates map[string]bool
+	activeBySession     map[[2]string]string  // (machine_id, session_id) -> the open todo it works for
+	snapshotSyncing     map[[2]string]bool    // (machine_id, session_id) whose title is being written
+	spacesByKey         map[string]string     // "<machine_id>/<space>" -> todo_id
+	botmux              map[string]botmuxSeen // by machine: its botmux sessions' chats and dispatches (todo_sessions.go)
 
 	tokensMu sync.Mutex
 	tokens   map[string]*tokenSync // by machine (todo_sessions.go)
@@ -294,6 +296,14 @@ func (s *Service) loadTodosLocked(ctx context.Context) error {
 	tlist, err := st.ListTodos(ctx)
 	if err != nil {
 		return err
+	}
+	if gates, ok := st.(interface {
+		DeletedRequestGates(context.Context) (map[string]bool, error)
+	}); ok {
+		b.deletedRequestGates, err = gates.DeletedRequestGates(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	slist, err := st.ListAllTodoSpaces(ctx)
 	if err != nil {
@@ -510,6 +520,12 @@ func (s *Service) removeTodo(ctx context.Context, id string) error {
 
 	s.todos.mu.Lock()
 	if cur, ok := s.todos.todos[id]; ok {
+		if cur.RequireAcceptedAfter {
+			if s.todos.deletedRequestGates == nil {
+				s.todos.deletedRequestGates = make(map[string]bool)
+			}
+			s.todos.deletedRequestGates[id] = true
+		}
 		for _, a := range cur.Agents {
 			if a.ReleasedAt == nil && a.DismissedAt == nil {
 				delete(s.todos.activeBySession, [2]string{a.MachineID, a.SessionID})
@@ -675,6 +691,7 @@ func copyTodoLocked(t *Todo) Todo {
 // that worked for it (latest released first).
 func formatTodo(t Todo) Todo {
 	out := t
+	out.Delivery = currentDelivery(t)
 	if out.Source != nil && out.Source.ReportFullReply {
 		source := *out.Source
 		source.ReportText = "" // the delivery payload is not part of the to-do list
@@ -941,11 +958,12 @@ func (s *Service) todoRoutes() {
 			return
 		}
 		var in struct {
-			Title              string          `json:"title"`
-			Notes              string          `json:"notes"`
-			Project            *string         `json:"project"`
-			Kind               string          `json:"kind"`
-			RepositoryBindings json.RawMessage `json:"repository_bindings"`
+			Title                string          `json:"title"`
+			Notes                string          `json:"notes"`
+			Project              *string         `json:"project"`
+			Kind                 string          `json:"kind"`
+			RequireAcceptedAfter *bool           `json:"require_accepted_after"`
+			RepositoryBindings   json.RawMessage `json:"repository_bindings"`
 			todoPlanIn
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -963,6 +981,17 @@ func (s *Service) todoRoutes() {
 			return
 		}
 		var plan db.TodoEdit
+		if in.RequireAcceptedAfter != nil {
+			if !fullRole(r) {
+				apierr.Write(w, http.StatusForbidden, errors.New("only the owner can change request prerequisite enforcement"))
+				return
+			}
+			if kind == db.KindConcern && *in.RequireAcceptedAfter {
+				apierr.Write(w, http.StatusBadRequest, errRequestGateRoot)
+				return
+			}
+			plan.RequireAcceptedAfter = in.RequireAcceptedAfter
+		}
 		if err := in.todoPlanIn.edit(&plan); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
@@ -1019,12 +1048,13 @@ func (s *Service) todoRoutes() {
 		}
 
 		var in struct {
-			Title   *string         `json:"title"`
-			Notes   *string         `json:"notes"`
-			Done    *bool           `json:"done"`
-			Project *string         `json:"project"`
-			PartOf  json.RawMessage `json:"part_of"`
-			After   json.RawMessage `json:"after"`
+			Title                *string         `json:"title"`
+			Notes                *string         `json:"notes"`
+			Done                 *bool           `json:"done"`
+			Project              *string         `json:"project"`
+			PartOf               json.RawMessage `json:"part_of"`
+			After                json.RawMessage `json:"after"`
+			RequireAcceptedAfter *bool           `json:"require_accepted_after"`
 			todoPlanIn
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -1032,6 +1062,11 @@ func (s *Service) todoRoutes() {
 			return
 		}
 		e := db.TodoEdit{Title: in.Title, Notes: in.Notes, Done: in.Done}
+		if in.RequireAcceptedAfter != nil && !fullRole(r) {
+			apierr.Write(w, http.StatusForbidden, errors.New("only the owner can change request prerequisite enforcement"))
+			return
+		}
+		e.RequireAcceptedAfter = in.RequireAcceptedAfter
 		if in.Title != nil {
 			t := strings.TrimSpace(*in.Title)
 			if t == "" {

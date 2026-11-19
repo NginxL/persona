@@ -172,7 +172,8 @@ func momentForPrompt(m *MomentPost, note string, chars int, zone *time.Location)
 
 // judgeMoments asks which candidates are about p, links those, and remembers every verdict.
 func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPost, judged map[string]bool) (int, error) {
-	in := prompts.KBMomentsLinkInput{Name: p.Name, Aliases: p.Aliases, Keywords: p.Keywords, OneLine: p.OneLine, Goal: p.Goal,
+	owner := e.knowledgeOwner()
+	in := prompts.KBMomentsLinkInput{Language: owner.Language, Name: p.Name, Aliases: p.Aliases, Keywords: p.Keywords, OneLine: p.OneLine, Goal: p.Goal,
 		Summary: clip(e.Store.Summary(KindProject, p.Slug), 1500)}
 	for _, m := range cands {
 		in.Posts = append(in.Posts, momentForPrompt(m, "", 300, e.Store.Zone()))
@@ -186,7 +187,7 @@ func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPo
 	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.moments").JSONMax(cctx, prompts.RenderKBMomentsLink(prompts.KBOwner{Owner: e.ownerName()}),
+	if err := e.modelFor("kb.moments").JSONMax(cctx, prompts.RenderKBMomentsLink(owner),
 		prompts.RenderKBMomentsLinkInput(in), 3000, &d); err != nil {
 		return 0, err
 	}

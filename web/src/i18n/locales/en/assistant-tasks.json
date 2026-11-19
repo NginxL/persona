@@ -16,6 +16,7 @@
   "tray_empty_parked": "No tasks parked",
   "tray_review": "Persona reviewing",
   "tray_empty_review": "Nothing waiting for Persona to review",
+  "tray_finished": "Finished",
   "pr_blocker_review_required": "Review required",
   "pr_blocker_changes_requested": "Changes requested",
   "pr_blocker_checks_failed": "Checks failed",

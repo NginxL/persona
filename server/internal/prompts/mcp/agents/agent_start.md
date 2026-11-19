@@ -8,6 +8,8 @@ When the agent needs credentials the user keeps in a secret provider (a token in
 
 Give `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word "ultracode" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.
 
+Optional `wait_seconds` observes this launch or input for at most 50 seconds after dispatch. The receipt is retained, followed by an `Inline observation` JSON record: `completed` with `reply`, `question` with `interaction_id`, or `timeout`, `cancelled`, `unavailable`, `interrupted` or `failed`. The record includes the input and session references when known. It never answers a question, accepts a task or resends input. Older nodes without input echo support may time out instead of returning an unrelated reply. Continue to follow the normal supervision and `task_review` requirements.
+
 ```json
 {
   "type": "object",
@@ -17,6 +19,11 @@ Give `ultracode: true` for a large task: one that spans many files or needs chec
     "prompt"
   ],
   "properties": {
+    "wait_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional inline observation after dispatch, capped at 50 seconds; omit or 0 for the current receipt. Returns this input's completed reply or pending question reference. Timeout never resends or cancels work; normal supervision and task_review still apply."
+    },
     "machine": {
       "type": "string"
     },

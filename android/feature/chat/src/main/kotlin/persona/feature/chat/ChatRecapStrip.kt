@@ -47,7 +47,7 @@ import persona.core.domain.plainMarkdown
  * ([closed], the last recap closed in this chat). [lines] are newest first.
  */
 internal fun openRecapId(lines: List<ChatLine>, closed: String?): String? {
-    val newest = when (val line = lines.firstOrNull()) {
+    val newest = when (val line = lines.firstOrNull { it !is ChatLine.ModeChange }) {
         is ChatLine.Recaps -> line.items.lastOrNull()?.item
         is ChatLine.Row -> line.row.item?.item?.takeIf { line.row.type == "recap" }
         else -> null

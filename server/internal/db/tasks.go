@@ -129,6 +129,41 @@ func (d *DB) UpdateTaskPlan(ctx context.Context, id, from, to string, tasks json
 	return tag.RowsAffected() == 1, nil
 }
 
+// EditStartedPlanTask applies edit to the current task while holding the database row lock.
+// A manager claiming the queue on another connection serializes with this edit.
+func (d *DB) EditStartedPlanTask(ctx context.Context, id string, index int, edit func(json.RawMessage) (json.RawMessage, error)) (*TaskPlanRow, error) {
+	var row TaskPlanRow
+	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		var task json.RawMessage
+		err := tx.QueryRow(ctx, `SELECT state, tasks->$2::integer FROM task_plans WHERE id = $1 FOR UPDATE`, id, index).Scan(&row.State, &task)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTaskPlanNotFound
+		}
+		if err != nil || row.State != "started" || index < 0 || task == nil {
+			return err
+		}
+		next, err := edit(task)
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text], $3::jsonb), updated_at = clock_timestamp()
+			WHERE id = $1 RETURNING id, conversation, tasks, state, created_at, updated_at`, id, index, next).
+			Scan(&row.ID, &row.Conversation, &row.Tasks, &row.State, &row.CreatedAt, &row.UpdatedAt)
+	})
+	if err != nil || row.ID == "" {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// CompareTaskQueue changes one authorized start's queue only if it is still the entry the dispatcher read.
+func (d *DB) CompareTaskQueue(ctx context.Context, id string, index int, todoID string, before, after json.RawMessage, at time.Time) (bool, error) {
+	tag, err := d.pool.Exec(ctx, `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text, 'queue'], $5::jsonb), updated_at = $6
+		WHERE id = $1 AND state = 'started' AND tasks->$2::integer->>'todo_id' = $3 AND tasks->$2::integer->'queue' = $4::jsonb`,
+		id, index, todoID, []byte(before), []byte(after), at)
+	return tag.RowsAffected() == 1, err
+}
+
 func (d *DB) AppendFeed(ctx context.Context, f FeedRow) error {
 	_, err := d.appendDraftFeed(ctx, f, false)
 	return err

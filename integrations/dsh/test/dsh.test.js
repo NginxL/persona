@@ -26,6 +26,12 @@ function bus() {
   }
 }
 
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
 /** A sessionController over in-memory logs. */
 function controller() {
   const sessions = new Map()
@@ -549,6 +555,176 @@ test('plan reviews and questions go to the phone; a timed question answered late
   release({ answers: { 'Which db?': 'pg' } })
   await until('late answer', () => answered.length === 1)
   assert.deepEqual(answered[0], { callId: 'call_q', answer: { answers: [{ id: 'q1', selected: ['pg'] }] } })
+})
+
+test('both mode lets the phone win an approval, aborts Web, and keeps fallback behavior (#10176)', async (t) => {
+  const { n, ctl, ev, rt } = await setup(t, { interactions: 'both' })
+  ctl.add('session-both-a', {})
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  const agent = { session: { id: 'session-both-a' } }
+
+  const phone = deferred()
+  const web = deferred()
+  const req = { agent, toolName: 'bash', callId: 'both-phone' }
+  let webSignal
+  n.resolve = () => phone.promise
+  const promptsBefore = ctl.prompts.length
+  const pending = ev.waterfall('approval/request', req, () => { webSignal = req.signal; return web.promise })
+  await until('both answerers are active', () => n.asked.length === 1 && webSignal)
+  phone.resolve({ allow: false, message: 'phone decision' })
+  assert.equal(await pending, 'rejected')
+  assert.equal(webSignal.aborted, true, 'the phone winner aborts the Web GUI request')
+  await until('the phone refusal reason steered in', () => ctl.prompts.length === promptsBefore + 1)
+  assert.equal(ctl.prompts.at(-1).requestId, `${n.asked[0].id}-reason`)
+  web.reject(new Error('late Web failure'))
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(n.all('interaction.cancel').length, 0, 'an answered phone card is not withdrawn')
+
+  const unavailablePhone = deferred()
+  n.resolve = () => unavailablePhone.promise
+  let unavailableSettled = false
+  const unavailable = ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'both-unavailable' }, () => 'unavailable')
+  unavailable.then(() => { unavailableSettled = true }, () => { unavailableSettled = true })
+  await until('the second phone card', () => n.asked.length === 2)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(unavailableSettled, false, 'an unavailable Web answerer does not win')
+  assert.equal(n.all('interaction.cancel').length, 0)
+  unavailablePhone.resolve({ allow: true })
+  assert.equal(await unavailable, 'allowed-once')
+
+  const dismissedWeb = deferred()
+  const dismissedReq = { agent, toolName: 'bash', callId: 'both-dismissed' }
+  let dismissedSignal
+  n.resolve = () => ({ dismiss: true })
+  const dismissed = ev.waterfall('approval/request', dismissedReq, () => { dismissedSignal = dismissedReq.signal; return dismissedWeb.promise })
+  await until('the dismissed phone card', () => n.asked.length === 3)
+  await new Promise((resolve) => setImmediate(resolve))
+  dismissedWeb.resolve('allowed-once')
+  assert.equal(await dismissed, 'allowed-once')
+  assert.equal(dismissedSignal.aborted, false, 'a dismissed phone card leaves the Web branch alone')
+})
+
+test('both mode lets Web win an approval and withdraws both branches on cancellation (#10176)', async (t) => {
+  const { n, ctl, ev, rt } = await setup(t, { interactions: 'both' })
+  ctl.add('session-both-b', {})
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  const agent = { session: { id: 'session-both-b' } }
+
+  const phone = deferred()
+  const web = deferred()
+  n.resolve = () => phone.promise
+  const promptsBefore = ctl.prompts.length
+  const pending = ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'both-web' }, () => web.promise)
+  await until('the first phone card', () => n.asked.length === 1)
+  web.resolve('rejected')
+  assert.equal(await pending, 'rejected')
+  await until('the Web winner withdraws the phone', () => n.last('interaction.cancel')?.id === n.asked[0].id)
+  phone.resolve({ allow: true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(ctl.prompts.length, promptsBefore, 'a Web denial has no phone refusal reason to steer')
+
+  const cancelledPhone = deferred()
+  const turn = new AbortController()
+  const req = { agent, toolName: 'bash', callId: 'both-cancelled', signal: turn.signal }
+  let webSignal
+  n.resolve = () => cancelledPhone.promise
+  const cancelled = ev.waterfall('approval/request', req, () => {
+    webSignal = req.signal
+    return new Promise((resolve, reject) => req.signal.addEventListener('abort', () => reject(req.signal.reason), { once: true }))
+  })
+  await until('the second phone card', () => n.asked.length === 2)
+  turn.abort(new Error('turn stopped'))
+  assert.equal(await cancelled, 'cancelled')
+  assert.equal(webSignal.aborted, true)
+  await until('turn cancellation withdraws the phone', () => n.last('interaction.cancel')?.id === n.asked[1].id)
+  cancelledPhone.resolve({ allow: true })
+
+  const offlinePhone = deferred()
+  const offlineWeb = deferred()
+  n.resolve = () => offlinePhone.promise
+  const offline = ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'both-offline' }, () => offlineWeb.promise)
+  await until('the third phone card', () => n.asked.length === 3)
+  n.setHub(false)
+  await until('hub disconnected', () => !rt.hubConnected)
+  offlineWeb.resolve('allowed-once')
+  assert.equal(await offline, 'allowed-once')
+  assert.equal(n.all('interaction.cancel').length, 2, 'a disconnected hub cannot receive the withdrawal yet')
+  n.setHub(true)
+  await until('reconnection withdraws the Web-answered card', () => n.last('interaction.cancel')?.id === n.asked[2].id)
+  offlinePhone.resolve({ allow: false })
+})
+
+test('both mode races questions and preserves one timed late answer (#10176)', async (t) => {
+  const { n, ctl, ev, rt, answered } = await setup(t, { interactions: 'both' })
+  ctl.add('session-both-q', {})
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  const agent = { session: { id: 'session-both-q' } }
+  const q = { id: 'q1', question: 'Which db?', options: [{ label: 'pg' }, { label: 'sqlite' }] }
+
+  const phone = deferred()
+  const web = deferred()
+  const req = { agent, questions: [q] }
+  let webSignal
+  n.resolve = () => phone.promise
+  const pending = ev.waterfall('user-questions/request', req, () => { webSignal = req.signal; return web.promise })
+  await until('the first question card', () => n.asked.length === 1)
+  phone.resolve({ answers: { 'Which db?': 'pg' } })
+  assert.deepEqual(await pending, { answers: [{ id: 'q1', selected: ['pg'] }] })
+  assert.equal(webSignal.aborted, true)
+  web.resolve({ answers: [{ id: 'q1', selected: ['sqlite'] }] })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(answered.length, 0, 'a resolved question has no late answer')
+
+  const webPhone = deferred()
+  const webAnswer = deferred()
+  n.resolve = () => webPhone.promise
+  const fromWeb = ev.waterfall('user-questions/request', { agent, questions: [q] }, () => webAnswer.promise)
+  await until('the second question card', () => n.asked.length === 2)
+  webAnswer.resolve({ answers: [{ id: 'q1', selected: ['sqlite'] }] })
+  assert.deepEqual(await fromWeb, { answers: [{ id: 'q1', selected: ['sqlite'] }] })
+  await until('the Web answer withdraws the question card', () => n.last('interaction.cancel')?.id === n.asked[1].id)
+  webPhone.resolve({ answers: { 'Which db?': 'pg' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(answered.length, 0, 'a late phone answer after Web wins is ignored')
+
+  const latePhone = deferred()
+  const timed = new AbortController()
+  const timedReq = { agent, questions: [q], signal: timed.signal, wait: { callId: 'call_both_q', timed: true } }
+  let timedWebSignal
+  n.resolve = () => latePhone.promise
+  const timedResult = ev.waterfall('user-questions/request', timedReq, () => {
+    timedWebSignal = timedReq.signal
+    return new Promise((resolve, reject) => timedReq.signal.addEventListener('abort', () => reject(timedReq.signal.reason), { once: true }))
+  })
+  await until('the timed question card', () => n.asked.length === 3)
+  timed.abort(new Error('ASK_TIMED_OUT'))
+  await assert.rejects(timedResult, /ASK_TIMED_OUT/)
+  assert.equal(timedWebSignal.aborted, true)
+  latePhone.resolve({ answers: { 'Which db?': 'pg' } })
+  await until('one timed late answer', () => answered.length === 1)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(answered, [{ callId: 'call_both_q', answer: { answers: [{ id: 'q1', selected: ['pg'] }] } }])
+
+  const cancelledPhone = deferred()
+  const cancelledTimed = new AbortController()
+  const cancelledReq = { agent, questions: [q], signal: cancelledTimed.signal, wait: { callId: 'call_cancel_q', timed: true } }
+  n.resolve = () => cancelledPhone.promise
+  const cancelledResult = ev.waterfall('user-questions/request', cancelledReq, () => {
+    return new Promise((resolve, reject) => cancelledReq.signal.addEventListener('abort', () => reject(cancelledReq.signal.reason), { once: true }))
+  })
+  await until('the externally cancelled timed card', () => n.asked.length === 4)
+  cancelledTimed.abort(new Error('question completed outside WebUI'))
+  await assert.rejects(cancelledResult, /outside WebUI/)
+  await until('external cancellation withdraws the timed card', () => n.last('interaction.cancel')?.id === n.asked[3].id)
+  cancelledPhone.resolve({ answers: { 'Which db?': 'sqlite' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(answered.length, 1, 'an outer responder winning is not a timeout and accepts no late answer')
 })
 
 test('reconnects when the node goes away and comes back', async (t) => {

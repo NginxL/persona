@@ -129,6 +129,40 @@ func TestModeChangesAreRecorded(t *testing.T) {
 	}
 }
 
+// A pick of the mode the session runs in already changed nothing: no set row, from a node that says how it took effect
+// or an older one. When it called off a restart that waited, the node's event is the one row, with its code (#11089).
+func TestPickOfTheModeItRunsInIsNotAChange(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	var mu sync.Mutex
+	answer := map[string]any{"ok": true, "applied": "now"}
+	m := modesMachine(t, d, func() (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return answer, nil
+	})
+	phone := &devicewire.Actor{Kind: "device", DeviceID: "d1", DeviceName: "Phone"}
+	if err := modesCall(d, `{"session_id":"s1","permission_mode":"acceptEdits"}`, phone); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	answer = map[string]any{"ok": true} // an older node
+	mu.Unlock()
+	if err := modesCall(d, `{"session_id":"s1","permission_mode":"acceptEdits"}`, phone); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.recorded(); len(got) != 0 {
+		t.Fatalf("a pick of the mode it runs in was recorded: %+v", got)
+	}
+	b, _ := json.Marshal(proto.ModeRestartEvent{SessionID: "s1", Mode: "bypassPermissions", Outcome: proto.ModeRestartDropped,
+		Reason: proto.ModeRestartReasonCancelled})
+	m.onEvent(proto.EventModeRestart, b)
+	if got := st.recorded(); len(got) != 1 || got[0].Kind != db.ModeChangeRestartDropped || got[0].Reason != proto.ModeRestartReasonCancelled {
+		t.Errorf("rows = %+v", got)
+	}
+}
+
 // What became of a queued restart is kept with the session's changes and goes no further than the manager.
 func TestModeRestartOutcomeIsRecordedAndKept(t *testing.T) {
 	d := newTestDevices(t)

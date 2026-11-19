@@ -211,3 +211,153 @@ func TestSupervisionRuntimeRefusalStopsRelay(t *testing.T) {
 		})
 	}
 }
+
+// A task a runtime-backed chat already supervises (it was handed out before such a chat's tasks went to the main
+// conversation's route) is followed up by that route as well: its supervision message neither goes to the chat nor ends
+// in a "did not send" push, whether it goes out at once or waits in the queue.
+func TestRuntimeSupervisedStockTaskGoesToOwnSupervisor(t *testing.T) {
+	for _, route := range []string{"main", "background"} {
+		for _, delivery := range []string{"immediate", "queued"} {
+			t.Run(route+"/"+delivery, func(t *testing.T) {
+				ctx := context.Background()
+				s, f := newQuietService(t)
+				useMain := route == "main"
+				s.noBackground = false
+				setSettings(t, s, func(v *Settings) {
+					v.MainSupervisesOwnTasks = &useMain
+					v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "background", "server"
+				})
+				persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: "claude", Status: proto.StatusIdle}
+				background := proto.Session{SessionID: "background", MachineID: "server", Assistant: true, Agent: "codex", Status: proto.StatusIdle}
+				side := proto.Session{SessionID: "agy-side", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle}
+				f.setSessions("server", persona, background, side)
+				f.mu.Lock()
+				f.known[background.SessionID] = true
+				f.mu.Unlock()
+				guardRuntimeFollowUp(f, side.SessionID)
+
+				if _, err := s.toolTaskPlan(ctx, side.SessionID, json.RawMessage(runtimePlan)); err != nil {
+					t.Fatal(err)
+				}
+				waitFor(t, "the worker to link", func() bool { return len(onlyTodo(s).Agents) == 1 })
+				task := onlyTodo(s)
+				// What an earlier release recorded: the runtime chat itself as the supervisor.
+				if _, _, err := s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+					v.Supervisor = side.SessionID
+					return true
+				}); err != nil {
+					t.Fatal(err)
+				}
+				reviewer := persona.SessionID
+				if !useMain {
+					reviewer = background.SessionID
+				}
+				if delivery == "queued" {
+					f.setSessions("server", persona, background, func() proto.Session { w := side; w.Status = proto.StatusWorking; return w }())
+				}
+				worker := task.Agents[0]
+				const report = "Build finished successfully."
+				if _, err := s.reportToSupervisor(ctx, worker.MachineID, worker.SessionID, json.RawMessage(`{"kind":"done","text":"`+report+`"}`), time.Now()); err != nil {
+					t.Fatal(err)
+				}
+				waitFor(t, "the worker's report at the route's reviewer", func() bool {
+					f.mu.Lock()
+					defer f.mu.Unlock()
+					return slices.ContainsFunc(f.sends, func(p map[string]any) bool {
+						text, _ := p["text"].(string)
+						return p["session_id"] == reviewer && strings.Contains(text, report) &&
+							p["supervision_instructions"] == prompts.RenderSupervisionInstructions()
+					})
+				})
+				if f.sentTo(side.SessionID) != 0 || s.queuedFor(side.SessionID) != 0 {
+					t.Fatal("the runtime chat received or queued a supervision message")
+				}
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				for _, p := range f.pushes {
+					if p.SessionID == side.SessionID {
+						t.Fatalf("the owner was told a message was not sent: %+v", p)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A supervision message queued for a runtime-backed chat before the hub knew that chat cannot take it moves to the
+// main conversation's route when it comes due, instead of being refused there.
+func TestRuntimeQueuedSupervisionMovesToOwnSupervisor(t *testing.T) {
+	ctx := context.Background()
+	s, f, task := newSupervisedService(t)
+	side := proto.Session{SessionID: "agy-side", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle}
+	main := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: "claude", Status: proto.StatusIdle}
+	f.setSessions("server", main, side)
+	f.mu.Lock()
+	f.known[side.SessionID] = true
+	f.mu.Unlock()
+	guardRuntimeFollowUp(f, side.SessionID)
+	if _, _, err := s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+		v.Supervisor, v.State = side.SessionID, reviewPending
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	task = todoNow(s, task.ID)
+	signals := watchSignals(task, nil, now)
+	if len(signals) == 0 {
+		t.Fatal("the task raises no signal")
+	}
+	s.queueRelay(side.SessionID, relayMsg{Tool: superviseTool, Text: "A task is ready for review.", Signals: encodeDigestSignals(signals), At: now})
+	s.drainRelays("server", []proto.Session{side})
+	waitFor(t, "the message at the main conversation", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return slices.ContainsFunc(f.sends, func(p map[string]any) bool { return p["session_id"] == main.SessionID })
+	})
+	waitFor(t, "the runtime chat's queue to empty", func() bool { return s.queuedFor(side.SessionID) == 0 })
+	if f.sentTo(side.SessionID) != 0 {
+		t.Fatal("the runtime chat was sent a supervision message")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range f.pushes {
+		if p.SessionID == side.SessionID {
+			t.Fatalf("the owner was told a message was not sent: %+v", p)
+		}
+	}
+}
+
+// A leader conversation on a runtime (a scheduled chat listed in assistant.leaders) is routed around, so the route's
+// supervisor has to be able to review what it supervised.
+func TestRuntimeLeaderTasksAreReviewedByBackgroundSupervisor(t *testing.T) {
+	ctx := context.Background()
+	s, f := newQuietService(t)
+	off := false
+	s.noBackground = false
+	setSettings(t, s, func(v *Settings) {
+		v.MainSupervisesOwnTasks = &off
+		v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "background", "server"
+		v.Leaders = []string{"agy-lead"}
+	})
+	persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: "claude", Status: proto.StatusIdle}
+	background := proto.Session{SessionID: "background", MachineID: "server", Assistant: true, Agent: "codex", Status: proto.StatusIdle}
+	lead := proto.Session{SessionID: "agy-lead", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle}
+	f.setSessions("server", persona, background, lead)
+	f.mu.Lock()
+	f.known[background.SessionID] = true
+	f.mu.Unlock()
+	todo, err := s.newTodo(ctx, "Check", "", lead.SessionID, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool { v.Supervisor = lead.SessionID; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.digestTarget(ctx, s.settings(ctx), superviseSignal{Todo: todo.ID, Kind: sigReview}); got != background.SessionID {
+		t.Fatalf("signal goes to %q, want the background supervisor", got)
+	}
+	if !s.backgroundSupervises(ctx, background.SessionID, todoNow(s, todo.ID)) {
+		t.Fatal("the background supervisor may not review the task it is told about")
+	}
+}

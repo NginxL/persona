@@ -101,7 +101,7 @@ still follow the rules below when those prompts change.
 #5906 shipped recording summaries, minutes and day recaps in the recording's language, with owner-language
 fallback (#6011); #6045 preserves place names as spoken. Those paths are not reimplemented here. Existing knowledge
 content stays in the language in which it was recorded; a UI-language change never rewrites stored pages or quoted
-source data. Other KB templates are migration backlog, not a permanent exemption: their follow-up decides which
+source data. Non-recording KB explanations and their input wrappers now follow owner language (#6272); the live digest localizes only its headings, while persisted source records stay unchanged. The [template inventory](../archive/assistant/knowledge-prompt-language-6272.md) classifies all callers and the source-preserving templates. Other KB templates are migration backlog, not a permanent exemption: their follow-up decides which
 new outputs should use owner language and which preserve source language before changing them.
 
 #5898 and its instruction-placement proposal (#5903) separately address deduplication and policy placement,

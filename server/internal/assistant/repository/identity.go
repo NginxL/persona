@@ -9,14 +9,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/nwverse/persona/server/internal/repositorywire"
 )
 
-type Identity struct {
-	Provider     string `json:"provider"`
-	InstanceURL  string `json:"instance_url"`
-	Path         string `json:"path"`
-	CanonicalURL string `json:"canonical_url"`
-}
+// Identity is the contract's (repositorywire): the node reads it in a preparation snapshot (#11013).
+type Identity = repositorywire.Identity
 
 var ErrRemote = errors.New("invalid repository remote")
 

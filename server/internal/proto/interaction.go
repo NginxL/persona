@@ -104,7 +104,9 @@ type Interaction struct {
 	PlanThen string `json:"plan_then,omitempty"`
 	// EditableText is the outgoing body text a Claude Code Lark send/reply approval card may let the user edit before
 	// allowing. It is set only by that command gate; runtimes and other cards cannot declare it.
-	EditableText    string       `json:"editable_text,omitempty"`
+	EditableText string `json:"editable_text,omitempty"`
+	// Format is a script ask's opt-in card rendering. Only "markdown" is emitted; absent keeps literal text.
+	Format          string       `json:"format,omitempty"`
 	Summary         string       `json:"summary,omitempty"`
 	Screen          string       `json:"screen,omitempty"`
 	AgentID         string       `json:"agent_id,omitempty"`

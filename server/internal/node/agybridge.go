@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/osproc"
@@ -35,10 +36,35 @@ var (
 	agyBridgeStopWait   = 3 * time.Second
 )
 
+var agyInstanceSeq atomic.Uint64
+
 type agyBridge struct {
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu       sync.Mutex
+	cancel   context.CancelFunc
+	done     chan struct{}
+	instance string
+	yieldCh  chan struct{}
+}
+
+func (rh *RuntimeHost) isBuiltinAgyInstance(instance string) bool {
+	if instance == "" {
+		return false
+	}
+	rh.agy.mu.Lock()
+	defer rh.agy.mu.Unlock()
+	return rh.agy.instance == instance
+}
+
+func (rh *RuntimeHost) yieldAgyBridge() {
+	rh.agy.mu.Lock()
+	ch := rh.agy.yieldCh
+	rh.agy.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // EnableAutoCompanions turns on automatic supervision of built-in CLI companions (Antigravity `agy`) once Listen runs.
@@ -150,7 +176,7 @@ func findAgyJSRuntime(ctx context.Context) (jsRuntime, error) {
 	return jsRuntime{}, errors.New("no Node.js found (set PERSONA_NODEJS)")
 }
 
-var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin string) (*exec.Cmd, error) {
+var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin, instance string) (*exec.Cmd, error) {
 	pkg, err := runtimepkg.Load(agyPackage)
 	if err != nil {
 		return nil, err
@@ -166,8 +192,12 @@ var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin string)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(js.Path, filepath.Join(dir, "antigravity", "companion.mjs"),
-		"--socket", rh.path, "--agy-bin", agyBin, "--no-update", "--parent-stdin")
+	args := []string{filepath.Join(dir, "antigravity", "companion.mjs"),
+		"--socket", rh.path, "--agy-bin", agyBin, "--no-update", "--parent-stdin"}
+	if instance != "" {
+		args = append(args, "--instance", instance)
+	}
+	cmd := exec.Command(js.Path, args...)
 	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path))
 	cmd.Dir = dir
 	return cmd, nil
@@ -197,9 +227,13 @@ func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}) {
 			continue
 		}
 		started := time.Now()
-		err := rh.runAgyBridge(ctx, agyBin)
+		yielded, err := rh.runAgyBridge(ctx, agyBin)
 		if ctx.Err() != nil {
 			return
+		}
+		if yielded {
+			wait = agyBridgeRestartMin
+			continue
 		}
 		if time.Since(started) > agyBridgeSteady {
 			wait = agyBridgeRestartMin
@@ -223,24 +257,39 @@ func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}) {
 	}
 }
 
-func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) error {
-	cmd, err := agyBridgeCommand(ctx, rh, agyBin)
+func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) (bool, error) {
+	instance := fmt.Sprintf("builtin-agy-%d-%d", os.Getpid(), agyInstanceSeq.Add(1))
+	yieldCh := make(chan struct{}, 1)
+	rh.agy.mu.Lock()
+	rh.agy.instance = instance
+	rh.agy.yieldCh = yieldCh
+	rh.agy.mu.Unlock()
+	defer func() {
+		rh.agy.mu.Lock()
+		if rh.agy.instance == instance {
+			rh.agy.instance = ""
+			rh.agy.yieldCh = nil
+		}
+		rh.agy.mu.Unlock()
+	}()
+
+	cmd, err := agyBridgeCommand(ctx, rh, agyBin, instance)
 	if err != nil {
-		return err
+		return false, err
 	}
 	cmd.SysProcAttr = osproc.GroupAttr()
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return false, err
 	}
 	cmd.Stderr = cmd.Stdout
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer stdin.Close()
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start: %w", err)
+		return false, fmt.Errorf("start: %w", err)
 	}
 	rh.logger.Printf("agy runtime: running (pid %d, agy %s)", cmd.Process.Pid, agyBin)
 	logged := make(chan struct{})
@@ -255,10 +304,7 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) error {
 		<-logged
 		exited <- cmd.Wait()
 	}()
-	select {
-	case err := <-exited:
-		return err
-	case <-ctx.Done():
+	stopChild := func() {
 		_ = osproc.StopGroup(cmd.Process.Pid, false)
 		select {
 		case <-exited:
@@ -266,6 +312,16 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) error {
 			_ = osproc.StopGroup(cmd.Process.Pid, true)
 			<-exited
 		}
-		return ctx.Err()
+	}
+	select {
+	case err := <-exited:
+		return false, err
+	case <-yieldCh:
+		rh.logger.Printf("agy runtime: yielding to external agy runtime")
+		stopChild()
+		return true, nil
+	case <-ctx.Done():
+		stopChild()
+		return false, ctx.Err()
 	}
 }

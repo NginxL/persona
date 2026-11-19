@@ -348,8 +348,15 @@ private fun ChatPage(
     var backgroundOpen by rememberSaveable(key.path) { mutableStateOf(false) }
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
     val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
+    val modeChangeStore = remember(key, repository, scope) { ModeChangeStore(scope) { repository.modeChanges(it) } }
+    DisposableEffect(modeChangeStore) { onDispose(modeChangeStore::close) }
+    LaunchedEffect(key, repository, renderStyle, session != null, session?.permissionMode, session?.bypassPending) {
+        session?.let { modeChangeStore.watch(key, it, agentChat = renderStyle != ChatRenderStyle.Assistant) }
+    }
+    val modeChangesUntil = remember(timelineVersion, projection) { modeChangesCutoff(timeline.isFrozen(), projection.lines) }
     val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
-        openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList())
+        openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList(), modeChanges = modeChangeStore.changes,
+        modeChangesUntil = modeChangesUntil)
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
     val subagentCards = pageLines.subagentCards
@@ -1081,7 +1088,52 @@ private fun ChatPage(
                             CloseoutCard(closeout, closeoutWork?.artifacts.orEmpty(), key.path, Modifier.padding(
                                 start = horizontalPadding, end = horizontalPadding, top = pagePaddingValues.calculateTopPadding() + Tokens.Space.s))
                         }
-                        Box(Modifier.weight(1f).then(if (foldsHeader) Modifier.nestedScroll(headerScroll) else Modifier)) {
+                        val showJump = !chatList.followsEnd
+                        ChatReaderLayout(
+                            Modifier.weight(1f).then(if (foldsHeader) Modifier.nestedScroll(headerScroll) else Modifier),
+                            topInset = padding.calculateTopPadding(),
+                            bottomInset = padding.calculateBottomPadding(),
+                            collapse = {
+                                val topInset = padding.calculateTopPadding()
+                                WorkCollapseControl(lines, list, listKeys, topInset, ::toggle,
+                                    Modifier.padding(horizontal = horizontalPadding)
+                                        .padding(top = topInset + Tokens.Space.s, bottom = Tokens.Space.s))
+                            },
+                            navigation = {
+                                // A plan outside the viewport is still reachable from the conversation's footer.
+                                val anchor = remember(lines, contentPlans, renderStyle) { latestPlanLine(lines, contentPlans) }
+                                val planOut by remember(anchor) { derivedStateOf {
+                                    anchor != null && list.layoutInfo.totalItemsCount > 0 &&
+                                        list.layoutInfo.visibleItemsInfo.none { it.key == anchor.lineId }
+                                } }
+                                // An open sheet keeps the last plan if its work line folds away.
+                                if (planSheet && anchor != null) SideEffect { sheetPlan = anchor.plan }
+                                if (showJump || planOut) Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = horizontalPadding).padding(bottom = Tokens.Space.s),
+                                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        if (anchor != null && planOut) {
+                                            val progress = remember(anchor.plan.todos) { planProgress(anchor.plan.todos) }
+                                            val opensSheet = glass && agentChat
+                                            PlanPill(progress.step, progress.total, progress.done, onClick = {
+                                                if (opensSheet) { sheetPlan = anchor.plan; planSheet = true }
+                                                else scope.launch {
+                                                    timeline.freeze(currentItems()); timelineVersion++
+                                                    chatList.scrollToRecord(anchor.lineId)
+                                                }
+                                            }, modifier = Modifier.heightIn(min = Tokens.MinTouch.android),
+                                                spoken = if (opensSheet) planStepText(res, anchor.plan.todos) else null,
+                                                onClickLabel = if (opensSheet) stringResource(R.string.chat_plan_pill_opens) else null)
+                                        }
+                                    }
+                                    if (showJump) ChatJumpToLatest(
+                                        timeline, timelineVersion, snapshot.items, pageReader.newestVisibleItem, readThrough,
+                                        deferCount = snapshot.streamingItemIds.isNotEmpty(), onClick = chatList::returnToLatest)
+                                }
+                            },
+                        ) { listBottomInset ->
                             val outboxBubble: @Composable (OutboxMessage) -> Unit = { message ->
                                 val delivery = composerDeliveries[message.clientMessageId]
                                 val deliveryState = if (message.state in setOf(DeliveryState.Refused, DeliveryState.Rejected))
@@ -1119,7 +1171,7 @@ private fun ChatPage(
                             ChatList(state = chatList, modifier = Modifier.fillMaxSize().endSelectionOnTapOutside(messageMenu), contentPadding = PaddingValues(
                                 start = horizontalPadding, end = horizontalPadding,
                                 top = padding.calculateTopPadding() + 12.dp.dense,
-                                bottom = padding.calculateBottomPadding() + 12.dp.dense,
+                                bottom = listBottomInset + 12.dp.dense,
                             )) {
                                 errorLine?.let { error -> item(key = ERROR_ROW, contentType = ERROR_ROW) { ChatSystemLine(error, failed = true) } }
                                 readyLine?.let { words -> item(key = READY_ROW, contentType = READY_ROW) { TypingLine(words) } }
@@ -1145,7 +1197,7 @@ private fun ChatPage(
                                                 catch (e: CancellationException) { throw e }
                                                 catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
                                             }
-                                        }, style = renderStyle, textUpdates = textUpdates,
+                                        }, style = renderStyle, agentSession = session, textUpdates = textUpdates,
                                             liveText = snapshot.liveText, streamingItemIds = snapshot.streamingItemIds,
                                             userImages = contentUserImages[line.id].orEmpty(),
                                             imagesInUserBubble = line.id in contentHiddenImages,
@@ -1170,47 +1222,18 @@ private fun ChatPage(
                                     JTextButton(stringResource(R.string.chat_screen_load_older), { scope.launch { try { repository.loadOlder(key) } catch (e: CancellationException) { throw e } catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) } } })
                                 }
                             }
-                            // Under the top bar: in glass the list (and this box) runs under it, up to the status bar.
-                            WorkCollapseOverlay(lines, list, listKeys, ::toggle, Modifier.align(Alignment.TopStart)
-                                .padding(start = horizontalPadding, top = padding.calculateTopPadding() + Tokens.Space.s))
                             val settling = snapshot.loading || projectedFrom == null || (snapshot.items.isNotEmpty() && projectedFrom !== snapshot.items)
+                            val readerPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = listBottomInset)
                             if (settling && lines.isEmpty() && messages.isEmpty()) {
                                 // An Agent's chat on Glass: iOS's skeleton rows where its newest lines will be; Brief and Board keep the spinner.
                                 if (glass && agentChat) ChatSkeleton(Modifier.align(Alignment.BottomCenter).padding(start = horizontalPadding, end = horizontalPadding,
-                                    bottom = padding.calculateBottomPadding() + Tokens.Space.m))
-                                else JLoading(Modifier.align(Alignment.Center).padding(padding).padding(horizontal = horizontalPadding))
+                                    bottom = listBottomInset + Tokens.Space.m))
+                                else JLoading(Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))
                             }
                             else if (!settling && lines.isEmpty() && messages.isEmpty() && snapshot.error == null)
                                 JEmptyState(stringResource(R.string.chat_screen_empty_title),
                                     emptyChatHint(res, session, machines.firstOrNull { it.id == key.machineId }?.name, readOnly),
-                                    Modifier.align(Alignment.Center).padding(padding).padding(horizontal = horizontalPadding))
-                            // The newest plan card scrolled out of view: "Step N/M" above the composer brings it back (web PlanPill).
-                            val anchor = remember(lines, contentPlans, renderStyle) { latestPlanLine(lines, contentPlans) }
-                            val planOut by remember(anchor) { derivedStateOf {
-                                anchor != null && list.layoutInfo.totalItemsCount > 0 &&
-                                    list.layoutInfo.visibleItemsInfo.none { it.key == anchor.lineId }
-                            } }
-                            // The open sheet follows the newest plan, and keeps the last one if its work line folds away.
-                            if (planSheet && anchor != null) SideEffect { sheetPlan = anchor.plan }
-                            if (anchor != null && planOut) {
-                                val progress = remember(anchor.plan.todos) { planProgress(anchor.plan.todos) }
-                                // An Agent's chat on Glass: the whole plan in a sheet (iOS `PlanSheet`); Brief and Board scroll back to its card.
-                                val opensSheet = glass && agentChat
-                                PlanPill(progress.step, progress.total, progress.done, onClick = {
-                                    if (opensSheet) { sheetPlan = anchor.plan; planSheet = true }
-                                    else scope.launch {
-                                        timeline.freeze(currentItems()); timelineVersion++
-                                        chatList.scrollToRecord(anchor.lineId)
-                                    }
-                                }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = padding.calculateBottomPadding() + Tokens.Space.l),
-                                    spoken = if (opensSheet) planStepText(res, anchor.plan.todos) else null,
-                                    onClickLabel = if (opensSheet) stringResource(R.string.chat_plan_pill_opens) else null)
-                            }
-                            if (!chatList.followsEnd) ChatJumpToLatest(
-                                timeline, timelineVersion, snapshot.items, pageReader.newestVisibleItem, readThrough,
-                                deferCount = snapshot.streamingItemIds.isNotEmpty(),
-                                onClick = chatList::returnToLatest,
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(end = horizontalPadding, bottom = padding.calculateBottomPadding() + 16.dp.dense))
+                                    Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))
                         }
                     }
                 }
@@ -1301,13 +1324,12 @@ private fun ChatJumpToLatest(
     readThrough: Item?,
     deferCount: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier,
 ) {
     // A changing visible row only invalidates this button. Freeze and follow change the timeline in place.
     val count by remember(timeline, timelineVersion, items, newestVisibleItem, readThrough, deferCount) {
         derivedStateOf { timeline.newMessageCount(items, newestVisibleItem.value, readThrough, defer = deferCount) }
     }
-    JumpToLatest(count, onClick, modifier)
+    JumpToLatest(count, onClick, Modifier.sizeIn(minWidth = Tokens.MinTouch.android, minHeight = Tokens.MinTouch.android))
 }
 
 /** The contexts the next message carries, over the composer (a chat's, and New chat's sessions picked with @); a longer list scrolls. */

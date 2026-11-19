@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -133,6 +134,21 @@ func (r *ResidentReload) Announce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// ReportUpdatePreflightFailure lets the manager stop waiting for a replacement while the current node keeps serving.
+func (r *ResidentReload) ReportUpdatePreflightFailure(ctx context.Context, id string, err error) {
+	failure := proto.NodeUpdatePreflightFailure{ID: id, Error: err.Error()}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for peer := range r.peers {
+		// The notification must never stall the reload worker or interrupt the surviving connection.
+		go func() {
+			send, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			_ = peer.NotifyContext(send, nodeproto.EventUpdatePreflightFailed, failure)
+		}()
+	}
 }
 
 // exchange also bounds an already-started write. Aborting an unconfirmed announcement must close the physical

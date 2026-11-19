@@ -29,6 +29,19 @@ import (
 
 var errCodexNoOwner = errors.New("没有可共享的 app-server 运行入口")
 
+const codexWriterBusy = "codex_writer_busy"
+
+// An active-writer answer means this app-server did not accept the thread. Nothing was delivered, and trying another
+// server would only contend for the same writer lock; continue through the original owner or wait for it to disconnect.
+func codexWriterConflict(err error) error {
+	var re *codexError
+	if !errors.As(err, &re) || re.Code != -32600 || !strings.Contains(strings.ToLower(re.Message), "already has an active writer") {
+		return nil
+	}
+	return refusal(codexWriterBusy, "这个 Codex 会话正由电脑上的另一个进程写入，这次没有发送：请在原 Codex 窗口或终端里继续；如果那边已退出，等它断开后刷新再试。",
+		map[string]any{"detail": re.Error()})
+}
+
 type remoteThread struct {
 	id, publicID, title, cwd, path, status, turn, parent, partial string
 	// ended is the last turn turn/completed ended: a snapshot read before it (join, activeTurn, the metadata read)
@@ -694,6 +707,9 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 		return refusal("codex_read_only", firstNonEmpty(err.Error(), "仅查看"), nil)
 	}
 	if err = c.join(ctx, id, true); err != nil {
+		if conflict := codexWriterConflict(err); conflict != nil {
+			return conflict
+		}
 		return refusal("codex_read_only", err.Error(), nil)
 	}
 	if codexCompactCommand(text, images) { // Codex's own command, not words for the model (codex_remote_compact.go)
@@ -757,6 +773,9 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	if errors.As(err, &re) && effort != "" {
 		// Codex refused a turn that carried the choice: drop it, so it does not fail every message after this one.
 		n.dropCodexPending(id, c.generation, t.id)
+	}
+	if conflict := codexWriterConflict(err); conflict != nil {
+		return conflict
 	}
 	if errors.As(err, &re) {
 		if re.Code == -32601 || re.Code == -32602 {

@@ -33,6 +33,7 @@ type inboxNote struct {
 	// Deferred holds this programmatic wake out of every direct delivery path until the unified scheduler admits it.
 	// Pending is persisted but never listed, so this is durable internal bookkeeping rather than client wire state.
 	Deferred bool `json:"deferred,omitempty"`
+	Retry    bool `json:"retry,omitempty"` // held while the retry waits for its linked Agent
 }
 
 func renderNote(n inboxNote, owner string) string {
@@ -202,7 +203,7 @@ func (b *inboxBook) dropInboxWakes(it *InboxItem) {
 	}
 	kept := a.Pending[:0]
 	for _, n := range a.Pending {
-		if !n.Deferred {
+		if !n.Deferred && !n.Retry {
 			kept = append(kept, n)
 		}
 	}
@@ -299,7 +300,7 @@ func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
 	var changed []*inboxWrite
 	for _, it := range b.items {
 		a := it.Agent
-		if !it.open() || it.Context == "" || a != nil && a.Of == it.Last {
+		if !it.open() || it.Context == "" || a != nil && (a.Of == it.Last || a.savingRetry) {
 			continue
 		}
 		handled := it.handled()
@@ -404,7 +405,8 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 		return
 	}
 	a := it.Agent
-	if a == nil || a.SessionID == "" || len(a.Pending) == 0 {
+	if a == nil || a.SessionID == "" || len(a.Pending) == 0 || a.savingRetry ||
+		it.Handling != nil && it.Handling.State == HandlingAgent && a.hasRetryNote() {
 		b.mu.Unlock()
 		return
 	}
@@ -446,10 +448,8 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 	gone := false
 	if err != nil {
 		// Gone only when its machine answers without it (an offline machine is tried again later).
-		if _, known := s.device(ctx, machine); known {
-			_, found := s.session(ctx, machine, sid)
-			gone = !found
-		}
+		_, found, reachable := s.inboxAgentSession(ctx, machine, sid)
+		gone = reachable && !found
 		s.logf("inbox: tell the conversation of %s: %v (gone: %v)", it.ID, err, gone)
 	}
 	now := time.Now()

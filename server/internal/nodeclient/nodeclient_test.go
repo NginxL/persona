@@ -204,3 +204,72 @@ func TestAskRequestNormalize(t *testing.T) {
 		t.Fatalf("round trip %s", b)
 	}
 }
+
+// A script's Markdown opt-in survives the typed client on its way to node.sock.
+func TestAskNodeSendsMarkdownFormat(t *testing.T) {
+	var ask AskRequest
+	if err := json.Unmarshal([]byte(`{"question":"**Deploy?**","format":"markdown"}`), &ask); err != nil {
+		t.Fatal(err)
+	}
+	var sent json.RawMessage
+	dial := func(_ context.Context, req any) ([]byte, error) {
+		r, ok := req.(Request)
+		if !ok {
+			t.Fatalf("request type %T", req)
+		}
+		sent = append(sent, r.Input...)
+		return []byte(`{"status":"answered"}` + "\n"), nil
+	}
+	rep, err := AskNode(context.Background(), dial, ask, "")
+	if err != nil || rep.Status != AskAnswered {
+		t.Fatalf("reply %+v, %v", rep, err)
+	}
+	var input map[string]any
+	if err := json.Unmarshal(sent, &input); err != nil {
+		t.Fatalf("input %q: %v", sent, err)
+	}
+	if got := input["format"]; got != "markdown" {
+		t.Fatalf("format %#v, want markdown; input %s", got, sent)
+	}
+}
+
+// Formatting does not change the existing 1000-character question boundary, including for unknown formats.
+func TestAskRequestQuestionLimitRegardlessOfFormat(t *testing.T) {
+	for _, format := range []struct {
+		name  string
+		input string
+	}{
+		{name: "omitted"},
+		{name: "markdown", input: `,"format":"markdown"`},
+		{name: "plain", input: `,"format":"plain"`},
+		{name: "unknown", input: `,"format":"html"`},
+	} {
+		for _, limit := range []struct {
+			name      string
+			length    int
+			wantError bool
+		}{
+			{name: "at the limit", length: AskQuestionMost},
+			{name: "over the limit", length: AskQuestionMost + 1, wantError: true},
+		} {
+			t.Run(format.name+"/"+limit.name, func(t *testing.T) {
+				question, err := json.Marshal(strings.Repeat("界", limit.length))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ask AskRequest
+				input := `{"question":` + string(question) + format.input + `}`
+				if err := json.Unmarshal([]byte(input), &ask); err != nil {
+					t.Fatal(err)
+				}
+				err = ask.Normalize()
+				if limit.wantError && err == nil {
+					t.Fatalf("a %d-character question was accepted, want the %d-character limit", limit.length, AskQuestionMost)
+				}
+				if !limit.wantError && err != nil {
+					t.Fatalf("a %d-character question was rejected: %v", limit.length, err)
+				}
+			})
+		}
+	}
+}

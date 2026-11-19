@@ -223,7 +223,15 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		hello.Instance = strings.TrimSpace(hello.Instance)
 		hello.Launchers = cleanLaunchers(hello.Launchers)
-		stale, err := rh.reg.hello(h, hello, rh.reservedID)
+		stale, err := rh.reg.hello(h, hello, rh.reservedID, func(o *runtimeConn, incoming runtimeHello) bool {
+			if incoming.Runtime != agyRuntimeID || h.isDaemon() {
+				return false
+			}
+			o.mu.Lock()
+			oldInstance := o.hello.Instance
+			o.mu.Unlock()
+			return rh.isBuiltinAgyInstance(oldInstance) && incoming.Instance != oldInstance
+		})
 		if err != nil {
 			rh.logger.Printf("runtime %s #%d refused: %v", hello.Runtime, h.serial, err)
 			return nil, err
@@ -236,6 +244,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			if drop != nil {
 				drop()
 			}
+		}
+		if hello.Runtime == agyRuntimeID && !h.isDaemon() && !rh.isBuiltinAgyInstance(hello.Instance) {
+			rh.yieldAgyBridge()
 		}
 		rh.logger.Printf("runtime %s %s #%d connected", hello.Runtime, hello.Version, h.serial)
 		if rh.autoCompanions && (hello.Launcher != "" || len(hello.Launchers) > 0) {

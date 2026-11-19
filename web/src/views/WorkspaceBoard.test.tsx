@@ -242,4 +242,26 @@ describe("the workflow board with many cards and Agents", () => {
     openWork("todo:accepted-closed");
     expect(location.pathname + location.search).toBe("/todos?id=accepted-closed");
   });
+
+  it("keeps only to-dos with an active Agent on the selected computer in the auto view", async () => {
+    localStorage.setItem("persona.workspace-board.view", "auto");
+    const link = (machine_id: string, released_at?: string) => ({ machine_id, session_id: `${machine_id}-${released_at ? "old" : "live"}`, linked_at: "2026-11-19T08:00:00Z", released_at });
+    const todo = (id: string, agent: ReturnType<typeof link>) => ({ id, title: id, created_at: "2026-11-19T08:00:00Z", updated_at: "2026-11-19T08:00:00Z", agents: [agent] });
+    answers["/api/v1/todos"] = { todos: [todo("m0", link("m0")), todo("m1", link("m1")), todo("released", link("m0", "2026-11-19T08:01:00Z"))] };
+    await act(() => refresh());
+    act(() => root.render(<WorkspaceBoard />));
+    await flush();
+    const shown = (id: string) => host.querySelector(`article[data-work-id="todo:${id}"]`) !== null;
+    expect([shown("m0"), shown("m1"), shown("released")]).toEqual([true, true, true]);
+
+    const choose = (machine: string) => act(() => {
+      const select = host.querySelector<HTMLSelectElement>('select[aria-label="筛选机器"]')!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, machine);
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    choose("m0");
+    expect([shown("m0"), shown("m1"), shown("released")]).toEqual([true, false, false]);
+    choose("m1");
+    expect([shown("m0"), shown("m1"), shown("released")]).toEqual([false, true, false]);
+  });
 });

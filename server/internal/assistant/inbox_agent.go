@@ -120,9 +120,11 @@ type InboxAgent struct {
 	// Back is the handling state a waking note interrupted (waiting, done…): a turn that only updates the recap
 	// goes back to it.
 	Back string `json:"back,omitempty"`
+	// savingRetry keeps workers off an explicit retry until its row is committed.
+	savingRetry bool
 	// told counts the notes queued into Pending (in memory only): a message made of Pending carried those queued up
-	// to its count, and the ones queued since are the newest. Pending is trimmed to the latest 20, so its length
-	// cannot tell how many came since.
+	// to its count, and the ones queued since are the newest. Pending is bounded, so its length cannot tell how
+	// many came since.
 	told int
 	// signaled is the item's message count when an inbox signal to the linked task's supervisor last counted it
 	// (in memory only, supervise_inbox.go): the next one counts the messages since that count.
@@ -132,11 +134,15 @@ type InboxAgent struct {
 	signaledOf string
 }
 
-// queueNote adds a note to Pending, kept to the latest 20.
+// queueNote adds a note to Pending, keeping 20 places for ordinary notes plus one for a recent retry instruction.
 func (a *InboxAgent) queueNote(n inboxNote) {
 	a.Pending = append(a.Pending, n)
 	if len(a.Pending) > 20 {
-		a.Pending = a.Pending[len(a.Pending)-20:]
+		start := len(a.Pending) - 20
+		if slices.ContainsFunc(a.Pending[start-1:], func(n inboxNote) bool { return n.Retry }) {
+			start--
+		}
+		a.Pending = a.Pending[start:]
 	}
 	a.told++
 }
@@ -165,6 +171,10 @@ func (a *InboxAgent) lost(sid string) bool { return slices.Contains(a.Lost, sid)
 // startDue says a queued agent waits for no backoff (a fresh judge's agent has no RetryAfter).
 func (a *InboxAgent) startDue(now time.Time) bool {
 	return a.RetryAfter == nil || !a.RetryAfter.After(now)
+}
+
+func (a *InboxAgent) hasRetryNote() bool {
+	return slices.ContainsFunc(a.Pending, func(n inboxNote) bool { return n.Retry })
 }
 
 // handInbox is one pass of the AI twin's work (docs/assistant/inbox.md"AI twin"): look again at waiting matters whose
@@ -316,7 +326,7 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 		switch {
 		case inboxConversationRunning(it):
 			running++
-		case it.Agent.State == AgentQueued && it.Agent.SessionID == "" && it.open():
+		case it.Agent.State == AgentQueued && it.Agent.SessionID == "" && it.open() && !it.Agent.savingRetry:
 			// Recheck before backoff, capacity or adoption: a saved rule also covers work already queued.
 			if b.policyTwin(it) == TwinNever {
 				if w := b.releaseInboxAgent(it, HandlingDone, i18n.T(b.userLang(), "assistant-inbox_agent.never"), now); w != nil {
@@ -518,12 +528,14 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 	for _, it := range b.items {
 		a, h := it.Agent, it.Handling
 		switch {
-		case a == nil:
+		case a == nil || a.savingRetry:
 		case a.DeferredAt != nil && (h == nil || h.State != HandlingAgent || inboxDeferredAgentStop(it)):
 			// A held wake has not started a processing turn. Replied-while-Agent keeps its current Agent's supervision
 			// only until that Agent's settled stop is itself deferred; a known-settled stop must never time out as running.
 		case a.SessionID != "" && (a.State == AgentRunning || h != nil && (h.State == HandlingLooking || h.State == HandlingAgent)):
 			running = append(running, it)
+		case h != nil && h.State == HandlingAgent && a.hasRetryNote():
+			running = append(running, it) // a retry can wait for its linked Agent before it has a processing conversation
 		case a.State != AgentRunning || a.SessionID != "":
 		case a.StartedAt == nil || now.Sub(*a.StartedAt) > inboxAgentStartWait+time.Minute:
 			w := beginWrite(it)
@@ -535,7 +547,12 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 	b.mu.Unlock()
 	for _, it := range running {
 		b.mu.Lock()
+		if it.Agent == nil || it.Agent.savingRetry || !it.open() {
+			b.mu.Unlock()
+			continue
+		}
 		a := *it.Agent
+		retrying := a.hasRetryNote()
 		state := HandlingLooking
 		if it.Handling != nil {
 			state = it.Handling.State
@@ -564,6 +581,17 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 					if !stillAgent {
 						continue // the stop returned the item to its processing conversation or is held for capacity
 					}
+				} else if retrying && reachable {
+					b.mu.Lock()
+					if it.open() && it.Agent != nil && sameTime(it.Agent.StartedAt, a.StartedAt) &&
+						it.Handling != nil && it.Handling.State == HandlingAgent && it.Agent.hasRetryNote() {
+						w := beginWrite(it)
+						b.wakeInboxRetry(it, now)
+						b.settle(w)
+						changed = append(changed, w)
+					}
+					b.mu.Unlock()
+					continue
 				}
 			}
 			// Only a session known to be unsettled waits past this bound. A link evicted by the chain cap, a session the
@@ -609,8 +637,9 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 func (b *inboxBook) inboxAgentFor(it *InboxItem, owner string, linked *prompts.InboxTask, larkDefault int, loc *time.Location) prompts.InboxAgent {
 	a := prompts.InboxAgent{Owner: owner, EventID: it.ID, Title: it.Title, Item: b.promptItem(it), Task: it.Agent.Task, Reason: it.Agent.Reason,
 		Linked: linked}
-	if len(it.Agent.Lost) > 0 { // the event's conversation is gone: where it got to goes with the new one
-		a.Resumed, a.Recap = true, it.Recap
+	a.Resumed = len(it.Agent.Lost) > 0
+	if a.Resumed || it.Agent.hasRetryNote() {
+		a.Recap = it.Recap
 		for _, e := range it.Chain {
 			a.Chain = append(a.Chain, chainLine(e, loc))
 		}

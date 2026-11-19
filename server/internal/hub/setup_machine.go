@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -76,32 +77,63 @@ func pingPostgres(ctx context.Context, dbURL string) error {
 }
 
 // defaultLANIPv4 is this machine's private IPv4 address on the interface of the default route (several interfaces:
-// the one traffic goes out of), else the first private one on an interface that is up and not virtual.
+// the one traffic goes out of), else the first private one on an interface that is up and not virtual (pickLANIPv4).
 func defaultLANIPv4() string {
+	var route netip.Addr
 	// A UDP "connect" only picks the route: nothing is sent (192.0.2.1 is TEST-NET-1).
 	if c, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
-		ip := c.LocalAddr().(*net.UDPAddr).IP
+		route = c.LocalAddr().(*net.UDPAddr).AddrPort().Addr().Unmap()
 		c.Close()
-		if ip.IsPrivate() {
-			return ip.String()
-		}
 	}
-	ifaces, err := net.Interfaces()
+	addrs, err := allInterfaceAddresses()
 	if err != nil {
 		return ""
 	}
-	for _, ifc := range ifaces {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualInterfaceName(ifc.Name) {
+	return pickLANIPv4(route, addrs)
+}
+
+// pickLANIPv4 is route when it is a private IPv4 address on an interface that is up and not virtual, else the first
+// such address in addrs, else "". A full-tunnel VPN takes the default route, and its tunnel's address is no LAN address
+// (#11125): many VPN clients give the tunnel a new one on every reconnect, and a public_url and a TLS listener bound to
+// the old one reach nothing, not even from the LAN.
+func pickLANIPv4(route netip.Addr, addrs []localAddress) string {
+	var first netip.Addr
+	for _, a := range addrs {
+		ip := a.Addr.Unmap()
+		if !ip.Is4() || !ip.IsPrivate() || a.Flags&net.FlagUp == 0 || a.Flags&net.FlagLoopback != 0 || virtualInterfaceName(a.Interface) {
 			continue
 		}
+		if ip == route {
+			return ip.String()
+		}
+		if !first.IsValid() {
+			first = ip
+		}
+	}
+	if !first.IsValid() {
+		return ""
+	}
+	return first.String()
+}
+
+// allInterfaceAddresses lists the addresses of every interface, virtual ones included, in the system's order.
+func allInterfaceAddresses() ([]localAddress, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	var out []localAddress
+	for _, ifc := range ifaces {
 		addrs, _ := ifc.Addrs()
 		for _, a := range addrs {
-			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
-				return n.IP.String()
+			if n, ok := a.(*net.IPNet); ok {
+				if ip, ok := netip.AddrFromSlice(n.IP); ok {
+					out = append(out, localAddress{Addr: ip.Unmap(), Interface: ifc.Name, Flags: ifc.Flags})
+				}
 			}
 		}
 	}
-	return ""
+	return out, nil
 }
 
 func virtualInterfaceName(name string) bool {

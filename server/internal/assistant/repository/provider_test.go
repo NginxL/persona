@@ -105,7 +105,7 @@ func TestRegistryRoutesAddresses(t *testing.T) {
 	}
 	for _, remote := range []string{"https://code.acme.test/team/app/-/tree/main", "git@ssh.acme.test:team/app.git"} {
 		got, err := r.Parse(ctx, remote, "")
-		if err != nil || got.Identity != (Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}) || got.ProviderName != "Acme Code" {
+		if err != nil || got.Identity != (Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}) || got.ProviderName != "Acme Code" {
 			t.Fatalf("%s: %+v %v", remote, got, err)
 		}
 	}
@@ -181,7 +181,7 @@ func TestParseAnswersAreRechecked(t *testing.T) {
 }
 
 func TestLinkAnswersStayUnderTheRepository(t *testing.T) {
-	repo := Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}
+	repo := Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}
 	in := LinkInput{URL: "https://code.acme.test/team/app/reviews/12/files"}
 	got, err := CheckLinkAnswer(repo, in, LinkAnswer{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12", Title: "Fix\nthe  build"})
 	if err != nil || got != (TaskLink{"pull_request", "12", repo.CanonicalURL + "/reviews/12", "Fix the build"}) {
@@ -224,7 +224,7 @@ func TestLinkAnswersStayUnderTheRepository(t *testing.T) {
 // An extension's links come from the store or the provider's answer, never from a GitHub-style guess, and its rows bind
 // and read with the provider gone.
 func TestExtensionRowsWorkWithoutTheProvider(t *testing.T) {
-	repo := Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}
+	repo := Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}
 	source := SourceSnapshot{Identity: repo, CloneURL: repo.CanonicalURL, TransportOrigin: "canonical_default", ProviderName: "Acme Code"}
 	review := TaskLink{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12"}
 	if _, err := NormalizeLink(repo, LinkInput{Kind: "pull_request", Number: "12"}); err == nil {
@@ -239,7 +239,7 @@ func TestExtensionRowsWorkWithoutTheProvider(t *testing.T) {
 	}
 	for name, in := range map[string]LinkInput{
 		"another number": {Kind: "pull_request", Number: "13", Resolved: &ResolvedLink{source, review}},
-		"another repo":   {URL: review.CanonicalURL, Resolved: &ResolvedLink{SourceSnapshot{Identity: Identity{acmeID, "https://code.acme.test", "team/other", "https://code.acme.test/team/other"}}, review}},
+		"another repo":   {URL: review.CanonicalURL, Resolved: &ResolvedLink{SourceSnapshot{Identity: Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/other", CanonicalURL: "https://code.acme.test/team/other"}}, review}},
 		"outside":        {URL: review.CanonicalURL, Resolved: &ResolvedLink{source, TaskLink{Kind: "issue", Number: "1", CanonicalURL: "https://code.acme.test/team/app2/i/1"}}},
 		"both forms":     {URL: review.CanonicalURL, Kind: "pull_request", Number: "12", Resolved: &ResolvedLink{source, review}},
 	} {

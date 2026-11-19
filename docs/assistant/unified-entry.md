@@ -186,10 +186,28 @@ rule below. Native clients keep their existing two-entry presentation until they
   across Needs you, In progress, Parked and Persona reviewing equal to the To-dos header's "Not done", for the same
   scope. Live questions, owner decisions and active work outrank both types of wait; the supervisor's review keeps its
   own entry. Existing acceptance/deployed precedence and PR freshness are unchanged.
-- Finished tasks (done, cancelled, accepted) are in neither; the board (**All**) has them. An answered card moves its task
+- Finished tasks (done, cancelled, accepted) are in neither. The ones the conversation handed out that finished in the
+  last 24 hours are under **Finished** (next bullet); the board (**All**) has every finished task. An answered card moves its task
   back to In progress. An entry with nothing counted (no number on it), Needs you or In progress, is grey and still opens:
   to the rows it lists uncounted, or to its line ("All caught up", "Nothing in progress"); the web drew such an In
   progress in its working blue and ink until 2026-11-14.
+- **Finished** (#10922, every client; zh-Hans 已完成, ja 完了): the tasks the conversation handed out (in the main
+  conversation every handed-out task, as for the other entries) that finished in the last 24 hours, seen or not, newest
+  finished first and the same moment by id. Finished means the To-dos page's Just finished or Done section (closed,
+  cancelled, accepted, deployed, or a finished turn the owner has already seen; never a failed start), and a task
+  finished at the moment its triage rule reads (`finishedAt`: its close, its accepting review, its deploy, else its last
+  move). The window is `JUST_DONE_MS`, the one the To-dos page keeps Just finished by, so a row nobody has opened since
+  it finished is exactly that section's: it keeps Just finished's look (the unread green as a plain dot and the word
+  "Just finished" / 刚做完待看 / 完了したばかり). Opening a row opens the task and marks it seen (`seen_at`, #5707),
+  which changes only that mark: the row stays, as Done (Accepted, Cancelled), until its 24 hours pass. The entry comes
+  after In progress (on the web after Parked and Persona reviewing), only while it has rows or its tray is open, and shows
+  how many rows it has. That number is finished work, not open work: the Needs you and In progress counts and the
+  To-dos page's "Not done" do not change. It is drawn quiet (secondary words; on the web and Android the done check's
+  green as its mark), and its tray's header has **All** like the others. Before #10922 the finished rows were an
+  uncounted Just finished group under In progress that held only the unseen ones, so opening one took it out of the tray
+  and only the board still had it. The split is each client's `finished` (web `assistantEntries`, Android
+  `assistantEntries`, iOS `AssistantEntries.split`), pinned by `spec/fixtures/entries` (`expected.finished`,
+  `expected.finished_new`).
 - **One home for an Agent several tasks list** (every client, 2026-11-14: web #7490, Android #7531, iOS / Mac #7532): an
   Agent that more than one of the conversation's tasks lists asks under one of them, the task the hub ties its session
   to (`Session.todo`), else the first that lists it (oldest card first; one plan's tasks in the plan's order, the web's
@@ -201,7 +219,7 @@ rule below. Native clients keep their existing two-entry presentation until they
 The split is one pure function per client: web `assistantEntries` (`web/src/lib/assistant-entries.ts`), Android
 `assistantEntries` (`persona.core.domain.tasks`), iOS / iPad / Mac `AssistantEntries.split`
 (`apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift`, #3393). All three replay `spec/fixtures/entries`, which pins
-which entry every case goes to, and which In progress rows say their supervisor is reviewing them (Apple:
+which entry every case goes to, which tasks Finished lists and which of those are new, and which In progress rows say their supervisor is reviewing them (Apple:
 `AssistantEntriesFixtureTests`); the web reads those rows, and the overdue reviews, from `web_review` as its Persona
 reviewing entry (#8678). The older Pending / Progress / Agents / To start entries
 below are the earlier presentation (#2878, #3162).
@@ -327,18 +345,19 @@ changed. The hub writes every receipt as before: the completion judgment, superv
 interruption bookkeeping below and the trays' order still read them. How a task goes on is its row:
 
 - **In Progress** lists each open task with its state and latest line ("Stopped, not done yet · <why>" from its completion
-  check, else its Agent's last words), and under its rows a **Just Finished** group: the handed-out tasks that finished in
-  the last 24 hours and that the owner has not opened since (the To-dos page's rule, `TodoTriageLogic`), newest first,
-  uncounted, each with what it did (its accepting review's note, why it closed, its receipt's summary, else its Agent's
-  last words). Opening one shows the task and counts as seeing it (`seen_at`, #5707), so it leaves the group.
+  check, else its Agent's last words). What finished is under **Finished** ("Needs you and In progress" above, #10922):
+  the handed-out tasks that finished in the last 24 hours, seen or not, newest first, each with what it did (its
+  accepting review's note, why it closed, its receipt's summary, else its Agent's last words). Opening one shows the task
+  and counts as seeing it (`seen_at`, #5707): it stays, without the Just finished mark. Until #10922 these rows were a
+  Just Finished group under In Progress that kept only the unseen ones.
 - **Needs You** keeps a failed start's row with its reason, **Retry** and **Remove**, and an interrupted task's with its
   reason and **Continue** (`POST /api/v1/todos/{id}/retry`), which only the receipt card had; a usage limit nothing
   continues by itself gets Continue on its In Progress row. A tap on the row opens the task's details, where a receipt's
   **Look** went.
-- iOS (`ChatLines.drawnFeed`, `AssistantEntries.Result.justFinished`, `DispatchHandoffCard.interruption`,
-  `StartFailureWords`) and the web (`drawnFeed` in `lib/feed.ts`, `justFinished` in `lib/assistant-entries.ts`,
-  `lib/start-failure.ts`, `WaitingTaskRow`) since #8237; Android in #8312. Mock: `MOCK_TASKS=1 MOCK_TASKS_FINISHED=1` (two finished
-  tasks for Just Finished), with `MOCK_TASK_CHECK=1` (a stopped task's reason), `MOCK_TASKS_CUT=1` (an interrupted one) and `MOCK_MANAGERS=1` (one
+- iOS (`ChatLines.drawnFeed`, `AssistantEntries.Result.finished`, `DispatchHandoffCard.interruption`,
+  `StartFailureWords`) and the web (`drawnFeed` in `lib/feed.ts`, `finished` in `lib/assistant-entries.ts`,
+  `lib/start-failure.ts`, `WaitingTaskRow`) since #8237; Android in #8312. Mock: `MOCK_TASKS=1 MOCK_TASKS_FINISHED=1` (three
+  tasks for Finished: two nobody opened yet, one opened already), with `MOCK_TASK_CHECK=1` (a stopped task's reason), `MOCK_TASKS_CUT=1` (an interrupted one) and `MOCK_MANAGERS=1` (one
   manager, so the MacBook's Agents are the default page's), with `MOCK_TASKS_NO_ASKS=1` for a chat no question card
   covers; `QuietReceiptsUITests` checks and shoots them.
 
@@ -1246,7 +1265,8 @@ Hub-inserted chat entries do not enter Claude's transcript (that would trigger a
 - Reuse Agent state colors (`AgentState.tone`: Needs you red, Working amber, Unread green), not the prototype's orange waiting state, to match Agents.
 - If dock pills do not fit, truncate the title but never "Waiting for you."
 - **Action bar on iPhone, iPad and Mac (#3393, replacing #2879's Pending / To Start / Progress / Agents and the Mac's
-  dock)**: Needs You and In Progress as "Needs you and In progress: each thing once" above defines them. The split is
+  dock)**: Needs You and In Progress, and Finished (#10922) while it has rows, as "Needs you and In progress: each thing
+  once" above defines them. The split is
   `AssistantEntries.split`, a port of the web's `assistantEntries`; `ActionTrayContent` puts the conversation's own cards
   in front of Needs You (their row closes the tray onto the card below). The web (`OwnAskRow` in `AssistantActionBar`,
   the cards in `ChatView`'s dock) and Android (`panelRequests`, the chat's `InteractionPanel`) do the same since #4883:
@@ -1261,13 +1281,14 @@ Hub-inserted chat entries do not enter Claude's transcript (that would trigger a
   Dynamic Type), 12 pt horizontal and 6 pt vertical padding, a full capsule radius, `Theme.Fill.chip` behind secondary
   text, 28 pt tall at the default size, 8 pt apart. Open is the filter chip's on look in the same size (accent fill, white
   semibold); Needs You with rows takes the waiting pill's tint, empty it is the plain grey capsule and opens "All Caught Up".
-  In the main conversation with low-distraction mode on, Held Pushes (#7782) is a third entry in the same capsule after
+  In the main conversation with low-distraction mode on, Held Pushes (#7782) is an entry in the same capsule after
   them; its tray of today's held pushes opens in the trays' place, above the row at the bar's width, and one tray is open
   at a time (#8223; Android's `AssistantTray.HeldPushes` shares the slot the same way, the web opens a dialog).
-  At the accessibility text sizes the entries (and the computer pill after them) are a `FlowLayoutRow`: one that doesn't
-  fit goes on to the next line, each whole. Side by side they made the row, and with it the whole chat page, wider than
-  the screen, the header and the composer cut off at both edges (#5702; `docs/design/DESIGN_SYSTEM.md` 1.2 rule 3 (c),
-  wrapping rather than a sideways scroll so Needs You and its count stay in view). Below those sizes the row is as before.
+  The entries (and Held Pushes and the computer pill after them) are one row, Needs You first. When they do not fit the
+  bar (Finished beside the two with Held Pushes, a long translation, the largest text size the interface allows, #6813),
+  the row scrolls sideways, as the web's and Android's do, instead of making the chat page wider than the screen with
+  the header and the composer cut off at both edges (#5702); while they fit, nothing moves (#10922). From #5884 until
+  #7083 a `FlowLayoutRow` wrapped them at the accessibility text sizes, which the interface no longer reaches.
   Tests: `AssistantEntriesFixtureTests` (the shared fixture), `AssistantActionBarTests`, UI `AssistantActionBarUITests`
   (`MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1`; `testEntriesStayOnScreenAtEveryTextSize` in zh-Hans, English and Japanese at
   the default and the largest size, light and dark), UI `PushInterceptsUITests` (`MOCK_LN=1`; the held pushes tray's

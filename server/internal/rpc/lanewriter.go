@@ -180,8 +180,10 @@ func (lw *laneWriter) ackAll(seq uint64, at uint32) {
 	}
 }
 
-// allAckDelay bounds how long an acknowledgement of every frame read waits for a write to go with.
-const allAckDelay = 500 * time.Millisecond
+// allAckDelay bounds how long an acknowledgement of every frame read waits for a write to go with. It stays well under
+// resumeStale, or the other side takes a transport for silent before an acknowledgement was due: a test that shortens
+// resumeStale shortens this too (TestResumeBusyReaderIsNotSilence).
+var allAckDelay = 500 * time.Millisecond
 
 // acked takes the other side's acknowledgement of every frame through seq, the last read at at by its clock.
 func (lw *laneWriter) acked(seq uint64, at uint32) error {

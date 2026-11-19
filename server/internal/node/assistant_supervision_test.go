@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -264,22 +265,62 @@ func TestAssistantSupervisionStoppedCompactionRefreshesRole(t *testing.T) {
 	}
 }
 
-func TestSupervisionRuntimeRefusesRatherThanDroppingPolicy(t *testing.T) {
+// A conversation on a runtime has no separate policy channel. A person's message that arrives with a policy (the hub
+// asks for one when it cannot tell that the conversation runs on a runtime) goes through without it; only the manager's
+// own supervision message, which the policy is for, is refused rather than delivered unsupervised.
+func TestSupervisionRuntimeDropsPolicyForOwnerMessagesButRefusesSupervision(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
 	host := dialRuntime(t, n, assistantRuntimeHello())
-	params := map[string]any{"launcher": "dsh", "cwd": filepath.Join(n.home, ".persona", "assistant"),
-		"text": "Review task evidence", "supervision_instructions": prompts.RenderSupervisionInstructions()}
+	dir := filepath.Join(n.home, ".persona", "assistant")
+	policy := prompts.RenderSupervisionInstructions()
+	supervision := map[string]any{"launcher": "dsh", "cwd": dir, "text": "Review task evidence", "supervision_instructions": policy,
+		"message_source": map[string]any{"kind": "supervision"}}
 	for _, method := range []string{"assistant.send", "assistant.warm"} {
-		if _, err := nodeCall(t, n, method, params); refusalCode(err) != "assistant_supervision_runtime" {
-			t.Fatalf("%s silently accepted a supervisor without its policy: %v", method, err)
+		p := maps.Clone(supervision)
+		if method == "assistant.warm" {
+			delete(p, "message_source") // a warm is nobody's message
+		}
+		if _, err := nodeCall(t, n, method, p); method == "assistant.send" && refusalCode(err) != "assistant_supervision_runtime" {
+			t.Fatalf("%s silently accepted a supervision message without its policy: %v", method, err)
+		} else if method == "assistant.warm" && err != nil {
+			t.Fatalf("warming a runtime with a policy: %v", err)
 		}
 	}
 	if len(host.got("session.start")) != 0 || len(host.got("session.send")) != 0 {
 		t.Fatal("unsupported runtime started a supervisor without system instructions")
 	}
-	// Ordinary runtime conversations retain the existing behavior.
-	startedAssistant(t, n, host)
+	// The owner's message in a conversation the hub took for a supervisor is delivered, without the policy.
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "session-a1", "cwd": dir, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	owner := map[string]any{"launcher": "dsh", "cwd": dir, "text": "Where are we?", "supervision_instructions": policy}
+	if _, err := nodeCall(t, n, "assistant.send", owner); err != nil {
+		t.Fatalf("the owner's message to a runtime conversation was refused: %v", err)
+	}
+	sends := host.got("session.send")
+	if len(sends) != 1 || !strings.Contains(string(sends[0]), "Where are we?") || strings.Contains(string(sends[0]), "supervis") {
+		t.Fatalf("the owner's message did not reach the runtime without the policy: %s", sends)
+	}
+	// A later message to the same conversation, resolved without a policy, is delivered as well.
+	owner = map[string]any{"session_id": "session-a1", "launcher": "dsh", "cwd": dir, "text": "And now?", "resume_only": true, "supervision_instructions": policy}
+	if _, err := nodeCall(t, n, "assistant.send", owner); err != nil {
+		t.Fatalf("the owner's next message was refused: %v", err)
+	}
+	if got := len(host.got("session.send")); got != 2 {
+		t.Fatalf("%d messages reached the runtime, want 2", got)
+	}
+	// And a supervision message to that conversation is still refused.
+	supervision["session_id"] = "session-a1"
+	if _, err := nodeCall(t, n, "assistant.send", supervision); refusalCode(err) != "assistant_supervision_runtime" {
+		t.Fatalf("a supervision message to a runtime conversation = %v", err)
+	}
+	if got := len(host.got("session.send")); got != 2 {
+		t.Fatalf("a refused supervision message reached the runtime: %d sends", got)
+	}
 }
 
 // TestFakeSupervisionCodexServer is the subprocess used by the native startup test.

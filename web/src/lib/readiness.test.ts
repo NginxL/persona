@@ -65,6 +65,13 @@ describe("codedFailure", () => {
     expect(codedFailure(new TypeError("Failed to fetch")).code).toBe("");
   });
 
+  it("keeps a private profile's sign-in refusal actionable", () => {
+    const e = new ApiError(409, "Sign in to the dedicated profile", {
+      code: "not_logged_in", action: "connect_model", detail: "CLAUDE_CONFIG_DIR=/example/profile claude", delivered: "none",
+    });
+    expect(codedFailure(e)).toMatchObject({ action: "connect_model", detail: "CLAUDE_CONFIG_DIR=/example/profile claude" });
+  });
+
   it("knows the restart that passes by itself", () => {
     expect(passesBySelf(new ApiError(503, "x", { code: "assistant_offline" }))).toBe(true);
     expect(passesBySelf(new ApiError(409, "x", { code: "no_machine" }))).toBe(false);

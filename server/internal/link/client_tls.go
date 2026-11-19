@@ -78,7 +78,15 @@ func tlsClient(cfg *tls.Config, dial func(context.Context, string, string) (net.
 					tlsCfg.ServerName = host
 				}
 				c := tls.Client(raw, tlsCfg)
-				if err := tracedHandshake(ctx, c); err != nil {
+				hctx, cancel := context.WithTimeout(ctx, dialTimeout)
+				defer cancel()
+				stop := context.AfterFunc(hctx, func() { _ = raw.Close() })
+				err = tracedHandshake(hctx, c)
+				if !stop() {
+					raw.Close()
+					return nil, hctx.Err()
+				}
+				if err != nil {
 					raw.Close()
 					return nil, err
 				}

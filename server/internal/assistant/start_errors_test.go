@@ -73,6 +73,20 @@ func TestMainConversationSaysWhatIsMissing(t *testing.T) {
 	}
 }
 
+func TestMainConversationSaysPrivateProfileNeedsSignIn(t *testing.T) {
+	const raw = `the new conversation's dedicated Claude Code profile is not signed in`
+	f := newFakeHub().withMachine()
+	data, _ := json.Marshal(map[string]any{"delivered": "none", "retryable": false, "launcher": "claude"})
+	f.failAssistant = &rpc.Error{Code: proto.TurnErrorNotLoggedIn, Message: raw, Data: data}
+	s := newStorelessService(t, f)
+	status, body := serveJSON(t, s, "POST", "/api/v1/assistant/conversations", "", `{"prompt":"你好","main":true}`)
+	if status != 409 || body["code"] != proto.TurnErrorNotLoggedIn ||
+		body["error"] != "这个对话的 Claude Code 配置还没有登录。请登录该配置，或者改用 API Key。" ||
+		body["detail"] != raw || body["action"] != "connect_model" || body["machine_name"] != "server" || body["delivered"] != "none" {
+		t.Fatalf("%d %v", status, body)
+	}
+}
+
 // What a turn's model API error says is wrong, for the card that says what to fix; sign-in, the key and the model are
 // the user's (turn_error_kind user), a rate limit is not.
 func TestTurnErrorCodes(t *testing.T) {

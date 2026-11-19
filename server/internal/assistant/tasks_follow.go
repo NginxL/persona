@@ -362,8 +362,16 @@ var prLink = lazyre.New(`https://github\.com/[\w.-]+/[\w.-]+/pull/\d+|https://[^
 // user any more, the conversation gets a receipt (once per stretch of work), and the todo is closed if the judge
 // finds the work finished.
 func (s *Service) taskTurnEnded(ctx context.Context, machine, sid string) {
+	_, _ = s.taskTurnEndedOutcome(ctx, machine, sid)
+}
+
+// taskTurnEndedOutcome preserves whether this particular settlement could not reach an agent. A later probe is not a
+// substitute: a transient failure may already have recovered by then, losing the reason to retain the recheck.
+func (s *Service) taskTurnEndedOutcome(ctx context.Context, machine, sid string) (turnSettle, bool) {
 	time.Sleep(s.settleDelay(ctx)) // a turn that ends to ask, or goes on at once, is not the end
-	s.taskTurnSettled(ctx, machine, sid)
+	var unreachable bool
+	result := s.settleTurnReporting(ctx, machine, sid, "", &unreachable)
+	return result, unreachable
 }
 
 // taskTurnSettled is taskTurnEnded once the turn stayed still: after its sleep, or afterSettle's timer.
@@ -394,6 +402,13 @@ const (
 // can refuse or put off the end has passed and the transcript, read again, still shows the turn closed: an end that
 // is not taken leaves the task as it was (its stage, its check, what its supervisor waits for).
 func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) turnSettle {
+	result := s.settleTurnReporting(ctx, machine, sid, unheard, nil)
+	return result
+}
+
+// settleTurnReporting additionally reports an unreachable agent read, the one settleLater reason that has no other
+// wake guaranteed. Existing callers keep the turnSettle-only wrapper above.
+func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard string, unreachable *bool) turnSettle {
 	if s.meetingTurnNow(machine, sid) {
 		return settleRefused // a meeting's batch: never the task's progress, report or completion (meeting_turns.go)
 	}
@@ -432,6 +447,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		}
 	}
 	if !reached || !taskAgentsSettled(t, agents) {
+		if unreachable != nil {
+			*unreachable = !reached
+		}
 		// An event belongs to one Agent's turn, not the aggregate task's completion.
 		if taskAgentSettled(inboxRecipient) && !limitTakenUp(inboxRecipient, time.Now()) {
 			items, read := s.lastTurnItems(ctx, machine, sid)
@@ -619,6 +637,8 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 			if m, ok := s.quietMarks(last.MachineID)[last.SessionID]; e.Silent != "" && (!ok || !m.holds(last)) {
 				s.markQuietTurn(last, e.Silent)
 			}
+			// An external event's no-output turn still has to be reconciled with its retry ledger (#10050);
+			// a turn Persona's Stop interrupted neither acknowledges nor retries its event.
 			if e.Silent == proto.TurnErrorNoOutput {
 				s.taskInboxTurnEnded(cctx, t, last, items, true)
 			}
@@ -768,30 +788,25 @@ func (s *Service) releaseReceipt(ctx context.Context, id, machine, sid string, r
 	}
 }
 
-// taskTurnEndedAfter has taskTurnEnded look at sid's task again at at. What happened meanwhile decides as ever: a turn
-// that went on and ended had its own receipt, one that works again has none yet. A look already set for as early is
-// enough (one still waiting then sets the next): the wait's wakes (a background task reporting, a /loop) end a turn
-// each, and each comes here.
+// taskTurnEndedAfter persists the look before arming its process-local timer. Recovery uses the same path after a
+// manager restart; a storeless service retains the previous memory-only behavior.
 func (s *Service) taskTurnEndedAfter(ctx context.Context, machine, sid string, at time.Time) {
-	ref := SessionRef{MachineID: machine, SessionID: sid}
-	s.tasks.mu.Lock()
-	if s.tasks.limitLooks == nil {
-		s.tasks.limitLooks = map[SessionRef]time.Time{}
-	}
-	if pending, ok := s.tasks.limitLooks[ref]; ok && !pending.After(at) { // one as early is set: it looks again if need be
-		s.tasks.mu.Unlock()
-		return
-	}
-	s.tasks.limitLooks[ref] = at
-	s.tasks.mu.Unlock()
-	time.AfterFunc(time.Until(at), func() {
-		s.tasks.mu.Lock()
-		if s.tasks.limitLooks[ref].Equal(at) {
-			delete(s.tasks.limitLooks, ref)
+	w := s.newReceiptRecheck(ctx, machine, sid, at)
+	persisted := false
+	if w.Receipt.TodoID != "" && s.store != nil && s.store() != nil {
+		pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		selected, arm, err := s.persistReceiptRecheck(pctx, w)
+		cancel()
+		if err != nil {
+			s.logf("persist receipt recheck %s/%s: %v", machine, sid, err)
+		} else {
+			if !arm {
+				return
+			}
+			w, persisted = selected, true
 		}
-		s.tasks.mu.Unlock()
-		s.taskTurnEnded(ctx, machine, sid)
-	})
+	}
+	s.armReceiptRecheck(w, persisted)
 }
 
 // successorOpens: the owner's message on the card of closed task t (judged done or accepted, not cancelled) started

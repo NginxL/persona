@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/repositorywire"
 )
 
 const Version = "workspace-naming/v1"
@@ -185,7 +185,7 @@ func Validate(r Rules) error {
 				return problem("path_invalid", field)
 			}
 		case "branch_template":
-			if _, err := repository.NormalizeRef(repository.RequestedRef{Kind: "branch", Value: expanded}); err != nil {
+			if _, err := repositorywire.NormalizeRef(repositorywire.RequestedRef{Kind: "branch", Value: expanded}); err != nil {
 				return problem("branch_invalid", field)
 			}
 		case "base_directory":
@@ -205,7 +205,7 @@ func safeRelative(path string) bool {
 		return false
 	}
 	for _, part := range strings.Split(path, "/") {
-		if part == "" || part == "." || part == ".." || strings.EqualFold(part, ".persona") || strings.EqualFold(part, ".git") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || repository.IsWindowsReservedName(part) {
+		if part == "" || part == "." || part == ".." || strings.EqualFold(part, ".persona") || strings.EqualFold(part, ".git") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || repositorywire.IsWindowsReservedName(part) {
 			return false
 		}
 	}
@@ -254,16 +254,16 @@ func fragment(s string, limit int) string {
 }
 
 type Source struct {
-	Manager      string                         `json:"manager"`
-	TodoID       string                         `json:"todo_id"`
-	Title        string                         `json:"title"`
-	MachineID    string                         `json:"machine_id"`
-	PlannedAt    time.Time                      `json:"planned_at"`
-	Timezone     string                         `json:"timezone"`
-	Rules        Rules                          `json:"rules"`
-	RuleSources  map[string]string              `json:"rule_sources,omitempty"`
-	Layout       repository.Layout              `json:"layout"`
-	Repositories repository.PreparationSnapshot `json:"repository_snapshot"`
+	Manager      string                             `json:"manager"`
+	TodoID       string                             `json:"todo_id"`
+	Title        string                             `json:"title"`
+	MachineID    string                             `json:"machine_id"`
+	PlannedAt    time.Time                          `json:"planned_at"`
+	Timezone     string                             `json:"timezone"`
+	Rules        Rules                              `json:"rules"`
+	RuleSources  map[string]string                  `json:"rule_sources,omitempty"`
+	Layout       repositorywire.Layout              `json:"layout"`
+	Repositories repositorywire.PreparationSnapshot `json:"repository_snapshot"`
 }
 type NodeContext struct {
 	Home        string `json:"home"`
@@ -271,11 +271,11 @@ type NodeContext struct {
 	PathFlavor  string `json:"path_flavor,omitempty"`
 }
 type RepositoryPlan struct {
-	RepoID       string                  `json:"repo_id"`
-	RequestedRef repository.RequestedRef `json:"requested_ref"`
-	RelativePath string                  `json:"relative_path"`
-	AbsolutePath string                  `json:"absolute_path"`
-	TaskBranch   string                  `json:"task_branch"`
+	RepoID       string                      `json:"repo_id"`
+	RequestedRef repositorywire.RequestedRef `json:"requested_ref"`
+	RelativePath string                      `json:"relative_path"`
+	AbsolutePath string                      `json:"absolute_path"`
+	TaskBranch   string                      `json:"task_branch"`
 }
 type Plan struct {
 	Version      string           `json:"version"`
@@ -398,13 +398,13 @@ func Resolve(s Source, n NodeContext) Preview {
 		p.add("path_too_long", "task_directory_template", "", "error")
 		return p
 	}
-	if s.Layout != repository.LayoutRoot && s.Layout != repository.LayoutContainer || s.Layout == repository.LayoutRoot && len(s.Repositories.Repositories) != 1 {
+	if s.Layout != repositorywire.LayoutRoot && s.Layout != repositorywire.LayoutContainer || s.Layout == repositorywire.LayoutRoot && len(s.Repositories.Repositories) != 1 {
 		p.add("layout_invalid", "layout", "", "error")
 		return p
 	}
 	plan := Plan{Version: Version, Source: s, Node: n, TaskSlug: slug, BasePath: base, RootPath: root, Repositories: []RepositoryPlan{}}
 	plan.Source.Repositories.Repositories = slices.Clone(s.Repositories.Repositories)
-	slices.SortFunc(plan.Source.Repositories.Repositories, func(a, b repository.PreparationRepository) int { return strings.Compare(a.RepoID, b.RepoID) })
+	slices.SortFunc(plan.Source.Repositories.Repositories, func(a, b repositorywire.PreparationRepository) int { return strings.Compare(a.RepoID, b.RepoID) })
 	aliases := map[string]bool{}
 	ids := map[string]bool{}
 	for _, repo := range plan.Source.Repositories.Repositories {
@@ -413,15 +413,15 @@ func Resolve(s Source, n NodeContext) Preview {
 			continue
 		}
 		ids[repo.RepoID] = true
-		if _, err := repository.NormalizeRef(repo.RequestedRef); err != nil {
+		if _, err := repositorywire.NormalizeRef(repo.RequestedRef); err != nil {
 			p.add("repository_invalid", "requested_ref", repo.RepoID, "error")
 			continue
 		}
 		alias := repo.DirectoryAlias
 		if alias == "" {
-			alias = repository.DefaultAlias(repo.SourceSnapshot.Identity)
+			alias = repositorywire.DefaultAlias(repo.SourceSnapshot.Identity)
 		}
-		path, err := repository.RepositoryPath(s.Layout, alias, len(s.Repositories.Repositories))
+		path, err := repositorywire.RepositoryPath(s.Layout, alias, len(s.Repositories.Repositories))
 		if err != nil {
 			p.add("alias_invalid", "directory_alias", repo.RepoID, "error")
 			continue
@@ -452,7 +452,7 @@ func Resolve(s Source, n NodeContext) Preview {
 			p.add(e.Code, e.Field, repo.RepoID, "error")
 			continue
 		}
-		if _, err = repository.NormalizeRef(repository.RequestedRef{Kind: "branch", Value: branch}); err != nil {
+		if _, err = repositorywire.NormalizeRef(repositorywire.RequestedRef{Kind: "branch", Value: branch}); err != nil {
 			p.add("branch_invalid", "branch_template", repo.RepoID, "error")
 			continue
 		}
@@ -491,5 +491,5 @@ func CheckPlan(p Plan) error {
 	return nil
 }
 func ValidOperationID(id string) bool {
-	return len(id) > 0 && len(id) <= 100 && repository.ValidateAlias(id) == nil
+	return len(id) > 0 && len(id) <= 100 && repositorywire.ValidateAlias(id) == nil
 }

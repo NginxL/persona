@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -245,6 +246,25 @@ func TestInboxLaterSendReattestsManagerOrigin(t *testing.T) {
 	}
 	if params["origin"] != OriginInbox {
 		t.Fatalf("later send origin=%v, want the manager's Inbox attestation", params["origin"])
+	}
+}
+
+// The real continuation path is deliverNotes -> sendToSession -> session.send, not assistant.send's SendParams.
+// Re-attest there too: the manager's origin book, not a caller-supplied field or the node's pre-reload memory, is authoritative.
+func TestInboxDeliverNotesReattestsSessionSendOrigin(t *testing.T) {
+	h, _, it := handledHub(t)
+	h.originSet(t.Context(), "server", "s1", OriginInbox, it.ID, "")
+	h.inbox.mu.Lock()
+	h.inbox.tell(it, inboxNote{Name: prompts.NoteNewMessages, Text: "A new message"}, true, time.Now())
+	h.inbox.mu.Unlock()
+	h.deliverNotes(t.Context(), it)
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if len(h.f.agentSent) != 1 {
+		t.Fatalf("deliverNotes made %d session.send calls, want 1", len(h.f.agentSent))
+	}
+	if got := h.f.agentSent[0]["origin"]; got != OriginInbox {
+		t.Fatalf("session.send origin=%v, want the manager's Inbox attestation", got)
 	}
 }
 

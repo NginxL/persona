@@ -47,13 +47,14 @@ type Check struct {
 }
 
 type upload struct {
-	ID        string
-	Spec      proto.NodeUpdateBeginParams
-	Path      string
-	Offset    int64
-	At        time.Time
-	Accepted  bool
-	Restarted bool
+	ID           string
+	Spec         proto.NodeUpdateBeginParams
+	Path         string
+	Offset       int64
+	At           time.Time
+	Accepted     bool
+	Restarted    bool
+	PreflightErr error
 }
 
 // Options says how the resident node is run.
@@ -103,7 +104,7 @@ type Manager struct {
 	reason                  string
 	needsRestart            bool
 	upload                  *upload
-	restart                 func()
+	restart                 func(string)
 	timer                   *time.Timer
 	sweep                   *time.Timer
 	closed                  bool
@@ -116,8 +117,8 @@ type Manager struct {
 }
 
 // New resolves the actual running file once. The executable is never inferred
-// from HOME, PATH, an attach socket, or the spelling of argv[0].
-func New(version string, restart func(), opts Options) *Manager {
+// from HOME, PATH, an attach socket, or the spelling of argv[0]. The restart callback receives the accepted upload ID.
+func New(version string, restart func(string), opts Options) *Manager {
 	m := &Manager{version: version, restart: restart, timeout: ConfirmTimeout, startWatch: startWatchdog, requireResidentHandover: opts.RequireResidentHandover, signer: opts.Signer, logf: opts.Logf}
 	xpc := os.Getenv("XPC_SERVICE_NAME")
 	systemd := runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
@@ -302,6 +303,9 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	}
 	result := proto.NodeUpdateCommitResult{ID: id, Accepted: true}
 	if u.Accepted {
+		if u.PreflightErr != nil {
+			return proto.NodeUpdateCommitResult{}, u.PreflightErr
+		}
 		return result, nil
 	}
 	if u.Offset != u.Spec.Size {
@@ -400,7 +404,7 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	return result, nil
 }
 
-// ResponseWritten signals the whole resident, at most once, after the acceptance
+// ResponseWritten signals the resident to reload this update, at most once, after the acceptance
 // was written to the transport. Failed writes leave the watchdog to restore it.
 func (m *Manager) ResponseWritten(id string) {
 	m.mu.Lock()
@@ -412,7 +416,17 @@ func (m *Manager) ResponseWritten(id string) {
 	u.Restarted = true
 	restart := m.restart
 	m.mu.Unlock()
-	restart()
+	restart(id)
+}
+
+// PreflightFailed records why a committed reload could not proceed so a repeated commit returns the same error.
+// The installed file and transaction marker still belong to the rollback watchdog.
+func (m *Manager) PreflightFailed(id string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u := m.upload; u != nil && u.ID == id && u.Restarted {
+		u.PreflightErr = err
+	}
 }
 
 func (m *Manager) Abort(id string) error {

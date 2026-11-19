@@ -16,6 +16,7 @@
   "tray_empty_parked": "没有搁置中的事",
   "tray_review": "等 Persona 验收",
   "tray_empty_review": "没有等 Persona 验收的任务",
+  "tray_finished": "已完成",
   "pr_blocker_review_required": "需要审查",
   "pr_blocker_changes_requested": "需要修改",
   "pr_blocker_checks_failed": "检查未通过",

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRuntime, interactionId, light, PAGE_TEXT, RpcError } from '../index.js'
+import { createRuntime, interactionId, light, PAGE_TEXT, Peer, RpcError } from '../index.js'
 import { startFakeNode, until } from '../testing/fake-node.js'
 import { createEchoRuntime } from '../examples/echo-runtime.mjs'
 
@@ -219,6 +219,60 @@ test('asking the phone marks the session as needing you, and a withdrawn ask tak
   await assert.rejects(withdrawn, /gone/)
   await until('cancelled', () => n.last('interaction.cancel')?.id === 'toy-2')
   assert.equal(interactionId('toy', 's1', 'permission', 'call-1'), id, 'stable ids')
+})
+
+for (const loss of ['hub', 'node']) {
+  test(`an aborted ask withdraws its card after ${loss} recovery`, async (t) => {
+    const n = await startFakeNode(t)
+    const rt = createRuntime(minimal(), { runtime: `toy-cancel-${loss}`, socketPath: n.path, retryMs: loss === 'node' ? 200 : 20, pushDelayMs: 5, resumeWaitMs: 5000 })
+    t.after(() => rt.stop())
+    rt.start()
+    await n.ready
+    await until('listed', () => n.last('runtime.sessions'))
+    n.resolve = () => new Promise(() => {})
+    const ac = new AbortController()
+    const asking = rt.ask({ id: `cancel-after-${loss}`, kind: 'question', session_id: 's1' }, { signal: ac.signal })
+    await until('asked', () => n.asked.length === 1)
+    if (loss === 'hub') {
+      n.setHub(false)
+      await until('hub lost', () => !rt.hubConnected)
+    } else {
+      n.peer.close(new Error('node restarted'))
+      await until('node lost', () => !rt.connected)
+    }
+    ac.abort(new Error('answered elsewhere'))
+    await assert.rejects(asking, /answered elsewhere/)
+    assert.equal(n.all('interaction.cancel').length, 0, 'the cancel waits for a connected hub')
+    if (loss === 'hub') n.setHub(true)
+    await until('cancel delivered after recovery', () => n.last('interaction.cancel')?.id === `cancel-after-${loss}`)
+    assert.equal(n.asked.length, 1, 'the aborted ask is not resumed')
+  })
+}
+
+test('an aborted ask retains its cancel when the peer has just closed', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy-cancel-closing', socketPath: n.path, retryMs: 200, pushDelayMs: 5, resumeWaitMs: 5000 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  n.resolve = () => new Promise(() => {})
+  const ac = new AbortController()
+  const asking = rt.ask({ id: 'cancel-while-closing', kind: 'question', session_id: 's1' }, { signal: ac.signal })
+  await until('asked', () => n.asked.length === 1)
+  const close = Peer.prototype.close
+  let closing = true
+  Peer.prototype.close = function (err) {
+    close.call(this, err)
+    if (closing && this.prefix === 'd') ac.abort(new Error('answered elsewhere'))
+  }
+  t.after(() => { Peer.prototype.close = close })
+  n.peer.close(new Error('node restarted'))
+  await assert.rejects(asking, /connection closed/)
+  closing = false
+  assert.equal(n.all('interaction.cancel').length, 0)
+  await until('cancel delivered after recovery', () => n.last('interaction.cancel')?.id === 'cancel-while-closing')
+  assert.equal(n.asked.length, 1, 'the aborted ask is not resumed')
 })
 
 test("a card up longer than the resume wait still waits for the hub that went away under it, from when it went", async (t) => {

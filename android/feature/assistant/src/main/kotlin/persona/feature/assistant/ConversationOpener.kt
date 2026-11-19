@@ -112,9 +112,11 @@ internal fun originMarkLabel(source: AssistantConversationOrigin, drawnName: Str
  * The installed extensions and their icons as those marks need them (the web's lib/opener-icons.ts, iOS `OpenerIcons`).
  * Nothing is read at launch: the list (`GET /api/v1/extensions`, every manager's) is read once a mark needs it ([ensure]),
  * again when a mark appears a minute or more after the last read, and after [stale] (an extension installed, upgraded or
- * removed; the hub's features changed); [reset] forgets it all for another hub. The last list stays meanwhile. Each icon
- * is read once from its extension's manager, decoded off the main thread at about the size drawn and kept, at most
- * [KEPT] of them; one that did not load is asked again only after the list is read again. Used on the main thread.
+ * removed; the hub's features changed); a [stale] that comes while the list is being read has it read again once that
+ * read answers, whose answer is kept but not taken as fresh. [reset] forgets it all for another hub. The last list stays
+ * meanwhile. Each icon is read once from its extension's manager, decoded off the main thread at about the size drawn
+ * and kept, at most [KEPT] of them; one that did not load is asked again only after the list is read again, by the
+ * marks on screen too ([revision]). Used on the main thread.
  */
 @Stable
 class OpenerIcons(
@@ -152,9 +154,15 @@ class OpenerIcons(
     internal var generation by mutableIntStateOf(0)
         private set
 
+    /** Bumped by every list read that answers, the same list too: the marks on screen ask again for an icon that did not load. */
+    internal var revision by mutableIntStateOf(0)
+        private set
+
     private var wanted = false
     private var readAt: Long? = null
     private var reading: Job? = null
+    /** [stale] came while [reading]: its answer may predate the change. */
+    private var staleWhileReading = false
     private val drawn = HashMap<String, Drawn>()
 
     /** What the mark of a conversation [opener] opened draws in place of [origin]'s own: null for the origin's. */
@@ -185,19 +193,25 @@ class OpenerIcons(
             }
             if (at != generation) return@launch
             reading = null
-            readAt = now()
-            if (next == null) return@launch // the last list stays; asked again a minute later
-            drawn.values.forEach { it.failed = false }
-            if (next != extensions) extensions = next
+            val again = staleWhileReading
+            staleWhileReading = false
+            if (!again) readAt = now() // a failed read is asked again a minute later; the last list stays
+            if (next != null) {
+                drawn.values.forEach { it.failed = false }
+                if (next != extensions) extensions = next
+                revision++
+            }
+            if (again) ensure()
         }
         reading = job
         job.start()
     }
 
-    /** The list may have changed: read it again now if a mark has asked for it, else when one does. */
+    /** The list may have changed: read it again now if a mark has asked for it, else when one does; once the read on its way answers, if there is one. */
     fun stale() {
         readAt = null
-        if (wanted) ensure()
+        if (reading != null) staleWhileReading = true
+        else if (wanted) ensure()
     }
 
     /** Another hub: what this one read is not its. */
@@ -205,6 +219,7 @@ class OpenerIcons(
         generation++
         reading?.cancel()
         reading = null
+        staleWhileReading = false
         readAt = null
         wanted = false
         drawn.clear()
@@ -268,7 +283,8 @@ internal fun rememberDrawnOpener(opener: ConversationOpener?, origin: AssistantC
     LaunchedEffect(openers, opener, openers.generation) { openers.ensure() }
     val icon = openers.icon(opener, origin) { openerSameManager(it, opener.manager, assistant.id, assistant.roster) }
     val pixels = with(LocalDensity.current) { Tokens.Size.markS.roundToPx() }
-    LaunchedEffect(openers, icon, pixels) { icon?.let { openers.load(it, pixels) } }
+    // Again after every list read (revision): an icon that did not load is asked again while its mark stays on screen.
+    LaunchedEffect(openers, icon, pixels, openers.revision) { icon?.let { openers.load(it, pixels) } }
     val picture = icon?.let { openers.drawn(it).image } ?: return null
     return DrawnOpener(picture, icon.name)
 }

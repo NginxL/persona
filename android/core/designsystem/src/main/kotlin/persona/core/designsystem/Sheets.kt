@@ -191,6 +191,8 @@ fun JActionSheet(
 @Composable
 fun JMenu(
     expanded: Boolean, onDismiss: () -> Unit, actions: List<JAction>, modifier: Modifier = Modifier, offset: DpOffset = DpOffset(0.dp, 4.dp),
+    /** Wrap long labels and subtitles instead of losing their meaning at accessibility text sizes. */
+    multilineActions: Boolean = false,
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
@@ -218,13 +220,16 @@ fun JMenu(
                         else -> palette.ink
                     }
                     val label = @Composable {
-                        Text(action.label, style = PersonaTheme.type.body, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(action.label, style = PersonaTheme.type.body, color = ink,
+                            maxLines = if (multilineActions) Int.MAX_VALUE else 1,
+                            overflow = if (multilineActions) TextOverflow.Clip else TextOverflow.Ellipsis)
                     }
                     if (action.subtitle == null) label()
                     else Column {
                         label()
                         Text(action.subtitle, style = PersonaTheme.type.caption, color = if (action.enabled) palette.ink3 else palette.ink3.copy(alpha = MenuTokens.disabledSubtitle),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            maxLines = if (multilineActions) Int.MAX_VALUE else 1,
+                            overflow = if (multilineActions) TextOverflow.Clip else TextOverflow.Ellipsis)
                     }
                 },
                 leadingIcon = action.icon?.let { { JIcon(it, null, size = 20.dp, tint = if (!action.enabled) palette.ink3 else if (action.destructive) palette.danger.dot else palette.ink2) } },

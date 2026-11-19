@@ -125,6 +125,27 @@ func TestCallExplainsCodedRefusals(t *testing.T) {
 	}
 }
 
+func TestCallExplainsPrivateProfileSignIn(t *testing.T) {
+	const raw = `the selected profile is not signed in; run CLAUDE_CONFIG_DIR='/example/profile' claude`
+	refusal := &rpc.Error{Code: proto.TurnErrorNotLoggedIn, Message: raw,
+		Data: json.RawMessage(`{"delivered":"none","retryable":false,"launcher":"claude"}`)}
+	for _, tc := range []struct {
+		lang i18n.Lang
+		want string
+	}{
+		{"", "这个对话的 Claude Code 配置还没有登录。请登录该配置，或者改用 API Key。"},
+		{i18n.En, "This conversation's Claude Code profile isn't signed in. Sign in to that profile, or use an API key."},
+		{i18n.Ja, "この会話の Claude Code プロファイルにログインしていません。ログインするか、API キーを使ってください。"},
+	} {
+		rec := httptest.NewRecorder()
+		body := call(t, langWriter{rec, tc.lang}, rec, OnMachine(refusal, "server"))
+		if rec.Code != http.StatusConflict || body["code"] != proto.TurnErrorNotLoggedIn || body["error"] != tc.want ||
+			body["detail"] != raw || body["action"] != "connect_model" || body["delivered"] != "none" || body["retryable"] != false {
+			t.Errorf("%s: %d %v", tc.lang, rec.Code, body)
+		}
+	}
+}
+
 // A start whose new tab would not take its command (node/typedstart.go, #2022) is 503 and retryable, with nothing
 // delivered, not the generic 502.
 func TestCallTerminalNotReadyIsRetryable(t *testing.T) {
@@ -314,6 +335,7 @@ func TestRPCFailureLocalePreservesOutcomeAndDiagnostics(t *testing.T) {
 		{"untypable directory", &rpc.Error{Code: "directory_untypable", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.directory_untypable"},
 		// a send to an omp the node cannot resume (node/control.go, node/ompcalls.go)
 		{"omp not resumable", &rpc.Error{Code: "omp_resume_unknown", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.omp_resume_unknown"},
+		{"omp stopped", &rpc.Error{Code: "omp_stopped", Message: "node's own words"}, "rpc-errors.omp_stopped"},
 		// a read of an agent its engine let go, which only an open chat starts (Paseo, #8132)
 		{"not loaded", &rpc.Error{Code: proto.CodeNotLoaded, Message: "the runtime's own words"}, "rpc-errors.not_loaded"},
 		// an owner's message to an Agent with older ones held for it (devices held.go, #10661)
@@ -379,6 +401,20 @@ func TestOpenElsewhereSpeaksTheClientsLanguage(t *testing.T) {
 		rec := httptest.NewRecorder()
 		if body := call(t, langWriter{rec, i18n.En}, rec, err); body["error"] != words {
 			t.Fatalf("%s: %v", data, body)
+		}
+	}
+}
+
+func TestCodexWriterConflictSpeaksTheClientsLanguage(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		rec := httptest.NewRecorder()
+		raw := &rpc.Error{Code: "codex_writer_busy", Message: "node recovery words", Data: json.RawMessage(`{"delivered":"none","detail":"codex: thread 11111111-2222-3333-4444-555555555555 already has an active writer (-32600)"}`)}
+		body := call(t, langWriter{rec, lang}, rec, raw)
+		if rec.Code != http.StatusConflict || body["code"] != "codex_writer_busy" || body["error"] != i18n.T(lang, "rpc-errors.codex_writer_busy") {
+			t.Fatalf("%s: %d %v", lang, rec.Code, body)
+		}
+		if body["delivered"] != "none" || body["detail"] != "codex: thread 11111111-2222-3333-4444-555555555555 already has an active writer (-32600)" {
+			t.Fatalf("%s lost delivery or diagnostic evidence: %v", lang, body)
 		}
 	}
 }

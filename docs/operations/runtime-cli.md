@@ -233,7 +233,7 @@ scripts/app/personactl.py screenshot shot.jpg        # the window as the App dra
 ```
 
 - Works through the hub: `state`, `settle`, `tree`, `find`, `wait`, `tap` (accessibility activation only), `scroll`, `type`, `navigate`, `set-style`, `snapshot` / `screenshot`, `freeze`, `wait-loaded`.
-- Doesn't work: `launch` (on a real device, install the DEBUG build with Xcode / devicectl and open the App yourself), `reset` (not done yet; `navigate` also swaps in a new view tree),
+- Doesn't work: `launch` (on a real device, install the DEBUG build with Xcode / devicectl and open the App yourself; after `scripts/app/sim.sh`, first run `native/app-core/scripts/build-apple.sh` with no flag, `docs/operations/testing.md` "Development builds"), `reset` (not done yet; `navigate` also swaps in a new view tree),
   real touches that need `idb` (`tap` on menu items, `longpress`, `swipe`, `drag`, `background` / `foreground`), and `simctl` light/dark (`appearance` changes only the App instead).
 - Answers are WebSocket messages: an answer over 16 MB is an error (with the size); use JPEG (`.jpg`) or a smaller `scale` for screenshots.
 - When `type` has element filters and accessibility activation can't take focus (common with SwiftUI text fields), the App makes the text field under that element the first responder (what tapping it would do, without a touch);

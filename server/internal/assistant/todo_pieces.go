@@ -250,7 +250,22 @@ func (t PlanTask) pieceEdit() pieceEdit {
 // todoBook.writing held: every earlier link write is in the book by now, and no other can land before this one. It
 // returns the links to write, which may differ from e's (part_of changed since: after is emptied with it).
 func (s *Service) recheckPieces(id string, e db.TodoEdit) (db.TodoEdit, error) {
-	return s.checkPieces(id, pieceEdit{PartOf: e.PartOf, After: e.After})
+	links, err := s.checkPieces(id, pieceEdit{PartOf: e.PartOf, After: e.After})
+	if err != nil {
+		return links, err
+	}
+	cur, _ := s.todoNow(id)
+	partOf, enforced := cur.PartOf, cur.RequireAcceptedAfter
+	if links.PartOf != nil {
+		partOf = *links.PartOf
+	}
+	if e.RequireAcceptedAfter != nil {
+		enforced = *e.RequireAcceptedAfter
+	}
+	if enforced && (partOf != "" || cur.isConcern()) {
+		return links, &pieceError{errRequestGateRoot}
+	}
+	return links, nil
 }
 
 // planPieces checks task t's links when its plan is made, against the to-do it will run on (todo_id) or, for a new
@@ -277,22 +292,28 @@ func (s *Service) planPieces(t *PlanTask) error {
 // startPieces writes task t's links on its to-do as it starts. Checked again (and once more by editTodo as it writes):
 // the request may have changed since the plan was made; a link that no longer holds is left out (and logged) rather
 // than failing a start the owner approved.
-func (s *Service) startPieces(ctx context.Context, t PlanTask, todo Todo) Todo {
+func (s *Service) startPieces(ctx context.Context, t PlanTask, todo Todo) (Todo, error) {
 	p := t.pieceEdit()
 	if p.empty() {
-		return todo
+		return todo, nil
 	}
 	links, err := s.checkPieces(todo.ID, p)
 	if err != nil {
+		if t.RequestGate != "" {
+			return todo, err
+		}
 		s.logf("task %s: part_of/after left out: %v", todo.ID, err)
-		return todo
+		return todo, nil
 	}
 	out, err := s.editTodo(ctx, todo.ID, links)
 	if err != nil {
+		if t.RequestGate != "" {
+			return todo, err
+		}
 		s.logf("task %s: part_of/after: %v", todo.ID, err) // a *pieceError when a write since changed the request
-		return todo
+		return todo, nil
 	}
-	return out
+	return out, nil
 }
 
 // pieceLine is how todoLine shows a to-do's place in a request: " (piece of todo_x, after todo_a, todo_b)"; "" for

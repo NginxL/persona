@@ -61,16 +61,16 @@ func isoImage(data []byte) string {
 	return ""
 }
 
-// render draws src to fit size × size: decoded, upright, scaled down (never up) and encoded again. A HEIC or AVIF goes
-// as it is.
-func render(src []byte, size int) (*Image, error) {
-	kind, ok := sniff(src)
-	if !ok {
-		return nil, fail(CodeUnsupported, http.StatusUnsupportedMediaType, "not a JPEG, PNG, GIF, WebP, HEIC or AVIF image")
+// render draws src to fit size × size under p: decoded, upright, scaled down (never up) and encoded again. A HEIC or
+// AVIF goes as it is where p passes them.
+func (p Profile) render(src []byte, size int) (*Image, error) {
+	kind, _ := sniff(src)
+	if !p.served(kind) {
+		return nil, p.unsupported()
 	}
 	if kind == "image/heic" || kind == "image/avif" {
-		if len(src) > maxPassThrough {
-			return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%s of %d bytes, more than %d", kind, len(src), maxPassThrough)
+		if len(src) > p.MaxPassThrough {
+			return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%s of %d bytes, more than %d", kind, len(src), p.MaxPassThrough)
 		}
 		return &Image{Type: kind, Data: src}, nil
 	}
@@ -78,8 +78,8 @@ func render(src []byte, size int) (*Image, error) {
 	if err != nil {
 		return nil, fail(CodeBadImage, http.StatusUnprocessableEntity, "%s does not decode", kind)
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxPixels {
-		return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d×%d pixels, more than %d", cfg.Width, cfg.Height, maxPixels)
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > p.MaxPixels {
+		return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d×%d pixels, more than %d", cfg.Width, cfg.Height, p.MaxPixels)
 	}
 	pic, _, err := image.Decode(bytes.NewReader(src))
 	if err != nil {

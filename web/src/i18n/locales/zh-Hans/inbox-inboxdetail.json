@@ -20,5 +20,6 @@
   "assistant_says": "助手说",
   "say_something": "说一句",
   "retry": "再试一次",
-  "retry_text": "请再试一次。"
+  "retry_requested": "已请 AI 再试一次",
+  "retry_failed": "无法重试：{error}"
 }

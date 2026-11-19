@@ -51,7 +51,9 @@ func (m *Machine) modeSetFrom(p devicewire.NodeCall, params json.RawMessage) (si
 }
 
 // recordModeSet keeps a session.modes call the node took: who asked, from and to, and how it took effect (its answer's
-// applied: "now" or "restart"; an older node says neither, kept as "").
+// applied: "now" or "restart"; an older node says neither, kept as ""). A pick of the mode the session runs in already
+// changed nothing and is not kept: with a restart into Full access waiting, it called that off, and the node's
+// session.mode_restart event (cancelled) is the record of it (#11089).
 func (m *Machine) recordModeSet(actor *devicewire.Actor, sid, from, to string, out json.RawMessage) {
 	st, ok := m.d.opts.Store.(modeChangeStore)
 	if !ok || actor == nil {
@@ -64,6 +66,9 @@ func (m *Machine) recordModeSet(actor *devicewire.Actor, sid, from, to string, o
 	applied := ""
 	if answer.Applied == db.ModeAppliedNow || answer.Applied == db.ModeAppliedRestart {
 		applied = answer.Applied
+	}
+	if from != "" && from == to && applied != db.ModeAppliedRestart {
+		return
 	}
 	c := db.SessionModeChange{MachineID: m.cfg.ID, SessionID: sid, Kind: db.ModeChangeSet, From: from, To: to, Applied: applied,
 		ActorKind: actor.Kind, DeviceID: actor.DeviceID, DeviceName: actor.DeviceName}

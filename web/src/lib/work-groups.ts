@@ -6,7 +6,7 @@
 
 import { t } from "../i18n";
 import { isChildSessionStep } from "./child-cards";
-import type { Step } from "./turns";
+import { toolLabel, type Step } from "./turns";
 import type { Item } from "./types";
 
 export type ToolStep = Extract<Step, { kind: "tool" }>;
@@ -344,8 +344,7 @@ export interface WorkLineState {
 export const workLineOpen = (s: WorkLineState): boolean => s.turnLive ? (s.liveOverride ?? false) : s.remembered;
 export const togglesLiveOverride = (_style: WorkLineStyle, turnLive: boolean): boolean => turnLive;
 export const workLineOpens = (g: WorkGroupNode, _style: WorkLineStyle, _turnLive: boolean): boolean => groupOpens(g);
-/** Opening a summary must reveal every tool call: a timeline's inner groups start open with it (cindy folds them, which
- *  super rule 2 does not allow), each remembering its own choice after that. */
+/** Completed action groups initially open inside the manually opened summary; live groups use their run state. */
 export const nestedLineDefault = (_style: WorkLineStyle): boolean => true;
 
 /** How a duration reads where it ticks (cindy's status bar options): from `0s`, and `1m 0s` rather than `1m`. */
@@ -376,11 +375,10 @@ export function toolDurationMs(s: ToolStep): number | null {
   return start !== null && end !== null && end >= start ? end - start : null;
 }
 
-/** The quiet duration shown on an action row: a real span of a second or more. A sub-second or unfinished call says
- *  nothing rather than guessing. */
+/** Only reliable spans of at least 30 seconds warrant an action-row duration; unfinished calls do not guess. */
 export function toolDurationLabel(s: ToolStep): string | null {
   const ms = toolDurationMs(s);
-  return ms !== null && ms >= 1000 ? workDuration(ms) : null;
+  return ms !== null && ms >= 30_000 ? workDuration(ms) : null;
 }
 
 /** A finished group's title: "Worked for 1m 5s" ("Work details" without its times), and what it read when that is all
@@ -390,4 +388,30 @@ export function groupTitle(g: WorkGroupNode): string {
   const base = g.durationMs !== undefined ? t("lib-work-groups.worked_for", { duration: workDuration(g.durationMs) }) : t("lib-work-groups.work");
   const ex = explorationSummary(g);
   return ex ? `${base} · ${ex}` : base;
+}
+
+/** Action kinds in first-seen order; file actions count distinct known paths, other kinds count calls.
+ * Unknown tools keep their existing localized label. Only the first three kinds enter the compact header. */
+export function actionSummary(g: WorkGroupNode): { text: string; icon: string } {
+  const kinds = new Map<string, { count: number; paths: Set<string>; icon: string; key?: string; label?: string }>();
+  for (const child of g.children) {
+    if (child.kind !== "step" || child.step.kind !== "tool") continue;
+    const use = child.step.use;
+    const name = use.tool_name ?? "";
+    const kind = name === "Read" ? "read" : ["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name) ? "edit" : ["Bash", "exec_command", "shell", "PowerShell"].includes(name) ? "run" : ["Grep", "Glob", "WebSearch"].includes(name) ? "search" : name;
+    let entry = kinds.get(kind);
+    if (!entry) {
+      const known = ["read", "edit", "run", "search"].includes(kind);
+      entry = { count: 0, paths: new Set(), icon: known ? kind === "edit" ? "write" : kind : "tool", ...(known ? { key: `lib-work-groups.actions_${kind}` } : { label: toolLabel(name) }) };
+      kinds.set(kind, entry);
+    }
+    const path = (use.tool_input as Record<string, unknown> | undefined)?.file_path;
+    if ((kind === "read" || kind === "edit") && typeof path === "string" && path) {
+      if (entry.paths.has(path)) continue;
+      entry.paths.add(path);
+    }
+    entry.count++;
+  }
+  const shown = [...kinds.values()].slice(0, 3);
+  return { text: shown.map((k) => k.key ? t(k.key, { count: k.count }) : k.label).join(" · "), icon: shown[0]?.icon ?? "layers" };
 }

@@ -413,6 +413,90 @@ func TestSourceMainReplyWaitsForAllItsBackgroundWork(t *testing.T) {
 	}
 }
 
+func TestSourceMainReplyWaitsForItsContinuation(t *testing.T) {
+	launch := backgroundHandoff("")[1:]
+	wake := proto.Item{Seq: 6, Kind: proto.KindNotice, Wake: true, Task: &proto.TaskNote{TaskID: "check1", Status: "completed"}}
+	read := []proto.Item{
+		{Seq: 7, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "tool_read"},
+		{Seq: 8, Role: "user", Kind: proto.KindToolResult, ToolUseID: "tool_read", Text: "Release log"},
+	}
+	end := proto.Item{ID: "continuation_end", Seq: 10, Kind: turnDurationKind}
+	cases := []struct {
+		name  string
+		items []proto.Item
+		held  int
+		reply string
+		wait  time.Duration
+	}{
+		{"the continuation is working", slices.Concat(launch, []proto.Item{wake}, read), -1, "", channel.HeldMost},
+		{"the continuation is working for a held run", slices.Concat(launch, []proto.Item{wake}, read), 5, "", channel.HeldMost},
+		{"the continuation answered", slices.Concat(launch, []proto.Item{wake}, read, []proto.Item{
+			{Seq: 9, Role: "assistant", Kind: proto.KindText, Text: "The check passed."}, end}), -1, "The check passed.", 0},
+		{"the continuation ended without words", slices.Concat(launch, []proto.Item{wake}, read, []proto.Item{end}), -1, "", sourceReportWait},
+		{"the continuation was stopped", slices.Concat(launch, []proto.Item{wake}, read, []proto.Item{
+			{Seq: 9, Kind: proto.KindNotice, Text: userStoppedNotice}}), -1, "", 0},
+	}
+	for _, c := range cases {
+		reply, wait := sourceMainReplyItems(c.items, c.held)
+		var got string
+		if len(reply) == 1 {
+			got = reply[0].Text
+		}
+		if len(reply) > 1 || got != c.reply || wait != c.wait {
+			t.Errorf("%s: got %v with wait %s, want %q with wait %s", c.name, reply, wait, c.reply, c.wait)
+		}
+	}
+}
+
+// The handoff's background work wakes it after the short wait, and its channel run is gone (it
+// can fold into another run). The continuation keeps the long wait until its turn ends.
+func TestSourceReportWaitsForTheContinuationTurn(t *testing.T) {
+	e := newAskEnv(t, nil)
+	minutes := 0
+	e.fullReply, e.reportDelay = true, &minutes
+	e.ask(ownerAsk("om_continuation", "/ai Check the release"))
+	todo := onlyTodo(e.s)
+	run, _ := e.s.channelRunByID("fb_" + todo.Source.Handoff)
+	if run == nil {
+		t.Fatal("missing handoff run")
+	}
+	e.s.chans.mu.Lock()
+	e.s.chans.st.Runs = slices.DeleteFunc(e.s.chans.st.Runs, func(candidate *channel.Run) bool { return candidate == run })
+	e.s.chans.mu.Unlock()
+	items := backgroundHandoff(todo.Source.Handoff)
+	e.f.setItems(items...)
+	e.closeDone(todo.ID)
+	e.clock.advance(0)
+
+	e.s.todos.mu.Lock()
+	old := time.Now().Add(-sourceReportWait - time.Minute)
+	e.s.todos.todos[todo.ID].DoneAt = &old
+	e.s.todos.mu.Unlock()
+
+	// The check ends and wakes the handoff; the continuation is still reading its log.
+	items = append(items,
+		proto.Item{Seq: 6, Kind: proto.KindNotice, Wake: true, Task: &proto.TaskNote{TaskID: "check1", Status: "completed"}},
+		proto.Item{Seq: 7, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "tool_read"},
+		proto.Item{Seq: 8, Role: "user", Kind: proto.KindToolResult, ToolUseID: "tool_read", Text: "Release log"},
+	)
+	e.f.setItems(items...)
+	e.clock.advance(30 * time.Second)
+	if got := reportsTo(e.f, askSrc, "om_continuation"); len(got) != 0 {
+		t.Fatalf("the fallback went out while the continuation worked: %v", got)
+	}
+
+	const answer = "The release check passed."
+	items = append(items,
+		proto.Item{Seq: 9, Role: "assistant", Kind: proto.KindText, Text: answer},
+		proto.Item{ID: "final_end", Seq: 10, Kind: turnDurationKind},
+	)
+	e.f.setItems(items...)
+	e.clock.advance(30 * time.Second)
+	if got := reportsTo(e.f, askSrc, "om_continuation"); len(got) != 1 || got[0]["text"] != answer || got[0]["full_answer"] != true {
+		t.Fatalf("expected the continuation's answer, got %v", got)
+	}
+}
+
 func TestSourceAnswerPollBacksOff(t *testing.T) {
 	if got := sourceAnswerPoll(time.Minute); got != 5*time.Second {
 		t.Fatalf("early poll %s", got)

@@ -8,7 +8,7 @@
 
 | 文件 | 接口或事件 | 导出方式 |
 | --- | --- | --- |
-| [connection.json](connection.json) | WS `hello`、`revs`；GET `/api/v1/health` | 调用 `Hub.hello`、`Hub.health`；revs 使用实际信封结构和 `client.sendJSON` |
+| [connection.json](connection.json) | WS `hello`、`revs`；GET `/api/v1/health` | Calls `Hub.hello` and `Hub.health`, then puts the fixed `wireFeatures` in place of the hub's feature list; revs uses the real envelope and `client.sendJSON` |
 | [sessions.json](sessions.json) | GET `/api/v1/sessions`；WS `sessions` | `proto.Session` 经 `agentState`、`fillStateMarks` 后，用列表及事件的 map 结构发送 |
 | [machines.json](machines.json) | GET `/api/v1/machines`；WS `machines` | 调用 `Machine.snapshot`，再经 `writeJSON` 或 `sendJSON` |
 | [machines-concern.json](machines-concern.json) | Anonymous machines for Android concern-grid tests | `writeJSON` encodes the machine input |
@@ -24,7 +24,9 @@
 
 `wireNode` 通过内存管道提供固定的 `session.items` RPC 响应；hub 仍执行真实的分页包装、图片处理和补发逻辑。所有样本都没有启动完整 hub、node、herdr，不监听端口，也不访问数据库。
 
-时间固定为 `2026-01-02T03:04:05Z`，零时间用 Go 原值；`hello.client_id` 是唯一在生产构造函数返回后替换的随机字段。标识、域名、路径、消息正文均为占位数据；示例核数、内存容量等也是编造输入，不代表实测结果。
+时间固定为 `2026-01-02T03:04:05Z`，零时间用 Go 原值。标识、域名、路径、消息正文均为占位数据；示例核数、内存容量等也是编造输入，不代表实测结果。
+
+The export replaces two values after the production builders return: `hello.client_id`, which is random, and the feature list of `hello` and `/health`, which becomes the fixed `wireFeatures` (rules below).
 
 ## 规则与用例
 
@@ -32,7 +34,7 @@
 
 | 规则 | 来源 | 覆盖用例 |
 | --- | --- | --- |
-| hello 与 health 从当前 `proto.Features` 导出能力列表。 | `server/internal/hub/hello.go`：`hello`、`health`；`apple/Shared/LiveConnection.swift`：`ServerEvent.decode` | `hello_features`、`health_features` |
+| hello and a trusted health carry the hub's feature list under `features`. The samples carry a fixed list instead (`wireFeatures` in `wire_samples_test.go`): a few long-lived flags the clients read and one no client knows, `example_unknown_feature`, which decoders keep reading past. Adding or removing a feature flag changes no sample; `TestHelloAndHealthCarryTheHubsFeatures` checks that both carry exactly the hub's `features()`, `proto.Features` first and in order (#11022). | `server/internal/hub/hello.go`：`hello`、`health`；`server/internal/hub/hello_features_test.go`；`apple/Shared/LiveConnection.swift`：`ServerEvent.decode` | `hello_features`、`health_features` |
 | revs 是会话标识到整数版本号的映射。 | `apple/PersonaTests/SyncEventTests.swift`：`decodesRevs` | `revs_changed_sessions` |
 | 会话列表保留模式、队列、后台任务、子任务和循环信息，事件用信封中的机器标识设置会话归属。 | `server/internal/proto/session.go`：`Session`；`apple/Shared/Models.swift`：`Session.init(from:)`；`ServerEvent.decode` | `sessions_list`、`sessions_event` |
 | 完整会话行携带等待下一条消息的服务商切换（`pending_switch`）和 Persona 对话自己选的模型（`model_pick`）；摘要行保留 `model_pick`，省略启动器和 `pending_switch`，客户端用此前完整行里的值。 | `server/internal/proto/session.go`：`PendingSwitch`、`ModelPick`；`server/internal/hub/sessions_list.go`：`runtimeSummary`；`android/core/domain/src/main/kotlin/persona/core/domain/models/SummaryRows.kt` | `sessions_model_switch`、`sessions_summary_model_pick` |

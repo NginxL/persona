@@ -25,16 +25,17 @@ const remoteRaw = "11111111-2222-3333-4444-555555555555"
 const remoteOther = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 type remoteFixture struct {
-	mu         sync.Mutex
-	home       string
-	threads    []string
-	got        []codexMessage
-	socket     *websocket.Conn
-	replies    []codexMessage
-	drop       string
-	reject     string
-	rejectCode int    // the error code a rejected call gets; 0: -32600
-	hangup     string // a call to it closes the connection instead of an answer
+	mu            sync.Mutex
+	home          string
+	threads       []string
+	got           []codexMessage
+	socket        *websocket.Conn
+	replies       []codexMessage
+	drop          string
+	reject        string
+	rejectCode    int    // the error code a rejected call gets; 0: -32600
+	rejectMessage string // the error text a rejected call gets; empty: "rejected"
+	hangup        string // a call to it closes the connection instead of an answer
 	// slowRead: threads whose thread/read is never answered, as an app-server too slow for it.
 	slowRead      map[string]bool
 	resumeRequest bool
@@ -73,7 +74,7 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.got = append(f.got, m)
 		ids := append([]string(nil), f.threads...)
-		drop, reject, code, ephemeral, hangup := f.drop, f.reject, f.rejectCode, f.ephemeral, f.hangup
+		drop, reject, code, rejectMessage, ephemeral, hangup := f.drop, f.reject, f.rejectCode, f.rejectMessage, f.ephemeral, f.hangup
 		models, model, effort, archive := f.models, f.threadModel, f.threadEffort, f.archive
 		background := f.backgroundReply
 		backgroundPages := f.backgroundPages
@@ -109,7 +110,10 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 			archive(m.Method, p.ThreadID)
 		}
 		if m.Method == reject {
-			f.push(map[string]any{"id": m.ID, "error": map[string]any{"code": code, "message": "rejected"}})
+			if rejectMessage == "" {
+				rejectMessage = "rejected"
+			}
+			f.push(map[string]any{"id": m.ID, "error": map[string]any{"code": code, "message": rejectMessage}})
 			continue
 		}
 		var p map[string]any
@@ -402,6 +406,56 @@ func TestCodexRemoteOwnerConflictAndStdioRefuse(t *testing.T) {
 	}
 	if p := n.transcriptPath("c0de-00000000000000000000000000000000"); p != "" {
 		t.Fatal("unknown opaque key fell through")
+	}
+}
+
+func TestCodexRemoteActiveWriterIsAnUndeliveredConflict(t *testing.T) {
+	for _, method := range []string{"thread/resume", "turn/start"} {
+		t.Run(method, func(t *testing.T) {
+			n := remoteTestNode(t)
+			home := t.TempDir()
+			owner, _ := connectRemoteFixture(t, n, home, "owner", remoteRaw)
+			other, _ := connectRemoteFixture(t, n, home, "other")
+			id := n.registerCodex(home, remoteRaw, "")
+			owner.mu.Lock()
+			owner.reject = method
+			owner.rejectMessage = "thread " + remoteRaw + " already has an active writer"
+			owner.mu.Unlock()
+
+			err := n.send(context.Background(), id, "follow up once", nil, sendOpts{})
+			code, data := refusalOf(t, err)
+			if code != "codex_writer_busy" || data["delivered"] != "none" {
+				t.Fatalf("active writer refusal = %s %v (%v)", code, data, err)
+			}
+			if !strings.Contains(err.Error(), "原 Codex") || !strings.Contains(fmt.Sprint(data["detail"]), "active writer") {
+				t.Fatalf("conflict does not explain recovery and retain its diagnostic: %v %v", err, data)
+			}
+			wantStarts := 1
+			if method == "thread/resume" {
+				wantStarts = 0
+			}
+			if owner.count(method) != 1 || owner.count("turn/start") != wantStarts {
+				t.Fatalf("owning writer calls: resume=%d start=%d", owner.count("thread/resume"), owner.count("turn/start"))
+			}
+			if other.count("thread/resume")+other.count("turn/start") != 0 {
+				t.Fatal("active writer fell back to a competing app-server")
+			}
+		})
+	}
+}
+
+func TestCodexRemoteOtherInvalidRequestStaysUnknown(t *testing.T) {
+	n := remoteTestNode(t)
+	home := t.TempDir()
+	f, _ := connectRemoteFixture(t, n, home, "one", remoteRaw)
+	id := n.registerCodex(home, remoteRaw, "")
+	f.mu.Lock()
+	f.reject = "turn/start"
+	f.rejectMessage = "another invalid request"
+	f.mu.Unlock()
+	_, data := refusalOf(t, n.send(context.Background(), id, "follow up once", nil, sendOpts{}))
+	if data["delivered"] != "unknown" {
+		t.Fatalf("an unrelated invalid request became safe to retry: %v", data)
 	}
 }
 

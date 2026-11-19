@@ -1467,6 +1467,10 @@ nothing new say so. The node tells held from merely unconfirmed by the session's
 
 - Keep delivery receipts on the synchronous send path when deferring optional failure UI. The kept-message renderer and its retry/delete actions can load together, while receipt validation and row reconciliation stay immediate. Put the deferred row under a local error boundary and show the existing user bubble while it loads; verify that a failed import leaves the composer and its draft mounted. Keep words used only by deferred dialogs in the full client catalog: the existing lazy-import wait loads it before rendering. The startup literal-key guard and normal app/public build must still pass without changing the budget or counter. Startup selectors are prefixes: rewind.editing also selects rewind.editing_hint, so do not list both.
 
+### Flat work traces keep expansion separate from execution (#10247)
+
+Changing a live action group's header must not change its identity: search and jump-to-step open those keys, and folded history may replace the first visible item. Close a superseded run inside an already inspected trace, preserve explicit reopen/jump choices, and keep the outer summary's live override separate so completion still collapses it. Count action kinds from the complete group, not the progressive rendering budget; otherwise headers change as idle batches mount. Preview edits only in the current run, while every edit row still opens the complete changes view.
+
 ## Filter history after folding, and reconcile search snapshots (#10240)
 
 A stopped parent can own a working child or a pending side request. Fold the complete sidebar rows before selecting non-running history, or the parent disappears from live work and its children become duplicate history rows. A frozen content-search result can also outlive Resume or deletion: use the current complete row for its identity and drop identities removed from a loaded snapshot. Compute day headings and counts after all filters, with local calendar fields rather than UTC date substrings.

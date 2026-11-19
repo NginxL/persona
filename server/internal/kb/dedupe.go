@@ -202,6 +202,7 @@ func (e *Engine) DedupeProjects(ctx context.Context, max int) int {
 }
 
 func (e *Engine) judgeDuplicate(ctx context.Context, c dedupeCandidate) (same, keepA bool, reason string, err error) {
+	owner := e.knowledgeOwner()
 	side := func(key string, p *Project) prompts.KBDedupeProject {
 		var chats []string
 		for i, id := range p.Chats {
@@ -212,10 +213,10 @@ func (e *Engine) judgeDuplicate(ctx context.Context, c dedupeCandidate) (same, k
 				chats = append(chats, ch.Name)
 			}
 		}
-		return prompts.KBDedupeProject{Key: key, Name: p.Name, Aliases: p.Aliases, OneLine: p.OneLine, Goal: p.Goal,
+		return prompts.KBDedupeProject{Language: owner.Language, Key: key, Name: p.Name, Aliases: p.Aliases, OneLine: p.OneLine, Goal: p.Goal,
 			Summary: clip(e.Store.Summary(KindProject, p.Slug), 1500), Chats: chats, People: len(p.People)}
 	}
-	in := prompts.RenderKBDedupeInput(prompts.KBDedupeInput{A: side("A", c.a), B: side("B", c.b), Shared: c.shared})
+	in := prompts.RenderKBDedupeInput(prompts.KBDedupeInput{Language: owner.Language, A: side("A", c.a), B: side("B", c.b), Shared: c.shared})
 	var d struct {
 		Same   bool   `json:"same"`
 		Sure   bool   `json:"sure"`
@@ -224,7 +225,7 @@ func (e *Engine) judgeDuplicate(ctx context.Context, c dedupeCandidate) (same, k
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.dedupe").JSONMax(cctx, prompts.RenderKBDedupe(prompts.KBOwner{Owner: e.ownerName()}), in, 600, &d); err != nil {
+	if err := e.modelFor("kb.dedupe").JSONMax(cctx, prompts.RenderKBDedupe(owner), in, 600, &d); err != nil {
 		return false, false, "", err
 	}
 	reason = oneLine(d.Reason)
@@ -237,9 +238,13 @@ func (e *Engine) judgeDuplicate(ctx context.Context, c dedupeCandidate) (same, k
 
 // hedgeWords in a "same" verdict's reason mean the model doubts it (merges whose reasons read "whether the direction is the same is doubtful",
 // #2546).
-var hedgeWords = []string{"存疑", "不确定", "拿不准", "不一定", "待确认", "或许", "也许", "似乎", "不太像", "可能不是"}
+var hedgeWords = []string{"存疑", "不确定", "拿不准", "不一定", "待确认", "或许", "也许", "似乎", "不太像", "可能不是",
+	"uncertain", "unsure", "unclear", "doubt", "not sure", "not certain", "cannot tell", "can't tell", "maybe", "perhaps", "might", "may be", "may not", "possibly", "probably", "seems",
+	"not the same", "not same", "not identical", "different project", "different work", "distinct projects",
+	"不確か", "不明", "確信でき", "判断でき", "疑問", "疑わし", "かもしれ", "おそらく", "可能性"}
 
 func hedged(reason string) bool {
+	reason = strings.ReplaceAll(strings.ToLower(reason), "’", "'")
 	for _, w := range hedgeWords {
 		if strings.Contains(reason, w) {
 			return true

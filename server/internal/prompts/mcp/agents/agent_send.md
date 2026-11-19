@@ -4,11 +4,18 @@ A dialog holding its terminal refuses the send (dialog_open) with its first line
 
 To hand new work to a running agent (one the user opened, a long-lived one that passes work on), give task from the main conversation: once sent, the agent is your supervised task as agent_supervise makes one (a todo with the text as notes, done_when, a card; 督办 messages, task_review). Put the criteria in the text too: the agent reads only the text. An agent on one of your tasks takes more under the same title (done_when updated); another title, the user's own todo or another conversation's task is refused, with nothing sent. A failed send makes no task. Leave task out or null for a reply, nudge or decision; a task with only blank fields counts as left out.
 
+Optional `wait_seconds` observes this launch or input for at most 50 seconds after dispatch. The receipt is retained, followed by an `Inline observation` JSON record: `completed` with `reply`, `question` with `interaction_id`, or `timeout`, `cancelled`, `unavailable`, `interrupted` or `failed`. The record includes the input and session references when known. It never answers a question, accepts a task or resends input. Older nodes without input echo support may time out instead of returning an unrelated reply. Continue to follow the normal supervision and `task_review` requirements.
+
 ```json
 {
   "type": "object",
   "required": ["machine", "session_id", "text"],
   "properties": {
+    "wait_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional inline observation after dispatch, capped at 50 seconds; omit or 0 for the current receipt. Returns this input's completed reply or pending question reference. Timeout never resends or cancels work; normal supervision and task_review still apply."
+    },
     "machine": {
       "type": "string"
     },

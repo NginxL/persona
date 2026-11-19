@@ -2,6 +2,7 @@
 <resources>
     <string name="chat_tray_entry_needs_you">Needs you</string>
     <string name="chat_tray_entry_running">In progress</string>
+    <string name="chat_tray_entry_finished">Finished</string>
     <plurals name="chat_tray_items">
         <item quantity="one">%1$d item</item>
         <item quantity="other">%1$d items</item>
@@ -50,7 +51,7 @@
     <string name="chat_tray_stopped_reason">Stopped, not done yet · %1$s</string>
     <string name="chat_tray_pr_number">PR #%1$s</string>
     <string name="chat_tray_done">Completed</string>
-    <string name="chat_tray_just_finished">Just finished</string>
+    <string name="chat_tray_finished_empty">Nothing finished in the last 24 hours</string>
     <string name="chat_tray_finished_done">Done</string>
     <string name="chat_tray_accepted">Accepted</string>
     <string name="chat_tray_in_progress">In progress</string>

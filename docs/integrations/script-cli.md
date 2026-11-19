@@ -67,6 +67,8 @@ It reuses existing question and permission card shapes. Cards without a session 
 | With `--options` | `question`, one `Question` (`header` is `脚本` ("Script"), `multi_select: false`, one `label` per option) | The same question card as AskUserQuestion; the answer is `answers[<original question text>]`, the option or free text (when the card supports "Other") |
 | Without `--options` | `permission`, `summary` is the question | Allow / Deny card; the notification buttons can answer it directly |
 
+A direct node.sock caller can add `"format":"markdown"` to the ask `input`. The node preserves that opt-in as the interaction's top-level `format`; omitted, `plain` and unrecognized values stay plain and emit no format. On iOS and the web, an opted-in permission summary or question uses the same Markdown renderer as chat replies, including inline styles, lists and short tables. The original Markdown source remains the answer-map key. Notifications and clients without Markdown ask support keep their existing literal text. This does not change the `personad ask` flags, terminal fallback, or the 1000-character question limit.
+
 Both carry `tool_name: "personad_ask"`, `agent: "script"`, `agent_label: "脚本"` ("Script"; this is how runtime cards label "who is asking", `runtimes.md`):
 the notification title is "Script Has a Question" / "Script Needs Your Permission", and the card offers no "Always Allow", so it is easy to tell apart from Claude's own permission cards.
 `resumable: true`, and the id is derived from `attempt`: when the hub or node restarts, the card on the phone isn't lost, and the reconnected command reattaches to the same card (`../protocol/protocol.md` ("Interactions survive restarts")).
@@ -96,7 +98,7 @@ Delivery goes through APNs (direct or via the push relay) and the persistent con
 ## Clients
 
 - Notifications: `kind: "alert"` and `aps` already exist; no changes needed.
-- Question / permission cards: the shapes already exist; no changes needed. Possible but not required: if the card shows "Script" from `agent_label`, check that iOS's `Interaction.Agent` falls back to `agent_label` for unknown values (runtime cards already do).
+- Question / permission cards reuse the existing shapes. iOS and the web honor the optional Markdown format; other clients keep their literal-text rendering.
 - **Not checked on a device / simulator**: "Unverified" below lists what to look at.
 
 ## Security and privacy
@@ -107,10 +109,11 @@ Delivery goes through APNs (direct or via the push relay) and the persistent con
 
 ## Verification
 
-- Unit tests: `server/internal/scriptcli` (exit codes, flags, terminal fallback, Ctrl-C, `--strict`); `server/internal/node/scriptcli_test.go` (fake hub + fake socket: card shape, attribution, timeout, withdrawal, restart reconnect, `notify` parameters and truncation);
+- Unit tests: `server/internal/scriptcli` (exit codes, flags, terminal fallback, Ctrl-C, `--strict`); `server/internal/node/scriptcli_test.go` (fake hub + fake socket: card shape, Markdown format propagation and plain defaults, attribution, timeout, withdrawal, restart reconnect, `notify` parameters and truncation);
   `server/internal/hub/notify_api_test.go` (`silent`, `notify` from node: muting, preferences, no extension fields, the body cut to fit the push).
+- `apple/PersonaTests/PlanPermissionTests.swift` (`ScriptAskMarkdownTests`) covers the optional wire field, both card kinds and visual styles, and plain defaults; `web/src/views/chat/Interactions.markdown.test.tsx` covers the same behavior on the web, including the original answer key.
 - The real `personad` binary was run against a fake node socket to check the exit codes and wire JSON of `ask` / `notify` (without touching a real node or phone).
 - Not done: end-to-end against a real hub + phone (by convention, tests don't send real notifications).
 
-Unverified: how "Script" cards actually display on iOS / Android / web; where cards with an empty `session_id` show up in the Agents page / Inbox (the hub handles them by `machine_id + id`; clients not checked);
-whether `--silent` (no `sound`) is actually silent on a real device under APNs; notification delivery has no receipt.
+Unverified: how "Script" cards actually display on Android; where cards with an empty `session_id` show up in the Agents page / Inbox (the hub handles them by `machine_id + id`; clients not checked);
+whether `--silent` (no `sound`) is actually silent on a real device under APNs; notification delivery has no receipt. Physical-device display and end-to-end delivery remain unchecked on every client.

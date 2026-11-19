@@ -425,8 +425,27 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // extension's view (ExtensionSlots, the assistant's cards, an inbox item's body, the subscription pages, the launcher
 // sections), all in the first screen's static closure; the canvas itself is a chunk of its own (ViewBody10.tsx).
 // Main had 1,583 B of room; the budget stays.
+// #11040: main had 29 B of ja room. The voice call's UI (its bar, the thread's captions, the ended row and the dialog on
+// why a call cannot start: views/chat/voice/VoiceCall.tsx, loaded with the call's code) and 97 of the 101 voice strings
+// left the first screen, and startup entries only lazy chunks read (chat-navrail but target_failed, the
+// chat-interactions fields and input toggle, assistant-history.sidebar, agentspage.new_agent) went to the rest of the
+// catalog: ja 482,497 B to 477,736 B (en 479,378 B to 474,739 B, zh-Hans 480,224 B to 475,592 B), measured in one
+// environment against main b6b333e7e4. Main then went 16 B over (de8b2b4c41: en 479,423 B, ja 482,542 B, zh-Hans
+// 480,269 B); merged with it: en 474,792 B, ja 477,789 B, zh-Hans 475,645 B, 4,737 B of room. The budget stays.
+// #10922: the Assistant tray's Finished entry (lib/assistant-entries.ts `finished` with lib/todo-triage.ts `finishedAt`,
+// its entry in views/assistant/Tasks.tsx, a new row's Just finished mark and the entry's word), less the Just finished
+// group In progress no longer draws, adds 47 B in ja, measured in one environment against main ac465e3d3 (ja 478,078 B
+// to 478,125 B; en 475,068 B to 475,117 B, zh-Hans 475,930 B to 475,960 B; against main f4d81af87 it was 10 B in ja).
+// Its rows, seeing a task on opening it and the tray's empty line come with the tray's first opening, in the chunk of
+// the Parked rows (FinishedTaskRows.tsx through ParkedTaskRow.tsx: no lazy entry of their own), which also took
+// lib/todo-seen.ts off the first screen; on it they cost 228 B. Main had 4,653 B of room; the budget stays.
 // Keep the stricter existing limit while combining these changes.
-export const FIRST_SCREEN_BUDGET = 482_526;
+// #10904: the overview's task cards name who works on each task, the lead Agent's computer, model and effort and "+N"
+// for the others (lib/home-tasks.ts leadAgent; views/Home.tsx taskAgentLine over the model pill's pillView, modelList and
+// effortTitle, and home.task_agents_more). 205 B in ja, measured in one environment against main e7a12f7323 (ja
+// 482,497 B to 482,702 B; en 479,378 B to 479,585 B, zh-Hans 480,224 B to 480,422 B). Main had 29 B of room, so the
+// budget is this ja size plus those 29 B.
+export const FIRST_SCREEN_BUDGET = 482_731;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;

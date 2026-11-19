@@ -134,6 +134,30 @@ describe("the page's first voice call", () => {
     vi.doUnmock("./call-stack");
     expect(await voiceCalls.start(owner)).not.toBeNull();
   });
+
+  it("is on only once the page's own parts for it (its bar) are in too", async () => {
+    const { voiceCalls } = await import("./calls");
+    let arrive!: () => void;
+    const ui = vi.fn(() => new Promise<void>((r) => (arrive = r)));
+    const started = voiceCalls.start({ ...owner, deps: fakeDeps().deps, ui });
+    expect(ui).toHaveBeenCalledTimes(1);
+    await import("./call-stack"); // the call's code is in; its bar's is not
+    await flush();
+    expect(voiceCalls.current).toBeNull();
+    arrive();
+    const call = await started;
+    expect(call).not.toBeNull();
+    expect(voiceCalls.current).toBe(call);
+  });
+
+  it("reports parts that would not load like the call's code, and the next tap tries again", async () => {
+    const { voiceCalls } = await import("./calls");
+    const failing = () => Promise.reject(new TypeError("Failed to fetch dynamically imported module"));
+    expect(await voiceCalls.start({ ...owner, ui: failing })).toBeNull();
+    expect(contexts.every((c) => c.closed)).toBe(true);
+    expect(reported.list).toEqual([{ boundary: "voice_call", chunk: true }]);
+    expect(await voiceCalls.start({ ...owner, ui: () => Promise.resolve() })).not.toBeNull();
+  });
 });
 
 // The first screen's voice modules that name the call's types take them as types only (an `import type` is erased).
@@ -142,7 +166,8 @@ const staticImports = (source: string) => [...source.matchAll(/^import(?!\s+type
 const CALL_ONLY = /(?:^|\/)(?:call-stack|conversation|audio|uplink|resample|capture-pace|cues|frames)$/;
 
 describe("the first screen's voice modules", () => {
-  it.each(["./calls.ts", "./support.ts", "./notes.ts", "./bar-line.ts", "./wire.ts", "./availability.ts", "../../views/chat/voice/VoiceParts.tsx", "../../views/chat/voice/VoiceBar.tsx"])("%s does not bring the call's code in", (file) => {
+  // (the bar, notes.ts and bar-line.ts are in VoiceCall.tsx's chunk, which a call's start loads with the call's code)
+  it.each(["./calls.ts", "./support.ts", "./wire.ts", "./availability.ts", "../../views/chat/voice/VoiceParts.tsx"])("%s does not bring the call's code in", (file) => {
     expect(staticImports(read(file)).filter((s) => CALL_ONLY.test(s))).toEqual([]);
   });
 

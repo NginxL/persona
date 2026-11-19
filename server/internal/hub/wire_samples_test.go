@@ -15,11 +15,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
@@ -27,6 +29,16 @@ import (
 )
 
 var updateWireSamples = flag.Bool("update", false, "rewrite wire JSON golden fixtures")
+
+// wireUnknownFeature is a flag no client knows: the samples carry it to show that decoders read past one.
+const wireUnknownFeature = "example_unknown_feature"
+
+// wireFeatures is the feature list the hello and health samples carry in place of the hub's own (#11022). The real
+// list grows with every flag, and exporting it rewrote the shared sample, and conflicted with every other flag in
+// flight, each time; TestHelloAndHealthCarryTheHubsFeatures checks the real list instead. A few long-lived flags the
+// clients read, from proto.Features and from those the hub adds, then the unknown one.
+var wireFeatures = []string{nodeproto.PersonaContracts, "client_ops", proto.FeatureMessageSendState, featureSessionsList, "assistant_views",
+	wireUnknownFeature}
 
 type wireExpectation struct {
 	Accepted bool           `json:"accepted"`
@@ -177,16 +189,33 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	h := &Hub{version: "fixture-version", cfg: &Config{Name: "家里"}} // a fixed name, not this machine's
 	h.public.id = "00000000-0000-4000-8000-000000000001"            // fixed, like the times
 	hello := h.hello()
-	// Replace only the random client ID, leaving all protocol fields from hello intact.
+	// Replace the random client ID, and the hub's feature list with the samples' fixed one (wireFeatures), leaving
+	// every other protocol field from hello intact.
 	hello["client_id"] = "000000000001"
-	add("connection", "hello_features", "握手携带当前分支的能力列表。", "event", ws(hello),
-		map[string]any{"/type": "hello", "/features": h.features()}, "server/internal/hub/hello.go: Hub.hello", "apple/Shared/LiveConnection.swift: ServerEvent.decode", "docs/protocol/protocol.md: 鉴权")
+	if got, _ := hello["features"].([]string); !slices.Equal(got, h.features()) {
+		t.Fatalf("hello no longer carries features() under features: %v", hello["features"])
+	}
+	hello["features"] = wireFeatures
+	add("connection", "hello_features", "The hello lists the hub's features; the sample carries a fixed list with one flag no client knows, which decoders keep reading past.", "event", ws(hello),
+		map[string]any{"/type": "hello", "/features": wireFeatures}, "server/internal/hub/hello.go: Hub.hello", "server/internal/hub/hello_features_test.go: TestHelloAndHealthCarryTheHubsFeatures",
+		"apple/Shared/LiveConnection.swift: ServerEvent.decode", "docs/protocol/protocol.md: Health check and feature flags")
 	w := httptest.NewRecorder()
 	healthReq := httptest.NewRequest("GET", "/api/v1/health", nil)
 	healthReq.RemoteAddr = "127.0.0.1:1234" // from the LAN, where version and features are shown
 	h.health(w, healthReq)
-	add("connection", "health_features", "健康检查与握手使用同一份能力列表。", "health", wireBody(t, w, 200),
-		map[string]any{"/ok": true, "/version": "fixture-version", "/features": h.features()}, "server/internal/hub/hello.go: Hub.health", "docs/protocol/protocol.md: 鉴权")
+	// The same swap in the body /health wrote; the other keys keep the bytes it gave them.
+	var health map[string]json.RawMessage
+	if err := json.Unmarshal(wireBody(t, w, 200), &health); err != nil {
+		t.Fatal(err)
+	}
+	var healthFeatures []string
+	if err := json.Unmarshal(health["features"], &healthFeatures); err != nil || !slices.Equal(healthFeatures, h.features()) {
+		t.Fatalf("health no longer carries features() under features: %s", health["features"])
+	}
+	health["features"], _ = json.Marshal(wireFeatures)
+	add("connection", "health_features", "A trusted /health lists the same features as the hello; the sample carries the same fixed list.", "health", httpJSON(health),
+		map[string]any{"/ok": true, "/version": "fixture-version", "/features": wireFeatures}, "server/internal/hub/hello.go: Hub.health",
+		"server/internal/hub/hello_features_test.go: TestHelloAndHealthCarryTheHubsFeatures", "docs/protocol/protocol.md: Health check and feature flags")
 	add("connection", "revs_changed_sessions", "版本事件只携带发生变化的会话及其版本。", "event",
 		ws(map[string]any{"type": "revs", "machine_id": "m1", "revs": map[string]int64{"s1": 120, "s2": 7}}),
 		map[string]any{"/type": "revs", "/machine_id": "m1", "/revs": map[string]int64{"s1": 120, "s2": 7}},

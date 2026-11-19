@@ -166,7 +166,7 @@ func shellLauncherNames() map[string]bool {
 // The ids in daemons.json (reserved) are the daemons' (daemons.go): a runtime on the socket may not take one, and a
 // daemon whose id a runtime on the socket already has stays out until that one leaves (it is dialed again). A daemon's
 // link says hello with the config's id and an instance of its own, so its next connection is its own again.
-func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved func(string) bool) (stale []*runtimeConn, err error) {
+func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved func(string) bool, preempt func(o *runtimeConn, hello runtimeHello) bool) (stale []*runtimeConn, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h.mu.Lock()
@@ -194,6 +194,10 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 		if daemon != "" && onSocket {
 			return nil, &rpc.Error{Code: "runtime_conflict",
 				Message: fmt.Sprintf("runtime id %q is in use by a runtime on this machine's socket", hello.Runtime)}
+		}
+		if preempt != nil && preempt(o, hello) {
+			stale = append(stale, o)
+			continue
 		}
 		if instance == "" || hello.Instance == "" {
 			continue

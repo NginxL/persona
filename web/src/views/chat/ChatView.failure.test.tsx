@@ -360,6 +360,19 @@ describe("a message that did not go, in an agent's chat (#1122)", () => {
     expect(host.querySelector('[data-testid="readiness-failure"]')).toBeNull(); // the bubble says why: no card over the box
   });
 
+  it("a Codex writer conflict keeps the follow-up and its recovery with Retry and Delete", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    reply = () => json({ error: "请在原 Codex 窗口继续，这次没有发送", code: "codex_writer_busy", delivered: "none" }, 409);
+    await act(async () => void (await captured.onSend!({ text: "继续上一次修改", images: [] })));
+    await flush();
+    expect(failed()?.textContent).toContain("继续上一次修改");
+    expect(host.querySelector("[data-outbox] [role=alert]")?.textContent).toContain("请在原 Codex 窗口继续，这次没有发送");
+    expect(button("重试")).toBeDefined();
+    expect(button("删除")).toBeDefined();
+    expect(getState().outbox["hub/c1"]?.[0]).toMatchObject({ text: "继续上一次修改", state: "failed" });
+  });
+
   it("Retry sends it again, under a new id (the hub keeps its answer to the first), and the bubble waits for the transcript", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();

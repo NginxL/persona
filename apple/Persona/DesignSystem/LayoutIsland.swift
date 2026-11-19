@@ -68,6 +68,86 @@ private struct IslandHost<Content: View & Equatable>: UIViewControllerRepresenta
     }
 }
 
+/// A menu button drawn in a view graph of its own (#10738), for a menu inside a list that live updates redraw.
+///
+/// SwiftUI hands a `Menu`'s items to UIKit again (`UIContextMenuInteraction.updateVisibleMenuWithBlock:`) each time its
+/// view graph updates the menu, even with the same items, and UIKit then replaces the open menu and scrolls it back to
+/// its first item (`replaceVisibleMenu`, `scrollToFirstSignificantAction`). In the sidebar's list that happened several
+/// times a second while agents worked: the Agents heading's menu, scrolled down to the machines, jumped back to its top
+/// under the finger. Neither its items nor its environment had changed; the list's own updates reached it.
+///
+/// Here the menu is the root of a hosting controller that the page leaves alone: it gets a new root only when its
+/// `Content` (Equatable) or the look around it changes (`IslandLook`). What the menu shows from the app model and its
+/// stored choices it follows itself (Observation), as anywhere. It is as wide and as tall as its label.
+struct MenuIsland<Content: View & Equatable>: View {
+    let content: Content
+
+    var body: some View { MenuIslandHost(content: content) }
+}
+
+private struct MenuIslandHost<Content: View & Equatable>: UIViewControllerRepresentable {
+    let content: Content
+
+    /// What the root was last made of.
+    final class Coordinator {
+        var content: Content?
+        var look: IslandLook?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> UIHostingController<AnyView> {
+        let host = UIHostingController(rootView: root(context))
+        host.safeAreaRegions = []
+        host.sizingOptions = .intrinsicContentSize
+        host.view.backgroundColor = .clear
+        context.coordinator.content = content
+        context.coordinator.look = IslandLook(context.environment)
+        return host
+    }
+
+    func updateUIViewController(_ host: UIHostingController<AnyView>, context: Context) {
+        // A root handed in again, even an equal one, updates the menu and replaces it if it is open.
+        let look = IslandLook(context.environment)
+        guard content != context.coordinator.content || look != context.coordinator.look else { return }
+        context.coordinator.content = content
+        context.coordinator.look = look
+        host.rootView = root(context)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController host: UIHostingController<AnyView>, context: Context) -> CGSize? {
+        let fit = host.sizeThatFits(in: CGSize(width: proposal.width ?? .greatestFiniteMagnitude,
+                                               height: proposal.height ?? .greatestFiniteMagnitude))
+        return CGSize(width: ceil(fit.width), height: ceil(fit.height))
+    }
+
+    private func root(_ context: Context) -> AnyView {
+        AnyView(content.modifier(IslandEnvironment(context.environment)))
+    }
+}
+
+/// What of the page's environment a `MenuIsland` draws again for: the look and the type size, the style and its theme
+/// color. The rest it reads from the app model as it changes.
+struct IslandLook: Equatable {
+    var colorScheme: ColorScheme
+    var dynamicTypeSize: DynamicTypeSize
+    var readingTypeSize: DynamicTypeSize?
+    var locale: Locale
+    var layoutDirection: LayoutDirection
+    var style: AppStyle
+    var color: ThemeColor
+
+    init(_ env: EnvironmentValues) {
+        colorScheme = env.colorScheme
+        dynamicTypeSize = env.dynamicTypeSize
+        readingTypeSize = env.readingTypeSize
+        locale = env.locale
+        layoutDirection = env.layoutDirection
+        style = AppStyle.current
+        color = ThemeColor.current
+    }
+}
+
 /// What the app's views read from the environment, taken from the page's: the model, the style's theme, the shell,
 /// the type size and the look. The rest is the island's own hosting controller's (color scheme and the system's
 /// settings also come with its trait collection). A view in an island that reads another value set by the page needs it

@@ -10,6 +10,8 @@
   "home_folder": "Home folder",
   "follow_model_settings": "Model settings",
   "models_failed": "Couldn't load the model list. You can still start with the default model.",
+  "launchers_failed": "Couldn't read this computer's models. You can still start with its default model.",
+  "retry": "Retry",
   "follow_launcher": "Launcher default",
   "first_message_optional": "First message (optional)",
   "first_message": "First message",

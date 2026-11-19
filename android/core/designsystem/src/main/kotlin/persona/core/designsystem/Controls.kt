@@ -778,6 +778,8 @@ fun JChip(
     /** The [count] in a capsule of this state's colours ([JToneCount]: none at 0, 99+ past 99), spoken with the text
      *  ("Needs you, 12"): the Inbox's section bar (#9053). None: quiet digits, as before. */
     countTone: Status? = null,
+    /** Gives a standalone chip an opaque surface using its usual style colors. */
+    opaque: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
@@ -795,7 +797,8 @@ fun JChip(
     Row(
         modifier.heightIn(min = if (tall) JChipTokens.height else JChipTokens.quietHeight)
             .then(if (tall) Modifier.minimumInteractiveComponentSize() else Modifier)
-            .clip(shape).background(fill).border(JChipTokens.border, border, shape)
+            .clip(shape).background(if (opaque) fill.compositeOn(palette.surfaceOpaque) else fill)
+            .border(JChipTokens.border, border, shape)
             .then(when {
                 onClick != null && onLongClick != null ->
                     Modifier.combinedClickable(role = role, onClick = onClick, onLongClick = onLongClick)

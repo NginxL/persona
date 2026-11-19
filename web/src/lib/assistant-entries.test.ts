@@ -21,6 +21,11 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
       expect(got.running.map((item) => item.key)).toEqual(shared(c.expected.running));
       expect(got.shelved.map((item) => item.key)).toEqual(shared(c.expected.shelved));
       expect(got.review.map((item) => item.key)).toEqual(review);
+      // Finished (#10922): what the conversation handed out that finished in the last 24 hours, newest first, and which
+      // of them nobody has opened since (drawn as new)
+      const finished = c.expected as { finished?: string[]; finished_new?: string[] };
+      expect(got.finished.map((item) => item.key)).toEqual(finished.finished ?? []);
+      expect(got.finished.filter((item) => item.fresh).map((item) => item.key)).toEqual(finished.finished_new ?? []);
       // what the other clients' In progress says its supervisor is reviewing is under Persona reviewing here
       expect(shared((c.expected as { supervisor_review?: string[] }).supervisor_review ?? [])).toEqual([]);
       const activity = (c.expected as { activity?: Record<string, unknown> }).activity;
@@ -30,7 +35,7 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
           ...(work.workflow?.phase ? { phase: work.workflow.phase, progress: `${work.workflow.agents_done}/${work.workflow.agents_started}+` } : {}) } : null).toEqual(expected);
       }
       // one entry each: nothing is in both, and no agent of a listed task shows on its own
-      const keys = [...got.needsYou, ...got.running, ...got.shelved, ...got.review, ...got.parked].map((item) => item.key);
+      const keys = [...got.needsYou, ...got.running, ...got.shelved, ...got.review, ...got.parked, ...got.finished].map((item) => item.key);
       expect(new Set(keys).size).toBe(keys.length);
       const taskAgents = new Set(input.todos.filter((todo) => !todo.done_at && keys.includes(`task:${todo.id}`))
         .flatMap((todo) => (todo.agents ?? []).filter((a) => !a.released_at).map((a) => `agent:${a.machine_id}/${a.session_id}`)));
@@ -209,16 +214,16 @@ describe("an Agent several to-dos list", () => {
   });
 });
 
-// How a task ended is told in In progress, not by a card in the chat (#8237): the handed-out tasks that finished in the
-// last day and were not opened since are a group of their own, newest first and not counted.
-describe("Just finished in the Assistant's entries", () => {
+// How a task ended is told in the tray, not by a card in the chat (#8237): the handed-out tasks that finished in the last
+// day are the Finished entry (#10922), newest first, seen or not; the unseen ones are new. None of it is open work.
+describe("Finished in the Assistant's entries", () => {
   const now = Date.parse("2026-11-10T09:00:00Z");
   const done = (id: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({
     id, title: id, origin: "main", created_at: "2026-11-10T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra,
   } as unknown as Todo);
-  const run = (todos: Todo[], conversation = "main") => assistantEntries({ conversation, main: "main", todos, sessions: [], interactions: [], plans: {}, feed: [], now });
+  const run = (todos: Todo[], conversation = "main", at = now) => assistantEntries({ conversation, main: "main", todos, sessions: [], interactions: [], plans: {}, feed: [], now: at });
 
-  it("lists what just finished, newest first, and counts none of it", () => {
+  it("lists what finished in the last day, newest first, seen or not, and counts none of it", () => {
     const got = run([
       done("older", "2026-11-10T08:00:00Z"),
       done("newer", "2026-11-10T08:30:00Z"),
@@ -226,13 +231,28 @@ describe("Just finished in the Assistant's entries", () => {
       done("stale", "2026-11-08T08:00:00Z"),
       done("byHand", "2026-11-10T08:40:00Z", { origin: "" }),
     ]);
-    expect(got.justFinished.map((i) => i.key)).toEqual(["task:newer", "task:older"]);
-    expect(got.justFinished.every((i) => i.kind === "task" && !i.countsOpen)).toBe(true);
-    expect([...got.needsYou, ...got.running, ...got.shelved]).toEqual([]);
+    expect(got.finished.map((i) => i.key)).toEqual(["task:newer", "task:seen", "task:older"]);
+    expect(got.finished.map((i) => i.fresh)).toEqual([true, false, true]);
+    expect(got.finished.map((i) => i.at)).toEqual(["2026-11-10T08:30:00Z", "2026-11-10T08:10:00Z", "2026-11-10T08:00:00Z"].map(Date.parse));
+    expect([...got.needsYou, ...got.running, ...got.shelved, ...got.parked, ...got.review]).toEqual([]);
+  });
+
+  it("keeps a row once it is opened: seeing it changes only that it is new", () => {
+    const task = done("opened", "2026-11-10T08:30:00Z");
+    expect(run([task]).finished.map((i) => [i.key, i.fresh])).toEqual([["task:opened", true]]);
+    expect(run([{ ...task, seen_at: "2026-11-10T08:50:00Z" }]).finished.map((i) => [i.key, i.fresh])).toEqual([["task:opened", false]]);
+  });
+
+  it("lets a row go once it finished 24 hours ago, seen or not", () => {
+    const task = done("day", "2026-11-09T09:00:00Z");
+    expect(run([task], "main", now - 1000).finished.map((i) => i.key)).toEqual(["task:day"]);
+    expect(run([task]).finished).toEqual([]);
+    expect(run([{ ...task, seen_at: "2026-11-09T10:00:00Z" }], "main", now - 1000).finished.map((i) => i.fresh)).toEqual([false]);
   });
 
   it("leaves another conversation's finished work to it", () => {
-    expect(run([done("newer", "2026-11-10T08:30:00Z")], "side").justFinished).toEqual([]);
+    expect(run([done("newer", "2026-11-10T08:30:00Z")], "side").finished).toEqual([]);
+    expect(run([done("side", "2026-11-10T08:30:00Z", { origin: "side" })], "side").finished.map((i) => i.key)).toEqual(["task:side"]);
   });
 });
 

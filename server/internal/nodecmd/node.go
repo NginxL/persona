@@ -128,15 +128,16 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 		return err
 	}
 	defer transport.Close()
-	requests := make(chan string, 1)
-	askRestart := func(reason string) {
+	updates := make(chan string, 1)
+	tailcatUpdate := make(chan struct{}, 1)
+	updater := nodeupdate.New(b.Version, func(id string) { updates <- id }, nodeupdate.Options{Supervised: supervised, RequireResidentHandover: node.ResidentHandoverSupported, Signer: residentSigner(b.Program)})
+	defer updater.Close()
+	askTailcatRestart := func() {
 		select {
-		case requests <- reason:
-		default: // repeated deploys coalesce while waiting for idle work
+		case tailcatUpdate <- struct{}{}:
+		default: // repeated tailcat deploys coalesce while waiting for idle work
 		}
 	}
-	updater := nodeupdate.New(b.Version, func() { askRestart("update") }, nodeupdate.Options{Supervised: supervised, RequireResidentHandover: node.ResidentHandoverSupported, Signer: residentSigner(b.Program)})
-	defer updater.Close()
 	// A build another path put here (the hub's ssh deploy script, deploy.sh, install.sh) with a signing certificate set
 	// up on this Mac: signed now, and run again before serving, as a rollback is (docs/operations/mac-node-signing.md).
 	signed := !updater.RestartRequired() && updater.SignInstalled(ctx)
@@ -160,7 +161,7 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 	node.StartClaudePlugin(ctx, logger) // keeps the Persona plugin for Claude Code installed (node/claudeplugin.go)
 	tctx, tstop := context.WithCancel(context.Background())
 	defer tstop()
-	conns, stopped, err := node.ServeTailcat(tctx, logger, func() { askRestart("tailcat update") })
+	conns, stopped, err := node.ServeTailcat(tctx, logger, askTailcatRestart)
 	if err != nil {
 		logger.Printf("tailcat: %v (serving relays over ssh only)", err)
 	}
@@ -173,9 +174,12 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 	go func() {
 		defer close(workerDone)
 		for {
-			var reason string
+			var reason, updateID string
 			select {
-			case reason = <-requests:
+			case updateID = <-updates:
+				reason = "update"
+			case <-tailcatUpdate:
+				reason = "tailcat update"
 			case <-hup:
 				reason = "deployment"
 			case <-ctx.Done():
@@ -183,8 +187,11 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 			}
 			// A build a deployment or tailcat put in place runs signed too; an update's commit signed its own.
 			updater.SignInstalled(ctx)
-			if err := checkResidentReplacement(ctx, updater.Executable(), b.Program); err != nil {
-				logger.Printf("resident reload: replacement did not pass preflight; keeping the current node")
+			if err := preflightResidentReload(ctx, logger, updater.Executable(), b.Program); err != nil {
+				if updateID != "" {
+					updater.PreflightFailed(updateID, err)
+					reload.ReportUpdatePreflightFailure(ctx, updateID, err)
+				}
 				continue
 			}
 			logger.Printf("restart asked for (%s): draining idle work while attach remains available", reason)

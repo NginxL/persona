@@ -416,7 +416,7 @@ const APIRetrying = "（正在重试）"
 
 // OmpStoppedNotice is what a stopped omp session (listed from omp's own session files, node/ompdisk.go) shows in
 // place of its conversation. The hub puts it into the reader's language (hub/transcript_text.go noticeText).
-const OmpStoppedNotice = "这个 omp 会话已停止。现在只能在电脑上接着它（omp --resume），这里还不能给它发消息。"
+const OmpStoppedNotice = "这个 omp 会话已停止。发一条消息会在电脑上新开一个终端标签页，用 omp --resume 接着它。"
 
 // InterruptedNotice is the notice a turn stopped by the user becomes (Claude Code and Codex); APIErrorPrefix starts
 // the notice of a turn the model service failed. The channels read them as why a turn ended without words

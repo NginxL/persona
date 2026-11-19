@@ -340,7 +340,13 @@ func TestWrapAgentLinux(t *testing.T) {
 	}
 	a, e, st := WrapAgent(plan, argv, env)
 	separator := slices.Index(a, "--")
-	if st.State != AgentActive || !checked || a[0] != "/usr/bin/bwrap" || separator < 0 || !slices.Equal(a[separator+1:], argv) || !slices.Contains(e, AgentEnv+"=1") {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != AgentActive || !checked || len(a) < 4 || a[0] != "/usr/bin/bwrap" || separator < 0 || separator+4 > len(a) ||
+		!slices.Equal(a[separator+1:separator+4], []string{realPath(exe), AgentExecCommand, "--"}) ||
+		!slices.Equal(a[separator+4:], argv) || !slices.Contains(e, AgentEnv+"=1") {
 		t.Fatalf("%+v %v %v (checked %v)", st, a, e, checked)
 	}
 }

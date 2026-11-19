@@ -5,6 +5,7 @@
   "claude_missing_here": "Claude Code isn't installed on this computer yet.",
   "launcher_missing": "Can't find the model entry “{launcher}” on {machine}. It may have been removed.",
   "launcher_missing_here": "Can't find the model entry “{launcher}” on this computer. It may have been removed.",
+  "not_logged_in": "This conversation's Claude Code profile isn't signed in. Sign in to that profile, or use an API key.",
   "launcher_missing_terminal": "The shell of new terminal tabs on {machine} ({pane_shell}) has no command “{launcher}”; Persona found it in {launcher_shell} ({rc_file}). Define it where the terminal's shell reads its startup files, or add it to Persona as a model provider.",
   "launcher_missing_terminal_here": "The shell of new terminal tabs on this computer ({pane_shell}) has no command “{launcher}”; Persona found it in {launcher_shell} ({rc_file}). Define it where the terminal's shell reads its startup files, or add it to Persona as a model provider.",
   "launcher_missing_terminal_path": "The shell of new terminal tabs on {machine} ({pane_shell}) can't run “{missing}” to start the model entry “{launcher}”: the terminal runs where that file is missing or can't be run (a container, for example). Start agents in a terminal that sees it, or pick another model entry.",

@@ -347,6 +347,167 @@ func TestCompletionAcrossRestart(t *testing.T) {
 	}
 }
 
+// The manager loses its pending digest after recording an unsure judgment. A new transcript revision on
+// reconnect can still end on that same native turn. Only its outstanding message should be delivered.
+func TestCompletionDeliveryAfterTranscriptRevision(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	ctx := context.Background()
+	f.judge = `{"verdict":"unsure","reason":"The example needs review."}`
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	nodeListed(s, f, turnRow(proto.StatusWorking, 1, ""))
+	page := turnPage("native-a", "The example result is available.", true)
+	f.setItems(page...)
+	done := turnRow(proto.StatusDone, 2, "The example result is available.")
+	nodeListed(s, f, done)
+	wantTurns(t, "receipt and judgment before delivery", turnCounts{1, 1, 0}, s, todo.ID, f)
+	turnsQuiet(t, s, todo.ID)
+
+	entry, ok := s.turnOf(ctx, todo.ID)
+	if !ok || entry.Signal == nil || entry.Signal.Kind != sigUnjudged || entry.Signal.Told != nil {
+		t.Fatalf("outstanding signal before reconnect: %+v", entry.Signal)
+	}
+
+	// Keep the receipt and the judgment. Only the in-memory digest is lost.
+	s.supervise.mu.Lock()
+	if s.supervise.timer != nil {
+		s.supervise.timer.Stop()
+	}
+	s.supervise.timer, s.supervise.timerAt = nil, time.Time{}
+	clear(s.supervise.pending)
+	s.supervise.mu.Unlock()
+	s.superviseTimes = shortSuperviseTimings
+
+	// An older inventory arrives first. Its turn predates this task and must not consume the signal.
+	old := turnPage("older", "Earlier result.", true)
+	for i := range old {
+		old[i].TS = todo.CreatedAt.Add(-time.Hour)
+	}
+	f.setItems(old...)
+	nodeListed(s, f, turnRow(proto.StatusDone, 1, "Earlier result."))
+	sweeps(t, s, todo.ID, 2)
+	stillTurns(t, "after the older turn", turnCounts{1, 1, 0}, s, todo.ID, f)
+
+	page = append(page, proto.Item{ID: "bookkeeping", Kind: proto.KindNotice, Role: "system"})
+	f.setItems(page...)
+	done.Rev++
+	nodeListed(s, f, done)
+	sweeps(t, s, todo.ID, 1)
+	wantTurns(t, "one delivery of the already judged turn", oneEach, s, todo.ID, f)
+	f.setItems(append(page, proto.Item{ID: "bookkeeping-2", Kind: proto.KindNotice, Role: "system"})...)
+	done.Rev++
+	nodeListed(s, f, done)
+	s.TurnEnded(ctx, SessionRef{MachineID: done.MachineID, SessionID: done.SessionID})
+	sweeps(t, s, todo.ID, 2)
+	stillTurns(t, "after duplicate end events", oneEach, s, todo.ID, f)
+	if entry, _ = s.turnOf(ctx, todo.ID); entry.Key != "native-a" || entry.Signal == nil || entry.Signal.Told == nil {
+		t.Fatalf("delivered turn: %+v", entry)
+	}
+	if now := todoNow(s, todo.ID); now.DoneAt != nil || now.Check == nil || now.Check.Verdict != verdictUnsure {
+		t.Fatalf("delivery changed the task's review: %+v", now.Check)
+	}
+}
+
+// A changed revision after an actual manager reconstruction must still deliver the persisted unsure judgment.
+func TestCompletionDeliveryAfterTranscriptRevisionAcrossRestart(t *testing.T) {
+	database := taskRecoveryDatabase(t)
+	s, f, todo := newSupervisedServiceOn(t, database)
+	ctx := context.Background()
+	f.judge = `{"verdict":"unsure","reason":"The example needs review."}`
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	nodeListed(s, f, turnRow(proto.StatusWorking, 1, ""))
+	page := turnPage("native-restart", "The example result is available.", true)
+	f.setItems(page...)
+	done := turnRow(proto.StatusDone, 2, "The example result is available.")
+	nodeListed(s, f, done)
+	wantTurns(t, "persisted judgment before restart", turnCounts{1, 1, 0}, s, todo.ID, f)
+	turnsQuiet(t, s, todo.ID)
+	s.supervise.mu.Lock()
+	if s.supervise.timer != nil {
+		s.supervise.timer.Stop()
+	}
+	s.supervise.timer, s.supervise.timerAt = nil, time.Time{}
+	clear(s.supervise.pending)
+	s.supervise.mu.Unlock()
+
+	again, f2 := restartedOn(t, database)
+	if err := again.ensureTodosLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	page = append(page, proto.Item{ID: "bookkeeping", Kind: proto.KindNotice, Role: "system"})
+	f2.setItems(page...)
+	done.Rev++
+	nodeListed(again, f2, done)
+	sweeps(t, again, todo.ID, 1)
+	wantTurns(t, "persisted signal after restart", oneEach, again, todo.ID, f, f2)
+	again.TurnEnded(ctx, SessionRef{MachineID: done.MachineID, SessionID: done.SessionID})
+	sweeps(t, again, todo.ID, 2)
+	stillTurns(t, "no duplicate after restart", oneEach, again, todo.ID, f, f2)
+	if entry, ok := again.turnOf(ctx, todo.ID); !ok || entry.Signal == nil || entry.Signal.Told == nil {
+		t.Fatalf("signal delivery was not persisted: %+v", entry)
+	}
+	if now := todoNow(again, todo.ID); now.DoneAt != nil || now.Check == nil || now.Check.Verdict != verdictUnsure {
+		t.Fatalf("recovery changed the review: %+v", now.Check)
+	}
+}
+
+// A snapshot taken before Inbox I/O is not permission to rewrite or queue a newer turn's signal.
+func TestCompletionReplayRejectsStaleLedger(t *testing.T) {
+	for _, change := range []string{"machine", "session", "native turn", "judgment", "told", "missing", "unchanged"} {
+		t.Run(change, func(t *testing.T) {
+			s, _ := newQuietService(t)
+			s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+			old := taskTurn{Machine: "box", Session: "session", Key: "turn-a", Seen: time.Now(),
+				Signal: &turnSignal{Kind: sigUnjudged, Key: "signal-a", Machine: "box", Detail: "Needs review"}}
+			current := old
+			sig := *old.Signal
+			current.Signal = &sig
+			switch change {
+			case "machine":
+				current.Machine = "other-box"
+			case "session":
+				current.Session = "other-session"
+			case "native turn":
+				current.Key = "turn-b"
+			case "judgment":
+				current.Signal.Key = "signal-b"
+			case "told":
+				now := time.Now()
+				current.Signal.Told = &now
+			}
+			b := &s.tasks.turns
+			b.mu.Lock()
+			if !s.turnsLocked(context.Background()) {
+				t.Fatal("load ledger")
+			}
+			if change != "missing" {
+				b.doc.Turns["task"] = current
+			}
+			b.mu.Unlock()
+			s.replayTurnSignal("task", old)
+			b.mu.Lock()
+			got, exists := b.doc.Turns["task"]
+			b.mu.Unlock()
+			if change == "missing" {
+				if exists {
+					t.Fatal("replay created a ledger entry")
+				}
+			} else if got.Key != current.Key || got.Machine != current.Machine || got.Session != current.Session || *got.Signal != *current.Signal {
+				t.Fatalf("replay changed the ledger: %+v", got)
+			}
+			s.supervise.mu.Lock()
+			n := len(s.supervise.pending)
+			s.supervise.mu.Unlock()
+			want := 0
+			if change == "unchanged" {
+				want = 1
+			}
+			if n != want {
+				t.Fatalf("queued %d signals, want %d", n, want)
+			}
+		})
+	}
+}
+
 // Nothing is recovered for a task nobody supervises, nor for a closed one: a turn that completes unseen there gets no
 // receipt, no judgment and no message, and a closed task stays closed.
 func TestCompletionUnseenNotSupervisedOrClosed(t *testing.T) {

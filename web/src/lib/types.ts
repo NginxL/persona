@@ -879,6 +879,8 @@ export interface Interaction {
   tool_input?: Record<string, unknown>;
   /** The outgoing text the server lets the user edit before Allow, only for a Claude Code Lark send/reply card. */
   editable_text?: string;
+  /** Script asks opt into Markdown for their summary or question; absent and unknown values stay plain (#10857). */
+  format?: "markdown" | (string & {});
   summary?: string;
   screen?: string;
   secret?: boolean;

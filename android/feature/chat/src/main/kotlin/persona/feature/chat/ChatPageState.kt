@@ -333,7 +333,8 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     tasks: persona.core.domain.tasks.TasksStore?, taskTodos: List<persona.core.contracts.Todo>, search: ChatSearchState,
     openWork: Set<String>, projection: persona.core.domain.lines.ChatSnapshot, feed: List<persona.core.contracts.FeedItem>,
     taskPlans: Map<String, TaskPlan>, taskCardProjection: Map<String, List<AssistantTaskCard>>,
-    children: List<Session> = emptyList()): ChatPageLines {
+    children: List<Session> = emptyList(), modeChanges: List<persona.core.contracts.ModeChange> = emptyList(),
+    modeChangesUntil: java.time.Instant? = null): ChatPageLines {
     val jumpItemState = remember { mutableStateOf<String?>(null) }
     var jumpItem by jumpItemState
     // Glass draws the hub's task records among the lines, as iOS does (#4339 C13), and folds a supervision round into one
@@ -359,7 +360,7 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     val modelChanges = PersonaTheme.style == AppStyle.Glass
     val childPlaces = remember(key) { persona.core.domain.lines.ChildSessionPlaces() }
     val places = remember(children) { childPlaces.places(children) }
-    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork) {
+    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork, modeChanges, modeChangesUntil) {
         searchVisibleLines(assistantPresentation.foreground, search.selected?.itemId ?: jumpItem)
             .let {
                 when {
@@ -373,7 +374,14 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
             .let { persona.core.domain.lines.ChildSessionCards.lines(it, places, !snapshot.hasOlder, openWork) }
             // The strip of what a turn's work looked at is Glass's, as iOS draws it (#4339 C9); Brief and Board keep their lines.
             .let { if (viewedStrips) it else it.filterNot { line -> line is ChatLine.Viewed } }
-            .let { if (modelChanges) persona.core.domain.lines.ModelChanges.mark(it) else it }.asReversed()
+            .let { if (modelChanges) persona.core.domain.lines.ModelChanges.mark(it) else it }
+            .let {
+                if (renderStyle == ChatRenderStyle.Assistant) it else persona.core.domain.lines.ModeChanges.merge(it, modeChanges,
+                    earliest = if (snapshot.hasOlder) snapshot.items.firstNotNullOfOrNull { item ->
+                        persona.core.contracts.parseTime(item.ts)
+                    } ?: java.time.Instant.MAX else null,
+                    until = modeChangesUntil)
+            }.asReversed()
     }
     return ChatPageLines(jumpItemState, assistantPresentation, subagentCards, lines)
 }

@@ -87,10 +87,12 @@
   "assistant_supervision_busy": "这个对话的任务跟进职责变了。请等它当前的工作结束后再试，这次没有发送。",
   "assistant_supervision_runtime": "请用 Claude Code 或 Codex 对话跟进任务。这个 Agent 不支持独立的跟进指令，这次没有启动或发送任何内容。",
   "assistant_supervision_node_outdated": "请先更新这台电脑的 Persona Link，再在这里跟进任务。当前版本不能应用独立的任务指令，这次没有启动或发送任何内容。",
-  "omp_resume_unknown": "Persona 还不能从这里恢复这个 omp 会话，请在电脑上用 omp --resume 接着它。这次没有发送。",
+  "omp_resume_unknown": "找不到这个 omp 会话的文件，Persona 没法从这里恢复它：请在电脑上用 omp --resume 接着它。这次没有发送。",
   "held_ahead": "这个 Agent 还有更早的消息在等待发送，请等它们发出后再发这条。",
   "held_not_kept": "前面的消息还在等待发送，这条没能保存下来。请稍后再试。",
   "held_full": "等待发给这个 Agent 的消息太多了。请先删掉一些，或等电脑回来后再发这条。",
   "assistant_launcher_profile_switch": "无法将此对话切换到所选连接，消息未发送。请选择上一个连接继续此对话，或使用所选连接及其模型新建对话。",
-  "turn_over_background": "这一轮已经结束了，没有中断任何内容。后台任务还在运行，要结束它请到那台电脑的终端里操作。"
+  "codex_writer_busy": "这个 Codex 会话正由电脑上的另一个进程写入，这次没有发送：请在原 Codex 窗口或终端里继续；如果那边已退出，等它断开后刷新再试。",
+  "turn_over_background": "这一轮已经结束了，没有中断任何内容。后台任务还在运行，要结束它请到那台电脑的终端里操作。",
+  "omp_stopped": "这个 omp 会话已停止，没有这个操作：发一条消息会在电脑上接着它运行。"
 }

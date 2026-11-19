@@ -736,6 +736,13 @@ provide the current speed. A native null means Standard. Missing speed stays unk
 currently report it. Refreshes preserve acknowledged state, and reconnects start with unknown state until native
 settings arrive. Terminal-only panes, subagents and models without advertised tiers have no speed control.
 
+The iOS main Assistant conversation reads the same session fields in its existing composer menu. A Speed section appears
+only when the session advertises `default` or `priority`; it uses localized Standard / Fast labels, explains Fast's extra
+quota use and says the choice applies to the next turn. Working does not disable it, while an offline or read-only action
+carries a one-line reason. Each choice is its own `POST …/modes {service_tier}` and nothing is drawn optimistically: the
+acknowledged session value owns the checkmark, summary updates preserve both fields, and a refusal or unconfirmed request
+shows an error without moving the last acknowledged selection. Model and effort requests remain separate.
+
 A new Persona conversation can carry the same native tier in `POST /api/v1/assistant/conversations` while the default
 manager names `assistant_start_service_tier` in `manager.hello` and the hub lists that feature. Launcher model discovery
 preserves `serviceTiers` as `service_tiers`; the web offers Fast only for a row that advertises `priority`, never from a

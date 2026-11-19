@@ -309,6 +309,54 @@ struct HealthSnapshotTests {
         await store.markRefreshed(at: now.addingTimeInterval(-HealthSnapshotStore.refreshInterval - 60))
         #expect(await store.cachedIfFresh(now: now) == nil)
     }
+
+    @Test func restoredStoreUsesTheSnapshotDateForFreshness() async throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let cases: [(offset: TimeInterval, fresh: Bool)] = [
+            (-5 * 60, true),
+            (-20 * 60, false),
+            (5 * 60, false),
+            (-HealthSnapshotStore.refreshInterval, false),
+        ]
+        for testCase in cases {
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "health-snapshot-\(UUID().uuidString)", directoryHint: .isDirectory)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let refreshedAt = now.addingTimeInterval(testCase.offset)
+            let original = HealthSnapshotStore(directory: directory)
+            await original.save(makeSnapshot(asOf: refreshedAt))
+            await original.markRefreshed(at: refreshedAt)
+
+            let restored = HealthSnapshotStore(directory: directory)
+            let cached = await restored.cachedIfFresh(now: now)
+            if testCase.fresh {
+                // This non-nil answer makes HealthTool.refreshSnapshot return before its HealthKit queries.
+                #expect(cached?.asOf == refreshedAt)
+            } else {
+                #expect(cached == nil, "refresh offset: \(testCase.offset)")
+            }
+        }
+    }
+
+    @Test func restoredStoreRejectsAnOldFormatSnapshotWithoutADate() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "health-snapshot-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = Data(#"{"windowDays":90,"metrics":["steps"],"rows":{}}"#.utf8)
+        try legacy.write(to: directory.appending(path: "summary.json"))
+
+        let restored = HealthSnapshotStore(directory: directory)
+        #expect(await restored.cachedIfFresh(now: Date(timeIntervalSince1970: 1_760_000_000)) == nil)
+    }
+
+    @Test func restoredStoreRejectsAMissingSnapshot() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "health-snapshot-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let restored = HealthSnapshotStore(directory: directory)
+
+        #expect(await restored.cachedIfFresh(now: Date(timeIntervalSince1970: 1_760_000_000)) == nil)
+    }
 }
 
 private extension HealthSnapshotTests.FakeHealthSnapshotStore {

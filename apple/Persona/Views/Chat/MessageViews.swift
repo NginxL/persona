@@ -916,6 +916,7 @@ nonisolated enum ModeChangeWords {
     static func why(_ code: String?) -> String? {
         switch code {
         case "replaced": String(localized: "another switch took its place")
+        case "cancelled": String(localized: "the session stays in its current mode") // the mode it runs in picked again (#11089)
         case "process_exited": String(localized: "the process it was picked for has exited")
         case "process_replaced": String(localized: "the session runs in another process now")
         case "process_unknown": String(localized: "it couldn't tell which process to restart")

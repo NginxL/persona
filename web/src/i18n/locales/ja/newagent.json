@@ -10,6 +10,8 @@
   "home_folder": "ホームフォルダー",
   "follow_model_settings": "モデル設定に従う",
   "models_failed": "モデル一覧を読み込めませんでした。デフォルトのモデルで起動できます。",
+  "launchers_failed": "このコンピューターのモデルを読み込めませんでした。デフォルトのモデルで起動できます。",
+  "retry": "再試行",
   "follow_launcher": "ランチャーに従う",
   "first_message_optional": "最初のメッセージ（任意）",
   "first_message": "最初のメッセージ",

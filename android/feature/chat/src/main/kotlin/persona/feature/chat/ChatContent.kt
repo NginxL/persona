@@ -379,6 +379,7 @@ internal fun ChatLineContent(
     lastUserId: String? = null, onLastLine: (Int) -> Unit = {},
     onFullText: (Item) -> Unit,
     style: ChatRenderStyle = ChatRenderStyle.Agent,
+    agentSession: persona.core.contracts.Session? = null,
     textUpdates: Map<String, ChatTextUpdate> = emptyMap(),
     liveText: Map<String, StateFlow<String>> = emptyMap(),
     streamingItemIds: Set<String> = emptySet(),
@@ -426,10 +427,12 @@ internal fun ChatLineContent(
                     val hideCloseout = closeoutReply == line.row.id && update?.streaming != true
                     // only the block goes; a reply that said nothing else is not drawn at all
                     if (!hideCloseout || !onlyCloseout(update?.text ?: item.text, cut = item.fullSize != null)) {
-                        MessageContent(item, false, update, boxed = true, hideCloseout = hideCloseout)
-                        val usage = LocalReplyUsage.current[item.id]
-                        // A reply still streaming has no total yet (the web hides the bar while the turn is live).
-                        if (usage != null && update?.streaming != true) ReplyUsageFooter(item, usage)
+                        Column(Modifier.fillMaxWidth()) {
+                            MessageContent(item, false, update, boxed = true, hideCloseout = hideCloseout)
+                            val usage = LocalReplyUsage.current[item.id]
+                            // A reply still streaming has no total yet (the web hides the bar while the turn is live).
+                            if (usage != null && update?.streaming != true) ReplyUsageFooter(item, usage)
+                        }
                     }
                 }
             }
@@ -443,6 +446,7 @@ internal fun ChatLineContent(
         }
         is ChatLine.Recaps -> RecapLine(line.items.map { it.item })
         is ChatLine.Viewed -> ViewedImagesRow(line.images, session, loader)
+        is ChatLine.ModeChange -> ModeChangeDivider(line.change, agentSession)
         // Glass: where the replies' model changed (#5055, ModelChanges.mark), as the transcript names both.
         is ChatLine.ModelChange -> {
             val from = persona.core.domain.lines.ModelChanges.replyModelName(line.from)

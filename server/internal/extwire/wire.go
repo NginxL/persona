@@ -45,6 +45,7 @@ var Routes = []string{
 	"/api/v1/error-reports",
 	"/api/v1/subscriptions",
 	"/api/v1/subscriptions/",
+	"/api/v1/avatars/", // AvatarsRoute
 }
 
 // KeptRoutes are GET routes whose last answer the hub keeps and gives while the manager is away, so the apps keep

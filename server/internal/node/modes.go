@@ -349,7 +349,7 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 				}
 			}
 		} else {
-			n.dropModeRestart(id)
+			n.dropModeRestart(id, mode)
 		}
 	}
 	pane, err := n.paneFor(ctx, id)

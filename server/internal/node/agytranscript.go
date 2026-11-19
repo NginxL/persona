@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -120,22 +121,36 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 		} else {
 			step.seq = 1
 		}
+		at := len(steps)
 		if len(steps) > 0 && step.seq <= steps[len(steps)-1].seq {
 			last := steps[len(steps)-1]
-			if step.seq < last.seq || step.Type != last.Type || step.CreatedAt != last.CreatedAt {
-				rev.branch = agyDigest(rev.branch + "\n" + string(line))
-				rev.native = ""
-			} else if step.record != last.record {
-				rev.native = fmt.Sprintf("%x", step.record[:10])
+			// A step whose sequence nothing retained has is a late arrival, not a rewind: parallel tool calls are
+			// exported as they finish, so a call that fails at once lands before its sibling's result. It takes its
+			// place in order, keeps the branch (every item ID) and marks the content as changed.
+			floor := len(steps) - 1
+			for floor >= 0 && steps[floor].seq > step.seq {
+				floor--
 			}
-			for len(steps) > 0 && steps[len(steps)-1].seq >= step.seq {
-				steps = steps[:len(steps)-1]
+			if step.seq < last.seq && (floor < 0 || steps[floor].seq != step.seq) {
+				at = floor + 1
+				rev.native = fmt.Sprintf("%x", step.record[:10])
+			} else {
+				if step.seq < last.seq || step.Type != last.Type || step.CreatedAt != last.CreatedAt {
+					rev.branch = agyDigest(rev.branch + "\n" + string(line))
+					rev.native = ""
+				} else if step.record != last.record {
+					rev.native = fmt.Sprintf("%x", step.record[:10])
+				}
+				for len(steps) > 0 && steps[len(steps)-1].seq >= step.seq {
+					steps = steps[:len(steps)-1]
+				}
+				at = len(steps)
 			}
 		}
 		// Pane item IDs deliberately differ from the companion's. Mixing in the conversation
 		// isolates IDs across pane session switches, and named suffixes survive step completions.
 		step.key = strconv.Itoa(step.seq) + "@" + agyDigest(conversation+"\n"+step.CreatedAt+"\n"+rev.branch)
-		steps = append(steps, step)
+		steps = slices.Insert(steps, at, step)
 	}
 	return steps, rev
 }
@@ -222,6 +237,12 @@ func mapAgySteps(steps []agyStep, fallback time.Time) agyHistory {
 			history.items = append(history.items, proto.Item{ID: step.key + "#" + suffix, Seq: step.seq,
 				Role: role, Kind: kind, TS: at, Text: text})
 			return &history.items[len(history.items)-1]
+		}
+		// A call's result follows its planner step. One that never came (interrupted, dropped) must not stay queued
+		// to take the next result, which would shift every later result onto the wrong call.
+		switch step.Type {
+		case "PLANNER_RESPONSE", "USER_INPUT", "ERROR_MESSAGE":
+			pending = pending[:0]
 		}
 		switch step.Type {
 		case "USER_INPUT":

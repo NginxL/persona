@@ -57,6 +57,8 @@ printf '%%PDF-1.4\n%%Persona share test\n%%%%EOF\n' >"$LOCAL/File Provider Stora
 
 xcrun simctl ui "$SIM" appearance "$APPEARANCE"
 [ -z "$SHOTS" ] || mkdir -p "$SHOTS"
+# The whole project: the tests share into the share extension, which a lean build leaves out (apple/lean-dev-build.yml).
+unset PERSONA_LEAN_DEV_BUILD
 cd apple && xcodegen generate -q
 TEST_RUNNER_PERSONA_MOCK_HUB="http://127.0.0.1:$PORT" TEST_RUNNER_PERSONA_SHOTS="$SHOTS" TEST_RUNNER_PERSONA_SHOTS_APPEARANCE="$APPEARANCE" \
   xcodebuild test -project Persona.xcodeproj -scheme Persona -destination "id=$SIM" -derivedDataPath ../build/DerivedData \

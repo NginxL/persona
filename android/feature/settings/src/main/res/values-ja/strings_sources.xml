@@ -2,6 +2,9 @@
 <!-- Settings › Connectors / Channels / Model configuration / New model provider / Claude Code settings / Quota (docs/protocol/i18n.md). Same keys in values, values-zh and values-ja. -->
 <resources>
     <string name="settings_src_just_now">たった今</string>
+    <plurals name="settings_src_seconds_ago">
+        <item quantity="other">%1$d秒前</item>
+    </plurals>
     <plurals name="settings_src_minutes_ago">
         <item quantity="other">%1$d分前</item>
     </plurals>

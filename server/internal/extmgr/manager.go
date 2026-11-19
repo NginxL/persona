@@ -33,6 +33,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/remoteimage"
 	"github.com/nwverse/persona/server/internal/secretkey"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 	"github.com/nwverse/persona/server/internal/update"
@@ -143,6 +144,7 @@ type Manager struct {
 	connectorsOff map[string]bool
 	migrated      sync.Map
 	media         mediaCache
+	avatars       *remoteimage.Fetcher // the avatars route's (avatars.go)
 	recalls       recallLocks
 	extensions    *extensions
 	hostCLIMu     sync.Mutex
@@ -224,6 +226,7 @@ func New(opts Options) *Manager {
 	h.started = make(chan struct{})
 	h.extTokens.dropped = h.tellHubDropped
 	h.droppedWait = time.Second
+	h.avatars = newAvatars(cfg.dir, h.avatarDoH, opts.Logf)
 	return h
 }
 

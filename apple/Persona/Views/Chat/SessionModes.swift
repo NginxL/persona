@@ -9,6 +9,13 @@ nonisolated enum SessionModes {
         var symbol: String
     }
 
+    struct SpeedOption: Identifiable, Hashable {
+        var id: String
+        var title: String
+        var detail: String
+        var symbol: String
+    }
+
     static let permissionModes: [Option] = [
         Option(id: "default", title: String(localized: "Ask First"), detail: String(localized: "Asks you before editing files or running commands"), symbol: Theme.Icon.askFirst),
         Option(id: "acceptEdits", title: String(localized: "Auto-Edit"), detail: String(localized: "Edits files without asking, still asks before commands"), symbol: Theme.Icon.editFile),
@@ -209,6 +216,28 @@ nonisolated enum SessionModes {
     static func effortOptions(_ session: Session?) -> [Option] {
         guard let ids = session?.efforts, !ids.isEmpty else { return effortLevels }
         return ids.map { id in codexEffortLevels.first { $0.id == id } ?? Option(id: id, title: id, detail: "", symbol: Theme.Icon.effort) }
+    }
+
+    /// Current-conversation Codex speed, only for the main Assistant chat and only from advertised native tiers. The
+    /// native names are not interface copy: Standard and Fast use the same plain localized labels as the web.
+    static func speedOptions(_ session: Session?, mainConversation: Bool) -> [SpeedOption] {
+        guard mainConversation, session?.assistant == true, let tiers = session?.serviceTiers else { return [] }
+        let ids = Set(tiers.map(\.id))
+        var options: [SpeedOption] = []
+        if ids.contains("default") {
+            options.append(SpeedOption(id: "default", title: String(localized: "Standard"), detail: "", symbol: Theme.Icon.topicPerformance))
+        }
+        if ids.contains("priority") {
+            options.append(SpeedOption(id: "priority", title: String(localized: "Fast"), detail: String(localized: "Uses more quota"), symbol: Theme.Icon.topicPerformance))
+        }
+        return options
+    }
+
+    /// Why a visible Speed action cannot be changed. Working is not a restriction: the acknowledged tier applies next turn.
+    static func speedUnavailable(_ session: Session) -> String? {
+        if session.state == .offline { return StateName.notRunning.text }
+        if session.starting == true { return String(localized: "Starting [Session Modes 087739]") }
+        return session.canSend ? nil : String(localized: "This session is view-only")
     }
 
     /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`, or a
@@ -447,6 +476,8 @@ struct SessionModesMenu: View {
     var setsModes = true
     /// Only the effort can change, among the session's own levels (a Codex thread on its app-server, `Session.setsEffortOnly`).
     var setsEffortOnly = false
+    /// The hub-named main Assistant conversation: the only place this menu offers current-conversation Codex Speed.
+    var mainConversation = false
     /// "Other Model…" where a model can be picked: the composer opens `SessionTypedModelSheet` (#1644).
     var otherModel: (() -> Void)? = nil
     /// The main Persona chat: opens its conversation model sheet (#6542, the per-conversation pick, #5033). Nil on
@@ -469,6 +500,9 @@ struct SessionModesMenu: View {
     var body: some View {
         let mode = session?.permissionMode
         let effort = session?.effort
+        let speedOptions = SessionModes.speedOptions(session, mainConversation: mainConversation)
+        let selectedSpeed = session?.serviceTier ?? ""
+        let changingSpeed = model.serviceTierChanges.contains(key)
         // The modes an agent that is not Claude Code's lists (#8261): its own approval and Allow Everything, a switch both ways.
         let listsModes = !setsModes && session?.canSwitchListedModes == true
         // Allow Everything is said here, not on the composer's button (#1117). First: a menu opening upward from the button puts
@@ -526,6 +560,26 @@ struct SessionModesMenu: View {
                 Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model")) // what it runs; changed where it was started
             }
         }
+        if !speedOptions.isEmpty {
+            let unavailable = session.flatMap { SessionModes.speedUnavailable($0) }
+            Section {
+                ForEach(speedOptions) { option in
+                    let traits: AccessibilityTraits = option.id == selectedSpeed ? .isSelected : []
+                    MenuChoice(id: option.id, selected: selectedSpeed, pick: changeSpeed) {
+                        Label { Text(option.title) } icon: { ThemedIcon(option.symbol) }
+                    }
+                    .accessibilityAddTraits(traits)
+                    .accessibilityIdentifier("sessionModes.speed.\(option.id)")
+                    if !option.detail.isEmpty { Text(option.detail) }
+                }
+                Text("Applies next turn")
+                if changingSpeed { Text("Changing Speed…").lineLimit(1) }
+                if let unavailable { Text(unavailable).lineLimit(1) }
+            } header: {
+                Text("Speed").accessibilityIdentifier("sessionModes.speed")
+            }
+            .disabled(changingSpeed || unavailable != nil)
+        }
         if setsModes || setsEffortOnly {
             // Claude Code's ultracode (#1307): its own switch under the effort, not a level of it (declared before it where
             // the menu lists its items the other way round, `UltracodeMenuSection.leadsEffort`).
@@ -559,6 +613,11 @@ struct SessionModesMenu: View {
             }
             .pickerStyle(.menu)
         }
+    }
+
+    private func changeSpeed(_ tier: String) {
+        guard tier != session?.serviceTier, !model.serviceTierChanges.contains(key) else { return }
+        Task { await model.setServiceTier(key, tier: tier) }
     }
 
     private func change(mode: String? = nil, effort: String? = nil) {

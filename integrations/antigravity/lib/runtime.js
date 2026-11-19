@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createRuntime, installCurrent, interactionId, page, RpcError, snippet, summaryOf, verifyPackage } from '../../runtime-sdk/index.js'
 import { isAssistantDir } from '../../runtime-sdk/lib/identity.js'
 import { AgyAcpClient } from './acp.js'
-import { discoverModels, mapModels } from './models.js'
+import { discoverModels, mapModels, SIGNIN_TIMEOUT } from './models.js'
 import { nativeErrorStep } from './errors.js'
 import {
   agyModeToPersona,
@@ -69,6 +69,10 @@ export function createAgyRuntime(options = {}) {
   const checkTurns = new Map() // availability probes collect text without appearing in user conversations
   const permissionAsks = new Map() // agyId -> Set of AbortControllers, one per permission card still on the phone
   const cancelling = new Set() // agyId: interrupted, its turn has not ended yet
+  // agyId -> the native step count when a turn ended on a cancel the companion sent (#11108). agy's own summary can
+  // still say the cascade runs right after; until it shows a new step or a new prompt starts, that is not work.
+  const cancelledAt = new Map()
+  const interruptSettleMs = options.interruptSettleMs ?? 10_000
 
   const acp = new AgyAcpClient({
     bin: existsSync(agyBin) ? agyBin : 'agy',
@@ -81,6 +85,11 @@ export function createAgyRuntime(options = {}) {
   let catalogAt = 0
   let catalogFlight
   let catalogTimer
+  // Discovery runs every catalogEveryMs; each discovery in a row that times out on an expired sign-in doubles the wait,
+  // up to catalogMaxMs, instead of holding a hung agy for 25 s every 5 minutes (#11106).
+  const catalogEveryMs = options.catalogEveryMs ?? 300_000
+  const catalogMaxMs = options.catalogMaxMs ?? 3_600_000
+  let catalogTimeouts = 0
   // One agy acp process can keep the model list it had when the account's plan lapsed or the CLI signed out (#10368).
   let discoveredGeneration = -1 // the agy acp generation running when the latest successful discovery began
   let signedOut = false // the latest discovery failed because the CLI is signed out
@@ -114,7 +123,7 @@ export function createAgyRuntime(options = {}) {
     }
     if (!catalogFlight) {
       const generation = acp.generation
-      catalogFlight = discoverModels(acp.bin, { signal: catalogAbort.signal }).then((entries) => {
+      catalogFlight = discoverModels(acp.bin, { signal: catalogAbort.signal, timeout: options.modelsTimeoutMs ?? 25_000 }).then((entries) => {
         if (!stopped) {
           catalogAt = Date.now()
           discoveredGeneration = generation
@@ -128,7 +137,7 @@ export function createAgyRuntime(options = {}) {
         }
         return { agent: RUNTIME, models: catalog }
       }, (err) => {
-        if (SIGNED_OUT.test(err?.message || '')) signedOut = true
+        if (err?.code === SIGNIN_TIMEOUT || SIGNED_OUT.test(err?.message || '')) signedOut = true
         throw err
       }).finally(() => { catalogFlight = undefined })
     }
@@ -274,6 +283,7 @@ export function createAgyRuntime(options = {}) {
       launchers,
       assistant: true,
       socketPath: options.socketPath,
+      instance: options.instance,
       log,
       ...(update ? { package: { name: update.name, hash: update.hash }, onUpdate: (offer) => void takeUpdate(offer) } : {}),
       retryMs: options.retryMs,
@@ -667,6 +677,20 @@ export function createAgyRuntime(options = {}) {
     return transcript
   }
 
+  /**
+   * native as the session list reads it: a summary that still says running after a turn ended on a confirmed cancel,
+   * with no step since, reads as idle (#11108). A new native step drops the mark: that is work again.
+   */
+  function afterCancel(rawId, native) {
+    const mark = cancelledAt.get(rawId)
+    if (mark === undefined || !native) return native
+    if (Number.isInteger(native.step_count) && native.step_count > mark) {
+      cancelledAt.delete(rawId)
+      return native
+    }
+    return nativeWorking(native) ? { ...native, status: 'CASCADE_RUN_STATUS_IDLE', not_fully_idle: false } : native
+  }
+
   function readNativeError(rawId, native = readConversationStates().get(rawId), transcript = exportedTranscriptOf(rawId, native)) {
     const next = (transcript.steps.at(-1)?.step_index ?? -1) + 1
     const count = native?.step_count
@@ -815,7 +839,7 @@ export function createAgyRuntime(options = {}) {
       if (archived.has(rawId)) continue
       const meta = convs[rawId]
       const summary = meta?.summary
-      const native = states.get(rawId)
+      const native = afterCancel(rawId, states.get(rawId))
       const pid = toPersonaId(rawId)
       const running = activeTurns.has(pid) || nativeWorking(native)
       const bDir = brainDirOf(rawId)
@@ -1157,6 +1181,7 @@ export function createAgyRuntime(options = {}) {
       }
 
       const prevTurn = activeTurns.get(pid)
+      cancelledAt.delete(rawId) // a new prompt: whatever the summary says next is this turn's
       if (prevTurn?.pollTimer) clearInterval(prevTurn.pollTimer)
       const pollTimer = setInterval(() => syncTranscriptAppend(rawId), 400)
       const turnToken = Symbol('turn')
@@ -1208,6 +1233,10 @@ export function createAgyRuntime(options = {}) {
             // The turn is over: a card still waiting has nothing to answer for any more.
             const wasCancelled = cancelling.has(rawId)
             cancelling.delete(rawId)
+            if (wasCancelled) {
+              const count = readConversationStates().get(rawId)?.step_count
+              cancelledAt.set(rawId, Number.isInteger(count) ? count : -1)
+            }
             withdrawPermissionAsks(rawId, 'the turn ended')
             const expectReply = Boolean(turn.streamingText.trim())
             let awaitExport = false
@@ -1267,13 +1296,33 @@ export function createAgyRuntime(options = {}) {
     })
   }
 
-  async function interrupt(params) {
-    const rawId = ownedId(params.session_id)
+  /** Ask agy to end the session's running turn (session/cancel) and take its permission cards off the phone. */
+  function cancelTurn(rawId) {
     return busyCall(async () => {
       if (activeTurns.has(toPersonaId(rawId))) cancelling.add(rawId)
       withdrawPermissionAsks(rawId, 'interrupted')
       await acp.cancel(rawId)
     })
+  }
+
+  /**
+   * Stop the running turn. Resolves to {settled: true} once the turn that was running has ended (agy answers its
+   * session/prompt, stopReason cancelled), to nothing when it has not within interruptSettleMs: the runtime contract
+   * (docs/integrations/runtimes.md, #8097, #11108). A turn queued behind it is not waited for.
+   */
+  async function interrupt(params) {
+    const rawId = ownedId(params.session_id)
+    const pid = toPersonaId(rawId)
+    const running = promptTurns.get(pid) || activeTurns.get(pid)
+    await cancelTurn(rawId)
+    if (!running?.promise) return undefined
+    let timer
+    const ended = await Promise.race([
+      running.promise.then(() => true, () => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), interruptSettleMs) }),
+    ])
+    clearTimeout(timer)
+    return ended ? { settled: true } : undefined
   }
 
   async function rename(params) {
@@ -1290,7 +1339,7 @@ export function createAgyRuntime(options = {}) {
       archived.add(rawId)
       clearExportPoll(rawId)
       unexportedTurns.delete(rawId)
-      await interrupt(params)
+      await cancelTurn(rawId)
       await acp.closeSession(rawId)
       rt.sessionsChanged()
     })
@@ -1423,11 +1472,28 @@ export function createAgyRuntime(options = {}) {
     }
   }
 
+  /** The next periodic discovery: catalogEveryMs, doubled for each discovery in a row that timed out (#11106). */
+  function scheduleCatalog() {
+    clearTimeout(catalogTimer)
+    if (stopped) return
+    const wait = Math.min(catalogMaxMs, catalogEveryMs * 2 ** catalogTimeouts)
+    catalogTimer = setTimeout(() => {
+      void models({ refresh: true })
+        .then(() => { catalogTimeouts = 0 }, (err) => {
+          if (err?.code === SIGNIN_TIMEOUT) catalogTimeouts = Math.min(catalogTimeouts + 1, 16)
+          else catalogTimeouts = 0
+          log(`agy model discovery error: ${err.message}`)
+        })
+        .finally(scheduleCatalog)
+    }, wait)
+    catalogTimer.unref?.()
+  }
+
   /** Resolves once agy is gone. */
   function stop() {
     stopped = true
     clearInterval(idleTimer)
-    clearInterval(catalogTimer)
+    clearTimeout(catalogTimer)
     catalogAbort.abort()
     rt.stop()
     // A turn's transcript poll would otherwise keep running; acp.stop() fails the prompts themselves.
@@ -1446,8 +1512,7 @@ export function createAgyRuntime(options = {}) {
   return {
     start: () => {
       void models().catch((err) => log(`agy model discovery error: ${err.message}`))
-      catalogTimer = setInterval(() => { void models({ refresh: true }).catch((err) => log(`agy model discovery error: ${err.message}`)) }, 300_000)
-      catalogTimer.unref?.()
+      scheduleCatalog()
       return rt.start()
     },
     stop,

@@ -144,6 +144,10 @@ metrickit/*.json   MetricKit payloads as delivered (strings scrubbed, identifier
 log.txt            this launch's log lines
 ```
 
+On iOS, `commit` is the app's `PersonaCommit`, which only a Release build (every TestFlight build) is stamped with: a
+Debug build's package has an empty `commit` unless it was built with `PERSONA_STAMP_COMMIT=YES`
+(`docs/operations/testing.md`, "Development builds").
+
 The export page lists four categories; the first three can be left out: **Logs** (`log.txt` and the event kinds
 other than the energy ones), **Errors and Crashes** (`errors.jsonl`, `metrickit/diagnostics-*`), **Energy and
 Performance** (`minute`, `foreground`, `thermal`, `power`, `battery`, `path`, `metrickit/metrics-*`), and **Device and App

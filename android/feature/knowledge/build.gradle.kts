@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":core:contracts"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:navigation"))
+    implementation(project(":feature:inbox"))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.androidx.lifecycle.compose)

@@ -159,6 +159,8 @@ internal fun mergedChats(stacks: GroupStacks, storage: ChatLocalStorage): ChatRe
                     ?: flowOf(ChatSnapshot(loading = false, verified = false))
             }
         override suspend fun loadOlder(session: SessionKey) = stacks.use(session) { it.repositories.chats.loadOlder(it.names.raw(session)) }
+        override suspend fun modeChanges(session: SessionKey): List<ModeChange> =
+            stacks.use(session) { it.repositories.chats.modeChanges(it.names.raw(session)) }
         override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int) =
             stacks.use(session) { it.repositories.chats.expandFold(it.names.raw(session), fromSeq, toSeq) }
         override suspend fun loadRange(session: SessionKey, fromSeq: Int, throughSeq: Int) =

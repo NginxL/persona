@@ -29,6 +29,9 @@ func fakeClaudeHomeBash(t *testing.T, script string) {
 		t.Fatalf("no bash: %v", err)
 	}
 	fakeClaudeHomeFiles(t, script)
+	// Only here: the launcher profile probe dates every shell file it reads (assistant_profile_probe.go), and the
+	// zsh fixtures settle only ~/.zshrc, so a fresh ~/.bashrc beside it would read as a profile still being edited.
+	_ = os.WriteFile(filepath.Join(os.Getenv("HOME"), ".bashrc"), nil, 0o600)
 }
 
 func fakeClaudeHomeFiles(t *testing.T, script string) {
@@ -42,7 +45,6 @@ func fakeClaudeHomeFiles(t *testing.T, script string) {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(home, ".zshrc"), nil, 0o600)
-	_ = os.WriteFile(filepath.Join(home, ".bashrc"), nil, 0o600)
 	// The fake claude is meant to work, so mark its first-run setup finished: the launcher check's onboarding gate
 	// (claudeonboarding.go) otherwise stops before it ever runs.
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600); err != nil {
@@ -86,7 +88,11 @@ func TestAssistantSendFailsWhenTheLauncherDoesNotStart(t *testing.T) {
 
 // One that starts answers as before, as soon as its first line comes out.
 func TestAssistantSendReturnsOnceTheProcessStarted(t *testing.T) {
-	fakeClaudeHome(t, "read line\necho '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
+	fakeClaudeHome(t, `case " $* " in *" auth status "*) echo '{"loggedIn":true}'; exit 0 ;; esac
+read line
+echo '{"type":"system","subtype":"init"}'
+sleep 30
+`)
 	n := codexTestNode(t)
 	withFakeHub(t, n)
 	start := time.Now()

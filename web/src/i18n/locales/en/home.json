@@ -41,6 +41,7 @@
   "permission_detail": "{tool}: {what}",
   "tasks": "Tasks in progress",
   "tasks_all": "See all ›",
+  "task_agents_more": "+{count}",
   "continue": "Continue",
   "continue_placeholder": "What should it do next?",
   "continue_send": "Send",

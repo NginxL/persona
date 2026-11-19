@@ -249,6 +249,15 @@ func (s *Service) signal(g superviseSignal) {
 		b.mu.Unlock()
 		return
 	}
+	s.queueSignal(g)
+}
+
+// queueSignal only adds a validated signal to the in-memory digest. It does not change the turn ledger.
+func (s *Service) queueSignal(g superviseSignal) {
+	if g.At.IsZero() {
+		g.At = time.Now()
+	}
+	b := &s.supervise
 	b.mu.Lock()
 	b.init()
 	// This early cache is not an unhandled source's delivery receipt: an owner wait

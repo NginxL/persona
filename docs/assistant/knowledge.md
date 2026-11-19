@@ -490,7 +490,9 @@ The driver runs in its own goroutine (`kbHistoryLoop`, never inside the knowledg
 6. the connector archives into the knowledge base now and declares `history` (`connectors.archives`).
 
 Sources run one at a time, in the order `kb.history.sources` lists them. Everything is on disk, so a redeploy at any time loses nothing: a restart takes the lock again, backs up,
-and goes on from each chat's state and at the pace it had (a rest or pause under way is waited out first; "Pacing").
+and goes on from each chat's state and at the pace it had (a rest or pause under way is waited out first; "Pacing"). A shutdown is no stop either: a write or save of the
+import's own that fails once the run's context has ended (whatever the error says) ends the run without saving the page's state, and the next start reads that page again,
+which adds nothing twice; one that fails while the run goes on still stops (`write_failed`, `state_save_failed`, `anchors_save_failed`, `plan_save_failed`; #10975).
 
 #### Plans (`history/plan-<source>.json`)
 

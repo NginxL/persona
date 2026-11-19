@@ -25,7 +25,7 @@ export function installSmokeCapture(): void {
   app.on("browser-window-created", (_event, window) => {
     const capture = () => {
       if (settled || window.isDestroyed()) return;
-      void window.webContents.executeJavaScript(`(async () => { if (location.protocol === 'file:') { if (!window.desktopSetup || document.querySelector('#link-state').textContent.includes('…')) return {text: '', ready: false}; document.querySelector('details').open = true; await new Promise(resolve => setTimeout(resolve, 100)); } return {text: document.body.innerText, ready: document.body.innerText.includes('Let this browser in from a device') || !!document.querySelector('input[type="password"], #hub')}; })()`).then(async ({ text, ready }) => {
+      void window.webContents.executeJavaScript(`(async () => { if (location.protocol === 'persona-setup:' || location.protocol === 'file:') { if (!window.desktopSetup || document.querySelector('#link-state').textContent.includes('…')) return {text: '', ready: false}; document.querySelector('details').open = true; await new Promise(resolve => setTimeout(resolve, 100)); } return {text: document.body.innerText, ready: document.body.innerText.includes('Let this browser in from a device') || !!document.querySelector('input[type="password"], #hub')}; })()`).then(async ({ text, ready }) => {
         if (!ready) { setTimeout(capture, 250); return; }
         clearTimeout(deadline);
         // The existing web login has a short entrance transition; capture its settled frame, not its transparent first frame.

@@ -160,7 +160,8 @@ func (e *Engine) TagItems(ctx context.Context, max int) (more bool, err error) {
 		batch := todo[:min(tagItemsBatch, len(todo))]
 		todo = todo[len(batch):]
 		byID := map[string]*Item{}
-		in := prompts.KBItemsInput{Projects: e.knownProjects(), Tags: e.TopTags(40)}
+		owner := e.knowledgeOwner()
+		in := prompts.KBItemsInput{Language: owner.Language, Projects: e.knownProjects(), Tags: e.TopTags(40)}
 		for _, it := range batch {
 			key := it.Kind + "/" + it.ID
 			byID[key] = it
@@ -176,7 +177,7 @@ func (e *Engine) TagItems(ctx context.Context, max int) (more bool, err error) {
 		}
 		var out itemTags
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		err := e.modelFor("kb.items").JSONMax(cctx, prompts.RenderKBItems(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBItemsInput(in), 6000, &out)
+		err := e.modelFor("kb.items").JSONMax(cctx, prompts.RenderKBItems(owner), prompts.RenderKBItemsInput(in), 6000, &out)
 		cancel()
 		if err != nil {
 			if deferred(ctx, err) {
@@ -553,7 +554,7 @@ func recordingEntry(r *Recording) Entry {
 
 // Prompt is a short Markdown digest of the most important projects and chats, for the assistant's live snapshot.
 func (e *Engine) Prompt(projects, chats int) string {
-	var d prompts.KBDigest
+	d := prompts.KBDigest{Language: e.knowledgeOwner().Language}
 	// What has ended stays out (#9427): a done project, one whose chats have all ended at their source though it is not
 	// finished yet, and a chat that ended there (a pull request merged or closed).
 	for _, p := range e.List(KindProject, "") {

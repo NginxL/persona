@@ -46,6 +46,15 @@ class BrowserLoginDecisionTest {
         }
     }
 
+    @Test fun expiredAndAlreadyDecidedAllowAnswersRemainTerminal() = runTest {
+        for (status in listOf(409, 410)) {
+            val hub = Hub(); hub.failure = HubFailure(HubError.Server, status = status)
+            var dismissed = false
+            decideBrowserLogin(hub, request, true) { dismissed = true }
+            assertTrue("a stale $status decision keeps its existing terminal handling", dismissed)
+        }
+    }
+
     @Test fun aTransportFailureNeverTrapsCancellationOrPretendsApprovalSucceeded() = runTest {
         val hub = Hub(); hub.failure = java.io.IOException("fixture network failure")
         var dismissed = false

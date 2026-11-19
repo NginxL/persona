@@ -99,10 +99,10 @@ func loadHistoryAnchors(data, source string) (*historyAnchorsCache, error) {
 	return c, nil
 }
 
-func (d *historyDriver) saveAnchors(c *historyAnchorsCache) error {
+func (d *historyDriver) saveAnchors(ctx context.Context, c *historyAnchorsCache) error {
 	c.UpdatedAt = d.now().UTC()
 	if err := writeJSONFile(historyAnchorsPath(d.data, d.source), c); err != nil {
-		return halt(true, "anchors_save_failed", "class", errClass(err))
+		return failed(ctx, "anchors_save_failed", err)
 	}
 	return nil
 }
@@ -177,7 +177,7 @@ func (d *historyDriver) gatherAnchors(ctx context.Context) error {
 			}
 		}
 		cache.Done = true
-		if err := d.saveAnchors(cache); err != nil {
+		if err := d.saveAnchors(ctx, cache); err != nil {
 			return err
 		}
 	}
@@ -247,7 +247,7 @@ func (d *historyDriver) gatherYear(ctx context.Context, cache *historyAnchorsCac
 				y.Cursor = ans.Next
 			}
 		}
-		if err := d.saveAnchors(cache); err != nil {
+		if err := d.saveAnchors(ctx, cache); err != nil {
 			return err
 		}
 		if err := d.after(ctx, c); err != nil {
@@ -277,7 +277,7 @@ func (d *historyDriver) addUnlisted(ctx context.Context, cache *historyAnchorsCa
 		return nil
 	}
 	if err := SavePlan(d.data, p); err != nil {
-		return halt(true, "plan_save_failed", "class", errClass(err))
+		return failed(ctx, "plan_save_failed", err)
 	}
 	return d.gate(ctx)
 }
@@ -433,7 +433,7 @@ func (d *historyDriver) stepPositional(ctx context.Context, e *kb.Engine, w hist
 		if done {
 			st.State = kb.HistoryDone
 		}
-		return done, d.saveState(e, w, st)
+		return done, d.saveState(ctx, e, w, st)
 	}
 	var q connectorwire.HistoryQuery
 	for i := len(ps.Anchors) - 1; i >= 0; i-- {
@@ -543,7 +543,7 @@ func (d *historyDriver) stepPositional(ctx context.Context, e *kb.Engine, w hist
 	st.Read += len(page.Messages)
 	st.Written += added
 	st.State, st.LastError = kb.HistoryRunning, ""
-	if err := d.saveState(e, w, st); err != nil {
+	if err := d.saveState(ctx, e, w, st); err != nil {
 		return false, err
 	}
 	if h := d.takeHalt(); h != nil {
@@ -647,7 +647,7 @@ func (d *historyDriver) probeStart(ctx context.Context, e *kb.Engine, w historyW
 	ps.Start, ps.Probed = oldest, true
 	st.Read += len(page.Messages)
 	st.State, st.LastError = kb.HistoryRunning, ""
-	if err := d.saveState(e, w, st); err != nil {
+	if err := d.saveState(ctx, e, w, st); err != nil {
 		return false, err
 	}
 	return false, d.after(ctx, c)
@@ -696,7 +696,7 @@ func (d *historyDriver) stepFallback(ctx context.Context, e *kb.Engine, w histor
 		}
 		if len(ps.Fallback) == 0 {
 			st.State = kb.HistoryDone
-			return true, d.saveState(e, w, st)
+			return true, d.saveState(ctx, e, w, st)
 		}
 		ps.Year, ps.Fallback = ps.Fallback[0], ps.Fallback[1:]
 		st.Filter = &kb.AnchorFilterState{}
@@ -704,7 +704,7 @@ func (d *historyDriver) stepFallback(ctx context.Context, e *kb.Engine, w histor
 			_, end := historyYearBounds(ps.Year, zone)
 			st.Cursor = historyStart(ps, end)
 		}
-		if err := d.saveState(e, w, st); err != nil {
+		if err := d.saveState(ctx, e, w, st); err != nil {
 			return false, err
 		}
 	}
@@ -753,7 +753,7 @@ func (d *historyDriver) stepFallback(ctx context.Context, e *kb.Engine, w histor
 	if done {
 		st.State = kb.HistoryDone
 	}
-	if err := d.saveState(e, w, st); err != nil {
+	if err := d.saveState(ctx, e, w, st); err != nil {
 		return false, err
 	}
 	if h := d.takeHalt(); h != nil {

@@ -5,8 +5,32 @@
     <string name="settings_browser_login_title">Sign in on this browser?</string>
     <string name="settings_browser_login_loading">Checking sign-in request…</string>
     <string name="settings_browser_login_failed">This code has expired or belongs to another Persona. Refresh it on the computer.</string>
-    <string name="settings_browser_login_details">Allow %1$s to access your Persona? Only approve a browser you are signing in to. You can revoke it in Devices.</string>
+    <string name="settings_browser_login_only_yours">Only allow a browser you are signing in to yourself, right now.</string>
+    <string name="settings_browser_login_browser">Browser</string>
+    <string name="settings_browser_login_browser_note">The name the browser gave itself</string>
+    <string name="settings_browser_login_from">From</string>
+    <string name="settings_browser_login_network_lan">Your local network</string>
+    <string name="settings_browser_login_network_internet">The internet</string>
+    <string name="settings_browser_login_network_unknown">Can\'t tell</string>
+    <string name="settings_browser_login_network_unknown_note">The request was forwarded, so its real source can\'t be seen</string>
+    <string name="settings_browser_login_requested">Requested</string>
+    <string name="settings_browser_login_gets">Gets</string>
+    <string name="settings_browser_login_full_access">The same full access as this phone</string>
+    <string name="settings_browser_login_revoke">You can revoke it any time in Settings › Devices</string>
+    <string name="settings_browser_login_internet_warning">This request came from the internet. Only allow a browser you are signing in to yourself, right now.</string>
     <string name="settings_browser_login_allow">Allow sign-in</string>
     <string name="settings_browser_login_cancel">Cancel</string>
-    <string name="settings_browser_login_source">Source: %1$s · Requested %2$d seconds ago</string>
+
+    <string name="settings_browser_login_number_title">Type this number in the browser.</string>
+    <string name="settings_browser_login_number_secret">Don\'t tell anyone this number.</string>
+    <string name="settings_browser_login_number_one_try">One try: a wrong number cancels this sign-in.</string>
+    <string name="settings_browser_login_number_waiting">Waiting for the browser…</string>
+    <string name="settings_browser_login_decided">This sign-in has already been answered.</string>
+    <string name="settings_browser_login_signed_in">Browser signed in</string>
+    <string name="settings_browser_login_signed_in_detail">“%1$s” is now in Settings › Devices.</string>
+    <string name="settings_browser_login_voided">The number didn\'t match, so this sign-in was cancelled</string>
+    <string name="settings_browser_login_voided_detail">Refresh the code in the browser to try again.</string>
+    <string name="settings_browser_login_denied">This sign-in was declined</string>
+    <string name="settings_browser_login_expired">This code has expired</string>
+    <string name="settings_browser_login_expired_detail">Refresh the code in the browser to try again.</string>
 </resources>

@@ -47,6 +47,8 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
     connection: KnowledgeConnection,
     assistant: AssistantConversations,
     sender: MessageSender,
+    sessions: SessionsRepository? = null,
+    namespace: String? = null,
     openLinkInApp: (String) -> Unit,
     onNewAgent: ((KnowledgeAgentStart) -> Unit)? = null,
 ) {
@@ -75,7 +77,8 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
         val owner = route.manager ?: androidx.compose.runtime.saveable.rememberSaveable { current }
         val hierarchy = rememberUpdatedState("sessions_hierarchy" in LocalHubFeatures.current)
         val model = viewModel(key = "knowledge/$owner/${route.kind.wire}/${route.id}") {
-            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender) { hierarchy.value }
+            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender,
+                sessions = sessions, namespace = namespace) { hierarchy.value }
         }
         KnowledgeDetailScreen(model, navigator, openLinkInApp, onNewAgent)
     }

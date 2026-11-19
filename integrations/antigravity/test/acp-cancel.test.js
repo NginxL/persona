@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { AgyAcpClient } from '../lib/acp.js'
 import { toPersonaId } from '../lib/map.js'
@@ -68,7 +69,7 @@ test('cancel with no agy running starts none and resolves', async (t) => {
 })
 
 /** The agy runtime on a fake node, with an executable fake agy; nobody answers a card on the phone. */
-async function agyRuntime(t) {
+async function agyRuntime(t, options = {}) {
   const { dir, record } = scratch(t)
   const agyBin = join(dir, 'agy')
   writeFileSync(agyBin, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' --record '${record}' "$@"\n`)
@@ -78,7 +79,8 @@ async function agyRuntime(t) {
   mkdirSync(join(agyDir, 'brain', SESSION), { recursive: true })
   const n = await startFakeNode(t)
   n.resolve = () => new Promise(() => {})
-  const runtime = createAgyRuntime({ agyBin, agyDir, home: dir, socketPath: n.path, log: () => {} })
+  options.beforeStart?.(agyDir)
+  const runtime = createAgyRuntime({ agyBin, agyDir, home: dir, socketPath: n.path, log: () => {}, ...options.runtime })
   t.after(() => runtime.stop())
   runtime.start()
   await n.ready
@@ -88,8 +90,65 @@ async function agyRuntime(t) {
     return session.session_id
   }
   const status = (pid) => n.last('runtime.sessions')?.sessions.find((s) => s.session_id === pid)?.status
-  return { n, record, start, status }
+  // A rename pushes the inventory again: the status as the list reads it now.
+  const refresh = async (pid) => {
+    const before = n.all('runtime.sessions').length
+    await n.peer.call('session.rename', { session_id: pid, title: 'Renamed' })
+    await until('inventory refreshed', () => n.all('runtime.sessions').length > before, SLOW)
+    return status(pid)
+  }
+  return { n, record, start, status, refresh }
 }
+
+/** agy's own conversation summary for SESSION in agyDir: what nativeWorking reads. */
+function nativeSummary(agyDir, status, stepCount) {
+  const db = new DatabaseSync(join(agyDir, 'conversation_summaries.db'))
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
+    db.prepare('INSERT OR REPLACE INTO conversation_summaries VALUES (?, ?, 0, 0, ?, ?, ?, ?)')
+      .run(SESSION, status, stepCount, '', '[]', new Date().toISOString())
+  } finally {
+    db.close()
+  }
+}
+
+// #11108: interrupt answers settled once the running turn has ended, so agent_interrupt need not poll for it.
+test('interrupt answers settled once agy ends the cancelled turn', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  await until('the row is working', () => status(pid) === 'working', SLOW)
+  const res = await n.peer.call('session.interrupt', { session_id: pid })
+  assert.equal(res?.settled, true)
+  assert.ok(received(record).some((m) => m.ended === SESSION), 'agy ended the prompt before settled was answered')
+  await until('the row is no longer working', () => status(pid) !== 'working', SLOW)
+})
+
+test('interrupt does not answer settled when agy never ends the cancelled turn', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t, { runtime: { interruptSettleMs: 300 } })
+  const pid = await start('ignore-cancel')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  const res = await n.peer.call('session.interrupt', { session_id: pid })
+  assert.notEqual(res?.settled, true)
+  assert.ok(received(record).some((m) => m.method === 'session/cancel'), 'the cancel was sent')
+  await until('the row is still working', () => status(pid) === 'working', SLOW)
+})
+
+// #11108: agy's summary can still say running right after a confirmed cancel; that alone is not work. A new native
+// step is.
+test('a summary still running after a confirmed cancel does not keep the row working until a new step', async (t) => {
+  let agyDir
+  const { n, record, start, status, refresh } = await agyRuntime(t, {
+    beforeStart: (dir) => { agyDir = dir; nativeSummary(dir, 'CASCADE_RUN_STATUS_RUNNING', 1) },
+  })
+  const pid = await start('hold')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  assert.equal((await n.peer.call('session.interrupt', { session_id: pid }))?.settled, true)
+  await until('the row is no longer working', () => status(pid) !== undefined && status(pid) !== 'working', SLOW)
+  assert.notEqual(await refresh(pid), 'working', 'the stale summary alone does not make it working again')
+  nativeSummary(agyDir, 'CASCADE_RUN_STATUS_RUNNING', 2)
+  assert.equal(await refresh(pid), 'working', 'a new native step is work again')
+})
 
 test('interrupt withdraws the permission card, answers agy cancelled and ends the turn', async (t) => {
   const { n, record, start, status } = await agyRuntime(t)

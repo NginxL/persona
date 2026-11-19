@@ -55,28 +55,82 @@ func (n *Node) heldFallback(id, launcher string, asked modelExecution) modelExec
 }
 
 // heldFallbackWithExpiry also reports whether an existing hold for this exact request expired naturally. A missing
-// hold after a restart is not expiry, and another model choice is not expiry either.
+// hold after a restart is not expiry, and another model choice is not expiry either. Classification leaves the old
+// chain untouched for a new choice; commitModelChoice ends it only once that choice's input is delivered.
 func (n *Node) heldFallbackWithExpiry(id, launcher string, asked modelExecution) (modelExecution, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	asked.NewModelChoice = false
 	f := n.fallbacks[id]
-	if f == nil {
-		return asked, false
-	}
 	now := time.Now()
-	if now.Sub(f.at) >= assistantRefusalSticky {
-		delete(n.fallbacks, id)
+	if f != nil {
+		aged := now.Sub(f.at) >= assistantRefusalSticky
+		same := f.launcher == launcher && sameModelChoice(asked, f.from)
+		if aged && same {
+			delete(n.fallbacks, id)
+			return asked, true // age does not turn this exact old request into a cold restart
+		}
+		if aged {
+			asked.NewModelChoice = true
+			return asked, false
+		}
+		if !now.Before(f.until) || !same {
+			expired := !now.Before(f.until) && same
+			asked.NewModelChoice = !same
+			return asked, expired
+		}
+		out := f.to
+		out.IsMain, out.Interject, out.Ultracode = asked.IsMain, asked.Interject, asked.Ultracode // the message's own
+		out.SupervisionInstructions = asked.SupervisionInstructions
+		out.NewModelChoice = false // the old hold selected this execution, not a new pick
+		return out, false
+	}
+
+	// A cold restart can leave only the persisted marker. Its own original execution identity is authoritative:
+	// recovery sends may have overwritten the session's current model and effort.
+	r := n.recoveryMarks[id]
+	if r == nil {
+		if st, ok := n.state.get(id); ok {
+			r = st.ModelRecovery
+		}
+	}
+	if !modelRecoverySwitched(r) {
 		return asked, false
 	}
-	if !now.Before(f.until) || f.launcher != launcher || !sameModelChoice(asked, f.from) {
-		expired := !now.Before(f.until) && f.launcher == launcher && sameModelChoice(asked, f.from)
-		f.until = time.Time{} // over; a refusal soon after still skips the same-model retry
-		return asked, expired
+	choice := modelExecution{Model: r.From, Effort: asked.Effort, UseEffort: asked.UseEffort, Fingerprint: asked.Fingerprint}
+	oldLauncher := ""
+	if r.Choice != nil {
+		choice = modelExecution{Model: r.From, Effort: r.Choice.Effort, UseEffort: r.Choice.UseEffort, Fingerprint: r.Choice.Fingerprint}
+		oldLauncher = r.Choice.Launcher
+	} else if st, ok := n.state.get(id); ok {
+		// Compatibility for records written before choice existed. The session's full identity is reliable only while
+		// it still names the original model; recovery may have normalized effort and fingerprint on the fallback.
+		oldLauncher = st.Launcher
+		choice = modelExecution{Model: r.From, Effort: asked.Effort, UseEffort: asked.UseEffort, Fingerprint: asked.Fingerprint}
+		if st.Model == r.From {
+			choice = modelExecution{Model: r.From, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint}
+		}
 	}
-	out := f.to
-	out.IsMain, out.Interject, out.Ultracode = asked.IsMain, asked.Interject, asked.Ultracode // the message's own
-	out.SupervisionInstructions = asked.SupervisionInstructions
-	return out, false
+	asked.NewModelChoice = !sameModelChoice(asked, choice) || oldLauncher != "" && oldLauncher != launcher
+	return asked, false
+}
+
+// commitModelChoice ends the old recovery chain after the new choice's input was actually delivered. A rejected
+// preflight or an active process that retains its old execution never reaches this commit.
+func (n *Node) commitModelChoice(id string, execution modelExecution) {
+	if !execution.NewModelChoice {
+		return
+	}
+	n.mu.Lock()
+	if f := n.fallbacks[id]; f != nil {
+		if time.Since(f.at) >= assistantRefusalSticky {
+			delete(n.fallbacks, id)
+		} else {
+			f.until = time.Time{} // the hold is over; the sticky record keeps the old chain's retry budget
+		}
+	}
+	n.mu.Unlock()
+	n.clearModelRecovery(id)
 }
 
 // recentFallback: conversation id's last fallback answered within assistantRefusalSticky, and what the conversation

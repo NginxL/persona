@@ -75,6 +75,9 @@ type fleetBook struct {
 	clients            assistantwire.Clients
 	prev               map[string]map[string]turnPrev // each machine's list setSessions saw last, by session id
 	// prevConn: the node connection (devices' ConnectedAt) each machine's prev list came on.
+	// heldRows: the last listed row of each Agent with a held message, by machine and session. These display-only
+	// copies recreate a missing row; the devices' inventory stays authoritative for delivery.
+	heldRows map[string]map[string]proto.Session
 	prevConn map[string]time.Time
 
 	// sent: what is kept of each machine's last session list told the hub (fleet.sessions): its length and digest, not

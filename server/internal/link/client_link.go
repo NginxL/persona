@@ -81,10 +81,12 @@ func (l *link) getEndpoints() []Endpoint {
 	return slices.Clone(l.eps)
 }
 
-func dial(ctx context.Context, c *Config) (*link, error) { return dialVia(ctx, c, c.Endpoints, nil) }
+func dial(ctx context.Context, c *Config) (*link, error) {
+	return dialVia(ctx, c, ranked(c.Endpoints), nil)
+}
 
 // dialVia races eps for the link: straight to the hub, or through outbound proxy p when it is set (proxied); every
-// stream later opened on the link takes the same route.
+// stream later opened on the link takes the same route. eps is already in its intended race order.
 func dialVia(ctx context.Context, c *Config, eps []Endpoint, p *url.URL) (*link, error) {
 	candidates := ranked(eps)
 	l, ep, err := race(ctx, candidates, func(ctx context.Context, ep Endpoint) (*link, error) {

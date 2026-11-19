@@ -37,6 +37,7 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.RestoredAt, t.SomedayUntil = row.RestoredAt, row.SomedayUntil
 	t.InboxItem = row.InboxItem
 	t.PartOf, t.After = row.PartOf, slices.Clone(row.After)
+	t.RequireAcceptedAfter = row.RequireAcceptedAfter
 }
 
 // keepPlan writes t's plan, project and the owner's marks (seen, restored, Someday) into row: a row made in memory for a
@@ -53,6 +54,7 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.RestoredAt, row.SomedayUntil = t.RestoredAt, t.SomedayUntil
 	row.InboxItem = t.InboxItem
 	row.PartOf, row.After = t.PartOf, slices.Clone(t.After)
+	row.RequireAcceptedAfter = t.RequireAcceptedAfter
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).
@@ -234,7 +236,7 @@ func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo,
 	if cur.isConcern() && cur.DoneAt == nil && e.Done != nil && *e.Done {
 		return Todo{}, db.ErrConcernUnreported // only its report closes it (concerns.go); the store checks it again
 	}
-	links := e.PartOf != nil || e.After != nil
+	links := e.PartOf != nil || e.After != nil || e.RequireAcceptedAfter != nil
 	if f := s.pieceWriteHook; links && f != nil {
 		f(id)
 	}

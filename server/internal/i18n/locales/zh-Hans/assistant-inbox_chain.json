@@ -1,4 +1,5 @@
 {
+  "retry_requested": "请 AI 分身再试一次",
   "received_other": "收到 {count} 条新消息",
   "received_from_other": "收到 {count} 条新消息 · {sender}",
   "received_mail_other": "收到 {count} 封邮件",

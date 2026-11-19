@@ -145,6 +145,36 @@ func notifyOK() (any, error) { return map[string]any{"sent": true}, nil }
 
 func boolp(b bool) *bool { return &b }
 
+// rawScriptAsk bypasses the typed client so a new input field can be tested before nodeclient knows it.
+func rawScriptAsk(t *testing.T, h *scriptHub, input string) nodeclient.AskReply {
+	t.Helper()
+	line, err := h.dial(context.Background(), nodeclient.Request{Kind: "ask", Input: json.RawMessage(input)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep nodeclient.AskReply
+	if err := json.Unmarshal(line, &rep); err != nil {
+		t.Fatalf("bad reply %q: %v", line, err)
+	}
+	return rep
+}
+
+// scriptInteractionFormat reads the interaction's public wire shape without requiring the new Go field to exist yet.
+func scriptInteractionFormat(t *testing.T, ix proto.Interaction) string {
+	t.Helper()
+	line, err := json.Marshal(ix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(line, &wire); err != nil {
+		t.Fatal(err)
+	}
+	return wire.Format
+}
+
 // A question with options is the question card AskUserQuestion already is, from "Script" (in Chinese), under the session of the
 // caller's pane; the option chosen comes back.
 func TestScriptAskOptionsIsAQuestionCard(t *testing.T) {
@@ -211,6 +241,104 @@ func TestScriptAskWithoutOptionsIsAPermissionCard(t *testing.T) {
 				t.Fatalf("interaction %+v", ix)
 			}
 		})
+	}
+}
+
+// Markdown is a per-ask opt-in carried on either kind of interaction for the phone and web to render.
+func TestScriptAskMarkdownFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		input    string
+		res      proto.Resolution
+		kind     string
+		question string
+		answer   string
+	}{
+		{
+			name:     "permission",
+			input:    `{"question":"**Deploy?**\n\n- migrates the database","format":"markdown"}`,
+			res:      proto.Resolution{Allow: boolp(true)},
+			kind:     proto.IxPermission,
+			question: "**Deploy?**\n\n- migrates the database",
+		},
+		{
+			name:     "question",
+			input:    `{"question":"**Deploy where?**\n\n- keeps the data","options":["staging","prod"],"format":"markdown"}`,
+			res:      proto.Resolution{Answers: map[string]string{"**Deploy where?**\n\n- keeps the data": "staging"}},
+			kind:     proto.IxQuestion,
+			question: "**Deploy where?**\n\n- keeps the data",
+			answer:   "staging",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newScriptHub(t, answerWith(tc.res), notifyOK)
+			rep := rawScriptAsk(t, h, tc.input)
+			if rep.Status != nodeclient.AskAnswered || rep.Answer != tc.answer {
+				t.Fatalf("reply %+v", rep)
+			}
+			ix := h.lastCreated(t)
+			if ix.Kind != tc.kind {
+				t.Fatalf("kind %q, want %q", ix.Kind, tc.kind)
+			}
+			question := ix.Summary
+			if ix.Kind == proto.IxQuestion {
+				if len(ix.Questions) != 1 {
+					t.Fatalf("questions %+v", ix.Questions)
+				}
+				question = ix.Questions[0].Question
+			}
+			if question != tc.question {
+				t.Fatalf("question %q, want the original Markdown", question)
+			}
+			if got := scriptInteractionFormat(t, ix); got != "markdown" {
+				t.Fatalf("format %q, want markdown; interaction %s", got, mustJSON(ix))
+			}
+		})
+	}
+}
+
+// Omitted, plain and unrecognized formats retain the existing literal-text cards; only markdown opts in.
+func TestScriptAskFormatDefaultsToPlain(t *testing.T) {
+	const question = "**Keep this literal?**"
+	for _, shape := range []struct {
+		name    string
+		options string
+		res     proto.Resolution
+		kind    string
+	}{
+		{name: "permission", res: proto.Resolution{Allow: boolp(true)}, kind: proto.IxPermission},
+		{name: "question", options: `,"options":["yes","no"]`, res: proto.Resolution{Answers: map[string]string{question: "yes"}}, kind: proto.IxQuestion},
+	} {
+		for _, format := range []struct {
+			name  string
+			input string
+		}{
+			{name: "omitted"},
+			{name: "plain", input: `,"format":"plain"`},
+			{name: "unknown", input: `,"format":"html"`},
+		} {
+			t.Run(shape.name+"/"+format.name, func(t *testing.T) {
+				h := newScriptHub(t, answerWith(shape.res), notifyOK)
+				rep := rawScriptAsk(t, h, `{"question":"`+question+`"`+shape.options+format.input+`}`)
+				if rep.Status != nodeclient.AskAnswered {
+					t.Fatalf("reply %+v", rep)
+				}
+				ix := h.lastCreated(t)
+				if ix.Kind != shape.kind {
+					t.Fatalf("kind %q, want %q", ix.Kind, shape.kind)
+				}
+				gotQuestion := ix.Summary
+				if ix.Kind == proto.IxQuestion {
+					gotQuestion = ix.Questions[0].Question
+				}
+				if gotQuestion != question {
+					t.Fatalf("question %q, want the unchanged literal text", gotQuestion)
+				}
+				if got := scriptInteractionFormat(t, ix); got != "" && got != "plain" {
+					t.Fatalf("format %q, want the default plain behavior", got)
+				}
+			})
+		}
 	}
 }
 

@@ -32,7 +32,7 @@ Back up data and credentials privately, stop all old entry points (including soc
 
 ## Shared wire fixtures have two sides
 
-A derived wire case stores both `input` and `expected.fields`. The hub's golden `-update` refreshes the captured input, not every client's expected-field map. When `proto.Features` gains a capability, update the matching documented `/features` expectation too and run the Apple/Android/web consumers; a server-only green test can miss that stale expectation. Keep exact assertions rather than filtering out the new capability.
+A derived wire case stores both `input` and `expected.fields`. The hub's golden `-update` refreshes the captured input, not the expected-field map the export writes by hand or a client test's own assertions. When a derived hello or health field changes, update the matching expected field too and run the Apple/Android/web consumers; a server-only green test can miss that stale expectation. Keep exact assertions rather than filtering out the new value. `/features` is the exception: both samples carry the fixed `wireFeatures` (`server/internal/hub/wire_samples_test.go`, #11022), so adding or removing a flag in `proto.Features` changes nothing under `spec/`, and `TestHelloAndHealthCarryTheHubsFeatures` checks the real list.
 
 ## Verify every test temporary root
 

@@ -107,6 +107,97 @@ func TestHeldMessagesAreDrawnOnAgentRowsOnly(t *testing.T) {
 	}
 }
 
+// A runtime Agent that leaves the node's list keeps a display-only row while a message is held for it. The last
+// listed row supplies its identity; the real row replaces the placeholder as soon as the runtime is listed again.
+func TestHeldMessageKeepsUnlistedRuntimeAgentRow(t *testing.T) {
+	ft, _, held := heldFleet(t)
+	ft.d.mu.Lock()
+	ft.d.held["mac"] = map[string][]proto.UndeliveredMessage{"agent1": {held}}
+	ft.d.mu.Unlock()
+	live := proto.Session{SessionID: "agent1", MachineID: "mac", Agent: "dsh", AgentLabel: "DSH",
+		SourceKind: proto.SourceRuntime, Title: "Runtime agent", Cwd: "/home/u/runtime", Status: proto.StatusWorking}
+	ft.d.setSessions("mac", []proto.Session{live})
+	if rows := ft.s.publishList("mac"); len(rows) != 1 || rows[0].Title != live.Title {
+		t.Fatalf("seed the last-known row: %+v", rows)
+	}
+
+	ft.d.setSessions("mac", nil)
+	rows := ft.s.publishList("mac")
+	if len(rows) != 1 {
+		t.Fatalf("unlisted Agent with a held message has %d rows, want one: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.SessionID != live.SessionID || row.MachineID != "mac" || row.Agent != live.Agent ||
+		row.AgentLabel != live.AgentLabel || row.SourceKind != live.SourceKind || row.Title != live.Title || row.Cwd != live.Cwd {
+		t.Fatalf("placeholder lost the runtime identity: %+v", row)
+	}
+	if row.Status != proto.StatusOffline || row.State != proto.StateOffline {
+		t.Fatalf("placeholder is not offline: status %q, state %q", row.Status, row.State)
+	}
+	if got, want := undeliveredJSON(row.Undelivered), undeliveredJSON(&[]proto.UndeliveredMessage{held}); got != want {
+		t.Fatalf("placeholder carries %s, want %s", got, want)
+	}
+
+	live.Title, live.Status = "Listed again", proto.StatusIdle
+	ft.d.setSessions("mac", []proto.Session{live})
+	rows = ft.s.publishList("mac")
+	if len(rows) != 1 || rows[0].Title != live.Title || rows[0].Status != proto.StatusIdle {
+		t.Fatalf("the live row did not replace its placeholder: %+v", rows)
+	}
+
+	ft.d.setSessions("mac", nil)
+	ft.d.mu.Lock()
+	delete(ft.d.held["mac"], "agent1")
+	ft.d.mu.Unlock()
+	if rows := ft.s.publishList("mac"); len(rows) != 0 {
+		t.Fatalf("placeholder outlived its held message: %+v", rows)
+	}
+}
+
+// After a cold manager restart there is no last-known row. The held message's machine and session IDs still make a
+// minimal row, with every held message on it, until the real inventory returns or the messages are gone.
+func TestHeldMessageRecreatesUnlistedAgentRowWithColdCache(t *testing.T) {
+	ft, _, held := heldFleet(t)
+	second := held
+	second.ID, second.Text = "held-2", "run the integration tests"
+	ft.d.mu.Lock()
+	ft.d.held["mac"] = map[string][]proto.UndeliveredMessage{"agent1": {held, second}}
+	ft.d.mu.Unlock()
+	ft.d.setSessions("mac", nil)
+
+	rows := ft.s.publishList("mac")
+	if len(rows) != 1 {
+		t.Fatalf("cold cache produced %d rows, want one: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.MachineID != "mac" || row.SessionID != "agent1" || row.Status != proto.StatusOffline || row.State != proto.StateOffline {
+		t.Fatalf("cold placeholder: %+v", row)
+	}
+	if row.Agent != "" || row.AgentLabel != "" || row.SourceKind != "" || row.Title != "" || row.Cwd != "" {
+		t.Fatalf("cold placeholder invented metadata: %+v", row)
+	}
+	if got, want := undeliveredJSON(row.Undelivered), undeliveredJSON(&[]proto.UndeliveredMessage{held, second}); got != want {
+		t.Fatalf("cold placeholder carries %s, want %s", got, want)
+	}
+
+	live := proto.Session{SessionID: "agent1", Agent: "dsh", Title: "Live runtime", Status: proto.StatusIdle}
+	ft.d.setSessions("mac", []proto.Session{live})
+	rows = ft.s.publishList("mac")
+	if len(rows) != 1 || rows[0].Title != live.Title || rows[0].Status != proto.StatusIdle {
+		t.Fatalf("cold placeholder duplicated or hid the live row: %+v", rows)
+	}
+	ft.d.mu.Lock()
+	delete(ft.d.held["mac"], "agent1")
+	ft.d.mu.Unlock()
+	if rows := ft.s.publishList("mac"); len(rows) != 1 || rows[0].Undelivered != nil {
+		t.Fatalf("settling held messages removed or dirtied the live row: %+v", rows)
+	}
+	ft.d.setSessions("mac", nil)
+	if rows := ft.s.publishList("mac"); len(rows) != 0 {
+		t.Fatalf("unlisted row remained after its held messages settled: %+v", rows)
+	}
+}
+
 // Older apps call the conversations' undelivered routes for every row's message. One the assistant keeps is its own,
 // as before; any other goes to the devices' held message of that session when a person's own app asks (the hub's
 // assistantwire.PersonHeader), and its answer is the route's.

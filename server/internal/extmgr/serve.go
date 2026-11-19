@@ -121,6 +121,7 @@ func (h *Manager) registerRoutes(api *http.ServeMux) {
 	h.messagingRoutes(api)
 	h.adminExtensionRoutes(api) // with the old /api/v1/admin/plugins paths
 	h.subscriptionRoutes(api)
+	h.avatarRoutes(api)
 	api.HandleFunc("POST /api/v1/error-reports", h.postErrorReports)
 	// The assistant's WebSocket routes, relayed like the extensions' (a relay stream), are the assistant's to answer.
 	for _, pattern := range assistantwire.SocketRoutes {

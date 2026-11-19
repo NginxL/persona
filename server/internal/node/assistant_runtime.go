@@ -144,9 +144,17 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		awaitList(n.notifySessionsSoon())
 		return id, nil
 	}
-	live, commit := n.turnContext(id, n.assistantContext(id))
-	if st.AwaitingFirstMessage {
-		live = strings.TrimSpace(n.runtimeInstructions(cwd, memDir) + "\n" + live)
+	// A message that is only a slash command goes on its own: with the context block in front, an agent that runs its own
+	// commands (Antigravity's /compact) takes the line for plain text, records it as `/compact/compact` and runs nothing.
+	// The snapshot is not marked as sent, so the next message carries it. A conversation's first message keeps its block:
+	// it holds the instructions the runtime needs.
+	command := runtimeCommandOnly(text, len(images)) && !st.AwaitingFirstMessage
+	live, commit := "", func() {}
+	if !command {
+		live, commit = n.turnContext(id, n.assistantContext(id))
+		if st.AwaitingFirstMessage {
+			live = strings.TrimSpace(n.runtimeInstructions(cwd, memDir) + "\n" + live)
+		}
 	}
 	params := map[string]any{"session_id": id, "text": text, "images": images}
 	// The message's own client_msg_id, none when it came without one (#5225): a runtime may put the id it is sent with
@@ -167,12 +175,39 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		return "", fmt.Errorf("%s: %w", h.label(), err)
 	}
 	commit()
+	if command && runtimeCommandWord(text) == "/compact" {
+		// The runtime summarizes the conversation: the blocks it was told are gone, so the next message tells it everything
+		// again, as after Persona's own compaction.
+		n.contextCompacted(id)
+	}
 	if st.AwaitingFirstMessage {
 		n.noteRuntimeWorking(h, id)
 	}
 	awaitList(n.notifySessionsSoon()) // as a Claude conversation's send: not the whole list's time
 	return id, nil
 }
+
+// runtimeCommandOnly: text is one line that is a slash command, with or without arguments ("/compact", "/model opus"),
+// and no picture goes with it. A path ("/data/logs") or a message of several lines is not.
+func runtimeCommandOnly(text string, images int) bool {
+	return images == 0 && !strings.ContainsAny(strings.TrimSpace(text), "\r\n") && runtimeCommandWord(text) != ""
+}
+
+// runtimeCommandWord is the lower-cased command at the start of text ("/compact"), "" when text does not start with one.
+func runtimeCommandWord(text string) string {
+	word, _, _ := strings.Cut(strings.TrimSpace(text), " ")
+	if len(word) < 2 || word[0] != '/' || !isASCIILetter(rune(word[1])) {
+		return ""
+	}
+	for _, r := range word[2:] {
+		if !isASCIILetter(r) && (r < '0' || r > '9') && r != '_' && r != '-' && r != ':' {
+			return ""
+		}
+	}
+	return strings.ToLower(word)
+}
+
+func isASCIILetter(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' }
 
 type clientMsgIDKey struct{}
 

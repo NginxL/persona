@@ -15,6 +15,7 @@ const { values } = parseArgs({
     socket: { type: 'string' },
     'agy-dir': { type: 'string' },
     'agy-bin': { type: 'string' },
+    instance: { type: 'string' },
     'parent-stdin': { type: 'boolean' },
   },
   strict: false,
@@ -27,6 +28,7 @@ const runtime = createAgyRuntime({
   socketPath: values.socket || undefined,
   agyDir: values['agy-dir'] || undefined,
   agyBin: values['agy-bin'] || undefined,
+  instance: values.instance || undefined,
   log,
   update: self.store && !process.argv.includes('--no-update') ? {
     name: self.name,

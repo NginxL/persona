@@ -37,7 +37,7 @@ vi.mock("../lib/current-assistant", () => ({
   useScopedMachines: () => [{ id: "mac", name: "Mac", online: true }],
   useScopedInteractions: () => fake.interactions,
   useScopedAgentSessions: () => fake.sessions,
-  useScopedCounts: () => ({ needs: 0, working: 0, unread: 0, interactions: fake.interactions.length }),
+  useScopedCounts: () => ({ needs: 0, working: 0, waiting: 0, unread: 0, interactions: fake.interactions.length }),
   useScopedAgentListStatus: () => ({ status: "loaded", whole: true }),
   useScopedTodos: () => [],
 }));

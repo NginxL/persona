@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+// Independent of the production list: a mutation that puts SendMessage back must fail this exact comparison.
+const wantInboxClaudeBuiltins = "Bash,Read,Write,Edit,Monitor,Skill,Agent,ListAgents,TaskStop,WebFetch,WebSearch,ToolSearch"
 
 // A native child Agent's MCP server is a descendant of the same assistant process. Even if it names another session,
 // the node resolves it to the parent and attests the parent's Inbox origin to the manager.
@@ -70,8 +74,8 @@ func TestInboxClaudeUsesDefaultAndPersistsOrigin(t *testing.T) {
 		t.Fatalf("Claude control requests did not select non-bypass default: %s", in)
 	}
 	argv := f.file("cli-argv")
-	if !strings.Contains(argv, "--tools "+assistantBuiltinTools) {
-		t.Fatalf("Inbox investigation lost built-in file, shell, web or tool-search capabilities: %s", argv)
+	if !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+		t.Fatalf("Inbox built-ins must retain investigation tools but exclude cross-Agent SendMessage: %s", argv)
 	}
 	if !strings.Contains(argv, assistantAllowedTools) {
 		t.Fatalf("Persona's own MCP tools lost their permission allowlist: %s", argv)
@@ -149,6 +153,130 @@ func TestInboxClaudeReadOnlyMCPAndSuggestionSkipPermission(t *testing.T) {
 	}
 	if got := len(f.fh.interactions()); got != 0 {
 		t.Fatalf("handling opened %d permission cards, want none", got)
+	}
+}
+
+func inboxResumeTranscript(t *testing.T, n *Node, id string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), id+".jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","permissionMode":"plan","message":{"role":"user","content":"Earlier investigation"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n.setPath(id, path)
+}
+
+// session.send is the continuation RPC used by Inbox deliverNotes. Its attested origin must reach assistantSend even
+// when the reloaded session record and transcript still say Plan; the restricted tools apply to the resumed process too.
+func TestInboxSessionSendRestoresDefaultAndRestrictedTools(t *testing.T) {
+	f := cliTest(t)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "11111111-1111-4111-8111-111111111111"
+	cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "plan"})
+	inboxResumeTranscript(t, f.n, id)
+	if _, err := nodeCall(t, f.n, "session.send", map[string]any{"session_id": id, "text": "Continue", "origin": originInbox}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	if got := f.file("permission-requests"); got != "" {
+		t.Fatalf("session.send resumed a permission stall: %s", got)
+	}
+	const completed = "mcp__persona__lark_messages\nmcp__persona__inbox_suggest\n"
+	if got := f.file("completed-tools"); got != completed {
+		t.Fatalf("completed Persona MCP calls = %q, want %q", got, completed)
+	}
+	argv := f.file("cli-argv")
+	if !strings.Contains(argv, "--resume") || !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+		t.Fatalf("resumed Inbox argv lacks its origin-specific tool policy: %s", argv)
+	}
+	if in := f.file("stdin.jsonl"); !strings.Contains(in, `"subtype":"set_permission_mode"`) || !strings.Contains(in, `"mode":"default"`) {
+		t.Fatalf("session.send did not replace the old Plan mode with default: %s", in)
+	}
+}
+
+// Node-owned recovery runs before any manager continuation can re-attest the conversation. Load the hub's persisted
+// NodeSession representation through the real state.load/fetchState path, then recover its lost background task. Both
+// a new record with origin and a pre-upgrade record without it must recover safely; assistant.model re-attests the latter.
+func TestInboxNodeRecoveryKeepsPersistedOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name, persistedOrigin string
+		model                 map[string]any
+	}{
+		{name: "origin persisted", persistedOrigin: originInbox},
+		{name: "legacy record re-attested by assistant model", model: map[string]any{"origin": originInbox}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const id = "11111111-1111-4111-8111-111111111112"
+			cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			inboxResumeTranscript(t, f.n, id)
+			f.fh.mu.Lock()
+			f.fh.state = map[string]db.NodeSession{id: {
+				Launcher: "claude", Cwd: cwd, Origin: tc.persistedOrigin, AppMode: "plan", Tasks: []string{"watch a background task"},
+			}}
+			f.fh.model = tc.model
+			f.fh.mu.Unlock()
+			if !f.n.fetchState(context.Background()) {
+				t.Fatal("state.load failed")
+			}
+			f.idle(t, id)
+			const completed = "mcp__persona__lark_messages\nmcp__persona__inbox_suggest\n"
+			cliWait(t, "recovered read-only investigation and suggestion", func() bool { return f.file("completed-tools") == completed })
+			if got := f.file("permission-requests"); got != "" {
+				t.Fatalf("node-owned recovery resumed a permission stall: %s", got)
+			}
+			argv := f.file("cli-argv")
+			if !strings.Contains(argv, "--resume") || !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+				t.Fatalf("node-owned recovery lost the Inbox tool policy: %s", argv)
+			}
+			if in := f.file("stdin.jsonl"); !strings.Contains(in, `"mode":"default"`) {
+				t.Fatalf("node-owned recovery did not force default: %s", in)
+			}
+			if st, _ := f.n.state.get(id); len(st.Tasks) != 0 || st.Origin != originInbox {
+				t.Fatalf("recovered session state=%+v, want cleared tasks and retained origin", st)
+			}
+		})
+	}
+}
+
+// A warm spare was started with ordinary built-ins. Inbox must cold-start with its restricted list rather than inherit
+// SendMessage from that process; an ordinary conversation still adopts the same spare.
+func TestInboxDoesNotAdoptOrdinaryToolSpare(t *testing.T) {
+	n := assistantNode(t)
+	p := &assistantProc{id: "spare", agent: "claude", launcher: "claude", cwd: n.home, born: time.Now(),
+		fingerprint: n.executionFingerprint("claude", modelExecution{})}
+	n.spare = p
+	if got := n.adoptSpareFor(n.home, "claude", "default", modelExecution{Origin: originInbox}); got != nil {
+		t.Fatal("Inbox adopted a process started with ordinary built-in tools")
+	}
+	if n.spare != p {
+		t.Fatal("the refused spare was consumed")
+	}
+	if got := n.adoptSpareFor(n.home, "claude", "default", modelExecution{}); got != p {
+		t.Fatal("ordinary conversation did not retain warm-spare adoption")
+	}
+}
+
+func TestOrdinaryClaudeKeepsBuiltInSendMessage(t *testing.T) {
+	f := cliTest(t)
+	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "Investigate", nil, "default", "", modelExecution{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	if argv := f.file("cli-argv"); !strings.Contains(argv, "--tools "+assistantBuiltinTools) || !strings.Contains(argv, "SendMessage") {
+		t.Fatalf("ordinary conversation lost its existing built-in tools: %s", argv)
 	}
 }
 

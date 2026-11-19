@@ -91,8 +91,12 @@ class OpenerMarkShotsTest {
         private val answer: suspend (String) -> ByteArray = { path -> if ("chat-bridge" in path) bubble() else page() },
     ) : OpenerIcons.Source {
         val asked = mutableListOf<String>()
+        var listReads = 0
         override val listsExtensions = true
-        override suspend fun extensions() = list
+        override suspend fun extensions(): List<HubExtension> {
+            listReads++
+            return list
+        }
         override fun iconPath(url: String) = url.takeIf(ExtensionIconPath::matches)
         override suspend fun icon(path: String, manager: String?): ByteArray {
             asked += path
@@ -168,13 +172,11 @@ class OpenerMarkShotsTest {
         assertTrue("no icon asked when the list has none", iconless.asked.isEmpty())
     }
 
-    @Test fun anIconThatFailsOrIsStillLoadingKeepsTheOriginsMarkAndWords() {
-        val failing = Hub(withIcons) { error("404") }
-        val loading = Hub(withIcons) { awaitCancellation() }
-        var openers by mutableStateOf<OpenerIcons?>(null)
+    /** The drawer's Recent with [rows], in Glass, light, marked from [openers]. */
+    private fun showDrawer(openers: () -> OpenerIcons?) {
         val groups = ConversationGroups(main = main, others = rows, recent = rows)
         rule.setContent {
-            CompositionLocalProvider(LocalOpenerIcons provides openers) {
+            CompositionLocalProvider(LocalOpenerIcons provides openers()) {
                 PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
                     Box(Modifier.width(400.dp).height(1300.dp)) {
                         AssistantDrawer("", {}, groups, active = null, hasMain = true, onEnd = null,
@@ -183,6 +185,13 @@ class OpenerMarkShotsTest {
                 }
             }
         }
+    }
+
+    @Test fun anIconThatFailsOrIsStillLoadingKeepsTheOriginsMarkAndWords() {
+        val failing = Hub(withIcons) { error("404") }
+        val loading = Hub(withIcons) { awaitCancellation() }
+        var openers by mutableStateOf<OpenerIcons?>(null)
+        showDrawer { openers }
         for ((name, hub) in listOf("failed" to failing, "loading" to loading)) {
             rule.runOnIdle { openers = OpenerIcons(scope, hub, io = Dispatchers.Unconfined) }
             rule.waitForIdle()
@@ -192,6 +201,22 @@ class OpenerMarkShotsTest {
             assertEquals("$name: never named before its icon is drawn", 0, marks("来自 Chat Bridge"))
             assertEquals(0, marks("来自 Example Docs"))
         }
+    }
+
+    @Test fun aFailedIconIsAskedAgainWhileItsRowStaysOnceTheSameListIsReadAgain() {
+        var offline = true
+        val hub = Hub(withIcons) { path -> if (offline) error("offline") else if ("chat-bridge" in path) bubble() else page() }
+        val openers = OpenerIcons(scope, hub, io = Dispatchers.Unconfined)
+        showDrawer { openers }
+        rule.waitForIdle()
+        assertEquals("both icons asked once, and failed", 2, hub.asked.size)
+        assertEquals(2, marks("来自 飞书 /agent"))
+        assertEquals(1, marks("来自扩展"))
+        rule.runOnIdle { offline = false; openers.stale() } // e.g. an install elsewhere: the same list comes back
+        rule.waitUntil(5_000) { marks("来自 Chat Bridge") == 1 && marks("来自 Example Docs") == 1 }
+        assertEquals("the list read again", 2, hub.listReads)
+        assertEquals("each icon asked again once", 4, hub.asked.size)
+        assertEquals("the Lark extension's own /agent keeps Lark's", 1, marks("来自 飞书 /agent"))
     }
 
     private companion object {

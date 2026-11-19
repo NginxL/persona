@@ -139,7 +139,7 @@ func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause 
 // stoppable checks that session id's agent may be stopped now (retire: only a still one) and holds its typing lock
 // (unlock releases it) when ok; ok false with no error when it is not running.
 func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, ok bool, err error) {
-	if !validID(id) {
+	if !validID(id) && !n.agyPaneRow(id) {
 		return nil, a, false, fmt.Errorf("invalid session id %q", id)
 	}
 	no := func(code, why string) (func(), host.Agent, bool, error) {
@@ -183,7 +183,7 @@ func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, o
 			return fail(notRetirable, "the agent is "+a.AgentStatus)
 		}
 		switch a.Agent {
-		case "", "claude", "codex", traexAgent:
+		case "", "claude", "codex", traexAgent, agyAgent: // agy leaves its TUI on two Ctrl+C presses too (#11087)
 		default:
 			return fail(notRetirable, "cannot stop a "+a.Agent)
 		}
@@ -463,4 +463,11 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 	markTaskTerminal(ctx, launch, created.Pane)
 	n.agentTerminalOpened(launch, created.Pane) // finished_close.go
 	return created, nil
+}
+
+// agyPaneRow: id is the pane-derived row (otherSession) of an agy herdr is running now. agy rows never carry a
+// session id of the hex form validID accepts, so without this an agy Agent could not be stopped or retired (#11087).
+func (n *Node) agyPaneRow(id string) bool {
+	a, ok := n.agent(id)
+	return ok && a.Agent == agyAgent && a.PaneID != "" && id == otherSession(a)
 }

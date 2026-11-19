@@ -1,3 +1,6 @@
+#if os(iOS) && canImport(AlarmKit)
+import AlarmKit
+#endif
 import Foundation
 import MapKit
 import Testing
@@ -297,6 +300,34 @@ struct PhoneSystemToolsTests {
         #expect(throws: ToolFailure.self) { try AlarmsTool.timerSeconds(json(#"{"seconds":86401}"#)) }
         #expect(AlarmsTool.timerSummary(seconds: 1500, label: "Focus").contains("Focus"))
     }
+
+    @Test func aPausedTimerShowsTheTimeLeftAsTheClockAppDoes() {
+        #expect(AlarmActivityTime.paused(total: 1500, elapsed: 1.2) == "24:58")
+        #expect(AlarmActivityTime.paused(total: 3 * 3600, elapsed: 3600) == "2:00:00")
+        #expect(AlarmActivityTime.paused(total: 60, elapsed: 90) == "0:00")
+    }
+
+    @Test func theCountdownNeverStartsAfterItRings() {
+        let fire = Date(timeIntervalSince1970: 1_000)
+        #expect(AlarmActivityTime.countdown(start: Date(timeIntervalSince1970: 400), fire: fire).lowerBound == Date(timeIntervalSince1970: 400))
+        #expect(AlarmActivityTime.countdown(start: Date(timeIntervalSince1970: 2_000), fire: fire) == fire...fire)
+    }
+
+    #if os(iOS) && canImport(AlarmKit)
+    /// The DEBUG sample requests its activity itself, where ActivityKit takes at most 4 KB of attributes; a timer's
+    /// with both states don't fit (~5.7 KB), so it keeps the one it draws (#11058). AlarmKit gets both.
+    @Test func theTimerSampleFitsInsideActivityKitsLimit() throws {
+        guard #available(iOS 26.0, *) else { return }
+        let running = AlarmsTool.attributes(label: "Focus", timer: true, only: .countdown)
+        let paused = AlarmsTool.attributes(label: "Focus", timer: true, only: .paused)
+        #expect(try JSONEncoder().encode(running).count < 4096)
+        #expect(try JSONEncoder().encode(paused).count < 4096)
+        #expect(running.presentation.countdown?.pauseButton != nil && running.presentation.paused == nil)
+        #expect(paused.presentation.paused != nil && paused.presentation.countdown == nil)
+        let timer = AlarmsTool.attributes(label: "Focus", timer: true).presentation
+        #expect(timer.countdown != nil && timer.paused != nil)
+    }
+    #endif
 
     // MARK: - Home (#2285)
 

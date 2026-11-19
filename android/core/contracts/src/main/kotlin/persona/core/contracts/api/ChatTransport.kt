@@ -17,6 +17,8 @@ interface ChatTransport {
     suspend fun sessionCounts(filter: SessionListFilter = SessionListFilter()): SessionListCounts =
         throw SessionListsUnsupported()
     suspend fun items(session: SessionKey, query: ItemsQuery): ItemsResponse
+    /** The session's recorded permission mode changes, oldest first; empty where the hub has no such record. */
+    suspend fun modeChanges(session: SessionKey): List<ModeChange> = emptyList()
     suspend fun interactions(): List<Interaction>
     suspend fun resolve(id: String, resolution: Resolution)
     /** [resolve], with what the hub said about it (a card answered already carries the answer that took effect). */

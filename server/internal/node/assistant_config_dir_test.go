@@ -3,10 +3,15 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // Exercise the RPC boundary and the real fixture process, not just a profile
@@ -107,6 +112,106 @@ func TestAssistantProfileCompatibility(t *testing.T) {
 			check()
 			n.stopAssistant(res.SessionID)
 			t.Logf("%s: profile retained after process restart", scenario)
+		})
+	}
+}
+
+func TestAssistantNewPrivateProfileMustBeSignedIn(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		loggedIn bool
+		explicit bool
+	}{
+		{name: "signed out"},
+		{name: "signed in", loggedIn: true},
+		{name: "explicit legacy is unchanged", explicit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			seen := filepath.Join(t.TempDir(), "auth-profile")
+			fakeClaudeHome(t, `case " $* " in
+  *" auth status "*)
+    printf '%s\n' "$CLAUDE_CONFIG_DIR" > `+shellQuote(seen)+`
+    echo '{"loggedIn": `+fmt.Sprintf("%t", tc.loggedIn)+`, "authMethod": "claude.ai"}'
+    exit 1 ;;
+esac
+`+fakeCLI)
+			n := f.n
+			n.home = os.Getenv("HOME")
+			n.dir = filepath.Join(n.home, ".persona")
+			n.claudeV.set("2.1.308")
+			params := map[string]any{"launcher": "claude", "cwd": t.TempDir(), "text": "hello"}
+			if tc.explicit {
+				params["config_dir"] = "legacy"
+			}
+			answer, err := nodeCall(t, n, "assistant.send", params)
+			if !tc.loggedIn && !tc.explicit {
+				var re *rpc.Error
+				if !errors.As(err, &re) || re.Code != proto.TurnErrorNotLoggedIn ||
+					!strings.Contains(string(re.Data), `"delivered":"none"`) {
+					t.Fatalf("signed-out start = %v", err)
+				}
+				if got := f.file("cli-argv") + f.file("start.json"); got != "" {
+					t.Fatalf("a model process started before sign-in: %q", got)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			} else {
+				var res struct {
+					SessionID string `json:"session_id"`
+				}
+				if err := json.Unmarshal(answer, &res); err != nil {
+					t.Fatal(err)
+				}
+				n.stopAssistant(res.SessionID)
+			}
+			profile, readErr := os.ReadFile(seen)
+			if tc.explicit {
+				if !os.IsNotExist(readErr) {
+					t.Fatalf("an explicit legacy profile was preflighted: %q, %v", profile, readErr)
+				}
+			} else if got, want := strings.TrimSpace(string(profile)), filepath.Join(n.dir, "profiles", "claude"); got != want {
+				t.Fatalf("auth checked profile %q, want %q (%v)", got, want, readErr)
+			}
+		})
+	}
+}
+
+func TestAssistantNewProfileAuthFailsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name, launcher, answer, wrapper string
+		managed, checked                bool
+	}{
+		{name: "unreadable status", launcher: "claude", answer: "not a status", checked: true},
+		{name: "managed provider", launcher: "gw", answer: `{"loggedIn":false}`, managed: true},
+		{name: "launcher-owned profile", launcher: "work", answer: `{"loggedIn":false}`, wrapper: "/tmp/wrapper-profile"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			seen := filepath.Join(t.TempDir(), "auth-ran")
+			fakeClaudeHome(t, `touch `+shellQuote(seen)+"\necho '"+tc.answer+"'\nexit 1\n")
+			n := f.n
+			n.home = os.Getenv("HOME")
+			n.dir = filepath.Join(n.home, ".persona")
+			n.claudeV.set("2.1.308")
+			selected := n.assistantConfigDir(tc.launcher, "")
+			if tc.managed {
+				n.setManaged([]proto.ManagedLauncher{{Name: tc.launcher, BaseURL: "https://gw.example.com", APIKey: "test-key"}})
+			}
+			if tc.wrapper != "" {
+				selected = tc.wrapper
+				writeFile(t, filepath.Join(n.home, ".zshrc"), `function work { CLAUDE_CONFIG_DIR=`+shellQuote(tc.wrapper)+` command claude "$@"; }`+"\n")
+			}
+			if err := n.assistantNewProfileAuth(context.Background(), tc.launcher, "", selected); err != nil {
+				t.Fatalf("start refused: %v", err)
+			}
+			_, err := os.Stat(seen)
+			if tc.checked && err != nil {
+				t.Fatalf("auth status did not run: %v", err)
+			}
+			if !tc.checked && !os.IsNotExist(err) {
+				t.Fatal("an unchanged profile was preflighted")
+			}
 		})
 	}
 }

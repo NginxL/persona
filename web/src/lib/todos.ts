@@ -62,6 +62,8 @@ export interface Todo {
    *  pieces"); unset for a to-do that is no piece and from hubs without them. */
   part_of?: string;
   after?: string[];
+  /** Unmet prerequisite to-do IDs for a strict piece; an empty list means none, omission keeps legacy behavior. */
+  prerequisite_blockers?: string[];
   done_at?: string | null;
   created_at: string;
   updated_at: string;

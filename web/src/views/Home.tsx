@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SESSIONS_HIERARCHY_FEATURE } from "../lib/child-sessions";
 import { homeKey } from "../lib/folded-rows";
-import { ago, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
+import { ago, backgroundWaiting, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
 import { usePendingLine } from "../lib/card-answer";
 import { cardState, requestRoute } from "../lib/card-focus";
 import { interactionAsk } from "../lib/inbox";
@@ -27,6 +27,9 @@ import { getSession, useStore, withTaskRows } from "../lib/store";
 import { retryAgentList } from "../lib/sessions";
 import { discardOutbox, outboxEntry, queueToSession, retryOutboxEntry } from "../lib/outbox";
 import { homeTasks, type HomeTask } from "../lib/home-tasks";
+import { sessionLauncher } from "../lib/model-switch";
+import { effortTitle } from "../lib/session-actions";
+import { modelList, pillView, useModelLists } from "../lib/session-models";
 import { heldDelivery, makeSessionLookup, orphanedLine, TODO_STATUS_INFO, TODO_TONE_CLASS, todoStatusLabel } from "../lib/todos";
 import { BUSY_MOTION, spinStyle } from "../lib/busy-motion";
 import type { AgentState, Interaction, Machine, Session } from "../lib/types";
@@ -79,7 +82,7 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
     }
     return byMachine;
   }, [list, whole, hubAgentCounts, agentSessions]);
-  const now = useNow(5000, counts.working > 0);
+  const now = useNow(5000, counts.working > 0 || counts.waiting > 0);
 
   // the agents of one herdr tab are one row (#2320), filed under the most urgent of them; a card waiting counts as
   // something to do, and "Mark all as seen" marks every unread agent, wherever its tab is filed
@@ -143,13 +146,6 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
             </div>
           </div>
 
-          {/* the extensions' cards (docs/extensions/extensions.md"UI slots" overview_card), under the agents' summary */}
-          <OverviewCards />
-
-          {/* Before the first snapshot the socket streams the machines' agents and cards in one by one, each moving the
-              groups already painted, and "Loading" then went from over them: until it is in only "Loading", then all at once. */}
-          {!loaded && <Loading label={t("common.loading")} />}
-
           {/* the headline counts agents, this counts cards: say so when one agent has several cards waiting */}
           {loaded && (interactions.length > 0 || held.length > 0) && (
             <Group title={stateName("needs_you")} count={interactions.length} hint={new Set(interactions.map(homeKey)).size < interactions.length ? t("home.needs_you_hint") : undefined} grid="cards">
@@ -208,7 +204,7 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
               grid="tasks"
             >
               {tasks.rows.map((r) => (
-                <TaskCard key={r.todo.id} task={r} />
+                <TaskCard key={r.todo.id} task={r} machine={name} />
               ))}
             </Group>
           )}
@@ -216,6 +212,16 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
           {loaded && groups.working.length > 0 && (
             <Group title={stateName("working")} count={groups.working.length} grid>
               {groups.working.map((g, i) => (
+                <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<When>{g.lead.state_since ? shortDuration(now - Date.parse(g.lead.state_since)) : ""}</When>} />
+              ))}
+            </Group>
+          )}
+
+          {/* working, but only waiting on background commands (#6045): apart from Working, as the sidebar's quick
+              filters and By status have them, timed from when the wait began (#10938) */}
+          {loaded && groups.waiting.length > 0 && (
+            <Group title={stateName("bg_waiting")} count={groups.waiting.length} grid>
+              {groups.waiting.map((g, i) => (
                 <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<When>{g.lead.state_since ? shortDuration(now - Date.parse(g.lead.state_since)) : ""}</When>} />
               ))}
             </Group>
@@ -249,6 +255,10 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
             </div>
           )}
 
+          {/* Before the first snapshot the socket streams the machines' agents and cards in one by one, each moving the
+              groups already painted, and "Loading" then went from over them: until it is in only "Loading", then all at once. */}
+          {!loaded && <Loading label={t("common.loading")} />}
+
           {loaded && machines.length > 0 && (
             <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
@@ -276,6 +286,11 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
               </div>
             </Group>
           )}
+
+          {/* the extensions' cards (docs/extensions/extensions.md "UI slots" overview_card), last: under everything about
+              the owner's agents (what needs them, what is running, what just finished) and the computers, so no number
+              of cards pushes those off the first screen (#11147; #11092 had them under Needs you and Stuck only) */}
+          <OverviewCards />
         </div>
       </div>
       <MarkSeenDialog list={confirmSeen} onClose={() => setConfirmSeen(null)} />
@@ -283,10 +298,11 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   );
 }
 
-/** The line under the greeting: how many agents need you, work and finished unseen. With none of them, the cards
- *  that wait (a Persona conversation's, whose agent is not counted) are what needs you: never an empty sentence. */
-function summary(counts: { needs: number; working: number; unread: number }, cards: number): string {
-  const parts = [counts.needs && t("home.summary_needs", { count: counts.needs }), counts.working && stateCount("working", counts.working), counts.unread && stateCount("unread", counts.unread)].filter(Boolean);
+/** The line under the greeting: how many agents need you, work, only wait in the background (counted apart from the
+ *  working ones, #10938) and finished unseen. With none of them, the cards that wait (a Persona conversation's, whose
+ *  agent is not counted) are what needs you: never an empty sentence. */
+function summary(counts: { needs: number; working: number; waiting: number; unread: number }, cards: number): string {
+  const parts = [counts.needs && t("home.summary_needs", { count: counts.needs }), counts.working && stateCount("working", counts.working), counts.waiting && stateCount("bg_waiting", counts.waiting), counts.unread && stateCount("unread", counts.unread)].filter(Boolean);
   if (parts.length) return t("home.summary", { list: parts.join(t("home.summary_separator")) });
   return cards ? t("home.summary_cards", { count: cards }) : t("home.all_quiet");
 }
@@ -326,13 +342,25 @@ function Group({ title, count, children, right, hint, grid }: { title: string; c
   );
 }
 
+/** Who works on a task (#10904): its lead agent's computer, then the model and effort as that agent's model pill names
+ *  them (its list's name once the pill has read the list, else the short form of the id; no effort, none said), and how
+ *  many other agents it has. With no row of its agents read, how many there are (the Tasks page's words). */
+function taskAgentLine({ agents, lead }: Pick<HomeTask, "agents" | "lead">, machine: (mid: string) => string): { who: string; more: number } {
+  if (!lead) return { who: agents > 0 ? t("todos.agent_count", { count: agents }) : "", more: 0 };
+  const view = pillView(lead, modelList(lead.machine_id, sessionLauncher(lead)));
+  return { who: [machine(lead.machine_id), view.model, view.effort && effortTitle(view.effort)].filter(Boolean).join(" · "), more: agents - 1 };
+}
+
 // One task on the overview: its title (opens the task), its status, the stage bar with its PR, and what holds its
-// delivery or how many agents it has (the Tasks page's words). The PR link is beside the title link, not inside it.
-function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
+// delivery, then who works on it (taskAgentLine). The PR link is beside the title link, not inside it.
+function TaskCard({ task, machine }: { task: HomeTask; machine: (mid: string) => string }) {
+  const { todo, status } = task;
+  useModelLists(); // a model list the pill reads later names the model here too
   const to: Route = { name: "todos", id: todo.id };
   const held = heldDelivery(todo);
   const orphan = status !== "needs_you" ? orphanedLine(todo) : undefined;
-  const line = [held && t(`todos.delivery_${held.state}`), agents > 0 && t("todos.agent_count", { count: agents })].filter(Boolean).join(" · ");
+  const { who, more } = taskAgentLine(task, machine);
+  const line = [held && t(`todos.delivery_${held.state}`), who].filter(Boolean).join(" · ");
   return (
     <div className="flex h-full flex-col gap-2 rounded-card bg-surface px-3 py-2.5 shadow-card" data-task={todo.id}>
       <div className="flex min-w-0 items-center gap-2">
@@ -346,7 +374,13 @@ function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
       {/* the lines under the stage bar sit at the card's bottom, so a row of cards of one height lines up */}
       {(line || orphan) && (
         <div className="mt-auto flex flex-col gap-2">
-          {line && <p className={cx("truncate text-[11.5px]", held ? "text-orange" : "text-ink-3")}>{line}</p>}
+          {/* the other agents' count stays when the line is cut short */}
+          {line && (
+            <p data-task-agents className={cx("flex min-w-0 gap-1 text-[11.5px]", held ? "text-orange" : "text-ink-3")}>
+              <span className="truncate">{line}</span>
+              {more > 0 && <span className="shrink-0 tabular-nums">{t("home.task_agents_more", { count: more })}</span>}
+            </p>
+          )}
           {/* nobody is working on it (#3618): the hub's finding and why; a card that waits for the user says that instead */}
           {orphan && (
             <p data-orphaned-line className="truncate text-[11.5px] text-ink-3">
@@ -388,7 +422,7 @@ function SessionTask({ s, i, machine, pill, footer }: { s: Session; i: number; m
   const title = sessionTitle(s);
   // the source is a tag once, not again in front of the latest words
   // the latest words are Markdown: one line of them reads without its marks, as the sidebar's row line does (#10939)
-  return <TaskRow i={i} state={stateOf(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={plainMarkdown(sessionPreview(s))} pill={pill} footer={footer} />;
+  return <TaskRow i={i} state={stateOf(s)} waiting={backgroundWaiting(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={plainMarkdown(sessionPreview(s))} pill={pill} footer={footer} />;
 }
 
 // One tab's agents as one row (#2320): the "Lead"'s title (the first pane's when the panes are peers), the most urgent
@@ -402,15 +436,16 @@ function GroupTask({ g, i, machine, pill, footer }: { g: TabGroup; i: number; ma
     <TaskRow
       i={i}
       state={g.state}
+      waiting={backgroundWaiting(s)}
       to={paneRoute(s)}
       title={sessionTitle(head)}
       tags={rowTags(sessionTitle(head), [machine, s.space_name, tabLabel(s)])}
       detail={s === head ? preview : agentLabel(s) && preview ? t("home.agent_preview", { agent: agentLabel(s), preview }) : agentLabel(s) || preview}
       pill={
         <>
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums" title={g.sessions.map((x) => `${agentLabel(x)} · ${sessionTitle(x)} · ${STATE_LABEL[stateOf(x)]}`).join("\n")}>
+          <span className="flex shrink-0 items-center gap-1 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums" title={g.sessions.map((x) => `${agentLabel(x)} · ${sessionTitle(x)} · ${backgroundWaiting(x) ? stateName("bg_waiting") : STATE_LABEL[stateOf(x)]}`).join("\n")}>
             <span aria-hidden className="flex items-center gap-0.5">
-              {g.sessions.map((x) => <StatusMark key={x.session_id} state={stateOf(x)} size="sm" />)}
+              {g.sessions.map((x) => <StatusMark key={x.session_id} state={stateOf(x)} size="sm" waiting={backgroundWaiting(x)} />)}
             </span>
             <span className="max-sm:sr-only">{t("home.machine_agents", { count: g.sessions.length })}</span>
           </span>
@@ -559,7 +594,7 @@ function AnsweredLine({ ix, body }: { ix: Interaction; body: Resolution }) {
 // One Task Rows capsule, compact: status badge, the title alone on its line (it is what tells rows apart), then
 // where it runs as small tags and the latest words; when on the right. With `actions` (a card's one-tap answers) they
 // sit under it in the same capsule, outside the link, and its words take up to three lines: read before answering.
-function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions, footer }: { i: number; state: AgentState; done?: boolean; to: Route; title: string; tags: string[]; detail?: string; pill: React.ReactNode; entry?: Record<string, unknown>; actions?: React.ReactNode; /** Under the row, the row itself drawn as without it (Continue, #6449). */ footer?: React.ReactNode }) {
+function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry, actions, footer }: { i: number; state: AgentState; /** Working, but only waiting in the background: the clock, not the spinner. */ waiting?: boolean; done?: boolean; to: Route; title: string; tags: string[]; detail?: string; pill: React.ReactNode; entry?: Record<string, unknown>; actions?: React.ReactNode; /** Under the row, the row itself drawn as without it (Continue, #6449). */ footer?: React.ReactNode }) {
   const below = actions ?? footer;
   const enter = { animation: `fade-up 420ms ${EASE} ${Math.min(i, 8) * 50}ms both` };
   const link = (
@@ -575,7 +610,7 @@ function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions
           <Icon name="check" size={11} stroke={3.2} />
         </span>
       ) : (
-        <Badge state={state} />
+        <Badge state={state} waiting={waiting} />
       )}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13.5px] leading-[18px] font-medium text-ink">{title}</span>
@@ -606,8 +641,8 @@ function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions
   );
 }
 
-function Badge({ state }: { state: AgentState }) {
-  if (state === "working") {
+function Badge({ state, waiting = false }: { state: AgentState; waiting?: boolean }) {
+  if (state === "working" && !waiting) {
     const size = 20,
       stroke = 2,
       r = (size - stroke) / 2,
@@ -635,7 +670,7 @@ function Badge({ state }: { state: AgentState }) {
     );
   return (
     <span className="flex size-5 shrink-0 items-center justify-center">
-      <StatusMark state={state} />
+      <StatusMark state={state} waiting={waiting} />
     </span>
   );
 }

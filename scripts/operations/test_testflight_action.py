@@ -116,7 +116,8 @@ class TestFlightActionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             root = Path(home)
             worktree = root / "worktree"
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            # A first branch of its own: with init.defaultBranch=main the fixture's own main below would already exist.
+            subprocess.run(["git", "init", "-q", "--initial-branch=fixture", str(root)], check=True)
             subprocess.run(["git", "-C", str(root), "config", "user.email", "release@example.com"], check=True)
             subprocess.run(["git", "-C", str(root), "config", "user.name", "Release Fixture"], check=True)
             (root / "tracked.txt").write_text("source\n")

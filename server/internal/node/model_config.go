@@ -54,6 +54,9 @@ type modelExecution struct {
 	// assistant's claude_interactive setting. Part of the fingerprint, so a change resumes an idle conversation in a
 	// new process; omitted when off, so fingerprints from before it stay the same.
 	Interactive bool `json:",omitempty"`
+	// NewModelChoice classifies this request against the previous recovery chain. It is per-turn provenance, never
+	// persisted or included in the execution fingerprint, and is committed only when the input is delivered.
+	NewModelChoice bool `json:"-"`
 	// SecretTicket: the hand-off a new Claude Code start puts in its environment (secretenv.go). Per start, never
 	// part of a fingerprint, never kept for a resume.
 	SecretTicket string `json:"-"`
@@ -64,6 +67,29 @@ type modelExecution struct {
 	Goal string `json:"-"`
 	// InPane is session.start's in_pane: a failed start's kept tab to start in (startremedy.go).
 	InPane string `json:"-"`
+}
+
+// supervisionDeliveryKey marks a send that is the manager's own supervision message (message_source "supervision").
+type supervisionDeliveryKey struct{}
+
+// withSupervisionDelivery marks ctx for a send from message source src when that is a supervision message.
+func withSupervisionDelivery(ctx context.Context, src *proto.MessageSource) context.Context {
+	if src != nil && src.Kind == proto.SourceSupervision {
+		return context.WithValue(ctx, supervisionDeliveryKey{}, true)
+	}
+	return ctx
+}
+
+// runtimePolicyDropped decides what a runtime conversation does with a supervision policy it cannot carry: a runtime has no
+// separate policy channel. The manager's own supervision message is refused, since delivered without its policy it would
+// leave a supervisor unsupervised; anything else (a person's message the hub could not tell was for a runtime
+// conversation) goes through without the policy rather than shutting that conversation's owner out.
+func (n *Node) runtimePolicyDropped(ctx context.Context, id string) error {
+	if ctx.Value(supervisionDeliveryKey{}) == true {
+		return supervisionRuntimeRefusal(ctx)
+	}
+	n.logf("assistant %s: runs on a runtime, which has no channel for supervision policy: sending the message without it", short(id))
+	return nil
 }
 
 func supervisionRuntimeRefusal(ctx context.Context) error {
@@ -116,7 +142,8 @@ func (m modelExecution) withSupervision(policy *string) modelExecution {
 // assistantModel is the launcher and model the hub runs conversation id's next message on (as a message from the phone
 // would be), for a message the node sends it by itself (recoverAssistantTasks). Started on the model it last ran, the
 // conversation's next message from the phone would need another process (#1554). Nothing when the hub can't say (an
-// older hub): the conversation's own then.
+// older hub): the conversation's own then. The manager also re-attests origin here, so a pre-upgrade node session
+// with no persisted origin still recovers under its Inbox policy.
 func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExecution) {
 	var res struct {
 		Launcher                string                   `json:"launcher"`
@@ -127,11 +154,12 @@ func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExec
 		IsMain                  bool                     `json:"is_main"`
 		MainCompact             int                      `json:"main_compact_window"`
 		External                *proto.ExternalExecution `json:"external"`
+		Origin                  string                   `json:"origin"`
 		SupervisionInstructions *string                  `json:"supervision_instructions"`
 		ClaudeInteractive       bool                     `json:"claude_interactive"` // #10058: a send's own flag, here for starts no send makes
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
 		return "", modelExecution{}
 	}
-	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions)
+	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Origin: res.Origin, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions)
 }

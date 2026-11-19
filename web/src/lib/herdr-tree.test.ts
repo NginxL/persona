@@ -288,6 +288,33 @@ describe("panes of one tab", () => {
     expect(carded.working[1]!.sessions).toHaveLength(3);
   });
 
+  it("homeTaskGroups: an agent that only waits in the background is not Working (#10938)", () => {
+    const bg = { background_working: true, background_waiting: true };
+    const busy = pane({ space: "w1", slot: 1, p: 1, st: "working", state_since: "2026-01-01T10:30:00Z" });
+    const newer = pane({ space: "w1", slot: 2, p: 1, st: "working", state_since: "2026-01-01T10:20:00Z", ...bg });
+    const older = pane({ space: "w1", slot: 3, p: 1, st: "working", state_since: "2026-01-01T10:00:00Z", ...bg });
+    const g = homeTaskGroups([busy, newer, older], []);
+    expect(g.working.map((x) => x.lead)).toEqual([busy]);
+    // the longest waiting first, as Working lists the longest working first
+    expect(g.waiting.map((x) => x.lead)).toEqual([older, newer]);
+    expect(homeOverview([older], []).quiet).toBe(false);
+  });
+
+  it("homeTaskGroups: a tab with one pane really working is Working, and that pane speaks for it (#10938)", () => {
+    // the waiting pane began first: by time alone it would lead the row, with its clock
+    const waits = at("pW", { pane_index: 0, st: "working", state_since: "2026-01-01T10:00:00Z", background_working: true, background_waiting: true });
+    const works = at("p2E", { pane_index: 1, st: "working", state_since: "2026-01-01T10:59:00Z" });
+    const g = homeTaskGroups([waits, works], []);
+    expect(g.waiting).toEqual([]);
+    expect(g.working.map((x) => x.lead)).toEqual([works]);
+    expect(g.working[0]!.sessions).toEqual([waits, works]);
+    // both only wait: the tab is one waiting row, the longest waiting pane's
+    const alsoWaits = { ...works, background_working: true, background_waiting: true };
+    const all = homeTaskGroups([waits, alsoWaits], []);
+    expect(all.working).toEqual([]);
+    expect(all.waiting.map((x) => x.lead)).toEqual([waits]);
+  });
+
   it("homeTaskGroups: a tab of two working panes is as long working as its longest, and shows that one", () => {
     // tab A: pane 0 working since 10:59, pane 1 since 10:00; tab B: one pane since 10:30
     const a0 = at("pW", { pane_index: 0, st: "working", state_since: "2026-01-01T10:59:00Z" });

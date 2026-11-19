@@ -170,3 +170,148 @@ func TestCodexDaemonPaneIsWorkingWhileItsTurnRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexStaleBlockedClearedByActiveRollout(t *testing.T) {
+	now := time.Now().UTC()
+	sid := "00000002-0000-4000-8000-000000000001"
+	dir := t.TempDir()
+	rollout := filepath.Join(dir, "rollout.jsonl")
+	writeRollout := func(extra string) {
+		t.Helper()
+		ts := now.Add(-2 * time.Second).Format(time.RFC3339Nano)
+		body := `{"timestamp":"` + ts + `","type":"session_meta","payload":{"id":"` + sid + `","cwd":"` + dir + `"}}` + "\n" +
+			`{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}` + "\n" +
+			`{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"e1","command":["powershell","-Command","Get-ChildItem"],"status":"completed","aggregated_output":"ok\n","exit_code":0}}}` + "\n" +
+			extra
+		if err := os.WriteFile(rollout, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRollout("")
+
+	sh := &screenHost{bareHost: bareHost{kind: host.Herdr}, screen: "› \n"}
+	n := &Node{
+		home:    dir,
+		hosts:   host.NewRegistry(sh),
+		state:   &stateFile{},
+		codices: newCodexRegistry(),
+		agents:  map[string]host.Agent{sid: {Agent: "codex", PaneID: "w2:p4", Cwd: dir, AgentStatus: proto.StatusBlocked, Attention: "waiting"}},
+		paths:   map[string]string{sid: rollout},
+		pathsAt: map[string]time.Time{sid: now},
+		metas:   map[string]quickMeta{},
+		bgScans: map[string]*bgScan{},
+	}
+
+	// Within the 10s grace window after blocked began, keep StatusBlocked so real prompts are not masked.
+	if row := paneRow(t, n, sid); row.Status != proto.StatusBlocked {
+		t.Fatalf("within grace window: got %q, want blocked", row.Status)
+	}
+
+	// Simulate herdr having been stuck in blocked since 25s ago while rollout kept advancing to 2s ago.
+	n.mu.Lock()
+	n.blockedAt[sid] = now.Add(-25 * time.Second)
+	n.mu.Unlock()
+	if row := paneRow(t, n, sid); row.Status != proto.StatusWorking || row.AttentionReason != "" {
+		t.Fatalf("stale blocked with active rollout: got status=%q attention=%q, want working", row.Status, row.AttentionReason)
+	}
+
+	// When an open non-async request_user_input exists in the rollout, keep StatusBlocked.
+	ts := now.Add(-time.Second).Format(time.RFC3339Nano)
+	askLine := `{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"function_call","name":"request_user_input","call_id":"call_1","arguments":"{\"questions\":[{\"id\":\"q1\",\"question\":\"Continue?\"}]}"}}` + "\n"
+	writeRollout(askLine)
+	n.mu.Lock()
+	n.blockedAt[sid] = now.Add(-25 * time.Second)
+	n.mu.Unlock()
+	if row := paneRow(t, n, sid); row.Status != proto.StatusBlocked {
+		t.Fatalf("open blocking ask: got %s, want blocked", row.Status)
+	}
+
+	// Fresh activity recorded BEFORE blocked began must NOT clear StatusBlocked even after the 10s grace expires.
+	oldTS := now.Add(-18 * time.Second).Format(time.RFC3339Nano)
+	preBlockBody := `{"timestamp":"` + oldTS + `","type":"session_meta","payload":{"id":"` + sid + `","cwd":"` + dir + `"}}` + "\n" +
+		`{"timestamp":"` + oldTS + `","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}` + "\n" +
+		`{"timestamp":"` + oldTS + `","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"e1","command":["powershell","-Command","Get-ChildItem"],"status":"completed","aggregated_output":"ok\n","exit_code":0}}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(preBlockBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n.mu.Lock()
+	delete(n.metas, rollout)
+	n.blockedAt[sid] = now.Add(-15 * time.Second)
+	n.mu.Unlock()
+	if row := paneRow(t, n, sid); row.Status != proto.StatusBlocked {
+		t.Fatalf("pre-block activity after 10s grace with no post-block progress: got %s, want blocked", row.Status)
+	}
+
+	// Old-turn / carried-over timestamp (task_complete followed by idle or no open turn activity after blockedAt) must NOT clear StatusBlocked.
+	closedTS := now.Add(-time.Second).Format(time.RFC3339Nano)
+	oldTurnBody := `{"timestamp":"` + closedTS + `","type":"session_meta","payload":{"id":"` + sid + `","cwd":"` + dir + `"}}` + "\n" +
+		`{"timestamp":"` + closedTS + `","type":"event_msg","payload":{"type":"task_started","turn_id":"t0"}}` + "\n" +
+		`{"timestamp":"` + closedTS + `","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"e0","command":["powershell","-Command","Get-ChildItem"],"status":"completed","aggregated_output":"ok\n","exit_code":0}}}` + "\n" +
+		`{"timestamp":"` + closedTS + `","type":"event_msg","payload":{"type":"task_complete","turn_id":"t0"}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(oldTurnBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n.mu.Lock()
+	delete(n.metas, rollout)
+	n.blockedAt[sid] = now.Add(-25 * time.Second)
+	n.mu.Unlock()
+	if row := paneRow(t, n, sid); row.Status != proto.StatusBlocked {
+		t.Fatalf("closed old turn timestamp: got %s, want blocked", row.Status)
+	}
+}
+
+func TestCodexVisibleApprovalWithQuestionHistoryAndActivityKeepsBlocked(t *testing.T) {
+	now := time.Now().UTC()
+	sid := "00000002-0000-4000-8000-000000000002"
+	dir := t.TempDir()
+	rollout := filepath.Join(dir, "rollout.jsonl")
+	oldTS := now.Add(-20 * time.Second).Format(time.RFC3339Nano)
+	freshTS := now.Add(-2 * time.Second).Format(time.RFC3339Nano)
+	// Rollout contains an earlier completed request_user_input question plus newer open-turn activity.
+	body := `{"timestamp":"` + oldTS + `","type":"session_meta","payload":{"id":"` + sid + `","cwd":"` + dir + `"}}` + "\n" +
+		`{"timestamp":"` + oldTS + `","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}` + "\n" +
+		`{"timestamp":"` + oldTS + `","type":"response_item","payload":{"type":"function_call","name":"request_user_input","call_id":"call_prev","arguments":"{\"questions\":[{\"id\":\"q1\",\"question\":\"Continue?\"}]}"}}` + "\n" +
+		`{"timestamp":"` + oldTS + `","type":"response_item","payload":{"type":"function_call_output","call_id":"call_prev","output":"{\"answers\":{\"q1\":{\"answers\":[\"Yes\"]}}}"}}` + "\n" +
+		`{"timestamp":"` + freshTS + `","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"e1","command":["powershell","-Command","Get-ChildItem"],"status":"completed","aggregated_output":"ok\n","exit_code":0}}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	approvalScreen := "  Would you like to run the following command?\n\n  $ powershell -Command Get-ChildItem\n\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n\n  Press enter to confirm or esc to cancel\n"
+	sh := &screenHost{bareHost: bareHost{kind: host.Herdr}, screen: approvalScreen}
+	n := &Node{
+		home:    dir,
+		hosts:   host.NewRegistry(sh),
+		state:   &stateFile{},
+		codices: newCodexRegistry(),
+		agents:  map[string]host.Agent{sid: {Agent: "codex", PaneID: "w2:p4", Cwd: dir, AgentStatus: proto.StatusBlocked, Attention: "waiting"}},
+		paths:   map[string]string{sid: rollout},
+		pathsAt: map[string]time.Time{sid: now},
+		metas:   map[string]quickMeta{},
+		bgScans: map[string]*bgScan{},
+		blockedAt: map[string]time.Time{
+			sid: now.Add(-25 * time.Second),
+		},
+	}
+
+	// Visible TUI approval must keep StatusBlocked even with newer open-turn rollout activity after blockedAt.
+	if row := paneRow(t, n, sid); row.Status != proto.StatusBlocked {
+		t.Fatalf("visible approval with rollout activity: got %s, want blocked", row.Status)
+	}
+	if !n.cx.hasApproval(sid) {
+		t.Fatal("expected screen check to record active approval")
+	}
+
+	// An open rollout question must not clear the cached approval bit without reading the screen.
+	askLine := `{"timestamp":"` + freshTS + `","type":"response_item","payload":{"type":"function_call","name":"request_user_input","call_id":"call_open","arguments":"{\"questions\":[{\"id\":\"q2\",\"question\":\"Proceed?\"}]}"}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(body+askLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cards := n.codexCardsNow(context.Background(), "")
+	if len(cards) == 0 {
+		t.Fatal("expected open question card")
+	}
+	if !n.cx.hasApproval(sid) {
+		t.Fatal("open rollout question cleared cached approval without reading the screen")
+	}
+}

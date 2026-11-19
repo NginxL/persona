@@ -133,7 +133,7 @@ func TestTodoPiecesConcurrentWrites(t *testing.T) {
 			a, b := piece("Hire movers"), piece("Measure the sofa")
 			oneEach(t, "task start/PATCH",
 				func() bool {
-					out := s.startPieces(context.Background(), PlanTask{PartOf: root.ID, After: []string{b.ID}}, a)
+					out, _ := s.startPieces(context.Background(), PlanTask{PartOf: root.ID, After: []string{b.ID}}, a)
 					return slices.Equal(out.After, []string{b.ID}) // a link that no longer holds is left out
 				},
 				func() bool { return patch(b.ID, `{"after":["`+a.ID+`"]}`)() == http.StatusOK },

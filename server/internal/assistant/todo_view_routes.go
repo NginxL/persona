@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -62,7 +63,36 @@ func (s *Service) listedTodosOf(ctx context.Context, briefs bool, ids map[string
 	if briefs {
 		links = s.briefLinksNow() // every lineage below is read from these, not from all the links each time
 	}
+	plans := make(map[string]*TaskPlan)
 	for i := range list {
+		piece := &list[i]
+		if piece.PartOf != "" {
+			if root, ok := s.todoNow(piece.PartOf); ok && root.RequireAcceptedAfter {
+				task := PlanTask{TodoID: piece.ID, RequestGate: root.ID}
+				if piece.PlanID != "" {
+					plan, cached := plans[piece.PlanID]
+					if !cached {
+						var err error
+						plan, err = s.loadPlan(ctx, piece.PlanID)
+						if err != nil && !errors.Is(err, errPlanNotFound) {
+							return nil, err
+						}
+						plans[piece.PlanID] = plan
+					}
+					if plan != nil && plan.State == planStarted {
+						for _, pt := range plan.Tasks {
+							if pt.TodoID == piece.ID && pt.RequestGate == root.ID && pt.OwnerStarted {
+								task.After = pt.After
+								break
+							}
+						}
+					}
+				}
+				blockers := s.requestBlockers(ctx, task)
+				// An empty array tells clients this piece passed the manager's gate.
+				piece.PrerequisiteBlockers = append([]string{}, blockers...)
+			}
+		}
 		if briefs {
 			list[i].Todo = s.withBriefFrom(list[i].Todo, links)
 		}

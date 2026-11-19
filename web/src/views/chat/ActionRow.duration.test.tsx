@@ -48,28 +48,28 @@ const suffix = () => host.querySelector("[data-tool-duration]");
 
 describe("ActionRow per-call duration (#8163)", () => {
   it("a real span renders the suffix on a wide row, without changing the row's own title", () => {
-    render(step("t1", 0, 4));
-    expect(suffix()?.textContent).toBe("4s");
+    render(step("t1", 0, 30));
+    expect(suffix()?.textContent).toBe("30s");
     expect(suffix()?.className).toContain("tabular-nums");
     expect(suffix()?.className).toContain("max-lg:hidden");
     // the parameter's title stays as it was; the duration is not duplicated into it on wide layouts
-    expect(row().title).toBe("npm test");
+    expect(row().title).toBe("跑单测");
   });
 
   it("on a compact layout the duration moves into the hover title while the suffix stays CSS-hidden", () => {
     narrow = true;
-    render(step("t1", 0, 4));
-    expect(row().title).toBe("npm test · 4s");
+    render(step("t1", 0, 30));
+    expect(row().title).toBe("跑单测 · 30s");
     expect(suffix()?.className).toContain("max-lg:hidden");
   });
 
   it("a sub-second or unfinished call shows no suffix and no duration in the title", () => {
     render(step("t2", 0, 0.4));
     expect(suffix()).toBeNull();
-    expect(row().title).toBe("npm test");
+    expect(row().title).toBe("跑单测");
 
     render(step("t3", 0), true);
     expect(suffix()).toBeNull();
-    expect(row().title).toBe("npm test");
+    expect(row().title).toBe("跑单测");
   });
 });

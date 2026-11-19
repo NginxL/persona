@@ -66,10 +66,11 @@ const (
 // the routes, its view (todo_view_routes.go).
 type listedTodo struct {
 	Todo
-	Ask            *todoAsk                   `json:"ask,omitempty"`
-	DecisionReview *decisionReview            `json:"decision_review,omitempty"`
-	Orphaned       *TodoOrphan                `json:"orphaned,omitempty"`
-	View           *assistantwire.TodoSummary `json:"view,omitempty"`
+	PrerequisiteBlockers []string                   `json:"prerequisite_blockers,omitzero"`
+	Ask                  *todoAsk                   `json:"ask,omitempty"`
+	DecisionReview       *decisionReview            `json:"decision_review,omitempty"`
+	Orphaned             *TodoOrphan                `json:"orphaned,omitempty"`
+	View                 *assistantwire.TodoSummary `json:"view,omitempty"`
 }
 
 // todoAsks are the open asks by to-do id, in the request's language: the ones the briefing lists (not passed, not ended,

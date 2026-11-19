@@ -61,7 +61,7 @@ describe("WorkGroup", () => {
 describe("ActionRow", () => {
   it("a command with a description is that sentence, no verb; the command is its title", () => {
     const p = presentAction(use("t1", "Bash", { command: "npm test", description: "跑单测" }));
-    expect(p).toEqual({ param: { text: "跑单测", title: "npm test" } });
+    expect(p).toEqual({ param: { text: "npm test", title: "跑单测" } });
     const html = renderToStaticMarkup(<ActionRow step={tool("t1", "Bash", { command: "npm test", description: "跑单测" })} mid="m" sid="s" />);
     expect(html).toContain("py-[3px]");
     expect(html).toContain("rounded-[8px]");
@@ -70,8 +70,8 @@ describe("ActionRow", () => {
 
   it("one without: 运行命令 and the command on a quieter line under it", () => {
     const html = renderToStaticMarkup(<ActionRow step={tool("t1", "Bash", { command: "git status --short" })} mid="m" sid="s" />);
-    expect(html).toContain(">运行命令<");
-    expect(html).toMatch(/pl-\[30px\][^>]*>git status --short</);
+    expect(html).toContain(">git status --short<");
+    expect(html).not.toContain("pl-[30px]");
   });
 
   it("a file is a chip with its name only; long parameters stop at 60 characters", () => {
@@ -97,7 +97,7 @@ describe("ActionRow", () => {
     expect(presentAction(use("n", "TaskCreate", { subject: "Write tests", description: "…" }))).toEqual({ verb: "加待办", param: { text: "Write tests", title: "Write tests" } });
     expect(presentAction(use("n", "ListAgents", {}))).toEqual({ verb: "看 Agent 列表" });
     expect(presentAction(use("n", "Monitor", { command: "tail -f x", description: "errors in x" })).verb).toBe("监视");
-    expect(presentAction(use("n", "PowerShell", { command: "Get-ChildItem" }))).toEqual({ verb: "运行命令", raw: "Get-ChildItem" });
+    expect(presentAction(use("n", "PowerShell", { command: "Get-ChildItem" }))).toEqual({ param: { text: "Get-ChildItem", title: "Get-ChildItem" } });
     expect(inlineInput(use("n", "Monitor", { command: "tail -f x", description: "d" }))).toBe("tail -f x");
   });
 
@@ -159,9 +159,9 @@ describe("ActionRow", () => {
       const r = endS === undefined ? undefined : res(id, "ok", endS);
       return { kind: "tool", id: u.id, use: u, ...(r ? { result: r } : {}), images: [] };
     };
-    const done = renderToStaticMarkup(<ActionRow step={span("t1", 0, 4)} mid="m" sid="s" />);
+    const done = renderToStaticMarkup(<ActionRow step={span("t1", 0, 30)} mid="m" sid="s" />);
     expect(done).toContain('data-tool-duration');
-    expect(done).toMatch(/data-tool-duration[^>]*>4s</);
+    expect(done).toMatch(/data-tool-duration[^>]*>30s</);
     // tabular, quiet and hidden only on compact layouts; the diff-stats layout is untouched
     expect(done).toContain("max-lg:hidden shrink-0 font-mono text-label text-tool-ink tabular-nums");
     expect(renderToStaticMarkup(<ActionRow step={span("t2", 0, 0.4)} mid="m" sid="s" />)).not.toContain("data-tool-duration");

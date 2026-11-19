@@ -3,6 +3,8 @@ package node
 import (
 	"encoding/json"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -132,5 +134,98 @@ func TestAgyToolArrayArgsAreClipped(t *testing.T) {
 	}
 	if _, small := agyTool("view_file", json.RawMessage(`[1,2]`)); string(small) != `[1,2]` {
 		t.Fatalf("small array changed: %s", small)
+	}
+}
+
+// The pane reader follows the companion's rules (integrations/antigravity/lib/map.js): a parallel call that fails at
+// once is exported before its sibling's result, and a call that never got a result must not take a later one.
+func TestAgyParallelResultsOutOfOrderPairWithTheirOwnCalls(t *testing.T) {
+	const early = `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","created_at":"2026-01-01T00:00:00Z","content":"go"}
+{"step_index":1,"type":"PLANNER_RESPONSE","created_at":"2026-01-01T00:00:01Z","tool_calls":[{"name":"run_command","args":{"CommandLine":"tail log"}},{"name":"manage_task","args":{"Action":"status"}}]}
+{"step_index":3,"type":"GENERIC","status":"INVALID","created_at":"2026-01-01T00:00:02Z","content":"Error invalid tool call","error":"invalid arguments"}
+`
+	const late = `{"step_index":2,"type":"GENERIC","status":"DONE","created_at":"2026-01-01T00:00:02Z","content":"tail output"}
+{"step_index":4,"type":"PLANNER_RESPONSE","created_at":"2026-01-01T00:00:03Z","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/tmp/a"}}]}
+{"step_index":5,"type":"GENERIC","status":"DONE","created_at":"2026-01-01T00:00:04Z","content":"file body"}
+`
+	steps, before := parseAgySteps([]byte(early), agyTestID)
+	if len(steps) != 3 {
+		t.Fatalf("early steps = %d", len(steps))
+	}
+	steps, after := parseAgySteps([]byte(early+late), agyTestID)
+	var order []int
+	for _, s := range steps {
+		order = append(order, s.seq)
+	}
+	if want := []int{1, 2, 3, 4, 5, 6}; !slices.Equal(order, want) {
+		t.Fatalf("step order = %v, want %v: a late step keeps its place and nothing is dropped", order, want)
+	}
+	if after.branch != before.branch {
+		t.Errorf("a late arrival is not a rewind, but the branch went from %q to %q", before.branch, after.branch)
+	}
+	if after.native == before.native {
+		t.Errorf("watchers must learn that earlier items changed: native stayed %q", after.native)
+	}
+	history := mapAgySteps(steps, time.Time{})
+	results := map[string]string{}
+	failed := map[string]bool{}
+	for _, it := range history.items {
+		if it.Kind == "tool_result" {
+			results[it.ToolUseID], failed[it.ToolUseID] = it.Text, it.IsError
+		}
+	}
+	var got []string
+	var uses []string
+	for _, it := range history.items {
+		if it.Kind == "tool_use" {
+			uses = append(uses, it.ToolUseID)
+			got = append(got, results[it.ToolUseID])
+		}
+	}
+	if want := []string{"tail output", "invalid arguments", "file body"}; !slices.Equal(got, want) {
+		t.Fatalf("results by call = %q, want %q", got, want)
+	}
+	if !failed[uses[1]] {
+		t.Error("the invalid call's result is an error")
+	}
+}
+
+func TestAgyCallWithoutResultDoesNotShiftLaterResults(t *testing.T) {
+	step := func(i int, typ, extra string) string {
+		return `{"step_index":` + strconv.Itoa(i) + `,"type":"` + typ + `","status":"DONE","created_at":"2026-01-01T00:00:00Z"` + extra + "}\n"
+	}
+	calls := func(names ...string) string {
+		var parts []string
+		for _, n := range names {
+			parts = append(parts, `{"name":"`+n+`","args":{}}`)
+		}
+		return `,"tool_calls":[` + strings.Join(parts, ",") + `]`
+	}
+	fixture := step(0, "USER_INPUT", `,"source":"USER_EXPLICIT","content":"go"`) +
+		step(1, "PLANNER_RESPONSE", calls("view_file", "run_command")) +
+		step(2, "GENERIC", `,"content":"first"`) + // the second call was interrupted: no result
+		step(3, "USER_INPUT", `,"source":"USER_EXPLICIT","content":"again"`) +
+		step(4, "PLANNER_RESPONSE", calls("view_file")) +
+		step(5, "GENERIC", `,"content":"second"`) +
+		step(6, "PLANNER_RESPONSE", calls("view_file", "grep_search")) +
+		step(7, "SYSTEM_MESSAGE", `,"content":"a background task finished"`) +
+		step(8, "GENERIC", `,"content":"third"`) +
+		step(9, "GENERIC", `,"content":"fourth"`)
+	steps, _ := parseAgySteps([]byte(fixture), agyTestID)
+	history := mapAgySteps(steps, time.Time{})
+	results := map[string]string{}
+	for _, it := range history.items {
+		if it.Kind == "tool_result" {
+			results[it.ToolUseID] = it.Text
+		}
+	}
+	var got []string
+	for _, it := range history.items {
+		if it.Kind == "tool_use" {
+			got = append(got, results[it.ToolUseID])
+		}
+	}
+	if want := []string{"first", "", "second", "third", "fourth"}; !slices.Equal(got, want) {
+		t.Fatalf("results by call = %q, want %q", got, want)
 	}
 }

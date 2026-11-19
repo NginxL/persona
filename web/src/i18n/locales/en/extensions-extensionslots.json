@@ -1,5 +1,8 @@
 {
   "sidebar": "Sidebar",
   "redraw": "Redraw",
-  "extensions": "Extensions"
+  "extensions": "Extensions",
+  "cards_collapse": "Collapse",
+  "cards_expand": "Expand",
+  "card_see_all": "See all"
 }

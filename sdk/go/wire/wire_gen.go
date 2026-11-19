@@ -3824,6 +3824,10 @@ type ConnectorInboxThing struct {
 	// Where a reply goes and who sees it.
 	ReplyTo  string `json:"reply_to,omitempty"`
 	CanReply bool   `json:"can_reply,omitempty"`
+	// The thread's picture: one of the connector's own media refs (thread.media, as a ThreadChat's avatar) or an https
+	// address the hub fetches, either always naming the same bytes (docs "Avatars"). The other person of a private chat,
+	// a group's own. The Inbox row draws it; without one, the initial.
+	Avatar string `json:"avatar,omitempty"`
 	// ConnectorTier, or empty for the model.
 	Tier string `json:"tier,omitempty"`
 	Why  string `json:"why,omitempty"`

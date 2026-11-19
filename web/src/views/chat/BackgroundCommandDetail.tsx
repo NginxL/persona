@@ -56,7 +56,9 @@ async function readTail(path: string, signal: AbortSignal, manager: string | und
   return { text, tail };
 }
 
-/** Command output stays within Background tasks; the parent retains the selected task after it leaves the list. */
+/** Command output stays within Background tasks; the parent retains the selected task after it leaves the list. A task
+ *  whose output file is not known yet (a Monitor before its first event, #10852) shows the rest, says there is no output
+ *  and offers no file; when the file arrives the same detail reads it, keeping the focus and the command's fold. */
 export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, owner, manager, onBack, onOpenFile }: Props) {
   const liveOwner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
   const sameManager = useStore(() => {
@@ -72,7 +74,9 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
   const duration = backgroundDurationMs(task, active, now);
   const commandId = useId();
   const [fullCommand, setFullCommand] = useState(false);
-  const key = JSON.stringify([mid, sid, cwd, task.id, task.output_file, owner, manager]);
+  const file = task.output_file;
+  const opened = JSON.stringify([mid, sid, cwd, task.id, owner, manager]);
+  const key = JSON.stringify([mid, sid, cwd, task.id, file, owner, manager]);
   const [output, setOutput] = useState<Output>({ key });
   const [retry, setRetry] = useState(0);
   const bar = useRef<HTMLDivElement>(null);
@@ -85,11 +89,11 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
 
   useEffect(() => {
     if (focus && current) bar.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    // Focus only on opening a different command, not on output refreshes.
+    // Focus only on opening a different command, not on output refreshes or its output file arriving.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [opened]);
   useEffect(() => {
-    if (!current || !task.output_file) return;
+    if (!current || !file) return;
     const ac = new AbortController();
     const token = getToken();
     abort.current = ac;
@@ -101,7 +105,7 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
       busy = true;
       setOutput(old => ({ ...(old.key === key ? old : { key }), loading: true }));
       try {
-        const path = `/machines/${enc(mid)}/file/download?path=${enc(task.output_file!)}&cwd=${enc(cwd ?? "")}`;
+        const path = `/machines/${enc(mid)}/file/download?path=${enc(file)}&cwd=${enc(cwd ?? "")}`;
         const value = await readTail(path, ac.signal, manager, token, owner, requestActive);
         if (requestActive()) setOutput({ key, ...value, loading: false });
       } catch (error) {
@@ -130,8 +134,9 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
     }}>
       <div ref={bar} className="flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1.5">
         <IconButton icon="arrowLeft" label={t("chat-activity.back")} size={24} iconSize={14} onClick={back} />
-        <h3 className="min-w-0 flex-1 truncate text-meta font-medium text-ink">{backgroundTitle(task)}</h3>
-        <Button tone="quiet" size="sm" data-bg-open-file onClick={() => { if (scopeCurrent()) onOpenFile(); }}>{t("chat-activity.open_output_file")}</Button>
+        {/* Without Open as file the title is as tall as it, so the bar keeps its height when the file arrives. */}
+        <h3 className={cx("min-w-0 flex-1 truncate text-meta font-medium text-ink", !file && "leading-7")}>{backgroundTitle(task)}</h3>
+        {file && <Button tone="quiet" size="sm" data-bg-open-file onClick={() => { if (scopeCurrent()) onOpenFile(); }}>{t("chat-activity.open_output_file")}</Button>}
       </div>
       <dl className="shrink-0 space-y-2 border-b border-line px-3 py-3 text-label">
         <div className="flex items-start gap-3">
@@ -174,7 +179,7 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
         const el = body.current!; follows.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
       }}>
         {shown.text ? <pre className="font-mono text-label whitespace-pre-wrap break-words text-ink">{shown.text}</pre>
-          : !shown.error && <p className="text-label text-ink-3">{t(shown.text === undefined ? "chat-activity.output_loading" : active ? "chat-activity.output_empty_running" : "chat-activity.output_empty_ended")}</p>}
+          : !shown.error && <p className="text-label text-ink-3">{t(file && shown.text === undefined ? "chat-activity.output_loading" : active ? "chat-activity.output_empty_running" : "chat-activity.output_empty_ended")}</p>}
       </div>
     </div>
   );

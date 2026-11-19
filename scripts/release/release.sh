@@ -45,6 +45,9 @@ AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH" -authenti
 
 mkdir -p "$OUT"
 cd apple
+# The whole project, whatever the shell exported: the switch that leaves the watch app and the share extension out is for
+# sim.sh's development builds only (apple/lean-dev-build.yml).
+unset PERSONA_LEAN_DEV_BUILD
 xcodegen generate -q
 cd ..
 

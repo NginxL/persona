@@ -34,14 +34,19 @@ while release != "-" and not os.path.exists(release) and time.monotonic() < dead
 with open(log, "a") as f:
     f.write(f"{name} end\\n")
 """
-# A command that writes <ready> once its SIGTERM handler is in place and exits 42 when the TERM comes.
-TERM_CATCHER = """import signal, sys, time
+# How long the signal tests wait for a step that takes well under a second on an idle machine, and how long their
+# command sleeps when no signal comes: ten times the wait, so a TERM that never arrived cannot pass for a slow machine.
+SIGNAL_WAIT = 60
+UNSIGNALLED_SLEEP = 10 * SIGNAL_WAIT
+# A command that writes <ready> once its SIGTERM handler is in place and exits 42 when the TERM comes; without one it
+# sleeps UNSIGNALLED_SLEEP seconds and exits 3.
+TERM_CATCHER = f"""import signal, sys, time
 def caught(signum, frame):
     open(sys.argv[2], "w").write("TERM")
     sys.exit(42)
 signal.signal(signal.SIGTERM, caught)
 open(sys.argv[1], "w").write("ready")
-time.sleep(20)
+time.sleep({UNSIGNALLED_SLEEP})
 sys.exit(3)
 """
 # The same, for a caller that ignores SIGTERM: the command inherits the ignore and only reports what it got.
@@ -243,9 +248,15 @@ class HeavySlotTests(unittest.TestCase):
         (self.tmp / "catcher.py").write_text(TERM_CATCHER)
         ready, caught = self.tmp / "ready", self.tmp / "caught"
         proc = self.spawn("go", sys.executable, str(self.tmp / "catcher.py"), str(ready), str(caught))
-        self.wait_for(ready.exists, "the command never installed its handler")
+        self.wait_for(ready.exists, "the command never installed its handler", seconds=SIGNAL_WAIT)
         proc.send_signal(signal.SIGTERM)
-        proc.communicate(timeout=20)
+        try:
+            proc.communicate(timeout=SIGNAL_WAIT)
+        except subprocess.TimeoutExpired:
+            # The command sleeps ten times as long as this wait unless the TERM reaches it: say which side stalled.
+            if caught.exists():
+                self.fail(f"the command caught the TERM, but the helper had not exited {SIGNAL_WAIT}s later")
+            self.fail(f"the TERM never reached the command: it was still sleeping {SIGNAL_WAIT}s later")
         self.assertEqual("TERM", caught.read_text())
         self.assertEqual(42, proc.returncode)  # the command's own exit status after it handled the TERM
         self.assertEqual(0, self.run_helper("go", "true", env={"PERSONA_HEAVY_SLOT_TIMEOUT": "0"})[0])
@@ -257,7 +268,7 @@ class HeavySlotTests(unittest.TestCase):
         ready, caught = self.tmp / "ready", self.tmp / "caught"
         proc = self.spawn("go", sys.executable, str(self.tmp / "ignorer.py"), str(ready), str(caught),
                           preexec_fn=ignore_term)
-        self.wait_for(ready.exists, "the command never started")
+        self.wait_for(ready.exists, "the command never started", seconds=SIGNAL_WAIT)
         proc.send_signal(signal.SIGTERM)
         time.sleep(0.3)
         self.assertIsNone(proc.poll())
@@ -313,20 +324,30 @@ class HeavySlotDefaultsTests(unittest.TestCase):
 class HeavySlotCallersTests(unittest.TestCase):
     def test_ci_and_the_pr_watcher_take_no_slot(self):
         # A hosted runner runs one job, so a slot there would only make that job's own steps wait for each other, and
-        # the PR watcher's checks must not queue behind local builds. Neither runs a script that takes a slot today,
-        # which is why CI does not set PERSONA_HEAVY_SLOTS=0 (docs/operations/testing.md "Heavy build slots"); a lane
-        # or a watcher step that starts to run one sets it there.
+        # the PR and main watchers' checks must not queue behind local builds. None of them runs a script that takes a
+        # slot today, which is why CI does not set PERSONA_HEAVY_SLOTS=0 (docs/operations/testing.md "Heavy build
+        # slots"); a lane or a watcher step that starts to run one sets it there. The watchers' steps live in their
+        # scripts and example configs, and in the skills that run them (their scripts and the SKILL.md an Agent
+        # follows); the lanes they call are the CI scripts above.
         wrapped = ("heavy_slot.py", "app/sim.sh", "app/android.sh", "check-fast.sh", "scripts/sim.sh",
                    "scripts/android.sh")
-        patterns = (".github/workflows/*.yml", "scripts/ci/*.sh", "scripts/ci/*.py", "scripts/operations/*.py")
-        files = [path for pattern in patterns for path in sorted(ROOT.glob(pattern))
-                 if not path.name.startswith("test_")]
-        self.assertTrue(files)
+        groups = {
+            "CI": (".github/workflows/*.yml", "scripts/ci/*.sh", "scripts/ci/*.py"),
+            "the operations scripts, the PR and main watchers among them": (
+                "scripts/operations/*.py", "scripts/operations/*watch*.json", "scripts/operations/*watch*.service"),
+            "the PR watcher's skill": (".claude/skills/pr-review-merge-loop/**/*",),
+            "the main watcher's skill": (".claude/skills/main-verify-fix-loop/**/*",),
+        }
         callers = []
-        for path in files:
-            text = path.read_text(encoding="utf-8")
-            if any(name in text for name in wrapped) and "PERSONA_HEAVY_SLOTS" not in text:
-                callers.append(str(path.relative_to(ROOT)))
+        for group, patterns in groups.items():
+            files = sorted({path for pattern in patterns for path in ROOT.glob(pattern)
+                            if path.is_file() and not path.name.startswith("test_")})
+            # A moved directory must not leave its group scanning nothing.
+            self.assertTrue(files, f"no files for {group}: {patterns}")
+            for path in files:
+                text = path.read_text(encoding="utf-8")
+                if any(name in text for name in wrapped) and "PERSONA_HEAVY_SLOTS" not in text:
+                    callers.append(str(path.relative_to(ROOT)))
         self.assertEqual([], callers)
 
 if __name__ == "__main__":

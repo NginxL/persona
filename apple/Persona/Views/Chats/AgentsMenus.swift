@@ -179,6 +179,22 @@ struct AgentsListMenu: View {
     }
 }
 
+#if os(iOS)
+/// The Sidebar layout's Agents heading's ⋯ (#10738): `AgentsListMenu` in a view graph of its own (`MenuIsland`). In the
+/// sidebar's list the list's updates reached the menu several times a second while agents worked, and SwiftUI handed its
+/// items to UIKit again each time: open and scrolled down, it jumped back to its top.
+struct SidebarAgentsListMenu: View, Equatable {
+    let actions: AgentsListMenu.Actions
+
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.actions === b.actions }
+
+    var body: some View {
+        AgentsListMenu(actions: actions)
+            .accessibilityIdentifier("sidebar-agents-menu")
+    }
+}
+#endif
+
 #if !os(iOS)
 /// A row's long-press menu in Agents. Equal while the facts it shows are: the row's session changes with every push
 /// while its agent works (a new last line), and the menu held open on it was rebuilt each time.
@@ -371,9 +387,12 @@ struct SpaceHeaderMenu: View, Equatable {
 }
 
 /// The grouping, one tap away under the quick filters (#5766), in a cell without the search input. The same stored
-/// choice as the ⋯ menu's (`dev.grouping`), kept across launches. Reads nothing that a hub push changes.
-struct AgentsGroupingMenu: View {
+/// choice as the ⋯ menu's (`dev.grouping`), kept across launches. Reads nothing that a hub push changes. Equal while
+/// it is drawn the same way: in the list it sits in a `MenuIsland` (#10738), as the list's updates replaced it while open.
+struct AgentsGroupingMenu: View, Equatable {
     var iconOnly = false
+
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.iconOnly == b.iconOnly }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StoredValue("dev.grouping") private var grouping: DevGrouping = .standard
     private var shown: DevGrouping { DevGrouping.resolvedNow(grouping) }

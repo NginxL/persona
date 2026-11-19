@@ -84,7 +84,11 @@ func (s *Service) backgroundSupervises(ctx context.Context, self string, t Todo)
 		return false
 	}
 	sup := t.Supervision.Supervisor
-	return !s.isLeader(ctx, sup) && !s.isLeaderRef(sup)
+	if s.isLeaderRef(sup) {
+		return false
+	}
+	// A leader conversation on a runtime cannot be told anything (digestTarget): its tasks are this route's to review.
+	return !s.isLeader(ctx, sup) || s.runtimeConversation(ctx, s.settings(ctx).MachineID, sup)
 }
 
 // followUpWords tells conversation self, in the answer of the tool that just made an agent its supervised task
@@ -312,11 +316,11 @@ func (s *Service) startBackground(ctx context.Context) (string, error) {
 }
 
 // backgroundNeeded: one of the signals list would go to the background supervisor if there were one (digestTo).
-func (s *Service) backgroundNeeded(cfg Settings, list []superviseSignal) bool {
+func (s *Service) backgroundNeeded(ctx context.Context, cfg Settings, list []superviseSignal) bool {
 	const probe = "\x00background"
 	cfg.BackgroundSupervisor, cfg.BackgroundSupervisorMachineID = probe, cfg.MachineID
 	for _, g := range list {
-		if _, handled, _ := s.leaderRoute(g); !handled && s.digestTo(cfg, g) == probe {
+		if _, handled, _ := s.leaderRoute(g); !handled && s.digestTarget(ctx, cfg, g) == probe {
 			return true
 		}
 	}

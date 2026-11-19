@@ -5,6 +5,7 @@ package persona.feature.knowledge
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import persona.core.contracts.HubScope
+import persona.core.contracts.GroupKeys
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
@@ -123,6 +124,16 @@ internal data class KnowledgeSending(val busy: Boolean = false, @StringRes val m
 /** A recording's minutes being made or turned into to-dos (#2738): [busy] while the write and its read-back are on their way; [message] why one didn't go. */
 internal data class KnowledgeMinutesWork(val busy: Boolean = false, val message: UiText? = null)
 
+/** A meeting hand-off: [made] is the hub's answer shown before read-back. */
+internal data class KnowledgeMeetingHandoffWork(
+    val busy: Boolean = false,
+    val error: UiText? = null,
+    val made: MeetingHandoff? = null,
+)
+
+/** The sheet lives in the ViewModel so Activity recreation cannot lose Retry or replay an earlier success. */
+internal data class KnowledgeMeetingHandoffSheet(val again: MeetingHandoff?)
+
 /** The tag editor's save: [saved] counts the saves that went through, so the sheet closes on each; [error] says why one did not. */
 internal data class KnowledgeTagging(val busy: Boolean = false, val error: UiText? = null, val saved: Int = 0)
 
@@ -141,6 +152,8 @@ internal class KnowledgeDetailViewModel(
     val owner: String? = null,
     private val conversations: AssistantConversations? = null,
     private val messages: MessageSender? = null,
+    internal val sessions: SessionsRepository? = null,
+    internal val namespace: String? = null,
     private val hierarchy: () -> Boolean = { false },
 ) : ViewModel() {
     // The hub this page was opened on: its pin names nothing on another one.
@@ -155,6 +168,10 @@ internal class KnowledgeDetailViewModel(
     val tagging = _tagging.asStateFlow()
     private val _minutes = MutableStateFlow(KnowledgeMinutesWork())
     val minutesWork = _minutes.asStateFlow()
+    private val _meetingHandoff = MutableStateFlow(KnowledgeMeetingHandoffWork())
+    val meetingHandoffWork = _meetingHandoff.asStateFlow()
+    private val _meetingSheet = MutableStateFlow<KnowledgeMeetingHandoffSheet?>(null)
+    val meetingHandoffSheet = _meetingSheet.asStateFlow()
     private val opened = Channel<KnowledgeHandoff>(Channel.BUFFERED)
     /** Each question handed over, and where it went. */
     val handoffs = opened.receiveAsFlow()
@@ -183,6 +200,8 @@ internal class KnowledgeDetailViewModel(
                 _sending.value = KnowledgeSending()
                 _tagging.value = KnowledgeTagging()
                 _minutes.value = KnowledgeMinutesWork()
+                _meetingHandoff.value = KnowledgeMeetingHandoffWork()
+                _meetingSheet.value = null
                 while (opened.tryReceive().isSuccess) { }
             }
         }
@@ -298,6 +317,40 @@ internal class KnowledgeDetailViewModel(
     }
 
     fun dismissMinutesMessage() { _minutes.update { it.copy(message = null) } }
+
+    /** Hands the meeting to [target], showing the kept answer at once and reading the detail again behind it. */
+    fun handOff(target: Session, text: String, transcript: Boolean) {
+        if (_meetingHandoff.value.busy) return
+        val repository = connection.current.value ?: return
+        if (kind != KnowledgeKind.Recordings || page.value.scope != repository.scope) return
+        _meetingHandoff.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            try {
+                checkCurrent(repository)
+                val request = MeetingHandoffRequest(GroupKeys.raw(target.machineId), target.sessionId,
+                    target.displayTitle, text.trim(), transcript)
+                val result = withContext(pins) { repository.handOff(id, request) }.inMeetingGroup(namespace)
+                checkCurrent(repository)
+                _meetingHandoff.update { it.copy(busy = false, error = null, made = result) }
+                if (result.state == "sent") _meetingSheet.value = null
+                refresh()
+            } catch (cancelled: CancellationException) {
+                _meetingHandoff.update { it.copy(busy = false) }
+                throw cancelled
+            } catch (error: Exception) {
+                _meetingHandoff.update { it.copy(busy = false, error = meetingHandoffCallError(error)) }
+            }
+        }
+    }
+
+    fun showMeetingHandoff(again: MeetingHandoff?) { _meetingSheet.value = KnowledgeMeetingHandoffSheet(again) }
+
+    fun dismissMeetingHandoff() {
+        _meetingSheet.value = null
+        dismissMeetingHandoffError()
+    }
+
+    fun dismissMeetingHandoffError() { _meetingHandoff.update { it.copy(error = null) } }
 
     private fun checkCurrent(repository: KnowledgeRepository) {
         if (connection.current.value !== repository) throw CancellationException("Pairing changed")

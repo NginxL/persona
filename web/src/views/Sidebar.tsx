@@ -70,7 +70,7 @@ import { RUNTIME_AGENTS_PATH, supportsPagedAgents, runtimeActiveAt, runtimeAgent
 import { SESSIONS_CATALOG_FEATURE, SESSIONS_JUST_FINISHED_FEATURE, SESSIONS_QUICK_FILTERS_FEATURE, SESSIONS_TODO_FEATURE, type GroupDimension, type TodoNames } from "../lib/session-groups";
 import { type ListFilters } from "../lib/session-list";
 import { NoComputers, useAddComputer } from "./machines/AddComputerEntry";
-import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
+import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, pageLabel, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
 import { NavRow, PersonalAgents, PersonaRow, SessionRow, SubHeading } from "./SidebarRows";
 import { GroupBranch, LooseSection, MachineSection, RepoMachineSection, SessionTally, type SpaceMenuFn, type WorkspaceTreeActions, SpaceSection, TodoTreeView } from "./SidebarTree";
 import { CollapseButton, PagesTally } from "./SidebarRail";
@@ -531,7 +531,7 @@ export function NavGrid({ pages, more = [], activeKey, go, onNavigate }: { pages
             href={href(p.to)}
             onClick={go(p.to)}
             title={p.title ?? p.label}
-            aria-label={p.badge !== undefined ? `${p.label} ${p.badge}` : p.label}
+            aria-label={pageLabel(p)}
             aria-current={active ? "page" : undefined}
             className={cx("relative z-10 flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-[9px] px-0.5 py-1.5 transition-[background-color,transform] duration-150 active:scale-[0.96]", active ? "bg-hover" : "hover:bg-hover")}
           >
@@ -580,7 +580,7 @@ function MorePages({ more, reg, hover, activeKey, go }: { more: NavPage[]; reg: 
         type="button"
         onClick={toggle}
         aria-expanded={!folded}
-        title={counted.map((p) => `${p.label} ${p.badge}`).join(t("sidebar.list_separator")) || undefined}
+        title={counted.map(pageLabel).join(t("sidebar.list_separator")) || undefined}
         className="touch-hit relative z-10 flex w-full items-center gap-2 rounded-[7px] px-2 sidebar-row text-left transition-[background-color,transform] duration-150 hover:bg-hover active:scale-[0.98] [@media(pointer:coarse)]:min-h-11"
       >
         <span className="text-ink-3"><Icon name="more" size={14} stroke={1.8} /></span>

@@ -187,9 +187,11 @@ People and Agents follow the same steps, each with their own GitHub account. Tem
   platform checks; no hosted repository guards run automatically on PRs.
 - Server: `scripts/test/test-server.sh` (real Postgres on the hub machine); portable CI creates its own disposable Postgres 18 container.
   Deploy: `scripts/deploy/deploy.sh [machine id…]`.
-- iOS: `scripts/app/sim.sh [-openSession <machine>/<session>]` builds, installs on your simulator and pairs it. Before xcodegen / Xcode,
-  run `python3 scripts/persona_config.py xcconfig`; before a manual `xcodebuild`, `eval "$(python3 scripts/persona_config.py env)"` or an
-  old Xcode reports errors that look like someone else's breakage.
+- iOS: `scripts/app/sim.sh [--with-watch] [-openSession <machine>/<session>]` builds, installs on your simulator and pairs it; without
+  `--with-watch` it leaves out the watch app and share extension, and it builds only the Rust core's simulator slice
+  (`docs/operations/testing.md`, "Development builds"). Before xcodegen / Xcode, run `python3 scripts/persona_config.py xcconfig`, and
+  before a phone or Designed-for-iPad build in Xcode, `native/app-core/scripts/build-apple.sh` with no flag; before a manual `xcodebuild`,
+  `eval "$(python3 scripts/persona_config.py env)"` or an old Xcode reports errors that look like someone else's breakage.
 - Android: `scripts/app/android.sh [install|apk|test|lint|shots]` (`docs/android/android.md`).
 - Shared Rust core: `scripts/ci/core.sh` (needs rustup); a change to a wire type regenerates the clients' codecs (`native/app-core/README.md`).
 - HarmonyOS: from `harmony/`, run `node --test tests/*.test.mjs` and `node tests/run-domain.mjs` (Node.js 24+), then `devecocli build --build-mode release` with the API 26 SDK and locked native SSH core. Native device checks and fixture setup: `docs/harmony/harmony.md` ("Verification").
@@ -228,7 +230,8 @@ The full list is in `docs/lessons/`; read the file for the area you touch first.
 - **Minimum compiler is Xcode 26.0 (Swift 6.2)**: wrap newer-SDK APIs in `#if compiler(>=6.4)` with the old behavior in `#else`
   (`#available` covers only runtime). Build with 26.0 when you have it; otherwise note the Xcode you used and "26.0 not verified" in the
   PR. Raising the minimum is the user's decision (`docs/lessons/ios.md`, "Minimum compatible compiler").
-- The watch app targets watchOS 10 and compiles all of `Shared/`: only watchOS 10 APIs, with `#available` fallbacks (`Color.blended`, not `Color.mix`).
+- The watch app targets watchOS 10 and compiles all of `Shared/`: only watchOS 10 APIs, with `#available` fallbacks (`Color.blended`, not `Color.mix`);
+  `sim.sh` leaves the watch out, so check a `Shared/` change with `sim.sh --with-watch` (it says so; `docs/operations/testing.md`, "Development builds").
 - The iPhone and iPad app targets iOS 18.6 (#6730): an iOS 26 API gets `if #available(iOS 26.0, *)` with the older behavior, or a
   `SystemCompat.swift` helper; toolbar items choose on the view, since `ToolbarContentBuilder` can't (`docs/lessons/ios.md`, "iOS 18.6 floor").
 - Someone else's redeploy can wipe the hub's memory at any time: flows that span requests must be self-contained or persisted.

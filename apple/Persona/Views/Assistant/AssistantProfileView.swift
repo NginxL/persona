@@ -67,7 +67,7 @@ struct AssistantProfileView: View {
         #if DEBUG
         .onAppear {
             if debugPage == nil, let p = UserDefaults.standard.string(forKey: "openAssistantPage"),
-               !["profile", "assistant", "avatars"].contains(p) { debugPage = p }
+               !["profile", "assistant", "avatars", "promptsEntry"].contains(p) { debugPage = p }
         }
         .navigationDestination(item: $debugPage) { p in
             switch p {
@@ -75,6 +75,7 @@ struct AssistantProfileView: View {
             case "runs": AssistantRunsView()
             case "memory", "memoryFile", "memoryEdit": AssistantMemoryView()
             case "places", "place", "newPlace": SavedPlacesView()
+            case "prompts", "prompt", "newPrompt": SavedPromptsView()
             case "standing": StandingAuthorizationsView()
             case "agentFollowUp": AgentFollowUpView()
             default: AssistantNotesView()
@@ -84,6 +85,7 @@ struct AssistantProfileView: View {
     }
 
     private var list: some View {
+        ScrollViewReader { proxy in
         List {
             Section { header }
                 .listRowBackground(Color.clear)
@@ -134,6 +136,17 @@ struct AssistantProfileView: View {
             } footer: {
                 Text("“About Me” is what you tell Persona; “Memory” is what it notes down on its own in chats. You can edit both.")
             }
+            Section {
+                NavigationLink { SavedPromptsView() } label: {
+                    row("Saved Prompts", Theme.Icon.quickCommands, detail: savedPromptsDetail)
+                }
+                .accessibilityIdentifier("assistant-saved-prompts")
+            } header: {
+                Text("In Chats")
+            } footer: {
+                Text(Self.savedPromptsFooter)
+            }
+            .id("assistant-in-chats")
             if let quiet = quietTasks {
                 Section {
                     Toggle(isOn: quiet) {
@@ -204,6 +217,14 @@ struct AssistantProfileView: View {
             }
         }
         .themedPage()
+        #if DEBUG
+        .task { // `-openAssistantPage promptsEntry`: scrolled to In Chats, for screenshots of the Saved Prompts row
+            guard UserDefaults.standard.string(forKey: "openAssistantPage") == "promptsEntry" else { return }
+            try? await Task.sleep(for: .seconds(2))
+            proxy.scrollTo("assistant-in-chats", anchor: .center)
+        }
+        #endif
+        }
     }
 
     /// The BeautifulUI style: its list cards, a heading over each and a note under it.
@@ -246,6 +267,12 @@ struct AssistantProfileView: View {
                     NavigationLink { SavedPlacesView() } label: {
                         buiRow("Saved Places", Theme.Icon.place, detail: placesDetail)
                     }
+                }
+                BUIListSection(String(localized: "In Chats"), footer: Self.savedPromptsFooter) {
+                    NavigationLink { SavedPromptsView() } label: {
+                        buiRow("Saved Prompts", Theme.Icon.quickCommands, detail: savedPromptsDetail)
+                    }
+                    .accessibilityIdentifier("assistant-saved-prompts")
                 }
                 if let quiet = quietTasks {
                     BUIListSection(String(localized: "Task Notifications"), footer: Self.quietFooter) {
@@ -418,6 +445,15 @@ struct AssistantProfileView: View {
     private var upcoming: [AssistantUpcoming] {
         AssistantUpcoming.merge(tasks ?? []).prefix(3).map { $0 }
     }
+
+    /// Saved prompts (#9436): how many, once the list is read; nothing on an assistant without them.
+    private var savedPromptsDetail: String? {
+        let store = SavedPromptStore.shared
+        guard store.loaded, store.supported, !store.prompts.isEmpty else { return nil }
+        return String(localized: "\(store.prompts.count) saved", comment: "Saved prompts count on Assistant Profile")
+    }
+
+    static let savedPromptsFooter = String(localized: "Your own / prompts: the instructions you send again and again. Type / in any chat to use one.")
 
     private func row(_ title: LocalizedStringResource, _ symbol: String, detail: String?) -> some View {
         LabeledContent {

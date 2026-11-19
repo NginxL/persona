@@ -47,6 +47,7 @@
   "run_if_approval": "允许在每次定时运行前，在任务电脑上执行此命令吗？",
   "run_if_skipped": "运行前检查要求跳过本次运行。",
   "run_if_failed": "运行前检查失败：{error}",
+  "retry_unknown": "定时任务自动重试时 Persona 重启了，无法确认是否已发送，因此没有再次发送。",
   "todo_no_evidence": "未观察到 Agent 新答复、验收项状态变化或显式进展上报。",
   "todo_stalled": "{name}：连续 {count} 次定时检查没有可观察的进展。上次运行：{reason}",
   "todo_decide": "无进展原因：{reason}。换做法，还是继续等？",

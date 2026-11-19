@@ -136,7 +136,7 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       items.push(...unboundSessions(sessions, filtered)
         .filter((s) => (!machine || s.machine_id === machine) && match(`${s.title} ${s.cwd} ${s.machine_id}`))
         .map(sessionItem));
-      if (!machine) items.push(...todos.filter((todo) => match(`${todo.title} ${todo.notes ?? ""}`)).map((todo) => todoItem(todo, lookup)));
+      items.push(...todos.filter((todo) => (!machine || (todo.agents ?? []).some((a) => !a.released_at && a.machine_id === machine)) && match(`${todo.title} ${todo.notes ?? ""}`)).map((todo) => todoItem(todo, lookup)));
     }
     return workLanes(items);
   }, [view, board, search, machine, archived, sessionsOf, sessions, todos, lookup]);

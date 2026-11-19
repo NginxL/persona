@@ -48,6 +48,11 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		return h, nil
 	}
 	if known {
+		// An omp whose extension left with it (omp exited): a stopped session the node answers from its file and a
+		// message resumes (ompcalls.go), not a runtime that is away.
+		if n.ompStopped(method, id) {
+			return nil, nil
+		}
 		if awayReads[method] && n.runtimeTranscript(id) != "" {
 			return nil, nil // the node reads the transcript (n.file), as it does while the runtime lists the session
 		}

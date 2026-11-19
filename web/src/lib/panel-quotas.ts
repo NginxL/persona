@@ -9,7 +9,14 @@ import { liveAccounts, useUsageWindows, type UsageAccount } from "./usage-window
 
 export interface QuotaLauncher {
   name: string;
+  agent?: string;
+  agent_type?: string;
   base_url?: string;
+}
+
+/** Provider name for matching a local subscription account ("codex" | "claude"), matching unconnectedUsageProviders. */
+export function localLauncherProvider(id: string, launcher?: QuotaLauncher): string {
+  return (launcher?.agent_type || launcher?.agent || id).toLowerCase();
 }
 
 /** Converts an unambiguous live local subscription account for `provider` ("codex" | "claude") on `machineName` into a
@@ -71,7 +78,7 @@ export function usePanelQuotas(mid: string, providers: readonly { id: string }[]
       if (out[id]?.quota) continue;
       const l = launchers?.find((x) => x.name === id);
       if (l?.base_url) continue;
-      const local = localSubscriptionQuota(live, id, machineName);
+      const local = localSubscriptionQuota(live, localLauncherProvider(id, l), machineName);
       if (local) out[id] = local;
     }
     return out;

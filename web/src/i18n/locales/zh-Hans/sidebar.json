@@ -135,6 +135,7 @@
   "folded_states": "收起的 Agent：{list}",
   "unread_messages_count": "{count} 条未读消息",
   "inbox_badge_title": "收件箱：{count} 条未读事项，在等你的 Agent 看「总览」",
+  "todos_badge_title": "需要你处理的待办 {count} 个",
   "list_menu": "Agent 列表选项",
   "list_menu_sorted": "Agent 列表选项：{sort}",
   "not_connected_yet": "还没连上",

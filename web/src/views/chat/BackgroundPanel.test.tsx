@@ -204,13 +204,62 @@ describe("a background task", () => {
     expect(row.querySelector('button[aria-label="复制命令"]')).not.toBeNull();
   });
 
-  it("is a plain row when it has no output to open", () => {
+  it("is a plain row for a subagent with no output to open", () => {
     put({ background: [sub] });
     draw();
     const row = q('[data-bg-task="b2"]')!;
     expect(row.querySelector("[data-bg-kind]")!.getAttribute("data-bg-kind")).toBe("agent");
     expect(row.querySelector("button")).toBeNull();
     expect(row.textContent).toContain("Review the change");
+  });
+
+  it("opens a running Monitor before it has an output file, and switches to its output in place (#10852)", async () => {
+    const monitor: BackgroundTask = { id: "b3", kind: "monitor", description: "Watch the build log", command: "tail -f build.log | grep --line-buffered error", started_at: at(-20) };
+    put({ background: [shell, monitor, sub] });
+    const opened: Asked = { kind: "background", mid: "m", sid: "s" };
+    act(() => openPanel(opened));
+    draw(opened);
+    const row = q('[data-bg-task="b3"]')!;
+    expect(row.querySelector("[data-bg-kind]")!.getAttribute("data-bg-kind")).toBe("monitor");
+    act(() => row.querySelector<HTMLElement>("[data-bg-row-button]")!.click()); await flush();
+    expect(getPanel()).toEqual({ ...opened, task: "b3" });
+    const detail = q('[data-bg-command-detail="b3"]')!;
+    expect(detail.querySelector('[role="status"]')!.textContent).toBe("运行中");
+    expect(q("[data-command-runtime]")!.textContent).toBe("20s");
+    expect(q("[data-command-full]")!.textContent).toBe(monitor.command);
+    expect(q("[data-command-output]")!.textContent).toBe("暂无输出。");
+    expect(q("[data-bg-open-file]")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(q('button[aria-label="返回"]'));
+    // The reader unfolds the command and moves on to Copy; then the Monitor's first event names its file.
+    act(() => [...detail.querySelectorAll("button")].find((b) => b.textContent === "显示完整命令")!.click());
+    const copy = detail.querySelector<HTMLElement>('button[aria-label="复制命令"]')!;
+    act(() => copy.focus());
+    put({ background: [shell, { ...monitor, output_file: "/tmp/out/b3.log" }, sub] }); await flush();
+    expect(q('[data-bg-command-detail="b3"]')).toBe(detail);
+    expect(q("[data-command-output] pre")!.textContent).toBe("Sample output\n");
+    expect(String(vi.mocked(fetch).mock.calls[0]![0])).toContain("path=%2Ftmp%2Fout%2Fb3.log");
+    expect(document.activeElement).toBe(copy);
+    expect([...detail.querySelectorAll("button")].some((b) => b.textContent === "收起")).toBe(true);
+    act(() => q("[data-bg-open-file]")!.click());
+    expect(getPanel()).toEqual({ kind: "file", mid: "m", path: "/tmp/out/b3.log", cwd: "/work" });
+  });
+
+  it("reopens an ended Monitor that never named an output file from Completed, saying it had no output", async () => {
+    const monitor: BackgroundTask = { id: "b3", kind: "monitor", description: "Watch the build log", command: "tail -f build.log", started_at: at(-90), status: "completed", ended_at: at(-30) };
+    put({ background: [shell], background_ended: [monitor] });
+    draw();
+    act(() => q('[data-background-section="completed"] [data-bg-task="b3"] [data-bg-row-button]')!.click()); await flush();
+    expect(q('[data-bg-command-detail="b3"] [role="status"]')!.textContent).toBe("已完成");
+    expect(q("[data-command-runtime]")!.textContent).toBe("1m");
+    expect(q("[data-command-output]")!.textContent).toBe("没有输出。");
+    expect(q("[data-bg-open-file]")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    // A command's detail is as before: it reads its output and offers it as a file.
+    act(() => q('button[aria-label="返回"]')!.click());
+    act(() => q('[data-bg-task="b1"] [data-bg-row-button]')!.click()); await flush();
+    expect(q("[data-command-output] pre")!.textContent).toBe("Sample output\n");
+    expect(q("[data-bg-open-file]")).not.toBeNull();
   });
 
   it("returns to the same scroll position and row focus with Back", async () => {

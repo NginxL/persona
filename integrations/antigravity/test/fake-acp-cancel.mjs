@@ -5,6 +5,7 @@
 //   'ask'            request permission mid-prompt and wait for the answer
 //   'ask-then-end'   request permission, then end the turn without waiting for the answer
 //   'ask-on-cancel'  request permission when the cancel arrives (a request that crossed it on the wire)
+//   'ignore-cancel'  hold the prompt and never end it, even when cancelled (an agent that does not confirm the cancel)
 //   anything else    hold the prompt until it is cancelled
 // Every message it receives goes to the --record file as one JSON line, after a first {"started": <pid>} line.
 import { appendFileSync } from 'node:fs'
@@ -85,6 +86,7 @@ function onNotification(msg) {
   const sessionId = msg.params?.sessionId
   const turn = turns.get(sessionId)
   if (!turn) return
+  if (turn.mode === 'ignore-cancel') return
   turn.cancelled = true
   if (turn.mode === 'ask-on-cancel') turn.open.add(askPermission(sessionId, 'call-2'))
   endIfDone(sessionId)

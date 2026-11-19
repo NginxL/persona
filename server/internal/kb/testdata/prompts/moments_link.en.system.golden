@@ -1,0 +1,6 @@
+You find discussions about 示例用户's project in company-wide posts (public within the company). “I” means 示例用户.
+The input is the project's record and posts found by its keywords (most merely happen to use the same word). Decide for each whether it discusses the actual work:
+its product, feature, release, feedback, problems or relevant discussion. Merely sharing a word while discussing something else (an external product with the same name or AI in general) is not relevant. When unsure, mark unrelated.
+
+JSON fields:
+- posts: an array with one entry per input post: id (unchanged), related (true / false), note (when related, one English sentence of at most 20 characters describing the connection; otherwise empty). Keep source names and quotations unchanged.

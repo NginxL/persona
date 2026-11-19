@@ -481,3 +481,86 @@ func toolList(ts []proto.Tool) string {
 	}
 	return strings.Join(out, ",")
 }
+
+// A message that is only a slash command goes to the runtime on its own. With the <persona-context> block in front, an
+// agent that runs its own commands (Antigravity's /compact) no longer sees a command: it records the line as plain text,
+// `/compact/compact`, and compacts nothing. The snapshot is not lost: it stays unsent and rides with the next ordinary
+// message, and after a /compact the conversation is told everything again, as after Persona's own compaction.
+func TestAssistantOnARuntimeSendsASlashCommandOnItsOwn(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	sid := startedAssistant(t, n, host)
+	sentText := func(i int) (text, context string) {
+		t.Helper()
+		sends := host.got("session.send")
+		if len(sends) <= i {
+			t.Fatalf("%d sends, want more than %d", len(sends), i)
+		}
+		var p struct {
+			Text    string `json:"text"`
+			Context string `json:"context"`
+		}
+		_ = json.Unmarshal(sends[i], &p)
+		return p.Text, p.Context
+	}
+	seen := func() map[string]string {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.ctxSent[sid]
+	}
+	if seen() == nil {
+		t.Fatal("the first message did not record the snapshot as sent")
+	}
+
+	// /status: no context in front, and what the conversation has seen stays as it was.
+	before := seen()
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/status", "client_msg_id": "m-status"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(1); text != "/status" || ctx != "" {
+		t.Fatalf("/status went as %q with context %q", text, ctx)
+	}
+	if got := seen(); len(got) != len(before) {
+		t.Fatalf("/status changed what the conversation has seen: %v -> %v", before, got)
+	}
+
+	// /compact: on its own too, and the conversation has to be told everything again afterwards.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/compact\n", "client_msg_id": "m-compact"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(2); strings.TrimSpace(text) != "/compact" || ctx != "" {
+		t.Fatalf("/compact went as %q with context %q", text, ctx)
+	}
+	if got := seen(); got != nil {
+		t.Fatalf("after /compact the conversation still counts the snapshot as told: %v", got)
+	}
+
+	// The next ordinary message carries the whole snapshot again.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "next", "client_msg_id": "m-next"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(3); text != "next" || !strings.Contains(ctx, "测试时间") {
+		t.Fatalf("the message after /compact went as %q with context %q", text, ctx)
+	}
+	if seen() == nil {
+		t.Fatal("the message after /compact did not record the snapshot as sent")
+	}
+
+	// Words that merely begin with a slash, a path or a command with a sentence, are messages: they carry the context.
+	for i, text := range []string{"/tmp/report.md is ready\nplease read it", "/data/logs"} {
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": text, "client_msg_id": "m-words-" + string(rune('a'+i))}); err != nil {
+			t.Fatal(err)
+		}
+		if got, ctx := sentText(4 + i); got != text || !strings.Contains(ctx, "测试时间") {
+			t.Fatalf("%q went as %q with context %q", text, got, ctx)
+		}
+	}
+	// A picture makes it a message, whatever the words.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/status", "client_msg_id": "m-pic", "images": []map[string]any{{"mime": "image/png", "data": "AA=="}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ctx := sentText(6); !strings.Contains(ctx, "测试时间") {
+		t.Fatalf("a /status with a picture went without context: %q", ctx)
+	}
+}

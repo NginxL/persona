@@ -89,6 +89,8 @@ type quickMeta struct {
 	// turnOpen: a Codex rollout whose tail is inside a turn: the last turn it starts has not finished, or one turn
 	// fills the whole tail (a finished turn's task_complete is within a few KB of the end; real turns write MBs)
 	turnOpen bool
+	// turnActivityAt: newest timestamped line of the current open Codex turn in the tail (never carried from before/head).
+	turnActivityAt time.Time
 	// turnErr: the latest turn failed on the model service, as the agent's record says it (transcript.Meta.TurnError…:
 	// a Codex rollout's task_complete, #2185; Claude Code's own reply for a failed request, #1710).
 	turnErr turnFailure
@@ -256,14 +258,32 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 			whole += int64(len(lines[0]))
 			lines = lines[1:] // first line is partial
 		}
+		var codexTurnAt time.Time
 		for _, line := range lines {
 			if len(line) == 0 {
 				continue
 			}
-			if ts := lineTime(line); ts.After(m.contentAt) {
+			ts := lineTime(line)
+			if ts.After(m.contentAt) {
 				m.contentAt = ts
 			}
+			prevOpen, prevClosed := tm.TurnOpen, tm.TurnClosed
 			quickLine(line, &tm, &tail)
+			if tm.Codex {
+				switch {
+				case tm.TurnClosed && !prevClosed:
+					codexTurnAt = time.Time{}
+				case tm.TurnOpen && !prevOpen:
+					codexTurnAt = ts
+				case tm.TurnOpen || (off > 0 && !tm.TurnClosed):
+					if ts.After(codexTurnAt) {
+						codexTurnAt = ts
+					}
+				}
+			}
+		}
+		if tm.Codex && !tm.TurnClosed && (tm.TurnOpen || off > 0) {
+			m.turnActivityAt = codexTurnAt
 		}
 	}
 	if rest, ok := tail.Revoked(); ok { // Claude went on from a turn the node took for rewound (transcript.File.RewoundAt)

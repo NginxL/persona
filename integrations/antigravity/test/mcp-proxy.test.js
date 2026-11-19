@@ -40,9 +40,55 @@ function proxied(t, tools) {
 
 describe('MCP proxy (#7333)', { timeout: 15_000 }, () => {
   it('adds persona_call to the server\'s tools', async (t) => {
-    const { call } = proxied(t)
+    const big = { name: 'kb_search', description: 'Search the knowledge base. '.repeat(20), inputSchema: { type: 'object', properties: {} } }
+    const { call } = proxied(t, [big, { name: 'agents_list', description: 'List the Agents', inputSchema: { type: 'object', properties: {} } }])
     const res = await call('tools/list', {})
-    assert.deepEqual(res.result.tools.map((x) => x.name), ['todo_create', 'agents_list', 'persona_call'])
+    assert.deepEqual(res.result.tools.map((x) => x.name), ['kb_search', 'persona_call'])
+  })
+
+  it('weighs a tool by what agy declares of it, not its output schema or annotations (#10756)', async (t) => {
+    const padded = {
+      name: 'mail_accounts', description: 'List mail accounts', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      outputSchema: { type: 'object', description: 'x'.repeat(2000) }, annotations: { title: 'y'.repeat(500) },
+    }
+    const { call } = proxied(t, [padded])
+    const res = await call('tools/list', {})
+    assert.deepEqual(res.result.tools.map((x) => x.name), ['persona_call'])
+    const listed = await call('tools/call', { name: 'persona_call', arguments: {} })
+    assert.match(listed.result.content[0].text, /- mail_accounts: List mail accounts Arguments: \{"type":"object","properties":\{"id":\{"type":"string"\}\},"required":\["id"\]\}/)
+  })
+
+  it('lists a left-out tool with its whole input schema, references and alternatives included (#10756)', async (t) => {
+    const schema = {
+      type: 'object',
+      $defs: { when: { type: 'string', enum: ['now', 'later'] } },
+      properties: { at: { $ref: '#/$defs/when' }, target: { anyOf: [{ type: 'string' }, { type: 'integer' }] } },
+      additionalProperties: false,
+    }
+    const { call } = proxied(t, [{ name: 'cancel_followup', description: 'Cancel', inputSchema: schema }])
+    await call('tools/list', {})
+    const listed = await call('tools/call', { name: 'persona_call', arguments: {} })
+    const line = listed.result.content[0].text.split('\n').find((l) => l.startsWith('- cancel_followup:'))
+    assert.deepEqual(JSON.parse(line.slice(line.indexOf('Arguments: ') + 'Arguments: '.length)), schema)
+  })
+
+  it('declares no tool smaller than persona_call, so agy never defers it (#10756)', async (t) => {
+    const small = Array.from({ length: 40 }, (_, i) => ({ name: `connector_read_${i}`, description: 'Read one thing', inputSchema: { type: 'object', properties: {} } }))
+    const big = { name: 'todo_create', description: 'Add a to-do. '.repeat(40), inputSchema: { type: 'object', properties: { title: { type: 'string' } } } }
+    const { call } = proxied(t, [...small, big])
+    const res = await call('tools/list', {})
+    const size = (tool) => Buffer.byteLength(JSON.stringify(tool))
+    const declared = res.result.tools
+    const dispatch = declared.find((x) => x.name === 'persona_call')
+    assert.deepEqual(declared.map((x) => x.name), ['todo_create', 'persona_call'])
+    assert.ok(declared.every((x) => x === dispatch || size(x) > size(dispatch)), 'persona_call is the smallest declared tool')
+    // The tools left out are still listed, with their arguments, and callable through it.
+    const listed = await call('tools/call', { name: 'persona_call', arguments: {} })
+    assert.match(listed.result.content[0].text, /connector_read_0, .*connector_read_39, todo_create/)
+    assert.match(listed.result.content[0].text, /- connector_read_7: Read one thing Arguments: \{"type":"object","properties":\{\}\}/)
+    assert.doesNotMatch(listed.result.content[0].text, /- todo_create:/)
+    const via = await call('tools/call', { name: 'persona_call', arguments: { name: 'connector_read_7', arguments: {} } })
+    assert.deepEqual(JSON.parse(via.result.content[0].text), { name: 'connector_read_7', args: {} })
   })
 
   it('sends persona_call on as a call of the named tool, and other calls unchanged', async (t) => {

@@ -744,23 +744,40 @@ type failingWriter struct{}
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("the new transport failed") }
 
 // A read loop busy with a line does not read its transport, nor the acknowledgements of what its side wrote: that
-// is no sign of a dead transport, which only a read waiting for bytes can show (#10829's review).
+// is no sign of a dead transport, which only a read waiting for bytes can show (#10829's review). This holds the busy
+// side's own check only. The node answers once the hub's read loop is free again: an answer written meanwhile would
+// wait for an acknowledgement the busy loop does not send, and the node would take the transport for dead and close
+// it, as it should (TestResumeHeldReaderLearnsAtOnce). allAckDelay is shortened with resumeStale, as production has
+// it well under: the hub's acknowledgement of the event it holds reaches the node before the node's check (#11031).
 func TestResumeBusyReaderIsNotSilence(t *testing.T) {
-	oldStale, oldCheck := resumeStale, resumeCheck
-	resumeStale, resumeCheck = 200*time.Millisecond, 20*time.Millisecond
-	t.Cleanup(func() { resumeStale, resumeCheck = oldStale, oldCheck })
-	hold := make(chan struct{})
+	oldStale, oldCheck, oldAck := resumeStale, resumeCheck, allAckDelay
+	resumeStale, resumeCheck, allAckDelay = 200*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { resumeStale, resumeCheck, allAckDelay = oldStale, oldCheck, oldAck })
+	hold, busy, asked := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	l := newResumeLink(t, netshape.Config{}, 5*time.Second, true, true, func(h, n *Peer) {
-		h.OnEvent = func(string, json.RawMessage) { <-hold }
+		h.OnEvent = func(string, json.RawMessage) {
+			close(busy)
+			<-hold
+		}
+		n.OnRequest = func(context.Context, string, json.RawMessage) (any, error) {
+			close(asked)
+			<-hold
+			return map[string]any{}, nil
+		}
 	})
 	if err := l.n.Notify("ev", map[string]int{"i": 1}); err != nil {
 		t.Fatal(err)
 	}
+	<-busy // the hub's read loop is held from here on
 	call := make(chan error, 1)
 	go func() { call <- l.h.Call(context.Background(), "echo", nil, nil) }() // kept until an acknowledgement is read
+	<-asked
 	<-time.After(5 * resumeStale)
-	if l.h.Lost() {
-		t.Fatal("a transport lost while its read loop was busy with a line")
+	if l.h.lw.oldestKept().IsZero() {
+		t.Fatal("the call was acknowledged: the hub's read loop was not busy")
+	}
+	if l.h.Lost() || l.n.Lost() {
+		t.Fatalf("a transport lost while its read loop was busy with a line: hub %t, node %t", l.h.Lost(), l.n.Lost())
 	}
 	close(hold)
 	if err := <-call; err != nil {

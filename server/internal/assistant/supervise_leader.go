@@ -134,6 +134,20 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 	return lead
 }
 
+// digestTarget is digestTo, except that a conversation hosted by an external runtime is never the target: it has no
+// separate policy channel, so a supervision message to it would be refused (CodeSupervisionRuntime) and only end in a
+// "did not send" notice. What it supervises from before its tasks went to the main conversation's route (planTaskSupervisor)
+// is followed up by that route now: the background supervisor while it is on, else the main conversation (ownSupervisor).
+func (s *Service) digestTarget(ctx context.Context, cfg Settings, g superviseSignal) string {
+	to := s.digestTo(cfg, g)
+	if to == "" || to == cfg.Main || to == cfg.BackgroundSupervisor || !s.runtimeConversation(ctx, cfg.MachineID, to) {
+		return to
+	}
+	own := s.ownSupervisor(cfg)
+	s.logf("supervise: %s runs on a runtime that cannot take supervision policy: its signal goes to %s", short(to), short(own))
+	return own
+}
+
 // escalatedIn: one of the entries is a leader's needs_user.
 func escalatedIn(list []prompts.SuperviseEntry) bool {
 	return slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigEscalated })

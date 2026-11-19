@@ -36,6 +36,7 @@ func (s *Service) inboxRoutes() {
 	s.inboxMergeRoutes()
 	s.inboxTodoRoutes()
 	s.inboxSuggestionRoutes()
+	s.inboxRetryRoutes()
 	s.inboxHandoffRoutes()
 	s.inboxHistoryRoutes()
 	s.inboxTaskLinkRoutes()

@@ -72,9 +72,12 @@
 #                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check);
 #                              scripts/release/debug_switches.{txt,py} and release.sh also test_debug_switches.py,
 #                              test_release_debug_guard.py and scripts/test/test_apple_release_switch_names.py;
-#                              scripts/test/go_trimpath.sh also scripts/ci/test_ci.py and scripts/test/test_check_fast.py
-#                              (they run server.sh and check-fast.sh with it); scripts/heavy_slot.py also
-#                              scripts/test/test_check_fast.py (it runs check-fast.sh with it)
+#                              scripts/test/go_trimpath.sh also scripts/ci/test_ci.py and
+#                              scripts/test/test_check_fast_inputs.py (they run server.sh and check-fast.sh with it);
+#                              scripts/heavy_slot.py also scripts/test/test_check_fast_inputs.py (it runs check-fast.sh
+#                              with it); check-fast.sh (either path) and scripts/test/test_check_fast.py also
+#                              scripts/test/test_check_fast_guards.py and test_check_fast_inputs.py (the rest of
+#                              check-fast.sh's tests, which import test_check_fast.py's fixtures)
 #   docs/**, any *.md          scripts/test/test_doc_paths.py and test_doc_go_paths.py (paths quoted in the docs, the
 #                              CLAUDE.md doc index), test_doc_sections.py (section names quoted after a doc path),
 #                              test_doc_wire.py (the wire lists in protocol.md, extensions.md)
@@ -86,6 +89,11 @@
 #                              test_apple_no_callkit.py (no CallKit import or link setting, #9290; also for
 #                              scripts/persona_config.py, whose xcconfig it reads); the iOS/macOS builds and tests
 #                              are skipped with a note (they need a Mac)
+#   apple/project.yml, apple/{lean-dev-build,watch-and-share}.yml, scripts/app/{sim,ui-test}.sh,
+#   scripts/release/release.sh, scripts/ci/apple.sh
+#                              also scripts/test/test_apple_dev_build.py (the development build's switch and stamp, #10713)
+#   native/app-core/scripts/build-apple.sh
+#                              scripts/test/test_app_core_apple_build.py (the shared XCFramework cache, #10713)
 #   deploy/docker/**, docs/operations/docker.md, Dockerfile
 #                              scripts/test/test_docker_entrypoint.py (it also reads the root Dockerfile)
 #                              These Linux suites run in CI's Scripts tests job; they run from scripts/test as there.
@@ -95,8 +103,11 @@
 # variables below). The go test / go build and vitest commands first take a machine-wide slot of their kind
 # (scripts/heavy_slot.py; docs/operations/testing.md "Heavy build slots"), so parallel worktrees queue instead of
 # thrashing; the wait comes before the timeout, and a wait past PERSONA_HEAVY_SLOT_TIMEOUT is a TIMEOUT.
-# Every check prints one PASS / FAIL / TIMEOUT / SKIP line with its duration, followed by a summary. The temp log
-# directory is kept when a check fails or times out and removed on a fully clean run.
+# While a step waits for a slot, the helper's "waiting for a <kind> slot" line, and the one when it gets the slot,
+# appear on stderr as they happen ("check-fast: <step>: waiting for a go slot (3 busy, up to 45m)").
+# Every check prints one PASS / FAIL / TIMEOUT / SKIP line with its duration, followed by a summary; a check that
+# waited for a slot names the wait apart from its own time: "PASS     server go test ./... (95s, plus 140s waiting for a
+# go slot)". The temp log directory is kept when a check fails or times out and removed on a fully clean run.
 #
 # Exit codes: 0 all checks passed, skipped or not needed; 1 one or more checks FAILED; 124 no failure but at least
 # one check TIMEOUT (a timeout is reported, not silently treated as success; run the full suite when that happens).
@@ -166,8 +177,8 @@ HAVE_BUN=0; have bun && HAVE_BUN=1
 if [ "$HAVE_GO" -eq 1 ] && GO_TRIMPATH_FLAGS=$(sh scripts/test/go_trimpath.sh 2>/dev/null); then
   export GOFLAGS="$GO_TRIMPATH_FLAGS"
 fi
-# A job that sets JOB_SLOT (go, web) runs its steps in a machine-wide slot of that kind (#10714); without the helper
-# or python3 they run as before.
+# A job that sets JOB_SLOT (go, web) runs its steps in a machine-wide slot of that kind (#10714); with the slots off
+# (PERSONA_HEAVY_SLOTS=0), or without the helper or python3, they run directly, as before.
 HEAVY_SLOT="$PWD/scripts/heavy_slot.py"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/check-fast.XXXXXX")
@@ -276,18 +287,23 @@ step() {
   #   go test panics "panic: test timed out after …" when ITS suite deadline kills the run;
   #   node's TAP reporter emits "failureType: 'testTimeoutFailure'". A node per-test timeout under the default
   #   reporter is a clean exit 1 naming the test, so it rightly stays a FAIL, not a whole-job TIMEOUT.
-  local _out="$WORK/job.${JOB_I:-x}.steps.log" _slot
-  # The slot comes before the timeout, so waiting in its queue is not counted as a hung step.
-  _slot=()
-  if [ -n "${JOB_SLOT:-}" ] && [ "$HAVE_PY" -eq 1 ] && [ -f "$HEAVY_SLOT" ]; then
-    _slot=(python3 "$HEAVY_SLOT" run --kind "$JOB_SLOT" --)
+  local _out="$WORK/job.${JOB_I:-x}.steps.log" _rc
+  # The slot comes before the timeout, so waiting in its queue is not counted as a hung step. The helper's lines come
+  # before the command's first output: slot_lines shows them live on fd 4 (launch_all's stderr) and records the wait.
+  # fd 4 is closed for the command and tee, so nothing a check leaves running holds the caller's stderr open.
+  if [ -n "${JOB_SLOT:-}" ] && [ "${PERSONA_HEAVY_SLOTS:-}" != 0 ] && [ "$HAVE_PY" -eq 1 ] && [ -f "$HEAVY_SLOT" ]; then
+    python3 "$HEAVY_SLOT" run --kind "$JOB_SLOT" -- "$TIMEOUT_BIN" -k 5s "$_seconds" "$@" 4>&- 2>&1 |
+      tee -a "$_out" 4>&- | slot_lines "$_desc"
+    _rc=${PIPESTATUS[0]}
+  else
+    "$TIMEOUT_BIN" -k 5s "$_seconds" "$@" 4>&- 2>&1 | tee -a "$_out" 4>&-
+    _rc=${PIPESTATUS[0]}
   fi
-  ${_slot[@]+"${_slot[@]}"} "$TIMEOUT_BIN" -k 5s "$_seconds" "$@" 2>&1 | tee -a "$_out"
-  local _rc=${PIPESTATUS[0]}
   local _hint="${JOB_HINT:+ ($JOB_HINT)}"
   if [ "$_rc" -eq 124 ]; then
     # The helper's own 124: no slot came free in time, so the command never ran (not a hung check).
-    grep -q '^heavy_slot: timed out' "$_out" 2>/dev/null && _hint=" (no $JOB_SLOT slot came free; it did not run)$_hint"
+    [ -n "${JOB_SLOT:-}" ] && grep -q '^heavy_slot: timed out' "$_out" 2>/dev/null &&
+      _hint=" (no ${JOB_SLOT:-} slot came free; it did not run)$_hint"
     printf 'TIMEOUT\t%s\t%s\t%s%s\n' "$_rc" "$SECONDS" "$_desc" "$_hint" > "$JOB_STATUS"
     exit 0
   fi
@@ -302,6 +318,49 @@ step() {
   fi
   return "$_rc"
 }
+
+# slot_lines <step> passes a slot step's output through. The helper's lines about a wait come before the command's
+# first output: "waiting for a go slot (…)", then "got a go slot after 1m5s" or "timed out after 45m waiting for a go
+# slot (…)" (that one alone when no wait was allowed). It also copies those live to fd 4 as "check-fast: <step>:
+# <line>", so a run waiting for a slot is not silent until the step ends, and appends each wait to the job's wait file
+# as "<kind> <seconds>" for the summary. A "got" line without a "waiting" line before it, or anything after the first
+# other line, is the command's and only passes through: a free slot runs the command without a word.
+# bash's read takes a pipe a byte at a time, so the waiting line is seen the moment it arrives; awk is no substitute,
+# since mawk (Debian and Ubuntu's awk) fills a 4 KiB buffer or reaches EOF before it handles a line read from a pipe,
+# which here is the whole wait. After the helper's lines cat copies the rest, with fd 4 closed.
+SLOT_WAITING='^heavy_slot: waiting for an? [a-z]+ slot \([0-9]+ busy, up to [0-9ms]+\)$'
+SLOT_GOT='^heavy_slot: got an? ([a-z]+) slot after ([0-9ms]+)$'
+SLOT_TIMED_OUT='^heavy_slot: timed out after ([0-9ms]+) waiting for an? ([a-z]+) slot '
+slot_lines() (
+  _step=$1
+  # slot_read reads one line into _line (a last line without a newline too); false at the end of the output.
+  slot_read() { _line=""; IFS= read -r _line || [ -n "$_line" ]; }
+  # slot_live copies the line to fd 4 and records the wait a "got" or "timed out" line reports (45s, 2m or 1m5s).
+  slot_live() {
+    local _kind="" _wait="" _minutes=0
+    printf 'check-fast: %s: %s\n' "$_step" "${_line#heavy_slot: }" >&4
+    if [[ $_line =~ $SLOT_GOT ]]; then
+      _kind=${BASH_REMATCH[1]}; _wait=${BASH_REMATCH[2]}
+    elif [[ $_line =~ $SLOT_TIMED_OUT ]]; then
+      _kind=${BASH_REMATCH[2]}; _wait=${BASH_REMATCH[1]}
+    fi
+    [ -n "$_wait" ] || return 0
+    case $_wait in *m*) _minutes=${_wait%%m*}; _wait=${_wait#*m} ;; esac
+    _wait=${_wait%s}
+    printf '%s %s\n' "$_kind" "$((_minutes * 60 + ${_wait:-0}))" >> "$WORK/job.${JOB_I:-x}.wait"
+  }
+  slot_read || exit 0
+  if [[ $_line =~ $SLOT_WAITING ]]; then
+    slot_live
+    printf '%s\n' "$_line"
+    slot_read || exit 0
+    if [[ $_line =~ $SLOT_GOT || $_line =~ $SLOT_TIMED_OUT ]]; then slot_live; fi
+  elif [[ $_line =~ $SLOT_TIMED_OUT ]]; then
+    slot_live
+  fi
+  printf '%s\n' "$_line"
+  exec cat 4>&-
+)
 
 skip() { printf 'SKIP\t0\t%s\t%s\n' "$SECONDS" "$1" > "$JOB_STATUS"; exit 0; }
 
@@ -343,7 +402,7 @@ launch_all() {
           printf 'FAIL\t%s\t%s\texit %s\n' "$_rc" "$SECONDS" "$_rc" > "$JOB_STATUS"
         fi
       fi
-    ) > "${JOB_LOG[$_i]}" 2>&1 &
+    ) 4>&2 > "${JOB_LOG[$_i]}" 2>&1 &  # fd 4: this script's stderr, for slot_lines' live lines
     JOB_PID+=($!)
   done
   for _i in "${!JOB_PID[@]}"; do wait "${JOB_PID[$_i]}" 2>/dev/null || true; done
@@ -492,7 +551,7 @@ job_scripts_all() {
   local _t _rc _failed=() _timed_out=()
   for _t in "${SCRIPT_TESTS[@]}"; do
     echo "+ $_t (timeout ${TIMEOUT_OTHER}s)"
-    ( cd "$(dirname "$_t")" && "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 -B -m unittest -q "$(basename "$_t" .py)" ) 2>&1
+    ( cd "$(dirname "$_t")" && "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 -B -m unittest -q "$(basename "$_t" .py)" ) 4>&- 2>&1
     _rc=$?
     case "$_rc" in
       0) ;;
@@ -863,6 +922,13 @@ else
     case "$f" in apple/*) script_test_add scripts/test/test_apple_l10n.py ;; esac
     # Every Apple source and build file, and the xcconfig persona_config.py writes, against CallKit (#9290).
     case "$f" in apple/*|scripts/persona_config.py) script_test_add scripts/test/test_apple_no_callkit.py ;; esac
+    # The development build (#10713): the switch that leaves the watch app and the share extension out, who sets it,
+    # the Release-only commit stamp; and the Rust core's XCFramework cache shared between worktrees.
+    case "$f" in
+      apple/project.yml|apple/lean-dev-build.yml|apple/watch-and-share.yml|scripts/app/sim.sh|scripts/app/ui-test.sh|\
+      scripts/release/release.sh|scripts/ci/apple.sh) script_test_add scripts/test/test_apple_dev_build.py ;;
+      native/app-core/scripts/build-apple.sh) script_test_add scripts/test/test_app_core_apple_build.py ;;
+    esac
     # test_gen_tokens.py checks the token sources against the iOS values and the committed Android Tokens.kt (#4209).
     case "$f" in
       spec/tokens/*|apple/Shared/Design/*|android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt)
@@ -878,8 +944,9 @@ else
     # check_bundle_privacy.py imports privacy_check; test_merge_pr_sh.py copies privacy_check.py into its temp
     # repositories, where merge-pr.sh runs it, and checks that pr_watch_merge.py's merge lock excludes merge-pr.sh's.
     # It copies changed_ratchets.py and the two ratchets it imports there too (#7977); test_changed_ratchets.py imports them.
-    # test_ci.py and test_check_fast.py run server.sh and this script with go_trimpath.sh, which composes their GOFLAGS;
-    # test_check_fast.py runs this script with heavy_slot.py too.
+    # test_ci.py and test_check_fast_inputs.py run server.sh and this script with go_trimpath.sh, which composes their
+    # GOFLAGS; test_check_fast_inputs.py runs this script with heavy_slot.py too. This script's tests are three files
+    # (#11017): its own name picks test_check_fast.py, and the other two, which import its fixtures, come along.
     case "$f" in
       scripts/hooks/*)
         script_test_add scripts/test/test_privacy_check.py; script_test_add scripts/test/test_check_deno_adapter_sh.py ;;
@@ -890,8 +957,10 @@ else
       scripts/ci/sleep_ratchet.py|scripts/ci/web_font_ratchet.py)
         script_test_add scripts/ci/test_changed_ratchets.py; script_test_add scripts/test/test_merge_pr_sh.py ;;
       scripts/test/go_trimpath.sh)
-        script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast.py ;;
-      scripts/heavy_slot.py) script_test_add scripts/test/test_check_fast.py ;;
+        script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast_inputs.py ;;
+      scripts/heavy_slot.py) script_test_add scripts/test/test_check_fast_inputs.py ;;
+      scripts/check-fast.sh|scripts/test/check-fast.sh|scripts/test/test_check_fast.py)
+        script_test_add scripts/test/test_check_fast_guards.py; script_test_add scripts/test/test_check_fast_inputs.py ;;
     esac
     # The Release binary's DEBUG checks (#10616, #10654): a list that matches no script name, whose union merges can
     # leave it out of order, the checker test_apple_release_switch_names.py imports, and release.sh, which runs it.
@@ -1060,15 +1129,26 @@ for _i in "${!JOB_NAME[@]}"; do
     # The job subshell was killed (SIGKILL/OOM) before it could write a status; never let that count as nothing.
     _kind=FAIL; _seconds="?"; _detail="no status: the job was killed before it could report"
   fi
+  # Time in a slot's queue is not the check's own: the duration leaves it out, and the line names it after.
+  _waited=""
+  if [ -s "$WORK/job.$_i.wait" ]; then
+    read -r _wait_kind _wait_seconds < <(awk '{ total += $2; kind = $1 } END { print kind, total }' "$WORK/job.$_i.wait")
+    if [ "${_wait_seconds:-0}" -gt 0 ] 2>/dev/null; then
+      _waited=", plus ${_wait_seconds}s waiting for a $_wait_kind slot"
+      if [ "$_seconds" -ge 0 ] 2>/dev/null; then
+        _seconds=$((_seconds - _wait_seconds)); [ "$_seconds" -lt 0 ] && _seconds=0
+      fi
+    fi
+  fi
   case "$_kind" in
-    PASS) echo "PASS     ${JOB_NAME[$_i]} (${_seconds}s)"; N_PASS=$((N_PASS+1)) ;;
+    PASS) echo "PASS     ${JOB_NAME[$_i]} (${_seconds}s$_waited)"; N_PASS=$((N_PASS+1)) ;;
     SKIP) echo "SKIP     ${JOB_NAME[$_i]}: $_detail"; N_SKIP=$((N_SKIP+1)) ;;
     FAIL)
-      echo "FAIL     ${JOB_NAME[$_i]} (${_seconds}s, $_detail); log: ${JOB_LOG[$_i]}"
+      echo "FAIL     ${JOB_NAME[$_i]} (${_seconds}s$_waited, $_detail); log: ${JOB_LOG[$_i]}"
       sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
       N_FAIL=$((N_FAIL+1)) ;;
     TIMEOUT)
-      echo "TIMEOUT  ${JOB_NAME[$_i]} (${_seconds}s, $_detail); log: ${JOB_LOG[$_i]}"
+      echo "TIMEOUT  ${JOB_NAME[$_i]} (${_seconds}s$_waited, $_detail); log: ${JOB_LOG[$_i]}"
       sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
       N_TIMEOUT=$((N_TIMEOUT+1)) ;;
   esac

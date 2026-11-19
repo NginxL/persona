@@ -445,7 +445,7 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		Agent: s.Agent, AgentLabel: s.AgentLabel, AgentName: s.AgentName, AgentSurface: s.AgentSurface,
 		SourceKind: s.SourceKind, SourceThreadID: s.SourceThreadID, SourceInstanceID: s.SourceInstanceID,
 		ParentThreadID: s.ParentThreadID, ParentSessionID: s.ParentSessionID, RootSessionID: s.RootSessionID, IsSubagent: s.IsSubagent,
-		Capabilities: s.Capabilities, Attached: s.Attached, CanFork: s.CanFork,
+		Capabilities: s.Capabilities, Attached: s.Attached, CanFork: s.CanFork, BypassPending: s.BypassPending,
 		SpaceKind: s.SpaceKind, SpaceID: s.SpaceID, SpaceName: s.SpaceName, SpaceIndex: s.SpaceIndex,
 		ParentSpaceID: s.ParentSpaceID, SlotID: s.SlotID, SlotName: s.SlotName, SlotIndex: s.SlotIndex, PaneIndex: s.PaneIndex,
 		WorkspaceID: s.WorkspaceID, TabID: s.TabID, PaneID: s.PaneID,

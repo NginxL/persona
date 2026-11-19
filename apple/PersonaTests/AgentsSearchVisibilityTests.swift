@@ -46,3 +46,49 @@ struct AgentsSearchVisibilityTests {
         #expect(!AgentsSearchVisibility.retained(query: ""))
     }
 }
+
+#if os(iOS) || os(visionOS)
+@MainActor
+struct AgentsSearchStartTests {
+    @Test func pushCancelsThePendingSearchBeforeTheKeyboardAnswers() {
+        let header = AgentsHeader()
+        let start = header.startSearch()
+        #expect(header.floating)
+
+        header.closeSearchForPush(wasSearching: false)
+        #expect(!header.floating)
+        #expect(!header.up)
+        #expect(!header.compact)
+        #expect(!header.completeSearchStart(start, listInFront: false))
+        // Even after Back, the same callback cannot bring the cancelled field up.
+        #expect(!header.completeSearchStart(start, listInFront: true))
+    }
+
+    @Test func coveredListRejectsTheCurrentCallback() {
+        let header = AgentsHeader()
+        let start = header.startSearch()
+        #expect(!header.completeSearchStart(start, listInFront: false))
+        #expect(!header.floating)
+        #expect(!header.completeSearchStart(start, listInFront: true))
+    }
+
+    @Test func onlyTheCurrentStartCanRiseAndOnlyOnce() {
+        let header = AgentsHeader()
+        let interrupted = header.startSearch()
+        header.closeSearchForPush(wasSearching: false)
+        let current = header.startSearch()
+
+        #expect(!header.completeSearchStart(interrupted, listInFront: true))
+        #expect(header.completeSearchStart(current, listInFront: true))
+        #expect(!header.completeSearchStart(current, listInFront: true))
+        #expect(header.floating)
+
+        header.up = true
+        header.setCompact(true)
+        header.closeSearchForPush(wasSearching: true)
+        #expect(!header.floating)
+        #expect(!header.up)
+        #expect(!header.compact)
+    }
+}
+#endif

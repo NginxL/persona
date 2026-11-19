@@ -10,5 +10,6 @@
   "launcher_other_kind": "「{launcher}」は {launcher_agent} で動きますが、この会話は {conversation_agent} で動いていて途中で変えられないため、このメッセージは送信していません。{conversation_agent} のランチャーを選ぶか、「{launcher}」で新しい会話を始めてください。",
   "launcher_no_substitute": "「{launcher}」は {machine} にもうなく、同じ種類でアシスタントの会話を実行できるランチャーもそのコンピューターにないため、このメッセージは送信していません。モデル構成 › メインチャットで選び直してください。",
   "launcher_swapped": "「{launcher}」は {machine} でアシスタントの会話を実行できないため、{to} で実行します",
-  "launcher_swapped_model": "「{launcher}」は {machine} でアシスタントの会話を実行できないため、{to}（既定のモデル。{model} は一覧にありません）で実行します"
+  "launcher_swapped_model": "「{launcher}」は {machine} でアシスタントの会話を実行できないため、{to}（既定のモデル。{model} は一覧にありません）で実行します",
+  "model_missing": "{launcher} で {model} が利用できなくなったため、このメッセージには既定のモデルを使用します"
 }

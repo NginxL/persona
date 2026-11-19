@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -59,8 +60,59 @@ func (h *Hub) downloadFile(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if !strings.HasPrefix(info.Mime, "application/pdf") {
 		w.Header().Set("Content-Security-Policy", "sandbox")
 	}
-	reader := &remoteFileReader{get: get, request: p, size: info.Size}
+	reader := &remoteFileReader{get: get, request: p, size: info.Size,
+		back: func(pause time.Duration, until time.Time) bool { return awaitMachine(r.Context(), m, pause, until) }}
 	http.ServeContent(w, r, info.Name, info.Modified, reader)
+	if failed := reader.failed.Load(); failed != nil {
+		// ServeContent stops at the read that failed and returns as if it were done, with the head (200 or 206 and its
+		// Content-Length) already out. Over HTTP/2 the stream would then end cleanly, short of that length, and a
+		// client that does not count the bytes takes the cut file for the whole one (#10855). Aborting resets the
+		// stream (HTTP/2) or drops the connection without ending the body (HTTP/1.1): every client sees it failed.
+		if r.Context().Err() == nil { // not the client's own cancel
+			h.logf("[%s] download from %s aborted at byte %d of %d: %v", w.Header().Get("X-Request-Id"), m.cfg.ID,
+				failed.at, info.Size, failed.err)
+		}
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// A download waits this long for the machine to come back when its node's connection drops mid-file (#10855),
+// counted from the read that failed; then it is aborted. Persona Link redials a second after a drop, doubling, and a
+// full reconnect is normally back in a few seconds: 30 s covers its first redials, stays well inside the two minutes
+// the iOS app waits on a quiet download, and does not hold a client long for a machine that is gone. Each read still
+// has its own minute. Tests shorten them.
+var (
+	downloadRetryWindow = 30 * time.Second
+	downloadRetryPoll   = 250 * time.Millisecond // how often a waiting download looks whether the machine is back
+	downloadRetryMax    = 2 * time.Second        // the longest pause between two tries of the same read
+)
+
+// awaitMachine waits pause, then until m is reachable again (looking every downloadRetryPoll): false once until has
+// passed or the request ended first.
+func awaitMachine(ctx context.Context, m *Machine, pause time.Duration, until time.Time) bool {
+	t := time.NewTimer(pause)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-t.C:
+		}
+		if !time.Now().Before(until) {
+			return false
+		}
+		if m.reachable() {
+			return true
+		}
+		t.Reset(downloadRetryPoll)
+	}
+}
+
+// nodeAway: a read failed because the machine's node, or the manager that carries it, was not there: the connection
+// dropped with the call out (rpc.ErrClosed, the manager's node_closed), or the call found it offline. Asked again
+// once it is back, the node reads the same revision or says the file changed (file_changed), which is never retried.
+func nodeAway(err error) bool {
+	return errors.Is(err, rpc.ErrClosed) || errors.Is(err, errOffline) || errors.Is(err, errManagerOffline)
 }
 
 // inlineMime: what a browser may show in place (?inline=1: <img>, <video>, <audio>, a PDF in a frame); anything
@@ -110,11 +162,22 @@ func (h *Hub) fileThumb(w http.ResponseWriter, r *http.Request, m *Machine) {
 }
 
 type remoteFileReader struct {
-	get     func(proto.FileChunkRequest) (*proto.FileChunk, error)
+	get func(proto.FileChunkRequest) (*proto.FileChunk, error)
+	// back waits, at least pause, for the machine to be reachable again, until at most; nil: a failed read is final.
+	back    func(pause time.Duration, until time.Time) bool
 	request proto.FileChunkRequest
 	size    int64
 	pos     int64
 	buf     []byte
+	// failed is the read that failed, for downloadFile to abort the response. Atomic: for several ranges ServeContent
+	// reads in a goroutine of its own, which may still run when it returns after a failed write.
+	failed atomic.Pointer[readFailure]
+}
+
+// readFailure is where a download's read failed (the offset in the file) and why.
+type readFailure struct {
+	at  int64
+	err error
 }
 
 func (f *remoteFileReader) Read(p []byte) (int, error) {
@@ -127,12 +190,13 @@ func (f *remoteFileReader) Read(p []byte) (int, error) {
 	if len(f.buf) == 0 {
 		q := f.request
 		q.Offset, q.Length = f.pos, int(min(int64(proto.FileDownloadChunkBytes), f.size-f.pos))
-		chunk, err := f.get(q)
-		if err != nil {
-			return 0, err
+		chunk, err := f.chunk(q)
+		if err == nil && (chunk.Offset != q.Offset || chunk.Size != f.size || chunk.Revision != q.Revision || len(chunk.Data) != q.Length) {
+			err = errors.New("file chunk does not match the download")
 		}
-		if chunk.Offset != q.Offset || chunk.Size != f.size || chunk.Revision != q.Revision || len(chunk.Data) != q.Length {
-			return 0, errors.New("file chunk does not match the download")
+		if err != nil {
+			f.failed.Store(&readFailure{at: q.Offset, err: err})
+			return 0, err
 		}
 		f.buf = chunk.Data
 	}
@@ -140,6 +204,27 @@ func (f *remoteFileReader) Read(p []byte) (int, error) {
 	f.buf = f.buf[n:]
 	f.pos += int64(n)
 	return n, nil
+}
+
+// chunk reads q, again at the same offset while the machine's node is away (nodeAway) and comes back within
+// downloadRetryWindow of the first failure, pausing longer each time up to downloadRetryMax. A reconnect does not
+// change what is read: the request still names the revision the download started with.
+func (f *remoteFileReader) chunk(q proto.FileChunkRequest) (*proto.FileChunk, error) {
+	var until time.Time
+	pause := downloadRetryPoll
+	for {
+		c, err := f.get(q)
+		if err == nil || f.back == nil || !nodeAway(err) {
+			return c, err
+		}
+		if until.IsZero() {
+			until = time.Now().Add(downloadRetryWindow)
+		}
+		if !f.back(pause, until) {
+			return nil, err
+		}
+		pause = min(2*pause, downloadRetryMax)
+	}
 }
 
 func (f *remoteFileReader) Seek(offset int64, whence int) (int64, error) {

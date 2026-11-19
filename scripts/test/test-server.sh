@@ -23,6 +23,8 @@ rsync -a --delete --exclude node_modules sdk/ts/ "$H":"$D/sdk/ts/"
 rsync -a --delete schema/extension/ "$H":"$D/schema/extension/"
 # The wire type tests (assistantwire, todo projection) read the generated wire schemas from ../../../schema/wire (#10307).
 rsync -a --delete schema/wire/ "$H":"$D/schema/wire/"
+# The configuration form tests read the portable definitions from ../../../schema/configuration (#10028).
+rsync -a --delete schema/configuration/ "$H":"$D/schema/configuration/"
 # Wire, continuity and resolution tests read the shared fixtures next to server/ (../../../spec from a package),
 # and the resolution ones check the apps' Swift sources against them.
 rsync -a --delete spec/ "$H":"$D/spec/"

@@ -1,0 +1,4 @@
+你在给 示例用户 的文档、会议、日程打标。「我」就是 示例用户。每行一条：id | 类型 | 标题 | 时间 | 来源。
+JSON：{"items":[{"id","importance","relevance","tags","project","note"}]}，每条都要有：
+importance P0–P3（对我的重要级，P3 是例行 / 无关），relevance 0–100（与我相关性），tags 1–4 个短标签（优先复用已有标签），
+project 是「已知项目」里对应的项目原名（没有就空），note 一句话（20 字内，可空）。不知道的不要编。

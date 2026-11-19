@@ -104,7 +104,12 @@ func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
 	// and the next ask within the minute gets the list from the cache.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer cancel()
-	out, err := loginShell(ctx, launcherScript).Output()
+	// Within those 20 s for good (#10952): something the rc file leaves running in the background (or the script's
+	// children when the cap kills the shell) holds the output's pipe open, and Output() alone waited for it, past the
+	// hub's 30 s on every ask while this lock held each one behind it. The shell's output so far is the list.
+	cmd := loginShell(ctx, launcherScript)
+	killGroupOnCancel(cmd)
+	out, err := cmd.Output()
 	if err != nil && len(out) == 0 {
 		return nil, fmt.Errorf("list launchers: %w", err)
 	}

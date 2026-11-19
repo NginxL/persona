@@ -132,5 +132,5 @@
   "paseo_ui_state_blocked": "受阻",
   "paseo_ui_state_skipped": "已跳过",
   "paseo_ui_reply_with": "可直接回复以下任一项：",
-  "omp_stopped": "这个 omp 会话已停止。现在只能在电脑上接着它（omp --resume），这里还不能给它发消息。"
+  "omp_stopped": "这个 omp 会话已停止。发一条消息会在电脑上新开一个终端标签页，用 omp --resume 接着它。"
 }

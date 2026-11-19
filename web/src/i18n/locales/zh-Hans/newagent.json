@@ -10,6 +10,8 @@
   "home_folder": "主目录",
   "follow_model_settings": "跟随模型配置",
   "models_failed": "没读到模型列表，仍可以用默认模型启动",
+  "launchers_failed": "没读到这台电脑的模型，仍可以用它的默认模型启动",
+  "retry": "重试",
   "follow_launcher": "跟随启动器",
   "first_message_optional": "第一条消息（可选）",
   "first_message": "第一条消息",

@@ -714,9 +714,13 @@ struct QuestionForm: View {
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(.secondary)
                 }
-                Text(q.question)
-                    .font(Theme.Font.heading)
-                    .fixedSize(horizontal: false, vertical: true)
+                if interaction.format == "markdown" {
+                    InteractionMarkdown(text: q.question)
+                } else {
+                    Text(q.question)
+                        .font(Theme.Font.heading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 options(q)
                     .id(page)
                     .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
@@ -1125,6 +1129,20 @@ struct PlanTextSheet: View {
     }
 }
 
+/// A script ask's opt-in question, rendered by the same memoized Markdown stack as chat replies (#10857).
+struct InteractionMarkdown: View {
+    var text: String
+
+    var body: some View {
+        Markdown(MarkdownMemo.content(text))
+            .markdownTheme(.persona)
+            .readingContent()
+            .markdownTextStyle { ForegroundColor(Theme.primaryText) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("interaction-markdown")
+    }
+}
+
 struct PermissionForm: View {
     @Environment(AppModel.self) private var model
     var interaction: Interaction
@@ -1225,6 +1243,8 @@ struct AgentPermissionForm: View {
             }
             if let diff = PermissionDiff(interaction) {
                 PermissionDiffView(diff: diff, key: interaction.id)
+            } else if interaction.format == "markdown" {
+                InteractionMarkdown(text: interaction.permissionSubject ?? "")
             } else {
                 CardCode(text: interaction.permissionSubject ?? "", title: tool, id: "permission-command")
             }
@@ -2086,14 +2106,7 @@ struct BUIQuestionForm: View {
             }
         } else {
             let picks = Delegated.recommendedLabels(questions, interaction.delegate?.recommend)
-            ApprovalCard(questions: zip(questions, picks).map { Self.card($0, picks: $1, localOnly: localOnly ? interaction : nil) },
-                         startAt: startAt, answers: kept,
-                         skipLabel: canSkip ? String(localized: "Skip [Question Card]") : nil,
-                         continueLabel: String(localized: "Next [Interaction Views f82c68]"), sendLabel: isSending ? String(localized: "Sending…") : String(localized: "Submit"),
-                         customPlaceholder: String(localized: "Other answer…"),
-                         sentMessage: isSending ? String(localized: "Sending…") : String(localized: "Sent"),
-                         options: .panel(sending: isSending, maxHeight: cardCap, rejectsDraggedPicks: true),
-                         onSkip: skipCard, onSubmit: { answers in
+            let submit: (ApprovalAnswers) -> Void = { answers in
                 Haptics.tap()
                 if QuestionSteps.enabled(questions) { // the review first
                     withAnimation(Theme.Motion.standard) { held = answers; kept = answers }
@@ -2101,8 +2114,32 @@ struct BUIQuestionForm: View {
                     kept = answers // a failed answer builds the card again with them
                     send(answers)
                 }
-            })
-            .id(round)
+            }
+            if interaction.format == "markdown" {
+                ApprovalCard(questions: zip(questions, picks).map { Self.card($0, picks: $1, localOnly: localOnly ? interaction : nil, markdown: true) },
+                             startAt: startAt, answers: kept,
+                             skipLabel: nil,
+                             continueLabel: String(localized: "Next [Interaction Views f82c68]"), sendLabel: isSending ? String(localized: "Sending…") : String(localized: "Submit"),
+                             customPlaceholder: String(localized: "Other answer…"),
+                             sentMessage: isSending ? String(localized: "Sending…") : String(localized: "Sent"),
+                             options: .panel(sending: isSending, maxHeight: cardCap, rejectsDraggedPicks: true),
+                             onSubmit: submit) { qIndex in
+                    if questions.indices.contains(qIndex) {
+                        InteractionMarkdown(text: questions[qIndex].question)
+                    }
+                }
+                .id(round)
+            } else {
+                ApprovalCard(questions: zip(questions, picks).map { Self.card($0, picks: $1, localOnly: localOnly ? interaction : nil) },
+                             startAt: startAt, answers: kept,
+                             skipLabel: canSkip ? String(localized: "Skip [Question Card]") : nil,
+                             continueLabel: String(localized: "Next [Interaction Views f82c68]"), sendLabel: isSending ? String(localized: "Sending…") : String(localized: "Submit"),
+                             customPlaceholder: String(localized: "Other answer…"),
+                             sentMessage: isSending ? String(localized: "Sending…") : String(localized: "Sent"),
+                             options: .panel(sending: isSending, maxHeight: cardCap, rejectsDraggedPicks: true),
+                             onSkip: skipCard, onSubmit: submit)
+                .id(round)
+            }
         }
     }
 
@@ -2153,9 +2190,9 @@ struct BUIQuestionForm: View {
 
     /// `picks`: the options the assistant recommends (#544). `localOnly`: the card takes only the choices that send its
     /// Agent nothing (`cardLocalOnly`, #6839); the rest and the typed answer are off.
-    static func card(_ q: Question, picks: [String] = [], localOnly: Interaction? = nil) -> ApprovalQuestion {
+    static func card(_ q: Question, picks: [String] = [], localOnly: Interaction? = nil, markdown: Bool = false) -> ApprovalQuestion {
         ApprovalQuestion(
-            id: q.question, q.question, kind: q.multiSelect ? .multiple : .single,
+            id: q.question, markdown ? "" : q.question, kind: q.multiSelect ? .multiple : .single,
             choices: q.options.map { o in
                 let (label, recommended) = display(o.label)
                 let tag = recommended ? String(localized: "Recommended") : picks.contains(o.label) ? String(localized: "Assistant's pick") : nil
@@ -2303,15 +2340,19 @@ struct BUIPermissionForm: View {
         if let diff = PermissionDiff(interaction) { PermissionDiffView(diff: diff, key: interaction.id) } else { subject }
     }
 
-    /// The command or path with its tool's icon in a code box; a long one folded to a few lines (`CardCode`, #6605).
-    private var subject: some View {
-        HStack(alignment: .top, spacing: Theme.Space.s) {
-            ThemedIcon(ToolPresentation.symbol(interaction.toolName ?? "")).foregroundStyle(Theme.accent)
-            CardCode(text: interaction.permissionSubject ?? "", title: interaction.toolDisplayName ?? String(localized: "Tool"),
-                     lines: Self.commandLines, box: .none, id: "permission-command")
+    /// A script ask's Markdown question, or the command/path with its tool's icon in a code box as before (#10857).
+    @ViewBuilder private var subject: some View {
+        if interaction.format == "markdown" {
+            InteractionMarkdown(text: interaction.permissionSubject ?? "")
+        } else {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                ThemedIcon(ToolPresentation.symbol(interaction.toolName ?? "")).foregroundStyle(Theme.accent)
+                CardCode(text: interaction.permissionSubject ?? "", title: interaction.toolDisplayName ?? String(localized: "Tool"),
+                         lines: Self.commandLines, box: .none, id: "permission-command")
+            }
+            .padding(Theme.Space.m)
+            .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
         }
-        .padding(Theme.Space.m)
-        .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
     }
 
     /// The command's lines before Show All: a few, over the card's choices and its field (Send stays in view under them).

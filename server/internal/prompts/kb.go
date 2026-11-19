@@ -6,11 +6,10 @@ import (
 	"github.com/nwverse/persona/server/internal/kbwire"
 )
 
-// KBOwner is the knowledge base models' system prompts: compressing a chat (kb/compress), rewriting a project
-// (kb/project), tagging documents, meetings and events (kb/items). Language is what text written from a recording for
-// the user to read is written in, by the language's own name ("English", "日本語"; "" is Chinese), whatever languages
-// the transcript mixes (kb/write_language): only a recording's summary (kb/recording), minutes (kb/minutes,
-// kb/minutes_merge) and day recap (kb/day_recap, kb/day_recap_merge) read it.
+// KBOwner supplies the owner and the language of newly generated knowledge text
+// ("English", "日本語"; "" keeps the historical Chinese bytes). Recording callers
+// choose the recording's language first; other calls use the owner's current language.
+// Original source content and existing names remain in their recorded language.
 type KBOwner struct {
 	Owner    string
 	Language string
@@ -36,6 +35,7 @@ type KnownProject struct {
 
 // KBCompressInput is a chat's summary so far and its new messages (kb/compress_input).
 type KBCompressInput struct {
+	Language  string // Instruction language; source fields remain unchanged.
 	Pinned    string
 	People    []KBPinnedPerson
 	Name      string
@@ -61,6 +61,7 @@ type KBProjectChat struct {
 
 // KBProjectInput is a project's file, timeline and chats (kb/project_input).
 type KBProjectInput struct {
+	Language   string // Instruction language; source fields remain unchanged.
 	Pinned     string
 	Name, Kind string
 	Aliases    []string
@@ -80,6 +81,7 @@ type KBMoment struct {
 
 // KBDedupeProject is one side of a possible duplicate.
 type KBDedupeProject struct {
+	Language                     string // Instruction language; source fields remain unchanged.
 	Key                          string // "A" | "B"
 	Name, OneLine, Goal, Summary string
 	Aliases, Chats               []string
@@ -88,8 +90,9 @@ type KBDedupeProject struct {
 
 // KBDedupeInput is two projects that may be one (kb/dedupe_input); Shared is how many people they have in common.
 type KBDedupeInput struct {
-	A, B   KBDedupeProject
-	Shared int
+	Language string // Instruction language; source fields remain unchanged.
+	A, B     KBDedupeProject
+	Shared   int
 }
 
 // RenderKBDedupe is the system prompt deciding whether two projects are the same work (kb/dedupe).
@@ -98,6 +101,7 @@ func RenderKBDedupeInput(in KBDedupeInput) string { return render("kb/dedupe_inp
 
 // KBMomentsLinkInput is a project and Moments posts its keywords found (kb/moments_link_input).
 type KBMomentsLinkInput struct {
+	Language                     string // Instruction language; source fields remain unchanged.
 	Name, OneLine, Goal, Summary string
 	Aliases, Keywords            []string
 	Posts                        []KBMoment
@@ -123,6 +127,7 @@ type KBItem struct {
 
 // KBItemsInput is a batch of items to tag (kb/items_input).
 type KBItemsInput struct {
+	Language string // Instruction language; source fields remain unchanged.
 	Projects []KnownProject
 	Tags     []string
 	Items    []KBItem
@@ -273,6 +278,7 @@ type KBDigestEntry struct {
 
 // KBDigest is the most important projects and chats, for the assistant's live snapshot (kb/digest).
 type KBDigest struct {
+	Language        string // Instruction language; source fields remain unchanged.
 	Projects, Chats []KBDigestEntry
 }
 

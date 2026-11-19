@@ -15,6 +15,9 @@ const (
 	CodeRestarting  = "node_restarting"
 )
 
+// EventUpdatePreflightFailed reports a refused resident reload for a committed node update.
+const EventUpdatePreflightFailed = "node.update.preflight_failed"
+
 // PersonaContracts is the optional bidirectional naming capability. It does not
 // change the node protocol floor or become a required capability.
 const PersonaContracts = "persona_contracts_v1"

@@ -362,6 +362,23 @@ fun unknownAgentName(agent: String?, label: String?, launcher: String?): String 
     return said?.takeUnless { it.equals(PaseoAgent, ignoreCase = true) } ?: launcher?.trim()?.takeIf(String::isNotEmpty) ?: said ?: agent
 }
 
+/** A permission mode change recorded by the session's manager (GET …/mode-changes, #10297). */
+@Serializable
+data class ModeChange(
+    /** set, restart_done, restart_failed or restart_dropped. */
+    val kind: String = "",
+    val from: String? = null,
+    val to: String? = null,
+    /** For set: now, restart when it takes effect after this turn, or empty from an older node. */
+    val applied: String? = null,
+    /** Who asked: device, hub or extension. */
+    @SerialName("actor_kind") val actorKind: String? = null,
+    @SerialName("device_name") val deviceName: String? = null,
+    /** Why a queued restart finished as it did; a code, not display text. */
+    val reason: String? = null,
+    @WireTime val at: String = "",
+)
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionSerializer::class)
 data class Session(
@@ -435,6 +452,8 @@ data class Session(
      * process by the node; #1379, #3957). False while unknown and from older hubs: then Allow Everything is a start's choice.
      */
     @SerialName("bypass_available") val bypassAvailable: Boolean = false,
+    /** Allow Everything takes effect by a restart after the current turn (#6476). */
+    @SerialName("bypass_pending") val bypassPending: Boolean = false,
     @SerialName("assistant") val assistant: Boolean = false,
     /** An assistant conversation put away (POST /api/v1/assistant/conversations/{id}/archive): kept, not listed. */
     @SerialName("archived") val archived: Boolean = false,

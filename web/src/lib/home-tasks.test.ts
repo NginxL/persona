@@ -31,6 +31,24 @@ describe("homeTasks", () => {
     expect(homeTasks(todos, lookup).rows.map((r) => r.todo.id)).toEqual(sortTodos(todos, lookup).map((x) => x.id));
   });
 
+  it("names the agent working, else the one that moved last, of the rows read (#10904)", () => {
+    const at = (s: Session, updated_at: string, state_since?: string) => ({ ...s, updated_at, state_since });
+    const lookup = makeSessionLookup([
+      at(agent("idle", "idle"), "2026-11-01T09:00:00Z"),
+      at(agent("work", "working"), "2026-11-01T08:00:00Z"),
+      at(agent("late", "unread"), "2026-11-01T08:00:00Z", "2026-11-01T10:00:00Z"),
+      at(agent("gone", "working"), "2026-11-01T11:00:00Z"),
+      { ...at(agent("deleted", "working"), "2026-11-01T11:00:00Z"), deleted: true },
+    ]);
+    const lead = (...sids: string[]) => homeTasks([todo("t", { agents: sids.map(on) })], lookup).rows[0]!.lead?.session_id;
+    expect(lead("idle", "work", "late")).toBe("work");
+    expect(lead("idle", "late")).toBe("late");
+    expect(lead("idle", "missing")).toBe("idle");
+    expect(lead("missing", "deleted")).toBeUndefined();
+    // a released agent is not the task's any more
+    expect(homeTasks([todo("t", { agents: [on("idle"), { ...on("gone"), released_at: "y" }] })], lookup).rows[0]).toMatchObject({ agents: 1, lead: { session_id: "idle" } });
+  });
+
   it("reads an agent on an offline computer as the Tasks page does", () => {
     const { rows } = homeTasks([todo("t", { agents: [on("gone")] })], makeSessionLookup([]));
     expect(rows[0]).toMatchObject({ status: "follow_up", agents: 1 });

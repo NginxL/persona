@@ -402,6 +402,8 @@ class HubChatRepository(
         } finally { observer.cancelAndJoin() }
     }
 
+    override suspend fun modeChanges(session: SessionKey): List<ModeChange> = transport.modeChanges(session)
+
     override suspend fun loadOlder(session: SessionKey) {
         val entry = existing(session) ?: return
         entry.ready.await()

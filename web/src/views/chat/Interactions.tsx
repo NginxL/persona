@@ -123,7 +123,7 @@ const StackCount = createContext(0);
  *  which opens them all; opened, "Show first only" in the same place, which folds them back. */
 const QueueSlot = createContext<{ position: number; total: number; open: boolean; onToggle: () => void } | null>(null);
 
-export function Card({ title, kicker, onDismiss, busy, children, footer, looking = false, cardKeys, tapGuard }: { title: string; kicker: string; onDismiss?: () => void; busy?: boolean; children: React.ReactNode; footer: React.ReactNode; looking?: boolean; cardKeys?: CardKeys; tapGuard?: { ref: RefObject<HTMLDivElement | null> } }) {
+export function Card({ title, titleContent, kicker, onDismiss, busy, children, footer, looking = false, cardKeys, tapGuard }: { title: string; titleContent?: React.ReactNode; kicker: string; onDismiss?: () => void; busy?: boolean; children: React.ReactNode; footer: React.ReactNode; looking?: boolean; cardKeys?: CardKeys; tapGuard?: { ref: RefObject<HTMLDivElement | null> } }) {
   const asked = useContext(AskedByVoice);
   const sending = useContext(SendingAnswer);
   const from = useContext(AskedFrom);
@@ -168,7 +168,7 @@ export function Card({ title, kicker, onDismiss, busy, children, footer, looking
                 </span>
               )}
             </div>
-            <div ref={head} className="text-[13.5px] font-medium text-ink">{title}</div>
+            <div ref={head} className="text-[13.5px] font-medium text-ink">{titleContent ?? title}</div>
           </div>
           {stack > 1 && (
             <span data-chat-cards-count className="flex shrink-0 items-center gap-1 text-xs whitespace-nowrap text-ink-2">
@@ -378,6 +378,7 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
     <Card
       kicker={q.header || t("chat-interactions.question")}
       title={q.question}
+      titleContent={ix.format === "markdown" ? <Markdown text={q.question} small compact /> : undefined}
       looking={looking}
       cardKeys={keys}
       tapGuard={tapGuard}

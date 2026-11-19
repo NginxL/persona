@@ -1538,8 +1538,9 @@ struct InboxRow: View {
             } else if item.isLark {
                 LarkAvatarImage(name: item.title, url: item.avatar, isGroup: item.lark?.isGroup ?? false, size: Theme.Size.avatar)
             } else {
-                let disc = Theme.monogram(item.sender ?? "")
-                Monogram(name: item.sender ?? "", fill: disc.fill, ink: disc.ink)
+                // A connector's thread picture (the other person, a group's own) over the initial; the initial alone
+                // without one, mail's included.
+                ChatAvatar(url: item.connector?.avatarURL, name: item.sender ?? "")
             }
             }
             .opacity(item.isDone ? 0.6 : 1)

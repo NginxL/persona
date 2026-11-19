@@ -29,7 +29,7 @@ vi.mock("../lib/sessions", async (importOriginal) => {
 });
 
 // the extensions' overview cards are not this test's
-vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null }));
+vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => <section data-overview-cards="" /> }));
 // a card's answer stays on its way until the test lets it end
 const op = vi.hoisted(() => ({ finish: (_: unknown) => {} }));
 vi.mock("../lib/ops", async (importOriginal) => ({ ...(await importOriginal<typeof import("../lib/ops")>()), apiOp: () => new Promise((done) => { op.finish = done; }) }));
@@ -224,6 +224,62 @@ describe("the overview", () => {
     expect(buttonLabels(html)).not.toContain("打开机器页");
   });
 
+  it("keeps an agent that only waits in the background out of 工作中, in its own section with the clock (#10938)", () => {
+    const bg = { background_working: true, background_waiting: true, state_since: "2026-01-01T00:00:00Z" };
+    const html = render([agent(1, 0, "working", { title: "busy one" }), agent(2, 0, "working", { title: "busy two" }), agent(3, 0, "working", { title: "watching CI", ...bg })]);
+    expect(html).toContain("2 个工作中，1 个后台等待中。");
+    const working = heading(html, "工作中"), waiting = heading(html, "后台等待中");
+    expect(working).toBeGreaterThan(-1);
+    expect(waiting).toBeGreaterThan(working);
+    // each section's count is its rows'
+    expect(html.slice(working, waiting)).toContain(">2</span>");
+    expect(html.slice(working, waiting)).not.toContain("watching CI");
+    const row = html.slice(waiting);
+    expect(row).toContain("watching CI");
+    expect(row).toContain('data-state="bg_waiting"');
+    expect(row).not.toContain("busy one");
+    // the spinner is Working's
+    expect(html.slice(working, waiting).split("busy-motion").length - 1).toBe(2);
+    expect(row).not.toContain("busy-motion");
+  });
+
+  it("is not all quiet with only an agent waiting in the background (#10938)", () => {
+    const html = render([agent(1, 0, "working", { background_working: true, background_waiting: true })]);
+    expect(html).toContain("1 个后台等待中。");
+    expect(heading(html, "后台等待中")).toBeGreaterThan(-1);
+    expect(heading(html, "工作中")).toBe(-1);
+    expect(html).not.toContain("一切就绪");
+  });
+
+  it("marks the pane that only waits in a working tab's row (#10938)", () => {
+    const html = render([agent(1, 0, "working", { state_since: "2026-01-01T00:00:00Z" }), agent(1, 1, "working", { background_working: true, background_waiting: true })]);
+    expect(html).toContain("1 个工作中，1 个后台等待中。");
+    expect(heading(html, "后台等待中")).toBe(-1);
+    const row = html.slice(heading(html, "工作中"));
+    expect(row.split('data-state="bg_waiting"').length - 1).toBe(1);
+    expect(row).toContain("后台等待中");
+  });
+
+  it("puts the extensions' cards last, under the agents' sections and the computers (#11147)", () => {
+    const cards = (html: string) => html.indexOf("data-overview-cards");
+    const asking = agent(1, 0, "needs_you");
+    const bg = { background_working: true, background_waiting: true };
+    const html = render([asking, agent(2, 0, "needs_you"), agent(3, 0, "working"), agent(5, 0, "working", bg), agent(4, 0, "unread")], [{ id: "i1", kind: "permission", machine_id: "mac", session_id: asking.session_id, tool_name: "Bash" } as Interaction]);
+    const at = [heading(html, "需要你"), heading(html, "卡住了，要你去看"), heading(html, "工作中"), heading(html, "后台等待中"), heading(html, "完成未看"), heading(html, "电脑"), cards(html)];
+    expect(at.every((x) => x > -1)).toBe(true);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    // nothing to do: the ready card and the computers still come first
+    const calm = render([]);
+    expect(calm.indexOf("一切就绪")).toBeGreaterThan(-1);
+    expect(calm.indexOf("一切就绪")).toBeLessThan(heading(calm, "电脑"));
+    expect(heading(calm, "电脑")).toBeLessThan(cards(calm));
+    // before the first snapshot: only 加载中, then the cards
+    const early = render([agent(3, 0, "working")], [], { loaded: false });
+    expect(early.indexOf("加载中")).toBeGreaterThan(-1);
+    expect(early.indexOf("加载中")).toBeLessThan(cards(early));
+    render([], [], { loaded: true });
+  });
+
   it("does not say nothing needs you above a waiting card", () => {
     const asking = agent(1, 0, "needs_you");
     const html = render([asking, agent(2, 0, "idle")], [{ id: "i1", kind: "permission", machine_id: "mac", session_id: asking.session_id, tool_name: "Bash" } as Interaction]);
@@ -372,7 +428,8 @@ describe("tasks in progress", () => {
     expect(html).not.toContain('data-task="c"');
     expect(html).toContain('data-stage="review" data-state="current"');
     expect(html).toContain("https://example.com/o/r/pull/42");
-    expect(html).toContain("1 个 Agent");
+    // the agent's computer (its row has no model or effort to name; Home.task-agents.test.tsx has the rest, #10904)
+    expect(html.slice(html.indexOf('data-task="a"'), html.indexOf('data-task="b"'))).toContain('<span class="truncate">Mac</span>');
     expect(html).not.toContain("查看全部");
     expect(html).toContain("已合未上线");
   });

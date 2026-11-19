@@ -156,6 +156,9 @@ func (s *Service) taskCards(ctx context.Context, items []FeedItem, feedPlans map
 				card.State = "waiting"
 				card.Reason = i18n.T(s.lang(ctx), "assistant-tasks.admission_queued", i18n.Args{
 					"reason": task.Queue.Reason})
+				if task.Queue.Claimed || task.Queue.Key == requestGateKey {
+					card.Reason = task.Queue.Reason
+				}
 				card.UpdatedAt = task.Queue.NextAt
 			}
 			cards[card.ID] = card

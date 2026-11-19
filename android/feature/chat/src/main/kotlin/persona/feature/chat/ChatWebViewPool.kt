@@ -3,6 +3,7 @@ package persona.feature.chat
 import androidx.annotation.StringRes
 import androidx.annotation.VisibleForTesting
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Message
 import android.view.ActionMode
@@ -72,7 +73,13 @@ internal class ChatWebViewPool(
         val view = pages[url] ?: create().also { pages[url] = it; if (url in noCache) it.settings.cacheMode = WebSettings.LOAD_NO_CACHE; it.loadUrl(url) }
         // Only the newest uncommitted view needs protection. A composition abandoned before activate leaves no permanent held entry.
         pending = view
-        if (speculative.remove(url)) view.loadUrl(url)
+        if (speculative.remove(url)) {
+            if (view.paused) {
+                view.paused = false
+                view.onResume()
+            }
+            view.loadUrl(url)
+        }
         trim()
         return view
     }
@@ -82,10 +89,14 @@ internal class ChatWebViewPool(
         if (closed || view.gone || pages.values.none { it === view }) return
         if (pending === view) pending = null
         held += view
-        active?.takeIf { it !== view }?.let { mute(it, true); it.onPause() }
+        active?.takeIf { it !== view }?.let { previous ->
+            previous.exitCustomView()
+            pauseView(previous)
+        }
+        val changed = active !== view
         active = view
-        mute(view, false)
-        view.onResume()
+        if (changed || view.paused) resumeView(view)
+        maybeRecoverMedia(view)
         trim()
     }
 
@@ -98,18 +109,27 @@ internal class ChatWebViewPool(
         speculative.remove(url)
         val view = pages[url] ?: return
         // The one on screen reloads in place; one kept aside goes, and the next acquire loads it anew.
-        if (view === active) { view.settings.cacheMode = WebSettings.LOAD_NO_CACHE; if (view.loadProgress >= 100) view.reload() }
-        else { pages.remove(url); held -= view; if (pending === view) pending = null; (view.parent as? ViewGroup)?.removeView(view); view.destroy() }
+        if (view === active) {
+            view.exitCustomView()
+            view.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            if (view.loadProgress >= 100) view.reload()
+        } else {
+            pages.remove(url)
+            held -= view
+            if (pending === view) pending = null
+            destroyView(view)
+        }
     }
 
     private val noCache = mutableSetOf<String>()
 
     @androidx.annotation.OptIn(markerClass = [Profile.ExperimentalUrlPrefetch::class])
     fun preload(url: String) {
-        // A loopback address is the phone's own, with or without a port: never loaded ahead.
-        if (closed || isLoopback(url) || pages.containsKey(url)) return
+        // Loopback addresses (the phone's own) and direct media files are never preloaded in a paused background WebView.
+        if (closed || isLoopback(url) || isDirectMedia(url) || pages.containsKey(url)) return
         val view = create()
         pages[url] = view
+        view.needsMediaRecovery = true
         if (features.supported(WebViewFeature.PRERENDER_WITH_URL) &&
             WebViewFeature.isFeatureSupported(WebViewFeature.PRERENDER_WITH_URL)) {
             speculative.add(url)
@@ -120,8 +140,7 @@ internal class ChatWebViewPool(
                 }
             })
         } else view.loadUrl(url)
-        mute(view, true)
-        view.onPause()
+        pauseView(view)
         trim()
     }
 
@@ -134,17 +153,17 @@ internal class ChatWebViewPool(
         if (closed) return
         val entry = pages.entries.firstOrNull { it.value === view } ?: return
         val url = entry.key
+        view.exitCustomView()
         view.onPick = null; view.onExternal = null
-        mute(view, true)
         (view.parent as? ViewGroup)?.removeView(view)
-        view.onPause()
+        pauseView(view)
         if (active === view) active = null
         if (url in noCache) return
 
         // An ordinary view serves one opening: its browsed page and history go, and a fresh view waits on the original URL.
         pages.remove(url)
         speculative.remove(url)
-        view.destroy()
+        destroyView(view)
         preload(url)
     }
 
@@ -158,14 +177,14 @@ internal class ChatWebViewPool(
             val entry = pages.entries.firstOrNull { it.value !== active && it.value !in held && it.value !== pending } ?: return
             pages.remove(entry.key)
             speculative.remove(entry.key)
-            entry.value.destroy()
+            destroyView(entry.value)
         }
     }
 
     /** Memory pressure drops pages no host owns. Committed and newest pending views stay valid even while detached from their slot. */
     fun trimMemory() {
         val drop = pages.entries.filter { it.value !== active && it.value !in held && it.value !== pending && it.value.parent == null }
-        drop.forEach { (url, view) -> pages.remove(url); speculative.remove(url); view.destroy() }
+        drop.forEach { (url, view) -> pages.remove(url); speculative.remove(url); destroyView(view) }
     }
 
     /** A renderer that crashed or was killed takes only its page with it: forgotten here, shown as gone, made anew on reopening. */
@@ -175,9 +194,42 @@ internal class ChatWebViewPool(
         if (pending === view) pending = null
         if (active === view) active = null
         view.gone = true
-        view.onPick = null; view.onExternal = null
+        destroyView(view)
+    }
+
+    private fun destroyView(view: ChatSelectionWebView) {
+        view.exitCustomView()
+        view.onPick = null
+        view.onExternal = null
+        view.onWindowAttached = null
         (view.parent as? ViewGroup)?.removeView(view)
         view.destroy()
+    }
+
+    private fun pauseView(view: ChatSelectionWebView) {
+        mute(view, true)
+        if (!view.paused) {
+            view.paused = true
+            view.onPause()
+        }
+    }
+
+    private fun resumeView(view: ChatSelectionWebView) {
+        mute(view, false)
+        if (view.paused) {
+            view.paused = false
+            view.onResume()
+        }
+    }
+
+    /**
+     * Nudges `<video>` elements whose initial metadata/first-frame load stalled while the WebView was paused and
+     * window-detached during background preloading. Runs at most once after the view is active, resumed, attached, and loaded.
+     */
+    private fun maybeRecoverMedia(view: ChatSelectionWebView) {
+        if (!view.needsMediaRecovery || !view.pageLoaded || !view.isWindowAttached) return
+        view.needsMediaRecovery = false
+        view.recoverStalledMedia()
     }
 
     @Suppress("SetJavaScriptEnabled")
@@ -187,8 +239,9 @@ internal class ChatWebViewPool(
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        // A page seen before paints from the disk cache at once (iOS returnCacheDataElseLoad); later loads are normal.
-        settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+        // Honor standard HTTP Cache-Control / ETag semantics so cacheable assets stay fast while no-store / no-cache
+        // pages and HTML5 <video> byte-range requests are never served stale from disk.
+        settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.setSupportMultipleWindows(true)
         settings.javaScriptCanOpenWindowsAutomatically = false
         if (features.supported(WebViewFeature.ALGORITHMIC_DARKENING) &&
@@ -199,6 +252,9 @@ internal class ChatWebViewPool(
         // Logins embedded in a page (a sign-in frame from another site) need its cookies; every page shares the store.
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
         val page = this
+        onWindowAttached = {
+            if (!closed && active === page && !page.gone && !page.paused) maybeRecoverMedia(page)
+        }
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val target = request.url.toString()
@@ -210,11 +266,14 @@ internal class ChatWebViewPool(
                 return true
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                page.exitCustomView()
+                pageLoaded = false
                 failure = null; currentUrl = url.orEmpty(); loadProgress = 0
             }
             override fun onPageFinished(view: WebView, url: String?) {
                 currentUrl = url.orEmpty(); pageTitle = view.title.orEmpty(); loadProgress = 100
-                if (view.settings.cacheMode != WebSettings.LOAD_NO_CACHE) view.settings.cacheMode = WebSettings.LOAD_DEFAULT
+                pageLoaded = true
+                if (!closed && active === page && !page.gone && !page.paused) maybeRecoverMedia(page)
             }
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 this@ChatWebViewPool.dropGone(page)
@@ -230,6 +289,17 @@ internal class ChatWebViewPool(
         webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, value: Int) { loadProgress = value }
             override fun onReceivedTitle(view: WebView, title: String?) { pageTitle = title.orEmpty() }
+            override fun getDefaultVideoPoster(): Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (view == null || closed || page.gone || active !== page) {
+                    runCatching { callback?.onCustomViewHidden() }
+                    return
+                }
+                page.showCustomView(view, callback)
+            }
+            override fun onHideCustomView() {
+                page.onHideCustomViewFromWeb()
+            }
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
                 if (!isUserGesture) return false
                 // Route target=_blank back to this view without handing off to another app.
@@ -254,19 +324,60 @@ internal class ChatWebViewPool(
         return host in loopbackHosts || host.endsWith(".localhost")
     }
 
+    private fun isDirectMedia(url: String): Boolean {
+        val path = runCatching { URI(url.trim()).path }.getOrNull()?.lowercase() ?: return false
+        val segment = path.substringAfterLast('/', "")
+        val ext = segment.substringAfterLast('.', "")
+        return ext.isNotEmpty() && ext != segment && ext in directMediaExtensions
+    }
+
     private fun mute(view: WebView, muted: Boolean) {
         if (features.supported(WebViewFeature.MUTE_AUDIO) && WebViewFeature.isFeatureSupported(WebViewFeature.MUTE_AUDIO)) {
             WebViewCompat.setAudioMuted(view, muted)
         }
     }
 
-    fun pause() { pages.values.forEach { mute(it, true); it.onPause() } }
-    fun resume() { active?.let { mute(it, false); it.onResume() } }
-    fun destroy() { closed = true; held.clear(); pending = null; startup.complete(Unit); popups.forEach { it.destroy() }; popups.clear(); pages.values.forEach { (it.parent as? ViewGroup)?.removeView(it); it.destroy() }; pages.clear(); speculative.clear(); active = null; startupExecutor.shutdown() }
+    fun pause() {
+        pages.values.forEach { view ->
+            if (!view.pageLoaded) view.needsMediaRecovery = true
+            pauseView(view)
+        }
+    }
+
+    fun resume() {
+        active?.let { view ->
+            resumeView(view)
+            maybeRecoverMedia(view)
+        }
+    }
+
+    fun destroy() {
+        closed = true
+        held.clear()
+        pending = null
+        startup.complete(Unit)
+        popups.forEach { it.destroy() }
+        popups.clear()
+        pages.values.forEach { destroyView(it) }
+        pages.clear()
+        speculative.clear()
+        active = null
+        startupExecutor.shutdown()
+    }
 }
 
 /** The hosts that mean this phone itself (the same set as `PortLinks`, which also needs a port). */
 private val loopbackHosts = setOf("localhost", "127.0.0.1", "0.0.0.0", "::1", "::", "[::1]", "[::]")
+
+/** Direct audio/video file extensions skipped by background preloading so they load only in an active, visible WebView. */
+private val directMediaExtensions = setOf("mp4", "m4v", "mov", "webm", "mkv", "ogv", "m3u8", "mpd", "mp3", "m4a", "ogg", "wav", "flac")
+
+/**
+ * Re-triggers `load()` on `<video>` elements that stalled at `readyState < 2` while a preloaded WebView was paused and
+ * detached. Leaves actively playing, seeked, `preload="none"`, `srcObject`, and MSE (`blob:`) videos untouched.
+ */
+internal const val RESUME_STALLED_MEDIA_JS =
+    "(function(){var vs=document.querySelectorAll('video');for(var i=0;i<vs.length;i++){var v=vs[i];var src=v.currentSrc||v.getAttribute('src')||(v.querySelector('source[src]')&&v.querySelector('source[src]').getAttribute('src'))||'';if(!v.srcObject&&src&&!/^(blob|mediastream):/i.test(src)&&v.paused&&v.currentTime===0&&v.readyState<2&&v.preload!=='none'){try{v.load();}catch(e){}}}})();"
 
 /** What text picked on a page can become: in a conversation "AI edit" and "Use as context", elsewhere "Hand to Persona". */
 internal enum class ChatLinkPick(@StringRes val label: Int) {
@@ -279,12 +390,63 @@ internal open class ChatSelectionWebView(context: Context) : WebView(context) {
     var onPick: ((ChatLinkPick, ChatLinkContext) -> Unit)? = null
     /** A tapped link for another app (mailto:, tel:, intent:): the host asks before it leaves. */
     var onExternal: ((String) -> Unit)? = null
+    /** Active fullscreen custom view requested via [WebChromeClient.onShowCustomView], if any. */
+    var customView by mutableStateOf<View?>(null)
+        internal set
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    /** True while [WebView.onPause] is active on this view. */
+    internal var paused: Boolean = false
+    /** True once [WebViewClient.onPageFinished] has fired for the current main-frame navigation. */
+    internal var pageLoaded: Boolean = false
+    /** True when the page started loading while paused/detached and should nudge stalled `<video>` elements once visible. */
+    internal var needsMediaRecovery: Boolean = false
+    /** Notifies the pool when this view attaches to a window so deferred media recovery can run on a live surface. */
+    internal var onWindowAttached: (() -> Unit)? = null
     var currentUrl by mutableStateOf("")
     var pageTitle by mutableStateOf("")
     var failure by mutableStateOf<String?>(null)
     var loadProgress by mutableIntStateOf(0)
     /** Its renderer crashed or was killed: the view is destroyed, the host offers to load the page again. */
     var gone by mutableStateOf(false)
+
+    internal open val isWindowAttached: Boolean get() = isAttachedToWindow
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        onWindowAttached?.invoke()
+    }
+
+    internal fun showCustomView(view: View, callback: WebChromeClient.CustomViewCallback?) {
+        if (customView === view) {
+            if (callback != null && callback !== customViewCallback) customViewCallback = callback
+            return
+        }
+        clearCustomView()
+        customView = view
+        customViewCallback = callback
+    }
+
+    /** Dismisses any active custom view, detaching it and invoking its Chromium callback once. */
+    internal fun exitCustomView(): Boolean = clearCustomView()
+
+    internal fun onHideCustomViewFromWeb() {
+        clearCustomView()
+    }
+
+    private fun clearCustomView(): Boolean {
+        val current = customView
+        val callback = customViewCallback
+        if (current == null && callback == null) return false
+        customView = null
+        customViewCallback = null
+        (current?.parent as? ViewGroup)?.removeView(current)
+        runCatching { callback?.onCustomViewHidden() }
+        return true
+    }
+
+    internal fun recoverStalledMedia() {
+        evaluateJavascript(RESUME_STALLED_MEDIA_JS, null)
+    }
 
     override fun startActionMode(callback: ActionMode.Callback): ActionMode? = super.startActionMode(wrap(callback))
     override fun startActionMode(callback: ActionMode.Callback, type: Int): ActionMode? = super.startActionMode(wrap(callback), type)

@@ -33,3 +33,9 @@ type NodeUpdateAbortParams struct {
 type NodeUpdateConfirmParams struct {
 	Version string `json:"version"`
 }
+
+// NodeUpdatePreflightFailure identifies the committed update whose replacement could not be started.
+type NodeUpdatePreflightFailure struct {
+	ID    string `json:"id"`
+	Error string `json:"error"`
+}

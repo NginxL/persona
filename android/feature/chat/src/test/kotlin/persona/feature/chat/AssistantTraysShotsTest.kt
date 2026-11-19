@@ -420,6 +420,73 @@ class AssistantTraysShotsTest {
         rule.onNodeWithTag("assistant-tray-bar").assertDoesNotExist()
     }
 
+    /**
+     * Finished (#10922): the conversation's tasks that finished in the last 24 hours, newest first, seen or not, after In
+     * progress and counted by its rows. The unseen one says Just finished in Unread's green, the seen one Done; the task
+     * that finished weeks ago is the board's alone. Every style, light and dark.
+     */
+    @Test fun finishedListsNewAndSeenTasksInEveryStyle() = finishedShots("finished", "Just finished", "Done", AppStyle.entries)
+
+    /** The same in Chinese: 已完成 on the entry, 刚做完待看 on the new row. */
+    @Test @Config(qualifiers = "zh-w400dp-h900dp-xhdpi")
+    fun finishedListsNewAndSeenTasksInChinese() = finishedShots("finished-zh", "刚做完待看", "完成", listOf(AppStyle.Glass))
+
+    private fun finishedShots(name: String, newLabel: String, seenLabel: String, styles: List<AppStyle>) {
+        val fixture = Fixture()
+        val now = Instant.now()
+        fun ago(hours: Long) = now.minusSeconds(hours * 3600).toString()
+        fixture.returnedTodos = todoRows +
+            Todo("task-new", "Rename the settings tab", origin = "main", createdAt = ago(4), updatedAt = ago(1), doneAt = ago(1),
+                doneReason = "Renamed the tab and updated its tests") +
+            Todo("task-seen", "Fix the export button", origin = "main", createdAt = ago(6), updatedAt = ago(3), doneAt = ago(3),
+                seenAt = ago(2), doneReason = "The export works again")
+        fixture.tasks.reloadTodos()
+        fixture.requests.value = emptyList(); fixture.drafts.value = emptyList()
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
+                        ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
+                            chrome = ChatChromeBindings(tasks = fixture.tasks, assistantManagement = fixture.management, inboxTrays = fixture.inbox,
+                                inboxScope = "fixture", onOpenSession = { fixture.opened += it }),
+                            renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                    }
+                }
+            }
+        }
+        settle()
+        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-entry-finished").fetchSemanticsNodes().isNotEmpty() }
+        // after In progress, as tall as the other entries
+        assertTrue(rule.onNodeWithTag("assistant-entry-running").getUnclippedBoundsInRoot().left <
+            rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().left)
+        assertEquals(JChipTokens.height, rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().height)
+        rule.onNodeWithTag("assistant-entry-finished").performClick(); settle()
+        // the open entry shows whole: the row scrolls for it, as the web's does
+        val bar = rule.onNodeWithTag("assistant-tray-bar").getUnclippedBoundsInRoot()
+        val chip = rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot()
+        assertTrue("$chip in $bar", chip.left >= bar.left && chip.right <= bar.right)
+        for (s in styles) for (d in listOf(false, true)) {
+            style = s; dark = d; settle()
+            rule.onNodeWithTag("assistant-tray-finished").assertIsDisplayed()
+            val inFinished = hasAnyAncestor(hasTestTag("assistant-tray-finished"))
+            rule.onNodeWithTag("assistant-finished-row-new").assert(hasText(newLabel)).assert(hasText("Renamed the tab and updated its tests"))
+            rule.onNodeWithTag("assistant-finished-row").assert(hasText(seenLabel)).assert(hasText("The export works again"))
+            // newest finished first
+            assertTrue(rule.onNodeWithTag("assistant-finished-row-new").getUnclippedBoundsInRoot().top <
+                rule.onNodeWithTag("assistant-finished-row").getUnclippedBoundsInRoot().top)
+            rule.onNode(hasText(unread.title) and inFinished).assertDoesNotExist()
+            rule.onNodeWithTag("assistant-task-board").assertExists()
+            shot("$name-${s.name.lowercase()}-${if (d) "dark" else "light"}")
+        }
+    }
+
     /** A task whose agent stopped while the hub's completion check found it waiting (#3180): its Progress row says why it is
      *  not done, in every style, light and dark. */
     @Test fun aStoppedTaskSaysWhyItIsNotDoneInEveryStyle() =

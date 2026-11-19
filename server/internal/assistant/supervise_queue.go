@@ -69,7 +69,7 @@ func (s *Service) recheckQueuedDigest(ctx context.Context, to string, msg relayM
 			if _, handled, _ := s.leaderRoute(g); handled {
 				return msg, false, true
 			}
-			target := s.digestTo(here, g)
+			target := s.digestTarget(ctx, here, g)
 			if target == "" {
 				return msg, false, true
 			}

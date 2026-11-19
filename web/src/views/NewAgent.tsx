@@ -126,6 +126,9 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   const [configured, setConfigured] = useState<ModelBinding | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [launchersOf, setLaunchersOf] = useState(""); // the machine `launchers` and `configured` are for
+  // the computer whose launchers couldn't be read, and why (#10952): the pill says so and a click reads them again
+  const [unread, setUnread] = useState<{ mid: string; reason: string } | null>(null);
+  const readLaunchersAgain = useRef(() => {});
   // the grayed-out launcher whose "how to fix" is open (#1643); "": none
   const [helpFor, setHelpFor] = useState("");
   // this start's model (an id from the list; "": the default) and effort ("": the launcher's), never saved
@@ -405,7 +408,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     setProviderNames([]);
     setHelpFor("");
     setDropped(null);
-    const controller = new AbortController();
+    let controller = new AbortController();
     // nothing of the computer before goes to this one unless restoreLauncher puts it back (a read that fails leaves none)
     setLauncher("");
     setModel("");
@@ -414,35 +417,48 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     setModelDefault("");
     setHubDefault(undefined);
     setConfigured(null);
-    setLoadingModels(true);
-    Promise.all([
-      machineLaunchers(mid, { signal: controller.signal }),
-      modelPurpose("agent.new").catch((e) => {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      }),
-    ])
-      .then(([r, config]) => {
-        if (controller.signal.aborted) return;
-        const ls = r.launchers ?? [];
-        setLaunchers(ls);
-        setSkipped(r.unavailable ?? []);
-        setHubDefault(r.default);
-        setTiers(r.tiers ?? []);
-        setLaunchersOf(mid);
-        setUnified(config !== null);
-        if (config) {
-          setModelDefault(modelSummary(config.purpose, config.providers));
-          setConfigured(config.purpose.effective ?? {});
-          setProviderNames(namesFromProviders(config.providers));
-        }
-        const card = pendingSetup.current?.machine === mid ? pendingSetup.current : null;
-        if (card) pendingSetup.current = null;
-        carrying.current = null;
-        restoreLauncher(mid, card, ls, config ? (config.purpose.effective ?? {}) : null, carry);
-      })
-      .catch((e) => { if (!controller.signal.aborted) toast(errorText(e), "error"); })
-      .finally(() => { if (!controller.signal.aborted) setLoadingModels(false); });
+    // A read that fails settles too (#10952): the pill leaves its spinner for its failed state, the line under the box
+    // says why, and Start runs the computer's default. Retry reads again with the same card and carried choice.
+    const read = () => {
+      const { signal } = controller;
+      setUnread(null);
+      setLoadingModels(true);
+      Promise.all([
+        machineLaunchers(mid, { signal }),
+        modelPurpose("agent.new").catch((e) => {
+          if (e instanceof ApiError && e.status === 404) return null;
+          throw e;
+        }),
+      ])
+        .then(([r, config]) => {
+          if (signal.aborted) return;
+          const ls = r.launchers ?? [];
+          setLaunchers(ls);
+          setSkipped(r.unavailable ?? []);
+          setHubDefault(r.default);
+          setTiers(r.tiers ?? []);
+          setLaunchersOf(mid);
+          setUnified(config !== null);
+          if (config) {
+            setModelDefault(modelSummary(config.purpose, config.providers));
+            setConfigured(config.purpose.effective ?? {});
+            setProviderNames(namesFromProviders(config.providers));
+          }
+          const card = pendingSetup.current?.machine === mid ? pendingSetup.current : null;
+          if (card) pendingSetup.current = null;
+          carrying.current = null;
+          restoreLauncher(mid, card, ls, config ? (config.purpose.effective ?? {}) : null, carry);
+        })
+        // the computer read last only: another one picked meanwhile aborted this read
+        .catch((e) => { if (!signal.aborted) setUnread({ mid, reason: errorText(e) }); })
+        .finally(() => { if (!signal.aborted) setLoadingModels(false); });
+    };
+    read();
+    readLaunchersAgain.current = () => {
+      controller.abort();
+      controller = new AbortController();
+      read();
+    };
     const p = presetCwd.current;
     if (p?.mid === mid) presetCwd.current = null;
     const card = pendingSetup.current?.machine === mid ? pendingSetup.current : null;
@@ -455,9 +471,17 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     setNaming(false);
     return () => {
       controller.abort();
+      readLaunchersAgain.current = () => {};
       setLaunchersOf("");
+      setUnread(null);
     };
   }, [open, mid]);
+  const launchersFailed = unread?.mid === mid ? unread.reason : "";
+  // Retry, from the pill or the line under the box: the line goes while it reads, so the caret goes to the message box
+  const retryLaunchers = () => {
+    readLaunchersAgain.current();
+    firstMessage.current?.focus();
+  };
 
   // The model list of the launcher that will run (the chosen one, or the model configuration's), read on each opening and
   // kept for the page's life with the chat's (lib/session-models.ts): the pill names its model, a start sends what it
@@ -993,6 +1017,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
                     mid={mid}
                     launchers={launchers}
                     ready={settled}
+                    onRetry={launchersFailed ? retryLaunchers : undefined}
                     choice={{ launcher, model, effort }}
                     runs={runs}
                     configured={unified ? configured : null}
@@ -1025,6 +1050,15 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
             <ModelNotes>
               {dropped && (
                 <Note data-testid="new-agent-dropped" icon="info">{t("newagent.carry_dropped", { name: dropped.name, computer: dropped.computer })}</Note>
+              )}
+              {launchersFailed && (
+                // this computer's launchers couldn't be read (#10952): why, and Retry; Start still runs its default
+                <Note data-testid="new-agent-launchers-failed" icon="warning" tone="orange">
+                  {t("newagent.launchers_failed")} <span className="text-ink-3">{launchersFailed}</span>{" "}
+                  <button type="button" onClick={retryLaunchers} className="touch-hit whitespace-nowrap text-accent-ink hover:underline">
+                    {t("newagent.retry")}
+                  </button>
+                </Note>
               )}
               {runs && models.list === undefined && models.error && !models.loading && (
                 <Note data-testid="new-agent-models-failed" icon="warning" tone="orange">{t("newagent.models_failed")}</Note>

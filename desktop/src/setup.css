@@ -9,6 +9,8 @@ details { margin-top: 1.75rem; border-top: 1px solid GrayText; padding-top: 1rem
 summary { cursor: pointer; font-weight: 600; min-height: 2.75rem; align-content: center; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
 .actions button { width: auto; min-width: 8rem; margin: 0; padding: .5rem .75rem; }
+.actions button.secondary { border: 1px solid GrayText; background: Canvas; color: CanvasText; }
+#connection-recovery button { white-space: nowrap; }
 p { line-height: 1.5; }
 label { display: block; font-weight: 600; margin: 1.5rem 0 .5rem; }
 .choice { display: flex; align-items: center; gap: .6rem; min-height: 2.75rem; margin: 0; cursor: pointer; }

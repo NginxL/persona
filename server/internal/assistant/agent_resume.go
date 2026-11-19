@@ -131,7 +131,11 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	var res struct {
 		Session proto.Session `json:"session"`
 	}
-	err = s.call(sctx, am.ID, DeviceSessionStart, resumeParams(c, text), &res)
+	startParams := resumeParams(c, text)
+	if id, ok := params["client_msg_id"]; ok {
+		startParams["client_msg_id"] = id
+	}
+	err = s.call(sctx, am.ID, DeviceSessionStart, startParams, &res)
 	sendNote.sent(sctx, err) // an unknown answer counts for the agent's next turn: it may still come up and take it
 	if err != nil {
 		if startResultUnknown(err) { // it may still come up and take the message

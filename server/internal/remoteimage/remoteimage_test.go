@@ -48,8 +48,18 @@ type rig struct {
 // newRig serves handler as every host hosts names (name → comma-separated answers of the resolver).
 func newRig(t *testing.T, hosts map[string]string, handler http.HandlerFunc) *rig {
 	t.Helper()
+	return newRigOf(t, Profile{}, hosts, handler)
+}
+
+// newRigOf is newRig for profile p (Pictures for none), over TLS when p takes https only.
+func newRigOf(t *testing.T, p Profile, hosts map[string]string, handler http.HandlerFunc) *rig {
+	t.Helper()
 	r := &rig{}
-	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	start := httptest.NewServer
+	if p.HTTPSOnly {
+		start = httptest.NewTLSServer
+	}
+	r.srv = start(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Only the fetcher's requests count: a developer machine may probe a new local port on its own (GET /).
 		if req.Header.Get("User-Agent") != userAgent {
 			http.NotFound(w, req)
@@ -61,7 +71,9 @@ func newRig(t *testing.T, hosts map[string]string, handler http.HandlerFunc) *ri
 	t.Cleanup(r.srv.Close)
 	target := r.srv.Listener.Addr().String()
 	r.f = New(Options{
-		CacheDir: t.TempDir(),
+		Profile:     p,
+		tlsInsecure: p.HTTPSOnly,
+		CacheDir:    t.TempDir(),
 		resolve: func(_ context.Context, host string) ([]net.IPAddr, error) {
 			answer, ok := hosts[host]
 			if !ok {

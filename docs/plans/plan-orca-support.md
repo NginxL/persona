@@ -164,6 +164,9 @@ Two options for phase 3: propose an Orca "colored screen read" method callable o
 
 - **When state rows disappear**: after an Agent exits, Orca removes its row from `worktree.ps` (retaining only recovery rows, which `worktree.ps` does not list). But `agentIdentity`
   and row removal need not synchronize with the process, so Agent identification is process-based.
+- **A start does not take Orca's word alone** (#10588): a start once failed as a Claude stall in a tab Orca named claude in, where only empty prompts
+  showed and the start line never arrived. A start in an Orca tab now counts claude as come only with Claude Code's screen or its start file run, and a
+  line that never showed and never ran ends as `terminal_not_ready` (`node/startevidence.go`, `docs/integrations/claude-integration.md`).
 - **`terminal.send` rejection is not an error**: it returns `{send:{accepted:false, bytesWritten:0, refusedReason}}`; inspect `accepted`. However, `no-agent` / `permission`
   appear only with `requireAgentStatus:"sendable"`; without it, Orca writes anyway. Orca directly rejects `requireAgentStatus` together with "text + Enter"
   (requiring two steps: text, then Enter), but that loses bracketed paste, so we must verify foreground Agent via `terminal.agentStatus` before sending.

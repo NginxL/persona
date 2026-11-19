@@ -171,6 +171,7 @@ type fakeHub struct {
 	answer    func(proto.Interaction) proto.Resolution
 	deltas    []string
 	model     map[string]any        // assistant.model's answer; nil: an older hub without it
+	state     any                   // state.load's sessions value, in the hub's persisted representation
 	queried   map[string]string     // the session id the node asked about, by method
 	context   map[string]any        // assistant.context's answer; nil: just a snapshot
 	acks      []json.RawMessage     // assistant.context calls that acked view errors
@@ -214,6 +215,10 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 		switch method {
 		case "assistant.lark":
 			return proto.AssistantLark{}, nil
+		case "state.load":
+			fh.mu.Lock()
+			defer fh.mu.Unlock()
+			return map[string]any{"sessions": fh.state}, nil
 		case "assistant.context":
 			var p struct {
 				Ack json.RawMessage `json:"ack"`

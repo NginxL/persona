@@ -16,9 +16,10 @@ type KBTopicRef struct {
 // KBTopicDistillInput is one source for the distill step: a stretch of a project's timeline (Project) or a chat's
 // compressed context.
 type KBTopicDistillInput struct {
-	Project bool
-	Name    string
-	Goal    string
+	Language string // Instruction language; source fields remain unchanged.
+	Project  bool
+	Name     string
+	Goal     string
 	// A project's timeline lines From–To (1-based) of Total.
 	Lines           []string
 	From, To, Total int
@@ -28,6 +29,7 @@ type KBTopicDistillInput struct {
 
 // KBTopicDistill is the distill step's system prompt: MaxPoints is how many points one call answers with at most.
 type KBTopicDistill struct {
+	Language  string // Instruction language; source fields remain unchanged.
 	Owner     string
 	MaxPoints int
 }
@@ -39,12 +41,14 @@ func RenderKBTopicDistillInput(in KBTopicDistillInput) string {
 
 // KBTopicMerge is the merge step's system prompt: MaxPoints is how many points a topic keeps at most.
 type KBTopicMerge struct {
+	Language  string // Instruction language; source fields remain unchanged.
 	Owner     string
 	MaxPoints int
 }
 
 // KBTopicMergeInput is one topic's points and the candidates to fold in (their IDs are c1, c2…).
 type KBTopicMergeInput struct {
+	Language   string // Instruction language; source fields remain unchanged.
 	Name       string
 	Aliases    []string
 	Note       string

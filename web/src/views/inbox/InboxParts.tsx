@@ -116,7 +116,11 @@ export function ItemAvatar({ it, size = 40 }: { it: InboxItem; size?: number }) 
   } else if (isLark(it)) {
     face = <Monogram name={it.title} size={size} square={it.lark?.is_group} src={hubMediaURL(it.avatar)} manager={it.manager} />;
   } else {
-    face = <Monogram name={it.sender || it.title} size={size} neutral />;
+    // A connector's thread picture (the other person, a group's own) from the hub's avatars route, asked at the pixels
+    // drawn (the route rounds up to the sizes it draws; the browser keeps it, `immutable`); the initial without one or
+    // when it cannot be loaded. Inline: the row is on the first screen.
+    const pic = it.connector?.avatar_url;
+    face = <Monogram name={it.sender || it.title} size={size} neutral src={pic && `${pic}?size=${Math.ceil(size * devicePixelRatio)}`} manager={it.manager} />;
   }
   const badge = Math.max(14, Math.round(size * 0.42));
   // A connector's own mark on white in the corner; one without a mark a neutral gray, like mail.

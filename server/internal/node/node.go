@@ -185,6 +185,7 @@ type Node struct {
 	focus     focusState                 // focus sync for the full views (focus.go)
 	suggests  map[string]*suggestState   // session id -> Claude's suggested next message (suggestion.go)
 	driving   map[string]bool            // session id -> Persona is working its TUI (a picker it opened is not "blocked")
+	blockedAt map[string]time.Time       // session id -> when host status first became blocked without clearing
 	dialogs   paneDialogs                // pane -> the dialog its last screen read showed (dialogstatus.go)
 	allowed   allowWatches               // session -> its pane, followed after an allow (allowwatch.go)
 	firstWait sync.WaitGroup             // first messages being checked (firstprompt.go)
@@ -229,6 +230,7 @@ type Node struct {
 	// The pi family's panes listed by their fallback id, and omp's stopped sessions (pifamily.go, ompdisk.go).
 	familySeen map[string]familySeenPane // omp pane -> first seen (zero: there when the node started), last session
 	ompDisk    *ompDiskState
+	ompFiles   map[string]string // omp session id -> the session file herdr's omp integration reported (ompresume.go)
 
 	// usageRetried: when a conversation's message was last sent again after its transcript's usage was repaired
 	// (assistant_usage.go): once in a while at most. Under mu; nil until the first.
@@ -718,7 +720,7 @@ func (n *Node) writeClaudeConfig() error { return writeGeneratedConfig(n.dir, n.
 // Until the authenticated hub's configuration arrives, keep the legacy MCP alias.
 func (n *Node) hubSupportsPersonaContracts() bool { return n.hubPersonaContracts.Load() }
 
-func (n *Node) handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (n *Node) handle(ctx context.Context, method string, params json.RawMessage) (result any, resultErr error) {
 	if n.reload != nil {
 		done, err := n.reload.enter()
 		if err != nil {
@@ -915,12 +917,22 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 		}
 	}
-	if strings.HasPrefix(method, "session.") && p.SessionID != "" {
-		if id := n.resolveAlias(p.SessionID); id != p.SessionID { // a fallback row the pane has since named (pifamily.go)
+	if strings.HasPrefix(method, "session.") {
+		rewrite := map[string]string{}
+		if id := n.resolveAlias(p.SessionID); p.SessionID != "" && id != p.SessionID { // a fallback row the pane named (pifamily.go)
 			p.SessionID = id
+			rewrite["session_id"] = id
+		}
+		if id := n.resolveAlias(p.ResumeSessionID); p.ResumeSessionID != "" && id != p.ResumeSessionID {
+			p.ResumeSessionID = id
+			rewrite["resume_session_id"] = id
+		}
+		if len(rewrite) > 0 {
 			var m map[string]any
 			if json.Unmarshal(params, &m) == nil {
-				m["session_id"] = id
+				for k, v := range rewrite {
+					m[k] = v
+				}
 				if raw, err := json.Marshal(m); err == nil {
 					params = raw
 				}
@@ -1040,8 +1052,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		if res, err, handled := n.runtimeHandle(ctx, h, method, params); handled {
 			return res, err
 		}
-	} else if n.ompStopped(method, p.SessionID) { // a stopped omp: a notice, no send (ompcalls.go)
-		if res, err, handled := n.ompOfflineCalls(method, p.SessionID); handled {
+	} else if n.ompStopped(method, p.SessionID) { // a stopped omp: a notice, and a send resumes it (ompcalls.go)
+		if res, err, handled := n.ompOfflineCalls(ctx, method, p.SessionID, params); handled {
 			return res, err
 		}
 	} else if a, ok := n.agent(p.SessionID); ok && (a.Agent == cursorAgent || a.Agent == agyAgent) {
@@ -1334,9 +1346,32 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "session.start.options":
 		return n.workSessionOptions(ctx, p.Name, p.ConfiguredAgent, p.Host, p.Configured, true)
 	case "session.start", devicewire.MethodStartWorkSession:
+		// Optional tool waits correlate the first input through the existing echo ledger.
+		// Capture the resume boundary before launching, so an identical historical input cannot match.
+		var echoOpts sendOpts
+		_ = json.Unmarshal(params, &echoOpts)
+		if echoOpts.ClientMsgID != "" {
+			sentAt := time.Now()
+			after := echoAfter{in: echoInTranscript}
+			if p.ResumeSessionID != "" {
+				after = n.echoBase(p.ResumeSessionID)
+			}
+			defer func() {
+				out, _ := result.(map[string]any)
+				session, _ := out["session"].(*proto.Session)
+				if resultErr == nil && session != nil {
+					r := echoRecord{SessionID: session.SessionID, ClientMsgID: echoOpts.ClientMsgID,
+						Text: p.Prompt, SentAt: sentAt, AfterSeq: after.seq, In: after.in}
+					if n.echoes.expect(r) {
+						n.notifyEcho(r)
+					}
+				}
+			}()
+		}
 		if p.ResumeSessionID != "" {
 			unlock := n.recovery.lock(p.ResumeSessionID)
 			defer unlock()
+			ctx = withOmpResumeSend(ctx, p.Images, p.ClientMsgID) // what a resumed omp is sent with the prompt (ompresume.go)
 		}
 		if p.ResumeAutomatic {
 			if err := n.supervisorResumeAllowed(p.ResumeSessionID, p.PermissionMode, p.Launcher); err != nil {
@@ -1551,6 +1586,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		var opts sendOpts
 		_ = json.Unmarshal(params, &opts)
 		sctx = withClientMsgID(sctx, opts.ClientMsgID) // a runtime's message goes under it (assistant_runtime.go)
+		sctx = withSupervisionDelivery(sctx, p.MessageSource)
 		send := func() (string, error) {
 			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, ServiceTier: p.ServiceTier, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
 		}
@@ -1648,6 +1684,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 		}
 		ctx = context.WithValue(ctx, sendTraceKey{}, opts.ClientMsgID)
+		ctx = withSupervisionDelivery(ctx, p.MessageSource)
 		ctx, waits := withComputerWait(ctx) // claudebg.go: an outside Claude took it behind a dialog
 		ctx, queued := withSendQueued(ctx)  // codex_desktop_queue.go: it waits behind the turn under way
 		var owner *ownerDelivery
@@ -1664,7 +1701,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 			return n.sendEchoed(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, func() error { // echo.go
 				if n.isAssistantSession(p.SessionID) {
-					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
+					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
 					return err
 				}
 				return n.send(ctx, p.SessionID, p.Text, p.Images, opts)

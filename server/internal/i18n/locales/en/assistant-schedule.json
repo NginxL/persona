@@ -47,6 +47,7 @@
   "run_if_approval": "Allow this command to run on the routine’s computer before each scheduled run?",
   "run_if_skipped": "The pre-run command asked to skip this run.",
   "run_if_failed": "Pre-run check failed: {error}",
+  "retry_unknown": "Persona restarted during the automatic retry. Delivery is unknown, so it was not sent again.",
   "todo_no_evidence": "No new Agent answer, acceptance-criterion state change or explicit progress report was observed.",
   "todo_stalled": "{name}: {count} recurring checks without observable progress. Last run: {reason}",
   "todo_decide": "No progress: {reason} Change approach or keep waiting?",

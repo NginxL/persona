@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/repositorywire"
 	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
@@ -18,7 +18,7 @@ func TestWorkspaceNamingUsesTargetHomeWithoutEngineOrCreation(t *testing.T) {
 	for range 2 {
 		home := t.TempDir()
 		n := &Node{home: home, dir: filepath.Join(home, ".persona")}
-		source := workspacenaming.Source{TodoID: "todo_example", Title: "Example", PlannedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC), Timezone: "UTC", Rules: workspacenaming.Defaults(), Layout: repository.LayoutRoot, Repositories: repository.PreparationSnapshot{Repositories: []repository.PreparationRepository{{RepoID: "web", RequestedRef: repository.RequestedRef{Kind: "default"}}}}}
+		source := workspacenaming.Source{TodoID: "todo_example", Title: "Example", PlannedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC), Timezone: "UTC", Rules: workspacenaming.Defaults(), Layout: repositorywire.LayoutRoot, Repositories: repositorywire.PreparationSnapshot{Repositories: []repositorywire.PreparationRepository{{RepoID: "web", RequestedRef: repositorywire.RequestedRef{Kind: "default"}}}}}
 		raw, _ := json.Marshal(source)
 		out, err := n.handle(t.Context(), "workspace.naming.resolve", raw)
 		if err != nil {
@@ -100,7 +100,7 @@ func TestWorkspaceNamingResolvesPrivateStateItself(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := namingGuardSource()
-	s.Layout, s.Repositories.Repositories = repository.LayoutRoot, s.Repositories.Repositories[:1]
+	s.Layout, s.Repositories.Repositories = repositorywire.LayoutRoot, s.Repositories.Repositories[:1]
 	n := &Node{home: home, dir: alias}
 	before := namingGuardTree(t, home, state)
 	got := namingGuardPreview(t, n, s)
@@ -227,10 +227,10 @@ func TestWorkspaceNamingAllowsSafeMissingTailAndSymlinks(t *testing.T) {
 }
 
 func namingGuardSource() workspacenaming.Source {
-	return workspacenaming.Source{TodoID: "todo_example", Title: "Example", PlannedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC), Timezone: "UTC", Rules: workspacenaming.Defaults(), Layout: repository.LayoutContainer,
-		Repositories: repository.PreparationSnapshot{Repositories: []repository.PreparationRepository{
-			{RepoID: "api", DirectoryAlias: "api", RequestedRef: repository.RequestedRef{Kind: "default"}},
-			{RepoID: "web", DirectoryAlias: "web", RequestedRef: repository.RequestedRef{Kind: "default"}},
+	return workspacenaming.Source{TodoID: "todo_example", Title: "Example", PlannedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC), Timezone: "UTC", Rules: workspacenaming.Defaults(), Layout: repositorywire.LayoutContainer,
+		Repositories: repositorywire.PreparationSnapshot{Repositories: []repositorywire.PreparationRepository{
+			{RepoID: "api", DirectoryAlias: "api", RequestedRef: repositorywire.RequestedRef{Kind: "default"}},
+			{RepoID: "web", DirectoryAlias: "web", RequestedRef: repositorywire.RequestedRef{Kind: "default"}},
 		}}}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/extwire"
 )
 
 // The unified inbox (docs/assistant/inbox.md) is the manager's: Feishu messages, mail and the connectors' threads in one list,
@@ -303,6 +304,8 @@ func (it *InboxItem) listed() InboxItem {
 	}
 	if it.Connector != nil {
 		k := *it.Connector
+		// The apps get the picture's hub path, never the source's value (docs/protocol/protocol.md "Avatars").
+		k.AvatarURL, k.Avatar = extwire.AvatarURL(it.Source, k.Avatar), ""
 		c.Connector = &k
 	}
 	return c

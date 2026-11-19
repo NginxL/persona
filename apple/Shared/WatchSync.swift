@@ -53,7 +53,7 @@ nonisolated extension Interaction {
 
 /// What the watch needs to render without its own WebSocket: live sessions and pending interactions.
 
-nonisolated struct WatchSummary: Codable, Sendable {
+nonisolated struct WatchSummary: Codable, Sendable, Equatable {
     var sessions: [Session]
     var interactions: [Interaction]
     var machines: [Machine]
@@ -74,6 +74,30 @@ nonisolated struct WatchSummary: Codable, Sendable {
         try c.encodeIfPresent(inbox, forKey: .inbox)
         try c.encode(at, forKey: .at)
         try c.encodeIfPresent(sideFold, forKey: .sideFold)
+    }
+}
+
+/// The last summary the phone sent successfully, compared without its timestamp. A later push sends unchanged content
+/// again after 20 minutes: the Watch face's snapshot is stale after an hour, and this matches its timeline reload cadence.
+nonisolated struct WatchSummaryGate {
+    static let unchangedHeartbeat: TimeInterval = WatchPetSnapshot.staleAfter / 3
+    private var lastSent: (summary: WatchSummary, at: Date)?
+
+    func shouldSkip(_ summary: WatchSummary, now: Date) -> Bool {
+        guard let lastSent, Self.normalized(summary) == lastSent.summary else { return false }
+        return now.timeIntervalSince(lastSent.at) < Self.unchangedHeartbeat
+    }
+
+    mutating func sent(_ summary: WatchSummary, at now: Date, succeeded: Bool = true) {
+        guard succeeded else { return }
+        lastSent = (Self.normalized(summary), now)
+    }
+    mutating func reset() { lastSent = nil }
+
+    private static func normalized(_ summary: WatchSummary) -> WatchSummary {
+        var summary = summary
+        summary.at = .distantPast
+        return summary
     }
 }
 
@@ -237,6 +261,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
 
     private var lastSummaryPush = Date.distantPast
     private var pendingSummary: WatchSummary?
+    private var summaryGate = WatchSummaryGate()
     #if os(iOS) || os(visionOS)
     /// What the app last gave `pushRecordingDay`, sent again at every activation.
     private var dayCapabilities: RecordingDayCapabilities?
@@ -315,10 +340,17 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     private func flushSummary() {
-        guard let s = pendingSummary, let data = try? JSON.encoder.encode(s) else { return }
+        guard let s = pendingSummary else { return }
+        let now = Date.now
+        if summaryGate.shouldSkip(s, now: now) {
+            pendingSummary = nil
+            return
+        }
+        guard let data = try? JSON.encoder.encode(s) else { return }
         pendingSummary = nil
-        lastSummaryPush = .now
-        update(["summary": data])
+        let pushedAt = Date.now
+        lastSummaryPush = pushedAt
+        summaryGate.sent(s, at: pushedAt, succeeded: update(["summary": data]))
     }
 
     /// iPhone side: the meetings' minutes for the watch, when they changed.
@@ -330,12 +362,18 @@ final class WatchSync: NSObject, WCSessionDelegate {
         #endif
     }
 
-    private func update(_ values: [String: Any], removing gone: [String] = []) {
-        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+    @discardableResult
+    private func update(_ values: [String: Any], removing gone: [String] = []) -> Bool {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return false }
         var ctx = WCSession.default.applicationContext
         values.forEach { ctx[$0.key] = $0.value }
         gone.forEach { ctx[$0] = nil }
-        try? WCSession.default.updateApplicationContext(ctx)
+        do {
+            try WCSession.default.updateApplicationContext(ctx)
+            return true
+        } catch {
+            return false
+        }
     }
 
     #if os(iOS) || os(visionOS)
@@ -641,6 +679,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
         let installed = session.isWatchAppInstalled
         #endif
         Task { @MainActor in
+            self.summaryGate.reset()
             self.apply(ctx, full: true)
             #if os(iOS) || os(visionOS)
             self.watchAppWasInstalled = installed
@@ -668,6 +707,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
         let installed = session.isWatchAppInstalled
         Task { @MainActor in
+            self.summaryGate.reset()
             let arrived = installed && !self.watchAppWasInstalled
             self.watchAppWasInstalled = installed
             guard arrived else { return }
@@ -782,8 +822,13 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     #if os(iOS) || os(visionOS)
-    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
-    nonisolated func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
+        Task { @MainActor in self.summaryGate.reset() }
+    }
+    nonisolated func sessionDidDeactivate(_ session: WCSession) {
+        Task { @MainActor in self.summaryGate.reset() }
+        session.activate()
+    }
     #endif
 }
 #endif

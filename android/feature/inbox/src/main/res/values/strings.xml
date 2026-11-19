@@ -105,6 +105,14 @@
     <string name="inbox_group_fyi">FYI</string>
     <string name="inbox_mark_all_seen">Mark all seen</string>
     <string name="inbox_clear_all">Clear all</string>
+    <plurals name="inbox_mark_all_in_seen">
+        <item quantity="one">Mark %1$d item in “%2$s” seen</item>
+        <item quantity="other">Mark all %1$d in “%2$s” seen</item>
+    </plurals>
+    <plurals name="inbox_clear_all_in">
+        <item quantity="one">Clear %1$d item in “%2$s”</item>
+        <item quantity="other">Clear all %1$d in “%2$s”</item>
+    </plurals>
     <string name="inbox_translated">Translated</string>
     <plurals name="inbox_messages_count">
         <item quantity="one">%1$d message</item>

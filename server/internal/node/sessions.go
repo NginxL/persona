@@ -147,9 +147,11 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		// textAt: when the transcript last had the agent's words; rollout: a Codex pane's rollout meta, for its effort.
 		var textAt, promptAt time.Time
 		var rollout quickMeta
+		var rolloutPath string
 		if p := n.transcriptPath(id); p != "" {
 			if st, err := os.Stat(p); err == nil {
 				m := n.meta(p, st)
+				rolloutPath = p
 				textAt = m.lastTextAt
 				rollout = m
 				if m.title != "" && a.Agent != "codex" && a.Agent != traexAgent {
@@ -183,6 +185,12 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 				s.Subagents = n.subagents(id)
 			}
+		}
+		blockedSince := n.noteBlockedAt(id, s.Status == proto.StatusBlocked, now)
+		if a.Agent == "codex" && host.ParsePane(a.PaneID).Kind != host.Botmux && s.Status == proto.StatusBlocked &&
+			n.codexRolloutWorkingOverBlocked(ctx, id, a.PaneID, rolloutPath, rollout, blockedSince, now) {
+			s.Status = proto.StatusWorking
+			s.AttentionReason = ""
 		}
 		// The host's record of the answer (botmux's reply in the topic), unless the transcript has words well after it:
 		// the session went on outside the host (a `claude --resume` in a terminal). Text written in the same turn
@@ -250,7 +258,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if seen[s.SessionID] {
 			continue
 		}
-		n.decorateState(s)
+		n.decorateState(s, false)
 		if n.runtimeAssistant(s.SessionID) { // the assistant keeps its mode (assistant_runtime.go)
 			if m := n.assistantModeOf(s.SessionID); m != "" {
 				s.PermissionMode = m
@@ -397,7 +405,7 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 	if s.PaneID != "" && s.Host == "" {
 		s.Host = host.ParsePane(s.PaneID).Kind // the host it runs in (#2576)
 	}
-	if st, ok := n.decorateState(s); ok {
+	if st, ok := n.decorateState(s, true); ok {
 		s.Compaction = st.Compaction
 		s.PendingSwitch = st.PendingSwitch   // launcher_switch.go
 		s.SetEngineHistory(st.EngineHistory) // engine_switch.go
@@ -421,11 +429,15 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 }
 
 // decorateState restores metadata recorded when Persona started the session.
-func (n *Node) decorateState(s *proto.Session) (sessionState, bool) {
+func (n *Node) decorateState(s *proto.Session, managesModel bool) (sessionState, bool) {
 	st, ok := n.state.get(s.SessionID)
 	if ok {
 		s.StartedByPersona = true
 		s.Launcher = st.Launcher
+		if managesModel {
+			model := st.Model
+			s.RequestedModel = &model
+		}
 		// A row without a pane is listed where its record says it started, when that is an assistant or health
 		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's.
 		if s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd) {

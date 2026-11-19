@@ -139,7 +139,7 @@ func (s *Service) sendDigest(ctx context.Context) {
 	var leaderOrder []TodoAgent
 	var wait []superviseSignal     // with no main conversation, what nobody else can be told either (routeTo)
 	s.rehomeLeaderlessWorkers(ctx) // a worker whose leader's task closed gets a supervisor that can act, before routing
-	if s.backgroundNeeded(here, list) {
+	if s.backgroundNeeded(ctx, here, list) {
 		// The background supervisor is made the first time a signal is for it, and again when it is gone. One that
 		// cannot start leaves here as it was: the gone check below sends its signals to the main conversation.
 		id, was := s.ensureBackground(ctx)
@@ -185,7 +185,7 @@ func (s *Service) sendDigest(ctx context.Context) {
 				continue
 			}
 		}
-		to := s.routeTo(here, g, there)
+		to := s.routeTo(ctx, here, g, there)
 		if to == "" { // no main conversation, and the one that dispatched it cannot be told either: it waits (#10126)
 			wait = append(wait, g)
 			continue
@@ -223,8 +223,8 @@ func (s *Service) sendDigest(ctx context.Context) {
 // cannot be told now (there), and while no main conversation is set, the conversation that dispatched its task
 // (dispatcherOf, #10126). "" when none of them can be told: it waits for a main conversation (#5420). With a main
 // conversation set it is never "", and nothing goes anywhere else than before.
-func (s *Service) routeTo(here Settings, g superviseSignal, there func(string) bool) string {
-	to := s.digestTo(here, g)
+func (s *Service) routeTo(ctx context.Context, here Settings, g superviseSignal, there func(string) bool) string {
+	to := s.digestTarget(ctx, here, g)
 	if to != here.Main && !there(to) {
 		to = here.Main
 	}
@@ -248,9 +248,9 @@ func (s *Service) toldWithoutMain(ctx context.Context, here Settings, g supervis
 			return true // its task went meanwhile: nothing is told of it
 		}
 		up, _ := s.supervisorAboveTask(ctx, t)
-		return up != "" && s.routeTo(here, superviseSignal{Todo: g.Todo, Kind: sigDecide, To: up}, there) != ""
+		return up != "" && s.routeTo(ctx, here, superviseSignal{Todo: g.Todo, Kind: sigDecide, To: up}, there) != ""
 	}
-	return s.routeTo(here, g, there) != ""
+	return s.routeTo(ctx, here, g, there) != ""
 }
 
 // dispatcherOf is the conversation that dispatched task id, while it can be told now (there): the one its ledger names

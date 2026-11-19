@@ -107,11 +107,12 @@ func (e *Engine) mergeTopic(ctx context.Context, slug string) error {
 		c.ID = fmt.Sprintf("c%d", i+1)
 		cands[i] = c
 	}
-	in := prompts.KBTopicMergeInput{Name: t.Name, Aliases: t.Aliases, Note: t.Note, Pinned: t.Pinned, Points: f.Points, Candidates: cands}
+	owner := e.knowledgeOwner()
+	in := prompts.KBTopicMergeInput{Language: owner.Language, Name: t.Name, Aliases: t.Aliases, Note: t.Note, Pinned: t.Pinned, Points: f.Points, Candidates: cands}
 	var d mergeDigest
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	system := prompts.RenderKBTopicMerge(prompts.KBTopicMerge{Owner: e.ownerName(), MaxPoints: maxTopicPoints})
+	system := prompts.RenderKBTopicMerge(prompts.KBTopicMerge{Language: owner.Language, Owner: e.ownerName(), MaxPoints: maxTopicPoints})
 	if err := e.modelFor("kb.topics").JSONMax(cctx, system, prompts.RenderKBTopicMergeInput(in), 12000, &d); err != nil {
 		return err
 	}

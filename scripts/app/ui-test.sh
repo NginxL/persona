@@ -25,6 +25,8 @@ d=json.load(sys.stdin); ss=d if isinstance(d,list) else d.get("sessions",[])
 live=[s for s in ss if s.get("pane_id") and not s.get("assistant")]
 print(live[0]["machine_id"]+"/"+live[0]["session_id"] if live else "")')
 fi
+# The whole project, with the watch app and the share extension, whatever the shell exported (apple/lean-dev-build.yml).
+unset PERSONA_LEAN_DEV_BUILD
 cd apple && xcodegen generate -q
 TEST_RUNNER_PERSONA_PAIR_URL="persona://pair?url=$URL&token=$TOKEN" TEST_RUNNER_PERSONA_OPEN_SESSION="$SESSION" \
   xcodebuild test -project Persona.xcodeproj -scheme Persona -destination "id=$SIM" -derivedDataPath ../build/DerivedData \

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,9 +77,9 @@ func linuxAgentCheckArgs(count int) error {
 // The classification comes from identity.DataSecretName (DataSecrets plus DataCredentialPattern) and
 // identity.DataSecretDirs, with the same additional directories and launcher-settings exception as DarwinAgent.
 // Mount points on the data directory and its ancestors make renaming them fail. The socket directories are absent, so
-// connecting to their sockets fails without filtering network syscalls. An alias receives the same closed view, but
-// stock bubblewrap cannot stop unlinking the alias symlink itself while keeping its parent directory writable; that
-// Darwin rule is an explicit Linux gap documented in docs/server/agent-sandbox.md.
+// connecting to their sockets fails without filtering network syscalls. An alias receives the same closed view. Its
+// path is also passed to the pre-exec helper, which mounts the symlink inode without following it so the alias itself
+// cannot be unlinked or renamed while its parent stays writable.
 func LinuxAgent(bwrap string, plan AgentPlan) ([]string, error) {
 	if bwrap == "" {
 		return nil, errors.New("bwrap path is empty")
@@ -105,6 +106,7 @@ func LinuxAgent(bwrap string, plan AgentPlan) ([]string, error) {
 	for _, sub := range append(append([]string(nil), identity.DataSecretDirs...), agentClosedDirs...) {
 		closed[filepath.ToSlash(filepath.Clean(sub))] = true
 	}
+	aliasCount := 0
 	for _, d := range dirs {
 		allowed := linuxAgentLauncherSettings(plan.LauncherSettings, d.real)
 		var err error
@@ -114,24 +116,64 @@ func LinuxAgent(bwrap string, plan AgentPlan) ([]string, error) {
 		}
 		for _, alias := range d.aliases {
 			// A tmpfs directly on a symlink follows it and masks the real directory. First bind the real directory over
-			// the alias so bubblewrap gives this second name its own view, not a second mask over the real path. This
-			// does not make the host symlink itself immune to unlink; see the explicit alias-replacement gap above.
+			// the alias so bubblewrap gives this second name its own view, not a second mask over the real path.
 			args = append(args, "--bind", d.real, alias)
 			args, err = linuxAgentView(args, d.real, alias, closed, allowed)
 			if err != nil {
 				return nil, err
 			}
+			// The pre-exec helper consumes one environment entry per alias and removes them before exec. Separate entries
+			// avoid a single long argument when many aliases are configured.
+			args = append(args, "--setenv", agentAliasEnv(aliasCount), alias)
+			aliasCount++
 		}
 	}
 	if cwd != "" {
 		args = append(args, "--chdir", cwd)
 	}
-	// LinuxAgent is also used without WrapAgent, so reserve "--" and one command element here. WrapAgent repeats the
-	// check with the actual agent argv length.
-	if err := linuxAgentCheckArgs(len(args) + 2); err != nil {
+	// LinuxAgent is also used without WrapAgent, so reserve the command separator and one command element here. An
+	// aliased start also needs the resolved executable, the internal helper command and its separator. WrapAgent repeats
+	// the check with the actual agent argv length.
+	reserve := 2
+	if aliasCount > 0 {
+		reserve = 5
+	}
+	if err := linuxAgentCheckArgs(len(args) + reserve); err != nil {
 		return nil, err
 	}
 	return args, nil
+}
+
+func agentAliasEnv(i int) string {
+	return "PERSONA_AGENT_SANDBOX_ALIAS_" + strconv.Itoa(i)
+}
+
+// linuxAgentCommand adds the command after a LinuxAgent prefix. Aliased starts exec the current node binary first so
+// it can mount the symlink inodes without following them and then exec the agent at the same pid. A start with no
+// aliases keeps the original bwrap command and environment exactly.
+func linuxAgentCommand(prefix, argv []string) ([]string, error) {
+	wrapped := append([]string(nil), prefix...)
+	helper := false
+	for i := 0; i+1 < len(prefix); i++ {
+		if prefix[i] == "--setenv" && prefix[i+1] == agentAliasEnv(0) {
+			helper = true
+			break
+		}
+	}
+	if helper {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		wrapped = append(wrapped, "--", realPath(exe), AgentExecCommand, "--")
+	} else {
+		wrapped = append(wrapped, "--")
+	}
+	wrapped = append(wrapped, argv...)
+	if err := linuxAgentCheckArgs(len(wrapped)); err != nil {
+		return nil, err
+	}
+	return wrapped, nil
 }
 
 // linuxAgentDirs resolves and validates plan exactly where DarwinAgent does. Unlike a sandbox-exec profile, argv can
@@ -164,8 +206,8 @@ func linuxAgentDirs(plan AgentPlan) ([]linuxAgentDir, string, error) {
 			dirs = append(dirs, linuxAgentDir{real: r})
 			at = len(dirs) - 1
 		}
-		// Keep every explicit name, not just ~/.persona: each one must receive the masked view. The remaining unlink
-		// gap for an alias is documented above.
+		// Keep every explicit name, not just ~/.persona: each one receives the masked view and the pre-exec helper's
+		// no-follow symlink mount.
 		named := filepath.Join(realPath(filepath.Dir(d)), filepath.Base(d))
 		if named != r {
 			found := false
@@ -301,8 +343,9 @@ func linuxAgentPopulate(args []string, source, dest, rel string, closedParent bo
 }
 
 // checkLinuxAgentProfile is the Linux counterpart of checkAgentProfile. The opaque profile is the complete bwrap
-// prefix joined by NULs (which cannot occur in an argv element). Every start runs true with every mount: no cached
-// success can outlive bwrap's removal or a namespace failure, and per-cwd profiles do not accumulate in memory.
+// prefix joined by NULs (which cannot occur in an argv element). Every start runs true with every mount and the alias
+// helper: no cached success can outlive bwrap's removal, a namespace failure or missing open_tree/move_mount support,
+// and per-cwd profiles do not accumulate in memory.
 func checkLinuxAgentProfile(profile string) error {
 	parts := strings.Split(profile, "\x00")
 	if len(parts) < 2 || parts[0] == "" {
@@ -312,11 +355,13 @@ func checkLinuxAgentProfile(profile string) error {
 	if p, err := exec.LookPath("true"); err == nil {
 		trueBin = p
 	}
-	args := append([]string(nil), parts[1:]...)
-	args = append(args, "--", trueBin)
+	command, err := linuxAgentCommand(parts, []string{trueBin})
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, parts[0], args...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, command[0], command[1:]...).CombinedOutput(); err != nil {
 		return errors.New(firstLine(out, err))
 	}
 	return nil

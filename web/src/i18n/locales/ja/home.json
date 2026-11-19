@@ -37,6 +37,7 @@
   "permission_detail": "{tool}：{what}",
   "tasks": "進行中のタスク",
   "tasks_all": "すべて表示 ›",
+  "task_agents_more": "+{count}",
   "continue": "続ける",
   "continue_placeholder": "次に何をしてもらいますか？",
   "continue_send": "送信",

@@ -16,6 +16,7 @@
   "tray_empty_parked": "保留中のタスクはありません",
   "tray_review": "Persona の確認待ち",
   "tray_empty_review": "Persona の確認待ちのタスクはありません",
+  "tray_finished": "完了",
   "pr_blocker_review_required": "レビューが必要",
   "pr_blocker_changes_requested": "変更が必要",
   "pr_blocker_checks_failed": "チェック失敗",

@@ -59,6 +59,8 @@ class ShellSession(
     val hubAddresses: () -> List<String> = { emptyList() },
     /** "Add computer" and "Confirm computer" (docs/assistant/onboarding.md 4.2); null in demo mode. */
     val computers: ComputerPairing? = null,
+    /** The selected hub group's suffix in the merged session list; null for the primary group and demo. */
+    val knowledgeNamespace: String? = null,
 ) {
     val agents = object : AgentsDependencies {
         override fun sessions() = this@ShellSession.sessions
@@ -168,7 +170,7 @@ class AppServices @Inject constructor(
                     knowledgeConnection, shell.actions, phone, agentsWiring = agentsWiring, machines = machineManagement,
                     voice = voice, groups = hubGroups, tasks = tasksStore, hubUpdates = hubUpdates,
                     hubAddresses = { listOf(data.credentials.hubAddress) + data.credentials.candidateAddresses + socket.knownAddresses() },
-                    computers = computers, listAdapter = app.agentListAdapter)
+                    computers = computers, listAdapter = app.agentListAdapter, knowledgeNamespace = stacks.selected.value?.namespace)
                 try {
                     coroutineScope {
                         launch {
@@ -300,6 +302,7 @@ internal class OnlyWithRoute(private val delegate: KnowledgeRepository, private 
     override suspend fun search(query: String) = routed { delegate }.search(query)
     override suspend fun entry(kind: KnowledgeKind, id: String) = routed { delegate }.entry(kind, id)
     override suspend fun update(kind: KnowledgeKind, id: String, update: KnowledgeUpdate) = routed { delegate }.update(kind, id, update)
+    override suspend fun handOff(id: String, request: MeetingHandoffRequest) = routed { delegate }.handOff(id, request)
 }
 
 @Module

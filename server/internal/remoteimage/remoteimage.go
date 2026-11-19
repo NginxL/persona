@@ -98,6 +98,8 @@ type Image struct {
 
 // Options set up a Fetcher.
 type Options struct {
+	// Profile is what the Fetcher takes and makes (Pictures when it names no sizes).
+	Profile Profile
 	// CacheDir is where the pictures are kept (created 0700); "" keeps none on disk.
 	CacheDir string
 	// CacheMax is the disk cache's cap in bytes (0: 512 MiB).
@@ -157,8 +159,11 @@ func New(o Options) *Fetcher {
 	if o.now == nil {
 		o.now = time.Now
 	}
+	if len(o.Profile.Sizes) == 0 {
+		o.Profile = Pictures
+	}
 	if o.timeout <= 0 {
-		o.timeout = fetchTimeout
+		o.timeout = o.Profile.Timeout
 	}
 	if o.resolve == nil {
 		o.resolve = net.DefaultResolver.LookupIPAddr
@@ -173,7 +178,7 @@ func New(o Options) *Fetcher {
 		o:       o,
 		fetches: make(chan struct{}, fetchSlots),
 		decodes: make(chan struct{}, decodeSlots),
-		limits:  newLimiter(perCaller, time.Minute, o.now),
+		limits:  newLimiter(o.Profile.PerCaller, time.Minute, o.now),
 		calls:   map[string]*call{},
 		failed:  map[string]failure{},
 		sources: map[string]*call{},
@@ -188,19 +193,8 @@ func New(o Options) *Fetcher {
 	return f
 }
 
-// Snap is the served size for a requested one: the smallest of Sizes at least as large (the largest beyond them),
-// DefaultSize for 0 or less.
-func Snap(size int) int {
-	if size <= 0 {
-		return DefaultSize
-	}
-	for _, s := range Sizes {
-		if size <= s {
-			return s
-		}
-	}
-	return Sizes[len(Sizes)-1]
-}
+// Snap is the size Pictures serves for a requested one (Profile.Snap).
+func Snap(size int) int { return Pictures.Snap(size) }
 
 func key(parts ...string) string {
 	h := sha256.New()
@@ -211,19 +205,55 @@ func key(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// version is what every cache key starts with: what is made from a source, and by which profile (Pictures' keys are
+// as they were before profiles).
+func (f *Fetcher) version() string {
+	if f.o.Profile.Name == "" {
+		return processing
+	}
+	return processing + "-" + f.o.Profile.Name
+}
+
 // Get is the image at rawURL scaled to fit size × size, for caller (who is asking, for the per-caller limit).
 func (f *Fetcher) Get(ctx context.Context, caller, rawURL string, size int) (*Image, error) {
-	u, err := CheckURL(rawURL)
+	return f.GetIn(ctx, caller, "", rawURL, size)
+}
+
+// GetIn is Get kept in sub, one subdirectory of the cache (a source's own, "" none).
+func (f *Fetcher) GetIn(ctx context.Context, caller, sub, rawURL string, size int) (*Image, error) {
+	if !validSub(sub) {
+		return nil, fail(CodeBadURL, http.StatusBadRequest, "bad cache directory %q", sub)
+	}
+	u, err := f.check(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	addr := u.String()
-	size = Snap(size)
-	out := key(processing, "out", strconv.Itoa(size), addr)
+	return f.serve(ctx, caller, sub, u.String(), size, func(ctx context.Context) ([]byte, error) { return f.fetch(ctx, u) })
+}
+
+// Make is the picture whose bytes get gives (a source's own: an extension's media ref), scaled to fit size × size and
+// kept in sub under name, a value that always names the same bytes. Its bytes are checked and drawn exactly as a
+// fetched address's: types from the bytes, the profile's limits, one get however many ask, within caller's limit
+// and the fetch slots, a failure answered from memory for a while.
+func (f *Fetcher) Make(ctx context.Context, caller, sub, name string, size int, get func(context.Context) ([]byte, error)) (*Image, error) {
+	if !validSub(sub) {
+		return nil, fail(CodeBadURL, http.StatusBadRequest, "bad cache directory %q", sub)
+	}
+	if name == "" {
+		return nil, fail(CodeBadURL, http.StatusBadRequest, "no name")
+	}
+	id := "\x00" + sub + "\x00" + name // never an address: those start with a scheme
+	return f.serve(ctx, caller, sub, id, size, func(ctx context.Context) ([]byte, error) { return f.given(ctx, get) })
+}
+
+// serve is the picture id names at size: from the cache, or made from its source once however many ask.
+func (f *Fetcher) serve(ctx context.Context, caller, sub, id string, size int, fetch func(context.Context) ([]byte, error)) (*Image, error) {
+	size = f.o.Profile.Snap(size)
+	out := inSub(sub, key(f.version(), "out", strconv.Itoa(size), id))
 	if img := f.cache.image(out); img != nil {
 		return img, nil
 	}
-	if e := f.failedLately(addr); e != nil {
+	if e := f.failedLately(id); e != nil {
 		return nil, e
 	}
 	f.mu.Lock()
@@ -236,7 +266,7 @@ func (f *Fetcher) Get(ctx context.Context, caller, rawURL string, size int) (*Im
 	if !joined {
 		// Not tied to the first asker's request: those who joined it still wait for the answer.
 		go func() {
-			c.img, c.err = f.make(context.WithoutCancel(ctx), caller, u, size, out)
+			c.img, c.err = f.make(context.WithoutCancel(ctx), caller, sub, id, size, out, fetch)
 			f.mu.Lock()
 			delete(f.calls, out)
 			f.mu.Unlock()
@@ -252,8 +282,8 @@ func (f *Fetcher) Get(ctx context.Context, caller, rawURL string, size int) (*Im
 }
 
 // make fetches (or finds) the source, draws the size and keeps it.
-func (f *Fetcher) make(ctx context.Context, caller string, u *url.URL, size int, out string) (*Image, error) {
-	src, err := f.source(ctx, caller, u)
+func (f *Fetcher) make(ctx context.Context, caller, sub, id string, size int, out string, fetch func(context.Context) ([]byte, error)) (*Image, error) {
+	src, err := f.source(ctx, caller, sub, id, fetch)
 	if err != nil {
 		return nil, err
 	}
@@ -262,20 +292,19 @@ func (f *Fetcher) make(ctx context.Context, caller string, u *url.URL, size int,
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	img, err := render(src, size)
+	img, err := f.o.Profile.render(src, size)
 	<-f.decodes
 	if err != nil {
-		f.remember(u.String(), err)
+		f.remember(id, err)
 		return nil, err
 	}
 	f.cache.put(out, img)
 	return img, nil
 }
 
-// source is the bytes at u: from the disk cache, or fetched once however many sizes wait for them.
-func (f *Fetcher) source(ctx context.Context, caller string, u *url.URL) ([]byte, error) {
-	addr := u.String()
-	k := key(processing, "src", addr)
+// source is the bytes id names: from the disk cache, or fetched once however many sizes wait for them.
+func (f *Fetcher) source(ctx context.Context, caller, sub, id string, fetch func(context.Context) ([]byte, error)) ([]byte, error) {
+	k := inSub(sub, key(f.version(), "src", id))
 	if img := f.cache.image(k); img != nil {
 		return img.Data, nil
 	}
@@ -287,11 +316,11 @@ func (f *Fetcher) source(ctx context.Context, caller string, u *url.URL) ([]byte
 	}
 	f.mu.Unlock()
 	if !joined {
-		c.src, c.err = f.fetchLimited(ctx, caller, u)
+		c.src, c.err = f.fetchLimited(ctx, caller, fetch)
 		if c.err == nil {
 			f.cache.put(k, &Image{Type: "application/octet-stream", Data: c.src})
 		} else {
-			f.remember(addr, c.err)
+			f.remember(id, c.err)
 		}
 		f.mu.Lock()
 		delete(f.sources, k)
@@ -302,8 +331,8 @@ func (f *Fetcher) source(ctx context.Context, caller string, u *url.URL) ([]byte
 	return c.src, c.err
 }
 
-// fetchLimited is fetch within the caller's limit and the fetch slots.
-func (f *Fetcher) fetchLimited(ctx context.Context, caller string, u *url.URL) ([]byte, error) {
+// fetchLimited is fetch within the caller's limit and the fetch slots: the only place a picture costs the caller.
+func (f *Fetcher) fetchLimited(ctx context.Context, caller string, fetch func(context.Context) ([]byte, error)) ([]byte, error) {
 	if wait, ok := f.limits.take(caller); !ok {
 		return nil, &Error{Code: CodeRateLimited, Status: http.StatusTooManyRequests, Detail: "too many images fetched", RetryAfter: wait}
 	}
@@ -313,8 +342,36 @@ func (f *Fetcher) fetchLimited(ctx context.Context, caller string, u *url.URL) (
 		return nil, ctx.Err()
 	}
 	defer func() { <-f.fetches }()
-	return f.fetch(ctx, u)
+	return fetch(ctx)
 }
+
+// given is the bytes get gives, held to what a fetch is: the profile's time and bytes, a type it serves. A failure of
+// get's own is a failed fetch.
+func (f *Fetcher) given(ctx context.Context, get func(context.Context) ([]byte, error)) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, f.o.timeout)
+	defer cancel()
+	data, err := get(ctx)
+	if err != nil {
+		var e *Error
+		switch {
+		case errors.As(err, &e):
+			return nil, e
+		case ctx.Err() != nil || isTimeout(err):
+			return nil, fail(CodeTimeout, http.StatusGatewayTimeout, "took longer than %s", f.o.timeout)
+		}
+		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%v", err)
+	}
+	if len(data) > f.o.Profile.MaxSource {
+		return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d bytes, more than %d", len(data), f.o.Profile.MaxSource)
+	}
+	if kind, _ := sniff(data); !f.o.Profile.served(kind) {
+		return nil, f.o.Profile.unsupported()
+	}
+	return data, nil
+}
+
+// Drop forgets everything kept in sub (a source uninstalled, or its data deleted).
+func (f *Fetcher) Drop(sub string) { f.cache.drop(sub) }
 
 // failedLately is the error an address failed with in the last failedFor, if any.
 func (f *Fetcher) failedLately(addr string) *Error {

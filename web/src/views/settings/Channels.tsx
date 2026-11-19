@@ -325,7 +325,7 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
         {d.surfaces && d.surfaces.length > 0 && <Row label={t("settings-channels.surfaces")}>{d.surfaces.join(t("settings-channels.list_separator"))}</Row>}
       </Group>
 
-      {editable && d.state === "connected" && (
+      {editable && d.state === "connected" && d.capabilities.push && (
         <Group footer={t("settings-channels.test_footer")}>
           <div className="px-4 py-2.5">
             <Button

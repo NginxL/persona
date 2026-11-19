@@ -116,14 +116,19 @@ fi
 # Gradle runs in a machine-wide gradle slot, so parallel worktrees queue instead of thrashing
 # (docs/operations/testing.md "Heavy build slots"). Inside the slot it takes at most ANDROID_MAX_WORKERS workers
 # (default 4; org.gradle.parallel is on) unless the caller already set org.gradle.workers.max in GRADLE_OPTS or the
-# Gradle user home's properties.
+# Gradle user home's properties. With the slots off (PERSONA_HEAVY_SLOTS=0) or no python3, Gradle runs directly, as
+# check-fast's steps do: the helper would only exec it, and the build itself needs no python3.
 gradlew() {
   local workers=()
   if ! { [[ " ${GRADLE_OPTS:-} " == *" -Dorg.gradle.workers.max="* ]] ||
          grep -qs '^[[:space:]]*org\.gradle\.workers\.max[[:space:]]*=' "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties"; }; then
     workers=(--max-workers="${ANDROID_MAX_WORKERS:-4}")
   fi
-  python3 ../scripts/heavy_slot.py run --kind gradle -- ./gradlew ${workers[@]+"${workers[@]}"} "$@"
+  if [ "${PERSONA_HEAVY_SLOTS:-}" = 0 ] || ! command -v python3 >/dev/null 2>&1; then
+    ./gradlew ${workers[@]+"${workers[@]}"} "$@"
+  else
+    python3 ../scripts/heavy_slot.py run --kind gradle -- ./gradlew ${workers[@]+"${workers[@]}"} "$@"
+  fi
 }
 case "${ANDROID_MAX_WORKERS:-4}" in ''|*[!0-9]*|0*) echo "ANDROID_MAX_WORKERS must be a positive whole number." >&2; exit 2 ;; esac
 case "$COMMAND" in

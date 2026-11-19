@@ -3,6 +3,7 @@ package persona.core.hub
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -130,6 +131,19 @@ class HubChatTransport internal constructor(
         return get(url.encodedPath + "?" + url.encodedQuery)
     }
 
+    override suspend fun modeChanges(session: SessionKey): List<ModeChange> {
+        val body = request(api("sessions", session.machineId, session.sessionId, "mode-changes"), "GET", null)
+            .use { it.body!!.string() }
+        val root = try { JsonCodec.parseToJsonElement(body) as? JsonObject }
+        catch (error: Exception) { throw HubFailure(HubError.Protocol, retryable = false, cause = error) }
+        val records = root?.get("changes") as? JsonArray ?: return emptyList()
+        return records.mapNotNull { element ->
+            val change = runCatching { JsonCodec.decodeFromJsonElement<ModeChange>(element) }.getOrNull()
+                ?: return@mapNotNull null
+            change.takeIf { it.kind in MODE_CHANGE_KINDS && parseTime(it.at) != null }
+        }
+    }
+
     /**
      * Sends one answer under one op id (#1574): when the connection cuts it off (a hub restarting, a network change),
      * the same answer goes again with the same id once the connection is back, for up to [resolveRetryMillis]; the
@@ -180,6 +194,7 @@ class HubChatTransport internal constructor(
         get(api("sessions", session.machineId, session.sessionId, "items", itemId, "full"))
 
     companion object {
+        private val MODE_CHANGE_KINDS = setOf("set", "restart_done", "restart_failed", "restart_dropped")
         const val OP_ID_HEADER = "X-Persona-Op-Id"
         const val RESOLVE_RETRY_MILLIS = 60_000L
         /** Between tries: a hub that answers 503 while it stops would otherwise be asked again at once. */

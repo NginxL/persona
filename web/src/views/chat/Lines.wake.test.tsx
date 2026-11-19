@@ -55,6 +55,7 @@ describe.each(["assistant", "agents"] as const)("%s background continuation", (s
     // nothing opens by itself, during execution or after it (super rule 2)
     expect(headers().map((h) => h.getAttribute("aria-expanded"))).toEqual(["false", "false"]);
     act(() => headers()[1].click());
+    for (const h of host.querySelectorAll<HTMLButtonElement>("[data-work-detail] [data-work-group] > button")) if (h.getAttribute("aria-expanded") === "false") act(() => h.click());
     for (const seq of [5, 7]) expect(details().join("\n")).toContain(`echo example-${seq}`);
     expect(details().join("\n")).not.toContain("echo example-2");
     const done = [...live, item(9, "text", "Final result.")];

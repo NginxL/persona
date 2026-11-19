@@ -22,7 +22,7 @@ function who(c: ModeChange): string {
 
 /** Why a restart went as it did, in words, for the codes the node sends (docs/protocol/protocol.md "Session mode
  *  changes"); "" for none or one this app does not know (rows from before the codes hold English words). */
-const WHY = new Set(["replaced", "process_exited", "process_replaced", "process_unknown", "expired", "not_stopped", "start_failed", "stopped"]);
+const WHY = new Set(["replaced", "cancelled", "process_exited", "process_replaced", "process_unknown", "expired", "not_stopped", "start_failed", "stopped"]);
 function why(c: ModeChange): string {
   return c.reason && WHY.has(c.reason) ? t(`chat-modes.why_${c.reason}`) : "";
 }

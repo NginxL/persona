@@ -140,6 +140,35 @@ class PersonaConfigTests(unittest.TestCase):
                 text = (root / 'apple' / 'Config.xcconfig').read_text()
                 self.assertIn('PERSONA_HOMEKIT = %s\n' % flag, text)
 
+    def test_generated_files_are_written_only_when_their_content_changes(self):
+        # sim.sh writes them before every build; a rewrite with the same bytes still moves the modification time,
+        # which Xcode takes as a changed xcconfig (every target's settings) or entitlements file (signs again), #10713.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._fake_root(directory)
+            paths = [root / 'apple' / 'Config.xcconfig', root / 'apple' / config.OPT_IN_ENTITLEMENTS]
+            cfg = {'app': {'bundle_id': 'com.example.assistant', 'homekit': True}}
+
+            def generate():
+                with patch.object(config, 'ROOT', str(root)):
+                    config.xcconfig(cfg)
+                return [(path.read_bytes(), path.stat().st_mtime_ns) for path in paths]
+
+            first = generate()
+            for path in paths:
+                os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+            again = generate()
+            self.assertEqual([content for content, _ in again], [content for content, _ in first])
+            self.assertEqual([mtime for _, mtime in again], [1_000_000_000] * 2, 'unchanged files must not be rewritten')
+
+            cfg['app']['bundle_id'] = 'com.example.other'
+            cfg['app']['carplay_voice'] = True
+            changed = generate()
+            self.assertIn(b'PERSONA_BUNDLE_ID = com.example.other\n', changed[0][0])
+            self.assertIn(b'carplay-voice-based-conversation', changed[1][0])
+            self.assertTrue(all(mtime != 1_000_000_000 for _, mtime in changed), 'changed files are written')
+            self.assertEqual(sorted(p.name for p in (root / 'apple').iterdir() if p.is_file()),
+                             sorted(['Config.xcconfig', config.OPT_IN_ENTITLEMENTS]), 'no scratch file is left')
+
 
 class SigningProfileConfigTests(unittest.TestCase):
     bid = 'com.example.persona'

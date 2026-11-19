@@ -16,7 +16,7 @@ import { BADGE_TONE, navIcon, pageRoute } from "./extensions/ExtensionSlots";
 import { href, inWorkView, navigate, type Route } from "../lib/router";
 import { useAgentSessions } from "../lib/sessions";
 import { scoped, useScope, useScopedCounts, useScopedTodos } from "../lib/current-assistant";
-import { triageTodos } from "../lib/todo-triage";
+import { ownerBadge } from "../lib/todo-triage";
 import { makeSessionLookup } from "../lib/todos";
 import { useRestoredTodos } from "../lib/todo-restore";
 import { useLarkOn, useStore } from "../lib/store";
@@ -64,8 +64,15 @@ export function useGo(onNavigate?: () => void): GoFn {
   );
 }
 
-/** One entry of the pages under Persona ("Overview", "Inbox" … "Settings", and the extensions' pages). */
-export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; hint?: string; title?: string; group?: { id: string; title: string } };
+/** One entry of the pages under Persona ("Overview", "Inbox" … "Settings", and the extensions' pages). `badgeLabel`:
+ *  what a screen reader hears for the badge in place of its digits, when the number alone does not say what it counts. */
+export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; badgeLabel?: string; hint?: string; title?: string; group?: { id: string; title: string } };
+
+/** A page's spoken name with its badge ("Inbox 3", "To-dos 2 to-dos need you"): the phone's grid, the rail and the folded
+ *  titles say what the list's row says. */
+export function pageLabel(p: NavPage): string {
+  return p.badge === undefined ? p.label : `${p.label} ${p.badgeLabel ?? p.badge}`;
+}
 
 /** The sidebar's pages ("Overview" … "Settings", the extensions' pages) and the connection, shared by the sidebar and its rail. */
 export function useNavPages() {
@@ -79,11 +86,12 @@ export function useNavPages() {
   const assistant = useStore((s) => s.assistant);
   const todos = useScopedTodos();
   const todosSupported = useStore((s) => s.todosSupported);
-  // The To-dos page's open count (#3156): not shelved, not finished; quiet tasks (#1731) are told about in the main
-  // conversation, not counted here.
+  // The open to-dos that need the owner, not those Agents are on (#11085, lib/todo-triage ownerBadge); quiet tasks
+  // (#1731) are told about in the main conversation, not counted here. The To-dos page's "Not done" counts every open one.
   const agentSessions = useAgentSessions();
   const [restored] = useRestoredTodos();
-  const uncompletedTodosCount = useMemo(() => triageTodos(todos, makeSessionLookup(agentSessions), Date.now(), restored, { quiet: false }).open, [todos, agentSessions, restored]);
+  const todosBadge = useMemo(() => ownerBadge(todos, makeSessionLookup(agentSessions), Date.now(), restored).size, [todos, agentSessions, restored]);
+  const todosBadgeLabel = todosBadge ? t("sidebar.todos_badge_title", { count: todosBadge }) : undefined;
   const counts = useScopedCounts();
   const inbox = useInboxBadge();
   const larkSwitch = useLarkHome();
@@ -102,7 +110,7 @@ export function useNavPages() {
     health: { k: "health", to: { name: "health" }, icon: "heart", label: t("sidebar.nav_health"), short: t("sidebar.nav_health_short") },
     messages: larkHome && { k: "messages", to: { name: "messages" }, icon: "chat", label: t("sidebar.nav_messages") },
     "workspace-board": boardOn && { k: "workspace-board", to: { name: "workspace-board" }, icon: "layers", label: t("sidebar.nav_board"), short: t("sidebar.nav_board_short") },
-    todos: todosSupported !== false && { k: "todos", to: { name: "todos" }, icon: "todo", label: t("sidebar.nav_todos"), badge: uncompletedTodosCount || undefined },
+    todos: todosSupported !== false && { k: "todos", to: { name: "todos" }, icon: "todo", label: t("sidebar.nav_todos"), badge: todosBadge || undefined, badgeLabel: todosBadgeLabel, title: todosBadgeLabel },
     routines: { k: "routines", to: { name: "routines" }, icon: "clock", label: t("sidebar.nav_routines"), short: t("sidebar.nav_routines_short") },
     kb: { k: "kb", to: { name: "kb" }, icon: "book", label: t("sidebar.nav_kb"), short: t("sidebar.nav_kb_short") },
     machines: { k: "machines", to: { name: "machines" }, icon: "machine", label: t("sidebar.nav_machines"), short: t("sidebar.nav_machines_short"), hint: total ? `${online}/${total}` : undefined },

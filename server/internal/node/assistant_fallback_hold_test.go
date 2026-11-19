@@ -60,9 +60,12 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 		t.Fatalf("another launcher was held: %+v", got)
 	}
 	n := hold()
-	if got := n.heldFallback(id, "claude", modelExecution{Model: "other-model", Fingerprint: "fp2"}); got.Model != "other-model" {
+	other := modelExecution{Model: "other-model", Fingerprint: "fp2"}
+	got := n.heldFallback(id, "claude", other)
+	if got.Model != "other-model" {
 		t.Fatalf("a model the user picked was overridden: %+v", got)
 	}
+	n.commitModelChoice(id, got)
 	if got := n.heldFallback(id, "claude", from); got.Model != "primary-model" {
 		t.Fatalf("the hold outlived another pick: %+v", got)
 	}

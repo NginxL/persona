@@ -147,7 +147,8 @@ const HELLO_NEGOTIATION_MS = 5000;
 // The native stream page and its schema validator are a chunk of their own: most pages are drawn over HTTP and never need it.
 const NativeExtensionUI = lazyPage(() => import("./NativeExtensionUI").then((m) => m.NativeExtensionUI));
 export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExtensionUI>[0] & {
-  /** A full page: drawn at once from its last view while the extension draws it again (lib/extension-view-cache.ts). */
+  /** A full page, or a card on Overview (`compact`, #11091): drawn at once from its last view while the extension draws
+   *  it again (lib/extension-view-cache.ts). */
   remember?: boolean;
 }) {
   const supported = useStore((s) => canTryUIStream(s.features));
@@ -179,7 +180,7 @@ export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExte
     const [extension, ui, state, language] = JSON.parse(page) as string[];
     return readKeptView({ extension, ui, state, language }, httpOnly ? [UI_VERSION] : [NATIVE_UI_VERSION, UI_VERSION], defaultId || undefined);
   }, [page, httpOnly, defaultId]);
-  const placeholder = kept ? <KeptView view={kept.view} native={kept.key.version === NATIVE_UI_VERSION} onWide={props.onWide} /> : undefined;
+  const placeholder = kept ? <KeptView view={kept.view} native={kept.key.version === NATIVE_UI_VERSION} compact={props.compact} onWide={props.onWide} /> : undefined;
   const onView = useCallback((view: UIView, version: number, manager = defaultKnown() ? defaultManager() : "") => {
     if (!page || !manager) return;
     const [extension, ui, state, language] = JSON.parse(page) as string[];
@@ -201,10 +202,21 @@ export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExte
 
 /** The page's last view while its extension draws it again (docs/web/web.md "Extension pages on reload"): as it was, as
  *  wide, but nothing in it can be pressed or focused, and a quiet "Updating" in the page's top margin, so nothing moves
- *  when the drawing replaces it. `native`: drawn over the socket, which titles the page itself. */
-function KeptView({ view, native, onWide }: { view: UIView; native: boolean; onWide?: (wide: boolean) => void }) {
+ *  when the drawing replaces it. `native`: drawn over the socket, which titles the page itself. `compact`: a card's
+ *  (#11091), its sections laid out as the drawing's own in the card's column (`contents`), "Updating" for screen readers
+ *  only: the card's heading marks it (OverviewCard, by `data-kept-view`). */
+function KeptView({ view, native, compact, onWide }: { view: UIView; native: boolean; compact?: boolean; onWide?: (wide: boolean) => void }) {
   const wide = wideView(view);
   useEffect(() => onWide?.(wide), [wide, onWide]);
+  if (compact)
+    return (
+      <div className="contents" data-kept-view>
+        <p role="status" className="sr-only">{t("settings-extensionview.updating")}</p>
+        <div inert aria-busy="true" className="contents">
+          <ViewSections view={view} compact {...INERT} />
+        </div>
+      </div>
+    );
   return (
     <div className="relative" data-kept-view>
       <p role="status" className="absolute right-1 -top-5 flex items-center gap-1.5 text-label text-ink-3">

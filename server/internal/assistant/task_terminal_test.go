@@ -44,10 +44,16 @@ func dispatchTerminalTaskOn(t *testing.T, store Store, optIn, receipt bool) (*Se
 	})
 	const args = `{"tasks":[{"title":"Finish a synthetic task","prompt":"Write a task receipt","machine":"box","cwd":"/work",
 		"close_tab_on_accept":true,"terminal_cleanup":"closed","terminal_target":{"machine":"claimed"}}]}`
-	if _, err := s.toolTaskPlan(t.Context(), "conv1", json.RawMessage(args)); err != nil {
+	res, err := s.toolTaskPlan(t.Context(), "conv1", json.RawMessage(args))
+	if err != nil {
 		t.Fatal(err)
 	}
-	p := planOf(t, s, "conv1")
+	// The plan this call made, by its id: on Postgres, task_plans is not emptied between tests, so conv1 also has the
+	// plans earlier tests made there (feed_plans_test.go).
+	p, err := s.loadPlan(t.Context(), planID(t, res))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p.Tasks[0].CloseTabOnAccept || p.Tasks[0].TerminalCleanup != "" || p.Tasks[0].TerminalTarget.Machine != "" {
 		t.Fatal("tool arguments supplied owner consent or a terminal receipt")
 	}

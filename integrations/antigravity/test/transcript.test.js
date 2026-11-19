@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { readTranscript, readTranscriptSteps } from '../lib/map.js'
+import { readTranscript, readTranscriptSteps, stepsToItems } from '../lib/map.js'
 
 function logs(t) {
   const brain = mkdtempSync(join(tmpdir(), 'agy-transcript-'))
@@ -87,4 +87,30 @@ test('same-sequence file rewrites update content revisions while ordinary append
   assert.equal(readTranscript(brain, true).revision, complete.revision, 'body cache pressure preserves the revision')
   appendFileSync(file, JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'Next' }) + '\n')
   assert.equal(readTranscript(brain, true).revision, complete.revision)
+})
+
+// A parallel call that fails at once (unknown tool, bad arguments) is exported before its sibling's result, so the
+// lines arrive as 3 then 2. That is a late arrival, not a rewind: both results belong to the same planner step.
+test('parallel results exported out of order are kept in step order and pair with their own calls', (t) => {
+  const { brain, directory } = logs(t)
+  const file = join(directory, 'transcript.jsonl')
+  const line = (step) => JSON.stringify({ source: 'MODEL', status: 'DONE', created_at: '2026-01-01T00:00:00Z', ...step }) + '\n'
+  const calls = [{ name: 'run_command', args: { CommandLine: 'tail log' } }, { name: 'manage_task', args: { Action: 'status' } }]
+  writeFileSync(file, line({ step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'go' }) +
+    line({ step_index: 1, type: 'PLANNER_RESPONSE', tool_calls: calls }) +
+    line({ step_index: 3, type: 'GENERIC', status: 'INVALID', content: 'Error invalid tool call', error: 'invalid arguments' }))
+  const before = readTranscript(brain, false)
+  appendFileSync(file, line({ step_index: 2, type: 'GENERIC', content: 'tail output' }) +
+    line({ step_index: 4, type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'view_file', args: { AbsolutePath: '/tmp/a' } }] }) +
+    line({ step_index: 5, type: 'GENERIC', content: 'file body' }))
+  const after = readTranscript(brain, false)
+  assert.deepEqual(after.steps.map((step) => step.step_index), [0, 1, 2, 3, 4, 5], 'the late step keeps its place and nothing is dropped')
+  assert.equal(after.branch, before.branch, 'a late arrival is not a rewind: item identities stay')
+  assert.notEqual(after.revision, before.revision, 'watchers still learn that earlier items changed')
+  const { items } = stepsToItems(after.steps)
+  const uses = items.filter((item) => item.kind === 'tool_use')
+  const results = new Map(items.filter((item) => item.kind === 'tool_result').map((item) => [item.tool_use_id, item]))
+  assert.equal(uses.length, 3)
+  assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)?.text), ['tail output', 'invalid arguments', 'file body'])
+  assert.equal(results.get(uses[1].tool_use_id).is_error, true)
 })

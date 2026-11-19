@@ -388,6 +388,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             LiveActivityController.shared.showSample(phase, details: d.bool(forKey: "fleetDetails"), island: d.string(forKey: "fleetIsland"),
                                                      count: d.integer(forKey: "showFleetCount"))
         }
+        #if os(iOS) && canImport(AlarmKit)
+        // `-showAlarmSample timer|paused`: a 25-minute "Focus" timer set as phone_timer_start sets one (paused: then paused),
+        // so its Live Activity can be photographed (docs/apple/live-activity.md "Alarms and timers (AlarmKit)").
+        if #available(iOS 26.0, *), let sample = d.string(forKey: "showAlarmSample") {
+            AlarmsTool.showSample(paused: sample == "paused")
+        }
+        #endif
         RuntimeCLI.startIfAsked() // `-runtimeCLI <port>`: scripts/app/personactl.py drives the running app
         let automation = d.string(forKey: "pairURL") != nil
         #else

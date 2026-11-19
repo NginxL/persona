@@ -165,6 +165,27 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(items[4].text.trim(), 'total 0')
   })
 
+  it('does not let a call that never got a result shift the results of later calls', () => {
+    const at = '2026-11-05T10:00:00Z'
+    const step = (step_index, type, extra = {}) => ({ step_index, type, source: type === 'USER_INPUT' ? 'USER_EXPLICIT' : 'MODEL', status: 'DONE', created_at: at, ...extra })
+    const call = (name) => ({ name, args: {} })
+    const { items } = stepsToItems([
+      step(0, 'USER_INPUT', { content: 'go' }),
+      step(1, 'PLANNER_RESPONSE', { tool_calls: [call('view_file'), call('run_command')] }),
+      step(2, 'GENERIC', { content: 'first' }), // the second call was interrupted: no result
+      step(3, 'USER_INPUT', { content: 'again' }),
+      step(4, 'PLANNER_RESPONSE', { tool_calls: [call('view_file')] }),
+      step(5, 'GENERIC', { content: 'second' }),
+      step(6, 'PLANNER_RESPONSE', { thinking: 'more', tool_calls: [call('view_file'), call('grep_search')] }),
+      step(7, 'SYSTEM_MESSAGE', { content: 'a background task finished' }),
+      step(8, 'GENERIC', { content: 'third' }),
+      step(9, 'GENERIC', { content: 'fourth' }),
+    ])
+    const uses = items.filter((item) => item.kind === 'tool_use')
+    const results = new Map(items.filter((item) => item.kind === 'tool_result').map((item) => [item.tool_use_id, item.text]))
+    assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)), ['first', undefined, 'second', 'third', 'fourth'])
+  })
+
   it('maps modes between Persona and Antigravity ACP', () => {
     assert.equal(personaModeToAgy('plan'), 'plan')
     assert.equal(personaModeToAgy('acceptEdits'), 'accept-edits')

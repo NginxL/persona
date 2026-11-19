@@ -80,7 +80,7 @@ func main() {
 	restart := make(chan struct{})
 	// `--supervised` among the arguments stands for a supervisor other than systemd or launchd, as the real node's
 	// `node --attach --supervised` does.
-	m := nodeupdate.New(version, func() { close(restart) }, nodeupdate.Options{Supervised: slices.Contains(os.Args[1:], "--supervised")})
+	m := nodeupdate.New(version, func(string) { close(restart) }, nodeupdate.Options{Supervised: slices.Contains(os.Args[1:], "--supervised")})
 	defer m.Close()
 	if m.RestartRequired() {
 		mustExec(m.Executable())

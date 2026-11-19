@@ -73,6 +73,21 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 				return nil, planInvalid{fmt.Errorf("task %d: %w", i+1, err)}
 			}
 		}
+		task.RequestGate = s.planRequestGate(*task)
+		if task.RequestGate != "" {
+			if !ownerStarts(ctx) {
+				return nil, planInvalid{i18n.Err("assistant-tasks.request_owner_start")}
+			}
+			if task.Continues != "" {
+				return nil, planInvalid{i18n.Err("assistant-tasks.request_new_plan")}
+			}
+			if task.ReuseTodo != "" && !task.pieceEdit().empty() {
+				return nil, planInvalid{i18n.Err("assistant-tasks.request_edit_piece")}
+			}
+			if err := s.planPieces(task); err != nil {
+				return nil, planInvalid{err}
+			}
+		}
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
@@ -165,8 +180,18 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			}
 			continue
 		}
-		todo = s.startPieces(ctx, *t, todo) // its place in a request (todo_pieces.go)
+		todo, err = s.startPieces(ctx, *t, todo)
+		if err != nil {
+			t.Error = err.Error()
+			s.releaseTakenTodo(t.ReuseTodo)
+			continue
+		}
 		t.TodoID = todo.ID
+		if t.RequestGate != "" {
+			// Persist the approved edges, including edges inherited from a reused to-do.
+			t.After = cleanIDs(slices.Concat(t.After, todo.After))
+			t.Queue = s.prerequisiteQueue(ctx, *t, s.requestBlockers(ctx, *t))
+		}
 		s.briefStarted(ctx, p, t, todo) // what was asked, kept from now on (task_brief_plan.go)
 		s.setTaskStageKind(ctx, todo.ID, "", "", taskStageKind(t.Readonly, t.DoneWhen, todo.PRURL), false)
 		if sup := supervisors[i]; sup != "" {
@@ -185,8 +210,17 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			s.logf("task %s: feed: %v", todo.ID, err)
 		}
 	}
-	if _, err := s.movePlan(ctx, p, planStarted); err != nil { // keep the todo ids
+	if saved, err := s.movePlan(ctx, p, planStarted); err != nil || !saved { // keep the todo ids
+		if err == nil {
+			err = errPlanNotOpen
+		}
 		s.logf("plan %s: %v", p.ID, err)
+		if slices.ContainsFunc(p.Tasks, func(task PlanTask) bool { return task.RequestGate != "" }) {
+			for _, task := range p.Tasks {
+				s.releaseTakenTodo(firstNonEmpty(task.ReuseTodo, task.TodoID))
+			}
+			return nil, err
+		}
 	}
 	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 	for i := range p.Tasks {
@@ -256,6 +290,9 @@ func (s *Service) reusableTodo(ctx context.Context, conversation, id string, tak
 	}
 	if t.closedForGood() {
 		return nil, notReusable(id, "it is already done")
+	}
+	if s.requestStartPending(ctx, t) {
+		return nil, notReusable(id, "an approved start for this request piece is already waiting or its launch is unconfirmed")
 	}
 	if s.startRemedying(ctx, t) {
 		return nil, notReusable(id, "its start is being remedied in the tab its computer keeps: use task_retry")
@@ -347,6 +384,9 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation stri
 	if task.Continues == id {
 		var todo Todo
 		todo, err = s.taskTodoForConversation(conversation, id)
+		if err == nil && (s.planRequestGate(task) != "" || s.requestStartPending(ctx, todo)) {
+			err = i18n.Err("assistant-tasks.request_new_plan")
+		}
 		if err == nil && task.Brief != nil {
 			err = s.checkContinuationScope(&task)
 		}
@@ -539,6 +579,22 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 // runPlanTaskStart is the shared start body; its caller owns the idle reservation through every return path.
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
+	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
+	defer cancel()
+	if t.RequestGate != "" {
+		queued := t.Queue
+		if !s.claimRequestStart(ctx, &t) {
+			return
+		}
+		if queueExpired(queued, time.Now()) {
+			task := &TaskPlan{ID: planID, Conversation: conversation}
+			s.failQueuedStart(ctx, task, i, t, queued)
+			return
+		}
+	} else if s.planRequestGate(t) != "" {
+		s.logf("task %s: prerequisites changed before dispatch; make a new plan", t.TodoID)
+		return
+	}
 	defer s.releaseTaskWorkspace(t.TodoID)
 	// The admission claim (if the gate took one) is released when this start body ends either way: on success the
 	// agent is linked into the todo by then so the ledger's direction count carries it, and on failure nothing runs.
@@ -548,8 +604,6 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 			t.admissionRelease = nil
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
-	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
 	if t.Role == roleLeader { // legacy one-shot tool discovery may wait for this link (task_leader.go)
 		s.leaderStarts.Add(1)
@@ -558,7 +612,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	t.Permission = strings.TrimSpace(t.Permission)
 	mid, sid, err := s.startTaskAgent(ctx, &t, retry)
 	var lost startLinkLost
-	if errors.As(err, &lost) && lost.back {
+	if t.RequestGate == "" && errors.As(err, &lost) && lost.back {
 		// The link took the start's answer and the machine, back, does not show the agent: start it once more, with
 		// a whole start's time of its own (the first may have spent its own on the dead link). Not counted against
 		// the launcher (#7511).
@@ -567,7 +621,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		defer rcancel()
 		ctx = rctx
 		mid, sid, err = s.startTaskAgent(ctx, &t, retry)
-	} else if err != nil && ctx.Err() == nil && !startStalled(err) {
+	} else if t.RequestGate == "" && err != nil && ctx.Err() == nil && !startStalled(err) {
 		// The machine's link dropped (a node restarting, a tunnel blinking): try once more after a moment. Any other
 		// launcher failure may move a flexible task, after verifying its directory on the destination.
 		// An unknown result (the wait ran out or the link dropped while the answer was out) already went through
@@ -605,7 +659,8 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	if t.Machine != placed || t.Why != placedWhy || t.Permission != placedPermission { // workspace admission already persisted the actual checkout
 		s.updatePlanTask(ctx, planID, i, t)
 	}
-	if err == nil {
+	launched := err == nil
+	if launched {
 		// The start's own context can be spent already: an unanswered start whose session was just reconciled
 		// (#6540) reaches here after taskStartTimeout, and a database write on that context fails at once, which
 		// would fail the task although its agent is running. The link gets its own time, like the bookkeeping below.
@@ -638,6 +693,19 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		}
 		s.remedyStarted(context.WithoutCancel(ctx), planID, conversation, i, t) // after an assistant's retry (start_remedy.go)
 		return
+	}
+	if t.RequestGate != "" {
+		var blocked *requestBlocked
+		if errors.As(err, &blocked) {
+			s.requeueRequestStart(ctx, t, blocked.ids)
+			return
+		}
+		var remote *rpc.Error
+		if launched || startResultUnknown(err) || errors.As(err, &lost) || nodeMayHaveTaken(err) ||
+			errors.As(err, &remote) && remote.Code == "identity_conflict" {
+			s.logf("task %s: request launch unconfirmed, not replaying: %v", t.TodoID, err)
+			return
+		}
 	}
 	// An admission-gate refusal means the machine or direction is briefly full, not that the start failed: park the
 	// task in the admission queue (no failTodo, no failure receipt) and let the queue loop retry it (task_queue.go).
@@ -672,7 +740,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		}
 		args["launcher"] = s.startLauncher(ctx, t.Launcher)
 	}
-	if s.beginRemedy(ctx, planID, i, t, err, code, args, reason) {
+	if t.RequestGate == "" && s.beginRemedy(ctx, planID, i, t, err, code, args, reason) {
 		return
 	}
 	// A retry the assistant asked for that failed so its tab is gone: the start fails for good, and the supervisor and
@@ -927,6 +995,9 @@ func (s *Service) retryTaskStart(ctx context.Context, todoID string, with retryW
 	}
 	p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 	t := p.Tasks[i]
+	if t.RequestGate != "" || s.planRequestGate(t) != "" {
+		return nil, false, retryRefused{i18n.Err("assistant-tasks.request_new_plan")}
+	}
 	t.Permission = strings.TrimSpace(t.Permission)
 	m, ok := s.machineByName(ctx, t.Machine)
 	if !ok {

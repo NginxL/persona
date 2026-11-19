@@ -108,6 +108,10 @@ class ChatDetailsTest {
     @Test fun theNewestRecapIsOpenUntilClosed() {
         val exchange = listOf(user(1, "修好导入重试"), reply(2, "修好了。"))
         assertEquals("r3", openRecapId(lines(exchange + recap(3, "这一轮：修了导入重试。")), closed = null))
+        // A newer permission-mode line does not hide the recap it follows.
+        val mode = persona.core.domain.lines.ChatLine.ModeChange("mode", persona.core.contracts.ModeChange(
+            kind = "set", to = "acceptEdits", at = at(4)))
+        assertEquals("r3", openRecapId(listOf(mode) + lines(exchange + recap(3, "这一轮：修了导入重试。")), closed = null))
         // Several in a row are one line: its newest is open.
         assertEquals("r4", openRecapId(lines(exchange + recap(3, "第一段") + recap(4, "第二段")), closed = null))
         // Closed, until a newer one comes.

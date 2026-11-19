@@ -1,5 +1,8 @@
 {
   "sidebar": "サイドバー",
   "redraw": "再描画",
-  "extensions": "拡張機能"
+  "extensions": "拡張機能",
+  "cards_collapse": "折りたたむ",
+  "cards_expand": "展開",
+  "card_see_all": "すべて表示"
 }

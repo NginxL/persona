@@ -9,8 +9,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
+
+func TestResidentReportsUpdatePreflightFailure(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	peer, manager := rpc.New("node", a), rpc.New("manager", b)
+	failures := make(chan proto.NodeUpdatePreflightFailure, 1)
+	manager.OnEvent = func(event string, params json.RawMessage) {
+		var failure proto.NodeUpdatePreflightFailure
+		if event == nodeproto.EventUpdatePreflightFailed && json.Unmarshal(params, &failure) == nil {
+			failures <- failure
+		}
+	}
+	go func() { _ = manager.Serve(ctx, b) }()
+	reload := &ResidentReload{}
+	reload.peer(peer, func() { _ = a.Close() })
+	reload.ReportUpdatePreflightFailure(ctx, "update-one", errors.New("exit status 23"))
+	select {
+	case got := <-failures:
+		want := proto.NodeUpdatePreflightFailure{ID: "update-one", Error: "exit status 23"}
+		if got != want {
+			t.Fatalf("failure = %+v, want %+v", got, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("manager did not receive the preflight failure")
+	}
+	if leave, err := reload.enter(); err != nil {
+		t.Fatalf("preflight failure suspended the resident: %v", err)
+	} else {
+		leave()
+	}
+}
 
 type heldReloadNotice struct {
 	net.Conn

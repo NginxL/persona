@@ -12,6 +12,8 @@ When an installed Link is present, the desktop's local setup page can show its r
 
 After sign-in, **Settings › General › This computer** opens that same local options window through the additive `openLocalSettings` bridge capability. A normal browser and an older desktop without the method do not show the entry. The hub renderer can request only that the window open: it receives no Link command, local status, hub address or credential. The separate local window retains its own origin-checked preload for the fixed operations. Merely opening or closing it does not navigate or destroy the signed-in hub window. If the person explicitly chooses **Continue** for a different hub, the shell waits for the old hub window to close and creates a new window with that hub's own persistent session; merely saving the global address cannot leave the old page denied by IPC. The acceptance smoke checks both boundaries, the absent-Link explanation and the second hub's sign-in; it does not perform real pairing.
 
+If a saved hub cannot be reached at launch, the shell keeps its address, generation and persistent per-hub session instead of treating the profile as a new install. The same local setup window shows a plain connection failure with **Retry** and **Local settings**. Retry submits the unchanged address through the existing validated setup bridge and persists nothing when the load fails; Local settings reveals the existing form and desktop options. Closing setup during a pending attempt retires that attempt without reopening a window, and quitting cannot reopen recovery. A late failure from an older generation cannot clear a replacement hub or its IPC owner.
+
 ## Existing web behavior
 
 - The desktop loads only the configured hub origin (including its reverse-proxy prefix). Other HTTP/HTTPS links open in the system browser. Authentication, service-worker permission actions, notification text/tags/deduplication/withdrawal, quiet hours and the Needs-you count stay in the existing web code.
@@ -299,7 +301,10 @@ passing is not first-install acceptance. Do not relax fuses or the existing orig
 green.
 
 The notch island's page failed the same way in every packaged app, not only on a first run: its window was on screen and
-empty. It now loads from its own scheme ("Island at the MacBook notch"); the setup page's path is still the claim's above.
+empty. It now loads from its own scheme ("Island at the MacBook notch"). The setup page now likewise loads from its own
+scheme (`persona-setup://app/setup.html`, `desktop/src/setup-page.ts`), which serves only `setup.html`, `setup.css` and
+`setup.cjs` from `dist/setup/` on the default session with `grantFileProtocolExtraPrivileges: false` unchanged. Full
+signed-release, macOS and physical-device acceptance under #6770 remain separate.
 
 ## Owner actions and decisions still required
 

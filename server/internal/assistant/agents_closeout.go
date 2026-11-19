@@ -140,6 +140,9 @@ func closeoutDelivery(c proto.Closeout, artifacts []proto.WorkArtifact) (d TodoD
 	}
 	if d.State != deliveryLive && d.State != deliveryNone {
 		d.Gate = cmpOr(c.Missing, c.Waiting)
+		if externalDeliveryWait.MatchString(d.Gate) || externalDeliveryWait.MatchString(c.Waiting) {
+			d.Unblock = unblockOther
+		}
 	}
 	return d, true
 }

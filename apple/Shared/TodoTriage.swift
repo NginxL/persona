@@ -221,6 +221,20 @@ nonisolated enum TodoTriageLogic {
         return at(.other, .rest)
     }
 
+    /// When a to-do the triage filed with the finished ones (Just Finished or Done) finished: the moment its rule reads
+    /// above — its close, its accepting review, its deploy — else its last move (a finished turn the owner has seen since).
+    /// The Assistant's Finished entry lists what finished less than `justDone` ago, seen or not (#10922; the web's
+    /// `finishedAt`). `distantPast` when nothing says.
+    static func finishedAt(_ todo: TodoItem, _ t: TodoTriage) -> Date {
+        switch t.rule {
+        case .closed: todo.doneAt ?? .distantPast
+        case .accepted: todo.supervision?.latestReview?.at ?? .distantPast
+        case .deployed: todo.delivery?.at ?? t.last
+        case .superseded: todo.doneAt ?? t.last
+        default: t.last
+        }
+    }
+
     /// Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A
     /// finished turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do.
     /// One the owner has seen since (rule 9a, in Done) does not.

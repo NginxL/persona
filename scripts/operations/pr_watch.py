@@ -305,6 +305,8 @@ class Watcher:
                         continue
                     if not isinstance(item.get("headRefOid"), str) or not SHA.fullmatch(item["headRefOid"]):
                         raise WatchError("PR discovery entry has no valid head SHA")
+                    if self.unchanged_head_complete_or_waiting(repo, item["number"], item["headRefOid"]):
+                        continue
                     self.enqueue(repo, item["number"], item["headRefOid"], "poll")
         except WatchError as error:
             self.log("discovery failed: " + str(error))
@@ -326,6 +328,23 @@ class Watcher:
                 and old.get("outcome") not in ("merged", "continuation", "findings")):
             return 0
         return 1
+
+    def unchanged_head_complete_or_waiting(self, repo, number, sha):
+        """A settled head needs no snapshot until its retry or a new head."""
+        old = self.state.get(repo, number)
+        if old.get("head") != sha or old.get("format") != FORMAT_VERSION:
+            return False
+        if self.repositories[repo].get("close_stale", False):
+            # A settled head is precisely what stale cleanup must keep checking.
+            # Preserve only terminal states that already skip that cleanup.
+            return old.get("outcome") in ("merged", "continuation")
+        return (old.get("retry_after", 0) > time.time()
+                or old.get("outcome") in ("merged", "continuation", "repair_published")
+                or old.get("outcome") == "merge_failed" and old.get("blocking")
+                or bool(old.get("repair_exhausted") and old.get("failure_posted"))
+                or old.get("outcome") == "findings" and not self.repositories[repo]["merge"]
+                and old.get("semantic") == "findings" and old.get("review_posted")
+                and blocking_findings(old.get("findings", [])))
 
     def enqueue(self, repo, number, sha, source):
         if repo not in self.repositories or not isinstance(number, int) or number < 1:
@@ -817,21 +836,98 @@ class Watcher:
             raise WatchError("PR has an outstanding changes request")
         return True
 
-    def stale_activity_json(self, repo, number, collection, endpoint, fields):
-        """An empty jq stream is no activity; all other API empties stay fatal."""
-        try:
-            return gh_json(["api", "repos/%s/%s/%s/%s" % (repo, collection, number, endpoint),
-                            "--paginate", "--jq", ".[] | {createdAt: " + fields + "}"], timeout=90)
-        except WatchError as error:
-            if str(error) == "gh returned an empty response":
-                return []
-            raise
+    def stale_activity(self, repo, number):
+        """Read every activity record through bounded GraphQL cursor pages."""
+        owner, name = repository(repo).split("/", 1)
+        query = """
+query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
+      $commentsCursor: String, $reviewsCursor: String, $threadsCursor: String,
+      $needComments: Boolean!, $needReviews: Boolean!, $needThreads: Boolean!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: $pageSize, after: $commentsCursor) @include(if: $needComments) {
+        nodes { createdAt body }
+        pageInfo { hasNextPage endCursor }
+      }
+      reviews(first: $pageSize, after: $reviewsCursor) @include(if: $needReviews) {
+        nodes { createdAt: submittedAt }
+        pageInfo { hasNextPage endCursor }
+      }
+      reviewThreads(first: $pageSize, after: $threadsCursor) @include(if: $needThreads) {
+        nodes {
+          comments(first: 100) {
+            nodes { createdAt body }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"""
+        cursors = {"comments": None, "reviews": None, "threads": None}
+        activity = {"comments": [], "reviews": [], "inline": []}
+        seen = set()
+        for _ in range(1000):
+            variables = {"owner": owner, "name": name, "number": number, "pageSize": 100}
+            variables.update({field + "Cursor": value for field, value in cursors.items()})
+            variables.update({"needComments": cursors["comments"] is not False,
+                              "needReviews": cursors["reviews"] is not False,
+                              "needThreads": cursors["threads"] is not False})
+            response = gh_json(["api", "graphql", "--input", "-"],
+                               input_text=json.dumps({"query": query, "variables": variables}), timeout=90)
+            try:
+                data = response["data"]["repository"]["pullRequest"]
+            except (KeyError, TypeError) as error:
+                raise WatchError("stale activity returned an incomplete GraphQL response") from error
+            if not isinstance(data, dict):
+                raise WatchError("stale activity returned an incomplete GraphQL response")
+            pending = False
+            for field in ("comments", "reviews", "threads"):
+                collection = "reviewThreads" if field == "threads" else field
+                if cursors[field] is False:
+                    if collection in data:
+                        raise WatchError("stale activity repeated a completed collection")
+                    continue
+                connection = data.get(collection)
+                if not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list):
+                    raise WatchError("stale activity has an invalid " + collection + " collection")
+                page = connection.get("pageInfo")
+                if not isinstance(page, dict) or not isinstance(page.get("hasNextPage"), bool):
+                    raise WatchError("stale activity has invalid pagination")
+                if field == "threads":
+                    for thread in connection["nodes"]:
+                        if not isinstance(thread, dict) or not isinstance(thread.get("comments"), dict):
+                            raise WatchError("stale activity has an invalid review thread")
+                        nested = thread["comments"]
+                        if not isinstance(nested.get("nodes"), list) or not isinstance(nested.get("pageInfo"), dict):
+                            raise WatchError("stale activity has invalid review comments")
+                        if nested["pageInfo"].get("hasNextPage") is not False:
+                            # Never silently close a PR after truncating its
+                            # activity. Fetching nested cursors can be added
+                            # separately if a thread ever reaches this bound.
+                            raise WatchError("stale activity review-thread pagination is incomplete")
+                        activity["inline"].extend(nested["nodes"])
+                else:
+                    activity[field].extend(connection["nodes"])
+                if page["hasNextPage"]:
+                    cursor = page.get("endCursor")
+                    if not isinstance(cursor, str) or not cursor or (field, cursor) in seen:
+                        raise WatchError("stale activity pagination has no advancing cursor")
+                    seen.add((field, cursor))
+                    cursors[field] = cursor
+                    pending = True
+                else:
+                    cursors[field] = False
+            if not pending:
+                return activity
+        raise WatchError("stale activity exceeded its bounded GraphQL pagination")
 
     def stale_progress_at(self, repo, number, pr, old, ignore_notice=None):
         """Use actual GitHub activity, never aggregate timestamps or polling."""
-        comments = self.stale_activity_json(repo, number, "issues", "comments", ".created_at, body: .body")
-        reviews = self.stale_activity_json(repo, number, "pulls", "reviews", ".submitted_at")
-        inline = self.stale_activity_json(repo, number, "pulls", "comments", ".created_at, body: .body")
+        activity = self.stale_activity(repo, number)
+        comments, reviews, inline = activity["comments"], activity["reviews"], activity["inline"]
         if isinstance(inline, dict):
             inline = [inline]
         if not isinstance(inline, list):
@@ -938,6 +1034,21 @@ class Watcher:
         # A continuation covers the fork head even as the base branch advances.
         if old.get("outcome") == "continuation" and old.get("head") == head:
             return
+        evidence_key = repo + "#" + str(number) + "@" + pr["baseRefOid"] + ".." + head
+        if old.get("head") == head and old.get("format") == FORMAT_VERSION and not config.get("close_stale", False):
+            if old.get("retry_after", 0) > time.time() \
+                    and old.get("verification_policy") == VERIFICATION_POLICY_VERSION:
+                return
+            if old.get("outcome") in ("merged", "repair_published"):
+                return
+            if old.get("repair_exhausted") and old.get("failure_posted"):
+                return
+            if old.get("outcome") == "merge_failed" and old.get("blocking"):
+                return
+            if old.get("outcome") == "findings" and old.get("semantic") == "findings" \
+                    and old.get("review_posted") and not config["merge"] \
+                    and blocking_findings(old.get("findings", [])):
+                return
         if old.get("outcome") in ("stale_closed", "stale_close_pending"):
             # Closing or an interrupted close invalidates the old approval.
             # A later reopen must produce new semantic and verification evidence.
@@ -1560,8 +1671,8 @@ class Watcher:
 
     def start_workers(self):
         count = self.config["workers"]
-        if not 1 <= count <= 16:
-            raise WatchError("workers must be between 1 and 16")
+        if not 1 <= count <= 20:
+            raise WatchError("workers must be between 1 and 20")
         self.workers = [threading.Thread(target=self.worker, daemon=True) for _ in range(count)]
         for worker in self.workers:
             worker.start()

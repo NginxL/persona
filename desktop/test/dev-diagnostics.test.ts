@@ -52,6 +52,8 @@ test("only the hub page's main frame may turn it on or read it", () => {
   assert.equal(readerAllowed("http://127.0.0.1:8080/", true), true);
   assert.equal(readerAllowed("https://hub.example/", false), false);
   assert.equal(readerAllowed("file:///app/setup.html", true), false);
+  assert.equal(readerAllowed("persona-setup://app/setup.html", true), false);
+  assert.equal(readerAllowed("persona-island://app/island.html", true), false);
   assert.equal(readerAllowed(undefined, true), false);
   assert.equal(readerAllowed("not a url", true), false);
 });

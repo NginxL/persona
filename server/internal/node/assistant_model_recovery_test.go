@@ -777,6 +777,7 @@ func TestRecoveryReturnHonorsNewModelChoice(t *testing.T) {
 			other := modelExecution{Model: "other-model", IsMain: true}
 			execution, expired := n.heldFallbackWithExpiry(id, "claude", other)
 			execution = n.applyModelRecoveryReturn(context.Background(), id, other.Model, execution, expired)
+			n.commitModelChoice(id, execution) // the direct helper models the delivery boundary in assistantSend
 			if execution.Model != "other-model" {
 				t.Fatalf("automatic return overrode the newer model choice with %q", execution.Model)
 			}
