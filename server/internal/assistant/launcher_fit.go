@@ -23,14 +23,14 @@ import (
 // ultracode is the tri-state the caller gave (nil: it said nothing, false: it explicitly asked for it off). permission
 // is a task's permission mode as it stood before the launcher that runs set it (launchPick only; pickOf leaves it "").
 type startPick struct {
-	launcher, effort, model, tier, permission string
-	ultracode                                 *bool
+	launcher, effort, model, speed, tier, permission string
+	ultracode                                        *bool
 }
 
 // launchPick is what task t holds of its launch now, as pickOf reads it from a start's params, with its ultracode.
 func (t *PlanTask) launchPick() startPick {
 	return startPick{launcher: strings.TrimSpace(t.Launcher), effort: strings.TrimSpace(t.Effort),
-		model: strings.TrimSpace(t.Model), tier: strings.TrimSpace(t.Tier), permission: strings.TrimSpace(t.Permission),
+		model: strings.TrimSpace(t.Model), speed: strings.TrimSpace(t.Speed), tier: strings.TrimSpace(t.Tier), permission: strings.TrimSpace(t.Permission),
 		ultracode: copyBool(t.Ultracode)}
 }
 
@@ -52,7 +52,7 @@ func (t PlanTask) storedLaunch() startPick {
 	}
 	own := *t.callerPick
 	if t.startFilled.preset {
-		kept.launcher, kept.model, kept.effort, kept.tier, kept.permission = own.launcher, own.model, own.effort, own.tier, own.permission
+		kept.launcher, kept.model, kept.effort, kept.speed, kept.tier, kept.permission = own.launcher, own.model, own.effort, own.speed, own.tier, own.permission
 	}
 	if t.startFilled.effort {
 		kept.effort = own.effort
@@ -78,9 +78,10 @@ func pickOf(params map[string]any) startPick {
 	e, _ := params["effort"].(string)
 	m, _ := params["model"].(string)
 	t, _ := params["tier"].(string)
+	v, _ := params["speed"].(string)
 	u, _ := params["ultracode"].(*bool)
 	return startPick{launcher: strings.TrimSpace(l), effort: strings.TrimSpace(e),
-		model: strings.TrimSpace(m), tier: strings.TrimSpace(t), ultracode: u}
+		model: strings.TrimSpace(m), speed: strings.TrimSpace(v), tier: strings.TrimSpace(t), ultracode: u}
 }
 
 // resolveStart fills params (a session.start's, with the caller's own launcher, model, effort and tier, if any) with
@@ -171,12 +172,15 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		})
 	}
 	to := launcherInstead(m, list)
-	for _, k := range []string{"model", "effort", "model_fingerprint"} {
+	for _, k := range []string{"model", "effort", "model_fingerprint", "speed"} {
 		delete(params, k)
 	}
 	params["launcher"] = to
 	if own.effort != "" {
 		params["effort"] = own.effort
+	}
+	if own.speed != "" {
+		params["speed"] = own.speed
 	}
 	if err := s.applyModel(ctx, "agent.new", params); err != nil {
 		return "", startAgent{}, err

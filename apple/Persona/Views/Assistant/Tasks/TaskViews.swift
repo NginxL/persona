@@ -354,8 +354,7 @@ struct PlanTaskRow: View {
             FlowLayoutRow(spacing: Theme.Space.xs) {
                 Chip(text: TaskPlace.machineName(task.machine), symbol: Theme.Icon.laptop)
                 Chip(text: task.project, symbol: Theme.Icon.folder)
-                Chip(text: task.model.flatMap { $0.isEmpty ? nil : $0 } ?? task.launcher.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Default Model"),
-                     symbol: Theme.Icon.cpu)
+                Chip(text: modelLabel, symbol: Theme.Icon.cpu)
                 if task.isReadOnly {
                     Chip(text: String(localized: "Read-only"), symbol: Theme.Icon.view, look: .tint(Theme.accent))
                 } else if let p = task.permission, !p.isEmpty {
@@ -379,13 +378,24 @@ struct PlanTaskRow: View {
         }
     }
 
+    /// An explicit model wins; a tier names its preset with the task's launcher, then the existing launcher/default.
+    private var modelLabel: String {
+        if let model = task.model, !model.isEmpty { return model }
+        let launcher = task.launcher.flatMap { $0.isEmpty ? nil : $0 }
+        if let tier = task.tier, !tier.isEmpty {
+            let preset = String(localized: "Preset \(tier)")
+            return launcher.map { "\($0) · \(preset)" } ?? preset
+        }
+        return launcher ?? String(localized: "Default Model")
+    }
+
     /// The modes a planned task can start with (web PLAN_PERMISSIONS, Android PlanPermissions); Auto too, which the hub
     /// may settle an unset one to from Claude Code's default mode (#3026).
     static let permissions = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 
     static func permissionLabel(_ mode: String) -> String {
         switch mode {
-        case "acceptEdits": String(localized: "Can edit files")
+        case "acceptEdits": String(localized: "Auto-Edit")
         case "plan": String(localized: "Plan first")
         case "auto": String(localized: "Auto [Plan Card Permission]", comment: "A planned task's permission mode: the agent judges the risk itself")
         case "bypassPermissions": String(localized: "Allow Everything")

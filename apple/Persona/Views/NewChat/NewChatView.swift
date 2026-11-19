@@ -74,6 +74,12 @@ struct NewChatView: View {
     @State private var prompt = ""
     @State private var tabName = ""
     @State private var launchers: [Launcher] = []
+    /// The active model profile's Agent presets on this computer, and the preset whose fields are still intact.
+    @State private var tiers: [AgentPreset] = []
+    @State private var profile: AgentPresetProfile?
+    @State private var pickedTier: AgentPreset?
+    /// A picked preset is waiting for its launcher's model list before Start can validate its model and effort.
+    @State private var presetLoading = false
     /// The models of the launcher that will run (`runLauncher`) and the IDs typed for it before (#1644). `pickedModel`
     /// "": the default; an ID the list doesn't have (typed) stays picked when the list comes.
     @State private var modelList = LauncherModelsModel()
@@ -160,7 +166,43 @@ struct NewChatView: View {
     private var modelsError: String? { modelList.error }
 
     private var modelChoice: LauncherModelChoice? {
-        models.map { LauncherModelChoice(list: $0, picked: pickedModel, configured: unifiedModels && runLauncher == defaultLauncher ? configuredModel : "") }
+        models.map {
+            LauncherModelChoice(list: $0, picked: pickedModel,
+                                configured: unifiedModels && runLauncher == defaultLauncher ? configuredModel : "",
+                                presetDefault: pickedTier != nil)
+        }
+    }
+
+    /// Whether this preset needs its model list to check what a start can pass on.
+    private func presetNeedsList(_ tier: AgentPreset?) -> Bool {
+        guard let tier else { return false }
+        return tier.model?.isEmpty == false || tier.effort?.isEmpty == false
+    }
+
+    /// Start waits rather than losing or validating a preset against the launcher's previous model list.
+    private var presetNeedsModels: Bool {
+        presetNeedsList(pickedTier) && (presetLoading || modelsLoading)
+    }
+
+    /// The effort the corresponding start path sends, used to explain a preset field that cannot run.
+    private var presetSentEffort: String? {
+        if codex { return listsModes ? providerEffortSent : nil }
+        return limitedModes ? providerEffortSent : (effort.isEmpty ? nil : effort)
+    }
+
+    /// What of the picked preset this start would leave out, once its own model-list request has settled. A missing or
+    /// failed list does not hide the explanation: it is based on the same fields the start actually sends.
+    private var presetProblem: String? {
+        guard let tier = pickedTier, !presetNeedsModels else { return nil }
+        var omitted: [String] = []
+        if let id = tier.model, !id.isEmpty, sentModel != id {
+            omitted.append(String(localized: "Model \(id) [Agent Preset Compatibility]"))
+        }
+        if let id = tier.effort, !id.isEmpty, presetSentEffort != id {
+            omitted.append(String(localized: "Effort \(id) [Agent Preset Compatibility]"))
+        }
+        guard !omitted.isEmpty else { return nil }
+        return String(localized: "Not used here: \(omitted.joined(separator: " · ")). The launcher or model's own settings apply. [Agent Preset Compatibility]")
     }
 
     /// The list couldn't be read, but the launcher runs Claude Code or Codex: a model ID can still be typed (#1644).
@@ -414,6 +456,24 @@ struct NewChatView: View {
                 }
 
                 Section {
+                    if !tiers.isEmpty {
+                        NavigationLink {
+                            AgentPresetPicker(tiers: tiers, profile: profile, launchers: launchers, picked: pickedTier, onPick: pickTier)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                                    Text(pickedTier.map { String(localized: "Preset \($0.name)") } ?? String(localized: "Preset"))
+                                        .font(Theme.Font.heading).foregroundStyle(Color.primary)
+                                    if let profile {
+                                        Text(profile.name).font(Theme.Font.label).foregroundStyle(Color.secondary).lineLimit(1)
+                                    }
+                                }
+                            } icon: {
+                                ThemedIcon(Theme.Icon.model).foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .accessibilityIdentifier("newChat.preset")
+                    }
                     NavigationLink {
                         launcherPicker
                     } label: {
@@ -437,6 +497,18 @@ struct NewChatView: View {
                     }
                     .accessibilityIdentifier("newChat.launcher")
                     modelRow
+                    if let pickedTier {
+                        if let problem = presetProblem {
+                            Label(problem, systemImage: Theme.Icon.error)
+                                .font(Theme.Font.label).foregroundStyle(Theme.cautionText)
+                                .accessibilityIdentifier("newChat.preset.problem")
+                        } else {
+                            let detail = pickedTier.description?.isEmpty == false ? " · \(pickedTier.description!)" : ""
+                            Label(String(localized: "Preset \(pickedTier.name)") + detail, systemImage: Theme.Icon.model)
+                                .font(Theme.Font.label).foregroundStyle(Color.secondary)
+                                .accessibilityIdentifier("newChat.preset.picked")
+                        }
+                    }
                 } header: { Text(models?.models.isEmpty == false || modelChoice?.canPick == true ? String(localized: "Launcher & Model (This Time Only)") : String(localized: "Launcher (This Time Only)")) } footer: {
                     let about = unifiedModels ? String(localized: "Uses Model Configuration › New Agent by default. A choice here applies to this session only and doesn't change the global default.")
                         : String(localized: "Claude Code / Codex launchers from this machine. It runs in a new tab in the terminal engine.")
@@ -453,7 +525,7 @@ struct NewChatView: View {
                             } label: { Label { Text("Permission Mode") } icon: { ThemedIcon(Theme.Icon.permissions).foregroundStyle(Theme.accent) } }
                         }
                         if !effortOptions.isEmpty {
-                            Picker(selection: limitedModes ? $providerEffort : $effort) {
+                            Picker(selection: effortByHand) {
                                 Text("Use Launcher's").tag("")
                                 ForEach(effortOptions) { o in Label(o.title, systemImage: o.symbol).tag(o.id) }
                             } label: { Label { Text("Thinking Effort") } icon: { ThemedIcon(Theme.Icon.effort).foregroundStyle(Theme.accent) } }
@@ -527,7 +599,7 @@ struct NewChatView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(starting ? startingLabel : String(localized: "Start Chat")) { Task { await start() } }
                         .lineLimit(1)
-                        .disabled(starting || loading || !ready)
+                        .disabled(starting || loading || presetNeedsModels || !ready)
                 }
                 #endif
             }
@@ -535,7 +607,14 @@ struct NewChatView: View {
                 VStack(spacing: Theme.Space.s) {
                 // Next to the button, not as the form's last section: below First Message and under this button it went
                 // unseen, the button just turned back to Start Chat (and a retry started a second agent).
-                if let error {
+                if presetNeedsModels {
+                    Label(String(localized: "Loading the preset's model options…"), systemImage: Theme.Icon.ai)
+                        .font(Theme.Font.caption).foregroundStyle(Color.secondary).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Space.m)
+                        .background(.regularMaterial, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
+                        .accessibilityIdentifier("newChat.preset.loading")
+                } else if let error {
                     Label(error, systemImage: Theme.Icon.errorFilled)
                         .font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -565,7 +644,7 @@ struct NewChatView: View {
                 }
                 .themedButton(prominent: true)
                 .controlSize(.large)
-                .disabled(starting || loading || !ready)
+                .disabled(starting || loading || presetNeedsModels || !ready)
                 #endif
                 }
                 .padding(.horizontal, Theme.Space.xl)
@@ -590,20 +669,19 @@ struct NewChatView: View {
             #endif
             // The Claude quota under ultracode's row (#1307).
             .task(id: ultracodeShown) { if ultracodeShown { await UsageWindowsStore.shared.loadIfOld(model) } }
-            .task(id: "\(machineID)|\(runLauncher)|\(machine?.online == true)|\(defaultsFor)") { await loadModels() }
+            .task(id: "\(machineID)|\(runLauncher)|\(machine?.online == true)|\(defaultsFor)|\(pickedTier?.name ?? "")") { await loadModels() }
             .task(id: SpacePreset.repositoryLookupKey(machineID: machineID, cwd: cwd, online: machine?.online == true,
                                                       destination: targetPreset)) { await loadRepo() }
             .sheet(isPresented: $typingModel) {
                 TypedModelSheet(initial: pickedModel, note: String(localized: "Used for this start only. Once it runs, it's listed under Typed Before.")) { id in
+                    clearPickedTier()
                     pickedModel = id
                 }
             }
             .onChange(of: effortOptions.map(\.id)) { _, ids in
-                // The picked model does not take it. Only the picker on screen: the remembered Claude Code effort is not
-                // dropped for a limited launcher's model, whose own pick is `providerEffort`.
-                if limitedModes {
-                    if !providerEffort.isEmpty, !ids.contains(providerEffort) { providerEffort = "" }
-                } else if !effort.isEmpty, !ids.contains(effort) { effort = "" }
+                // Keep a preset's own effort until its launcher's list arrives; the old list must not clear it.
+                guard !presetNeedsModels else { return }
+                settleEffort(ids)
             }
             .onAppear {
                 if prompt.isEmpty { prompt = initialPrompt }
@@ -684,8 +762,41 @@ struct NewChatView: View {
         #endif
     }
 
+    private var launcherByHand: Binding<String> {
+        Binding(get: { launcher }, set: { clearPickedTier(); launcher = $0 })
+    }
+
+    private var modelByHand: Binding<String> {
+        Binding(get: { pickedModel }, set: { clearPickedTier(); pickedModel = $0 })
+    }
+
+    private var effortByHand: Binding<String> {
+        Binding(get: { limitedModes ? providerEffort : effort }, set: { value in
+            clearPickedTier()
+            if limitedModes { providerEffort = value } else { effort = value }
+        })
+    }
+
+    /// Only a manual edit unmarks a preset; filling its fields and settling its model list do not.
+    private func clearPickedTier() {
+        pickedTier = nil
+        presetLoading = false
+    }
+
+    /// Fills exactly the three ordinary start fields. `restoredModel` carries the model onto a new launcher's list.
+    private func pickTier(_ tier: AgentPreset) {
+        pickedTier = tier
+        launcher = tier.launcher
+        let limited = StartModes.limited(launchers.first { $0.name == tier.launcher })
+        effort = limited ? "" : tier.effort ?? ""
+        providerEffort = limited ? tier.effort ?? "" : ""
+        restore(model: tier.model ?? "")
+        let expected = LauncherModelsModel.key(ref, tier.launcher)
+        presetLoading = presetNeedsList(tier) && (modelList.key != expected || modelsLoading)
+    }
+
     private var launcherPicker: some View {
-        LauncherPicker(launchers: launchers, selection: $launcher, allowDefault: unifiedModels, defaultLabel: defaultLabel,
+        LauncherPicker(launchers: launchers, selection: launcherByHand, allowDefault: unifiedModels, defaultLabel: defaultLabel,
                        defaultBlock: unifiedModels ? launchers.first(where: { $0.name == defaultLauncher })?.block : nil,
                        // The provider wizard saves to the hub-level group: on another group's computer it would land elsewhere.
                        addsProvider: ref.group == (model.hub?.group ?? ""),
@@ -737,6 +848,7 @@ struct NewChatView: View {
     /// would be, and the model goes only with the launcher it was picked for.
     private func apply(_ fill: RecentSetupCard.Fill) {
         pendingFill = nil
+        clearPickedTier()
         pickedWorkspace = nil
         cwd = fill.cwd
         cwdPicked = !fill.cwd.isEmpty
@@ -869,6 +981,8 @@ struct NewChatView: View {
             let (ls, dirs) = try await (l, d)
             guard current() else { return }
             launchers = ls
+            tiers = model.launcherTiers[ref] ?? []
+            profile = model.launcherTierProfile[ref]
             recent = dirs.recent ?? []
             let firstLoad = defaultsFor != machineID
             if firstLoad {
@@ -906,6 +1020,10 @@ struct NewChatView: View {
         pickedWorkspace = nil
         recent = []
         launchers = []
+        tiers = []
+        profile = nil
+        pickedTier = nil
+        presetLoading = false
         launcher = ""
         mode = ""
         providerMode = ""
@@ -952,7 +1070,7 @@ struct NewChatView: View {
                     .accessibilityIdentifier("newChat.model.enter")
                     // A typed pick can be dropped again: the start goes with the launcher's default.
                     if !pickedModel.isEmpty {
-                        Button { pickedModel = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.secondary) }
+                        Button { clearPickedTier(); pickedModel = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.secondary) }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Use Default Model")
                             .accessibilityIdentifier("newChat.model.clearTyped")
@@ -961,7 +1079,7 @@ struct NewChatView: View {
             }
         } else if let c = modelChoice, c.canPick {
             NavigationLink {
-                LauncherModelPicker(choice: c, picked: $pickedModel, refresh: { await loadModels(refresh: true) }, owner: runLauncher, offersTyping: true,
+                LauncherModelPicker(choice: c, picked: modelByHand, refresh: { await loadModels(refresh: true) }, owner: runLauncher, offersTyping: true,
                                     forget: { id in await modelList.forget(id, machine: ref, launcher: runLauncher) },
                                     forgetError: modelList.forgetError,
                                     defaultFooter: c.configured.isEmpty ? String(localized: "No model chosen: runs with the launcher's own settings.")
@@ -996,14 +1114,33 @@ struct NewChatView: View {
         }
     }
 
+    /// Drops an effort only after the list for the launcher and model that will run has settled.
+    private func settleEffort(_ ids: [String]) {
+        // Only the picker on screen: the remembered Claude Code effort is not dropped for a limited launcher's model,
+        // whose own pick is `providerEffort`.
+        if limitedModes {
+            if !providerEffort.isEmpty, !ids.contains(providerEffort) { providerEffort = "" }
+        } else if !effort.isEmpty, !ids.contains(effort) { effort = "" }
+    }
+
     /// The model list of the launcher that will run. Again only when that launcher (or machine) changed, or refresh:
     /// `.task` runs again when a pushed list pops. A typed pick stays when the list comes (it isn't in it, #1644); another
-    /// launcher or machine starts over from the default.
+    /// launcher or machine starts over from the default. A preset picked during a request schedules its own completion,
+    /// so an older request cannot clear its loading state or validate against the previous launcher's list.
     private func loadModels(refresh: Bool = false) async {
         let key = LauncherModelsModel.key(ref, runLauncher)
-        if !refresh, modelList.key == key, modelList.list != nil || modelList.loading { return }
+        let needsPresetList = presetNeedsList(pickedTier)
+        if needsPresetList { presetLoading = modelList.key != key || modelList.loading }
+        if !refresh, modelList.key == key, modelList.list != nil || modelList.loading {
+            if !needsPresetList { return }
+            if !modelList.loading {
+                presetLoading = false
+                settleEffort(effortOptions.map(\.id))
+                return
+            }
+        }
         if modelList.key != key { pickedModel = "" }
-        // A recent setup's model, or the machine's (#2134): picked before the list comes, so the efforts offered are its.
+        // A recent setup's or preset's model, or the machine's (#2134): picked before the list comes, so its efforts show.
         if let r = restoredModel, r.key == key {
             pickedModel = r.id
             restoredModel = nil
@@ -1012,7 +1149,12 @@ struct NewChatView: View {
         // Only once this machine's launchers are in: before that `launcher` is still the last machine's.
         guard defaultsFor == machineID, launchers.contains(where: { $0.name == runLauncher }), machine?.online == true else { return }
         restoredModel = nil // one left was for a launcher no longer picked
+        let requestedTier = pickedTier
         await modelList.load(ref, launcher: runLauncher, refresh: refresh)
+        if pickedTier == requestedTier {
+            presetLoading = false
+            settleEffort(effortOptions.map(\.id))
+        }
     }
 
     /// What names the worktree's branch: the todo's name, else the first message, else the folder.
@@ -1033,6 +1175,7 @@ struct NewChatView: View {
     }
 
     private func start() async {
+        guard !presetNeedsModels else { return }
         guard let api = model.api(ref.group) else {
             error = String(localized: "Can't reach this computer's hub. Try again later.")
             return
@@ -1137,6 +1280,67 @@ struct NewChatView: View {
     }
 }
 
+/// The active model profile's Agent presets. A blocked launcher's health reason stays on its disabled row; picking any
+/// other row only fills New Agent's ordinary launcher, model and effort fields.
+struct AgentPresetPicker: View {
+    var tiers: [AgentPreset]
+    var profile: AgentPresetProfile?
+    var launchers: [Launcher]
+    var picked: AgentPreset?
+    var onPick: (AgentPreset) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(tiers) { tier in row(tier) }
+            } header: {
+                if let profile { Text(profile.name) }
+            } footer: {
+                Text("Picking a preset fills the launcher, model and thinking effort for this start.")
+            }
+        }
+        .themedPage()
+        .navigationTitle("Preset")
+        #if os(iOS) || os(visionOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    private func row(_ tier: AgentPreset) -> some View {
+        let block = launchers.first { $0.name == tier.launcher }?.block
+        let selected = picked?.name == tier.name
+        return Button {
+            onPick(tier)
+            Haptics.tap()
+            dismiss()
+        } label: {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(String(localized: "Preset \(tier.name)"))
+                        .font(Theme.Font.heading).foregroundStyle(Color.primary)
+                    if let description = tier.description, !description.isEmpty {
+                        Text(description).font(Theme.Font.secondary).foregroundStyle(Color.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(runs(tier)).font(Theme.Font.label).foregroundStyle(Color.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let block { LauncherBlockLine(block: block) }
+                }
+                Spacer(minLength: Theme.Space.s)
+                if selected { ThemedIcon(Theme.Icon.done).foregroundStyle(Theme.accent).fontWeight(.semibold) }
+            }
+            .contentShape(.rect)
+        }
+        .disabled(block != nil)
+        .accessibilityIdentifier("newChat.preset.\(tier.name)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func runs(_ tier: AgentPreset) -> String {
+        let effort = tier.effort.flatMap { $0.isEmpty ? nil : SessionModes.effortLabel($0) ?? $0 }
+        return [tier.launcher, tier.model, effort].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+    }
+}
+
 /// New Agent's launchers. One grayed out on this computer (`Launcher.block`, #1643) stays listed with why; choosing it
 /// shows how to fix it instead of picking it, and the help's Try Anyway picks it after all. A provider the hub leaves out
 /// here (`unavailable`, #8109) comes after them, off with why.
@@ -1199,7 +1403,7 @@ struct LauncherPicker: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                                Text(l.title).font(Theme.Font.heading.monospaced()).foregroundStyle(.primary)
+                                Text(l.title).font(Theme.Font.heading.monospaced()).foregroundStyle(Color.primary)
                                 chips(l, look: .neutral)
                             }
                             Spacer()

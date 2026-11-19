@@ -204,6 +204,7 @@ func (h *Hub) features() []string {
 	out = append(out, h.todoViewFeatures()...)
 	out = append(out, h.todoAsksFeatures()...)
 	out = append(out, h.todoTimelineFeatures()...)
+	out = append(out, h.todoImageFeatures()...)
 	// The assistant's card interfaces, always on (docs/assistant/assistant-views.md, #5509): assistant_views is declarative
 	// actions (expected_version), live cards and transcript cards; assistant_html_bridge is …/html-actions. Neither says
 	// a client may run HTML: that is each platform's own security sign-off, else fallback.

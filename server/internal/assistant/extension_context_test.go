@@ -79,36 +79,39 @@ type inboxModelCalls struct {
 // is written once more, told so; the rewrite is what the user gets. If the rewrite repeats one too, there is no draft.
 // The sentences themselves are never in a prompt; a short one does not count.
 func TestInboxDraftNeverQuote(t *testing.T) {
-	ctx := context.Background()
-	never := []string{"Thinks the vendor is unreliable", "ok"}
-	for _, c := range []struct {
-		name    string
-		replies []string
-		want    string
-		err     error
-		calls   int
-	}{
-		{"clean", []string{"OK, I'll send it Friday."}, "OK, I'll send it Friday.", nil, 1},
-		{"rewritten", []string{"Sure. (THINKS the vendor is unreliable!)", "Sure, Friday works."}, "Sure, Friday works.", nil, 2},
-		{"withheld", []string{"thinks the vendor is ＵＮＲＥＬＩＡＢＬＥ", "Thinks  the vendor, is unreliable."}, "", errDraftWithheld, 2},
-	} {
-		h := goldenInbox(t)
-		answerInboxContext(h, never...)
-		calls, stop := sequenceModel(t, c.replies...)
-		h.in.models[purposeDraft] = modelAt(t, calls.url)
-		it := goldenItems(t)["dm"]
-		h.inbox.items[it.ID] = it
-		got, err := h.draftReply(ctx, it.ID, "")
-		stop()
-		if got != c.want || !errors.Is(err, c.err) || len(calls.systems) != c.calls {
-			t.Fatalf("%s: %q %v after %d calls", c.name, got, err, len(calls.systems))
-		}
-		for i, system := range calls.systems {
-			if strings.Contains(system, "unreliable") {
-				t.Fatalf("%s: a never-quote sentence is in the prompt", c.name)
+	for _, locale := range []string{"zh-Hans", "en", "ja"} {
+		ctx := context.Background()
+		never := []string{"Thinks the vendor is unreliable", "ok"}
+		for _, c := range []struct {
+			name    string
+			replies []string
+			want    string
+			err     error
+			calls   int
+		}{
+			{"clean", []string{"OK, I'll send it Friday."}, "OK, I'll send it Friday.", nil, 1},
+			{"rewritten", []string{"Sure. (THINKS the vendor is unreliable!)", "Sure, Friday works."}, "Sure, Friday works.", nil, 2},
+			{"withheld", []string{"thinks the vendor is ＵＮＲＥＬＩＡＢＬＥ", "Thinks  the vendor, is unreliable."}, "", errDraftWithheld, 2},
+		} {
+			h := goldenInbox(t)
+			h.f.hello.Locale = locale
+			answerInboxContext(h, never...)
+			calls, stop := sequenceModel(t, c.replies...)
+			h.in.models[purposeDraft] = modelAt(t, calls.url)
+			it := goldenItems(t)["dm"]
+			h.inbox.items[it.ID] = it
+			got, err := h.draftReply(ctx, it.ID, "")
+			stop()
+			if got != c.want || !errors.Is(err, c.err) || len(calls.systems) != c.calls {
+				t.Fatalf("%s: %q %v after %d calls", c.name, got, err, len(calls.systems))
 			}
-			if rewrite := strings.Contains(system, "上一版草稿照搬了"); rewrite != (i == 1) {
-				t.Fatalf("%s: call %d asks to rewrite: %v", c.name, i, rewrite)
+			for i, system := range calls.systems {
+				if strings.Contains(system, "unreliable") {
+					t.Fatalf("%s: a never-quote sentence is in the prompt", c.name)
+				}
+				if rewrite := strings.Contains(system, "上一版草稿照搬了") || strings.Contains(system, "The previous draft copied") || strings.Contains(system, "前の下書きは外部に出せない"); rewrite != (i == 1) {
+					t.Fatalf("%s: call %d asks to rewrite: %v", c.name, i, rewrite)
+				}
 			}
 		}
 	}

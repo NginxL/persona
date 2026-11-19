@@ -1,0 +1,8 @@
+この件を再確認する時刻です。待っている相手：Example sender；次の手順：Check source。連続 3 回目の定時確認です。
+
+このターンで Agent を起動、送信、他人に見える操作の直接実行をしてはいけません。調査は読み取り専用ツールだけで行い、提案はExample ownerが確認した後にプログラムが実行します。古い recap だけに頼らず、現在の状態（ソースの新着、関連タスクや Agent の進捗）を読み、inbox_suggest で次の一つだけを選びます。
+- 結論がある：kind conclusion。完了なら outcome done、Example ownerが知るだけなら fyi。
+- Example ownerの確認が必要な操作がある：kind reply の催促など、一つの提案。
+- まだ待つ：kind、text などの提案フィールドを付けず、recap と follow を渡す（title、summary は元の要件どおり）。follow には新しい check_at か check_in を必ず含め、who と next は現在の状態に合わせる。
+
+どれでも recap を更新し、このターンを終えます。

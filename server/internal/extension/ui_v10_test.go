@@ -30,7 +30,7 @@ func v10Example(t *testing.T, name string) *View {
 	return v
 }
 
-var v10Examples = []string{"work-tree", "plan-layered"}
+var v10Examples = []string{"work-tree", "plan-layered", "graph-control-room"}
 
 // graphOf is the first graph of v.
 func graphOf(t *testing.T, v *View) *UIElem {
@@ -452,5 +452,81 @@ func TestFitResultGraphBelow10(t *testing.T) {
 		if err := FitResult(&res, page, version); err == nil {
 			t.Errorf("v%d: a graph with a cycle is taken", version)
 		}
+	}
+}
+
+// A node's inspector and timeline metadata reach an app of 10 as written: started_at 0 stays a pointer (not "no
+// start"), and facts, detail and links are kept. Below 10 the node becomes a row and the metadata waits with the
+// graph; the row still comes out.
+func TestV10NodeInspectorMetadata(t *testing.T) {
+	page, _ := Slot("nav_page")
+	v := v10Example(t, "graph-control-room")
+	drawn := graphOf(t, v)
+	root := nodeOf(t, drawn, "root")
+	if root.StartedAt == nil || *root.StartedAt != 1726399980 {
+		t.Fatalf("started_at did not survive: %v", root.StartedAt)
+	}
+	if len(root.Facts) == 0 || root.Detail == "" || len(root.Links) == 0 {
+		t.Fatalf("the inspector metadata did not survive: %+v", root)
+	}
+	want, _ := json.Marshal(v)
+	if _, err := Fit(v, page, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := json.Marshal(v); string(got) != string(want) {
+		t.Errorf("an app of 10 gets the metadata changed\nwant %s\n got %s", want, got)
+	}
+
+	// started_at: 0 and ended_at: 0 stay non-nil pointers across ParseView and Fit at 10
+	zeroView, err := ParseView([]byte(`{"sections":[{"items":[{"type":"graph","nodes":[{"id":"z","title":"Zero","started_at":0,"ended_at":0}]}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fit(zeroView, page, 10); err != nil {
+		t.Fatal(err)
+	}
+	zNode := nodeOf(t, graphOf(t, zeroView), "z")
+	if zNode.StartedAt == nil || *zNode.StartedAt != 0 || zNode.EndedAt == nil || *zNode.EndedAt != 0 {
+		t.Fatalf("zero timestamps did not survive Fit: started=%v ended=%v", zNode.StartedAt, zNode.EndedAt)
+	}
+
+	// a fresh copy below 10: every visible node is a row, and no graph is left
+	v = v10Example(t, "graph-control-room")
+	drawn = graphOf(t, v)
+	order, _ := newGraphWalk(drawn).readingOrder()
+	if _, err := Fit(v, page, 9); err != nil {
+		t.Fatal(err)
+	}
+	rows := slices.DeleteFunc(items(v), func(e UIElem) bool { return e.Type != wire.ComponentRow })
+	if len(rows) != len(order) {
+		t.Fatalf("%d rows for %d visible nodes", len(rows), len(order))
+	}
+}
+
+// The hub holds a node's inspector metadata to the kit's limits: a bad time, a blank fact, an over-long detail and a
+// non-https link are refused when the view is parsed.
+func TestV10NodeInspectorRefused(t *testing.T) {
+	for name, node := range map[string]string{
+		"ended before started": `{"id":"a","title":"a","started_at":2,"ended_at":1}`,
+		"negative start":       `{"id":"a","title":"a","started_at":-1}`,
+		"blank fact":           `{"id":"a","title":"a","facts":[{"label":"k","value":""}]}`,
+		"nine facts":           `{"id":"a","title":"a","facts":[` + strings.Repeat(`{"label":"k","value":"v"},`, 8) + `{"label":"k","value":"v"}]}`,
+		"long detail":          `{"id":"a","title":"a","detail":"` + strings.Repeat("決", 2001) + `"}`,
+		"http link":            `{"id":"a","title":"a","links":[{"title":"x","url":"http://hub.example.com/x"}]}`,
+		"nine links":           `{"id":"a","title":"a","links":[` + strings.Repeat(`{"title":"x","url":"https://hub.example.com/x"},`, 8) + `{"title":"x","url":"https://hub.example.com/x"}]}`,
+	} {
+		raw := json.RawMessage(`{"sections":[{"items":[{"type":"graph","nodes":[` + node + `]}]}]}`)
+		if _, err := ParseView(raw); err == nil {
+			t.Errorf("%s: held", name)
+		}
+	}
+
+	// and a good node with 0 start, equal end, facts, a 2000-rune detail and an https link holds
+	good := json.RawMessage(`{"sections":[{"items":[{"type":"graph","nodes":[{"id":"a","title":"a",` +
+		`"started_at":0,"ended_at":0,"facts":[{"label":"k","value":"v","icon":"check"}],` +
+		`"detail":"` + strings.Repeat("決", 2000) + `",` +
+		`"links":[{"title":"x","url":"https://hub.example.com/x"}]}]}]}]}`)
+	if _, err := ParseView(good); err != nil {
+		t.Errorf("a good node: %v", err)
 	}
 }

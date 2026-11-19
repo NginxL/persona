@@ -3,6 +3,7 @@
   "url_scheme": "URLはhttp(s)://で始めてください",
   "url_extras": "URLにユーザー、認証情報、クエリ、フラグメントは含められません",
   "header_line": "ヘッダーの{line}行目は「名前: 値」の形式で書いてください",
+  "header_reserved": "ヘッダー{name}はPersonaまたはHTTPが管理しています。削除して専用フィールドを使うか、別の名前を指定してください。",
   "env_line": "環境変数の{line}行目は「名前=値」の形式で書いてください（名前は英数字と _ のみ）",
   "env_limit": "環境変数は50個までです",
   "proxy_scheme": "プロキシはhttp(s)://またはsocks5://で始めてください",

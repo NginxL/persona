@@ -122,6 +122,7 @@ todos.write          DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    GET /api/v1/agent-shares/{share_id}
 -                    GET /api/v1/agent-shares/{share_id}/messages
 agents.read          GET /api/v1/agents
+-                    GET /api/v1/agents/display-settings
 -                    GET /api/v1/agents/hidden
 -                    GET /api/v1/agents/outbox
 -                    GET /api/v1/agents/prefs
@@ -337,6 +338,7 @@ todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/places
 todos.read           GET /api/v1/todos/{id}
 todos.read           GET /api/v1/todos/{id}/decisions
+-                    GET /api/v1/todos/{id}/images/{image}
 todos.read           GET /api/v1/todos/{id}/repositories
 todos.read           GET /api/v1/todos/{id}/timeline
 todos.read           GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}
@@ -655,6 +657,7 @@ todos.write          POST /api/v1/todos/{id}/workspace-naming/preview
 -                    PUT /api/v1/admin/password-login
 -                    PUT /api/v1/admin/usage-sources
 -                    PUT /api/v1/admin/usage-sources/{id}
+-                    PUT /api/v1/agents/display-settings
 -                    PUT /api/v1/agents/prefs
 -                    PUT /api/v1/agents/triage
 -                    PUT /api/v1/assistant

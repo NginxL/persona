@@ -6,10 +6,15 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.GroupKeys
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.AssistantSnapshot
+import persona.core.contracts.api.HubGroupInfo
+import persona.core.contracts.api.KnowledgeKind
 import persona.core.contracts.api.MainConversationSender
 import persona.core.designsystem.AppFeedback
 import persona.core.navigation.AppTab
+import persona.core.navigation.AgentsRoute
+import persona.core.navigation.AssistantRoute
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.HubLinks
@@ -17,9 +22,16 @@ import persona.core.navigation.HubPage
 import persona.core.navigation.MachineDetailRoute
 import persona.core.navigation.MessageJumps
 import persona.core.navigation.Navigator
+import persona.core.navigation.ResolvedRoute
+import persona.core.navigation.TerminalRoute
+import persona.core.navigation.TodoDetailRoute
+import persona.core.navigation.TodosRoute
 import persona.feature.chat.*
 import persona.feature.assistant.personaConversationTitle
 import persona.feature.inbox.InboxWebSelection
+import persona.feature.knowledge.KnowledgeDetailRoute
+import persona.feature.knowledge.KnowledgeKindRoute
+import persona.feature.knowledge.KnowledgeRoute
 import persona.feature.inbox.LocalInboxWebSelection
 import java.util.UUID
 
@@ -47,10 +59,20 @@ internal fun ShellLinkHost(session: ShellSession, navigator: Navigator, feedback
             send
         }
     }
-    val appLinks: (ChatAppLink) -> Unit = remember(navigator) {
+    val appLinks: (ChatAppLink) -> Unit = remember(session, navigator) {
+        fun open(page: HubPage, hub: String?, source: String) {
+            val groups = session.groups.groups.value
+            val selected = groups.selectedGroup()
+            val route = resolveHubPage(page, selected?.namespace, session.sessions.sessions.value.map { it.key },
+                session.assistant.assistant.value, groups, hub) ?: return
+            if (route.hubGroupId != null && route.hubGroupId != selected?.id) {
+                if (source.isNotEmpty()) persona.android.MainActivity.pendingHubLink.value = source
+            } else openResolvedHubPage(route, navigator)
+        }
         { link: ChatAppLink ->
             when (link) {
-                is ChatAppLink.Session -> navigator.navigate(ChatRoute(link.machineId, link.sessionId))
+                is ChatAppLink.Session -> open(HubPage.Agent(link.machineId, link.sessionId, link.itemId), null, "")
+                is ChatAppLink.Page -> open(link.page, link.hub, link.source)
                 is ChatAppLink.Tab -> when (link.tab) {
                     "inbox" -> navigator.navigate(persona.core.navigation.InboxRoute)
                     "settings" -> navigator.navigate(persona.core.navigation.SettingsRoute)
@@ -62,8 +84,18 @@ internal fun ShellLinkHost(session: ShellSession, navigator: Navigator, feedback
     }
     val hubLinks: (String) -> Boolean = remember(session, navigator) {
         { link: String ->
-            openHubPage(link, session.hubAddresses(), session.groups.groups.value.firstOrNull { it.selected }?.namespace,
-                session.sessions.sessions.value.map { it.key }, session.assistant.assistant.value, navigator)
+            val groups = session.groups.groups.value
+            val selected = groups.selectedGroup()
+            val route = resolveHubRoute(link, session.hubAddresses(), selected?.namespace,
+                session.sessions.sessions.value.map { it.key }, session.assistant.assistant.value, groups)
+            when {
+                route == null -> false
+                route.hubGroupId != null && route.hubGroupId != selected?.id -> {
+                    persona.android.MainActivity.pendingHubLink.value = link
+                    true
+                }
+                else -> openResolvedHubPage(route, navigator)
+            }
         }
     }
     val forwarding = rememberChatForwarding(session, navigator)
@@ -100,44 +132,105 @@ internal fun ShellLinkHost(session: ShellSession, navigator: Navigator, feedback
     }
 }
 
+private fun List<HubGroupInfo>.selectedGroup(): HubGroupInfo? = firstOrNull { it.selected } ?: firstOrNull()
+
+private fun List<HubGroupInfo>.groupForHub(hub: String?): HubGroupInfo? =
+    if (hub == null) selectedGroup() else firstOrNull { group -> group.hubs.any { it.hubId == hub } }
+
 /**
- * Opens the app's screen for [link] when it is a page of the selected group's hubs ([HubLinks]; [hubs] their
- * addresses, [namespace] the group's machine id suffix); false for other sites, the hub's pages the app has no
- * screen for, and an assistant conversation before the assistant is known. A link to one message of a conversation
- * (`?at=`) leaves it in [MessageJumps] for that chat's page, which lands on it.
+ * Opens the app's screen for [link]. Web links use the selected group's [hubs] addresses; an app link's explicit hub
+ * selects any paired group in [groups]. The returned route carries that group so the shell can select it before opening.
  */
 internal fun openHubPage(link: String, hubs: List<String>, namespace: String?, sessions: List<SessionKey>,
-    assistant: AssistantSnapshot, navigator: Navigator): Boolean {
-    val page = HubLinks.page(link, hubs) ?: return false
-    // The hub speaks its own machine ids; the merged lists carry the group's suffix (GroupKeys).
-    fun machine(id: String) = GroupKeys.machine(id, namespace)
-    when (page) {
+    assistant: AssistantSnapshot, navigator: Navigator, groups: List<HubGroupInfo> = emptyList()): Boolean {
+    val route = resolveHubRoute(link, hubs, namespace, sessions, assistant, groups) ?: return false
+    return openResolvedHubPage(route, navigator)
+}
+
+/** The native route of a hub link; cold-start Router and in-app links share this mapping. */
+internal fun resolveHubRoute(link: String, hubs: List<String>, namespace: String?, sessions: List<SessionKey>,
+    assistant: AssistantSnapshot, groups: List<HubGroupInfo> = emptyList()): ResolvedRoute? {
+    val selectedId = groups.selectedGroup()?.id
+    val profiles = if (groups.isEmpty()) listOf(HubLinks.Hub("", hubs)) else groups.flatMap { group ->
+        group.hubs.map { member -> HubLinks.Hub(member.hubId, if (group.id == selectedId) hubs else emptyList()) }
+    }
+    val result = HubLinks.parse(link, profiles) as? HubLinks.Result.Page ?: return null
+    return resolveHubPage(result.page, namespace, sessions, assistant, groups, result.hub?.takeIf { it.isNotBlank() })
+}
+
+/** The native route of an already parsed page; message-link and web-link navigation share this mapping. */
+internal fun resolveHubPage(page: HubPage, namespace: String?, sessions: List<SessionKey>,
+    assistant: AssistantSnapshot, groups: List<HubGroupInfo> = emptyList(), hub: String? = null): ResolvedRoute? {
+    if (hub != null && groups.isEmpty()) return null
+    val target = groups.groupForHub(hub)
+    if (groups.isNotEmpty() && target == null) return null
+    // The hub speaks its own machine ids; merged lists carry the target group's suffix (GroupKeys).
+    fun machine(id: String) = GroupKeys.machine(id, target?.namespace ?: namespace)
+    fun route(tab: AppTab, key: androidx.navigation3.runtime.NavKey, focus: Boolean = false) =
+        ResolvedRoute(tab, key, focusComposer = focus, hubGroupId = target?.id)
+    return when (page) {
         is HubPage.Agent -> {
             val machineId = machine(page.machineId)
             // The web page also takes the first characters of a session id (#2464): the one session they name.
             val sessionId = sessions.filter { it.machineId == machineId && it.sessionId.startsWith(page.sessionId) }
                 .let { keys -> keys.firstOrNull { it.sessionId == page.sessionId } ?: keys.singleOrNull() }?.sessionId ?: page.sessionId
             page.itemId?.let { MessageJumps.request(machineId, sessionId, it) }
-            navigator.navigate(ChatRoute(machineId, sessionId))
+            route(AppTab.Agents, if (page.view == "term") TerminalRoute(machineId, sessionId) else ChatRoute(machineId, sessionId))
         }
         is HubPage.Conversation -> {
             val main = assistant.mainSession
-            val key = when (val id = page.sessionId) {
-                null -> main
-                // The assistant's conversations all run on its machine: one not listed yet is there too.
+            val id = page.sessionId
+            val linkedMachine = page.machineId
+            val key = when {
+                id == null -> main
+                // An explicit machine resolves another manager's conversation even when it is not in the current list.
+                linkedMachine != null -> SessionKey(machine(linkedMachine), id)
+                // Otherwise retain the current assistant's resolution and its not-listed-yet fallback.
                 else -> assistant.conversations.map { it.key }.firstOrNull { it.sessionId == id }
-                    ?: main?.let { SessionKey(it.machineId, id) } ?: return false
+                    ?: main?.let { SessionKey(it.machineId, id) } ?: return null
             }
-            if (key == null) navigator.selectTab(AppTab.Persona)
+            if (id != null && page.managerId != null) {
+                AssistantManagerChoice.noteItem(listOf("assistant", "conversations", id), page.managerId)
+            }
+            if (key == null) route(AppTab.Persona, AssistantRoute)
             else {
                 page.itemId?.let { MessageJumps.request(key.machineId, key.sessionId, it) }
-                navigator.navigate(ChatRoute(key.machineId, key.sessionId, ConversationKind.Assistant))
+                route(AppTab.Persona, ChatRoute(key.machineId, key.sessionId, ConversationKind.Assistant))
             }
         }
-        is HubPage.Screen -> navigator.navigate(page.key.let { if (it is MachineDetailRoute) it.copy(machineId = machine(it.machineId)) else it })
+        HubPage.NewConversation -> route(AppTab.Persona, AssistantRoute, focus = true)
+        is HubPage.Knowledge -> {
+            val kind = page.kind?.let { KnowledgeKind.fromWire(it) ?: return null }
+            route(AppTab.Persona, kind?.let { KnowledgeKindRoute(it) } ?: KnowledgeRoute)
+        }
+        is HubPage.KnowledgeEntry -> {
+            val kind = KnowledgeKind.fromWire(page.kind) ?: return null
+            route(AppTab.Persona, KnowledgeDetailRoute(kind, page.id))
+        }
+        is HubPage.Screen -> {
+            val key = page.key.let {
+                // Named copying keeps the parsed range and all route defaults; manager-bearing screens navigate unchanged.
+                if (it is MachineDetailRoute) it.copy(machineId = machine(it.machineId)) else it
+            }
+            val tab = when (key) {
+                AgentsRoute, TodosRoute, is TodoDetailRoute -> AppTab.Agents
+                else -> AppTab.Persona
+            }
+            route(tab, key)
+        }
     }
+}
+
+/** Message and web links keep their existing direct-navigation behavior; cold starts apply the same route to the stacks. */
+private fun openResolvedHubPage(route: ResolvedRoute, navigator: Navigator): Boolean {
+    if (route.focusComposer) persona.feature.assistant.AssistantComposerFocus.request()
+    if (route.key == AssistantRoute) navigator.selectTab(route.tab) else navigator.navigate(route.key)
     return true
 }
+
+internal fun openHubPage(page: HubPage, namespace: String?, sessions: List<SessionKey>,
+    assistant: AssistantSnapshot, navigator: Navigator, groups: List<HubGroupInfo> = emptyList(), hub: String? = null): Boolean =
+    resolveHubPage(page, namespace, sessions, assistant, groups, hub)?.let { openResolvedHubPage(it, navigator) } == true
 
 /**
  * What chats need for Forward (#3901): the sessions and Persona's conversations the app already holds, each group's Recent,

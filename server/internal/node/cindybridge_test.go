@@ -3,15 +3,18 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 func TestCindyEngineDetected(t *testing.T) {
@@ -276,5 +279,20 @@ func TestCindyBridgeSessionsAndOperations(t *testing.T) {
 	defer mu.Unlock()
 	if len(enqueued) < 2 || len(stopped) != 1 || stopped[0] != "s2" || len(patches) < 2 {
 		t.Fatalf("enqueued=%d stopped=%v patches=%d", len(enqueued), stopped, len(patches))
+	}
+}
+
+// Cindy has no image-input contract. Sending or starting with pictures must refuse explicitly, never answer ok after
+// dropping them (#11084).
+func TestCindyImageInputIsExplicitlyUnsupported(t *testing.T) {
+	b := &cindyBridge{}
+	for _, method := range []string{"session.send", "session.start"} {
+		params, _ := json.Marshal(map[string]any{"session_id": "s1", "text": "read this", "prompt": "read this",
+			"images": []map[string]any{{"mime": "image/png", "data": "aW1hZ2U="}}})
+		_, err := b.request(context.Background(), method, params)
+		var rpcErr *rpc.Error
+		if !errors.As(err, &rpcErr) || rpcErr.Code != "image_input_unsupported" || !strings.Contains(rpcErr.Message, "does not support image input") {
+			t.Fatalf("%s: %v, want image_input_unsupported", method, err)
+		}
 	}
 }

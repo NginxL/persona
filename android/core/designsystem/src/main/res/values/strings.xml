@@ -447,4 +447,5 @@
     <string name="designsystem_shortcuts_help_keys">Ctrl + /</string>
     <string name="designsystem_shortcuts_terminal">Terminal has priority</string>
     <string name="designsystem_shortcuts_terminal_keys">Esc, Tab, Shift + Tab, Ctrl + C, arrow keys</string>
+    <string name="designsystem_load_image">Load image</string>
 </resources>

@@ -58,6 +58,34 @@ internal fun projectSections(entries: List<KnowledgeEntry>): List<KnowledgeSecti
 internal fun kindSections(entries: List<KnowledgeEntry>, tag: String?): List<KnowledgeSection> =
     if (entries.isEmpty()) emptyList() else listOf(KnowledgeSection(R.string.knowledge_section_ranked, entries, tag = tag))
 
+/** Meetings and Persona's recordings share one list (#9994). A recording the hub matched to an imported meeting keeps
+ * that meeting on its own row, and the imported row goes. Recordings without a listed match stay exactly as they are. */
+internal fun mergeMeetingLists(meetings: KnowledgeList, recordings: KnowledgeList): KnowledgeList {
+    val byId = meetings.items.distinctBy { it.id }.associateBy { it.id }
+    val covered = mutableSetOf<String>()
+    val recs = recordings.items.map { recording ->
+        val imported = recording.meetingId?.let(byId::get) ?: return@map recording
+        covered += imported.id
+        recording.copy(imported = imported)
+    }
+    return KnowledgeList(meetings.items.filterNot { it.id in covered } + recs,
+        (meetings.tags.orEmpty() + recordings.tags.orEmpty()).distinct())
+}
+
+/** The imported meeting whose own notes a recording's page opens (#9994). */
+internal data class KnowledgeImportedMeeting(val id: String, val url: String, val source: String?)
+
+/** `meta.imported_meeting` names the meeting; its resolved link carries the notes' URL and connector. */
+internal val KnowledgeDetail.importedMeeting: KnowledgeImportedMeeting?
+    get() {
+        if (kind != KnowledgeKind.Recordings.wire) return null
+        val reference = meta?.get("imported_meeting") as? JsonObject ?: return null
+        val id = reference.string("id").takeIf { it.isNotBlank() } ?: return null
+        val link = links.orEmpty().firstOrNull { it.kind == KnowledgeKind.Meetings.wire && it.id == id } ?: return null
+        val url = link.extra?.trim().takeUnless { it.isNullOrEmpty() } ?: return null
+        return KnowledgeImportedMeeting(id, url, link.source)
+    }
+
 /** A project's `extra` is "short|long · active|paused|done|ignored"; missing halves read as short and active. */
 internal val KnowledgeEntry.projectKind: String
     get() = extra.orEmpty().split(" · ").firstOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: "short"

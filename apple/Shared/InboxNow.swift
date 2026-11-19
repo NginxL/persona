@@ -73,12 +73,12 @@ nonisolated enum InboxNow {
         }
     }
 
-    /// The row's third line when the hub supplies `where`: "where · who: newest line". A direct chat names its person
-    /// once. Nil means that the caller keeps its existing source-specific line (an older hub, or mail with no where).
-    static func meta(_ item: InboxItem, lang: String) -> String? {
-        guard let place = nonEmpty(item.where), let separator = word("labelValueSeparator", lang: lang) else { return nil }
+    /// The source place or mail folder, then who said what. A direct chat names its person once.
+    static func meta(_ item: InboxItem, lang: String, translatedPreview: String? = nil) -> String? {
+        guard let place = nonEmpty(item.where) ?? item.mail?.sourceMailbox,
+              let separator = word("labelValueSeparator", lang: lang) else { return nil }
         let sender = nonEmpty(item.sender)
-        let preview = item.preview
+        let preview = nonEmpty(translatedPreview) ?? item.preview
         if let sender {
             let who = preview.isEmpty ? sender : sender + separator + preview
             return sender == place ? who : place + " · " + who

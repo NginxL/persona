@@ -16,25 +16,25 @@ import (
 )
 
 func (s *Service) toolRepositoryAdd(ctx context.Context, machine, self string, raw json.RawMessage) (string, error) {
-	if machine == "" || self == "" {
-		return "", errors.New("a calling conversation is required")
-	}
 	var in repositoryInput
 	if err := repositoryArguments(raw, &in); err != nil {
-		return "", err
+		return "", repositoryAddNotApplied(err)
 	}
 	binding, err := s.repositoryBinding(withProviderBudget(ctx), in, "")
 	if err != nil {
-		return "", s.repositoryToolError(ctx, err)
+		return "", repositoryAddNotApplied(s.repositoryToolError(ctx, err))
 	}
 	doc, err := s.repositoryDocument(ctx)
 	if err != nil {
-		return "", s.repositoryToolError(ctx, err)
+		return "", repositoryAddNotApplied(s.repositoryToolError(ctx, err))
 	}
 	for _, saved := range doc.Repositories {
 		if s.sameRepository(saved.Identity, binding.Identity) {
-			return "", s.repositoryToolError(ctx, repositoryProblem("duplicate"))
+			return "", repositoryAddNotApplied(s.repositoryToolError(ctx, repositoryProblem("duplicate")))
 		}
+	}
+	if machine == "" || self == "" {
+		return "", repositoryAddNotApplied(errors.New("a calling conversation is required"))
 	}
 	shown, _ := json.Marshal(in)
 	if repository.IsExtensionProvider(binding.Provider) {
@@ -86,6 +86,12 @@ func providerRepositoryCard(binding RepositoryBinding) json.RawMessage {
 	}{binding.CanonicalURL, binding.Provider, binding.ProviderName, binding.Name, binding.Aliases, binding.Purpose,
 		cmp.Or(binding.CloneURL, binding.CanonicalURL)})
 	return shown
+}
+
+// repositoryAddNotApplied marks only failures proven to precede card creation and Apply.
+// saveRepository and other Apply errors deliberately keep their original uncertainty.
+func repositoryAddNotApplied(err error) error {
+	return fmt.Errorf("%w; nothing was applied (%w)", err, approvalops.ErrNotApplied)
 }
 
 func (s *Service) repositoryToolError(ctx context.Context, err error) error {

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"net/http"
 	"time"
 
@@ -86,6 +87,9 @@ func (b *BusHub) localDeviceCall(ctx context.Context, p DeviceCall) (json.RawMes
 	d := b.opts.Devices
 	if d == nil || p.Device == assistantwire.DeviceAll || assistantwire.HubDeviceMethods[p.Method] || !d.Has(p.Device) {
 		return nil, false, nil
+	}
+	if p.Method == DeviceSessionModes && devicewire.ModeActorOf(ctx) == nil {
+		ctx = devicewire.WithModeActor(ctx, devicewire.AssistantModeActor())
 	}
 	out, err := d.CallNode(ctx, p.Device, p.Method, p.Params)
 	return out, true, err

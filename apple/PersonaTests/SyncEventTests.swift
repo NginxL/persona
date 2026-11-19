@@ -58,7 +58,7 @@ struct SyncEventTests {
         let s = try JSON.decoder.decode(Session.self, from: Data(#"{"session_id":"s","status":"idle","permission_mode":"plan","effort":"xhigh"}"#.utf8))
         #expect(s.permissionMode == "plan")
         #expect(s.effort == "xhigh")
-        #expect(SessionModes.modeLabel(s.permissionMode) == "只做计划")
+        #expect(SessionModes.modeLabel(s.permissionMode) == "计划模式")
         #expect(SessionModes.effortLabel(s.effort) == "很高")
         #expect(SessionModes.modeLabel("on-request") == "on-request") // unknown values (Codex) show as they are
         let auto = try JSON.decoder.decode(Session.self, from: Data(#"{"session_id":"s","status":"idle","effort":"auto"}"#.utf8))

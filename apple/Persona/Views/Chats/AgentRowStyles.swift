@@ -96,6 +96,7 @@ struct AgentAvatar: View {
     var dense = false
     /// Off where something else beside the row says the state (`SlotRow.dot`).
     var dot = true
+    var muted = false
 
     var body: some View {
         let side = dense ? Theme.Size.wellS : Theme.Size.wellL
@@ -104,7 +105,7 @@ struct AgentAvatar: View {
             .background(Theme.Fill.well, in: Circle())
             .overlay(alignment: .bottomTrailing) {
                 if dot {
-                    StatusDot(state: session.state, size: dense ? Theme.Size.dot : Theme.Size.dotXL, waiting: session.waitsInBackground)
+                    StatusDot(state: session.state, size: dense ? Theme.Size.dot : Theme.Size.dotXL, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted))
                         .padding(Theme.Size.rule)
                         .background(Theme.card, in: Circle())
                         .offset(x: Theme.Size.rule, y: Theme.Size.rule)
@@ -183,7 +184,7 @@ extension SlotRow {
 
     @MainActor private func avatarRow(dense: Bool) -> some View {
         HStack(alignment: .top, spacing: dense ? Theme.Space.s : Theme.Space.m) {
-            AgentAvatar(session: session, dense: dense, dot: dot)
+            AgentAvatar(session: session, dense: dense, dot: dot, muted: muted)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 TimeBesideOrUnder {
                     titleText.frame(maxWidth: .infinity, alignment: .leading)
@@ -214,7 +215,7 @@ extension SlotRow {
 
     @MainActor private var twoLineRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            if dot { StatusDot(state: session.state, size: Theme.Size.dot, waiting: session.waitsInBackground) }
+            if dot { StatusDot(state: session.state, size: Theme.Size.dot, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted)) }
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 TimeBesideOrUnder {
                     HStack(spacing: Theme.Space.xs) {
@@ -251,7 +252,7 @@ extension SlotRow {
         let tone = session.stateTone(muted: muted)
         let waits = session.state == .needsYou && !muted
         // Its state in words, but not a quiet one's (Seen) nor where the section says it.
-        let word = hideState || muted || (session.state == .idle && !session.awaitsYourReply(muted: muted)) ? nil : session.stateLabel(muted: muted)
+        let word = hideState || muted || (session.state == .idle && !showsReviewWord) ? nil : session.stateLabel(muted: muted)
         return VStack(alignment: .leading, spacing: Theme.Space.xs) {
             TimeBesideOrUnder {
                 HStack(spacing: Theme.Space.xs) {

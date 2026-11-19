@@ -1,0 +1,27 @@
+{
+  "name": "view_update",
+  "description": "Replace a live card created by this assistant conversation with a complete validated View. Other conversations and ordinary agents cannot modify it. Supply the version read from view_get to reject stale updates; without it the hub uses the version it reads at the start of this call. Validation or a version conflict leaves the previous card intact. Contents are stored before update notifications are coalesced (at most one per second). Returns {version}. Keep stable component keys to preserve editing and scroll state across devices.",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "id",
+      "view"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The exact id returned by view_show, including its view_ prefix."
+      },
+      "view": {
+        "type": "object",
+        "description": "The entire replacement View, including required plain-text fallback."
+      },
+      "version": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991,
+        "description": "Expected version from view_get; a stale version returns a conflict instead of overwriting."
+      }
+    }
+  }
+}

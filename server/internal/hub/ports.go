@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/streams"
@@ -207,24 +208,20 @@ func (h *Hub) connectPort(w http.ResponseWriter, r *http.Request, m *Machine) {
 		return
 	}
 	dctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	dial := map[string]any{"id": id, "port": port}
+	dial := devicewire.PortDial{ID: id, Port: port}
 	if port == screenPort && h.extReport().ScreenKeepAwake {
-		dial["keep_awake"] = true // someone is watching the Mac: it stays awake until this closes (node/awake.go)
+		dial.KeepAwake = true
 	}
-	link := false
 	if port == screenPort {
 		if pair := r.URL.Query().Get("pair"); pair != "" {
-			dial["pair"] = pair // ties this 5900 stream to a later screen/video/connect for the video channel (#3954)
-			link = h.askScreenLink(r, dial)
+			dial.Pair = pair
+			dial.Link = h.offersScreenLink(r)
+			dial.Attach = dial.Link && r.URL.Query().Get("attach") == "1"
 		}
 	}
-	var res struct {
-		Link int `json:"link"`
-	}
-	err = m.call(dctx, "port.dial", dial, &res)
+	res, err := m.dialPortStream(dctx, mux, dial, nil)
 	cancel()
 	if err != nil {
-		mux.Abort(id, err)
 		var re *rpc.Error
 		if errors.As(err, &re) && re.Code == "port_gone" {
 			writeErr(w, http.StatusNotFound, err)
@@ -237,7 +234,32 @@ func (h *Hub) connectPort(w http.ResponseWriter, r *http.Request, m *Machine) {
 		callErr(w, err)
 		return
 	}
-	h.bridgeStream(w, r, mux, id, link && res.Link == 1)
+	h.bridgeStream(w, r, mux, id, dial.Link && res.Link == 1)
+}
+
+// dialPortStream dials an already registered stream and starts pumping a TCP endpoint if supplied.
+// A WebSocket caller supplies nil and starts its own pump after upgrading.
+func (m *Machine) dialPortStream(ctx context.Context, mux *streams.Mux, dial devicewire.PortDial, tcp streams.HalfCloseConn) (devicewire.PortDialReply, error) {
+	dial.StreamVersion = 0
+	if tcp != nil {
+		dial.StreamVersion = devicewire.PortStreamHalfCloseV1
+	}
+	var res devicewire.PortDialReply
+	if err := m.call(ctx, devicewire.MethodPortDial, dial, &res); err != nil {
+		if tcp != nil {
+			_ = tcp.Close()
+		}
+		mux.Abort(dial.ID, err)
+		return res, err
+	}
+	if tcp != nil {
+		if res.StreamVersion == devicewire.PortStreamHalfCloseV1 {
+			mux.StartHalfClose(dial.ID, tcp, false)
+		} else {
+			mux.Start(dial.ID, tcp)
+		}
+	}
+	return res, nil
 }
 
 // screenLinkSubprotocol is the WebSocket subprotocol a phone offers to carry the live screen as a screen session
@@ -250,18 +272,7 @@ const screenLinkSubprotocol = "persona-screen-link.1"
 // web's noVNC, an app before it) asks for nothing and gets the raw stream, as before, and so does every client while
 // hub.json's screen_link_off is set.
 func (h *Hub) askScreenLink(r *http.Request, dial map[string]any) bool {
-	if h.cfg.ScreenLinkOff {
-		return false
-	}
-	offered := false
-	for _, v := range r.Header.Values("Sec-WebSocket-Protocol") {
-		for _, p := range strings.Split(v, ",") {
-			if strings.EqualFold(strings.TrimSpace(p), screenLinkSubprotocol) {
-				offered = true
-			}
-		}
-	}
-	if !offered {
+	if !h.offersScreenLink(r) {
 		return false
 	}
 	dial["link"] = true
@@ -269,6 +280,20 @@ func (h *Hub) askScreenLink(r *http.Request, dial map[string]any) bool {
 		dial["attach"] = true
 	}
 	return true
+}
+
+func (h *Hub) offersScreenLink(r *http.Request) bool {
+	if h.cfg.ScreenLinkOff {
+		return false
+	}
+	for _, v := range r.Header.Values("Sec-WebSocket-Protocol") {
+		for _, p := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(p), screenLinkSubprotocol) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // bridgeStream upgrades the request to a binary WebSocket and pumps it against stream `id` on `mux` until it ends.

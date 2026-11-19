@@ -87,8 +87,8 @@ func (s *Service) backgroundSupervises(ctx context.Context, self string, t Todo)
 	if s.isLeaderRef(sup) {
 		return false
 	}
-	// A leader conversation on a runtime cannot be told anything (digestTarget): its tasks are this route's to review.
-	return !s.isLeader(ctx, sup) || s.runtimeConversation(ctx, s.settings(ctx).MachineID, sup)
+	// A leader conversation on a runtime without supervision_policy cannot be told anything (digestTarget): its tasks are this route's to review.
+	return !s.isLeader(ctx, sup) || s.runtimeWithoutSupervisionPolicy(ctx, s.settings(ctx).MachineID, sup)
 }
 
 // followUpWords tells conversation self, in the answer of the tool that just made an agent its supervised task
@@ -252,7 +252,7 @@ func (s *Service) backgroundThere(ctx context.Context, cfg Settings, id string) 
 		return true
 	}
 	if res.OK {
-		return res.Session.Assistant && res.Session.SourceKind != proto.SourceRuntime && !s.backgroundSignedOut(cfg, res.Session)
+		return res.Session.Assistant && !runtimeSessionLacksSupervisionPolicy(res.Session) && !s.backgroundSignedOut(cfg, res.Session)
 	}
 	if d, ok := s.device(ctx, cfg.MachineID); !ok || !d.Online || !d.Reachable {
 		return true
@@ -264,7 +264,7 @@ func (s *Service) backgroundThere(ctx context.Context, cfg Settings, id string) 
 	listed := false // the node listed since this manager started: an assistant conversation is in its list
 	for _, c := range list {
 		if c.SessionID == id {
-			return c.Assistant && !s.backgroundSignedOut(cfg, c)
+			return c.Assistant && !runtimeSessionLacksSupervisionPolicy(c) && !s.backgroundSignedOut(cfg, c)
 		}
 		listed = listed || c.Assistant
 	}

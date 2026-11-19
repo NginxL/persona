@@ -130,7 +130,7 @@ class HeaderModeShotsTest {
                         Row { if (style == AppStyle.Glass) HeaderModeButton(s, chrome, online = true) {} else ChatModeBar(s, chrome, online = true) }
                     }
                 }
-                assertTrue("$scene: mode button", described(if (scene == "after-bypass") "权限模式：全部放行" else "权限模式：自动改文件"))
+                assertTrue("$scene: mode button", described(if (scene == "after-bypass") "权限模式：完全访问" else "权限模式：允许编辑"))
                 // the state is said once, in the header's title line; the line above the composer keeps only its facts
                 assertTrue(has("工作中"))
                 assertFalse("$scene: state said twice", has("正在工作"))
@@ -146,16 +146,17 @@ class HeaderModeShotsTest {
                         for (s in list) Moded(s, chrome)
                     }
                 }
-                for (w in listOf("手动确认", "只做计划", "自动改文件", "自动", "全部放行", "未知")) assertTrue("modes: $w", described("权限模式：$w"))
+                for (w in listOf("默认权限", "计划模式", "允许编辑", "自动审批", "完全访问", "未知")) assertTrue("modes: $w", described("权限模式：$w"))
                 assertEquals(6, rule.onAllNodesWithContentDescription("权限模式：", substring = true).fetchSemanticsNodes().size)
                 save("modes", style, dark)
             }
             "menu", "menu-bypass" -> {
-                val s = agent("default", bypass = scene == "menu-bypass")
+                // not in a terminal pane: the node can't restart it into Allow Everything either (#6513, PermissionsCommandShotsTest)
+                val s = agent("default", bypass = scene == "menu-bypass").let { if (scene == "menu") it.copy(paneId = null) else it }
                 show(style, dark, 640) { chrome -> Column { Moded(s, chrome) } }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
-                assertTrue(has("权限模式：手动确认") && has("只做计划") && has("全部放行"))
+                assertTrue(has("权限模式：默认权限") && has("计划模式") && has("完全访问"))
                 // without bypass_available it is there, greyed, saying it is a start's choice
                 assertEquals(scene == "menu", has("只能在新开时选"))
                 save(scene, style, dark, withPopup())
@@ -166,12 +167,12 @@ class HeaderModeShotsTest {
                 show(style, dark, 640) { chrome -> Column { Moded(s, chrome) } }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
-                rule.onNode(hasText(if (into) "全部放行" else "只做计划") and hasAnyAncestor(isPopup())).performClick()
+                rule.onNode(hasText(if (into) "完全访问" else "计划模式") and hasAnyAncestor(isPopup())).performClick()
                 rule.waitForIdle()
-                assertTrue(has(if (into) "全部放行？" else "离开全部放行？"))
+                assertTrue(has(if (into) "完全访问？" else "退出完全访问？"))
                 assertTrue("nothing sent before the answer", actions.asked.isEmpty())
                 save(scene, style, dark, rule.onNode(isDialog()).captureToImage().asAndroidBitmap())
-                rule.onNode(hasText(if (into) "全部放行" else "切到 只做计划") and hasAnyAncestor(isDialog())).performClick()
+                rule.onNode(hasText(if (into) "完全访问" else "切到 计划模式") and hasAnyAncestor(isDialog())).performClick()
                 rule.waitForIdle()
                 assertEquals(listOf(ChatAction.Modes(permissionMode = if (into) "bypassPermissions" else "plan")), actions.asked)
             }

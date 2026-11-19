@@ -50,6 +50,12 @@ runtime errors. Shell launchers, managed launchers and older runtimes keep their
   The main chat's conversations count as well (they run the computer's launcher under the same sign-in). Each turn a background task wakes meets the same limit again; it is recorded once.
 - Stored in the settings key `launchers.health` (Postgres), one entry per computer × launcher: success / failure, error text (redacted, truncated), error category,
   check time, consecutive failure count, repair log, state. It survives hub restarts.
+- **Clean error text** (`internal/textfmt`): the check's output and a start's error arrive with the terminal's colour codes and prompt records (iTerm2 shell integration,
+  zsh's `PROMPT_SP`) and with the shell's own startup noise (a gitstatus restart line, `Console output during zsh initialization`). The node strips the escapes before anything
+  reads the text, then redacts and summarizes it to its error line, so a URL or IP that an escape wrapped is still redacted and the category is read off the error, not off a banner
+  (`[oh-my-zsh] Would you like to update?` in front of a 401 stays `auth`, not `cli_outdated`). The manager cleans what it is given too, and `GET /api/v1/launchers/health`,
+  `agents_list`, the launcher lists and the apps' Test strip the escapes from records an older node or hub persisted, so a banner never reaches a reader. The web's
+  `lib/ansi.ts` does the same on the client.
 
 ## Usage-limit record rules
 

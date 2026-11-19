@@ -64,7 +64,10 @@ func (s *Service) chansNow() time.Time {
 func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Duration, steps []string, live string) {
 	ctx = feishuSendAs(ctx, "progress", r.MachineID, r.SessionID)
 	s := f.s
-	if f.cotProgressNow(ctx, r) {
+	if s.runExt(r, "chat") != "" {
+		// The topic's card keeps its own immediate lifecycle; the native API must not hold it back.
+		defer func() { f.cotProgressNow(ctx, r) }()
+	} else if f.cotProgressNow(ctx, r) {
 		return
 	}
 	c := progressCard(s.botLang(ctx), r.Label, took, steps, live, s.runWaiting(r), s.runLiveView(r.ID), botTargetOf(r))

@@ -218,3 +218,56 @@ func TestModeChangesRoute(t *testing.T) {
 		t.Errorf("another session: %d %v", code, out)
 	}
 }
+
+func TestInternalModeChangeProvenance(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	var refuse error
+	modesMachine(t, d, func() (any, error) { return map[string]any{"applied": "now"}, refuse })
+	ctx := devicewire.WithModeActor(context.Background(), devicewire.AssistantModeActor())
+	call := func(ctx context.Context, p string) error {
+		_, err := d.CallNode(ctx, "mac", "session.modes", json.RawMessage(p))
+		return err
+	}
+	if err := call(ctx, `{"session_id":"s1","permission_mode":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
+	rows := st.recorded()
+	if len(rows) != 1 || rows[0].ActorKind != "assistant" || rows[0].DeviceName != "Persona" || rows[0].From != "acceptEdits" || rows[0].To != "plan" || rows[0].Applied != "now" {
+		t.Fatalf("assistant record: %+v", rows)
+	}
+	if err := call(ctx, `{"session_id":"s1","effort":"high"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := call(context.Background(), `{"session_id":"s1","permission_mode":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
+	refuse = &rpc.Error{Code: "refused", Message: "not applied"}
+	if err := call(ctx, `{"session_id":"s1","permission_mode":"plan"}`); err == nil {
+		t.Fatal("expected refusal")
+	}
+	if rows := st.recorded(); len(rows) != 1 {
+		t.Fatalf("non-changes recorded: %+v", rows)
+	}
+}
+
+func TestPlanModeEventRecordsActualChoice(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	m := modesMachine(t, d, func() (any, error) { return map[string]any{}, nil })
+	e := proto.ModeSetEvent{SessionID: "s1", From: "plan", To: "acceptEdits", Actor: &proto.ModeActor{Kind: "device", DeviceID: "d1", DeviceName: "Phone"}}
+	raw, _ := json.Marshal(e)
+	m.onEvent(proto.EventModeSet, raw)
+	rows := st.recorded()
+	if len(rows) != 1 || rows[0].From != "plan" || rows[0].To != "acceptEdits" || rows[0].DeviceID != "d1" || rows[0].DeviceName != "Phone" || rows[0].Applied != "" {
+		t.Fatalf("plan record: %+v", rows)
+	}
+	e.Actor = nil
+	raw, _ = json.Marshal(e)
+	m.onEvent(proto.EventModeSet, raw)
+	if len(st.recorded()) != 1 {
+		t.Fatal("legacy or unattributed event was recorded")
+	}
+}

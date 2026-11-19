@@ -273,6 +273,7 @@ type modelsState struct {
 	cacheMu  sync.Mutex
 	cacheAt  map[string]time.Time
 	have     map[string]map[string]bool   // machine \x00 launcher → its models (ids and what aliases resolve to)
+	declared map[string][]string          // machine \x00 launcher → every id the launcher declared (ids, resolved, aliases)
 	aliases  map[string]map[string]string // machine \x00 launcher → alias id → its resolved id
 	defaults map[string]string            // machine \x00 launcher → its default model's resolved or own id
 

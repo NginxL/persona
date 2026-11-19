@@ -56,11 +56,7 @@ enum DemoModelCatalog {
             } else {
                 purpose["category_id"] = .string(Self.category(id))
             }
-            // Main Chat alone picks its How It Runs (#2455).
-            if id == "assistant" {
-                purpose["fields"] = ["provider", "model", "effort", "runtime"]
-                purpose["runtimes"] = ["cli", "agentsdk"]
-            }
+            // No runtime or runtimes, as the hub since #9799: How It Runs is no longer a setting (docs/assistant/model-config.md).
             return .object(purpose)
         }
         return ["purposes": .array(purposes), "providers": .array(providers)]

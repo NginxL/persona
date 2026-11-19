@@ -23,7 +23,7 @@ class AgentReceiptTextTest {
         assertEquals("交回电脑处理", AgentText.receipt(AnswerReceipt(rm, Resolution(dismiss = true))).resolve(res))
         // #5121: the Agents page names the plan and the approval mode too.
         val plan = Interaction("p2", kind = "plan", plan = "## Use Kotlin\n1. Port it")
-        assertEquals("已批准计划（自动接受编辑）：Use Kotlin",
+        assertEquals("已批准计划（允许编辑）：Use Kotlin",
             AgentText.receipt(AnswerReceipt(plan, Resolution(approve = true, mode = "acceptEdits"))).resolve(res))
     }
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -332,7 +333,11 @@ func (s *Service) writeConversationJSON(ctx context.Context, w http.ResponseWrit
 }
 
 func conversationWrite(method string) bool {
-	return method == "assistant.send" || method == "session.send" || method == "session.start" || method == "session.resume" || method == "session.fork" || method == "session.rewind"
+	switch method {
+	case "assistant.send", "session.send", DeviceSessionSendOnce, "session.start", "session.resume", "session.fork", "session.rewind", assistantwire.DeviceAssistantAnswerAgain:
+		return true
+	}
+	return false
 }
 
 // Check every referenced identity: a resume may name both a new session id and

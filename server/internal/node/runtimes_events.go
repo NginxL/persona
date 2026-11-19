@@ -53,11 +53,18 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 	switch event {
 	case "usage.report":
 		n.runtimeUsageReport(h, params, time.Now())
+	case proto.EventModeSet:
+		var e proto.ModeSetEvent
+		if json.Unmarshal(params, &e) == nil && n.runtimes.owns(h, e.SessionID) && n.peer != nil {
+			_ = n.peer.Notify(proto.EventModeSet, params)
+		}
 	case "session.items":
 		var p struct {
 			SessionID string       `json:"session_id"`
 			Items     []proto.Item `json:"items"`
 			ToSeq     *int         `json:"to_seq"`
+			FromSeq   *int         `json:"from_seq"`
+			History   string       `json:"history"`
 		}
 		if json.Unmarshal(params, &p) != nil || !n.runtimes.owns(h, p.SessionID) {
 			return
@@ -72,7 +79,7 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 		if p.ToSeq != nil {
 			last = max(last, *p.ToSeq)
 		}
-		n.runtimes.pushed(p.SessionID, last)
+		n.runtimes.pushed(p.SessionID, last, p.History, p.FromSeq != nil && *p.FromSeq == 0)
 		if n.peer != nil {
 			_ = n.peer.Notify("session.items", n.echoedRaw(p.SessionID, params, "items")) // echo.go
 		}
@@ -83,7 +90,9 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 		if json.Unmarshal(params, &p) != nil || !n.runtimes.owns(h, p.SessionID) || n.peer == nil {
 			return
 		}
+		n.deltaMu.Lock()
 		_ = n.peer.Notify("session.delta", params)
+		n.deltaMu.Unlock()
 	case "interaction.cancel":
 		if n.peer != nil {
 			_ = n.peer.Notify("interaction.cancel", params)
@@ -114,6 +123,14 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 	_, engine := engineRuntimes[rt]
 	ownWorkspaces := engine && caps.Workspaces && !daemon
 	seen := make(map[string]bool, len(list))
+	capsBuf := make([]proto.SessionCapabilities, 0, len(list))
+	boolTrue, boolFalse := true, false
+	capBool := func(v bool) *bool {
+		if v {
+			return &boolTrue
+		}
+		return &boolFalse
+	}
 	panes := map[string]string{}
 	defer func() {
 		h.mu.Lock()
@@ -191,11 +208,13 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		if !modes || claudeModes {
 			permissionModes = 0
 		}
-		s.Capabilities = &proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
-			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(claudeModes),
-			Rewind: proto.CanModes(rewind), RewindCode: proto.CanModes(rewindCode),
-			Model:           proto.CanModes(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep)),
-			PermissionModes: permissionModes}
+		capsBuf = append(capsBuf, proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
+			SupervisionPolicy: caps.Assistant && caps.SupervisionPolicy && !sub,
+			Close:             capBool(caps.Close), Rename: capBool(caps.Rename && !sub), Modes: capBool(claudeModes),
+			Rewind: capBool(rewind), RewindCode: capBool(rewindCode),
+			Model:           capBool(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep)),
+			PermissionModes: permissionModes})
+		s.Capabilities = &capsBuf[len(capsBuf)-1]
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.
 		if s.PaneID != "" && validPane(s.PaneID) {
@@ -243,6 +262,12 @@ func (n *Node) runtimeWatch(h *runtimeConn, id string, since int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), runtimeCallTimeout)
 	defer cancel()
 	params := map[string]any{"session_id": id, "since_seq": since}
+	n.runtimes.mu.Lock()
+	history := n.runtimes.lastHistory[id]
+	n.runtimes.mu.Unlock()
+	if history != "" {
+		params["history"] = history
+	}
 	if n.runtimeTranscript(id) != "" {
 		params["since_seq"], params["transcript"] = 0, true
 	}

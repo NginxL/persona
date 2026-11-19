@@ -258,19 +258,11 @@ export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, no
   usageMs?: number;
 }) {
   // a long answer the hub cut for the page: its start, and "View full text" under it
-  const full = useFullText(streaming === undefined ? item : undefined, mid, sid);
+  const live = streaming !== undefined;
+  const full = useFullText(live ? undefined : item, mid, sid);
   const text = streaming ?? (noCloseout ? stripCloseout(full.text) : full.text);
   if (!text) return null;
   const cwd = mid && sid ? getSession(mid, sid)?.cwd : undefined;
-  if (streaming !== undefined) {
-    return (
-      <MessageActions text={text}>
-        <div className={ANSWER} data-answer="streaming">
-          <Markdown text={text} mid={mid} cwd={cwd} streaming lineBreaks />
-        </div>
-      </MessageActions>
-    );
-  }
   return (
     <MessageActions text={text} ts={item?.ts} itemId={item?.id} bar={bar} usage={bar ? usage : undefined} usageMs={bar ? usageMs : undefined}
       translationSource={item?.full_size ? {
@@ -281,15 +273,15 @@ export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, no
         },
       } : undefined}>
       {cut && <p className="mb-1 text-[13px] leading-[1.384615] text-ink-2" data-cut-short>{t("chat-messageactions.cut_short")}</p>}
-      <div className={ANSWER} data-answer data-items={item?.id}>
+      <div className={ANSWER} data-answer={live ? "streaming" : true} data-items={item?.id}>
         {/* the cards in it are this item's blocks (ui/AssistantCard.tsx): `<item id>/<n>` */}
         <CardItem.Provider value={item?.id ? { id: item.id, text } : null}>
-          <Markdown text={text} mid={mid} cwd={cwd} fade={fade || undefined} lineBreaks />
+          <Markdown text={text} mid={mid} cwd={cwd} streaming={live || undefined} fade={fade || undefined} lineBreaks />
         </CardItem.Provider>
       </div>
       {full.more}
-      {mid && sid && <ReplyFiles text={text} mid={mid} cwd={cwd} />}
-      {mid && sid && <ReplyPorts text={text} mid={mid} sid={sid} cwd={cwd} />}
+      {!live && mid && sid && <ReplyFiles text={text} mid={mid} cwd={cwd} />}
+      {!live && mid && sid && <ReplyPorts text={text} mid={mid} sid={sid} cwd={cwd} />}
     </MessageActions>
   );
 });
@@ -323,7 +315,7 @@ export const SegmentView = memo(function SegmentView({
   sid: string;
   streaming?: string;
   /** The live words are an agent's as Claude shows them (docs/integrations/claude-integration.md "Live replies"): a batch
-   *  of lines at a time, and still while a tool runs. The live work row stays under them; the headless assistant's
+   *  of lines at a time, and still while a tool runs. The live work row stays above this text slot; the headless assistant's
    *  words stream as they are written and stand for it. */
   batchedWords?: boolean;
   expandFold: (f: Item) => Promise<boolean | void>;
@@ -360,9 +352,11 @@ export const SegmentView = memo(function SegmentView({
     return { mid, sid, scope, expandFold, agentStatus: agent, segment: seg.id, workflowCalls, trace, lineStyle, turnLive: live, plan };
   }, [mid, sid, scope, expandFold, subagents, tasks, live, seg.id, workflowCalls, trace, lineStyle, plan]);
   const identity = segmentIdentity(seg);
+  const last = steps.at(-1);
+  const newWords = streaming !== undefined && (last?.kind !== "text" || last.item.text?.trimEnd() !== streaming.trimEnd());
   const nodes = useMemo(
-    () => workBlocks(steps, { live, turnStart, streaming: streaming !== undefined, identity }),
-    [steps, live, turnStart, streaming !== undefined, identity],
+    () => workBlocks(steps, { live, turnStart, streaming: newWords, identity }),
+    [steps, live, turnStart, newWords, identity],
   );
   useCallSeeker(scope, nodes);
   // the pictures the agent looked at this turn, between its work and its last words
@@ -411,13 +405,10 @@ export const SegmentView = memo(function SegmentView({
       {/* Work stays collapsed above the single latest-text slot. */}
       {live && <Fragment key="before-words">{beforeWords}</Fragment>}
       <WorkNodes nodes={nodes.slice(0, cut)} p={p} live={live} fade />
-      {/* working with no run of steps going (its words just came, or nothing yet): the live group still shows, under an
-          agent's live words while they are there (batchedWords) */}
-      {streaming === undefined && liveRow}
+      {liveRow}
       {imageStrip}
       {!live && <Fragment key="before-words">{beforeWords}</Fragment>}
-      {streaming !== undefined && liveRow}
-      {(latestItem || streaming !== undefined) && !onlyCloseout && <div key="latest-text" data-latest-text><LatestAnswer item={latestItem} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} /></div>}
+      {(latestItem || streaming !== undefined) && !onlyCloseout && <div key="latest-text" data-latest-text><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} /></div>}
       {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}
       {changes && <TurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
     </section>

@@ -45,6 +45,19 @@ class ScopedChatStorage(application: Application, private val runtime: Connectio
         data?.let { ChatStorageSnapshot(it.scope.path, ScopedChatAnchors.open(it)) }
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
+    override fun heldMessages(session: SessionKey): persona.core.contracts.api.HeldAgentActions? {
+        val group = runtime.groupOf(session.machineId)?.takeIf { it.active } ?: return null
+        return group.heldActions?.invoke(GroupKeys.rawKey(session))
+    }
+
+    override fun replyImages(session: SessionKey): Flow<persona.core.contracts.api.ReplyImageSource?> =
+        runtime.groups.map { runtime.groupOf(session.machineId)?.let { group -> group.data?.let { group to it } } }
+            .distinctUntilChanged().map { owner ->
+                owner?.let { (group, data) ->
+                    persona.core.hub.HubReplyImages(runtime.connectionFor(data)) { group.active && group.data === data }
+                }
+            }
+
     override fun imageLoader(session: SessionKey): coil3.ImageLoader? {
         val data = runtime.groupOf(session.machineId)?.data ?: return null
         return imageLoaders.get(data.scope.path, data) { scopedChatImageLoader(context, this, data.scope.path) }

@@ -111,6 +111,16 @@ Once the extension that connects Lark through the Lark gateway is enabled, /agen
 The extension uses the hub's public API: `POST /api/v1/assistant/conversations` with `purpose: "lark.agent"` and the configured machine (`machine_id`) to open a chat, `POST /api/v1/sessions/{m}/{s}/messages` to continue the same topic,
 and `GET /api/v1/kb/chats/{id}/context` to get what the knowledge base knows about this conversation / project. Configuration lives in the extension (`agent`, `agent_launcher`, `agent_machine`); `lark_agent` in hub.json no longer takes effect.
 
+## Optional main-chat answers (#11130)
+
+The host offers an opt-in `mention` channel contract for the extension to adopt; this host change does not rewrite the extension's current per-request chats. With the channel's explicit `target: {kind: "main"}`, an owner's `/agent` request uses the unified `channel.receive` pipeline and the owner's main chat instead. Without that target, today's new chat per request or topic remains the default.
+
+The extension supplies `chat`, `topic`, the quoted message and gathered `context` with each request. They enter the main turn as escaped context, and the unified run reads the answer from that turn and returns it through the extension's existing `channel.send` reply path with the original request in `reply_to`. A busy main chat queues the request normally; `channel.receive` acknowledges accepted work before the model turn, while the extension remains responsible for the OnIt → DONE reactions.
+
+A mention turn is public even though it runs in main. Its localized prompt says not to reveal private context from other chats, sessions, mail or health unless the owner's request explicitly asks for the specific information, and the per-turn internal `public` marker suppresses the owner's live snapshot for that input only. It does not change the main conversation's origin or any later private turn.
+
+The main-chat receive path requires `owner: true`; a false or missing attestation is refused. Every non-owner request keeps using a separate guest conversation and never enters the owner's main chat. Proactive push/sync copies and approval fan-out are not enabled for mention channels by this contract.
+
 ## Not done yet
 
 (Chatting with the Persona main chat from Lark at any time, or answering questions by tapping cards in Lark: that is the Lark bot, `docs/extensions/bots.md`.)

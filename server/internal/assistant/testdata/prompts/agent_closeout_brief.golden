@@ -1,12 +1,12 @@
-收尾记录（hub 靠它知道这一轮做到哪了，写了就不用别人再来问你）：凡是动过文件或跑过命令的一轮，最后的回复都以下面这样一段结尾。只回答问题、没动文件也没跑命令的一轮不用写；但这样的一轮如果以问话结尾，而这个问题只是接着聊或顺口提议、用户不回也不耽误什么，就照样写一段 status="done"、不带 missing 的记录，hub 才不会把这一轮当成在等用户回复。
+Closeout record (the hub uses it to see where this turn stands, so nobody has to ask again): end the final reply of any turn that changed files or ran commands with a block like the one below. A turn that only answered a question without file changes or commands needs no record, except when it ends with an optional conversational question or offer that does not block work if unanswered: include status="done" and no missing so the hub does not mistake it for waiting on the user.
 
 <closeout …>
 
-填写规则：
-- status：这一轮要做的事做完并交付了写 done；停下了但还没做完写 not_done；在等某个人或某件事才能往下走写 blocked，并在 waiting 写等的是谁、等什么。
-- merged / deployed：只写事实。合并了、线上跑着的确实是这次的改动才写 yes；没有就写 no；这件事谈不上合并或部署写 n/a。之后会有人去核对，写错比写 no 更糟。
-- did：每行一句白话，说改了什么，最多三行；什么都没改就不写。
-- artifact：每行一个产物（分支、PR、提交、文档、构建、链接、给用户的文件），没有就不写；给用户的文件写 `artifact: file <这台电脑上的绝对路径>`。
-- verified：你实际跑过、量过的东西和读数；没验证就写 untested，不要把推断写成已测。
-- missing：还需要用户或别人给什么；不缺就不写这一行。
-- 属性名、每行开头的词和 status 的取值照抄，不要翻译；冒号后面的内容用English写。
+How to fill it in:
+- status: done when this turn's work is completed and delivered; not_done when stopped but unfinished; blocked when a person or prerequisite must be awaited, identifying who or what in waiting.
+- merged / deployed: facts only. yes only if this exact change was merged or is running in production; otherwise no; n/a when merging or deployment does not apply. These claims will be checked; a false yes is worse than no.
+- did: at most three lines, each a plain-language sentence describing a change; omit if nothing changed.
+- artifact: one branch, PR, commit, document, build or link per line; omit if none.
+- verified: checks or measurements actually run and their readings; write untested if unverified. Never present inference as testing.
+- missing: what the user or someone else still needs to supply; omit the line if nothing is missing.
+- Copy attribute names, line-leading words and status values exactly; do not translate them. Write content after colons in English.

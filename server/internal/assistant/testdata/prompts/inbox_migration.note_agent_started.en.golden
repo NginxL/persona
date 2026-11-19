@@ -1,0 +1,4 @@
+Example owner confirmed; the Agent has started (session session_1 on box). Instructions:
+Original task
+
+When it stops, you will receive its final words or failure reason, then submit a suggestion. For now call inbox_suggest with recap only to update the summary.

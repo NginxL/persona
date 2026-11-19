@@ -1,3 +1,4 @@
+import { refreshAgentsDisplay } from "./agents-display";
 // The list transport stays separate from complete, subscribed chat details.
 import { SESSIONS_LIST_FEATURE, SessionList, compareListIds } from "./session-list";
 import { foldedState } from "./child-sessions";
@@ -63,5 +64,6 @@ export const runtimeSessions = new SessionList<Session>("/sessions", runtimeIden
 });
 // A scoped removal can mean that a row is still present in the all-sessions list.
 export const runtimeAgents = new SessionList<Session>(RUNTIME_AGENTS_PATH, runtimeIdentity, runtimeOrder, undefined, runtimeRemoval, {
+  onRefresh: () => { void refreshAgentsDisplay(); },
   pageCounts: () => pageCounts,
 });

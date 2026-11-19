@@ -49,6 +49,7 @@ Read this before changing the Windows node (#1090), or developing or testing `pe
 
 - **A short (8.3) name is a second name for the same entry**: NTFS usually gives a name that is not valid 8.3 a short alias as well (`C:\Users\EXAMPL~1`, `PERSON~1` for `.persona`, `GIT-CR~1` for `.git-credentials`). Windows hands them out itself: `TEMP` and `TMP` are usually `C:\Users\EXAMPL~1\AppData\Local\Temp`, so agents mention such paths. The path guard compares names, so before #9891 an alias got past it: secrets were readable, `.persona` took writes, files in the home reached through the home's alias were refused as read-only, and a save, move or copy through an alias gave the file the alias as its name.
   The file tools resolve every client path through `absPath`, which spells out short names with `GetLongPathName` (`longPath`, `node/longpath_windows.go`) before `realPath` and the guard see them. A new file tool resolves its paths the same way, its last name included (`statDetail` once joined that name as asked). `GetLongPathName` keeps link and junction names, and it needs the `\\?\` prefix past `MAX_PATH` unless long paths are switched on. Test with a home whose own name has an alias (`EvalSymlinks` the temp folder first: it is often written with aliases), and skip where the volume makes none.
+- **`filepath.EvalSymlinks` does not see through a junction** (2026-11-20, #11277). A directory junction (`mklink /J`) is how a Windows user points one folder at another, for example Persona's private Claude profile at `~/.claude`. Go does not treat a junction as a symbolic link, and with Go 1.27.1 `EvalSymlinks` returned an error for a path through one. Code that dedupes directories by resolved path then sees a junction and its target as two directories. The assistant memory merge took the memory, reached through the linked profile, for another profile's copy of itself, and backed it up on every run. To tell whether two paths are one directory, compare them with `os.Stat` and `os.SameFile`, which follow a junction, as `recentDirs` and `memoryCopies` do. In tests, `cmd /c mklink /J` makes a junction without administrator rights.
 
 ## The Recycle Bin (file.trash)
 
@@ -179,3 +180,32 @@ See [windows.md](../operations/windows.md) ("Codex") and [codex.md](../integrati
   one Ctrl+C in the console ended the launcher with `0xc000013a`; the child (claude) survived, the parent disappeared, and the exit code was lost. `TestExecSurvivesCtrlC` guards this.
 - A test program `xxx.test.exe` can keep running briefly after exit (child processes), making scp fail to overwrite it with `dest open … Failure`. Use another filename or end the process first.
 - **Stopping a background shell does not stop the mock hub it started, and a second mock still binds the port**: on Windows, ending the Git Bash job that ran `python3 scripts/mock/mock_hub.py` leaves the Python process running, and Python's `HTTPServer` sets `SO_REUSEADDR`, which on Windows lets a restarted mock bind the same port too. Requests then go to either process, so a fix in the mock seems to have no effect (an unknown `/mock/…` route answers 404). Before restarting, look with `netstat -ano | grep :<port>` and end your own old process by its PID (`taskkill //PID <pid> //F`), never every Python.
+
+## Multiline terminal input and failed starts (#11145)
+
+A terminal newline is input, not a safe way to delimit a message. On Windows, herdr prompts use explicit bracketed
+paste followed by a separate Enter, checking that the same Agent is still in front and has not opened a dialog.
+This applies to Claude Code and other detected runtimes too. Codex starts open an empty composer, paste the complete
+first message, and still require the rollout to contain that complete message before reporting success. The startup
+readiness and delivery checks share one timeout. Codex App messages already use structured input on its IPC bus.
+
+Codex can display a paste as `[Pasted Content N chars]` followed by literal tail text, or several chips. An anchored
+chip-only check rejects such a composer even when the input arrived. Match chip lengths in Unicode characters and
+visible fragments against the full expected input; a prefix chip with its tail still in flight must wait. Codex
+normalizes line endings before counting. Confirm the complete first message in the rollout after submitting once. A chip is not a
+delivery receipt or evidence of ConPTY corruption. A compact footer with directory `~` and warnings is status, not
+draft content. Keep any real draft above that footer protected.
+
+An older desktop-bundled CLI can precede a newly upgraded npm CLI on PATH. Check the executable the launcher's
+actual environment resolves, not only npm's version. Startup skips Codex's recognized update offer with Escape on
+all systems; it must not select the default installer. A late offer can consume or hide a paste: after skipping,
+reuse a matching draft, or replay once only into an empty unqueued composer. Unknown dialogs and foreign drafts
+still refuse; failure closes only the launch's own new pane. Capture an incident's rollout and version before
+attributing an older truncation to an update offer.
+
+Closing a failed start's new pane does not archive a rollout it already published. Identify that rollout only through
+the pane's explicit thread ID or its unique rollout writer, and require its start time to belong to the launch.
+Close the owned pane before requesting Codex's reversible native archive. Never use a shared directory, title or
+matching first line as cleanup authority. Adopted panes remain the user's, and cleanup failures remain visible and
+must finish before another start with the same directory and launcher. A deployed incident needs its own version
+and transport evidence; a source-level transport regression alone does not prove which installed boundary failed.

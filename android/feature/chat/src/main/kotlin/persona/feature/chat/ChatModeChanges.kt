@@ -113,6 +113,7 @@ internal object ModeChangeWords {
         else change.deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: res.getString(R.string.chat_mode_change_by_unknown)
 
     private fun why(code: String?, res: Resources): String? = when (code) {
+        "cancelled" -> R.string.chat_mode_change_why_cancelled
         "replaced" -> R.string.chat_mode_change_why_replaced
         "process_exited" -> R.string.chat_mode_change_why_process_exited
         "process_replaced" -> R.string.chat_mode_change_why_process_replaced

@@ -62,7 +62,7 @@ func TestGenerate(t *testing.T) {
 	cmd := map[string]string{"dsh/package.json": "{}", "dsh/lib/a.js": "a", "dsh/lib/b.txt": "no", "runtime-sdk/package.json": "{}",
 		"runtime-sdk/index.js": "i", "runtime-sdk/lib/r.js": "r", "dsh/test/t.js": "no",
 		"pi/package.json": "{}", "pi/index.js": "x", "pi/companion.mjs": "c", "pi/lib/pi.js": "p", "pi/e2e/run.mjs": "no",
-		"antigravity/package.json": "{}", "antigravity/companion.mjs": "c", "antigravity/mcp-proxy.mjs": "m", "antigravity/lib/runtime.js": "a", "antigravity/install.mjs": "no", "antigravity/test/map.test.js": "no",
+		"antigravity/package.json": "{}", "antigravity/companion.mjs": "c", "antigravity/desktop.mjs": "d", "antigravity/mcp-proxy.mjs": "m", "antigravity/lib/runtime.js": "a", "antigravity/install.mjs": "no", "antigravity/test/map.test.js": "no",
 		"paseo/package.json": "{}", "paseo/bridge.mjs": "b", "paseo/lib/bridge.js": "l", "paseo/test/bridge.test.js": "no",
 		"claude-code-plugin/.claude-plugin/plugin.json": "{}", "claude-code-plugin/hooks/hooks.json": "{}",
 		"claude-code-plugin/hooks/register.ts": "r", "claude-code-plugin/hooks/register.test.ts": "no",
@@ -137,7 +137,7 @@ func TestGenerate(t *testing.T) {
 	for _, f := range files["persona-antigravity-runtime"] {
 		got = append(got, f.Path)
 	}
-	want = []string{"antigravity/package.json", "antigravity/companion.mjs", "antigravity/mcp-proxy.mjs", "antigravity/lib/runtime.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/r.js"}
+	want = []string{"antigravity/package.json", "antigravity/companion.mjs", "antigravity/desktop.mjs", "antigravity/mcp-proxy.mjs", "antigravity/lib/runtime.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/r.js"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("antigravity copied %v, want %v", got, want)
 	}

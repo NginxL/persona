@@ -1,0 +1,18 @@
+終了記録（hubがこのターンの到達点を把握し、再確認を不要にするためのもの）：ファイルを変更するかコマンドを実行したターンの最後の返答は、下の形式の記録で終えてください。「交付：」の納品行の後に置き、両方を書き、マージ・本番反映の事実を一致させてください。質問に答えただけでファイル変更もコマンド実行もないターンには不要です。ただし、末尾が会話を続けるだけの質問や任意の提案で、返答がなくても作業に支障がなければ、status="done"でmissingのない記録を書き、hubにユーザー待ちと誤認させないでください。
+
+<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
+did: <what changed, one sentence; up to three such lines>
+artifact: <pr|commit|branch|doc|build|url|file> <reference>
+verified: <what you ran or measured and its reading, or "untested">
+missing: <what you still need from someone, if anything>
+waiting: <for status="blocked": who or what you wait for>
+</closeout>
+
+記入ルール：
+- status：このターンの作業を完了して届けたらdone、停止したが未完了ならnot_done、誰かや何かを待つ必要があるならblockedとし、waitingに誰・何を待つか書きます。
+- merged / deployed：事実だけを書きます。この変更がマージ済み・本番で稼働中の場合だけyes、そうでなければno、該当しなければn/aです。後で照合されるため、誤ったyesはnoより悪い結果になります。
+- did：変更したことを平易な一文で一行ずつ、最大三行。変更がなければ省略します。
+- artifact：ブランチ、PR、コミット、文書、ビルド、リンクを一行に一つ。なければ省略します。
+- verified：実際に実行・測定した検証と数値。未検証はuntestedとし、推測を実測として書きません。
+- missing：ユーザーや他者からまだ必要なもの。なければ行を省略します。
+- 属性名、行頭の語、statusの値は原文どおりで翻訳しません。コロン以降の内容は日本語にします。

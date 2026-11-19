@@ -117,6 +117,29 @@ func TestAssistantSendResumesAClaudeConversationOnClaude(t *testing.T) {
 	}
 }
 
+// Launcher-kind normalization changes execution, not the message's audience: a public mention keeps its snapshot
+// suppression when a Claude transcript is asked to resume through Codex (#11130).
+func TestAssistantPublicSendSurvivesLauncherKindNormalization(t *testing.T) {
+	fakeClaudeHome(t, "read line\necho '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
+	n := kindTestNode(t)
+	fh := withFakeHub(t, n)
+	calls := 0
+	fh.mu.Lock()
+	fh.onContext = func(context.Context) { calls++ }
+	fh.mu.Unlock()
+	n.state.put(claudeConversation, sessionState{Launcher: "claude", Cwd: t.TempDir()})
+	id, err := n.assistantSend(context.Background(), claudeConversation, "", codexKindLauncher, "public mention", nil, "", "", modelExecution{Public: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.stopAssistant(id)
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("launcher-kind normalization requested %d owner snapshots for a public turn", calls)
+	}
+}
+
 // Sent with a Claude launcher, a Codex thread never goes to claude (it answered "No conversation found" and the
 // message was lost every time).
 func TestAssistantSendNeverResumesACodexThreadOnClaude(t *testing.T) {

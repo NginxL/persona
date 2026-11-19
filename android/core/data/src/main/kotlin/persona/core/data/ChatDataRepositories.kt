@@ -30,6 +30,7 @@ class ChatDataRepositories private constructor(
     private val legacyDirectory: File? = null,
     transcript: (suspend (SessionKey, List<Item>) -> Unit)? = null,
     awaitingTranscript: Flow<Set<SessionKey>> = emptyFlow(),
+    reconcileHeldRetries: (suspend (Session, Session) -> Unit)? = null,
     continuityFactory: (String, (ContinuityAdapter.Applied) -> Unit) -> ContinuityAdapter = ContinuityAdapters::create,
 ) {
     /** Reuses the pairing's database and lifetime; closing a view never discards its cache. */
@@ -39,10 +40,12 @@ class ChatDataRepositories private constructor(
         connection: HubConnection,
         foreground: StateFlow<Boolean>,
         preferenceTransport: HubPreferencesTransport? = null,
+        reconcileHeldRetries: (suspend (Session, Session) -> Unit)? = null,
         continuityFactory: (String, (ContinuityAdapter.Applied) -> Unit) -> ContinuityAdapter = ContinuityAdapters::create,
     ) : this(data.items, File(data.noBackupDirectory, "lists"), transport, connection, data.coroutineScope,
         foreground, preferenceTransport, transcript = data.messages::observeTranscript,
-        awaitingTranscript = data.messages.awaitingTranscript, continuityFactory = continuityFactory) {
+        awaitingTranscript = data.messages.awaitingTranscript, reconcileHeldRetries = reconcileHeldRetries,
+        continuityFactory = continuityFactory) {
         data.checkActive()
         data.openWindowReconciliation.register(scope, chats::reconcileOpened)
         data.messages.connectActivity { key ->
@@ -78,7 +81,7 @@ class ChatDataRepositories private constructor(
     private val job = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + job + Dispatchers.IO)
     val snapshots = ListSnapshotStore(snapshotDirectory)
-    val sessions = HubSessionsRepository(transport, connection, scope, snapshots)
+    val sessions = HubSessionsRepository(transport, connection, scope, snapshots, reconcileHeldRetries)
     val preferences = preferenceTransport?.let { remote ->
         HubPreferencesRepository(remote, scope, snapshots) { path ->
             sessions.sessions.value.firstOrNull { it.key.path == path }?.let { session ->

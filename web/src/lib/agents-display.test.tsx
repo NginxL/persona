@@ -1,0 +1,77 @@
+// @vitest-environment jsdom
+import { beforeEach, expect, it, vi } from "vitest";
+import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden } from "./agents-display";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { setToken } from "./api";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+let saved: boolean | undefined;
+let fail = "";
+let requests: { method: string; body?: Record<string,unknown> }[];
+const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers:{"Content-Type":"application/json"} });
+beforeEach(() => {
+ localStorage.clear(); resetAgentsDisplay(); saved = undefined; fail = ""; requests = [];
+ vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+  const method = init?.method ?? "GET";
+  const body = init?.body ? JSON.parse(init.body) : undefined;
+  requests.push({method,body});
+  if (fail === method) return json({error:"offline"},503);
+  if (body && (!body.only_if_unset || saved === undefined)) saved = body.show_botmux;
+  return json({ show_botmux:saved ?? true,configured:saved !== undefined });
+ }));
+});
+it("fresh default, conditional legacy migration, explicit choice wins and clearing storage preserves it", async () => {
+ await refreshAgentsDisplay(); expect(saved).toBeUndefined(); expect(requests).toHaveLength(1);
+ localStorage.setItem("persona.agentHideBotmux","1"); await refreshAgentsDisplay();
+ expect(saved).toBe(false); expect(requests.at(-1)?.body).toEqual({show_botmux:false,only_if_unset:true});expect(localStorage.getItem("persona.agentHideBotmux")).toBeNull();
+ await saveAgentsDisplay(true);
+ localStorage.setItem("persona.agentHideBotmux","1");await refreshAgentsDisplay();expect(saved).toBe(true);expect(requests.at(-1)?.method).toBe("GET");expect(localStorage.getItem("persona.agentHideBotmux")).toBeNull();
+ localStorage.clear();resetAgentsDisplay();await refreshAgentsDisplay();expect(saved).toBe(true);
+});
+it("retains the legacy key on failed reads and migration writes, then retries",async()=>{
+ localStorage.setItem("persona.agentHideBotmux","1");fail="GET";await refreshAgentsDisplay();expect(localStorage.getItem("persona.agentHideBotmux")).toBe("1");
+ fail="PUT";await refreshAgentsDisplay();expect(localStorage.getItem("persona.agentHideBotmux")).toBe("1");expect(saved).toBeUndefined();
+ fail="";await refreshAgentsDisplay();expect(saved).toBe(false);expect(localStorage.getItem("persona.agentHideBotmux")).toBeNull();
+});
+it("a concurrent explicit choice wins at the conditional server boundary",async()=>{
+ localStorage.setItem("persona.agentHideBotmux","1");
+ const fetcher=vi.mocked(fetch);fetcher.mockImplementationOnce(async()=>{saved=true;return json({show_botmux:true,configured:false});});
+ await refreshAgentsDisplay();expect(saved).toBe(true);expect(localStorage.getItem("persona.agentHideBotmux")).toBeNull();
+});
+it("retries the failed write after a background refresh", async () => {
+  await refreshAgentsDisplay();
+  fail = "PUT";
+  await saveAgentsDisplay(false);
+  await refreshAgentsDisplay();
+  fail = "";
+  await retryAgentsDisplay();
+  expect(requests.at(-1)).toEqual({ method: "PUT", body: { show_botmux: false } });
+  expect(saved).toBe(false);
+});
+it("hides botmux rows until the hub acknowledges the display preference", async () => {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  function Probe() { return <span>{useBotmuxHidden() ? "hidden" : "shown"}</span>; }
+  await act(async () => { root.render(<Probe />); });
+  expect(host.textContent).toBe("hidden");
+  vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
+  await act(async () => { await retryAgentsDisplay(); });
+  expect(host.textContent).toBe("hidden");
+  await act(async () => { await retryAgentsDisplay(); });
+  expect(host.textContent).toBe("shown");
+  await act(async () => { root.unmount(); });
+});
+it("does not apply a stale read over a save or a credential change",async()=>{
+ let finish!:(response:Response)=>void;
+ vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const read=refreshAgentsDisplay();await saveAgentsDisplay(false);finish(json({show_botmux:true,configured:true}));await read;
+ expect(saved).toBe(false);
+ // Read back through the actual hook and prove failure keeps the acknowledged value.
+ const host=document.createElement("div");const root=createRoot(host);
+ function Probe(){const s=useAgentsDisplay();return <span>{JSON.stringify(s.value)}</span>;}
+ await act(async()=>{root.render(<Probe/>);});expect(host.textContent).toContain('"show_botmux":false');
+ fail="PUT";await act(async()=>{await saveAgentsDisplay(true);});expect(host.textContent).toContain('"show_botmux":false');
+ let done!:(response:Response)=>void;vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{done=resolve;}));
+ const old=refreshAgentsDisplay();await act(async()=>{setToken("new-owner");done(json({show_botmux:false,configured:true}));await old;});expect(host.textContent).toBe("null");
+ await act(async()=>{root.unmount();});
+});

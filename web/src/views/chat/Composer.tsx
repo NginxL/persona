@@ -17,6 +17,8 @@ import { composerEntryDrop, dragHasEntry, droppedEntry } from "../../lib/entry-d
 import { uuid } from "../../lib/format";
 import { lazyPage } from "../../lib/lazy-page";
 import { enterSends, hasFinePointer, useMedia } from "../../lib/viewport";
+import { focusTaken } from "../../lib/dock-focus";
+import { useComposition } from "../../lib/ime";
 import { COMPACT_COMPOSER, COMPOSER_LINES, lineCount, offersExpand } from "./composer-grow";
 import { INPUT_MAX } from "./dock";
 import { imagePayload, MAX_IMAGE, releaseAttachments } from "../../lib/attachments";
@@ -52,11 +54,11 @@ const ImageEditor = lazyPage(() => import("./ImageEditor").then((m) => m.ImageEd
 const ComposerPanel = lazyPage(() => import("./ComposerPanel").then((m) => m.ComposerPanel), { idle: true });
 const ComposerOverlay = lazyPage(() => import("./ComposerOverlays").then((m) => m.ComposerOverlay));
 const preloadComposerOverlay = () => void ComposerOverlay.preload().catch(() => {});
-const AssistantComposerPanel = lazyPage(() => import("./AssistantComposerPanel").then((m) => m.AssistantComposerPanel));
+const SlashSkillEntry = lazyPage(() => import("./SlashSkillView").then((m) => m.SlashSkillEntry));
 // Skill-aware history labels are needed only when recall search opens, not on the first screen.
 const HistorySearch = lazyPage(() => import("./HistorySearch").then((m) => m.HistorySearch));
-// The command palette stays idle-preloaded. The assistant's intent chunk owns the skill stage and its loading/error view.
-const SlashPalette = lazyPage(() => import("./SlashPalette").then((m) => m.SlashPalette), { idle: true });
+// The shared picker shell is already idle-preloaded with @. Load slash-specific rows when the user types /.
+const SlashPalette = lazyPage(() => import("./SlashPalette").then((m) => m.SlashPalette));
 /** How long "Not sent yet" stays under the box after Enter was pressed while blocked. */
 const NUDGE_MS = 4000;
 
@@ -140,6 +142,7 @@ export const Composer = memo(function Composer({
   loadingDraft,
   stopping,
   autoFocus,
+  carryDraft,
   footer,
   leading,
   trailing,
@@ -175,6 +178,9 @@ export const Composer = memo(function Composer({
   /** A stop is on its way: the button shows it and takes no more presses. */
   stopping?: boolean;
   autoFocus?: boolean;
+  /** A new `draftKey` can be the same conversation at a newly known address (the assistant's chat, whose computer is
+   *  read after a cached first view; PersonaAssistant): the words and pictures in the box stay rather than being swapped. */
+  carryDraft?: boolean;
   /** In the bottom row's flexible middle (no chat passes one since #5324: the source and folder are under the box). */
   footer?: React.ReactNode;
   /** Right after the +: an Agent's or a Persona conversation's permission picker (#5324, PermissionPicker.tsx). Keep it the
@@ -243,6 +249,8 @@ export const Composer = memo(function Composer({
     if (!repeat) blocked?.onNudge?.();
   };
   const input = useRef<HTMLTextAreaElement>(null);
+  // an input method's composition (CJK): its Enter picks a candidate, and "/" or "@" typed in it opens no menu yet
+  const ime = useComposition();
   const lastEscape = useRef<number | null>(null);
   // the edit now, for the draft events' and the send's closures
   const editNow = useRef(editingLast);
@@ -266,6 +274,7 @@ export const Composer = memo(function Composer({
     return split.text;
   };
   const skillEnvironment = JSON.stringify([machineId, mention?.cwd, mention?.skills]);
+  const catalogMemory = useMemo<import("./useSkillCatalog").CatalogMemory>(() => ({}), [skillEnvironment, draftKey]);
   const previousSkillEnvironment = useRef(skillEnvironment);
   useEffect(() => {
     setActive(0);
@@ -314,13 +323,29 @@ export const Composer = memo(function Composer({
   }, []);
 
   // a different conversation: its own draft
+  const shownKey = useRef(draftKey);
   useEffect(() => {
+    const from = shownKey.current;
+    shownKey.current = draftKey;
+    const held = input.current?.value ?? "";
+    if (carryDraft && from !== draftKey && (held || attsNow.current.length)) {
+      // the same conversation re-addressed: what is being typed stays, saved under its new key only
+      storeDraft(draftKey, held);
+      storeDraft(from, "");
+      return;
+    }
     setDraft(restoreSkills(storedValue(`draft:${draftKey}`) ?? ""));
     setPlusOpen(false);
     releaseAttachments(attsNow.current);
     setAtts([]);
-    // not on a touch screen alone: there the focus brings the keyboard up over the conversation just opened
-    if (autoFocus && hasFinePointer()) setTimeout(() => input.current?.focus({ preventScroll: true }), 0);
+    // not on a touch screen alone: there the focus brings the keyboard up over the conversation just opened. Nor when
+    // the person already went to another field or a dialog by then.
+    if (!autoFocus || !hasFinePointer()) return;
+    const timer = setTimeout(() => {
+      const el = input.current;
+      if (el && !focusTaken(document.activeElement, el)) el.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [draftKey, autoFocus]);
 
   // "Quote" / "Edit" / a queued message pulled back / an edited picture, from the chat (lib/drafts.ts)
@@ -451,9 +476,22 @@ export const Composer = memo(function Composer({
     };
   }, [draftKey, saveDraft]);
 
+  // the words the box was last measured with: while it only grows past the cap, it is not measured again
+  const sizedFor = useRef({ draft: "", compact });
   useLayoutEffect(() => {
     const el = input.current;
     if (!el) return;
+    const was = sizedFor.current;
+    const breaks = (text: string) => text.split("\n").length;
+    const grows = was.compact === compact && draft.length >= was.draft.length && breaks(draft) >= breaks(was.draft);
+    // Mid-composition, or past the six-line cap and only growing, the box is not collapsed to measure: its scrollHeight
+    // already covers the words, and a collapse would throw its scroll to the top and make the IME's candidates flicker.
+    // It shrinks when the composition ends (this runs again then).
+    if (ime.composing || (grow.over && grows)) {
+      const h = el.scrollHeight;
+      if (h > el.clientHeight) el.style.height = `${h}px`;
+      return;
+    }
     // Measuring collapses the box to 0 for one layout: its parent holds its height meanwhile. Otherwise the chat above
     // grows by the box's height for that layout, the browser clamps the chat's scroll offset to the taller view, and
     // with the box back the chat sits that much above its newest line (#5375). Under the cap the chat's own
@@ -461,11 +499,15 @@ export const Composer = memo(function Composer({
     const holder = el.parentElement;
     const held = holder?.style.minHeight ?? "";
     if (holder) holder.style.minHeight = `${holder.getBoundingClientRect().height}px`;
+    sizedFor.current = { draft, compact };
+    // the collapse resets the box's own scroll: put it back, or a long draft jumps to its first line on every key
+    const top = el.scrollTop;
     el.style.height = "0px";
     const h = el.scrollHeight;
     // Both widths use the measured six-line cap before paint; CSS leaves room for Send in very short viewports.
     // Longer drafts scroll inside the same native textarea.
     el.style.height = `${Math.max(h, 24)}px`;
+    el.scrollTop = top;
     if (holder) holder.style.minHeight = held;
     const css = getComputedStyle(el);
     const line = parseFloat(css.lineHeight) || 24;
@@ -473,7 +515,7 @@ export const Composer = memo(function Composer({
     const cap = COMPOSER_LINES * line + pad;
     const over = offersExpand(lineCount(h - pad, line), COMPOSER_LINES);
     setGrow((g) => (g.cap === cap && g.over === over ? g : { cap, over }));
-  }, [draft, compact, grow.over]);
+  }, [draft, compact, grow.over, ime.composing]);
   const showExpand = compact && grow.over && !disabled;
   useEffect(() => {
     if (!compact || disabled) setExpanded(false);
@@ -497,14 +539,18 @@ export const Composer = memo(function Composer({
   // A /loop draft gets a line under the box saying what it will do (only where the menu offers /loop: Claude agents).
   const loop = commands.some((c) => c.text === LOOP_TEXT) ? loopHint(draft) : null;
   // the "/" palette opens on a lone "/word" wherever there are commands or this chat can offer skills
-  const slashOpen = query !== null && (allCommands.length > 0 || !!mention?.skills);
+  // A menu already open stays through a composition; none opens in the middle of one (it would cover the candidates).
+  const menusShown = useRef({ slash: false, at: false });
+  const slashOpen = query !== null && (allCommands.length > 0 || !!mention?.skills) && (!ime.composing || menusShown.current.slash);
   const closeSlash = useCallback(() => setDismissed(true), []);
   const rows = useMemo(() => (slashOpen ? rankCommands(allCommands, query) : []), [slashOpen, query, allCommands]);
   useEffect(() => setActive(0), [query]);
 
   // @: the token just before the caret (lib/mentions.ts)
-  const token = mention && focused && !dismissed && query === null && caret <= draft.length ? mentionAt(draft, caret) : null;
+  const atToken = mention && focused && !dismissed && query === null && caret <= draft.length ? mentionAt(draft, caret) : null;
+  const token = atToken && (!ime.composing || menusShown.current.at) ? atToken : null;
   const mOpen = Boolean(token);
+  menusShown.current = { slash: slashOpen, at: mOpen };
 
   const trackCaret = () => {
     const el = input.current;
@@ -817,9 +863,11 @@ export const Composer = memo(function Composer({
     input.current?.focus({ preventScroll: true });
   };
 
-  const slashProps = { rows, active, onHover: setActive, onPick: pick, onClose: closeSlash, query, source: mention, machineId, within: box };
+  const slashProps = {
+    rows, active, onHover: setActive, onPick: pick, onClose: closeSlash,
+    query, source: mention, machineId, within: box, memory: catalogMemory, ime: ime.tracker,
+  };
   const commandPalette = () => <SlashPalette {...slashProps} active={Math.min(active, Math.max(rows.length - 1, 0))} />;
-  const MentionPanel = mention?.skills ? AssistantComposerPanel : ComposerPanel;
   return (
     <div
       ref={box}
@@ -846,7 +894,7 @@ export const Composer = memo(function Composer({
           {mention?.skills ? (
             <OverlayBoundary open onClose={closeSlash} fallback={commandPalette()}>
               <Suspense fallback={commandPalette()}>
-                <AssistantComposerPanel {...slashProps} slash />
+                <SlashSkillEntry {...slashProps} />
               </Suspense>
             </OverlayBoundary>
           ) : commandPalette()}
@@ -857,12 +905,12 @@ export const Composer = memo(function Composer({
 
       {token && (
         <Suspense fallback={null}>
-          <MentionPanel from="at" query={token.query} source={mention} machineId={machineId} attach={disabled ? undefined : machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, token)} onClose={closePlus} handle={panel} />
+          <ComposerPanel key={skillEnvironment} memory={catalogMemory} from="at" query={token.query} source={mention} machineId={machineId} attach={disabled ? undefined : machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, token)} onClose={closePlus} handle={panel} />
         </Suspense>
       )}
       {plusOpen && !disabled && (
         <Suspense fallback={null}>
-          <MentionPanel from="plus" source={mention} machineId={machineId} attach={machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, null)} onClose={closePlus} />
+          <ComposerPanel key={skillEnvironment} memory={catalogMemory} from="plus" source={mention} machineId={machineId} attach={machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, null)} onClose={closePlus} />
         </Suspense>
       )}
 
@@ -927,9 +975,11 @@ export const Composer = memo(function Composer({
         <div className="relative">
         <textarea
           ref={input}
+          data-composer-input
           rows={1}
           value={draft}
           disabled={disabled}
+          {...ime.handlers}
           readOnly={loadingDraft}
           aria-busy={loadingDraft || undefined}
           onFocus={() => {
@@ -939,6 +989,7 @@ export const Composer = memo(function Composer({
           }}
           onBlur={() => {
             lastEscape.current = null;
+            ime.onBlur();
             setFocused(false);
             onFocusChange?.(false);
           }}
@@ -964,7 +1015,8 @@ export const Composer = memo(function Composer({
               e.stopPropagation();
               return;
             }
-            if (e.nativeEvent.isComposing || e.keyCode === 229) {
+            // also the Enter macOS Safari sends right after compositionend, which committed the candidate (lib/ime.ts)
+            if (ime.busy(e.nativeEvent)) {
               // the IME's own Escape (cancelling a candidate) must not reach ChatView's interrupt on the window
               if (e.key === "Escape") e.stopPropagation();
               return;
@@ -972,6 +1024,8 @@ export const Composer = memo(function Composer({
             const send = enterSends(e, hasFinePointer());
             // Mod+Enter sends rather than choosing a slash/@ row; Mod+Alt/Shift falls through to the window unchanged.
             const modEnter = e.ctrlKey || e.metaKey;
+            // a plain Enter picks the highlighted row; Shift+Enter or Alt+Enter is always a new line
+            const pickEnter = e.key === "Enter" && !modEnter && !e.shiftKey && !e.altKey;
             // `/model` alone opens the model panel instead of sending (where the agent switches models)
             if (send && isModelCommand(draft) && requestModelPicker(draftKey)) {
               e.preventDefault();
@@ -993,7 +1047,7 @@ export const Composer = memo(function Composer({
             if (history.onKeyDown(e)) return;
             if (mOpen) {
               // ↑ ↓ move in the panel, unmodified Enter / Tab pick its row (none while it is empty or still loading)
-              if ((e.key === "ArrowDown" || e.key === "ArrowUp" || (e.key === "Enter" && !modEnter) || e.key === "Tab") && panel.current?.key(e.key)) {
+              if ((e.key === "ArrowDown" || e.key === "ArrowUp" || pickEnter || e.key === "Tab") && panel.current?.key(e.key)) {
                 e.preventDefault();
                 return;
               }
@@ -1012,7 +1066,7 @@ export const Composer = memo(function Composer({
                 return;
               }
               // with nothing matching, Enter sends the words as they are: the list holds only a few of the agent's commands
-              if (((e.key === "Enter" && !modEnter) || e.key === "Tab") && rows.length) {
+              if ((pickEnter || e.key === "Tab") && rows.length) {
                 e.preventDefault();
                 pick(rows[Math.min(active, rows.length - 1)]);
                 return;
@@ -1045,6 +1099,9 @@ export const Composer = memo(function Composer({
               fillSuggestion(pill);
               return;
             }
+            // Alt+Enter, which sends on a desktop, never sends the half-typed "/com" or "@file" an open menu is completing:
+            // the menu's rows take only a plain Enter, and Mod+Enter stays the explicit send
+            if (send && (slashOpen || mOpen) && e.altKey && !modEnter) return;
             // a touch keyboard's return is a new line there; the send button sends (a hardware keyboard with a
             // trackpad, an iPad's, sends on Enter)
             if (send) {

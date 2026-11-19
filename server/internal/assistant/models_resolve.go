@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -316,9 +317,21 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 					if err != nil {
 						return c, i18n.Err("assistant-models_probe.err_open_headers")
 					}
+					if err := checkHeaders(headers); err != nil {
+						return c, err
+					}
+					if l.Kind != "api" && !l.CustomHeadersSupported() {
+						return c, errRuntimeHeaders
+					}
 					for _, header := range parseHeaders(headers) {
+						name := http.CanonicalHeaderKey(header[0])
+						if c.Headers == nil {
+							c.Headers = map[string]string{}
+						}
+						c.Headers[name] = header[1]
 						if strings.EqualFold(header[0], "User-Agent") {
-							c.UserAgent = &header[1]
+							value := header[1]
+							c.UserAgent = &value
 						}
 					}
 				}

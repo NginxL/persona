@@ -496,6 +496,7 @@ func (h *Manager) hubCall(ctx context.Context, method string, params json.RawMes
 		Base      string          `json:"base"`
 		TZ        string          `json:"tz"`
 		Sender    string          `json:"sender"`
+		Proof     string          `json:"proof"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &a); err != nil {
@@ -511,6 +512,12 @@ func (h *Manager) hubCall(ctx context.Context, method string, params json.RawMes
 	case extwire.HubSettingsTool:
 		text, err := h.toolPersonaSettings(ctx, a.MachineID, a.SessionID, a.Arguments)
 		return map[string]any{"text": text}, err
+	case extwire.HubClarificationTake:
+		proof, ok := h.clarificationProofs.take(a.Proof)
+		if !ok {
+			return nil, errors.New("clarification proof is unknown, expired, or already used")
+		}
+		return proof, nil
 	case extwire.HubAudit:
 		var au extwire.Audit
 		if err := json.Unmarshal(params, &au); err != nil || au.Extension == "" ||

@@ -2,6 +2,7 @@ package persona.core.hub
 
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
+import persona.core.contracts.HeldAgentMessage
 import persona.core.contracts.HubScope
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
@@ -35,12 +36,14 @@ class HttpChatComposerService internal constructor(
     /** A refusal retry's delivery, operation id, and actual transport result (null until a final response). */
     private val onRetryDelivery: suspend (String, ComposerDelivery, String, MessageTransportResult?) -> Unit = { _, _, _, _ -> },
     private val onPairingExpired: () -> Unit = {},
+    private val onHeld: suspend (SessionKey, HeldAgentMessage) -> Unit = { _, _ -> },
 ) : ChatComposerService, MessageTransport by transport {
     constructor(
         hubScope: HubScope, transport: MessageTransport, connection: OkHttpHubConnection, token: String,
         onRetryDelivery: suspend (String, ComposerDelivery, String, MessageTransportResult?) -> Unit,
         onPairingExpired: () -> Unit,
         isCurrent: () -> Boolean = { true },
+        onHeld: suspend (SessionKey, HeldAgentMessage) -> Unit = { _, _ -> },
     ) :
         this(hubScope, transport, { path, body, headers ->
             if (!isCurrent()) throw CancellationException("Pairing changed")
@@ -61,7 +64,7 @@ class HttpChatComposerService internal constructor(
                         throw HubFailure(HubError.Transport, "Route changed before receipt")
                     }
                 }
-        }, { connection.serverFeatures.value }, onRetryDelivery, onPairingExpired)
+        }, { connection.serverFeatures.value }, onRetryDelivery, onPairingExpired, onHeld)
 
     override val deliveries = MutableStateFlow<Map<String, ComposerDelivery>>(emptyMap())
     private val refused = mutableMapOf<String, MessageRequest>()
@@ -89,6 +92,23 @@ class HttpChatComposerService internal constructor(
                     if (fields?.get("state")?.jsonPrimitive?.contentOrNull in setOf("pending", "unknown")) {
                         record(message, ComposerDelivery(DeliveryState.Unknown))
                         return@use MessageTransportResult.NoReceipt
+                    }
+                    if (fields?.get("delivered")?.jsonPrimitive?.contentOrNull == "later") {
+                        val kept = (fields["undelivered"] as? JsonObject)?.let {
+                            runCatching { JsonCodec.decodeFromJsonElement<HeldAgentMessage>(it) }.getOrNull()
+                        }
+                        if (kept == null || !kept.computer.isNullOrBlank()) {
+                            refused.remove(message.clientMessageId)
+                            record(message, ComposerDelivery(DeliveryState.Held))
+                            if (kept?.id == message.opId) {
+                                try { onHeld(message.session, kept) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { /* A later session snapshot also carries the queue. */ }
+                            }
+                            return@use MessageTransportResult.Held
+                        }
+                        refused.remove(message.clientMessageId)
+                        return@use MessageTransportResult.Kept
                     }
                     try { transport.onAccepted(message.session, fields) }
                     catch (cancelled: CancellationException) { throw cancelled }

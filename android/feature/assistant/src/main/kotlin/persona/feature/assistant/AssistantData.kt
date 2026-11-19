@@ -288,7 +288,7 @@ internal fun DeliveryState.pendingStatus(): PendingStatus? = when (this) {
     DeliveryState.Verifying -> PendingStatus.Verifying
     DeliveryState.NeedsConfirmation -> PendingStatus.NeedsReview
     DeliveryState.Rejected, DeliveryState.Refused -> PendingStatus.Refused
-    DeliveryState.Sent -> null
+    DeliveryState.Sent, DeliveryState.Held -> null
 }
 
 internal fun assistantStatus(session: Session?, messages: List<OutboxMessage>,

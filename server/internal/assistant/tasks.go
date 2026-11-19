@@ -65,6 +65,7 @@ type PlanTask struct {
 	Launcher          string `json:"launcher,omitempty"`
 	Model             string `json:"model,omitempty"`
 	Effort            string `json:"effort,omitempty"`
+	Speed             string `json:"speed,omitempty"`
 	Tier              string `json:"tier,omitempty"`
 	Permission        string `json:"permission,omitempty"`
 	// Ultracode: the agent starts with Claude Code's ultracode on (#12). A pointer so that an edit from the card can

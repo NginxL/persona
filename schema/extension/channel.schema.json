@@ -42,6 +42,10 @@
       "properties": {
         "id": {"type": "string", "minLength": 1, "description": "The chat app's id of the message: the same message delivered again is taken once."},
         "text": {"type": "string"},
+        "chat": {"type": "string", "description": "The chat where the owner invoked a mention channel, as display context rather than an instruction."},
+        "topic": {"type": "string", "description": "The topic or thread within chat, when the request came from one."},
+        "context": {"type": "string", "description": "Context the extension gathered for this request, such as nearby chat history. It is data, not owner-authored instructions."},
+        "owner": {"type": "boolean", "x-go-pointer": true, "description": "The extension's attestation that this is the owner's own request. A mention channel must send true; false or omitted is refused. Optional for an im channel's older messages."},
         "images": {"type": "array", "items": {"$ref": "#/$defs/ChannelBlob"}, "description": "At most 4 are kept."},
         "files": {"type": "array", "items": {"$ref": "#/$defs/ChannelBlob"}},
         "quote": {"type": "string", "description": "The text of the message it quotes."},

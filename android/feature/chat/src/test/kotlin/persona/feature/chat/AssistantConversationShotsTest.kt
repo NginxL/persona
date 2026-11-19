@@ -46,7 +46,7 @@ class AssistantConversationShotsTest {
         Item("compact", 1, ts = at(1), role = "system", kind = "notice", text = "Context compacted"),
         Item("background", 2, ts = at(2), role = "user", kind = "text", text = "Inspect background work",
             source = MessageSource("supervision", title = "Background check")),
-        Item("quiet-answer", 3, ts = at(3), role = "assistant", kind = "text", text = "No decision needed"),
+        Item("quiet-answer", 3, ts = at(3), role = "assistant", kind = "text", text = "No decision needed", narration = true),
         Item("question", 4, ts = at(4), role = "user", kind = "text", text = "Simplify the Assistant conversation"),
         Item("read", 5, ts = at(5), role = "assistant", kind = "tool_use", toolUseId = "read", toolName = "Read",
             toolInput = buildJsonObject { put("file_path", "/sample/chat.kt") }),
@@ -110,7 +110,11 @@ class AssistantConversationShotsTest {
                         activityAt = "2026-11-15T00:20:00Z")),
                         { it }, { opened = it }, { throw it }, {}, sheet = sheet)
                     val original = ChatTimeline().lines(transcript, false, expanded).lines
-                    val presentation = AssistantConversation.project(original, transcript)
+                    // Match rememberChatPageLines with the default background-round switch off: Glass keeps quiet
+                    // supervision narration as one inline fold; Brief and Board move it into the background record.
+                    val inline = style == AppStyle.Glass
+                    val presentation = AssistantConversation.project(original, transcript,
+                        BackgroundFolding(expanded, rounds = false), inline = inline)
                     val lines = if (simplified) AssistantTaskCards.lines(presentation.foreground, feed, mapOf(plan.id to plan), todos)
                         else AssistantLines.lines(original, feed)
                     CompositionLocalProvider(LocalAssistantTaskHost provides host) {

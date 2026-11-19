@@ -1546,11 +1546,19 @@
     },
     {
       "name": "assistant_feed_permission_default",
-      "value": "Default"
+      "value": "Default permissions"
+    },
+    {
+      "name": "assistant_feed_permission_acceptEdits",
+      "value": "Auto accept edits"
     },
     {
       "name": "assistant_feed_permission_plan",
-      "value": "Read only"
+      "value": "Plan mode"
+    },
+    {
+      "name": "assistant_feed_permission_auto",
+      "value": "Auto-review"
     },
     {
       "name": "assistant_feed_persona_message",
@@ -4635,6 +4643,10 @@
     {
       "name": "agent_group_background",
       "value": "Waiting in background"
+    },
+    {
+      "name": "agent_group_just_finished",
+      "value": "Just finished"
     },
     {
       "name": "agent_group_waiting",

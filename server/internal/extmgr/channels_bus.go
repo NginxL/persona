@@ -55,15 +55,32 @@ func (h *Manager) channelsAppCall(ctx context.Context, p assistantwire.AppCall) 
 			Action        string `json:"action"`
 			Channel       string `json:"channel"`
 			Kind          string `json:"kind"`
+			Clarify       bool   `json:"clarify"`
+			Text          string `json:"text"`
+			ClientMsgID   string `json:"client_msg_id"`
+			MachineID     string `json:"machine_id"`
+			SessionID     string `json:"session_id"`
 		}
 		if err := json.Unmarshal(p.Params, &a); err != nil {
 			return nil, true, err
+		}
+		var question assistantwire.ClarificationProof
+		if a.Clarify {
+			question = assistantwire.ClarificationProof{InteractionID: strings.TrimSpace(a.InteractionID), MachineID: a.MachineID,
+				SessionID: a.SessionID, Text: a.Text, ClientMsgID: a.ClientMsgID}
+			if a.Channel != channel.Feishu || !validClarificationProof(question) {
+				return nil, true, errors.New("invalid clarification proof request")
+			}
 		}
 		// The assistant answers a card from a channel only with the owner's action handed over with that press or
 		// message in that channel (a card's for that card, a message's for a kind it takes typed), once
 		// (fleet_routes.go channelResolve there; kind is the queue's).
 		err = h.takeOwnerAction(a.Action, a.Channel, strings.TrimSpace(a.InteractionID), a.Kind)
-		out = map[string]any{}
+		if err == nil && a.Clarify {
+			out = map[string]any{"clarification_proof": h.clarificationProofs.issue(question)}
+		} else {
+			out = map[string]any{}
+		}
 	default:
 		return nil, false, nil
 	}
@@ -222,17 +239,23 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		}
 		return map[string]any{}, feishuCoded(api.Recall(ctx, a.MessageID))
 	case assistantwire.FeishuCotCreate:
-		// The agent message is made in the owner's DM, so the message it answers has to be in the DM too.
+		chatID, err := botSendChat(set, a.ChatID)
+		if err != nil {
+			return nil, err
+		}
 		parent, err := h.checkReplyParent(ctx, api, set, a.ReplyTo)
 		if err != nil {
 			return nil, err
 		}
-		if parent != "" && parent != set.Owner.ChatID {
+		if a.InThread && a.ReplyTo == "" {
 			return nil, errBotReplyChat
 		}
-		cot, id, err := api.CotCreate(ctx, set.Owner.ChatID, a.ReplyTo)
+		// As with other replies, the parent decides where the agent message lands; chat_id must still name a chat
+		// the bot may use, and reply_in_thread keeps it in the parent's origin topic.
+		chatID = firstNonEmpty(parent, chatID)
+		cot, id, err := api.CotCreate(ctx, chatID, a.ReplyTo, a.InThread)
 		if err == nil {
-			h.rememberMessageChat(id, set.Owner.ChatID)
+			h.rememberMessageChat(id, chatID)
 		}
 		return map[string]any{"cot_id": cot, "message_id": id}, feishuCoded(err)
 	case assistantwire.FeishuCotAppend:

@@ -41,7 +41,7 @@ func bigSnapshot(now time.Time) prompts.Snapshot {
 		Machines: []prompts.SnapshotMachine{{Name: "the hub machine", ID: "hub-1", Online: true}},
 		Needs:    agents(6, "hub-1"), Unread: agents(6, "build-1"), Awaiting: agents(4, "build-1"),
 		Waiting: agents(6, "build-2"), Done: agents(20, "build-3"), Muted: agents(4, "build-4"),
-		Working: agents(12, "hub-1"), Workflows: []prompts.SnapshotWorkflow{{Agent: "assistant › a", Machine: "build-1", Session: "s1", Name: "audit", Phase: "Verify", PhaseIndex: 2, Phases: 2, Done: 1, Started: 2, For: "3 minutes"}},
+		Working:  agents(12, "hub-1"),
 		Chats:    &prompts.SnapshotChats{AtMe: []prompts.SnapshotChat{{Name: "发布群", Unread: 3, Preview: line[:40*3]}}, Other: []prompts.SnapshotChat{{Name: "运维群", Unread: 9}}},
 		Calendar: &prompts.SnapshotCalendar{Events: []prompts.SnapshotEvent{{Start: now, End: now.Add(time.Hour), Title: "周会"}}},
 		KB:       strings.Repeat("知识库条目很长很长。\n", 30),
@@ -75,9 +75,11 @@ func TestSnapshotDoneAndMutedStayCounts(t *testing.T) {
 		Needs:    []prompts.SnapshotAgent{{Label: "等你批准发布", Machine: "build-1", Session: "need-1", Line: "可以合并吗"}},
 		Awaiting: []prompts.SnapshotAgent{{Label: "看过还没回复", Machine: "build-1", Session: "wait-1", Line: "选哪个方案"}},
 		Done:     []prompts.SnapshotAgent{{Label: "已经修完的登录问题", Machine: "build-2", Session: "done-1", Line: "测试通过"}},
-		Muted:    []prompts.SnapshotAgent{{Label: "已经屏蔽的巡检", Machine: "build-3", Session: "mute-1", Line: "没有新事"}}}
+		Muted:    []prompts.SnapshotAgent{{Label: "已经屏蔽的巡检", Machine: "build-3", Session: "mute-1", Line: "没有新事"}},
+		Working:  []prompts.SnapshotAgent{{Label: "后台在跑的编译", Machine: "build-4", Session: "work-1", Ultracode: "on"}}}
 	got := fitSnapshot(s)
 	for _, want := range []string{
+		"- Agents：需要你 1 个，完成未看 0 个，工作中 1 个（详情用 agents_list）",
 		"  - 做完的（24 小时内）：1 个，agents_list state=done 查",
 		"  - 已屏蔽（用户关了它们的通知，上面的数不算它们；别主动提，问到再说）：1 个，agents_list state=muted 查",
 		"等你批准发布", "看过还没回复", "可以合并吗", "选哪个方案",
@@ -86,9 +88,9 @@ func TestSnapshotDoneAndMutedStayCounts(t *testing.T) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}
 	}
-	for _, unwanted := range []string{"已经修完的登录问题", "已经屏蔽的巡检", "done-1", "mute-1", "测试通过", "没有新事"} {
+	for _, unwanted := range []string{"已经修完的登录问题", "已经屏蔽的巡检", "后台在跑的编译", "  - 工作中：", "done-1", "mute-1", "work-1", "测试通过", "没有新事"} {
 		if strings.Contains(got, unwanted) {
-			t.Errorf("done or muted details stayed in an under-budget snapshot (%q):\n%s", unwanted, got)
+			t.Errorf("done, muted or working details stayed in an under-budget snapshot (%q):\n%s", unwanted, got)
 		}
 	}
 }
@@ -106,7 +108,7 @@ func TestFitSnapshotStaysInBudget(t *testing.T) {
 	if strings.Contains(got, strings.TrimSpace(prompts.SnapshotCut())) {
 		t.Fatalf("leaving sections out should have been enough, it was cut:\n%s", got)
 	}
-	for _, want := range []string{"  - 需要你：", "  - 在问用户、用户看过还没回的", "后台 workflow 在跑", "等用户点「开始」的计划", "没成功的定时任务",
+	for _, want := range []string{"  - 需要你：", "  - 在问用户、用户看过还没回的", "等用户点「开始」的计划", "没成功的定时任务",
 		"@我：", "周会"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q, which is never left out, is missing:\n%s", want, got)

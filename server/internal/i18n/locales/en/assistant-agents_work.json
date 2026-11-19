@@ -51,5 +51,6 @@
   "relay_why_expired": "\n(The link has expired: ask it for a new one)",
   "relay_why_not_in_session": "\n(None of its own commands printed this link: Persona doesn't authorize it for you)",
   "relay_why_failed": "\n(Persona tried to authorize it for you and couldn't)",
-  "relay_why_done": "\n(Persona authorized it but couldn't tell the agent: tap “Authorized, go on”)"
+  "relay_why_done": "\n(Persona authorized it but couldn't tell the agent: tap “Authorized, go on”)",
+  "conversation_invalid": "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue."
 }

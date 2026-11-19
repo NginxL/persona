@@ -216,4 +216,3 @@ describe("an Overview card on reload (#11091)", () => {
     expect(host.textContent).not.toContain("the page, not the card");
   });
 });
-

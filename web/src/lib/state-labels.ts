@@ -4,11 +4,21 @@
 import { t } from "../i18n";
 import type { AgentState } from "./types";
 
-/** An agent's state (AgentState), Waiting, Waiting in the background (#6045), Awaiting reply (#5096), Just finished (an agent's turn or a to-do, #9751), and the states only a task or a summary has: Done, Interrupted, Follow-up, Waiting (a task whose agent waits to be brought back, #3274), Not started, Didn't start. */
-export type StateName = AgentState | "waiting" | "bg_waiting" | "awaits_reply" | "just_finished" | "done" | "interrupted" | "follow_up" | "task_waiting" | "not_started" | "failed";
+/** An agent's state (AgentState), Waiting, Waiting in the background (#6045), Awaiting reply (#5096), Just finished (an agent's turn or a to-do, #9751), and the states only a task or a summary has: Done, Interrupted, Follow-up, Not started, Didn't start. A task whose agent waits to be brought back (#3274) is named by what it waits on (waitName). */
+export type StateName = AgentState | "waiting" | "bg_waiting" | "awaits_reply" | "just_finished" | "done" | "interrupted" | "follow_up" | "not_started" | "failed";
 
 export function stateName(s: StateName): string {
   return t(`lib-state-labels.${s}`);
+}
+
+/** What a waiting task waits on (#11090, lib/todo-wait-reason.ts waitReason): its owner (`owner`, the sidebar badge's
+ *  waitsOnOwner), a prerequisite, a merge or deploy, something outside Persona, its own background work, the hub's
+ *  automatic retry, or nothing it can tell (`unknown`). Only `owner` asks anything of the owner. */
+export type WaitReason = "owner" | "prerequisite" | "delivery" | "external" | "background" | "retry" | "unknown";
+
+/** A waiting task's state word: Waiting on you, Waiting on a prerequisite … Paused (nothing needed from you). */
+export function waitName(r: WaitReason): string {
+  return t(`lib-state-labels.waits_${r}`);
 }
 
 /** The states a list counts in its headers and summaries: "3 need you". */

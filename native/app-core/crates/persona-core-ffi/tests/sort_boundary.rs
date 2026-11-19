@@ -84,6 +84,7 @@ fn c_abi_replays_the_exact_projection_cases_and_rejects_bad_input() {
             "held_quiet_row_keeps_unread_state_section".to_owned(),
             "held_quiet_space_stays_active".to_owned(),
             "held_row_stays_out_of_quiet_idle_fold".to_owned(),
+            "just_finished_rank_and_precedence".to_owned(),
             "kept_cannot_escape_base".to_owned(),
             "machine_search_before_counts".to_owned(),
             "machine_qualifier_matches_registry_title".to_owned(),

@@ -790,7 +790,7 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
         "name": {"type": "string", "minLength": 1, "maxLength": 40},
-        "kind": {"type": "string", "enum": ["im"]},
+        "kind": {"type": "string", "enum": ["im", "mention"]},
         "connector": {"type": "string"},
         "bind": {"type": "string", "enum": ["qr", "code", "fields"]},
         "description": {"type": "string"},

@@ -195,7 +195,7 @@ func TestMailArchiveReceiptUnknownValidity(t *testing.T) {
 }
 
 type multiReceiptMail struct {
-	Mail
+	inboxOnlyMail
 	accounts []mail.MailAccount
 	inboxes  map[string]*pagedMail
 	fail     map[string]bool

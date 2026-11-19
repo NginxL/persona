@@ -162,7 +162,7 @@ type ReadTools interface {
 
 - Descriptions and schemas live in `server/internal/prompts/mcp/<connector>/<tool name>.md` (unchanged format from `docs/assistant/prompts.md` ("MCP tools")), read by `prompts.Tool(name)`.
 - The hub tool list comes from `Registry`: only `ok` connectors expose tools (today's two booleans in `assistantTools(withLark, withMail)` are a special case);
-  `callTool` / `runAssistantTool` dispatch by prefix. `mcp_tools.*` goldens must remain byte-for-byte identical across migration.
+  `callTool` / `runAssistantTool` dispatch by prefix. `mcp_tools/` goldens must remain byte-for-byte identical across migration.
 - Read-only tools need no approval under `--allowedTools mcp__persona` (like today's `lark_*`); writes do not belong here.
 
 ### 7. Writes (`Actions`)
@@ -268,7 +268,7 @@ A `connector` uses only **one** machine (configured as `imessage.machine`), not 
 One PR per step, with the same checks before merging:
 
 - **All existing tests pass**: `./scripts/test/test-server.sh` (hub machine, real Postgres), `go test ./...`, App `PersonaTests` and `Inbox` / knowledge-base UI tests.
-- **Byte-identical goldens**: prompts, MCP tool lists (`mcp_tools.*`, `mail_tools`).
+- **Byte-identical goldens**: prompts, MCP tool lists (`mcp_tools/`, `mail_tools`).
 - **New comparison tests** (write in M0, baseline generated with old code): fake Lark gateway + fake `mail` (synthetic data), one archive + `Inbox` collection round,
   saving results (knowledge-base directory tree and every file's content, `InboxItem` JSON) as goldens; every subsequent step must match.
 - **Real-data comparison** (read-only, print numbers only): `personad dev connector-diff` (DEBUG builds / tests only), using real Lark gateway and `mail` on the hub machine;

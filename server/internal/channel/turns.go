@@ -75,14 +75,9 @@ func (r *Run) Queued(now time.Time) bool { return now.Sub(r.waitFrom()) < Queued
 // Asked: the conversation was asked again for this turn's answer (once is all).
 func (r *Run) Asked() bool { return !r.Again.IsZero() }
 
-// placeholders are what a turn may end with instead of an answer (Claude Code writes the first when a turn ends with
-// nothing to say).
-var placeholders = []string{"no response requested", "(no content)", "no content", "[no content]"}
-
 // Placeholder: text stands in for an answer the turn did not give.
 func Placeholder(text string) bool {
-	t := strings.TrimRight(strings.ToLower(strings.TrimSpace(text)), ".。!！ ")
-	return slices.Contains(placeholders, t)
+	return transcript.ReplyPlaceholder(text)
 }
 
 // Folded is an earlier message a run answers too.

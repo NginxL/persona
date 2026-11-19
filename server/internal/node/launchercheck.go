@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // launcherCheckDir starts the name of the temp directory a check runs in; Claude Code names the projects directory it
@@ -156,13 +157,13 @@ func (n *Node) launcherCheckWith(ctx context.Context, name string, o launcherChe
 	}
 	if agent == "claude" {
 		if r, ok := claudeResult(text); ok {
-			res.Model, res.Answer = r.model, clipText(r.result, 200)
+			res.Model, res.Answer = r.model, clipText(textfmt.StripTerminalEscapes(r.result), 200)
 			if turn.on && r.subtype == "error_max_turns" {
 				// The model answered with a tool call, which the one turn allowed did not run: the request went through.
 				r.isError, res.Answer = false, ""
 			}
 			if r.isError {
-				res.Error = clipText(redactCheck(r.result), 400)
+				res.Error = clipText(redactCheck(textfmt.LauncherErrorSummary(r.result, 400)), 400)
 				// A result that is only its kind (error_during_execution…) says nothing of why; what claude printed
 				// besides its result line often does.
 				if r.bare {
@@ -179,7 +180,7 @@ func (n *Node) launcherCheckWith(ctx context.Context, name string, o launcherChe
 			return res
 		}
 	} else if err == nil && text != "" {
-		lines := strings.Split(text, "\n")
+		lines := strings.Split(textfmt.StripTerminalEscapes(text), "\n")
 		res.OK, res.Answer = true, clipText(lines[len(lines)-1], 200)
 		return res
 	}
@@ -223,8 +224,12 @@ func (n *Node) launcherAgent(ctx context.Context, name string) string {
 	return "claude"
 }
 
-// checkOutput is the end of what a check printed, as its error says it: the last lines, without keys, URLs or IPs.
-func checkOutput(text string) string { return clipText(redactCheck(lastLines(text, 6)), 400) }
+// checkOutput is what a check printed, as its error says it: terminal escapes and the shell's startup noise gone, keys,
+// URLs and IPs redacted (the escapes around an address are stripped first, so one a prompt wrapped still matches), and
+// the result summarized to its error line.
+func checkOutput(text string) string {
+	return textfmt.LauncherErrorSummary(redactCheck(textfmt.StripTerminalEscapes(text)), 400)
+}
 
 var (
 	checkURL = lazyre.New(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+`)
@@ -261,7 +266,8 @@ type claudeOut struct {
 // "{" that starts one (an interactive zsh may print banners first, and a shell integration's escape codes on the same
 // line, #3412).
 func claudeResult(out string) (claudeOut, bool) {
-	lines := strings.Split(out, "\n")
+	// Escape sequences the shell integration leaves around the line (or on it) must not reach the JSON parser.
+	lines := strings.Split(textfmt.StripTerminalEscapes(out), "\n")
 	for l := len(lines) - 1; l >= 0; l-- {
 		line := lines[l]
 		for i := strings.IndexByte(line, '{'); i >= 0; {

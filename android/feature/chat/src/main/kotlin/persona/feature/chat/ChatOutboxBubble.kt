@@ -43,7 +43,7 @@ internal fun outboxMark(state: DeliveryState): OutboxMark? = when (state) {
     DeliveryState.Sending -> OutboxMark.Sending
     DeliveryState.Queued, DeliveryState.WaitingForNetwork -> OutboxMark.Waiting
     DeliveryState.Refused, DeliveryState.Rejected -> OutboxMark.Failed
-    DeliveryState.Sent, DeliveryState.Unknown, DeliveryState.Verifying, DeliveryState.NeedsConfirmation -> null
+    DeliveryState.Held, DeliveryState.Sent, DeliveryState.Unknown, DeliveryState.Verifying, DeliveryState.NeedsConfirmation -> null
 }
 
 /** Glass draws [state] as iOS's bubble: one with a [OutboxMark], or one delivered and waiting for the chat history. */

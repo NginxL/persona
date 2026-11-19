@@ -866,7 +866,7 @@ extension InboxItem {
     /// The newest mail of the thread, for the mail reader.
     var mailSummary: MailSummary? {
         guard let m = mail, let uid = m.uids.last else { return nil }
-        return MailSummary(accountID: m.accountID, mailbox: m.mailbox, uid: uid, messageID: m.messageID, subject: title,
+        return MailSummary(accountID: m.accountID, mailbox: m.sourceMailbox ?? "INBOX", uid: uid, messageID: m.messageID, subject: title,
                            from: m.from, date: updatedAt, snippet: preview, seen: isDone || read == true)
     }
 }

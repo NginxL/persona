@@ -1,0 +1,26 @@
+{
+  "name": "agent_transfer",
+  "description": "Main only: move an open Agent task to a current direction or main (App Move to). Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Transfer back to undo. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "machine",
+      "session_id",
+      "supervisor"
+    ],
+    "properties": {
+      "machine": {
+        "type": "string",
+        "description": "agents_list machine id or name"
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Agent session id or first 8 characters"
+      },
+      "supervisor": {
+        "type": "string",
+        "description": "exact direction or main id from conversations_list"
+      }
+    }
+  }
+}

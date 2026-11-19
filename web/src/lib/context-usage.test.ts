@@ -46,6 +46,12 @@ describe("modelShort", () => {
     expect(modelShort("gpt-5.5")).toBe("gpt-5.5");
     expect(modelShort(undefined)).toBe("");
   });
+  it("drops a gateway's routing prefix before the model", () => {
+    expect(modelShort("passthrough/route-gemini-4-carbon/gemini-4-carbon")).toBe("gemini-4-carbon");
+    expect(modelShort("route/kimi-k3.1-pro")).toBe("kimi-k3.1-pro");
+    expect(modelShort("passthrough/claude-opus-5-5")).toBe("opus 5.5");
+    expect(modelShort("passthrough/claude-opus-5-5[1m]")).toBe("opus 5.5 1M");
+  });
 });
 
 describe("rowDetail", () => {

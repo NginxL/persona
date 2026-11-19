@@ -1,1 +1,1 @@
-{{.Owner}}驳回了你的建议{{with .Text}}（原来的建议：{{.}}）{{end}}。重新想想这件事该怎么处理，调 inbox_suggest 交一条新的建议或结论。
+{{if eq .Language "日本語"}}{{.Owner}}が提案を却下しました{{with .Text}}（前の提案：{{.}}）{{end}}。対応を考え直し、inbox_suggest で新しい提案か結論を提出してください。{{else if .Language}}{{.Owner}} rejected your suggestion{{with .Text}} (previous suggestion: {{.}}){{end}}. Rethink how to handle this matter and call inbox_suggest with a new suggestion or conclusion.{{else}}{{.Owner}}驳回了你的建议{{with .Text}}（原来的建议：{{.}}）{{end}}。重新想想这件事该怎么处理，调 inbox_suggest 交一条新的建议或结论。{{end}}

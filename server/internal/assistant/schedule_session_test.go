@@ -701,6 +701,7 @@ func TestSilentRunInAReusedChat(t *testing.T) {
 func TestTaskTurnEndingInSessionTurnErrorFailsAndRetriesOnce(t *testing.T) {
 	n := newFakeHub().withMachine()
 	h := newStorelessService(t, n)
+	h.work.switches = &TriageSwitches{TransientRetry: new(false)}
 	h.runRetry = 50 * time.Millisecond
 	h.turnPoll = 200 * time.Millisecond
 	setTasks(h, Task{ID: "p", Title: "值守", Prompt: "go", Repeat: repeatInterval, EveryMinutes: 30, At: time.Now().Add(-time.Minute), Enabled: true, MachineID: "server", CreatedBy: "assistant"})

@@ -43,13 +43,12 @@ func (d *Devices) pathInfos(m *Machine) []pathInfo {
 // until its own wait runs out, a task's start for minutes.
 func (d *Devices) measureNodes(ctx context.Context) {
 	for _, m := range d.machinesNow() {
-		p := m.activePath()
-		if p == nil || !m.isOnline() {
+		m.mu.Lock()
+		p, peer, rev, online := m.active, m.peer, m.routeRev, m.online
+		m.mu.Unlock()
+		if p == nil || !online {
 			continue
 		}
-		m.mu.Lock()
-		peer := m.peer
-		m.mu.Unlock()
 		if peer == nil || peer.Lost() { // waiting to be resumed: no transport to ping (resume.go)
 			continue
 		}
@@ -60,7 +59,10 @@ func (d *Devices) measureNodes(ctx context.Context) {
 		err := peer.Call(cctx, "ping", map[string]any{}, nil)
 		cancel()
 		m.logCall("ping", err, time.Since(start), 1)
-		if err == nil {
+		m.mu.Lock()
+		sameRoute := m.peer == peer && m.active == p && m.routeRev == rev
+		m.mu.Unlock()
+		if err == nil && sameRoute { // a preserved pong may arrive after a resume moved the route
 			d.pathRTT(p, max(1, int(time.Since(start).Milliseconds())))
 		}
 		if ctx.Err() == nil {

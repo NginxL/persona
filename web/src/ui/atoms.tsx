@@ -117,6 +117,7 @@ export function IconButton({
   className = "",
   disabled,
   iconSize = 15,
+  pressed,
   buttonRef,
 }: {
   icon: IconName;
@@ -128,6 +129,8 @@ export function IconButton({
   className?: string;
   disabled?: boolean;
   iconSize?: number;
+  /** A button that turns a mode on and off (Overview's Arrange cards): whether it is on (aria-pressed, drawn as `active`). */
+  pressed?: boolean;
   /** The button itself (not forwarded through `ref`: these buttons are plain, and a named prop keeps the call sites explicit). */
   buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
@@ -136,13 +139,14 @@ export function IconButton({
       type="button"
       ref={buttonRef}
       aria-label={label}
+      aria-pressed={pressed}
       title={label}
       disabled={disabled}
       onClick={onClick}
       onKeyDown={onKeyDown}
       className={cx(
         "touch-hit flex shrink-0 items-center justify-center rounded-[8px] transition-[background-color,color,transform] duration-150 enabled:active:scale-[0.94] disabled:opacity-40",
-        active ? "bg-hover text-ink" : "text-ink-3 enabled:hover:bg-hover enabled:hover:text-ink",
+        active || pressed ? "bg-hover text-ink" : "text-ink-3 enabled:hover:bg-hover enabled:hover:text-ink",
         className,
       )}
       style={{ width: size, height: size }}
@@ -1102,7 +1106,12 @@ export function Dialog({
       inert={exit.leaving || undefined}
       className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/25 px-4 pt-[12vh] pb-8 backdrop-blur-[2px] dark:bg-black/45 max-sm:top-(--kb-top) max-sm:bottom-auto max-sm:h-(--kb-h) max-sm:items-end max-sm:overflow-hidden max-sm:p-0"
       style={{ animation: "fade-in 140ms ease-out both" }}
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        // The default mousedown focus change would blur the opener just after closing restores focus.
+        e.preventDefault();
+        onClose();
+      }}
     >
       {/* A column either way, so a tall body scrolls between the title and the footer: the card stops short of the
           backdrop's bottom padding (12vh above it, pb-8 below), the sheet at 90% of what the keyboard leaves. */}

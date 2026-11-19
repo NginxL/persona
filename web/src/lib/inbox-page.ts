@@ -10,7 +10,7 @@ import { larkPath } from "./lark-accounts";
 import { baseName, uuid } from "./format";
 import type { Route } from "./router";
 import type { Interaction, Session } from "./types";
-import { type DocChange, type InboxDoc, type InboxItem, type InboxMute, type InboxMuteOption, type InboxParent, type InboxParentKind, type InboxPolicy, type InboxTree, type InboxTriage, type LarkMention, type LarkMessage, type LarkPart, type MomentContent, type PolicyTier, type PolicyTwin, connectorReference, contextXML, docTypeName, isLark, itemPath, itemRequest, itemRoute } from "./inbox";
+import { type DocChange, type InboxDoc, type InboxItem, type InboxMute, type InboxMuteOption, type InboxParent, type InboxParentKind, type InboxPolicy, type InboxTree, type InboxTriage, type LarkMention, type LarkMessage, type LarkPart, type MomentContent, type PolicyTier, type PolicyTwin, connectorReference, contextXML, docTypeName, isLark, itemPath, itemRequest, itemRoute, sourceMailbox } from "./inbox";
 
 /** The menu's words for a mute option (iOS MuteOption.title). */
 export function muteTitle(o: Pick<InboxMuteOption, "tag">): string {
@@ -77,7 +77,7 @@ export function sourceLine(it: InboxItem): string {
   // i18n-ignore: the hub names its Lark accounts "Lark · <name>" in Chinese
   if (isLark(it)) return [it.account_name?.startsWith("飞书 · ") ? it.account_name : t("lib-inbox.lark"), it.lark?.is_group ? t("lib-inbox.kind_group") : it.kind === "bot" ? t("lib-inbox.kind_bot") : t("lib-inbox.kind_dm")].join(" · ");
   const from = it.mail?.from;
-  return [it.account_name, from?.name && from.email ? `${from.name} <${from.email}>` : from?.email || it.sender].filter(Boolean).join(" · ");
+  return [it.account_name, sourceMailbox(it), from?.name && from.email ? `${from.name} <${from.email}>` : from?.email || it.sender].filter(Boolean).join(" · ");
 }
 
 /** The AI twin's proposed status move as a line ("Status: In progress → Done · write the doc", in Chinese). */
@@ -120,7 +120,7 @@ export function handOffContext(it: InboxItem): ContextRef {
   }
   if (it.connector?.url) text += `\n\n${t("lib-inbox-page.handoff_connector", { name: it.account_name || it.source, url: it.connector.url })}`;
   const uid = it.mail?.uids[it.mail.uids.length - 1];
-  if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox, uid })}`;
+  if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox || "INBOX", uid })}`;
   return { id: `inbox:${it.id}`, kind: "context", title, url: "", text };
 }
 

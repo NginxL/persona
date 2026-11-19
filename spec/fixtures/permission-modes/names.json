@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "names": {
+    "default": {
+      "en": "Default permissions",
+      "zh-Hans": "默认权限",
+      "ja": "デフォルト権限"
+    },
+    "acceptEdits": {
+      "en": "Auto accept edits",
+      "zh-Hans": "允许编辑",
+      "ja": "編集を自動承認"
+    },
+    "plan": {
+      "en": "Plan mode",
+      "zh-Hans": "计划模式",
+      "ja": "計画モード"
+    },
+    "auto": {
+      "en": "Auto-review",
+      "zh-Hans": "自动审批",
+      "ja": "自動レビュー"
+    },
+    "bypassPermissions": {
+      "en": "Full access",
+      "zh-Hans": "完全访问",
+      "ja": "フルアクセス"
+    }
+  }
+}

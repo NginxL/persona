@@ -118,6 +118,7 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 		{"names A: a naming preview", "POST", "/api/v1/assistant/workspace-naming/preview", `{"machine_id":"mb","layout":"root"}`, namesA},
 		{"names A by query: a naming preview", "POST", "/api/v1/assistant/workspace-naming/preview?manager=assistant", `{"machine_id":"mb","layout":"root"}`, nil},
 		{"names A: an inbox reply", "POST", "/api/v1/inbox/item-1/reply", `{"text":"x"}`, namesA},
+		{"names A: an inbox retry", "POST", "/api/v1/inbox/item-1/retry", "", namesA},
 		{"names A: the knowledge base", "GET", "/api/v1/kb/people", "", namesA},
 		{"names A: another extension's HTTP", "GET", "/api/v1/extensions/lark/things", "", namesA},
 		{"A's card choice", "POST", "/api/v1/interactions/ix_a/choose", `{"option":0,"rev":"old"}`, nil},
@@ -270,8 +271,8 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"POST /api/v1/inbox/merge": "manager", "POST /api/v1/inbox/merge/undo": "manager", "POST /api/v1/inbox/todo": "manager", "POST /api/v1/inbox/todo/undo": "manager",
 		"POST /api/v1/inbox/{id}/done": "manager", "POST /api/v1/inbox/{id}/draft": "manager", "POST /api/v1/inbox/{id}/reply": "manager",
 		"POST /api/v1/inbox/{id}/suggestion": "manager", "POST /api/v1/inbox/{id}/handoff": "manager", "POST /api/v1/inbox/{id}/doc/status": "manager",
-		"POST /api/v1/inbox/{id}/task-link/recheck": "manager",
-		"PUT /api/v1/inbox/{id}/parent":             "manager", "GET /api/v1/inbox/tree/{kind}/{id...}": "manager",
+		"POST /api/v1/inbox/{id}/task-link/recheck": "manager", "POST /api/v1/inbox/{id}/retry": "manager", // relayed like done (inboxRoutesRelayed)
+		"PUT /api/v1/inbox/{id}/parent": "manager", "GET /api/v1/inbox/tree/{kind}/{id...}": "manager",
 		"PUT /api/v1/inbox/{id}/folder": "manager", "GET /api/v1/inbox/folders": "manager", "PUT /api/v1/inbox/folders": "manager",
 		"POST /api/v1/inbox/mutes": "manager", "DELETE /api/v1/inbox/mutes/{id}": "manager", "POST /api/v1/inbox/policies": "manager",
 		"PATCH /api/v1/inbox/policies/{id}": "manager", "DELETE /api/v1/inbox/policies/{id}": "manager", "POST /api/v1/inbox/refresh": "manager",

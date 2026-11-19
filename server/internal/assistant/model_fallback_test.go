@@ -29,12 +29,12 @@ func TestRefusalFallbackSessionClassification(t *testing.T) {
 		{name: "structured node error", text: "The selected route is unavailable", code: proto.TurnErrorModelFallbackUnavailable,
 			fallback: refusalFallback(), wantCode: proto.TurnErrorModelFallbackUnavailable, wantKind: proto.TurnErrorUser},
 		{name: "structured error name", text: "API Error: model_not_found", fallback: refusalFallback(), wantCode: proto.TurnErrorModelFallbackUnavailable, wantKind: proto.TurnErrorUser},
-		{name: "unrelated session", text: fallbackRouteError, wantCode: proto.TurnErrorModelRoute},
-		{name: "cleared fallback", text: fallbackRouteError, code: proto.TurnErrorModelFallbackUnavailable, wantCode: proto.TurnErrorModelRoute},
+		{name: "unrelated session", text: fallbackRouteError, wantCode: proto.TurnErrorModelRoute, wantKind: proto.TurnErrorUser},
+		{name: "cleared fallback", text: fallbackRouteError, code: proto.TurnErrorModelFallbackUnavailable, wantCode: proto.TurnErrorModelRoute, wantKind: proto.TurnErrorUser},
 		{name: "nonmodel 404", text: "API Error: 404 resource not found", fallback: refusalFallback()},
 		{name: "server failure", text: "API Error: 503 model unavailable at upstream", kind: proto.TurnErrorTransient,
 			fallback: refusalFallback(), wantKind: proto.TurnErrorTransient},
-		{name: "unknown refusal", text: fallbackRouteError, fallback: &proto.ModelRefusal{Subtype: "model_refusal_unknown", FallbackModel: "fallback-model"}, wantCode: proto.TurnErrorModelRoute},
+		{name: "unknown refusal", text: fallbackRouteError, fallback: &proto.ModelRefusal{Subtype: "model_refusal_unknown", FallbackModel: "fallback-model"}, wantCode: proto.TurnErrorModelRoute, wantKind: proto.TurnErrorUser},
 		{name: "new turn", text: fallbackRouteError, code: proto.TurnErrorModelFallbackUnavailable, fallback: refusalFallback(), working: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,13 +106,14 @@ func TestRefusalFallbackWorkNeverAutoContinues(t *testing.T) {
 // A saved retry from an older manager, or one scheduled before the refusal metadata reached it, must not replay.
 func TestRefusalFallbackCancelsEarlierContinue(t *testing.T) {
 	s, f := workService(t)
-	c := apiErrorTurn("s1", fallbackRouteError)
+	c := apiErrorTurn("s1", "API Error: 503 upstream")
 	f.setSessions("box", c)
 	triage(t, s, c.SessionID)
 	e := entryOf(t, s, c.SessionID)
 	if e.Work.On != proto.WaitTransient || e.WakeAt == nil {
 		t.Fatalf("fixture did not queue a continuation: %+v", e)
 	}
+	c.TurnError, c.LastText = fallbackRouteError, fallbackRouteError
 	c.ModelFallback = refusalFallback()
 	f.setSessions("box", c)
 	ctx := context.Background()

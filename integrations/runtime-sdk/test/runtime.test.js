@@ -145,6 +145,177 @@ test('content rewritten under another history goes out even where its seq did no
   assert.equal(n.all('session.items').length, 3)
 })
 
+test('in-place item updates under the same history go out without advancing seq and coalesce by id', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ items: async () => ({ items: [], history: 'h1', to_seq: 5 }) }), { runtime: 'toy', socketPath: n.path, retryMs: 20 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  // Two rapid in-place updates within the append window coalesce into the latest copy of that item id.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  await until('coalesced in-place update pushed', () => n.all('session.items').length === 1)
+  assert.deepEqual(n.all('session.items')[0], {
+    session_id: 's1',
+    items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2' }],
+    from_seq: 5,
+    to_seq: 5,
+    history: 'h1',
+    update: true,
+  })
+  // Without update: true, a same-seq append is still ignored as already pushed.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'ignored' }], fromSeq: 5, toSeq: 5, history: 'h1' })
+  await new Promise((r) => setTimeout(r, 120))
+  assert.equal(n.all('session.items').length, 1)
+  // A follow-up in-place update after flush still goes out under the same history and seq.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2 + 3' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  await until('second in-place update pushed', () => n.all('session.items').length === 2)
+  assert.deepEqual(n.all('session.items')[1], {
+    session_id: 's1',
+    items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2 + 3' }],
+    from_seq: 5,
+    to_seq: 5,
+    history: 'h1',
+    update: true,
+  })
+})
+
+test('mixed append batches preserve update in either order without leaking to later batches', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ cursor: async () => ({ history: 'h', to_seq: 5 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1' })
+  for (const updateFirst of [true, false]) {
+    const from = updateFirst ? 5 : 6
+    const append = { items: [{ id: `i${from + 1}`, seq: from + 1 }], fromSeq: from, toSeq: from + 1, history: 'h' }
+    const update = { items: [{ id: `i${from}`, seq: from, text: 'revised' }], toSeq: from, history: 'h', update: true }
+    for (const a of updateFirst ? [update, append] : [append, update]) rt.append('s1', a)
+    await until('mixed batch', () => n.all('session.items').length === (updateFirst ? 1 : 2))
+    assert.equal(n.last('session.items').update, true)
+    assert.equal(n.last('session.items').items.length, 2)
+  }
+  rt.append('s1', { items: [], fromSeq: 7, toSeq: 8, history: 'h' })
+  await until('plain batch', () => n.all('session.items').length === 3)
+  assert.equal(n.last('session.items').update, undefined)
+})
+
+test('watch catch-up signals a rewind without claiming its missing items are complete', async (t) => {
+  const { page } = await import('../index.js')
+  for (const toSeq of [5, 0]) {
+    await t.test(`cursor ${toSeq}`, async (t) => {
+      const n = await startFakeNode(t)
+      const all = Array.from({ length: toSeq }, (_, i) => ({ id: `i${i + 1}`, seq: i + 1, role: 'user', kind: 'text', text: `message ${i + 1}` }))
+      const requests = []
+      const rt = createRuntime(minimal({ cursor: async () => toSeq, items: async (params) => {
+        requests.push(params)
+        return page(all, params, { history: 'rewritten', toSeq })
+      } }), { runtime: 'toy', socketPath: n.path })
+      t.after(() => rt.stop())
+      rt.start()
+      await n.ready
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+      assert.equal(n.all('session.items').length, 1)
+      const batch = n.last('session.items')
+      assert.equal(batch.history, 'rewritten')
+      assert.equal(batch.to_seq, toSeq)
+      assert.equal(batch.from_seq, 20, 'a continuing batch from another history must trigger reload')
+      assert.deepEqual(batch.items, [])
+      assert.deepEqual(requests, [{ session_id: 's1', after_seq: 20 }], 'the catch-up response carries the real cursor')
+      const reloaded = await n.peer.call('session.items', { session_id: 's1', limit: 80 })
+      assert.deepEqual(reloaded.items, all, 'reload recovers every rewound message')
+      rt.append('s1', { items: [{ id: 'next', seq: toSeq + 1 }], fromSeq: toSeq, toSeq: toSeq + 1, history: 'rewritten' })
+      await until('content after rewind', () => n.all('session.items').length === 2)
+      assert.equal(n.last('session.items').to_seq, toSeq + 1)
+    })
+  }
+})
+
+test('an idle watch reads one catch-up page without pushing an empty batch', async (t) => {
+  const { page } = await import('../index.js')
+  const n = await startFakeNode(t)
+  const requests = []
+  const rt = createRuntime(minimal({ items: async (params) => {
+    requests.push(params)
+    return page([{ id: 'last', seq: 20 }], params, { history: 'current', toSeq: 20 })
+  } }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+  assert.deepEqual(requests, [{ session_id: 's1', after_seq: 20 }])
+  assert.deepEqual(n.all('session.items'), [])
+})
+
+test('rewatching a known history reports a same-length rewrite', async (t) => {
+  const { page } = await import('../index.js')
+  const n = await startFakeNode(t)
+  let history = 'old'
+  const rt = createRuntime(minimal({ items: async (params) => page([{ id: 'last', seq: 20 }], params, { history, toSeq: 20 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  history = 'rewritten'
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+  assert.equal(n.all('session.items').length, 1)
+  assert.equal(n.last('session.items').history, history)
+  assert.equal(n.last('session.items').from_seq, 20)
+  assert.equal(n.last('session.items').to_seq, 20)
+})
+
+test('watch history detects same-length rewrites after unwatch or reconnect', async (t) => {
+  const { page } = await import('../index.js')
+  for (const reconnect of [false, true]) {
+    await t.test(reconnect ? 'reconnect' : 'unwatch', async (t) => {
+      const n = await startFakeNode(t)
+      let history = 'old'
+      let reads = 0
+      const rt = createRuntime(minimal({ items: async (params) => {
+        reads++
+        return page([{ id: 'last', seq: 20 }], params, { history, toSeq: 20 })
+      } }), { runtime: 'toy', socketPath: n.path, retryMs: 20 })
+      t.after(() => rt.stop())
+      rt.start()
+      await n.ready
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+      if (reconnect) {
+        const oldPeer = n.peer
+        oldPeer.close()
+        await until('runtime reconnects', () => n.peer !== oldPeer && n.hellos === 2)
+      } else {
+        await n.peer.call('session.unwatch', { session_id: 's1' })
+      }
+      reads = 0
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20, history: 'old' })
+      assert.equal(reads, 1)
+      assert.deepEqual(n.all('session.items'), [], 'known unchanged history stays quiet')
+      await n.peer.call('session.unwatch', { session_id: 's1' })
+      history = 'rewritten'
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20, history: 'old' })
+      assert.equal(n.all('session.items').length, 1, 'the supplied history survives a lost watch')
+      assert.deepEqual(n.last('session.items'), { session_id: 's1', items: [], history, from_seq: 20, to_seq: 20 })
+    })
+  }
+})
+
+test('an explicit zero start resets append watermarks without a new history', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ cursor: async () => ({ history: 'h', to_seq: 20 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1' })
+  rt.append('s1', { items: Array.from({ length: 5 }, (_, i) => ({ id: `i${i + 1}`, seq: i + 1 })), fromSeq: 0, toSeq: 5, history: 'h' })
+  await until('explicit reset', () => n.all('session.items').length === 1)
+  assert.equal(n.last('session.items').to_seq, 5)
+  rt.append('s1', { items: [{ id: 'next', seq: 6 }], fromSeq: 5, toSeq: 6, history: 'h' })
+  await until('content after reset', () => n.all('session.items').length === 2)
+  assert.equal(n.last('session.items').to_seq, 6)
+})
+
 test('a capped watch catch-up says there is more after its last batch', async (t) => {
   const n = await startFakeNode(t)
   const { page } = await import('../index.js')
@@ -988,4 +1159,50 @@ test('send_and_interrupt_say_queued_and_settled_as_the_driver_does', async (t) =
   assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true }, 'a stop not confirmed says nothing more')
   settle = true
   assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true, settled: true })
+})
+
+test('supervision_policy is advertised only when both assistant and supervisionPolicy are enabled (#11173)', async (t) => {
+  const full = await startFakeNode(t)
+  const capable = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'agy-like', socketPath: full.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+  )
+  t.after(() => capable.stop())
+  capable.start()
+  await full.ready
+  assert.equal(full.hello.caps.assistant, true)
+  assert.equal(full.hello.caps.supervision_policy, true)
+
+  const legacy = await startFakeNode(t)
+  const plainAsst = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'dsh-like', socketPath: legacy.path, retryMs: 20, assistant: true },
+  )
+  t.after(() => plainAsst.stop())
+  plainAsst.start()
+  await legacy.ready
+  assert.equal(legacy.hello.caps.assistant, true)
+  assert.equal(legacy.hello.caps.supervision_policy, undefined, 'absent unless explicitly opted in')
+
+  const noAsst = await startFakeNode(t)
+  const nonAsst = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'plain', socketPath: noAsst.path, retryMs: 20, assistant: false, supervisionPolicy: true },
+  )
+  t.after(() => nonAsst.stop())
+  nonAsst.start()
+  await noAsst.ready
+  assert.equal(noAsst.hello.caps.assistant, false)
+  assert.equal(noAsst.hello.caps.supervision_policy, undefined, 'never advertised without assistant')
+
+  const noSend = await startFakeNode(t)
+  const incomplete = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }) }),
+    { runtime: 'half-asst', socketPath: noSend.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+  )
+  t.after(() => incomplete.stop())
+  incomplete.start()
+  await noSend.ready
+  assert.equal(noSend.hello.caps.assistant, false)
+  assert.equal(noSend.hello.caps.supervision_policy, undefined, 'never advertised when start/send are incomplete')
 })

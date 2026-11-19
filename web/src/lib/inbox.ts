@@ -115,7 +115,7 @@ export interface InboxItem {
     /** The Lark gateway account the chat is in; `ol_account` only when that is not the hub's own (docs/extensions/feishu.md "Multiple accounts"). */
     account_id?: number; ol_account?: number;
   };
-  mail?: { account_id: string; mailbox: string; uids: number[]; message_id?: string; from?: { name?: string; email?: string }; direct?: boolean; thread?: string };
+  mail?: { account_id: string; mailbox?: string; uids: number[]; message_id?: string; from?: { name?: string; email?: string }; direct?: boolean; thread?: string };
   doc?: InboxDoc;
   moment?: { post_id: string; notice?: string; reply_to?: string; my_post?: boolean; post_text?: string };
   /** A connector's thread (GitHub…): `source` is the connector's id, `account_name` its name. */
@@ -340,6 +340,12 @@ export function fromLine(it: InboxItem, preview?: string): string {
   // a Feishu direct chat's title already is the sender
   if (!it.sender || (isLark(it) && it.lark && !it.lark.is_group)) return it.preview;
   return t("lib-inbox.sender_line", { sender: it.sender, text: it.preview });
+}
+
+/** The mail's IMAP folder. The default inbox needs no label. */
+export function sourceMailbox(it: InboxItem): string | undefined {
+  const mailbox = it.mail?.mailbox;
+  return mailbox && mailbox.toLowerCase() !== "inbox" ? mailbox : undefined;
 }
 
 export function agentDraft(it: InboxItem): string | undefined {

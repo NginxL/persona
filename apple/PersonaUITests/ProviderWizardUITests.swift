@@ -100,23 +100,20 @@ final class ProviderWizardUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["cc_kimi"].waitForExistence(timeout: 10), "cc_kimi is not in the list")
     }
 
-    /// Model Settings › Main Chat has How It Runs; saving Agent SDK shows it in the category's line.
+    /// Model Settings › Main Chat has no How It Runs since #9799: Demo Mode answers as the hub does, without `runtimes`
+    /// (the picker for an older hub that still sends them is covered by ProviderWizardTests).
     @MainActor func testTheMainConversationsRuntime() {
         app = XCUIApplication()
         app.launchArguments = ["-demo.on", "YES", "-tab", "settings", "-dev.openChat", "",
                                "-openModelConfiguration", "YES", "-openModelPurpose", "assistant"]
         app.launchPinned()
-        let runtime = el("model-config-runtime")
-        XCTAssertTrue(runtime.waitForExistence(timeout: 15), "no 运行方式:\n\(app.debugDescription)")
-        runtime.tap()
-        let sdk = app.buttons["Agent SDK"].firstMatch
-        XCTAssertTrue(sdk.waitForExistence(timeout: 5), "no Agent SDK choice:\n\(app.debugDescription)")
-        sdk.tap()
+        let advanced = el("model-config-advanced")
+        XCTAssertTrue(advanced.waitForExistence(timeout: 15), "no Advanced:\n\(app.debugDescription)")
+        for _ in 0..<4 where !advanced.isHittable { app.swipeUp() }
+        advanced.tap()
+        XCTAssertTrue(el("model-config-provider").waitForExistence(timeout: 5), "Advanced did not open:\n\(app.debugDescription)")
         shot("8-runtime")
-        app.buttons["model-config-save"].tap()
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Agent SDK")).firstMatch.waitForExistence(timeout: 10),
-                      "主对话's line does not say Agent SDK:\n\(app.debugDescription)")
+        XCTAssertFalse(el("model-config-runtime").exists, "Main Chat still offers How It Runs:\n\(app.debugDescription)")
     }
 
     /// Choose Models › Advanced has the provider's own environment (#5953), written like the headers.

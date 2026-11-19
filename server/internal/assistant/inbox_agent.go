@@ -311,7 +311,8 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 	for _, t := range s.activeTasks(ctx) {
 		linked[t.ID] = &t
 	}
-	owner := s.owner(ctx)
+	hello := s.hello(ctx)
+	owner, language := inboxPromptOwner(hello), answerLanguage(hello.Locale)
 	loc := s.location(ctx) // the chain's times, read in the user's zone (the hub runs in UTC)
 	now := time.Now().UTC()
 	byEvent := s.conversationsByEvent(ctx)
@@ -368,7 +369,7 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 		}
 		it.Agent.State, it.Agent.StartedAt, it.Agent.Attempts, it.Agent.RetryAfter = AgentRunning, &now, it.Agent.Attempts+1, nil
 		delete(b.listMemo.kept, it.ID) // saved once the start returns: listed as running meanwhile (inbox_list_memo.go)
-		a := b.inboxAgentFor(it, owner, linked[it.Agent.TodoID], larkDefault, loc)
+		a := b.inboxAgentForIn(it, owner, linked[it.Agent.TodoID], larkDefault, loc, language)
 		a.KnowledgeDir = s.kb.dir // the heading of what the knowledge base knows names where it is
 		turn := rand.Text()
 		it.Agent.ProcessingTurn = turn
@@ -635,7 +636,11 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 
 // inboxAgentFor is what the AI twin's first message is made of, but the knowledge base's part.
 func (b *inboxBook) inboxAgentFor(it *InboxItem, owner string, linked *prompts.InboxTask, larkDefault int, loc *time.Location) prompts.InboxAgent {
-	a := prompts.InboxAgent{Owner: owner, EventID: it.ID, Title: it.Title, Item: b.promptItem(it), Task: it.Agent.Task, Reason: it.Agent.Reason,
+	return b.inboxAgentForIn(it, owner, linked, larkDefault, loc, answerLanguage(string(b.userLang())))
+}
+
+func (b *inboxBook) inboxAgentForIn(it *InboxItem, owner string, linked *prompts.InboxTask, larkDefault int, loc *time.Location, language string) prompts.InboxAgent {
+	a := prompts.InboxAgent{Language: language, Owner: owner, EventID: it.ID, Title: it.Title, Item: b.promptItemIn(it, language), Task: it.Agent.Task, Reason: it.Agent.Reason,
 		Linked: linked}
 	a.Resumed = len(it.Agent.Lost) > 0
 	if a.Resumed || it.Agent.hasRetryNote() {
@@ -649,7 +654,7 @@ func (b *inboxBook) inboxAgentFor(it *InboxItem, owner string, linked *prompts.I
 			continue
 		}
 		if n.Name != prompts.NoteNewMessages { // the item above is its content now
-			a.Notes = append(a.Notes, renderNote(n, owner))
+			a.Notes = append(a.Notes, renderNoteIn(n, owner, language))
 		}
 	}
 	switch {

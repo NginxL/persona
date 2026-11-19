@@ -311,6 +311,24 @@
       "format": "link"
     },
     {
+      "name": "persona app link from the same cindy v1 payload",
+      "text": "persona://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "https://example.invalid/v1",
+          "display_name": "Example AI",
+          "auth": "bearer",
+          "api_key": "FAKE-EXAMPLE-KEY",
+          "model": "",
+          "models": []
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
       "name": "cindy link with surrounding blanks",
       "text": "  cindy://provider/import?data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&v=1\n",
       "drafts": [

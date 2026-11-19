@@ -11,5 +11,7 @@
   "not_logged_in": "Claude Code 还没登录",
   "bad_key": "模型的 Key 不对或过期了",
   "bad_model": "这个模型现在用不了",
-  "safeguards": "模型的安全检查拦截了这条消息"
+  "safeguards": "模型的安全检查拦截了这条消息",
+  "conversation_invalid": "此会话已失效：压缩上下文属于另一个账号。请换新会话接着做。",
+  "invalid_label": "已失效"
 }

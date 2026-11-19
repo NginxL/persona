@@ -6,6 +6,7 @@
 // warning, needs you, version mismatch, then the rest in the hub's order. Pure: no requests, no React.
 import { t } from "../i18n";
 import { isPending, neverConnected } from "./add-computer";
+import { stripAnsi } from "./ansi";
 import { disconnectExpected } from "./machine-deploy";
 import { level, memPercent, percent, type Level } from "./machine-detail";
 import { classifyConnection } from "./node-health";
@@ -48,6 +49,12 @@ export interface LauncherHealthRecord {
 
 /** A record that says the launcher does not work on its computer now. */
 export const launcherFailing = (r: Pick<LauncherHealthRecord, "state">): boolean => r.state === "failing" || r.state === "blocked";
+
+/** A record's error text without terminal escapes or shell startup noise around it (an older hub keeps them). */
+export const launcherErrorText = (r: Pick<LauncherHealthRecord, "error">): string => stripAnsi(r.error ?? "").trim();
+
+/** A record's blocked reason without terminal escapes (an older hub keeps them). */
+export const launcherBlockedReason = (r: Pick<LauncherHealthRecord, "blocked_reason">): string => stripAnsi(r.blocked_reason ?? "").trim();
 
 export interface AlertInput {
   machine: Machine;

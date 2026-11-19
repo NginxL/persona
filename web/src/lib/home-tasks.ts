@@ -3,6 +3,7 @@
 // count agree.
 import { stateOf } from "./format";
 import { sortTodos, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { waitOf, type WaitReason } from "./todo-wait-reason";
 import type { Session } from "./types";
 
 /** How many tasks the overview lists; the rest are a "See all" away. */
@@ -16,6 +17,8 @@ export interface HomeTask {
   /** The agent its card names (#10904): of those whose rows the page has, the one working, else the one that moved last.
    *  Absent while none of their rows is read. */
   lead?: Session;
+  /** What it waits on while its status is Waiting (#11090, lib/todo-wait-reason.ts waitOf): its status pill says so. */
+  wait?: WaitReason;
 }
 
 const ms = (at: string | undefined) => {
@@ -42,7 +45,8 @@ export function homeTasks(todos: Todo[], lookup: SessionLookup, max = HOME_TASKS
   const rows = open.slice(0, max).map((todo): HomeTask => {
     const linked = (todo.agents ?? []).filter((a) => !a.released_at);
     const read = linked.map((a) => lookup(a.machine_id, a.session_id)).filter((s): s is Session => Boolean(s && !s.deleted));
-    return { todo, status: todoStatus(todo, lookup), agents: linked.length, lead: leadAgent(read) };
+    const status = todoStatus(todo, lookup);
+    return { todo, status, agents: linked.length, lead: leadAgent(read), wait: waitOf(todo, status, lookup) };
   });
   return { rows, total: open.length };
 }

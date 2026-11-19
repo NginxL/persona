@@ -29,7 +29,7 @@ vi.mock("../lib/session-models", async (importOriginal) => {
   const real = await importOriginal<typeof import("../lib/session-models")>();
   return { ...real, modelList: (mid: string, launcher: string) => fake.lists.get(`${mid}/${launcher}`) ?? {} };
 });
-vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null }));
+vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null, OverviewArrangeButton: () => null }));
 
 const { Home } = await import("./Home");
 const { t } = await import("../i18n");
@@ -107,5 +107,36 @@ describe("a task card's agent line", () => {
     expect(line).toEqual({ who: `${t("todos.delivery_merged")} · MacBook · opus 5.5 · ${effort("high")}`, more: "+1", held: true });
     // a task with no agents keeps its delivery alone
     expect(agentLine([todo("b", { delivery: { state: "merged" } })], [])).toEqual({ who: t("todos.delivery_merged"), more: "", held: true });
+  });
+});
+
+/** The card's status pill: its word and class. */
+function statusPill(todos: Todo[], sessions: Session[], id: string): { label: string; className: string } | null {
+  Object.assign(fake, { todos, sessions, machines });
+  const html = renderToStaticMarkup(<Home onNewAgent={() => {}} onToggleSidebar={() => {}} />);
+  Object.assign(fake, { todos: [], sessions: [] });
+  const card = html.slice(html.indexOf(`data-task="${id}"`));
+  const m = /<span class="([^"]*)" data-testid="task-status">([^<]*)<\/span>/.exec(card);
+  return m ? { label: m[2]!, className: m[1]! } : null;
+}
+
+describe("a task card's status (#11090)", () => {
+  const waiting = (sid: string, wait: string) => row(sid, { work: { phase: "blocked", on: "external", line: wait, wait, wake_at: "2099-01-01T00:00:00Z" } });
+
+  it("a waiting task says what it waits on, neutral", () => {
+    const pill = statusPill([todo("a", { agents: [on("s1")], delivery: { state: "pr", unblock: "other" } })], [waiting("s1", "CI")], "a");
+    expect(pill?.label).toBe(t("lib-state-labels.waits_delivery"));
+    expect(pill?.className).toContain("text-ink-3");
+    expect(pill?.className).not.toContain("text-attention");
+  });
+
+  it("Waiting on you, in the attention color, for one held for the owner's OK", () => {
+    const pill = statusPill([todo("a", { agents: [on("s1")], delivery: { state: "merged", unblock: "user" } })], [waiting("s1", "deploy")], "a");
+    expect(pill).toEqual({ label: t("lib-state-labels.waits_owner"), className: expect.stringContaining("text-attention") });
+  });
+
+  it("other statuses keep their words and colors", () => {
+    const pill = statusPill([todo("a", { agents: [on("s1")] })], [row("s1", { state: "working", status: "working" })], "a");
+    expect(pill).toEqual({ label: t("lib-state-labels.working"), className: expect.stringContaining("text-orange") });
   });
 });

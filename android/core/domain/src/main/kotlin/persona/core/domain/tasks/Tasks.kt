@@ -55,7 +55,7 @@ enum class TaskState(val label: CoreText, val rank: Int) {
             todo.doneAt != null && !todo.startError.isNullOrBlank() -> Failed
             todo.doneAt != null -> Done
             AgentState.NeedsYou in agents -> NeedsYou
-            interrupted -> Interrupted
+            interrupted && AgentState.Working !in agents && todo.supervision?.state != "parked" -> Interrupted
             AgentState.Unread in agents -> Unread
             AgentState.Working in agents -> Working
             agents.isNotEmpty() -> Followup
@@ -78,13 +78,15 @@ fun receiptTitle(item: FeedItem, todo: Todo?): String? = todo?.title?.trim()?.if
 /** Why the model service cut the agent off (#1516), in words, and whether "Continue" can help; null when it was not.
  *  [plain]: no model service error, [reason] being the hub's own sentence, said as it is: a turn with no output at all
  *  (turn_error_kind `no_output`, or `stopped` when Persona's Stop interrupted it with its conversation, #10187). */
-data class Interruption(val reason: CoreText, val canContinue: Boolean, val plain: Boolean = false) {
+data class Interruption(val reason: CoreText, val canContinue: Boolean, val invalid: Boolean = false, val plain: Boolean = false) {
     companion object {
         /** The hub's own kinds for a turn with no output (#10187): its turn_error is a sentence, not an API error. */
         private val silentKinds = setOf("no_output", "stopped")
 
         fun of(s: Session?): Interruption? {
             if (s?.interrupted != true) return null
+            val invalid = s.turnErrorKind == "unrecoverable" || s.turnErrorCode == "compaction_sealed" || ApiErrorInfo.unrecoverable(s.turnError)
+            if (invalid) return Interruption(CoreText.of(Key.ApiConversationInvalid), false, invalid = true)
             if (s.turnErrorKind in silentKinds) return Interruption(CoreText.plain(s.turnError.orEmpty().trim()), true, plain = true)
             val info = ApiErrorInfo.parse(s.turnError)
             return Interruption(info?.reason ?: CoreText.of(Key.ApiFailed), info?.needsAction != true)

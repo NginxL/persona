@@ -1,7 +1,7 @@
 {
-  "mode_accept_edits": "auto accept edits",
-  "mode_bypass": "full access",
-  "mode_default": "confirm each step",
+  "mode_accept_edits": "Auto accept edits",
+  "mode_bypass": "Full access",
+  "mode_default": "Default permissions",
   "dismissed": "Handed back to the computer",
   "by_assistant": "Answered by the assistant",
   "unanswered": "(No answer)",

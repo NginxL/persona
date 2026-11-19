@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/mcptoolgolden"
 )
 
 const promptSizeBaseline = "testdata/prompt_sizes.json"
@@ -82,9 +84,10 @@ func promptSizePieces(t *testing.T) map[string]int {
 		}
 	}
 
-	// The assistant's MCP tools, one entry per tool object.
-	toolsPath := filepath.Join("..", "hub", "testdata", "prompts", "mcp_tools.assistant.golden")
-	raw, err := os.ReadFile(toolsPath)
+	// The assistant's MCP tools, one entry per tool object, from the hub's goldens (one file a tool since #11252).
+	toolsDir := filepath.Join("..", "hub", mcptoolgolden.Dir)
+	toolsPath := filepath.Join(toolsDir, "assistant") // for messages: the list's index and tool files
+	raw, err := mcptoolgolden.Load(toolsDir, "assistant")
 	if err != nil {
 		t.Fatal(err)
 	}

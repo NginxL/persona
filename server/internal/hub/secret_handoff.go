@@ -108,6 +108,13 @@ func personSent(ctx context.Context) bool {
 	return p.Role == roleFull && p.ID != ""
 }
 
+// legacyAppOwner checks the direct HTTP request's authenticated owner. principalOf also returns a full role for
+// calls without a principal. The legacy credential can vouch for reply recovery only.
+func legacyAppOwner(ctx context.Context) bool {
+	p, ok := ctx.Value(principalKey{}).(principal)
+	return ok && p.Role == roleFull && p.ID == ""
+}
+
 type humanStartKey struct{}
 
 // withHumanStart marks r, a new conversation's start, as a person's own app's when it is (HTTPRequest.Human).

@@ -214,5 +214,87 @@ import UIKit
         await settle()
         #expect(view.ring.animation(forKey: BreathingRingView.key) != nil)
     }
+
+    private struct FacePage: View {
+        var front: Front
+        var body: some View {
+            AssistantAvatar(size: 40, state: .working)
+                .environment(\.tabIsActive, front.active)
+                .environment(\.scenePhase, front.phase)
+        }
+    }
+
+    private struct FaceScrollPage: View {
+        var front: Front
+        var body: some View {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: 180).id("top")
+                        AssistantAvatar(size: 40, state: .working).id("probe")
+                        Color.clear.frame(height: 300).id("bottom")
+                    }
+                }
+                .onChange(of: front.target) { _, target in proxy.scrollTo(target, anchor: .top) }
+            }
+            .environment(\.tabIsActive, front.active)
+            .environment(\.scenePhase, front.phase)
+            .ignoresSafeArea()
+        }
+    }
+
+    private func face(in view: UIView) -> PersonaFaceMotionView? {
+        if let face = view as? PersonaFaceMotionView { return face }
+        return view.subviews.lazy.compactMap { face(in: $0) }.first
+    }
+
+    private func moving(_ view: PersonaFaceMotionView) -> Bool {
+        view.body.layer.animation(forKey: PersonaMotionAnimations.bobKey) != nil
+    }
+
+    @Test func personaFaceStopsForTabSceneAndUnmount() async throws {
+        let front = Front()
+        let window = try makeWindow()
+        window.rootViewController = UIHostingController(rootView: FacePage(front: front))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await settle()
+        let view = try #require(face(in: window))
+        #expect(moving(view))
+        front.active = false
+        await settle()
+        #expect(!moving(view) && face(in: window) == nil, "an inactive tab returns to the original still renderer")
+        front.active = true
+        await settle()
+        let resumed = try #require(face(in: window))
+        #expect(moving(resumed))
+        front.phase = .background
+        await settle()
+        #expect(!moving(resumed) && face(in: window) == nil)
+        front.phase = .active
+        await settle()
+        let foreground = try #require(face(in: window))
+        #expect(moving(foreground))
+        window.rootViewController = nil
+        await settle()
+        #expect(!moving(foreground))
+    }
+
+    @Test func personaFaceStopsWhenItsScrollRowLeavesTheScreen() async throws {
+        let front = Front()
+        let window = try makeWindow()
+        window.rootViewController = UIHostingController(rootView: FaceScrollPage(front: front))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await settle()
+        let view = try #require(face(in: window))
+        #expect(moving(view), "a partially visible face moves")
+        front.target = "bottom"
+        await settle()
+        #expect(!moving(view) && face(in: window) == nil)
+        front.target = "probe"
+        await settle()
+        #expect(moving(try #require(face(in: window))))
+    }
 }
 #endif

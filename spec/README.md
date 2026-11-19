@@ -39,6 +39,7 @@ spec/
     provider-import-link/ provider import links: what the web builds and what the hub reads
     deep-links/       links to Persona's pages: the hub's paths and what each client opens for a link
     agent-names/      what every client calls each coding agent (names.json)
+    permission-modes/ what every client calls each permission mode, in en, zh-Hans and ja (names.json)
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     stream-chunks/     the completed-block split of a streaming reply, checked against iOS by the pure Rust core
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS

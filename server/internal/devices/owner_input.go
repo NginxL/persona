@@ -16,8 +16,15 @@ func ownerInputParams(p devicewire.NodeCall, params json.RawMessage) (json.RawMe
 }
 
 func trustedHumanInput(p devicewire.NodeCall) bool {
-	return p.Submission != nil && p.Submission.Kind == "human_input" && p.Submission.ID != "" &&
-		p.Caller != nil && p.Caller.Kind == "device"
+	if p.Submission == nil || p.Submission.ID == "" || p.Caller == nil {
+		return false
+	}
+	if p.Submission.Kind == devicewire.SubmissionApprovalClarification {
+		// The hub creates this only after consuming the exact one-time proof. A
+		// manager cannot attach a Submission to its own device.call envelope.
+		return p.Caller.Kind == "system" && strings.TrimSpace(p.Submission.OriginalText) != ""
+	}
+	return p.Submission.Kind == "human_input" && p.Caller.Kind == "device"
 }
 
 type ownerControlKey struct{}
@@ -44,7 +51,7 @@ func ownerControlMethod(ctx context.Context, method string) string {
 }
 
 func carriesOwnerInput(method string) bool {
-	return method == "session.send" || method == "session.interrupt" || method == "codex.answer"
+	return method == "session.send" || method == "session.send_once" || method == "session.interrupt" || method == "codex.answer"
 }
 
 func rewriteOwnerInput(params json.RawMessage, owner bool) (json.RawMessage, error) {

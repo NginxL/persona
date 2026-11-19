@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -296,8 +295,10 @@ func CheckView(raw json.RawMessage, compact bool) error {
 				card += max(1, len(c.Tiles))
 			}
 			at := fmt.Sprintf("sections[%d].items[%d] (%s)", si, ii, c.Type)
-			if c.Type == wire.ComponentLink && !strings.HasPrefix(c.URL, "https://") {
-				return fmt.Errorf("%s: links are https", at)
+			if c.Type == wire.ComponentLink {
+				if err := wire.CheckHTTPS(c.URL, "link"); err != nil {
+					return fmt.Errorf("%s: %w", at, err)
+				}
 			}
 			if c.Type == wire.ComponentGraph {
 				if err := wire.CheckGraph(&c); err != nil {

@@ -1,12 +1,14 @@
 package persona.feature.chat
 
 import android.content.Context
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -34,14 +36,20 @@ import persona.core.contracts.Machine
 import persona.core.contracts.Resolution
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.UndeliveredMessage
+import persona.core.contracts.api.ChatAction
+import persona.core.contracts.api.ChatActionResult
+import persona.core.contracts.api.ChatActions
 import persona.core.contracts.api.ChatRepository
 import persona.core.contracts.api.ChatSnapshot
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.MessageSender
+import persona.core.contracts.api.MessageSendReceipt
 import persona.core.contracts.api.OutboxMessage
 import persona.core.contracts.api.SessionsRepository
 import persona.core.designsystem.AppStyle
+import persona.core.designsystem.LocalHubFeatures
 import persona.core.designsystem.PersonaTheme
 import java.time.Instant
 
@@ -191,10 +199,13 @@ class ChatDetailsTest {
     }
 
     private fun page(style: AppStyle, items: List<Item>, session: Session, outbox: List<OutboxMessage> = emptyList(),
-                     composer: ChatComposerState = ChatComposerState(), expanded: Set<String> = emptySet()) {
+                     composer: ChatComposerState = ChatComposerState(), expanded: Set<String> = emptySet(),
+                     actions: ChatActions? = null, renderStyle: ChatRenderStyle = ChatRenderStyle.Agent,
+                     features: Set<String> = emptySet(), sessionFlow: MutableStateFlow<List<Session>>? = null,
+                     receipts: MutableStateFlow<List<MessageSendReceipt>>? = null) {
         val sessions = object : SessionsRepository {
             override val machines = MutableStateFlow(listOf(Machine(key.machineId, "Box", online = true)))
-            override val sessions = MutableStateFlow(listOf(session))
+            override val sessions = sessionFlow ?: MutableStateFlow(listOf(session))
             override suspend fun refresh() = Unit
         }
         val chats = object : ChatRepository {
@@ -204,6 +215,7 @@ class ChatDetailsTest {
         }
         val sender = object : MessageSender {
             override val outbox = MutableStateFlow(outbox)
+            override val sendReceipts = receipts ?: MutableStateFlow(emptyList())
             override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) = Unit
         }
         val interactions = object : InteractionCenter {
@@ -217,9 +229,12 @@ class ChatDetailsTest {
         }
         rule.mainClock.autoAdvance = false // the spinner and the typing dots never settle
         rule.setContent {
-            PersonaTheme(reduceMotion = true, style = style) {
-                ChatScreen(key, chats, sender, interactions, sessions, onBack = {}, composerState = composer,
-                    readingKey = ChatReadingKey("test", key.path), anchorStore = anchors)
+            CompositionLocalProvider(LocalHubFeatures provides features) {
+                PersonaTheme(reduceMotion = true, style = style) {
+                    ChatScreen(key, chats, sender, interactions, sessions, onBack = {}, composerState = composer,
+                        chrome = ChatChromeBindings(actions = actions), renderStyle = renderStyle,
+                        readingKey = ChatReadingKey("test", key.path), anchorStore = anchors)
+                }
             }
         }
     }
@@ -228,6 +243,165 @@ class ChatDetailsTest {
         page(AppStyle.Brief, listOf(user(1, "修好导入重试"), reply(2, "修好了。")), session(agent = "codex"), listOf(outbox(DeliveryState.Sent)))
         val shown = waitFor("getting ready") { "Codex 正在准备…" in it }
         assertTrue(shown.toString(), "给 Codex 发消息" in shown)
+    }
+
+    @Config(qualifiers = "en-w400dp-h700dp")
+    @Test fun assistantChatDrawsKeptMessagesWithTheirOwnActions() {
+        val calls = mutableListOf<String>()
+        val actions = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun retryUndelivered(session: Session, messageId: String) {
+                calls += "retry:${session.sessionId}:$messageId"
+            }
+            override suspend fun deleteUndelivered(session: Session, messageId: String) {
+                calls += "delete:${session.sessionId}:$messageId"
+            }
+        }
+        val waiting = UndeliveredMessage("kept-waiting", "Keep this waiting", images = 1,
+            at = "2026-11-17T10:00:00Z", state = "waiting", attempts = 2,
+            nextAt = "2026-11-17T10:01:00Z", error = "The assistant could not start")
+        val failed = UndeliveredMessage("kept-failed", "Retry this one", at = "2026-11-17T10:02:00Z",
+            state = "failed", error = "The computer is away")
+        val row = session().copy(assistant = true, undelivered = listOf(waiting, failed))
+        page(AppStyle.Glass, emptyList(), row, actions = actions, renderStyle = ChatRenderStyle.Assistant)
+
+        val shown = waitFor("both kept messages") { texts ->
+            "Keep this waiting" in texts && "Retry this one" in texts &&
+                "Not delivered: The assistant could not start. It will be sent automatically." in texts &&
+                "Not delivered: The computer is away" in texts
+        }
+        assertTrue(shown.toString(), shown.none { it == "Sends when connected" })
+
+        val waitingMark = rule.onNodeWithContentDescription("Not delivered yet. It will be sent automatically.")
+        waitingMark.performClick()
+        waitFor("the waiting message's actions") { "Delete" in it }
+        rule.onNodeWithText("Retry").assertDoesNotExist()
+        rule.onNodeWithText("Delete").performClick()
+        waitFor("the waiting message's Delete") { "delete:s1:kept-waiting" in calls }
+        waitFor("the waiting row and menu to leave") { "Keep this waiting" !in it && "Delete" !in it }
+
+        val failedMark = rule.onNodeWithContentDescription("Not delivered. Retry or delete.")
+        failedMark.performClick()
+        waitFor("the failed message's actions") { "Retry" in it && "Delete" in it }
+        rule.onNodeWithText("Retry").performClick()
+        waitFor("the failed message's Retry") { "retry:s1:kept-failed" in calls }
+        waitFor("Retry to show the waiting row") { "Not delivered: The assistant could not start. It will be sent automatically." in it }
+        failedMark.assertDoesNotExist()
+        val retriedMark = rule.onNodeWithContentDescription("Not delivered yet. It will be sent automatically.")
+        retriedMark.performClick()
+        waitFor("the failed message's Delete action") { "Delete" in it }
+        rule.onNodeWithText("Delete").performClick()
+        waitFor("the failed message's Delete") { "delete:s1:kept-failed" in calls }
+        waitFor("the deleted row to leave") { "Retry this one" !in it }
+        assertEquals(listOf("delete:s1:kept-waiting", "retry:s1:kept-failed", "delete:s1:kept-failed"), calls)
+    }
+
+    @Config(qualifiers = "en-w400dp-h700dp")
+    @Test fun assistantChatReloadsTheCompleteRowWhenKeptReceiptArrives() {
+        var reads = 0
+        val kept = UndeliveredMessage("kept-detail", "Loaded from the detail row",
+            at = "2026-11-17T10:00:00Z", state = "waiting", error = "The assistant could not start")
+        val summary = session().copy(assistant = true, waiting = false)
+        var complete = summary.copy(waiting = null)
+        val receipts = MutableStateFlow<List<MessageSendReceipt>>(emptyList())
+        val actions = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun completeRow(session: Session): Session {
+                reads++
+                assertEquals(summary.sessionId, session.sessionId)
+                return complete
+            }
+        }
+        page(AppStyle.Glass, emptyList(), summary, actions = actions,
+            renderStyle = ChatRenderStyle.Assistant, features = setOf("sessions_lookup"), receipts = receipts)
+        waitFor("the initial empty detail read") { reads == 1 }
+        complete = complete.copy(undelivered = listOf(kept))
+        // The summary and transcript rev stay unchanged; only the terminal kept receipt triggers another read.
+        receipts.value = listOf(MessageSendReceipt(key, "kept-detail", "kept", Instant.now()))
+        waitFor("the complete row's kept message") { "Loaded from the detail row" in it }
+        assertEquals(2, reads)
+    }
+
+    @Config(qualifiers = "en-w400dp-h700dp")
+    @Test fun authoritativeRowsReplaceOptimisticRetryIncludingANewFailure() {
+        val failed = UndeliveredMessage("kept-failed", "Retry this one", at = "2026-11-17T10:02:00Z",
+            state = "failed", error = "The computer is away")
+        val row = session().copy(assistant = true, undelivered = listOf(failed))
+        val rows = MutableStateFlow(listOf(row))
+        val actions = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun retryUndelivered(session: Session, messageId: String) = Unit
+        }
+        page(AppStyle.Glass, emptyList(), row, actions = actions,
+            renderStyle = ChatRenderStyle.Assistant, sessionFlow = rows)
+        val failedMark = rule.onNodeWithContentDescription("Not delivered. Retry or delete.")
+        failedMark.performClick()
+        waitFor("the failed message's actions") { "Retry" in it }
+        rule.onNodeWithText("Retry").performClick()
+        waitFor("the optimistic waiting row") {
+            "Not delivered: The assistant could not start. It will be sent automatically." in it
+        }
+
+        // The hub's Retry changes state but keeps the old reason. That authoritative row replaces the synthetic default.
+        rule.runOnIdle { rows.value = listOf(row.copy(undelivered = listOf(failed.copy(state = "waiting")))) }
+        waitFor("the hub's waiting reason") {
+            "Not delivered: The computer is away. It will be sent automatically." in it
+        }
+
+        // A later failure is newer still: it must never stay masked as optimistic waiting.
+        rule.runOnIdle {
+            rows.value = listOf(row.copy(undelivered = listOf(failed.copy(error = "It may already have gone in"))))
+        }
+        waitFor("the authoritative failure") { "Not delivered: It may already have gone in" in it }
+        failedMark.assertExists()
+    }
+
+    @Config(qualifiers = "en-w400dp-h700dp")
+    @Test fun retryAndDeleteReloadTheCompleteRowWithoutAReceiptOrRevChange() {
+        val failed = UndeliveredMessage("kept-failed", "Retry this one", at = "2026-11-17T10:02:00Z",
+            state = "failed", error = "The computer is away")
+        val summary = session().copy(assistant = true, waiting = false)
+        var complete = summary.copy(waiting = null, undelivered = listOf(failed))
+        var reads = 0
+        val actions = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun completeRow(session: Session): Session {
+                reads++
+                return complete
+            }
+            override suspend fun retryUndelivered(session: Session, messageId: String) {
+                complete = complete.copy(undelivered = listOf(failed.copy(state = "waiting")))
+            }
+            override suspend fun deleteUndelivered(session: Session, messageId: String) {
+                complete = complete.copy(undelivered = null)
+            }
+        }
+        page(AppStyle.Glass, emptyList(), summary, actions = actions,
+            renderStyle = ChatRenderStyle.Assistant, features = setOf("sessions_lookup"))
+        waitFor("the initial failed row") { "Retry this one" in it }
+        val failedMark = rule.onNodeWithContentDescription("Not delivered. Retry or delete.")
+        failedMark.performClick()
+        waitFor("the failed message's actions") { "Retry" in it }
+        rule.onNodeWithText("Retry").performClick()
+        waitFor("Retry's authoritative waiting row") {
+            "Not delivered: The computer is away. It will be sent automatically." in it
+        }
+        assertEquals(2, reads)
+
+        val waitingMark = rule.onNodeWithContentDescription("Not delivered yet. It will be sent automatically.")
+        waitingMark.performClick()
+        waitFor("the waiting message's actions") { "Delete" in it }
+        rule.onNodeWithText("Delete").performClick()
+        waitFor("Delete's authoritative empty row") { "Retry this one" !in it }
+        assertEquals(3, reads)
     }
 
     private val recapped = listOf(user(1, "修好导入重试"), reply(2, "修好了。"), recap(3, "**这一轮**：修了导入重试，测试都过了。"))

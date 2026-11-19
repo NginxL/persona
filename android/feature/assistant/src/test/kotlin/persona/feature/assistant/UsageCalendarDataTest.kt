@@ -1,15 +1,41 @@
 package persona.feature.assistant
 
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.JsonCodec
 import persona.core.contracts.api.UsageDay
 import persona.core.contracts.api.UsageTokens
+import persona.core.designsystem.AgentMarkKind
+import java.io.File
 
 class UsageCalendarDataTest {
     @Test fun everyTokenKindCountsButRepliesDoNot() {
         val tokens = UsageTokens(input = 1, cacheWrite = 2, cacheRead = 4, output = 8, requests = 16)
         assertEquals(15L, tokens.total)
+    }
+
+    @Test fun usageAgentIdsUseProductNamesAndAndroidMarks() {
+        val fixture = File(System.getProperty("persona.repo.root"), "spec/fixtures/agent-names/names.json")
+        val names = JsonCodec.parseToJsonElement(fixture.readText()).jsonObject.getValue("names").jsonObject
+        val brands = mapOf(
+            "claude" to AgentMarkKind.Claude, "codex" to AgentMarkKind.Codex, "trae" to AgentMarkKind.Trae,
+            "pi" to AgentMarkKind.Pi, "opencode" to AgentMarkKind.OpenCode,
+            "gemini" to AgentMarkKind.Gemini, "cursor" to AgentMarkKind.Cursor,
+        )
+        for ((id, name) in names) {
+            val mark = requireNotNull(usageAgentMark(id))
+            assertEquals(name.jsonPrimitive.content, mark.name)
+            assertEquals(brands[id], mark.kind)
+            assertNull(mark.surface)
+        }
+        val runtime = requireNotNull(usageAgentMark("My-Runtime"))
+        assertEquals("My-Runtime", runtime.name)
+        assertNull(runtime.kind)
+        assertNull(usageAgentMark(""))
     }
 
     @Test fun heatStepsRankTiesAtTheirSharedUpperRank() {

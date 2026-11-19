@@ -1501,7 +1501,7 @@ struct InboxRow: View {
     private var from: String {
         if item.isAssistantRow { return item.linePreview } // the tag says who: no "Assistant:" in front
         #if !os(macOS)
-        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier) { return meta }
+        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier, translatedPreview: translated?.preview) { return meta }
         #endif
         if let doc = item.doc { return doc.typeName + " · " + item.preview } // the preview names who: Li Lei mentioned you
         if item.moment != nil { return String(localized: "\(item.sender ?? ""): \(item.preview)", comment: "Who wrote it: what they wrote") } // who commented, on the post in the title

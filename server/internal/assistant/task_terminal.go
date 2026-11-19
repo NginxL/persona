@@ -182,6 +182,14 @@ func terminalCleanupStatus(t PlanTask) string {
 	return devicewire.TaskTerminalSkipped
 }
 
+func terminalCleanupWords(status string) string {
+	result := " Terminal cleanup: " + status + "."
+	if status == devicewire.TaskTerminalPending {
+		result += " The close request may have reached the node. Check the terminal before trying again."
+	}
+	return result
+}
+
 func (s *Service) taskTerminalIdle(ctx context.Context, target taskTerminalTarget) bool {
 	var row proto.Session
 	var ok bool

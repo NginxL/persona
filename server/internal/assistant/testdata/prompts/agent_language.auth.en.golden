@@ -1,0 +1,3 @@
+🔑 (Persona authorized on the user's behalf.) Persona confirmed the authorization link you provided above (app: “Example CLI 原文”) using the user's own signed-in account.
+Continue now: the program that produced the link can obtain the authorization (a waiting program obtains it itself; if it started without waiting, use its device code or follow-up command to obtain the token). After signing in, continue your original task.
+If sign-in still fails, briefly explain what blocks it. Do not keep generating new authorization links and retrying.

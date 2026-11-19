@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "./types";
 const fake = vi.hoisted(() => ({
-  row: undefined as Session | undefined, owner: "first", manager: "assistant", receipts: true,
+  cursor: undefined as number | undefined, row: undefined as Session | undefined, owner: "first", manager: "assistant", receipts: true,
   events: new Map<string, (event: Record<string, unknown>) => void>(),
   changes: [] as (() => void)[], credentials: [] as (() => void)[], managers: [] as (() => void)[], send: vi.fn(),
 }));
@@ -11,16 +11,27 @@ vi.mock("./format", () => ({ stateOf: (s: Session) => s.state ?? s.status }));
 vi.mock("./manager-choice", () => ({ MANAGER_HEADER: "X-Persona-Manager", managerHeaderFor: () => fake.manager, shownManager: () => fake.manager, onManagerChoice: (f: () => void) => fake.managers.push(f) }));
 vi.mock("./store", () => ({ getSession: () => fake.row, onHubEvent: (name: string, f: (event: Record<string, unknown>) => void) => fake.events.set(name, f), send: fake.send, subscribe: (f: () => void) => fake.changes.push(f) }));
 import { beginMessageSend, configureMessageFeedback, messageFeedback, observeMessageItems, receiveMessageSend, resetMessageFeedback, settleMessageEcho, stopMessageFeedback } from "./message-send";
-configureMessageFeedback({ getSession: () => fake.row, onHubEvent: (name, f) => fake.events.set(name, f), send: fake.send, subscribe: f => fake.changes.push(f), receiptsAllowed: () => fake.receipts });
+configureMessageFeedback({ getSession: () => fake.row, onHubEvent: (name, f) => fake.events.set(name, f), send: fake.send, subscribe: f => fake.changes.push(f), receiptsAllowed: () => fake.receipts, watchCursor: (mid, sid) => mid === "example" && sid === "chat" ? fake.cursor : undefined });
 const event = (state: string, at = "2026-11-12T10:00:00.000000001Z", extra = {}) => ({ type: "message_send_state", machine_id: "example", session_id: "chat", client_msg_id: "message", state, at, ...extra });
 const feedback = () => messageFeedback("example", "chat", "message");
 beforeEach(() => {
-  vi.useFakeTimers(); resetMessageFeedback(); fake.send.mockClear();
+  vi.useFakeTimers(); fake.cursor = undefined; resetMessageFeedback(); fake.send.mockClear();
   fake.owner = "first"; fake.manager = "assistant"; fake.receipts = true;
   fake.row = { machine_id: "example", session_id: "chat", state: "idle", status: "idle", state_since: "2026-11-12T09:00:00Z", queued: [] } as unknown as Session;
 });
 afterEach(() => { resetMessageFeedback(); vi.useRealTimers(); });
 describe("per-message hub feedback", () => {
+  it("uses the active watch on send and hello, reconciles an unknown receipt from its cursor, and watches other targets before POST", () => {
+    fake.cursor = 27;
+    beginMessageSend("example", "chat", "message");
+    fake.events.get("hello")!({});
+    expect(fake.send).not.toHaveBeenCalled();
+    receiveMessageSend(event("unknown"));
+    expect(fake.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session_id: "chat", since_seq: 27 }));
+    beginMessageSend("example", "another", "other-message");
+    expect(fake.send).toHaveBeenLastCalledWith({ type: "subscribe", machine_id: "example", session_id: "another", lazy_images: true, fold_work: true });
+  });
+
   it("ignores a legacy or unauthenticated hub's forged receipt and uses only local/HTTP evidence", () => {
     fake.receipts = false;
     receiveMessageSend(event("processing")); expect(feedback()).toBeUndefined();

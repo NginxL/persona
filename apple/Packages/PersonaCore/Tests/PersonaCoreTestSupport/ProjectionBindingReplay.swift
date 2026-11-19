@@ -197,6 +197,7 @@ public enum ProjectionBindingReplay {
         "cross_machine_same_session_id", "cross_machine_same_session_id_reversed",
         "empty_list", "filter_all", "filter_needsyou", "filter_unread", "filter_working",
         "folded_machine_hides_rows", "folded_space_keeps_counts", "folded_state_and_expanded_idle",
+        "just_finished_rank_and_precedence",
         "kept_cannot_escape_base", "held_quiet_row_keeps_unread_state_section", "held_quiet_space_stays_active",
         "held_row_stays_out_of_quiet_idle_fold", "machine_search_before_counts", "machine_uses_registry_order",
         "mute_allow_and_explicit_override", "pinned_offline_is_visible", "pinned_sessions_use_pin_order_once",

@@ -25,8 +25,9 @@ func (s *Service) applyModel(ctx context.Context, id string, params map[string]a
 		return err
 	}
 	params["launch"] = p.launch() // a caller cannot override the purpose's execution form
-	if name, _ := params["launcher"].(string); name != "" && launcherProvider(name) != b.Provider {
-		b = ModelBinding{Provider: launcherProvider(name)}
+	launcher, _ := params["launcher"].(string)
+	if launcher != "" && launcherProvider(launcher) != b.Provider {
+		b = ModelBinding{Provider: launcherProvider(launcher)}
 	}
 	if b.Model != "" && strings.HasPrefix(b.Provider, "launcher.") && !proto.ValidModelID(b.Model) {
 		// Configured before a launcher's model was held to the model id rule (#1644; Model configuration refuses it as
@@ -41,6 +42,8 @@ func (s *Service) applyModel(ctx context.Context, id string, params map[string]a
 	}
 	if effort, _ := params["effort"].(string); effort != "" {
 		b.Effort = effort
+	} else if native, _ := params["launcher_default_effort"].(bool); id == "agent.new" && native && launcher != "" {
+		b.Effort = ""
 	}
 	return s.finishModel(ctx, id, params, b)
 }

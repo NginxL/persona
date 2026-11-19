@@ -1,0 +1,7 @@
+Agent が失敗しました（box の会話 session_1）。失敗理由：
+
+<persona-context kind="agent_result" title="Agent の失敗理由">
+original  result
+</persona-context>
+
+読んで対応を続け、inbox_suggest で次の提案と更新した recap を提出してください。

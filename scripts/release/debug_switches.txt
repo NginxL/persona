@@ -142,6 +142,7 @@ openPairSheet
 openPane
 openPeople
 openPeopleQuery
+openPermissionModes
 openPersona
 openPlugin
 openPluginMarket

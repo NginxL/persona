@@ -162,8 +162,10 @@ if [ -n "${SITE_ONLY:-}" ]; then
   exit 0
 fi
 
-# The build number orders releases (UTC YYYYMMDDHHMM): hubs install only a larger one.
-BUILD="$(date -u +%Y%m%d%H%M)"
+# The build number orders releases (UTC YYYYMMDDHHMM): hubs install only a larger one. A release-PR workflow pins it
+# in its immutable plan so a retry verifies exactly the same downloads; ordinary builds keep the current UTC minute.
+BUILD="${PERSONA_RELEASE_BUILD:-$(date -u +%Y%m%d%H%M)}"
+[[ "$BUILD" =~ ^[0-9]{12}$ ]] || { echo "PERSONA_RELEASE_BUILD must be UTC YYYYMMDDHHMM" >&2; exit 2; }
 # The nearest vX.Y.Z tag, a lightweight one too, as deploy.sh names its builds (#7201).
 VERSION="${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}"
 COMMIT="$(git rev-parse HEAD)"

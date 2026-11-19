@@ -12,8 +12,8 @@ const documents = readdirSync(fixtureDir).filter((f) => f.endsWith('.json')).sor
   file, ...JSON.parse(readFileSync(new URL(file, fixtureDir), 'utf8')),
 }));
 const cases = documents.filter((doc) => doc.operation === 'agents_list').flatMap((doc) => doc.cases);
-assert.equal(cases.length, 60, 'the exact checked-in projection corpus');
-assert.equal(new Set(cases.map((c) => c.name)).size, 60, 'unique case names');
+assert.equal(cases.length, 61, 'the exact checked-in projection corpus');
+assert.equal(new Set(cases.map((c) => c.name)).size, 61, 'unique case names');
 const prefs = {pinsSpaces: [], pinsSessions: [], mutesSpaces: [], mutesSessions: [], mutesAllowed: []};
 
 function nativeInput(c) {

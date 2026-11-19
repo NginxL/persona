@@ -134,6 +134,31 @@ final class AgentsListTests: XCTestCase {
         }.count
     }
 
+    /// MOCK_WORK=1 supplies the triage's finished login fix in the app repository. Both views show its conclusion
+    /// without expanding Seen or an idle repository.
+    @MainActor func testJustFinishedInStatusAndRepository() throws {
+        let url = try XCTUnwrap(URL(string: hub + "/api/v1/sessions"))
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        try XCTSkipUnless(fixture.contains("a9000000-0000-4000-8000-000000000001"), "needs MOCK_WORK=1")
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        app = XCUIApplication()
+        app.launchArguments = ["-pairURL", pair]
+        app.launchPinned()
+        for grouped in ["state", "repo"] {
+            app.launchArguments = ["-pairURL", pair, "-app.tab", "chats", "-tab", "dev", "-dev.openChat", "",
+                                   "-openAgentsFresh", "YES", "-dev.grouping", grouped, "-dev.machineFilter", "server"]
+            app.launchPinned()
+            let match = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "agents.row", "登录页崩溃")).firstMatch
+            let row = reach(match, "the Just finished agent in " + grouped)
+            XCTAssertTrue(row.label.contains("已合并 PR #12"), row.label)
+            if grouped == "state" {
+                XCTAssertTrue(header("刚做完待看").exists)
+            } else {
+                XCTAssertTrue(row.label.contains("刚做完待看"), row.label)
+            }
+        }
+    }
+
     // MARK: Quick filters
 
     /// All / Needs You / Unread / Working with their counts, one tap each; they add up with the machine menu.

@@ -229,6 +229,13 @@ func literalLoopWord(word *syntax.Word, vars map[string]string) (string, bool, b
 				if !scalarParameter(p) {
 					return false
 				}
+				if p.Param.Value == "?" {
+					// `echo "$d exit=$?"` (#11193): the last exit status is always a number, set by the shell, never by
+					// the command, so it cannot name a program or a lark-cli word. Kept as text: a word holding it is
+					// not a literal the classifier can read as a command, a method or a path.
+					out.WriteString("$?")
+					continue
+				}
 				value, ok := vars[p.Param.Value]
 				if !ok || !quoted && !safeLiteralCommand(strings.TrimPrefix(value, "~/")) {
 					return false

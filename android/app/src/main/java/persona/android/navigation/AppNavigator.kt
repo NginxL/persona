@@ -70,6 +70,9 @@ internal class AppNavigator(
         ChatRoute(session.machineId, session.sessionId, source = source)
     }.sortedWith(compareBy(ChatRoute::machineId, ChatRoute::sessionId))
 
+    /** The tab whose inside page pushed [page], or null for a root / direct open. */
+    fun sourceTab(page: NavKey?): AppTab? = if (page == null) null else openedFrom[page]
+
     /** Root applies the same latest-ledger guard before embedding a direct assistant destination in Persona home. */
     fun hasInboxOrigin(key: NavKey): Boolean = inboxSource(key) != null
 

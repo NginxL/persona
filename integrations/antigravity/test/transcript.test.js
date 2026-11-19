@@ -114,3 +114,11 @@ test('parallel results exported out of order are kept in step order and pair wit
   assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)?.text), ['tail output', 'invalid arguments', 'file body'])
   assert.equal(results.get(uses[1].tool_use_id).is_error, true)
 })
+
+test('parsed transcript cache retains a full inventory of 80 sessions', async (t) => {
+  const entries = Array.from({ length: 80 }, () => logs(t))
+  for (const { directory } of entries) writeFileSync(join(directory, 'transcript_full.jsonl'), record('Cached reply.'))
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  const cached = entries.map(({ brain }) => readTranscript(brain, true))
+  for (const [index, { brain }] of entries.entries()) assert.equal(readTranscript(brain, true), cached[index])
+})

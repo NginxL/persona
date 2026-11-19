@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { t } from "../../i18n";
 import { enterSends, hasFinePointer } from "../../lib/viewport";
+import { useComposition } from "../../lib/ime";
 import { EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { useModalFocus } from "../../ui/overlay";
@@ -29,6 +30,7 @@ function ExpandedComposer({ value, placeholder, selection, onChange, onCollapse,
   const panel = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const start = useRef(selection);
+  const ime = useComposition();
   useModalFocus(panel);
   useLayoutEffect(() => {
     const el = field.current;
@@ -71,8 +73,10 @@ function ExpandedComposer({ value, placeholder, selection, onChange, onCollapse,
         ref={field}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        {...ime.handlers}
+        onBlur={ime.onBlur}
         onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+          if (ime.busy(e.nativeEvent)) return;
           // The full editor always keeps plain Enter as a newline; an explicit Mod+Enter sends on any pointer.
           if (!enterSends(e, false)) return;
           e.preventDefault();

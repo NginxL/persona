@@ -6,6 +6,7 @@ Split from test_check_fast.py (#11017), whose throwaway repository and helpers i
 the per-suite limit of scripts/ci/python-tests.py on a loaded machine.
 """
 import importlib.util
+import re
 import sys
 import unittest
 
@@ -150,6 +151,38 @@ class CheckFastGuardSuitesTests(ScriptsRepoTestCase):
                 self.git("clean", "-fdq", "--", path.split("/", 1)[0])
                 self.assertEqual(1, code, out)
                 self.assertIn("FAIL     scripts/test/test_apple_no_callkit.py", out)
+
+    def plans(self, paths):
+        """check-fast's plan of each path on its own ({path: [lines]}), from --dry-run --changed-from --each."""
+        self.write("listed.txt", "".join(p + "\n" for p in paths))
+        code, out = self.check_fast("--dry-run", "--changed-from", "listed.txt", "--each")
+        self.assertEqual(0, code, out)
+        plans, current = {}, None
+        for line in out.splitlines():
+            if line.startswith("== "):
+                current = plans.setdefault(line[3:], [])
+            elif current is not None:
+                current.append(line.strip())
+        self.assertEqual(sorted(paths), sorted(plans), out)
+        return plans
+
+    def test_what_the_development_build_suite_reads_runs_it(self):
+        # test_apple_dev_build.py reads the project, the includes its xcodegen dumps turn on, the scripts it names (each
+        # that generates a project or builds the Rust core, and the lean build's note), and runs some of them (#11250).
+        # The scripts are taken from the suite itself, so one it starts to name is held to the map too.
+        self.commit_on_top("scripts/test/test_apple_dev_build.py", PASSING, "base")
+        suite = (ROOT / "scripts/test/test_apple_dev_build.py").read_text()
+        scripts = sorted(set(re.findall(r"'((?:scripts|native)/[\w./-]+\.sh)'", suite)))
+        self.assertIn("scripts/app/lean-build-note.sh", scripts)
+        self.assertIn("scripts/diag/stream-scroll/run-ios.sh", scripts)
+        project = ["apple/project.yml", "apple/app-entitlements.yml", "apple/watch-and-share.yml",
+                   "apple/lean-dev-build.yml", "apple/siri-calls.yml"]
+        others = ["apple/homekit-entitlements.yml", "scripts/app/android.sh", "native/app-core/scripts/build-apple.sh"]
+        plans = self.plans(scripts + project + others)
+        for path, lines in plans.items():
+            with self.subTest(path=path):
+                self.assertEqual(path not in others, "queued: scripts/test/test_apple_dev_build.py" in lines, lines)
+                self.assertFalse([line for line in lines if line.startswith("INFO  no fast check maps to")], lines)
 
     def test_token_inputs_run_the_token_suite(self):
         self.commit_on_top("scripts/assets/test_gen_tokens.py", FAILING, "base")

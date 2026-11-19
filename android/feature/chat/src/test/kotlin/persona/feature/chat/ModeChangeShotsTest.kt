@@ -74,6 +74,9 @@ class ModeChangeShotsTest {
                                 actorKind = "device", deviceName = "A computer with a long device name", at = at,
                             ))
                             ModeChangeDivider(ModeChange(
+                                kind = "restart_dropped", to = "bypassPermissions", reason = "cancelled", at = at,
+                            ))
+                            ModeChangeDivider(ModeChange(
                                 kind = "restart_dropped", to = "bypassPermissions", reason = "process_replaced", at = at,
                             ))
                         }

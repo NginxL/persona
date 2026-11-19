@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -210,7 +211,7 @@ private fun UsageDayCell(
     onSelect: (String) -> Unit,
 ) {
     val locale = currentLocale
-    val description = stringResource(R.string.assistant_usage_day_description,
+    val description = stringResource(R.string.assistant_usage_token_description,
         formatDay(day.date, zone), LocalizedFormats.number(day.total, locale))
     val palette = PersonaTheme.palette
     val borderColor = when {
@@ -343,6 +344,16 @@ internal fun UsageCalendarPage(api: UsageHistoryApi?, onBack: () -> Unit, listSt
                         }
                     }
                 }
+                val agents = hours.agents.filter { it.total > 0 }
+                if (agents.isNotEmpty()) {
+                    item("agents-title") { JSectionHeader(stringResource(R.string.assistant_usage_by_agent), Modifier.padding(top = Tokens.Space.m)) }
+                    val largest = agents.maxOf { it.total }
+                    agents.forEachIndexed { index, share ->
+                        item("agent-${share.agent}") {
+                            JGroupItem(GroupPosition.of(index, agents.size)) { UsageAgentRow(share, largest) }
+                        }
+                    }
+                }
                 item("kinds-title") { JSectionHeader(stringResource(R.string.assistant_usage_by_kind), Modifier.padding(top = Tokens.Space.m)) }
                 val kinds = listOf(
                     R.string.assistant_usage_input to hours.total.input,
@@ -358,6 +369,25 @@ internal fun UsageCalendarPage(api: UsageHistoryApi?, onBack: () -> Unit, listSt
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun UsageAgentRow(share: UsageAgentShare, largest: Long) {
+    val mark = usageAgentMark(share.agent)
+    val name = mark?.name ?: stringResource(R.string.assistant_usage_before_agent_split)
+    val total = share.total
+    val spoken = stringResource(R.string.assistant_usage_token_description, name, LocalizedFormats.number(total, currentLocale))
+    JRow(Modifier.clearAndSetSemantics { contentDescription = spoken }) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                if (mark != null) JAgentMark(mark)
+                Text(name, Modifier.weight(1f), style = PersonaTheme.type.body,
+                    color = if (mark == null) PersonaTheme.palette.ink2 else PersonaTheme.palette.ink)
+                Text(compactTokens(total, currentLocale), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2, maxLines = 1)
+            }
+            JLinearProgress((total.toDouble() / largest).toFloat())
         }
     }
 }

@@ -358,6 +358,7 @@ The entry point is the same as Claude's (machine, directory, launcher); subseque
   so Apps make the message optional only for launchers marked `prompt_optional`. Launcher words and message are written together to a private temporary file under the node directory (0600). The pane receives only
   `personad codex-start <file>`: it claims the file (renames it away, so a node that gave up on the start and withdrew the file the same way leaves it nothing, and the other way round), reads and deletes it, then runs the launcher words (preceding `VAR=…` enters the environment), adding `--` and the message only when one is supplied.
   On Unix, native `codex` runs through the user's interactive shell to preserve a same-name function. The shell executes only `"$@"`: launcher words and the message are positional arguments, never interpolated as shell code.
+  On Windows, the private launch file carries no prompt: the TUI starts empty, then the node bracketed-pastes the complete message and submits it once after checking the composer. Readiness, paste and exact rollout confirmation share the startup timeout (#11145). Terminal line endings become LF; other terminal controls are made inert as for subsequent messages. Codex App uses structured IPC input instead of this terminal path.
   Quotes, newlines, `$`, backticks, Chinese, and thousands of characters all reach Codex unchanged (`codex_start.go`). Launcher words also stay off-screen and out of shell history
   (aliases may contain keys). With `--remote`, add `-C <directory>` (the TUI does not supply the directory itself when connecting to another app-server).
 - **Text only**: the first message carries no photos or files. New Agent offers no attachments for a Codex launcher on iPhone and iPad, and the web refuses such a start with "This launcher can't take attachments in the first message" (#2321).
@@ -379,6 +380,7 @@ The entry point is the same as Claude's (machine, directory, launcher); subseque
   followed by the last screen lines of that tab (falling back to the visible screen when the bottom rows are blank). If the launcher cannot run (command not found), fail as soon as a `personad codex-start:` line appears, without waiting the full timeout. codex-start's notes that it goes on after (the agent sandbox not wrapping the start) say `personad codex-start (note):` instead, so the Codex after them is not taken for a failure.
   If the terminal still reports Codex running, the error carries `agent_start_stalled`: the hub neither counts it as a broken launcher nor retries or reroutes the task automatically.
   Only after this wait returns a failure (including cancellation), the node closes the new pane to stop a Codex still waiting on a screen from later executing its queued prompt without a linked task.
+  If that pane explicitly identifies a fresh thread, or its unique Codex writer holds the fresh rollout, cleanup also asks Codex to archive that thread natively after the pane closes (#11145). This removes an already-published orphan from the Agent list while retaining its transcript. A directory, title or matching first line never authorizes archive; adopted panes remain untouched. Native archive failure is retained with the failed-pane cleanup for retry.
   This uses the terminal's existing close operation instead of keeping a background start waiting indefinitely for a thread. The last screen lines remain in the error.
   Independent starts in the same directory with the same launcher remain concurrent; waiting for one thread does not delay another start.
   If closing fails, the error says termination could not be confirmed. The node remembers every failed-cleanup pane for the directory and launcher; a later start must close the pending panes before opening another tab. Only that cleanup is serialized, and failures from concurrent starts are retained separately.
@@ -425,7 +427,7 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
 - **Before its thread exists, Codex has no session id**: herdr lists the pane as `agent: codex` with no `session_id` (Codex 0.153.4, herdr 0.9.3), and no rollout or `threads` row exists yet. About two seconds after the first message
   the rollout appears, and the pane's `codex` process holds it open. herdr still reports no session id.
 - **The start**: `codex-start` runs the launcher words alone. The node waits for Codex's input box, at most 60 seconds. On the way it trusts the folder, waits out a model still loading (`model: loading` in the header),
-  and skips the update offer. The offer is skipped with "Skip"'s own key (`2`), never Enter: Enter takes the highlighted "Update now", which runs the installer. On 0.153.4, `2` alone closes the offer.
+  and skips the update offer. Codex's own three-choice offer (`Update now`, `Skip`, `Skip until next version`) is skipped with Escape on every operating system, never Enter: Enter takes the highlighted "Update now", which runs the installer. Version upgrades belong to operations, not a message-delivery attempt.
   If the launcher fails (a `personad codex-start:` line), the start fails and the tab closes, as above. If Codex runs but its box has not come up in time, the row is still returned and the tab stays.
   Nothing is queued in that tab that could run later.
 - **The waiting row**: its id is the node's own: a UUID whose first group is `c0de0000`, which no Codex thread id (a UUIDv7) or Claude session id takes. It carries `awaiting_first_message: true`,
@@ -451,7 +453,8 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
 - **The first message from the Apps** (`session.send` to the row): text only (photos refuse with `codex_first_text`, nothing typed). The node brings Codex to its empty input box first, at most 20 seconds.
   On the way it answers the trust dialog and the update offer, and waits out the model loading and "Starting MCP servers".
   It types nothing, and refuses with the usual codes, when the box holds a draft (`input_draft`), when an approval, question or dialog that isn't ours is open (`dialog_open`), or when the box doesn't come (`codex_not_ready`).
-  The message goes in as one bracketed paste, unchanged, and Enter is pressed only once the box shows it (or Codex's `[Pasted Content N chars]`).
+  The message goes in as one bracketed paste, unchanged, and Enter is pressed only once the box shows it (or Codex's `[Pasted Content N chars]` chips with matching visible text before, between or after them). Chip lengths and visible fragments must cover the whole expected message in order, allowing terminal wrapping whitespace; a chip for only a prefix waits for its tail before Enter. Hidden content is still unverified: only a complete first-message rollout match confirms startup. A compact status row whose directory is just `~` is excluded from the draft too.
+  If the recognized update offer appears after paste, startup skips it once. A retained matching draft is submitted without pasting again; only an empty, unqueued composer may receive one replay. A different draft or unknown dialog is never cleared or submitted. This recovery has a bounded confirmation window within the original startup request.
   The send then waits up to 45 seconds for the thread (rules 1–3) and answers `{ok, session}` with the thread's session. Rule 3 finding two threads answers `{ok}` alone, and the row stays until rule 1 or 2 knows it.
   No thread in time is `codex_first_unconfirmed` with `delivered: unknown`: the message went in, so it is not sent again.
   First messages to one row go one at a time: a second one (another phone, a quick second tap) waits for the first, then goes to the thread it began as any message does.
@@ -472,7 +475,7 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
   - both attachments used rule 1.
 
   Rule 4 (the daemon route) is covered by unit tests only.
-- **Tests**: `node/codex_waiting_test.go`. It covers: the start skipping the update offer with `2` and never Enter; the row listed idle while herdr says working; the App's first message as one paste and the row becoming the thread;
+- **Tests**: `node/codex_waiting_test.go` and `node/codex_start_input_test.go`. They cover: the start skipping the update offer with Escape and never Enter; late update offers, retained/lost pastes, mixed chips and visible text, complete transcript confirmation and bounded failure cleanup; the row listed idle while herdr says working; the App's first message as one paste and the row becoming the thread;
   drafts, photos and dialogs refused with nothing typed; a model loading and MCP servers starting waited out; two rows in one directory;
   an app-server holding a pane's thread ignored; rule 4's ambiguities; the row known again after a restart and gone with Codex.
   The clients: the web's unit tests (`web/src/lib/codex-waiting.test.ts`, `web/src/lib/new-agent.test.ts`,
@@ -755,4 +758,4 @@ localized refusals (`assistant_service_tier_start_only`, `assistant_service_tier
 capability gets 501 `assistant_service_tier_manager_outdated` before relaying; a node without `assistant_service_tier`
 returns 409 `node_outdated`. An older hub ignores the unknown field, so the web neither offers nor sends it there. The
 start choice is one-shot, not execution-fingerprint or recovery state; later changes still use `session.speed`.
-New Agent starts have no speed setting.
+New terminal Agent starts have a separate `speed` contract for Codex Fast / Ultrafast and Claude Code fast mode, including catalog validation, start-only semantics and the `session_start_speed` compatibility gate; see [Launchers](launchers.md) "Speed". The New Agent form itself still has no speed control.

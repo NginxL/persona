@@ -26,7 +26,7 @@ class AnsweredTextTest {
 
     @Config(qualifiers = "en")
     @Test fun eachKindReadsAsItWasAnswered() {
-        assertEquals("Approved, auto-accept edits", AnsweredText.summary(res, plan, Resolution(approve = true, mode = "acceptEdits")))
+        assertEquals("Approved, Auto accept edits", AnsweredText.summary(res, plan, Resolution(approve = true, mode = "acceptEdits")))
         assertEquals("Sent back: shorter", AnsweredText.summary(res, plan, Resolution(approve = false, feedback = "shorter")))
         assertEquals("Always allowed", AnsweredText.summary(res, permission, Resolution(allow = true, always = true)))
         assertEquals("Denied", AnsweredText.summary(res, permission, Resolution(allow = false)))
@@ -51,7 +51,7 @@ class AnsweredTextTest {
 
     @Config(qualifiers = "zh")
     @Test fun chineseReadsAsChinese() {
-        assertEquals("已经回答过了：批准，每步确认", InteractionReply(InteractionSubmission.AlreadyAnswered,
+        assertEquals("已经回答过了：批准，默认权限", InteractionReply(InteractionSubmission.AlreadyAnswered,
             effective = Resolution(approve = true, mode = "default")).notice(res, plan))
         assertEquals("这个请求已经过期，回答没有送到", InteractionReply(InteractionSubmission.ResolvedElsewhere, endedStatus = "expired").notice(res, plan))
     }

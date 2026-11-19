@@ -26,5 +26,11 @@
   "graph_fold": "Fold",
   "graph_show_hidden_one": "Show {count} hidden",
   "graph_show_hidden_other": "Show {count} hidden",
-  "graph_under": "under {title}"
+  "graph_under": "under {title}",
+  "graph_outline": "Outline",
+  "graph_timeline": "Timeline",
+  "graph_inspector": "Details",
+  "graph_links": "Sessions & links",
+  "graph_open_action": "Open",
+  "graph_running": "Running"
 }

@@ -334,7 +334,7 @@ func feishuHub(owner string, pairedAt time.Time) (*fakeHub, *[]map[string]any) {
 	f := newFakeHub().withMachine()
 	var posts []map[string]any
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
-		return FeishuStatus{Ready: owner != "", Enabled: true, Owner: owner, PairedAt: pairedAt, Features: FeishuFeatures{Main: true, Cards: true}}, nil
+		return FeishuStatus{Ready: owner != "", Enabled: true, Owner: owner, PairedAt: pairedAt, Features: FeishuFeatures{Main: true, Cards: true, TopicCot: true}}, nil
 	})
 	f.answerApp(AppFeishu, FeishuPost, func(p json.RawMessage) (any, error) {
 		var m map[string]any

@@ -72,6 +72,10 @@ type runtimeHello struct {
 		Rewind    bool `json:"rewind"`
 		// Assistant: its launcher may run the Persona assistant (assistant_runtime.go; docs/integrations/runtimes.md "Assistant").
 		Assistant bool `json:"assistant"`
+		// SupervisionPolicy: the runtime carries manager-owned supervision_instructions on its own authoritative
+		// policy channel (separate from user messages) on session.start and session.send, and fails closed
+		// (assistant_supervision_runtime) when a nonempty policy cannot be applied (#11173).
+		SupervisionPolicy bool `json:"supervision_policy"`
 		// Execution reports the actual per-session execution environment via session.execution.
 		Execution bool `json:"execution"`
 		// Modes: the phone's permission mode and effort for its sessions go to it (session.modes).
@@ -180,6 +184,14 @@ func (h *runtimeConn) assistant() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.hello.Caps.Assistant
+}
+
+// supervisionPolicy: the runtime runs assistant conversations and accepts supervision_instructions on its own policy
+// channel (caps.assistant && caps.supervision_policy).
+func (h *runtimeConn) supervisionPolicy() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hello.Caps.Assistant && h.hello.Caps.SupervisionPolicy
 }
 
 // label is what the apps call the runtime.

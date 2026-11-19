@@ -134,7 +134,9 @@ class LeanBuildNoteTests(unittest.TestCase):
         (self.root / 'scripts/app').mkdir(parents=True)
         shutil.copy2(ROOT / NOTE, self.root / NOTE)
         for path in ('apple/Shared/Hub.swift', 'apple/PersonaWatch/Watch.swift', 'apple/PersonaWatchWidgets/Face.swift',
-                     'apple/PersonaShare/Share.swift', 'apple/Persona/App.swift', 'server/main.go'):
+                     'apple/PersonaShare/Share.swift', 'apple/Packages/PersonaWire/Sources/PersonaWire/Wire.swift',
+                     'apple/Packages/PersonaKit/Sources/PersonaKit/Kit.swift', 'apple/Persona/App.swift',
+                     'server/main.go'):
             self.write(path, 'one\n')
         self.git('init', '-q', '-b', 'main')
         self.commit('base')
@@ -163,14 +165,21 @@ class LeanBuildNoteTests(unittest.TestCase):
     def test_the_folders_it_watches_are_the_real_ones(self):
         text = (ROOT / NOTE).read_text()
         folders = [f for line in re.findall(r'^(?:WATCH|WATCH_AND_SHARE)=\((.*)\)$', text, re.M) for f in line.split()]
-        self.assertEqual(sorted(folders), ['apple/PersonaShare', 'apple/PersonaWatch', 'apple/PersonaWatchWidgets',
-                                           'apple/Shared'])
+        self.assertEqual(sorted(folders), ['apple/Packages/PersonaWire', 'apple/PersonaShare', 'apple/PersonaWatch',
+                                           'apple/PersonaWatchWidgets', 'apple/Shared'])
         for folder in folders:
             with self.subTest(folder=folder):
                 self.assertTrue((ROOT / folder).is_dir(), folder)
         project = (APPLE / 'project.yml').read_text()
         for folder in ('PersonaWatch', 'PersonaWatchWidgets', 'Shared'):
             self.assertIn('      - path: %s\n' % folder, project)
+        # Every package the watch app, its widgets or the share extension builds is watched (#11250).
+        packages = dict(re.findall(r'^  (\w+):\n    path: (Packages/\S+)$', project.split('\ntargets:')[0], re.M))
+        for target in ('PersonaWatch', 'PersonaWatchWidgets', 'PersonaShare'):
+            block = re.search(r'^  %s:\n(.*?)(?=^  \S)' % target, project.split('\ntargets:')[1], re.M | re.S).group(1)
+            for name in re.findall(r'^      - package: (\w+)$', block, re.M):
+                with self.subTest(target=target, package=name):
+                    self.assertIn('apple/' + packages[name], folders)
 
     def test_nothing_changed_where_the_lean_build_skips_says_nothing(self):
         self.assertEqual(self.note(), '')
@@ -202,6 +211,23 @@ class LeanBuildNoteTests(unittest.TestCase):
         self.assertIn('changes apple/PersonaWatch/ apple/PersonaWatchWidgets/;', out)
         self.assertIn("-scheme PersonaWatch -destination 'generic/platform=watchOS Simulator'", out)
         self.assertNotIn('--with-watch', out)
+        # As sim.sh builds: the config's Xcode first, then in an xcode slot (#11250), as one command a shell can run.
+        command = out.rstrip().split('check them with ', 1)[1]
+        self.assertTrue(command.startswith('(eval "$(python3 scripts/persona_config.py env)" && '
+                                           'python3 scripts/heavy_slot.py run --kind xcode -- xcodebuild '), command)
+        self.assertEqual(subprocess.run(['bash', '-n', '-c', command], capture_output=True, timeout=30).returncode, 0)
+
+    def test_a_wire_package_change_names_the_whole_build(self):
+        # The watch app, its widgets and the share extension link PersonaWire too (#11250).
+        self.write('apple/Packages/PersonaWire/Sources/PersonaWire/Wire.swift', 'two\n')
+        self.commit('wire')
+        out = self.note()
+        self.assertIn('changes apple/Packages/PersonaWire/;', out)
+        self.assertTrue(out.rstrip().endswith('scripts/app/sim.sh --with-watch'), out)
+        self.git('reset', '-q', '--hard', 'HEAD~1')
+        self.write('apple/Packages/PersonaKit/Sources/PersonaKit/Kit.swift', 'two\n')  # the iPhone app's only
+        self.commit('kit')
+        self.assertEqual(self.note(), '')
 
     def test_only_the_branch_counts_not_what_main_did_since(self):
         self.git('checkout', '-q', 'main')

@@ -1546,11 +1546,19 @@
     },
     {
       "name": "assistant_feed_permission_default",
-      "value": "默认"
+      "value": "默认权限"
+    },
+    {
+      "name": "assistant_feed_permission_acceptEdits",
+      "value": "允许编辑"
     },
     {
       "name": "assistant_feed_permission_plan",
-      "value": "只读"
+      "value": "计划模式"
+    },
+    {
+      "name": "assistant_feed_permission_auto",
+      "value": "自动审批"
     },
     {
       "name": "assistant_feed_persona_message",
@@ -4635,6 +4643,10 @@
     {
       "name": "agent_group_background",
       "value": "后台等待中"
+    },
+    {
+      "name": "agent_group_just_finished",
+      "value": "刚做完待看"
     },
     {
       "name": "agent_group_waiting",

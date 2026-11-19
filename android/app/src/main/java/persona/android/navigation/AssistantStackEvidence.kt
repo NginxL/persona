@@ -27,6 +27,7 @@ import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.MailRoute
 import persona.feature.knowledge.KnowledgeDetailRoute
+import persona.feature.knowledge.KnowledgeKindRoute
 import persona.feature.knowledge.KnowledgeRoute
 
 internal data class AssistantStackEvidence(val route: String, val selectedKey: String?)
@@ -40,6 +41,7 @@ internal fun assistantStackEvidence(key: NavKey?, tab: AppTab = AppTab.Persona):
     SettingsRoute -> AssistantStackEvidence("settings", null)
     MachinesRoute -> AssistantStackEvidence("machines", null)
     KnowledgeRoute -> AssistantStackEvidence("knowledge", null)
+    is KnowledgeKindRoute -> AssistantStackEvidence("knowledge/${key.kind.wire}", null)
     TodosRoute -> AssistantStackEvidence("todos", null)
     is ChatRoute -> AssistantStackEvidence("${tab.name}/chat", "${key.machineId}/${key.sessionId}")
     is InteractionRoute -> AssistantStackEvidence("${tab.name}/chat", "${key.chat.machineId}/${key.chat.sessionId}")

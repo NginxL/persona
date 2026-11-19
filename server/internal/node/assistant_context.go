@@ -95,7 +95,7 @@ func rowTodo(row string) string {
 	return ""
 }
 
-// rowLabel is the label a row starts with: "- Working: ..." is "Working", "- Done (24 hours): ..." is "Done".
+// rowLabel is the label a row starts with: "- Needs you: ..." is "Needs you", "- Done (24 hours): ..." is "Done".
 func rowLabel(row string) string {
 	label, ok := strings.CutPrefix(strings.TrimSpace(row), listMark)
 	if !ok || !strings.Contains(label, "：") {

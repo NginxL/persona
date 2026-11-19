@@ -66,6 +66,25 @@ final class ScreenLinkWireTests: XCTestCase {
         }
     }
 
+    /// A close confirmation is distinct from a data ack: a final-data ack can cross with a close the phone has not
+    /// processed. Type 14 carries the close's channel and final offset; older peers never send or expect it. The Go
+    /// wire test checks the same bytes.
+    func testCloseConfirmationWire() throws {
+        let bytes = Data(hex: "0000000a0e020102030405060708")
+        var parser = ScreenVideoParser()
+        let raws = try parser.push(bytes)
+        XCTAssertEqual(raws.count, 1)
+        XCTAssertEqual(raws[0].type, 14)
+        XCTAssertEqual(raws[0].body, Data(hex: "020102030405060708"))
+        let decoded = try ScreenLinkMessage.decode(type: raws[0].type, body: raws[0].body)
+        if case .unknown = decoded {
+            XCTFail("close_ack type 14 must be decoded, not skipped as an unknown message")
+        }
+        XCTAssertEqual(decoded.framed(), bytes)
+        let close = ScreenLinkMessage.close(channel: 2, offset: 0x0102_0304_0506_0708).framed()
+        XCTAssertEqual(close.dropFirst(5), raws[0].body, "close_ack repeats the close's channel and final offset")
+    }
+
     func testShortBodiesThrow() {
         XCTAssertThrowsError(try ScreenLinkMessage.decode(type: 1, body: Data([1, 0, 0])))
         XCTAssertThrowsError(try ScreenLinkMessage.decode(type: 8, body: Data(count: 10)))
@@ -86,6 +105,7 @@ final class ScreenLinkWireTests: XCTestCase {
         case "data": return .data(channel: ch(), offset: n("offset"), bytes: Data(hex: e["bytes_hex"]?.string ?? ""))
         case "ack": return .ack(channel: ch(), offset: n("offset"))
         case "close": return .close(channel: ch(), offset: n("offset"))
+        case "close_ack": return .closeAck(channel: ch(), offset: n("offset"))
         case "reset": return .reset(channel: ch(), offset: n("offset"))
         case "use": return .use(entries())
         case "resumed": return .resumed(entries())

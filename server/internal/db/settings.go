@@ -319,3 +319,15 @@ func (d *DB) CompareSetting(ctx context.Context, key string, revision int64, val
 	}
 	return tag.RowsAffected() == 1, err
 }
+
+// PutSettingIfUnset migrates a legacy client preference without overwriting a
+// concurrent explicit choice. The unique key arbitrates across manager processes.
+func (d *DB) PutSettingIfUnset(ctx context.Context, key string, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = d.pool.Exec(ctx, `INSERT INTO `+d.settingsTable()+` (key, value, updated_at)
+ VALUES ($1, $2, now()) ON CONFLICT (key) DO NOTHING`, key, raw)
+	return err
+}

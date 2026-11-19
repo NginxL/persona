@@ -282,10 +282,10 @@ fun TodoDetailScreen(
                             )
                         }
 
-                        // Dictated notes (#4636, iOS): the phone's own voice input, what was heard at the end of the notes.
-                        val dictate = persona.feature.chat.rememberDictation({ notesText = persona.feature.chat.withDictation(notesText, it) },
-                            onError, stringResource(R.string.agents_todo_notes_dictation_prompt))
                         if (editingNotes) {
+                            val dictate = key(todo.id) { persona.feature.chat.rememberDictation(
+                                { notesText = persona.feature.chat.withDictation(notesText, it) }, onError,
+                                stringResource(R.string.agents_todo_notes_dictation_prompt)) }
                             JTextField(
                                 notesText,
                                 { notesText = it },
@@ -293,8 +293,9 @@ fun TodoDetailScreen(
                                 placeholder = stringResource(R.string.agents_todo_notes_edit_placeholder),
                                 minLines = 3,
                                 maxLines = 8,
+                                supportingText = dictate?.heard?.takeIf { it.isNotBlank() },
                                 trailing = dictate?.let { d -> {
-                                    JIconButton(PersonaIcons.dictate, stringResource(R.string.agents_todo_notes_dictate), d, enabled = !saving)
+                                    persona.feature.chat.DictationMic(d, stringResource(R.string.agents_todo_notes_dictate), enabled = !saving)
                                 } },
                             )
                             Row(
@@ -302,6 +303,7 @@ fun TodoDetailScreen(
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 JTextButton(stringResource(R.string.agents_todo_cancel), onClick = {
+                                    dictate?.cancel()
                                     titleText = todo.title
                                     notesText = todo.notes
                                     editingTitle = false
@@ -310,7 +312,7 @@ fun TodoDetailScreen(
                                 Spacer(Modifier.width(Tokens.Space.s))
                                 // The hub refuses a blank title; the editor stays, with what was typed, until the save goes through.
                                 JButton(stringResource(R.string.agents_todo_save), onClick = {
-                                    if (saving || titleText.isBlank()) return@JButton
+                                    if (saving || titleText.isBlank() || dictate?.active == true) return@JButton
                                     saving = true
                                     scope.launch {
                                         try {
@@ -325,7 +327,7 @@ fun TodoDetailScreen(
                                             saving = false
                                         }
                                     }
-                                }, enabled = titleText.isNotBlank() && !saving, loading = saving)
+                                }, enabled = titleText.isNotBlank() && !saving && dictate?.active != true, loading = saving)
                             }
                         } else if (todo.notes.isNotBlank()) {
                             Text(

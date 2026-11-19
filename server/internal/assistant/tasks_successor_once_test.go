@@ -18,10 +18,11 @@ import (
 // the session holds its answer; fail answers that many of the held starts with an error once the gate opens.
 type successorGateHub struct {
 	*fakeHub
-	arrived chan struct{}
-	gate    chan struct{}
-	mu      sync.Mutex
-	fail    int
+	arrived  chan struct{}
+	gate     chan struct{}
+	mu       sync.Mutex
+	fail     int
+	startErr error
 }
 
 func (h *successorGateHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
@@ -35,6 +36,9 @@ func (h *successorGateHub) DeviceCall(ctx context.Context, p DeviceCall) (json.R
 		}
 		h.mu.Unlock()
 		if failing {
+			if h.startErr != nil {
+				return nil, h.startErr
+			}
 			return nil, errors.New("the node could not start the agent")
 		}
 	}
@@ -217,6 +221,52 @@ func TestStoppedTaskMessageAfterAFailedStartStartsTheAgent(t *testing.T) {
 			t.Fatalf("new agents linked to the task = %v, want [%s]", linked, agent)
 		}
 	})
+}
+
+func TestStoppedTaskUncertainStartDoesNotRepeatTheMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"deadline across the bus", relayedDeadline},
+		{"node failed after writing", nodeAfterWrite},
+		{"unreadable start receipt", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, h, todo := stoppedTaskOnGate(t)
+				if ok, err := s.autoDoneTodo(t.Context(), todo.ID, "finished", time.Now()); !ok || err != nil {
+					t.Fatalf("complete task: %v, %v", ok, err)
+				}
+				if tc.err == nil {
+					h.answerNode(DeviceSessionStart, unreadableWriteReceipt)
+				} else {
+					h.fail, h.startErr = 1, tc.err
+				}
+				first, waiting := make(chan error, 1), make(chan error, 1)
+				route := func(result chan<- error) {
+					_, err := s.routeToTask(t.Context(), "conv1", todo.ID, "Check the weekly figures")
+					result <- err
+				}
+				go route(first)
+				<-h.arrived
+				go route(waiting)
+				synctest.Wait()
+				close(h.gate)
+				for _, ch := range []chan error{first, waiting} {
+					if err := <-ch; err == nil || !strings.Contains(i18n.Localize(err, i18n.En), "before sending again") {
+						t.Errorf("route returned %v; want to check the agent before sending again", err)
+					}
+				}
+				if extra := len(h.arrived); extra != 0 {
+					t.Errorf("the waiting message started %d more agents", extra)
+				}
+				if got := todoNow(s, todo.ID); got.DoneAt != nil || got.ReopenedAt == nil {
+					t.Errorf("an uncertain start did not reopen the task")
+				}
+			})
+		})
+	}
 }
 
 // A start that outlasts its own bound: the message that waited for it is answered as not sent, rather than waiting

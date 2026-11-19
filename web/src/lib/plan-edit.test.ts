@@ -12,7 +12,7 @@ const plan: TaskPlan = {
 };
 
 describe("改一下 on a plan card", () => {
-  it("starts from every task's fields, an unset permission as 每步都问 and ultracode as the assistant chose", () => {
+  it("starts from every task's fields, an unset permission as 默认权限 and ultracode as the assistant chose", () => {
     expect(planEditsOf(plan)).toEqual([
       { title: "补测试", machine: "m1", cwd: "/work/app", model: "", permission: "default", prompt: "给登录补测试", ultracode: false },
       { title: "改文档", machine: "m2", cwd: "/work/docs", model: "opus", permission: "acceptEdits", prompt: "更新文档", ultracode: true },
@@ -34,7 +34,7 @@ describe("改一下 on a plan card", () => {
     expect(planEditsChanged(before, flipped)).toBe(true);
   });
 
-  it("sends the edits, leaving out a 每步都问 the plan never set", () => {
+  it("sends the edits, leaving out a 默认权限 the plan never set", () => {
     const edits = planEditsOf(plan);
     edits[0] = { ...edits[0], title: "补登录测试" };
     const sent = planEditsToSend(plan, edits);

@@ -100,6 +100,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Reroute = nil
 		t.Title, t.Prompt, t.Cwd = strings.TrimSpace(t.Title), strings.TrimSpace(t.Prompt), strings.TrimSpace(t.Cwd)
 		t.Model = strings.TrimSpace(t.Model)
+		t.Speed = strings.TrimSpace(t.Speed)
 		t.Permission = strings.TrimSpace(t.Permission)
 		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
@@ -164,14 +165,9 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		// What it runs on the computer it lands on (#2640): a default that computer lacks is swapped now, so the card
 		// names the launcher that will run and its why says so; a launcher this plan names that it lacks is refused.
 		takesModes := true
-		if m, ok := s.machineByName(ctx, t.Machine); ok {
-			params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "tier": t.Tier}
-			own, err := s.resolveStart(ctx, params)
-			if err != nil {
-				return "", fmt.Errorf("task %d: %w", i+1, err)
-			}
-			// The card shows the mode that runs: Allow all for Claude Code and an Auto Accept provider (#8141).
-			fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
+		if _, ok := s.machineByName(ctx, t.Machine); ok {
+			own := t.launchPick()
+			fit, err := s.fitPlanTaskSpeed(ctx, t)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
@@ -181,8 +177,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			// traex, omp…: no mode, no effort (launcher_modes.go). One the call names is refused now, rather than by
 			// the computer once the task starts; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
 			if takesModes = startTakesModes(fit.agent); !takesModes {
-				launcher, _ := params["launcher"].(string)
-				if err := startModesRefused(launcher, fit.agent, asked, own.effort); err != nil {
+				if err := startModesRefused(t.Launcher, fit.agent, asked, own.effort); err != nil {
 					return "", fmt.Errorf("task %d: %w", i+1, err)
 				}
 				t.Effort = ""
@@ -428,6 +423,9 @@ func applyPlanEdit(t *PlanTask, e PlanTask) {
 	}
 	if s := strings.TrimSpace(e.Effort); s != "" {
 		t.Effort = s
+	}
+	if s := strings.TrimSpace(e.Speed); s != "" {
+		t.Speed = s
 	}
 	if s := strings.TrimSpace(e.Permission); s != "" {
 		t.Permission = s

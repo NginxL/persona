@@ -68,6 +68,13 @@ describe("the current model", () => {
     expect(isCurrentModel(models[1], undefined)).toBe(false);
     expect(isCurrentModel(models[1], "")).toBe(false);
   });
+  it("folds a gateway's routed echo and the 1M marker", () => {
+    const carbon = [{ id: "gemini-4-carbon", name: "Gemini 4 Carbon" }];
+    expect(isCurrentModel(carbon[0], "passthrough/route-gemini-4-carbon/gemini-4-carbon")).toBe(true);
+    expect(isCurrentModel(carbon[0], "gemini-4-carbon[1m]")).toBe(true);
+    expect(isCurrentModel({ id: "gemini-4-carbon[1m]", name: "Gemini 4 Carbon" }, "gemini-4-carbon")).toBe(true);
+    expect(isCurrentModel(carbon[0], "passthrough/x/kimi-k3.1-pro")).toBe(false);
+  });
 });
 
 describe("the /model command", () => {

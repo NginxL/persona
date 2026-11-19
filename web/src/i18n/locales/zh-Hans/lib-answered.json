@@ -1,7 +1,7 @@
 {
   "mode_accept_edits": "允许编辑",
   "mode_bypass": "完全访问",
-  "mode_default": "每步确认",
+  "mode_default": "默认权限",
   "dismissed": "交回电脑处理",
   "by_assistant": "助手已代答",
   "unanswered": "（未回答）",

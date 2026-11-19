@@ -462,6 +462,26 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
 - Not yet available (others can install, but it's still awkward; see `docs/operations/config.md`):
   Developer ID notarization of the macOS binary (browser downloads get blocked by Gatekeeper; `curl` doesn't).
 
+## Release PRs and GitHub Actions publication
+
+**Every new formal or beta release is an explicit release PR.** The PR title is `release: vX.Y.Z` for a formal release or `release: vX.Y.Z-beta.N` for a beta. It targets `main`, originates in this repository, and is authored by administrator `chyroc`; an ordinary feature PR, fork PR or branch is not a release request. Do not create a local version tag to start a new release.
+
+1. `release-schedule.yml` runs stable selection at 12:00 in the operator's configured UTC+08:00 zone (04:00 UTC) and beta selection every two hours (never every two minutes). It skips an unchanged source and opens a release PR with an unused immutable version. A feature since the previous stable tag increments minor; a fix-only history increments patch. It uses `RELEASE_PR_TOKEN` in the protected `persona-release` environment so the PR has the administrator's identity. Do not replace it with the workflow's ordinary `GITHUB_TOKEN` or run a second local release scheduler.
+2. `release-pr.yml` first checks out the PR's proposed merge result, not an arbitrary branch or an earlier PR head. CLI/Web, Android, iPhone/Watch and Windows produce one exact-source verification plan. If a required build or check fails, repair the release PR and run it again; do not merge a failing release PR or substitute an older artifact.
+3. Only after every required platform check passes may the administrator squash-merge that release PR. The merge gate requires the exact successful check and unexpired verification artifact. Squash creates a new main SHA: the `push` run of `release-pr.yml` then resolves the merged PR and **rebuilds and reverifies that actual main commit on every platform**. A successful PR head is never treated as proof for the squash result.
+4. Only after the post-merge run succeeds does `release-publish.yml` start through `workflow_run`. It rereads the merged PR, requires its merge commit to be the current `main`, verifies the new plan and every artifact digest, then creates the immutable annotated tag once at that exact main commit. An existing tag for another source is a hard failure, never moved. The existing tag-triggered `release.yml` builds the container and creates the stable/prerelease GitHub Release. The publication job uploads the verified artifacts, compares remote SHA-256, independently downloads and compares every artifact, and only then advances the beta pointer. Stable `releases/latest` and stable metadata never come from a beta PR.
+5. TestFlight and release attachments are separate results. A completed release PR does not deploy the production Hub/site, submit an App Store production version or install on a phone. Repeating a failed publication is an administrator-only `release-publish` dispatch for the same merged release PR and exact current main; it never selects another source.
+
+### Protected environment
+
+`persona-release` holds the release-PR token and the signing/build values used by these jobs. `RELEASE_PR_TOKEN` creates release PRs as `chyroc`. Prefer a GitHub App installation token for that account, restricted to this repository with only **Contents: read and write** and **Pull requests: read and write**; a short-lived fine-grained token with exactly the same repository and permissions is the alternative. It needs no administration, packages, signing, Actions or organization access. The scheduler exchanges it only through the protected environment and never writes it to the repository or logs. Do not reuse the current interactive `gh` credential as a permanent release token. Android uses `PERSONA_ANDROID_APPLICATION_ID`, `PERSONA_ANDROID_CERTIFICATE_SHA256`, `PERSONA_ANDROID_KEYSTORE_BASE64`, `PERSONA_ANDROID_KEY_ALIAS`, `PERSONA_ANDROID_KEYSTORE_PASSWORD` and `PERSONA_ANDROID_KEY_PASSWORD`; the private `ci_release_config.py` writes a temporary mode-0600 signer configuration and keystore only inside the runner. Apple uses `PERSONA_APPLE_API_KEY`, `PERSONA_APPLE_API_KEY_ID`, `PERSONA_APPLE_API_ISSUER`, `PERSONA_APPLE_APP_ID`, `PERSONA_APPLE_TEAM_ID`, `PERSONA_APP_BUNDLE_ID`, `PERSONA_TESTFLIGHT_FEEDBACK_EMAIL`, `PERSONA_TESTFLIGHT_EXTERNAL_JSON`, and optional `PERSONA_APP_GROUP`, `PERSONA_WATCH_APP_GROUP`, `PERSONA_WATCH_WIDGET_BUNDLE_ID`. Windows desktop uses the existing `PERSONA_DESKTOP_APP_ID`, `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` prerequisites. Never commit these values, put them in PR text, or include the temporary configuration in an artifact.
+
+An unconfigured required signing platform blocks the release PR; it is not a successful skip. Windows amd64 native verification runs on `windows-latest`; Windows arm64 requires a matching native ARM64 runner or approved self-hosted signer and is otherwise reported blocked. HarmonyOS production HAP still requires DevEco and production signing (#6734). No debug IPA/APK, unsigned HAP, development Electron installer or ad-hoc signature is an acceptable replacement. Release-PR jobs use only their required protected credentials; the unprivileged CLI/Web job has no signing secrets.
+
+### Historical local tag consumers
+
+The local tag-consumer section below documents the pre-release-PR pipeline and existing private recovery tools. It is not a second scheduler to run alongside release PR publication. Existing tags and Releases remain immutable historical records.
+
 ## Publishing a release (`.github/workflows/release.yml`)
 
 A `v*` tag publishes the hub container image and creates a GitHub Release. **Only `chyroc` may create, update or delete a `v*` tag, dispatch an image release or rerun its jobs.** The repository's `Release tags: administrators only` ruleset permits only the administrator role to bypass its create/update/delete restrictions; other collaborators cannot publish a version tag. The workflow independently requires both the run's actor and its triggering actor to be `chyroc` before any checkout, build or upload, including manual dispatches and reruns. The Release's `github-actions[bot]` author identifies the workflow that created it, not the person who pushed the tag; the Actions run records that triggering actor.
@@ -483,6 +503,14 @@ git tag v1.2.0 && git push origin v1.2.0
 - The image's personad uses the tag minus `v` as its version (`personad version`); when node differs, the App prompts to redeploy, using the image's own builds or the release's (`docs/operations/docker.md` ("Node builds")).
 - The image's personad is on the `docker` channel: no skills (like all binaries), no self-update; a new image prompts you to pull it (`docs/operations/hub-update.md`).
 - When the repository is private, the package is private too; NAS installs need `docker login ghcr.io` (`docs/operations/docker.md` ("Image")).
+
+### Darwin command-line programs on version tags
+
+The `darwin-cli-sign` job signs `personad`, `persona-node`, `persona-link`, `persona-hub` and `persona-manager` for both darwin architectures on stable and prerelease version tags. Its `darwin_cli` availability check needs only `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` in the protected `persona-desktop-release` environment; it is independent of the desktop package version gate and does not require the desktop notarization credentials.
+
+The job builds the tag's programs, signs them under fixed identifiers, verifies each Developer ID signature, recompresses the signed binaries, rebuilds `SHA256SUMS` and `latest.json` from those downloads, verifies that manifest, and attaches the darwin archives and metadata to the same Release. If either certificate secret is missing, the gate reports `Darwin CLI signing blocked` with the missing secret names and the job does not build or upload; there is no ad-hoc fallback. A missing Developer ID identity also stops the job before upload.
+
+Prerelease CLI artifacts do not change the desktop package channel policy or GitHub's `releases/latest` selection. The `latest.json` attached to a prerelease is that Release's version manifest, not a move of the stable Release pointer.
 
 ### Desktop packages on version tags
 

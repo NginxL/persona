@@ -266,12 +266,12 @@ class ForwardTest {
         deliverForward(ForwardTarget.Chat(photos), ref, key, f, res)
         assertEquals(listOf(photos to false), opened.chats)
         val placed = ForwardPlacements.take(photos).single()
-        assertEquals("从 MacBook Pro 转发 · 发到 Mac Studio 上的 Claude", placed.route)
+        assertEquals("从 MacBook Pro 转发 · 发到 Mac Studio 上的 Claude", placed.ref.route)
         // The route is shown, never sent.
-        assertEquals(ref.xml(), placed.xml())
+        assertEquals(ref.xml(), placed.ref.xml())
         deliverForward(ForwardTarget.Persona, ref, key, f, res)
         assertEquals(main to true, opened.chats.last())
-        assertEquals("从 MacBook Pro 转发 · 发给 Persona", ForwardPlacements.take(main).single().route)
+        assertEquals("从 MacBook Pro 转发 · 发给 Persona", ForwardPlacements.take(main).single().ref.route)
         // No main conversation yet: Persona's new conversation takes it.
         deliverForward(ForwardTarget.Persona, ref, key, forwarding(opened, null), res)
         assertEquals(1, opened.home)

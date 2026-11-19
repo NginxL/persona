@@ -1,4 +1,5 @@
 {
+  "invalid_guidance": "This change is unavailable because its instructions are incomplete.",
   "retry": "Try again",
   "reload": "Reload",
   "refresh_failed": "Couldn't get the latest settings ({error}). What's shown may be out of date.",

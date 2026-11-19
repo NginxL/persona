@@ -167,6 +167,37 @@ func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	}
 }
 
+// A public mention on a runtime-backed main chat gets the runtime's ordinary input but no owner snapshot (#11130).
+func TestAssistantPublicSendOnRuntimeSkipsSnapshot(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	sid := startedAssistant(t, n, host)
+	hub.mu.Lock()
+	base := hub.answer
+	contextCalls := 0
+	hub.answer = func(method string, params json.RawMessage) (any, error, bool) {
+		if method == "assistant.context" {
+			contextCalls++
+		}
+		return base(method, params)
+	}
+	hub.mu.Unlock()
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "public mention", "public": true}); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	if contextCalls != 0 {
+		hub.mu.Unlock()
+		t.Fatalf("public runtime send requested %d owner snapshots", contextCalls)
+	}
+	hub.mu.Unlock()
+	sends := host.got("session.send")
+	if len(sends) != 2 || strings.Contains(string(sends[1]), "测试时间") {
+		t.Fatalf("public runtime input carries the owner snapshot: %s", sends)
+	}
+}
+
 // A runtime may put the client_msg_id it was sent a message with on the message's line (the node-to-runtime
 // session.send, as Paseo does). For an assistant conversation that id is the message's own: the app's, or none when it
 // came without one, so the apps match their pending bubble by it, or by its words. The node used to send every message

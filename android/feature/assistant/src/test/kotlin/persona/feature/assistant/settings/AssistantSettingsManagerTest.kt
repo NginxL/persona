@@ -101,7 +101,7 @@ class AssistantSettingsManagerTest {
         rule.onAllNodesWithText("Personal").assertCountEquals(0)
         rule.onAllNodesWithText("Work").assertCountEquals(0)
         rule.onAllNodesWithText("New conversation permissions").onLast().assertIsEnabled().performClick()
-        rule.onNodeWithText("Allow edits").performClick()
+        rule.onNodeWithText("Auto accept edits").performClick()
         rule.waitForIdle()
         assertEquals("acceptEdits", values.getValue("assistant").defaultPermissionMode)
         // Another assistant current: the page reads and writes that one's.
@@ -114,7 +114,7 @@ class AssistantSettingsManagerTest {
         assertEquals("acceptEdits", values.getValue("assistant").defaultPermissionMode)
         rule.runOnIdle { AssistantManagerChoice.pick(null) }
         rule.waitForIdle()
-        rule.onNodeWithText("Allow edits").assertExists()
+        rule.onNodeWithText("Auto accept edits").assertExists()
         assertEquals("personal-history", values.getValue("assistant").main)
         assertEquals("work-history", values.getValue("work").main)
     }

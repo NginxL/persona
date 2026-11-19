@@ -234,7 +234,7 @@ func (s *Service) acceptCard(ctx context.Context, t Todo, a acceptAsk, again boo
 	if again {
 		head = "assistant-reports.accept_again"
 	}
-	title := i18n.T(l, head, i18n.Args{"task": clip(oneLine(t.Title), 30)})
+	title := s.feishuDirection(ctx, t, s.feishuDirections(ctx)) + i18n.T(l, head, i18n.Args{"task": clip(oneLine(t.Title), 30)})
 	c := feishubot.NewCard("🧪 "+title, feishubot.Purple, title)
 	link := i18n.T(l, "assistant-reports.accept_no_link")
 	if a.Link != "" {

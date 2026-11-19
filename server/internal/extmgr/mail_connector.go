@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/mail"
@@ -17,7 +18,7 @@ import (
 )
 
 // mailConnector is mail as a connector (docs/plans/plan-connectors.md "3. Migration"): so far what goes into the knowledge
-// base, by one cursor per account (the newest UID archived, see Changes), its inbox, its tools and mail_send through the gate;
+// base, by one cursor per mailbox (the newest UID archived, see Changes), its inbox, its tools and mail_send through the gate;
 // Settings › Connectors draws its row from the connectors list (?all=1, migration M3–M6).
 type mailConnector struct{ h *Manager }
 
@@ -34,7 +35,7 @@ func (mailConnector) Manifest() connector.Manifest {
 		AgentTools: []string{"mail_*"}, Poll: kbMailPoll, InboxSwitch: true}
 }
 
-// Archive paging: a page of the inbox per ListMessages, at most mailArchivePages of them per account and call, at
+// Archive paging: a page per ListMessages, at most mailArchivePages of them per mailbox and call, at
 // most mailArchiveReads full texts per call (the rest their snippet).
 const (
 	mailArchivePage  = 40
@@ -42,11 +43,12 @@ const (
 	mailArchiveReads = 10
 )
 
-// Changes is inbox mail newer than the last UID archived per account, oldest first, one chat per account and
+// Changes is mail newer than the last UID archived per mailbox, oldest first, one chat per account and
 // correspondent (mail-<account>-<address>); subject + text, 4 000 characters. An account that cannot be read is
 // skipped this time.
 //
-// The cursor is {"<account>": uid}, as mail-cursors.json always was, plus per account (absent when zero):
+// The INBOX cursor is {"<account>": uid}, as mail-cursors.json always was. Each other folder uses MailFolderKey
+// in place of the account. Each key also has (absent when zero):
 // "<account>#v" the mailbox's UIDVALIDITY, "<account>#e" the identity epoch after a known validity change,
 // "<account>#t" the newest archived mail's time (unix seconds), and a hole "<account>#f" < UID < "<account>#h"
 // still to archive. The hole is what lies between the old cursor and the newest
@@ -63,52 +65,63 @@ func (c mailConnector) Changes(ctx context.Context, cursor string, _ int) ([]con
 		return nil, cursor, false, nil
 	}
 	var batches []connector.ChatBatch
-	reads, more := 0, false
+	more := false
 	for _, a := range accounts {
-		st := loadMailCursor(cursors, a.ID)
-		msgs, ok, err := c.mailChanges(ctx, a.ID, &st)
+		boxes, err := c.h.mail.IntakeMailboxes(ctx, a.ID)
 		if err != nil {
-			return nil, cursor, false, err
+			boxes = []string{"INBOX"} // Keep collecting INBOX while folder discovery is unavailable.
 		}
-		if !ok {
-			continue
-		}
-		for _, m := range msgs {
-			text := m.Snippet
-			if reads < mailArchiveReads {
-				if full, err := c.h.mail.GetMessage(ctx, a.ID, m.UID, m.Mailbox); err == nil && strings.TrimSpace(full.Text) != "" {
-					text = full.Text
+		for _, box := range boxes {
+			key := assistantwire.MailFolderKey(a.ID, box)
+			st := loadMailCursor(cursors, key)
+			msgs, ok, err := c.mailChanges(ctx, a.ID, box, &st)
+			if err != nil {
+				return nil, cursor, false, err
+			}
+			if !ok {
+				continue // keep this folder's cursor for the next round
+			}
+			for _, m := range msgs {
+				id := fmt.Sprint(m.UID)
+				if st.epoch != 0 {
+					// A second renumbering may occur before the new cursor is published.
+					id = fmt.Sprintf("v%d-e%d:%d", st.validity, st.epoch, m.UID)
 				}
-				reads++
+				if key != a.ID {
+					id = key + ":" + id
+				}
+				batches = append(batches, c.archiveMessage(ctx, a, box, m, id, len(batches) < mailArchiveReads))
 			}
-			at, _ := time.Parse(time.RFC3339, m.Date)
-			addr := strings.ToLower(m.From.Email)
-			name := m.From.Name
-			if name == "" {
-				name = addr
-			}
-			id := fmt.Sprint(m.UID)
-			if st.epoch != 0 {
-				// Include validity as well as the epoch: another renumbering can happen
-				// after ingestion succeeds but before this cursor is published.
-				id = fmt.Sprintf("v%d-e%d:%d", st.validity, st.epoch, m.UID)
-			}
-			batches = append(batches, connector.ChatBatch{
-				Chat: kb.SourceChat{ID: a.ID + "-" + addr, Name: name + " · 邮件", Kind: "mail"},
-				Messages: []kb.SourceMessage{{ID: id, SenderID: addr, SenderName: name, At: at, Type: "TEXT",
-					SenderHandles: []kb.Handle{{Kind: kb.HandleEmail, Value: addr}},
-					Mine:          strings.EqualFold(addr, a.Email),
-					Text:          "【" + m.Subject + "】" + clip(strings.TrimSpace(text), 4000)}},
-			})
+			st.store(cursors, key)
+			more = more || st.holeTop != 0 || st.deferred
 		}
-		st.store(cursors, a.ID)
-		more = more || st.holeTop != 0 || st.deferred
 	}
 	raw, _ := json.Marshal(cursors)
 	return batches, string(raw), more, nil
 }
 
-// mailCursor is one account's part of the mail archive cursor (see Changes).
+func (c mailConnector) archiveMessage(ctx context.Context, a mail.MailAccount, box string, m mail.MailSummary, id string, readFull bool) connector.ChatBatch {
+	text := m.Snippet
+	if readFull {
+		if full, err := c.h.mail.GetMessage(ctx, a.ID, m.UID, box); err == nil && strings.TrimSpace(full.Text) != "" {
+			text = full.Text
+		}
+	}
+	at, _ := time.Parse(time.RFC3339, m.Date)
+	addr, name := strings.ToLower(m.From.Email), m.From.Name
+	if name == "" {
+		name = addr
+	}
+	return connector.ChatBatch{
+		Chat: kb.SourceChat{ID: a.ID + "-" + addr, Name: name + " · 邮件", Kind: "mail"},
+		Messages: []kb.SourceMessage{{ID: id, SenderID: addr, SenderName: name, At: at, Type: "TEXT",
+			SenderHandles: []kb.Handle{{Kind: kb.HandleEmail, Value: addr}},
+			Mine:          strings.EqualFold(addr, a.Email),
+			Text:          "【" + m.Subject + "】" + clip(strings.TrimSpace(text), 4000)}},
+	}
+}
+
+// mailCursor is one mailbox's part of the mail archive cursor (see Changes).
 type mailCursor struct {
 	top       uint32 // newest UID archived
 	validity  uint32 // UIDVALIDITY the UIDs belong to, 0 unknown (a cursor from before it was kept)
@@ -135,13 +148,13 @@ func (st mailCursor) store(cursors map[string]uint32, id string) {
 	}
 }
 
-// mailChanges is the account's inbox mail to archive now, oldest first, moving st past it; ok is false when the
+// mailChanges is the mailbox's mail to archive now, oldest first, moving st past it; ok is false when the
 // inbox could not be read (st is left as it was).
-func (c mailConnector) mailChanges(ctx context.Context, account string, st *mailCursor) ([]mail.MailSummary, bool, error) {
+func (c mailConnector) mailChanges(ctx context.Context, account, box string, st *mailCursor) ([]mail.MailSummary, bool, error) {
 	if st.epoch != 0 && st.validity == 0 {
 		return nil, false, errors.New("mail archive identity epoch has no known validity")
 	}
-	res, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Limit: mailArchivePage})
+	res, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage})
 	if err != nil {
 		return nil, false, nil
 	}
@@ -174,7 +187,7 @@ func (c mailConnector) mailChanges(ctx context.Context, account string, st *mail
 	pages := 1
 	fill := func() {
 		for ; st.holeTop != 0 && pages < mailArchivePages; pages++ {
-			page, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Limit: mailArchivePage, BeforeUID: st.holeTop})
+			page, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage, BeforeUID: st.holeTop})
 			if err != nil || (page.UIDValidity != 0 && page.UIDValidity != st.validity) {
 				pages = mailArchivePages // read again next time; a renumbering in between is seen on the newest page then
 				return

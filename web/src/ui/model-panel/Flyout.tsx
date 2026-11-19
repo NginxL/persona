@@ -110,7 +110,7 @@ export function Flyout({ rowEl, panelEl, row, setup, mode, starred, disabled, fo
       aria-label={t("ui-modelpanel.setup_of", { model: name })}
       data-model-flyout
       className="fixed z-50 flex flex-col rounded-[12px] bg-surface p-3.5 pb-3 shadow-overlay transition-[top] duration-150 ease-out"
-      style={{ width: FLYOUT_WIDTH, maxWidth: "calc(100vw - 16px)", left: at?.left ?? -9999, top: at?.top ?? -9999, visibility: at ? undefined : "hidden" }}
+      style={{ width: FLYOUT_WIDTH, maxWidth: "calc(100vw - 16px)", left: at?.left, top: at?.top, visibility: at ? undefined : "hidden" }}
     >
       <div className="flex items-start gap-2">
         <span title={name} className={cx("line-clamp-2 min-w-0 flex-1 text-[14px] leading-[1.35] font-semibold break-words text-ink", model.custom && "font-mono")}>{name}</span>

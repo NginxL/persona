@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 enum class DeliveryState {
     Sending, WaitingForNetwork, Sent, Rejected, NeedsConfirmation,
-    Queued, Unknown, Refused, Verifying,
+    Queued, Unknown, Refused, Verifying, Held,
 }
 
 data class OutboxMessage(
@@ -18,6 +18,8 @@ data class OutboxMessage(
     val mainTarget: Boolean = false,
     /** When this phone wrote it, epoch millis. Absent on an outbox restored from before that was stored. */
     val createdAt: Long? = null,
+    /** The active attempt's wire id after the manager explicitly refused an earlier attempt. */
+    val opId: String? = null,
 )
 
 private val NoWrittenAt = MutableStateFlow(emptyMap<String, Long>())

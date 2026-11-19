@@ -1,0 +1,15 @@
+{
+  "name": "cancel_followup",
+  "description": "Cancel a scheduled follow-up or a repeating task by id (from list_followups).",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      }
+    }
+  }
+}

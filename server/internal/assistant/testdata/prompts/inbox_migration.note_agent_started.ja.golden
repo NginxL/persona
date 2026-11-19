@@ -1,0 +1,4 @@
+Example ownerが確認し、Agent が起動しました（box の会話 session_1）。指示：
+Original task
+
+停止時に最後の発言か失敗理由が届くので、そのとき提案してください。今は inbox_suggest に recap だけを渡して要約を更新します。

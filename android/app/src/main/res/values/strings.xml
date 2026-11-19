@@ -81,6 +81,11 @@
     <string name="app_share_queueing">Adding to the send queue…</string>
     <string name="app_share_queued_offline">Added to the send queue. It sends when you\'re online</string>
     <string name="app_share_queue_failed">Couldn\'t add to the send queue. The content is kept; try again</string>
+    <string name="app_diagnostics_title">Send diagnostics to Agent</string>
+    <string name="app_diagnostics_archive">Diagnostics archive</string>
+    <string name="app_diagnostics_note">Diagnostics from this Android device. Please inspect the attached archive and help identify the problem.</string>
+    <string name="app_diagnostics_open_chat">Open chat</string>
+    <string name="app_diagnostics_prepare_failed">Couldn\'t prepare the diagnostics draft. Check your connection and try again; nothing was sent.</string>
     <string name="app_capsule_open_and_handle">View and handle</string>
     <string name="app_capsule_main_prompt">What should Persona do?</string>
     <string name="app_capsule_main_section">Main chat</string>

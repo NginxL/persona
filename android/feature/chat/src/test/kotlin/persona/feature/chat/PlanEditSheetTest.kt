@@ -98,14 +98,14 @@ class PlanEditSheetTest {
         rule.onNode(hasSetTextAction() and hasText("Write the changelog")).assertExists()
     }
 
-    /** Auto is a mode the card names and the sheet offers: the hub may settle an unset one from Claude Code's default mode (#3026). */
+    /** Auto-review is a mode the card names and the sheet offers: the hub may settle an unset one from Claude Code's default mode (#3026). */
     @Test fun autoIsNamedOnTheCardAndOfferedInTheSheet() {
         val auto = Api(plan.copy(tasks = plan.tasks.map { it.copy(permission = "auto") }), fail = false)
         showCard(auto, mutableListOf())
-        rule.onNodeWithText("自动判断").assertExists()
+        rule.onNodeWithText("自动审批").assertExists()
         rule.onNodeWithText("改一下").performClick()
-        rule.onNode(hasText("每步都问") and hasAnyAncestor(isDialog())).performClick()
-        rule.onNode(hasText("自动判断") and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(hasText("默认权限") and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(hasText("自动审批") and hasAnyAncestor(isDialog())).performClick()
         rule.onNode(hasText("开始") and hasAnyAncestor(isDialog())).performClick()
         rule.waitForIdle()
         assertEquals("auto", auto.sent.single()?.single()?.permission)

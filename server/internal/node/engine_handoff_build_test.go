@@ -334,7 +334,7 @@ func TestHandoffInputsAndPictures(t *testing.T) {
 	items := []proto.Item{
 		img, hUser(1, "what is wrong here?"),
 		hTool(2, "s1", "mcp__persona__computer_screenshot", `{}`), hResult(3, "s1", "", false, nil), shot,
-		hUser(4, prompts.RenderAgentLimitContinue()),
+		hUser(4, prompts.RenderAgentLimitContinue("")),
 		peer,
 		{ID: "i3#0", Seq: 6, Role: "user", Kind: proto.KindImage, Image: &proto.Image{Mime: "image/png", Data: "BBBB"}},
 	}

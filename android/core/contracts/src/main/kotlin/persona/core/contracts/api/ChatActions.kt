@@ -59,6 +59,14 @@ interface ChatActions {
      */
     suspend fun sendQueuedNow(session: Session): Unit = throw UnsupportedOperationException("Send now unavailable")
 
+    /** Retry a kept assistant message that gave up (POST …/assistant/conversations/{id}/undelivered/{msg}/retry). */
+    suspend fun retryUndelivered(session: Session, messageId: String): Unit =
+        throw UnsupportedOperationException("Kept message retry unavailable")
+
+    /** Never send a kept assistant message again (DELETE …/assistant/conversations/{id}/undelivered/{msg}). */
+    suspend fun deleteUndelivered(session: Session, messageId: String): Unit =
+        throw UnsupportedOperationException("Kept message deletion unavailable")
+
     /**
      * "Branch to new chat" (#2137, POST …/fork): the node copies the conversation up to the end of [atItemId]'s turn (a reply's
      * transcript item, `<uuid>#<n>`) into a new session on the same machine; returns its session id. Only for

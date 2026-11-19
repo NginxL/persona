@@ -1,0 +1,6 @@
+<persona-context kind="message-source" title="">
+{"kind":"followup"}
+</persona-context>
+<persona-limit-continue />
+⏰（Personaからの再開依頼です。）サブスクリプションの利用枠がリセットされ、再び利用できます。
+利用枠がなくなったときの作業を続けてください。まず上の進捗を確認し、完了した作業を繰り返さず、止まったところから再開してください。

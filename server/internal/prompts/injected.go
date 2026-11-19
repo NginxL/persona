@@ -95,6 +95,10 @@ func ParseInjected(text string) *proto.Injected {
 	text = strings.TrimSpace(text)
 	head, rest, _ := strings.Cut(text, "\n")
 	switch {
+	case strings.HasPrefix(head, "<persona-inbox"):
+		return parseInboxMarker(head, rest)
+	case head == "<persona-answer-again />" && strings.TrimSpace(rest) != "":
+		return &proto.Injected{Kind: proto.InjectedSystem, State: "answer_again", Line: "Persona 正在补问"}
 	case strings.HasPrefix(head, "<persona-wake"):
 		return parseWakeMarker(head, rest)
 	case strings.HasPrefix(head, "🔔 任务「"):
@@ -105,6 +109,10 @@ func ParseInjected(text string) *proto.Injected {
 		state := noticeStates[m[2]]
 		return &proto.Injected{Kind: proto.InjectedTaskNotice, State: state, Title: m[1], Machine: m[3],
 			Line: "任务「" + m[1] + "」" + noticeLines[state]}
+	case head == "<persona-limit-continue />" && strings.TrimSpace(rest) != "":
+		return &proto.Injected{Kind: proto.InjectedFollowup, State: "limit_continue", Line: "用量额度重置了，Persona 让它接着做"}
+	case strings.HasPrefix(head, "<persona-limit-continue"):
+		return nil
 	case strings.HasPrefix(head, limitContinueHead):
 		// Only hubs that write it mark it: it is not in the shared fixtures the apps' own recognition runs.
 		return &proto.Injected{Kind: proto.InjectedFollowup, State: "limit_continue", Line: "用量额度重置了，Persona 让它接着做"}
@@ -198,6 +206,33 @@ func parseWakeMarker(head, body string) *proto.Injected {
 	}
 	return &proto.Injected{Kind: proto.InjectedFollowup, State: "wake", Title: meta.Title,
 		Line: "Persona 叫醒了它：看看「" + meta.Title + "」好了没有"}
+}
+
+// inboxMetadata is the language-independent identity of an Inbox followup.
+type inboxMetadata struct {
+	Title string `json:"title"`
+}
+
+func parseInboxMarker(head, body string) *proto.Injected {
+	const start, end = "<persona-inbox>", "</persona-inbox>"
+	if !strings.HasPrefix(head, start) || !strings.HasSuffix(head, end) || strings.TrimSpace(body) == "" {
+		return nil
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(head, start), end)
+	var meta inboxMetadata
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.DisallowUnknownFields()
+	if d.Decode(&meta) != nil || d.Decode(new(any)) != io.EOF {
+		return nil
+	}
+	// Require our canonical JSON: rejects null, absent/duplicate keys and literal
+	// closing tags. A malformed marker must never become guessed provenance.
+	canonical, _ := json.Marshal(meta)
+	if raw != string(canonical) {
+		return nil
+	}
+	return &proto.Injected{Kind: proto.InjectedSystem, State: "inbox", Title: meta.Title,
+		Line: "收件箱「" + meta.Title + "」有了下文"}
 }
 
 // askLaterInjected is how the card of an ask_later message (its text after the first line) ended (#6421): the

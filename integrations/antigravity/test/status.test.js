@@ -229,3 +229,13 @@ test('a real workspace sharing the check prefix remains visible', async (t) => {
   })
   assert.equal(node.last('runtime.sessions').sessions.length, 1)
 })
+
+test('lagging summaries never truncate freshly exported steps by timestamp alone', async (t) => {
+  const steps = [step('USER_INPUT', { source: 'USER_EXPLICIT', content: 'Question' }), step('PLANNER_RESPONSE', { content: 'Answer' })]
+  const { node, state, refresh } = await fixture(t, steps, { ...idle, last_modified_time: '2026-01-03T00:00:00Z' })
+  assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'Answer')
+  const history = node.last('runtime.sessions').sessions[0].rev
+  state({ ...idle, step_count: 2, last_modified_time: '2026-01-03T00:00:01Z' })
+  await refresh()
+  assert.equal(node.last('runtime.sessions').sessions[0].rev, history)
+})

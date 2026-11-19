@@ -2015,10 +2015,11 @@ export interface CarouselComponent {
 /**
  * Nodes joined by edges, drawn as a canvas the person can pan, zoom, fit and open full screen (UI version 10): work
  * split into parts, a plan's steps, a family of things. The app lays it out (layout, direction) and draws each node
- * with its own design system; tapping a node does its action, as a row's; a node with children folds them. Each node
- * counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or itself, a
- * repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a card it is a
- * still preview that opens full screen. An older app gets a row per node in reading order, indented.
+ * with its own design system; tapping a node does its action, as a row's (or opens its in-place inspector first on
+ * the web when the node carries facts, detail or links, with the action inside); a node with children folds them.
+ * Each node counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or
+ * itself, a repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a
+ * card it is a still preview that opens full screen. An older app gets a row per node in reading order, indented.
  */
 export interface GraphComponent {
   type: "graph";
@@ -2039,7 +2040,7 @@ export interface GraphComponent {
 
 /**
  * One node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress bar, in
- * tone's role color or color's named color (never both).
+ * tone's role color or color's named color (never both), with optional timing and inspector details.
  */
 export interface GraphNode {
   id: string;
@@ -2057,6 +2058,24 @@ export interface GraphNode {
    */
   group?: string;
   action?: Action;
+  /** Unix timestamp in seconds when this node started. */
+  started_at?: number;
+  /** Unix timestamp in seconds when this node ended; omitted while still running. */
+  ended_at?: number;
+  /** Short label/value readings shown in the node inspector. */
+  facts?: Fact[];
+  /** Plain-text summary, verifier feedback or error shown in the node inspector. */
+  detail?: string;
+  /** HTTPS links shown in the node inspector (for example work and verifier sessions across attempts). */
+  links?: GraphNodeLink[];
+}
+
+/**
+ * An https link shown in a graph node's inspector (UI version 10).
+ */
+export interface GraphNodeLink {
+  title: string;
+  url: string;
 }
 
 /**

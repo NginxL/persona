@@ -23,10 +23,10 @@ class SessionModesTest {
         assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable(claude("default")).map { it.id })
         assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable(claude(null)).map { it.id })
         assertEquals("bypassPermissions", SessionModes.switchable(claude("bypassPermissions")).last().id)
-        assertEquals("全部放行", SessionModes.switchable(claude("bypassPermissions")).last().title(res))
+        assertEquals("完全访问", SessionModes.switchable(claude("bypassPermissions")).last().title(res))
         // A newer Claude Code's mode is listed by its raw name, so the current one still shows as picked.
         assertEquals("future", SessionModes.switchable(claude("future")).last().title(res))
-        assertEquals("手动确认", SessionModes.modeLabel("default", res))
+        assertEquals("默认权限", SessionModes.modeLabel("default", res))
         assertEquals("很高", SessionModes.effortLabel("xhigh", res))
         assertEquals("future", SessionModes.modeLabel("future", res))
         assertNull(SessionModes.modeLabel(null, res))
@@ -57,7 +57,7 @@ class SessionModesTest {
         assertEquals("6.1", chatModeHint(session.copy(model = "gpt-6.1"), res))
         assertEquals("4o Mini", chatModeHint(session.copy(model = "gpt-4o-mini"), res))
         assertEquals("6.1 Codex Max", chatModeHint(session.copy(model = "gpt-6.1-codex-max"), res))
-        assertEquals("自动改文件，思考很高，6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
+        assertEquals("允许编辑，思考很高，6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
         // The current model does not grant a session permission or effort controls.
         assertEquals("6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res, includeModes = false))
         assertEquals("gpt-6.1-sol", session.model)
@@ -66,7 +66,7 @@ class SessionModesTest {
     @Test fun nonGptAndUnknownModelsDoNotChangeTheExistingHint() {
         val session = Session(sessionId = "s", permissionMode = "acceptEdits", effort = "xhigh")
         listOf(null, "", " \t", "unknown", "claude-opus-5-5", "deepseek/v4.1", "gateway/gpt-6.1", "gpt-", "gpt-6.1--sol").forEach { model ->
-            assertEquals(model, "自动改文件，思考很高", chatModeHint(session.copy(model = model), res))
+            assertEquals(model, "允许编辑，思考很高", chatModeHint(session.copy(model = model), res))
             assertNull(chatModeHint(session.copy(model = model), res, includeModes = false))
             assertNull(chatModeHint(session.copy(model = model, permissionMode = "default", effort = "high"), res))
         }
@@ -118,8 +118,8 @@ class SessionModesTest {
     @Test fun theHintNamesWhatIsNotTheDefault() {
         val session = Session(sessionId = "s", permissionMode = "default", effort = "high")
         assertNull(chatModeHint(session, res))
-        assertEquals("自动改文件，思考很高", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
-        assertEquals("全部放行", chatModeHint(session.copy(permissionMode = "bypassPermissions"), res))
+        assertEquals("允许编辑，思考很高", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
+        assertEquals("完全访问", chatModeHint(session.copy(permissionMode = "bypassPermissions"), res))
         assertEquals("future", chatModeHint(session.copy(permissionMode = "future"), res))
     }
 

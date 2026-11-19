@@ -7,6 +7,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import coil3.Image
 import coil3.SingletonImageLoader
 import coil3.compose.asPainter
@@ -22,22 +24,30 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
 import persona.core.contracts.api.ConnectionState
+import persona.core.designsystem.ContentTokens
 import persona.core.designsystem.JAvatar
 
-/** The edge asked of the hub for a person's or chat's picture: avatars are drawn at most 48 dp, here at 3×. */
+/** The legacy thumbnail size used for a repository-bound image before Compose resolves its drawn size. */
 internal const val LarkAvatarPixels = 144
 
 /**
- * [ref] at the hub's thumbnail size (the Lark gateway's steps of 24 px), as iOS asks for it; a URL not on the hub, or one that
- * already names a size, is left as it is.
+ * [ref] at [pixels]: relative hub paths get a size query unless they already name one; other URLs are left unchanged.
  */
-internal fun larkAvatarRef(ref: String): String =
+internal fun larkAvatarRef(ref: String, pixels: Int = LarkAvatarPixels): String =
     if (!ref.startsWith("/") || ref.startsWith("//") || Regex("[?&]size=").containsMatchIn(ref)) ref
-    else ref + (if ('?' in ref) "&" else "?") + "size=$LarkAvatarPixels"
+    else ref + (if ('?' in ref) "&" else "?") + "size=$pixels"
 
-/** A person's or chat's picture at the thumbnail size, read with [read] (bound to one pairing), or null without one. */
+/** A person's or conversation's picture at the legacy repository size, or null without a ref. */
 fun larkAvatar(ref: String?, scope: String, read: suspend (String) -> ByteArray): AuthenticatedLarkImage? =
-    ref?.takeIf { it.isNotBlank() }?.let(::larkAvatarRef)?.let { sized -> AuthenticatedLarkImage("$scope:$sized") { read(sized) } }
+    larkAvatar(ref, scope, LarkAvatarPixels, read)
+
+/** [ref] at [pixels], retaining the original ref and reader to make other decoded-size variants. */
+fun larkAvatar(ref: String?, scope: String, pixels: Int, read: suspend (String) -> ByteArray): AuthenticatedLarkImage? =
+    ref?.takeIf { it.isNotBlank() }?.let { original ->
+        val sized = larkAvatarRef(original, pixels)
+        val key = "$scope:$sized" + if (pixels == LarkAvatarPixels) "" else "#$pixels"
+        AuthenticatedLarkImage(key, sized = { next -> larkAvatar(original, scope, next, read)!! }) { read(sized) }
+    }
 
 /**
  * One read per picture however many rows show it at once, finishing in [scope] even when the row that asked has
@@ -88,30 +98,32 @@ internal fun rememberOnlineSince(connection: ConnectionState): Long? = remember(
 }
 
 /**
- * [image] for [JAvatar]'s picture: null while it loads, when it fails and without one, so the initial stands in. A
- * picture Coil still holds shows on the first frame when its row comes back on screen, without asking again. Coil gets
- * the bytes, never the pairing's credentials. Nothing is asked while the hub is not connected ([onlineSince] null);
+ * [image] for [JAvatar]'s picture at [size]: null while it loads, when it fails and without one, so the initial stands in.
+ * A picture Coil still holds at this pixel size shows on the first frame when its row comes back, without asking again.
+ * Coil gets the bytes, never the pairing's credentials. Nothing is asked while the hub is not connected ([onlineSince] null);
  * once it is, the rows on screen ask again.
  */
 @Composable
-internal fun rememberLarkAvatar(image: AuthenticatedLarkImage?, onlineSince: Long?): Painter? {
+internal fun rememberLarkAvatar(image: AuthenticatedLarkImage?, onlineSince: Long?, size: Dp): Painter? {
     val context = LocalContext.current.applicationContext
-    val key = image?.cacheKey
+    val pixels = with(LocalDensity.current) { size.roundToPx() }
+    val sizedImage = remember(image, pixels) { image?.atPixelSize(pixels) }
+    val key = sizedImage?.cacheKey
     val picture = remember(key) {
         mutableStateOf(key?.let { SingletonImageLoader.get(context).memoryCache?.get(MemoryCache.Key(it))?.image?.asPainter(context) })
     }
     LaunchedEffect(key, onlineSince) {
-        if (image == null || onlineSince == null || picture.value != null) return@LaunchedEffect
-        picture.value = avatarLoads.get(image, onlineSince) { bytes ->
-            val request = ImageRequest.Builder(context).data(bytes).memoryCacheKey(image.cacheKey).size(LarkAvatarPixels).build()
+        if (sizedImage == null || onlineSince == null || picture.value != null) return@LaunchedEffect
+        picture.value = avatarLoads.get(sizedImage, onlineSince) { bytes ->
+            val request = ImageRequest.Builder(context).data(bytes).memoryCacheKey(sizedImage.cacheKey).size(pixels).build()
             (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image
         }?.asPainter(context)
     }
     return picture.value
 }
 
-/** A Feishu person or chat: their picture once it has loaded, the initial of [name] until then and without one. */
+/** A person or conversation: their picture once it has loaded, the initial of [name] until then and without one. */
 @Composable
-internal fun LarkAvatar(name: String, image: AuthenticatedLarkImage?, onlineSince: Long?, modifier: Modifier = Modifier) {
-    JAvatar(name, modifier, image = rememberLarkAvatar(image, onlineSince))
+internal fun LarkAvatar(name: String, image: AuthenticatedLarkImage?, onlineSince: Long?, modifier: Modifier = Modifier, size: Dp = ContentTokens.mediumAvatar) {
+    JAvatar(name, modifier, size = size, image = rememberLarkAvatar(image, onlineSince, size))
 }

@@ -110,9 +110,9 @@
     <string name="chat_answered_entered">（已输入）</string>
     <string name="chat_answered_separator">，</string>
     <string name="chat_answered_labeled">%1$s：%2$s</string>
-    <string name="chat_answered_mode_accept_edits">自动接受编辑</string>
-    <string name="chat_answered_mode_bypass">全部放行</string>
-    <string name="chat_answered_mode_default">每步确认</string>
+    <string name="chat_answered_mode_accept_edits">允许编辑</string>
+    <string name="chat_answered_mode_bypass">完全访问</string>
+    <string name="chat_answered_mode_default">默认权限</string>
     <string name="chat_context_ai_edit">AI 修改</string>
     <string name="chat_context_linked">关联上下文</string>
     <string name="chat_context_web_selection">网页选文</string>
@@ -273,11 +273,11 @@
     <string name="chat_tasks_collapsed">已收起</string>
     <string name="chat_tasks_open_task">打开任务</string>
     <string name="chat_tasks_answered_default">回答了</string>
-    <string name="chat_tasks_permission_accept_edits">可以改文件</string>
-    <string name="chat_tasks_permission_plan">先出方案</string>
-    <string name="chat_tasks_permission_auto">自动判断</string>
-    <string name="chat_tasks_permission_bypass">全部放行</string>
-    <string name="chat_tasks_permission_default">每步都问</string>
+    <string name="chat_tasks_permission_accept_edits">允许编辑</string>
+    <string name="chat_tasks_permission_plan">计划模式</string>
+    <string name="chat_tasks_permission_auto">自动审批</string>
+    <string name="chat_tasks_permission_bypass">完全访问</string>
+    <string name="chat_tasks_permission_default">默认权限</string>
     <plurals name="chat_tasks_plan_started">
         <item quantity="other">✓ 开了 %1$d 个任务</item>
     </plurals>
@@ -291,6 +291,8 @@
     </plurals>
     <string name="chat_tasks_plan_single">这样开</string>
     <string name="chat_tasks_default_model">默认模型</string>
+    <string name="chat_tasks_preset">预设 %1$s</string>
+    <string name="chat_tasks_launcher_preset">%1$s · %2$s</string>
     <string name="chat_tasks_read_only">已要求只读</string>
     <string name="chat_tasks_plan_remember">这些目录及子目录以后直接开</string>
     <plurals name="chat_tasks_plan_start_count">

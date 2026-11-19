@@ -120,6 +120,8 @@ fun ChatLinkHost(
                     }
                 }
                 ChatLinkKind.App -> {
+                    // Route-table links keep their original URL so selecting another hub can be completed by the shell.
+                    if (hubLinks?.invoke(uri) == true) { if (url != null) closeRequest++; return }
                     val link = ChatLinks.appLink(uri)
                     val navigate = appLinks
                     if (link == null || navigate == null) unsupported = true

@@ -18,7 +18,7 @@ import (
 
 // ---- mail ----
 
-// collectMail applies a round's mail: each account's latest page, then the full text of the new mail (the round's
+// collectMail applies a round's mail: each folder's latest page, then the full text of the new mail (the round's
 // new items too: they are triaged on it) and of items collected before their text was read.
 func (s *Service) collectMail(ctx context.Context, read *assistantwire.InboxMailRead) []*InboxItem {
 	b := &s.inbox
@@ -28,10 +28,15 @@ func (s *Service) collectMail(ctx context.Context, read *assistantwire.InboxMail
 		now := time.Now()
 		changed = append(changed, b.applyMail(a, a.Messages, now)...)
 		changed = append(changed, s.settleMailOffPage(ctx, a, now)...)
+		readBoxes := map[string]bool{}
+		for f := range a.Mailboxes() {
+			readBoxes[assistantwire.MailFolderKey(a.ID, f.Name)] = true
+		}
 		b.mu.Lock()
 		var unread []*InboxItem
 		b.each(func(it *InboxItem) {
-			if it.Mail != nil && it.Mail.AccountID == a.ID && it.open() && !it.Read && it.BodyOf != it.Last {
+			if it.Mail != nil && it.Mail.AccountID == a.ID && readBoxes[it.Mail.folderKey()] &&
+				it.open() && !it.Read && it.BodyOf != it.Last {
 				unread = append(unread, it)
 			}
 		})
@@ -136,20 +141,49 @@ func mailThread(subject string, from ...string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// applyMail turns one account's latest inbox page into items: unseen messages grouped by thread, and the mail that
+// applyMail turns one account's latest pages into items: unseen messages grouped by folder and thread, and mail that
 // was already read when the inbox first saw it as items read and done (mailReadOnArrival).
 func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistantwire.InboxMailSummary, now time.Time) []*InboxItem {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	defer b.settleRound()
-	var changed []*InboxItem
-	baseline, since := b.mailBaseline(a, msgs)
-	index := b.threads(func(it *InboxItem) (string, bool) {
-		if it.Mail == nil || it.Mail.AccountID != a.ID {
-			return "", false
+	byFolder := map[string][]*InboxItem{}
+	b.each(func(it *InboxItem) {
+		if it.Mail != nil && it.Mail.AccountID == a.ID {
+			key := it.Mail.folderKey()
+			byFolder[key] = append(byFolder[key], it)
 		}
-		return it.Mail.Thread, true
 	})
+	var changed []*InboxItem
+	a.Messages = msgs
+	for f := range a.Mailboxes() {
+		key := assistantwire.MailFolderKey(a.ID, f.Name)
+		changed = append(changed, b.applyMailFolder(a, f, key, byFolder[key], now)...)
+	}
+	return changed
+}
+
+// UIDs, read-on-arrival baselines and thread comparisons belong to one IMAP mailbox.
+func (b *inboxBook) applyMailFolder(a assistantwire.InboxMailAccount, f assistantwire.InboxMailFolder, key string, items []*InboxItem, now time.Time) []*InboxItem {
+	baseline, since, generation := b.mailBaseline(key, f)
+	source := InboxMail{AccountID: a.ID, Mailbox: f.Name, Generation: generation}
+	index := &threadIndex{by: map[string][]*InboxItem{}, key: func(it *InboxItem) (string, bool) {
+		return it.Mail.Thread, it.Mail.Generation == generation
+	}}
+	var changed []*InboxItem
+	for _, it := range items {
+		if it.Mail.Generation < generation && len(it.Mail.UIDs) != 0 {
+			// Old UIDs can now target unrelated mail. Preserve the history and invalidate the targets.
+			b.roundWrite(it)
+			it.Mail.UIDs = []uint32{}
+			if it.open() {
+				b.mailReadElsewhere(it, now)
+			}
+			changed = append(changed, it)
+		}
+		index.file(it)
+	}
+	msgs := f.Messages
 	superseded, stay := b.supersedeSubjectless(index, msgs, now)
 	changed = append(changed, superseded...)
 	threads := map[string][]assistantwire.InboxMailSummary{}
@@ -209,7 +243,7 @@ func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistant
 				b.mailReadElsewhere(open, now)
 				changed = append(changed, open)
 			} else if open == nil && len(seen) > 0 {
-				changed = append(changed, b.mailReadOnArrival(a, t, seen, index, now))
+				changed = append(changed, b.mailReadOnArrival(a, source, t, seen, index, now))
 			}
 			continue
 		}
@@ -224,8 +258,7 @@ func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistant
 			b.roundWrite(it)
 		}
 		if it == nil {
-			it = &InboxItem{ID: fmt.Sprintf("mail:%s:%s:%d", a.ID, t, unseen[0].UID), Source: "mail", Kind: KindMail,
-				Account: a.ID, Mail: &InboxMail{AccountID: a.ID, Mailbox: newest.Mailbox, Thread: t}}
+			it = source.item(t, unseen[0].UID)
 			it.StartedAt, _ = time.Parse(time.RFC3339, unseen[0].Date)
 			b.add("mail", it)
 			b.roundNew(it)
@@ -238,6 +271,18 @@ func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistant
 		changed = append(changed, it)
 	}
 	return changed
+}
+
+func (m *InboxMail) folderKey() string { return assistantwire.MailFolderKey(m.AccountID, m.Mailbox) }
+
+func (m InboxMail) item(thread string, first uint32) *InboxItem {
+	scope := m.folderKey()
+	if m.Generation != 0 {
+		scope += fmt.Sprintf(":e:%d", m.Generation)
+	}
+	m.Thread = thread
+	return &InboxItem{ID: fmt.Sprintf("mail:%s:%s:%d", scope, thread, first), Source: "mail", Kind: KindMail,
+		Account: m.AccountID, Mail: &m}
 }
 
 // fillMail sets what a mail item shows and holds from its mails (oldest first, at least one).
@@ -273,10 +318,9 @@ func fillMail(it *InboxItem, a assistantwire.InboxMailAccount, msgs []assistantw
 // or marked read by a forwarding rule, between two rounds) as one item, read and done (#8298): Done lists it, so the
 // mail is never missing from the inbox, but it is no push, no unread and nothing in "Needs you". No model is asked
 // about it: it has its rule tier, as filed. Under b.mu.
-func (b *inboxBook) mailReadOnArrival(a assistantwire.InboxMailAccount, t string, seen []assistantwire.InboxMailSummary,
+func (b *inboxBook) mailReadOnArrival(a assistantwire.InboxMailAccount, source InboxMail, t string, seen []assistantwire.InboxMailSummary,
 	index *threadIndex, now time.Time) *InboxItem {
-	it := &InboxItem{ID: fmt.Sprintf("mail:%s:%s:%d", a.ID, t, seen[0].UID), Source: "mail", Kind: KindMail,
-		Account: a.ID, Mail: &InboxMail{AccountID: a.ID, Mailbox: seen[len(seen)-1].Mailbox, Thread: t}}
+	it := source.item(t, seen[0].UID)
 	it.StartedAt, _ = time.Parse(time.RFC3339, seen[0].Date)
 	b.add("mail", it)
 	b.roundNew(it)
@@ -291,30 +335,38 @@ func (b *inboxBook) mailReadOnArrival(a assistantwire.InboxMailAccount, t string
 	return it
 }
 
-// inboxMailBaselinesKey keeps each mail account's baseline (mailBaseline), by account id.
+// inboxMailBaselinesKey keeps each mailbox's first-page baseline, last known UIDVALIDITY (#v) and generation
+// after renumbering (#e). An old account-only entry remains its INBOX baseline.
 const inboxMailBaselinesKey = "inbox_mail_baselines"
 
-// mailBaseline is the account's baseline for mail already read when the inbox first sees it, under b.mu: only mail
-// with a newer UID becomes an item read and done (mailReadOnArrival). since is false on the account's first round
-// (or the first after this was added): its baseline is then the page's newest UID, so turning an account on (or the
-// update) does not file the window's read mail all at once, as unread mail always was. A page whose newest UID is
-// under the baseline (the mailbox was renumbered: a new UIDVALIDITY) starts again the same way. A new baseline is
-// stored after the round (saveMailBaselines).
-func (b *inboxBook) mailBaseline(a assistantwire.InboxMailAccount, msgs []assistantwire.InboxMailSummary) (baseline uint32, since bool) {
-	var newest uint32
-	for _, m := range msgs {
-		newest = max(newest, m.UID)
-	}
-	baseline, since = b.mailBaselines[a.ID]
-	if since && newest >= baseline {
-		return baseline, true
-	}
+// mailBaseline records an empty folder too: read mail delivered by a rule after that first visit should be filed.
+func (b *inboxBook) mailBaseline(key string, f assistantwire.InboxMailFolder) (baseline uint32, since bool, generation uint32) {
 	if b.mailBaselines == nil {
 		b.mailBaselines = map[string]uint32{}
 	}
-	b.mailBaselines[a.ID] = newest
+	validity := b.mailBaselines[key+"#v"]
+	renumbered := false
+	if f.UIDValidity != 0 && validity != f.UIDValidity {
+		b.mailBaselines[key+"#v"] = f.UIDValidity
+		b.mailBaselinesDirty = true
+		if validity != 0 {
+			renumbered = true
+			b.mailBaselines[key+"#e"]++
+		}
+	}
+	generation = b.mailBaselines[key+"#e"]
+	var newest uint32
+	for _, m := range f.Messages {
+		newest = max(newest, m.UID)
+	}
+	baseline, since = b.mailBaselines[key]
+	if since && !renumbered && (newest >= baseline || validity != 0 && f.UIDValidity != 0) {
+		return baseline, true, generation
+	}
+	// When either validity is unknown (including an upgrade), retain the original lower-page heuristic.
+	b.mailBaselines[key] = newest
 	b.mailBaselinesDirty = true
-	return newest, false
+	return newest, false, generation
 }
 
 // loadMailBaselines reads the mail accounts' baselines kept; false when the database could not be read.
@@ -399,8 +451,7 @@ func (b *inboxBook) supersedeSubjectless(index *threadIndex, msgs []assistantwir
 		// draft, is left as it is.
 		var filed []*InboxItem
 		for _, it := range b.items {
-			if it == open || !it.open() || it.Mail == nil || it.Mail.AccountID != open.Mail.AccountID ||
-				it.Mail.Mailbox != open.Mail.Mailbox || it.Mail.Thread == subjectlessThread ||
+			if it == open || !it.open() || it.Mail == nil || it.Mail.folderKey() != open.Mail.folderKey() || it.Mail.Generation != open.Mail.Generation || it.Mail.Thread == subjectlessThread ||
 				it.Tier == TierAction || it.Agent != nil || len(it.Mail.UIDs) == 0 ||
 				slices.ContainsFunc(it.Mail.UIDs, func(uid uint32) bool { return !stay[uid] }) {
 				continue

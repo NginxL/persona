@@ -346,6 +346,33 @@ class OutboxMessageSenderTest {
         sender.close()
     }
 
+    @Test fun managerCustodySurvivesRestartWithoutSendingAgainAndRequiresAnIdentifiedEcho() = runTest {
+        val store = MemoryOutboxStore()
+        val transport = FakeTransport(online = true, supportsClientOps = true)
+        transport.answers += MessageTransportResult.Held
+        val at = java.time.Instant.parse("2026-11-01T10:00:00Z")
+        val first = OutboxMessageSender(scope, store, transport, backgroundScope) { at.toEpochMilli() }
+        first.send(session, "Held text", "held-a")
+        runCurrent()
+        assertEquals(OutboxState.Held, store.state("held-a"))
+        assertTrue(first.outbox.value.isEmpty())
+        first.close()
+
+        val resumed = OutboxMessageSender(scope, store, transport, backgroundScope) { at.toEpochMilli() }
+        transport.evidence["held-a"] = MessageEvidence.Receipt(MessageTransportResult.Held)
+        runCurrent()
+        resumed.onReady()
+        assertFalse(resumed.retry("held-a"))
+        assertFalse(resumed.cancel("held-a"))
+        val sameWords = Item("other", 3, role = "user", kind = "text", text = "Held text", ts = at.toString())
+        resumed.observeTranscript(session, listOf(sameWords))
+        assertEquals(OutboxState.Held, store.state("held-a"))
+        resumed.observeTranscript(session, listOf(sameWords.copy(id = "landed", clientMsgId = "held-a")))
+        assertEquals(OutboxState.Shown, store.state("held-a"))
+        assertEquals(1, transport.requests.size)
+        resumed.close()
+    }
+
     @Test fun durableQueueWaitsForNetworkAndDistinguishesRefusalFromUncertainDelivery() = runTest {
         val store = MemoryOutboxStore()
         val transport = FakeTransport(online = false)
@@ -376,6 +403,39 @@ class OutboxMessageSenderTest {
         runCurrent()
         assertEquals(OutboxState.Shown, store.state("message-b"))
         assertEquals(OutboxState.Unknown, OutboxMessageSender.classify(MessageTransportResult.HubError()))
+        sender.close()
+    }
+
+    @Test fun keptMessageLeavesTheLocalOutboxForTheSessionRow() = runTest {
+        val store = MemoryOutboxStore()
+        val transport = FakeTransport(online = true)
+        transport.answers += MessageTransportResult.Kept
+        val sender = OutboxMessageSender(scope, store, transport, backgroundScope)
+        sender.send(session, "keep this for the assistant", "kept")
+        runCurrent()
+
+        assertEquals(1, transport.requests.size)
+        assertTrue("the authoritative session row draws a kept message instead",
+            sender.outbox.value.none { it.clientMessageId == "kept" })
+        assertEquals("kept", sender.sendReceipts.value.single().state)
+        assertFalse(sender.sendReceipts.value.single().processing)
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals("kept is not delivered and must not be sent again", 1, transport.requests.size)
+        assertTrue(sender.outbox.value.none { it.clientMessageId == "kept" })
+        sender.close()
+    }
+
+    @Test fun keptComposerRetryLeavesTheSendingOutboxForTheSessionRow() = runTest {
+        val store = MemoryOutboxStore()
+        store.enqueue(OutboxEntry("kept-retry", session, "keep this", state = OutboxState.Refused, createdAt = 100))
+        val sender = OutboxMessageSender(scope, store, FakeTransport(online = false), backgroundScope)
+        sender.recordComposerDelivery("kept-retry", ComposerDelivery(DeliveryState.Sending), "retry-op", null)
+        assertEquals(OutboxState.Sending, store.state("kept-retry"))
+
+        sender.recordComposerDelivery("kept-retry", ComposerDelivery(DeliveryState.Sending), "retry-op", MessageTransportResult.Kept)
+        assertEquals(OutboxState.Kept, store.state("kept-retry"))
+        assertTrue(sender.outbox.value.none { it.clientMessageId == "kept-retry" })
         sender.close()
     }
 

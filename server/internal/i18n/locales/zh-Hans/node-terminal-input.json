@@ -1,0 +1,4 @@
+{
+  "unverified_after_paste": "文字已粘贴，但无法确认 Agent 的状态，尚未提交：{reason}",
+  "changed_after_paste": "文字粘贴后，Agent 已改变或打开了对话框，因此尚未提交。"
+}

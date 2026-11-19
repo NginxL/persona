@@ -1,5 +1,6 @@
 {
   "not_sent": "没发出去：{error}",
+  "mention_owner_required": "只有用户本人的请求才能进入代答频道的主对话",
   "help": "在这里说的话会发给 Persona 的主对话，回答发回这里。\n/new 开一段新对话（后面可以直接跟第一句话）\n/main 回到主对话\n/stop 停下正在做的这一轮\n/status 现在发给谁、在等几个回答\n/help 这些命令\nAgent 问你问题或要你批准时，直接回复序号或文字。",
   "now_to_main": "之后的消息发给主对话。",
   "next_is_new": "好，下一条消息会开一段新对话。/main 回到主对话。",

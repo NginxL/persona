@@ -340,6 +340,8 @@ type NodeCall struct {
 	MachineID  string          `json:"machine_id"`
 	Method     string          `json:"method"`
 	Params     json.RawMessage `json:"params,omitempty"`
+	// StreamVersion is an offer for port.dial. The manager passes it into the node's params.
+	StreamVersion int `json:"stream_version,omitempty"`
 	// TimeoutMS bounds the call on the manager's side too, a little before the caller gives up: the manager's
 	// CodeDeadline answer comes back in time.
 	TimeoutMS int64 `json:"timeout_ms,omitempty"`
@@ -363,6 +365,29 @@ type NodeCall struct {
 	Ordered bool `json:"ordered,omitempty"`
 }
 
+const (
+	MethodPortDial = "port.dial"
+	// PortStreamHalfCloseV1 supports directional EOF on forwarded TCP streams.
+	PortStreamHalfCloseV1 = 1
+)
+
+// PortDial opens a stream to a port on the node. The hub offers StreamVersion only for an endpoint with CloseWrite.
+type PortDial struct {
+	ID            string `json:"id"`
+	Port          int    `json:"port"`
+	KeepAwake     bool   `json:"keep_awake,omitempty"` // keep a watched screen awake
+	Pair          string `json:"pair,omitempty"`       // ties a screen stream to screen.dial
+	Link          bool   `json:"link,omitempty"`       // use screen session framing
+	Attach        bool   `json:"attach,omitempty"`     // rejoin a live screen session
+	StreamVersion int    `json:"stream_version,omitempty"`
+}
+
+// PortDialReply confirms the stream version or the use of screen session framing.
+type PortDialReply struct {
+	Link          int `json:"link,omitempty"`
+	StreamVersion int `json:"stream_version,omitempty"`
+}
+
 // Hold is NodeCall.Hold.
 type Hold struct {
 	// Lang is the language of the words in CodeHeld's answer (the request's).
@@ -375,14 +400,9 @@ type HeldAnswer struct {
 	Undelivered *proto.UndeliveredMessage `json:"undelivered,omitempty"`
 }
 
-// Actor is who asked the hub for a call (NodeCall.Actor): the kind of token ("device", "hub" for the hub's own
-// token, "extension") and, for a device, its id and name as the hub knows them; an extension's id. Display only.
-type Actor struct {
-	Kind       string `json:"kind"`
-	DeviceID   string `json:"device_id,omitempty"`
-	DeviceName string `json:"device_name,omitempty"`
-	Extension  string `json:"extension,omitempty"`
-}
+// Actor is display-only provenance for NodeCall and plan decisions: a device, hub token, extension, or internal
+// assistant. It is shared with the node contract so a plan reports the actor supplied by its manager.
+type Actor = proto.ModeActor
 
 // RequestEnd is devices.request_end's params.
 type RequestEnd struct {

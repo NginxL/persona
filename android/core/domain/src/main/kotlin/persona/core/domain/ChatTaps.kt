@@ -3,7 +3,9 @@ package persona.core.domain
 import persona.core.contracts.Interaction
 import persona.core.contracts.Item
 import persona.core.contracts.MessageEcho
+import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.UndeliveredMessage
 import persona.core.contracts.api.OutboxMessage
 import persona.core.domain.answer.RequestExpiry
 import java.time.Instant
@@ -71,3 +73,17 @@ fun chatBubbles(outbox: List<OutboxMessage>, session: SessionKey, items: List<It
         message.session == session &&
             items.none { item -> item.id == message.clientMessageId || MessageEcho.tag(item) == message.clientMessageId }
     }
+
+/**
+ * Kept messages to draw from the session row, without duplicating a transcript line or a local bubble still drawn for
+ * the same client message. UUID casing differs between runtimes, so identity comparison ignores case (web and iOS).
+ */
+fun shownUndelivered(session: Session?, items: List<Item>, drawn: List<OutboxMessage>): List<UndeliveredMessage> {
+    val kept = session?.undelivered.orEmpty()
+    if (kept.isEmpty()) return emptyList()
+    val landed = items.filter(MessageEcho::candidate).flatMap { item ->
+        listOfNotNull(MessageEcho.tag(item), item.id)
+    }
+    val skip = (landed + drawn.map { it.clientMessageId }).mapTo(mutableSetOf()) { it.lowercase() }
+    return kept.filter { it.id.lowercase() !in skip }
+}

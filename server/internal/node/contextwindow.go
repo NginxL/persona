@@ -25,16 +25,31 @@ func contextWindowOf(model string, recorded, used int) int {
 		return recorded
 	}
 	id := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.Contains(id, "[1m]"):
+	if strings.Contains(id, "[1m]") {
 		return claudeWindow1M
-	case strings.HasPrefix(id, "claude-"):
-		if used > claudeWindow || claudeNative1M(id) {
-			return claudeWindow1M
-		}
-		return claudeWindow
 	}
-	return 0
+	id = claudeModelAfterRoute(id)
+	if id == "" {
+		return 0
+	}
+	if used > claudeWindow || claudeNative1M(id) {
+		return claudeWindow1M
+	}
+	return claudeWindow
+}
+
+// claudeModelAfterRoute is id or, for a gateway's routed name ("passthrough/claude-opus-5-5"), the Claude model after
+// its last "/"; "" when neither names a Claude model. id is lower case.
+func claudeModelAfterRoute(id string) string {
+	if strings.HasPrefix(id, "claude-") {
+		return id
+	}
+	if i := strings.LastIndexByte(id, '/'); i >= 0 {
+		if tail := id[i+1:]; strings.HasPrefix(tail, "claude-") {
+			return tail
+		}
+	}
+	return ""
 }
 
 // claudeNative1M reports a Claude model whose window is 1M without the "[1m]" opt-in, as Claude Code's own model list

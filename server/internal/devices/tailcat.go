@@ -168,9 +168,14 @@ func (m *Machine) watchTailcat(ctx context.Context, c *nodeConn) {
 	defer check.Stop()
 	probeTick := time.NewTicker(m.probeEvery())
 	defer probeTick.Stop()
-	m.updatePath(ctx)
+	p, via, rev, _ := c.routeState()
+	m.updatePath(ctx, p, rev)
 	misses := 0
 	for {
+		p, via, rev, _ = c.routeState()
+		if via != "tailcat" || p.src != m { // a resume moved the live connection off this watcher
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -178,7 +183,7 @@ func (m *Machine) watchTailcat(ctx context.Context, c *nodeConn) {
 			activity := c.pipe().activity // a resume brings another (resume.go)
 			if peer.Lost() || activity == nil || activity.idle() < m.timings.checkEvery || m.ping(ctx, peer) || activity.idle() < m.timings.checkEvery {
 				misses = 0
-				go m.updatePath(ctx)
+				go m.updatePath(ctx, p, rev)
 				continue
 			}
 			if ctx.Err() != nil {
@@ -207,6 +212,9 @@ func (m *Machine) watchTailcat(ctx context.Context, c *nodeConn) {
 			cancel()
 			if err != nil {
 				continue
+			}
+			if !c.claimRouteExit(rev) {
+				return // the connection resumed onto another route while ssh was being probed
 			}
 			m.mu.Lock()
 			m.directFailed, m.switchedBack = time.Time{}, time.Now()
@@ -278,7 +286,7 @@ func (c *activityConn) Write(p []byte) (int, error) {
 	return written, nil
 }
 
-func (m *Machine) updatePath(ctx context.Context) {
+func (m *Machine) updatePath(ctx context.Context, p *nodePath, rev uint64) {
 	if m.dialTailcat != nil {
 		return
 	}
@@ -293,7 +301,7 @@ func (m *Machine) updatePath(ctx context.Context) {
 		return
 	}
 	m.mu.Lock()
-	changed := m.via == "tailcat" && m.path != path
+	changed := m.routeRev == rev && m.active == p && m.transport == "tailcat" && m.path != path
 	if changed {
 		m.path = path
 	}

@@ -6,7 +6,8 @@ import { useStore } from "../../lib/store";
 // Enter or Tab puts the message in the box, Esc or Ctrl+G cancels. lib/send-history.ts holds the matching and the keys.
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
-import { composing, readHistory } from "../../lib/send-history";
+import { readHistory } from "../../lib/send-history";
+import { useComposition } from "../../lib/ime";
 import { moveActive, readAllHistory, searchAction, searchSent } from "../../lib/send-history-search";
 import { cx, EASE } from "../../ui/atoms";
 import { splitSkillDraft } from "../../lib/skill-mentions";
@@ -20,6 +21,8 @@ export function HistorySearch({ onPick, onClose }: { onPick: (text: string) => v
   const id = useId();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  // the IME's Enter (also Safari's, just after compositionend) picks a candidate, not a sent message
+  const ime = useComposition();
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
   const revision = useStore(conversationDeletionRevision);
   const [opened] = useState(() => ({ owner, scope: conversationDeletionScope() }));
@@ -56,8 +59,9 @@ export function HistorySearch({ onPick, onClose }: { onPick: (text: string) => v
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onBlur={onClose}
+          {...ime.handlers}
           onKeyDown={(e) => {
-            if (composing(e.nativeEvent)) return; // the Enter or arrow that picks an input-method candidate is not ours
+            if (ime.busy(e.nativeEvent)) return; // the Enter or arrow that picks an input-method candidate is not ours
             const action = searchAction(e.nativeEvent);
             if (!action) return;
             e.preventDefault();

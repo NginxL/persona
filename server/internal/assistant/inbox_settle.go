@@ -335,8 +335,8 @@ func (s *Service) askSettled(ctx context.Context, snap settleSnapshot, msgs []se
 		return "", "", "", false
 	}
 	hello := s.hello(ctx)
-	system := prompts.RenderInboxSettled(prompts.InboxSettled{Owner: hello.Owner})
-	input := prompts.RenderInboxSettledInput(prompts.InboxSettledInput{Title: snap.title, Summary: snap.summary,
+	system := prompts.RenderInboxSettled(prompts.InboxSettled{Language: answerLanguage(hello.Locale), Owner: hello.Owner})
+	input := prompts.RenderInboxSettledInput(prompts.InboxSettledInput{Language: answerLanguage(hello.Locale), Title: snap.title, Summary: snap.summary,
 		Context: snap.context, Later: later})
 	var out struct {
 		State  string `json:"state"`

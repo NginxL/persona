@@ -127,6 +127,9 @@ type sendOpts struct {
 	// human-input marker and drops any a caller sent). A Claude outside Persona's terminals takes it as the person's
 	// input through its tmux pane, or through Persona's plugin when it has no pane; every other message keeps its inbox.
 	OwnerInput bool `json:"owner_input"`
+	// CompactIfFull: the assistant's agent_send (#11137): a Claude Code or Codex Agent whose context is nearly full when
+	// the message would go in is compacted with its own /compact first (compact_before_send.go).
+	CompactIfFull bool `json:"compact_if_full"`
 	// readBox: a screen that cannot be read refuses (unreadBoxMessage) instead of passing for an empty box. After a
 	// command that may still sit in the box (ultracode.go), not knowing is not enough to type after it.
 	readBox bool

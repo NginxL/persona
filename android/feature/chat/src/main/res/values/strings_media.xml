@@ -19,4 +19,5 @@
     <string name="chat_share_card_share_text">Share Text</string>
     <string name="chat_share_card_light">Light</string>
     <string name="chat_share_card_dark">Dark</string>
+    <string name="chat_reply_image_original">Open original</string>
 </resources>

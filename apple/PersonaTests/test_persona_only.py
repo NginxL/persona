@@ -327,6 +327,27 @@ class PersonaOnlyTests(unittest.TestCase):
         for language in ["en", "zh-Hans", "ja"]:
             self.assertEqual(localized[language]["stringUnit"]["value"], "Persona")
 
+    def test_agent_preset_strings_have_all_native_languages(self):
+        # #2225: New Agent's Preset row and the plan card's "Preset <name>" chip.
+        catalog = json.loads(source("Shared/Localization/Localizable.xcstrings"))
+        for key in ["Preset", "Preset %@"]:
+            with self.subTest(key=key):
+                localizations = catalog["strings"].get(key, {}).get("localizations", {})
+                for language in ["en", "zh-Hans", "ja"]:
+                    with self.subTest(language=language):
+                        value = localizations.get(language, {}).get("stringUnit", {}).get("value", "")
+                        self.assertTrue(value.strip(), f"{key} needs {language}")
+
+    def test_agent_preset_native_docs_keep_the_start_contract_unchanged(self):
+        profiles = (APPLE.parent / "docs/assistant/model-profiles.md").read_text(encoding="utf-8")
+        section = profiles.split("## Agent presets (tiers)", 1)[1].split("## Edit and add profiles", 1)[0]
+        self.assertIn("iOS/Mac", section, "document the native New Agent and plan-card behavior")
+        self.assertNotIn("iOS, Mac and Android are open in #2225", section)
+        protocol = (APPLE.parent / "docs/protocol/protocol.md").read_text(encoding="utf-8")
+        start = next(line for line in protocol.splitlines() if line.startswith("| POST | `/api/v1/sessions` |"))
+        request = start.split("→", 1)[0]
+        self.assertNotIn('"tier"', request, "Agent presets resolve to launcher/model/effort before POST /sessions")
+
     def test_brand_and_avatar_symbols_do_not_collide(self):
         icons = source("Shared/Design/Icons.swift")
         for mac in [False, True]:

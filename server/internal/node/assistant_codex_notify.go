@@ -211,6 +211,9 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		failureKinds := []string{failureKind}
 		if modelServiceFailure {
 			failureKinds = append(failureKinds, assistantModelServiceFailure)
+			if failureKind != proto.TurnErrorUser && failureKind != proto.TurnErrorUsageLimit {
+				failureKind = proto.TurnErrorTransient
+			}
 		}
 		recovering := n.recoverAssistantResult(p, failure != "", failure, failureKinds...)
 		if !recovering {

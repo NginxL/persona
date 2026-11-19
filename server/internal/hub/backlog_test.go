@@ -11,8 +11,7 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// fakeNode answers session.items after_seq from n items (seq 1..n, one item per line) the way the node does: at most
-// 500 per call, more_after when items are left.
+// fakeNode models n one-item turns. The initial page takes the latest turns, and a catch-up takes up to 500 items.
 func fakeNode(t *testing.T, n int) *Machine {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -23,13 +22,21 @@ func fakeNode(t *testing.T, n int) *Machine {
 	nodeSide.OnRequest = func(_ context.Context, method string, params json.RawMessage) (any, error) {
 		var p struct {
 			AfterSeq *int `json:"after_seq"`
+			Turns    int  `json:"turns"`
 		}
 		_ = json.Unmarshal(params, &p)
-		if method != "session.items" || p.AfterSeq == nil {
+		if method != "session.items" || p.AfterSeq == nil && p.Turns <= 0 {
 			return nil, fmt.Errorf("unexpected %s %s", method, params)
 		}
+		initial := p.AfterSeq == nil
+		var after int
+		if initial {
+			after = max(0, n-p.Turns)
+		} else {
+			after = *p.AfterSeq
+		}
 		var items []proto.Item
-		for s := *p.AfterSeq + 1; s <= n && len(items) < 500; s++ {
+		for s := after + 1; s <= n && len(items) < 500; s++ {
 			items = append(items, proto.Item{ID: fmt.Sprintf("i%d", s), Seq: s, Role: "assistant", Kind: proto.KindText})
 		}
 		more := len(items) > 0 && items[len(items)-1].Seq < n
@@ -37,7 +44,7 @@ func fakeNode(t *testing.T, n int) *Machine {
 		if more {
 			to = items[len(items)-1].Seq
 		}
-		return map[string]any{"items": items, "has_more": false, "more_after": more, "history": "h1", "from_seq": *p.AfterSeq, "to_seq": to}, nil
+		return map[string]any{"items": items, "has_more": initial && after > 0, "more_after": more, "history": "h1", "from_seq": after, "to_seq": to}, nil
 	}
 	go func() { _ = hubSide.Serve(ctx, n2hR) }()
 	go func() { _ = nodeSide.Serve(ctx, h2nR) }()

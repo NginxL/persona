@@ -54,7 +54,7 @@ func (s *Service) ListMessages(ctx context.Context, opts ListOptions) (*ListResu
 	case limit > maxListLimit:
 		limit = maxListLimit
 	}
-	mailbox := strings.TrimSpace(opts.Mailbox)
+	mailbox := opts.Mailbox // an IMAP folder name can contain leading or trailing spaces
 	if mailbox == "" {
 		mailbox = "INBOX"
 	}

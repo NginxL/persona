@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import fnmatch
+from functools import cached_property
 import json
 import os
 from pathlib import Path
@@ -219,6 +220,58 @@ def _setup_reach(root):
     return reach
 
 
+class _WebIndex:
+    """What web_plan derives from the scan of web/ (the inputs, the Vite configs' sources, the vitest setup's reach,
+    each file's reads), worked out once and kept for every plan made with it (web_plans)."""
+
+    def __init__(self, root):
+        self.root = Path(root)
+        self._reads = {}
+
+    @cached_property
+    def inputs(self):
+        return web_inputs(self.root)
+
+    @cached_property
+    def config(self):
+        return _config_sources(self.root)
+
+    @cached_property
+    def setup(self):
+        return _setup_reach(self.root)
+
+    def reads(self, file):
+        if file.path not in self._reads:
+            self._reads[file.path] = _read_patterns(self.root, file)
+        return self._reads[file.path]
+
+    def plan(self, changed):
+        web = [path for path in changed if path.startswith("web/")]
+        outside = [path for path in changed if not path.startswith("web/")
+                   and any(fnmatch.fnmatchcase(path, pattern) for pattern in self.inputs)]
+        if not web and not outside:
+            return "none", "no change under web/ or in a file web/src and its tests read", []
+        for path in web:
+            if not path.startswith("web/src/"):
+                return "full", f"{path} is outside web/src", []
+            if any(fnmatch.fnmatchcase(path, pattern) for pattern in WEB_FULL_SUITE):
+                return "full", f"{path} is a shared entry point", []
+            if posixpath.splitext(path)[0] in self.config:
+                return "full", f"{path} is part of the Vite config", []
+        for path in web + outside:
+            if any(fnmatch.fnmatchcase(path, pattern) for pattern in self.setup):
+                return "full", f"{path} is part of the vitest setup", []
+        readers = []
+        for file in web_scan(self.root):
+            always = file.fs or file.build or (file.test and file.vite)
+            if always or (file.vite and any(fnmatch.fnmatchcase(path, pattern)
+                                            for pattern in self.reads(file) for path in changed)):
+                readers.append(file.path)
+        files = list(dict.fromkeys(web + outside + sorted(readers)))
+        reason = f"{len(web) + len(outside)} changed file(s) and {len(readers)} that read files from disk"
+        return "related", reason, [posixpath.relpath(path, "web") for path in files]
+
+
 def web_plan(changed, root=ROOT):
     """check-fast's web check for a list of changed repository paths (#10619): (mode, reason, files).
 
@@ -229,42 +282,22 @@ def web_plan(changed, root=ROOT):
     they read), every other web/src module that reads through fs or builds, and each one that reads through Vite a
     path a changed file matches.
     """
-    root = Path(root)
-    inputs = web_inputs(root)
-    web = [path for path in changed if path.startswith("web/")]
-    outside = [path for path in changed if not path.startswith("web/")
-               and any(fnmatch.fnmatchcase(path, pattern) for pattern in inputs)]
-    if not web and not outside:
-        return "none", "no change under web/ or in a file web/src and its tests read", []
-    config = _config_sources(root)
-    for path in web:
-        if not path.startswith("web/src/"):
-            return "full", f"{path} is outside web/src", []
-        if any(fnmatch.fnmatchcase(path, pattern) for pattern in WEB_FULL_SUITE):
-            return "full", f"{path} is a shared entry point", []
-        if posixpath.splitext(path)[0] in config:
-            return "full", f"{path} is part of the Vite config", []
-    setup = _setup_reach(root)
-    for path in web + outside:
-        if any(fnmatch.fnmatchcase(path, pattern) for pattern in setup):
-            return "full", f"{path} is part of the vitest setup", []
-    readers = []
-    for file in web_scan(root):
-        always = file.fs or file.build or (file.test and file.vite)
-        if always or (file.vite and any(fnmatch.fnmatchcase(path, pattern)
-                                        for pattern in _read_patterns(root, file) for path in changed)):
-            readers.append(file.path)
-    files = list(dict.fromkeys(web + outside + sorted(readers)))
-    reason = f"{len(web) + len(outside)} changed file(s) and {len(readers)} that read files from disk"
-    return "related", reason, [posixpath.relpath(path, "web") for path in files]
+    return _WebIndex(root).plan(changed)
+
+
+def web_plans(paths, root=ROOT):
+    """web_plan of each path on its own, from one scan (check-fast --each, #11026)."""
+    index = _WebIndex(root)
+    return [index.plan([path]) for path in paths]
 
 
 # Go compatibility tests read these client contracts and interaction entry points,
-# not unrelated Mac/Android screens or their build toolchains.
+# not unrelated Mac/Android screens or their build toolchains. internal/proto reads the wire package's JSONValue.swift
+# (#11026: check-fast runs it for that file, so CI's server lane does too).
 SERVER_CLIENT_INPUTS = [
     "apple/Shared/**", "apple/Persona/Views/Interactions/**", "apple/Persona/App/**",
     "apple/Persona/Intents/**", "apple/PersonaWatch/**", "apple/PersonaWidgets/**",
-    "apple/LiveActivity/**", "apple/PersonaTests/**", "android/core/contracts/**",
+    "apple/LiveActivity/**", "apple/PersonaTests/**", "apple/Packages/PersonaWire/**", "android/core/contracts/**",
 ]
 
 FILTERS = {
@@ -342,6 +375,15 @@ def main():
     parser.add_argument("--web-plan", action="store_true",
                         help="read changed paths from stdin, one per line, and print check-fast's web check: "
                              "a first line '<none|full|related> <reason>', then vitest related's files relative to web/")
+    parser.add_argument("--lanes-for", action="store_true",
+                        help="read changed paths from stdin, one per line, and print the lanes CI runs for them "
+                             "(not image), space-separated on one line (check-fast names the ones it does not run)")
+    parser.add_argument("--lanes-for-each", action="store_true",
+                        help="read paths from stdin, one per line, and print --lanes-for of each path on its own, one "
+                             "line per path in the same order (check-fast --each)")
+    parser.add_argument("--web-plan-each", action="store_true",
+                        help="read paths from stdin, one per line, and print the first line of --web-plan for each "
+                             "path on its own, one line per path in the same order (check-fast --each)")
     args = parser.parse_args()
     if args.web_inputs:
         print("\n".join(web_inputs()))
@@ -349,6 +391,19 @@ def main():
     if args.web_plan:
         mode, reason, files = web_plan([line for line in sys.stdin.read().splitlines() if line])
         print("\n".join([f"{mode} {reason}", *files]))
+        return
+    if args.lanes_for:
+        selected = select([line for line in sys.stdin.read().splitlines() if line])
+        print(" ".join(lane for lane in LANES if selected[lane]))
+        return
+    if args.lanes_for_each:
+        for path in [line for line in sys.stdin.read().splitlines() if line]:
+            selected = select([path])
+            print(" ".join(lane for lane in LANES if selected[lane]))
+        return
+    if args.web_plan_each:
+        for mode, reason, _ in web_plans([line for line in sys.stdin.read().splitlines() if line]):
+            print(f"{mode} {reason}")
         return
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     event = json.loads(Path(event_path).read_text()) if event_path else {}

@@ -36,7 +36,8 @@ data class NotificationRoute(val tab: AppTab?, val chat: ChatRoute? = null, val 
             card = requestId?.takeIf { it.isNotBlank() && machineId.isNotBlank() }?.let { RequestRef(machineId, it) })
 
         fun parse(uri: Uri): NotificationRoute? {
-            if (uri.scheme !in ProtocolCompatibility.appSchemes || uri.host != "open") return null
+            // Notification targets have no path; a canonical page's tab= is view state, not a notification tab.
+            if (uri.scheme !in ProtocolCompatibility.appSchemes || uri.host != "open" || !uri.path.isNullOrEmpty()) return null
             val tab = when (ProtocolCompatibility.canonicalTab(uri.getQueryParameter("tab"))) {
                 "persona" -> AppTab.Persona
                 "agents" -> AppTab.Agents

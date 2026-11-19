@@ -172,6 +172,10 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun verify(session: Session, action: ChatAction) = source.verify(names.rawSession(session), action)
         override suspend fun editQueue(session: Session, keep: List<Int>) = source.editQueue(names.rawSession(session), keep)
         override suspend fun sendQueuedNow(session: Session) = source.sendQueuedNow(names.rawSession(session))
+        override suspend fun retryUndelivered(session: Session, messageId: String) =
+            source.retryUndelivered(names.rawSession(session), messageId)
+        override suspend fun deleteUndelivered(session: Session, messageId: String) =
+            source.deleteUndelivered(names.rawSession(session), messageId)
         override suspend fun info(session: Session) = source.info(names.rawSession(session))
         override suspend fun completeRow(session: Session) = source.completeRow(names.rawSession(session))?.let(names::session)
         override suspend fun childRows(session: Session) = source.childRows(names.rawSession(session)).map(names::session)

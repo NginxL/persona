@@ -19,6 +19,8 @@ public enum ScreenLinkWire {
         case data = 1, ack, paths, attach, attached, ping, pong, use, resumed, close, reset
         /// The video over UDP (#7873), on a direct route's TLS connection.
         case udpOpen, udpReady
+        /// The phone processed `close`; a distinct type so a final-data ack cannot be mistaken for it (#10006).
+        case closeAck
     }
 }
 
@@ -127,6 +129,8 @@ public enum ScreenLinkMessage: Equatable, Sendable {
     case resumed([ScreenLinkOffset])
     /// The channel ends at `offset`.
     case close(channel: UInt8, offset: UInt64)
+    /// The phone processed the close ending at `offset`; sent again for every copy of that close.
+    case closeAck(channel: UInt8, offset: UInt64)
     /// The video channel goes on at `offset`, a message boundary: a partial message held is dropped.
     case reset(channel: UInt8, offset: UInt64)
     /// Open a UDP flow beside this direct connection (#7873).
@@ -147,6 +151,7 @@ public enum ScreenLinkMessage: Equatable, Sendable {
         case let .use(entries): return Self.frame(.use, entries.reduce(into: Data()) { $0 += Self.head($1.channel, $1.offset) })
         case let .resumed(entries): return Self.frame(.resumed, entries.reduce(into: Data()) { $0 += Self.head($1.channel, $1.offset) })
         case let .close(ch, off): return Self.frame(.close, Self.head(ch, off))
+        case let .closeAck(ch, off): return Self.frame(.closeAck, Self.head(ch, off))
         case let .reset(ch, off): return Self.frame(.reset, Self.head(ch, off))
         case .udpOpen: return Self.frame(.udpOpen, Data())
         case let .udpReady(r): return Self.frame(.udpReady, (try? JSONEncoder().encode(r)) ?? Data())
@@ -169,6 +174,9 @@ public enum ScreenLinkMessage: Equatable, Sendable {
         case .close:
             let (ch, off) = try head(b)
             return .close(channel: ch, offset: off)
+        case .closeAck:
+            let (ch, off) = try head(b)
+            return .closeAck(channel: ch, offset: off)
         case .reset:
             let (ch, off) = try head(b)
             return .reset(channel: ch, offset: off)

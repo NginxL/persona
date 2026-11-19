@@ -325,6 +325,12 @@ fun LarkRichInlineText(
     source: LarkContentSource? = null,
     onOpenProfile: ((String) -> Unit)? = null,
 ) {
+    val pictures = LocalInboxPictureMarkdown.current
+    val imageSource = source?.transport?.replyImages
+    if ("![" in text && pictures != null && imageSource != null) {
+        pictures(text, imageSource, modifier)
+        return
+    }
     val open = LocalLarkLinkOpener.current
     val uri = LocalUriHandler.current
     val palette = PersonaTheme.palette

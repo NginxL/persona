@@ -24,5 +24,11 @@
   "graph_close": "閉じる",
   "graph_fold": "折りたたむ",
   "graph_show_hidden_other": "非表示の {count} 件を表示",
-  "graph_under": "{title}の下"
+  "graph_under": "{title}の下",
+  "graph_outline": "アウトライン",
+  "graph_timeline": "タイムライン",
+  "graph_inspector": "詳細",
+  "graph_links": "セッションとリンク",
+  "graph_open_action": "開く",
+  "graph_running": "実行中"
 }

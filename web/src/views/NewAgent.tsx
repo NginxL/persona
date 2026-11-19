@@ -488,13 +488,16 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // takes. Starting never waits for it.
   const followed = followedBinding(launcher, unified ? configured : null);
   const listLauncher = launchersOf === mid ? pickerLauncher(launcher, followed) : "";
+  const listEntry = launchers.find((l) => l.name === listLauncher);
+  const desktopStart = startsInDesktopApp(listEntry);
+  const opensIn = workspace?.host ?? (desktopStart ? undefined : host || undefined);
   useEffect(() => {
     if (!open || !mid || !listLauncher) return;
-    const key = `${mid}/${listLauncher}`;
-    void readModels(mid, listLauncher, { again: !readThisTime.current.has(key), first: true });
+    const key = JSON.stringify([mid, listLauncher, opensIn]);
+    void readModels(mid, listLauncher, { again: !readThisTime.current.has(key), first: true, host: opensIn });
     readThisTime.current.add(key);
-  }, [open, mid, listLauncher]);
-  const models = useModelList(open ? mid : "", listLauncher);
+  }, [open, mid, listLauncher, opensIn]);
+  const models = useModelList(open ? mid : "", listLauncher, opensIn);
   // an older hub has no list (null): no model is picked
   useEffect(() => {
     if (models.list === null) setModel("");
@@ -521,9 +524,19 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   const hostDefault = picked ? currentHosts(picked).default : "";
   useEffect(() => { setHost(""); }, [open, mid]);
   const agent = launcherAgent(listLauncher, launchers, models.list);
+  const previousCatalog = useRef({ host: opensIn, launcher: listLauncher, agent });
+  useLayoutEffect(() => {
+    const previous = previousCatalog.current;
+    previousCatalog.current = { host: opensIn, launcher: listLauncher, agent };
+    if (open && previous.host !== opensIn && previous.launcher === listLauncher && (agent === "agy" || previous.agent === "agy")) {
+      // A model selected for another AGY host may be absent from this host's catalog.
+      setModel("");
+      setEffort("");
+      setTier(null);
+    }
+  }, [open, opensIn, listLauncher, agent]);
   // what a start on it takes besides the model (#8261): Claude Code's modes and efforts, or the permission modes a
   // launcher lists (Paseo's other providers) and the efforts its model lists, or neither (Codex keeps its own)
-  const listEntry = launchers.find((l) => l.name === listLauncher);
   const claudeModes = takesEffort(agent) && !listedModes(listEntry);
   const providerModes = claudeModes ? undefined : listedModes(listEntry);
   // Codex takes its first message with the start (lib/new-agent.ts); a computer that can opens it without one too
@@ -537,9 +550,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // A start in a desktop app (lib/desktop-start.ts, #5480 Claude's, #5726 the Codex App): no folder picked is a temporary
   // session, browsing starts in the folder holding the app's projects (worked out when the computer or the launcher
   // changes, not on every push), and a new folder may be named.
-  const desktopLauncher = runs ? launchers.find((l) => l.name === runs) : undefined;
-  const desktopStart = startsInDesktopApp(desktopLauncher);
-  const codexApp = desktopLauncher?.source === CODEX_APP_SOURCE;
+  const codexApp = listEntry?.source === CODEX_APP_SOURCE;
   const desktopScratch = desktopStart && !cwdPicked && !workspace;
   // not for a start handed in for something of its own (Inbox's "New agent…", #5933): that waits for one Agent
   const runsOffered = inWorktree && worktreeOffered && !desktopScratch && !preset?.onStarted;
@@ -598,7 +609,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // what of the picked preset this launcher can't take, said once its list is in
   const tierMissed = tier && listLauncher === tier.launcher && models.list !== undefined ? tierLeftOut(tier, { agent, list: models.list, followed, launcher: listEntry }) : [];
   // the follow row's second line: what Model settings › New agent runs (the hub's default, by display names)
-  const defaultList = useModelList(open ? mid : "", defaultRuns).list;
+  const defaultList = useModelList(open ? mid : "", defaultRuns, opensIn).list;
   const followDetail = hubDefault
     ? [hubDefault.provider && launcherTitle(hubDefault.provider, names), hubDefault.model && modelTitle(defaultList, hubDefault.model), hubDefault.effort && effortTitle(hubDefault.effort)].filter(Boolean).join(" · ")
     : modelDefault;
@@ -667,8 +678,6 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
       if (mode) localStorage.setItem(`new.mode.${mid}`, mode);
       else localStorage.removeItem(`new.mode.${mid}`);
     }
-    // a desktop app's session opens in the app, never in an engine host
-    const opensIn = workspace?.host ?? (desktopStart ? undefined : host || undefined);
     // this start as a recent setup (#2134): the folder picked (not the worktree made from it), the model and effort sent;
     // mode and effort only for Claude Code
     const claude = agent === "claude";
@@ -679,7 +688,8 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
       ? inlineTextStart(launchers.find((l) => l.name === listLauncher), opensIn ?? hostDefault, snapshot.text, snapshot.attachments.length)
       : undefined;
     // what every start of this sheet goes with (each run of a comparison too)
-    const target = { launcher, ...picks, permissionMode: permissionMode || undefined, host: opensIn, ultracode: ultra,
+    const launcherDefaultEffort = agent === "agy" && !!launcher && !picks.effort;
+    const target = { launcher, ...picks, launcherDefaultEffort: launcherDefaultEffort || undefined, permissionMode: permissionMode || undefined, host: opensIn, ultracode: ultra,
       ...(codex ? { agentType: "codex", inlinePrompt: true } : inline) };
     const launch = (dir: string, workspaceId: string | undefined) => {
       if (!current()) return;
@@ -1015,6 +1025,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
                 <span className="ml-auto flex min-w-0 shrink justify-end" data-testid="new-agent-model">
                   <NewAgentModel
                     mid={mid}
+                    host={opensIn}
                     launchers={launchers}
                     ready={settled}
                     onRetry={launchersFailed ? retryLaunchers : undefined}

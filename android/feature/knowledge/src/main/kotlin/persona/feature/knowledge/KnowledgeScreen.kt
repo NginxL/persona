@@ -4,22 +4,30 @@ import persona.core.designsystem.text
 import persona.core.domain.sort.workLine
 import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -119,7 +127,7 @@ private fun KindChips(kind: KnowledgeKind, count: Int?, onPick: (KnowledgeKind) 
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.xs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
-        KnowledgeKind.entries.forEach { option ->
+        KnowledgeKind.entries.filter { it != KnowledgeKind.Recordings }.forEach { option ->
             val on = option == kind
             JChip(option.label(), selected = on, onClick = { onPick(option) }, count = if (on) count else null)
         }
@@ -207,21 +215,69 @@ private fun KnowledgeRow(
     trailing: @Composable () -> Unit = {},
     extra: @Composable ColumnScope.() -> Unit = {},
 ) {
-    JCard(Modifier.padding(bottom = Tokens.Space.m), onClick = onClick) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                Text(name, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f))
-                trailing()
+    val imported = entry.imported
+    val notes = imported?.let { importedNotesTitle(it.source) }
+    JCard(Modifier.padding(bottom = Tokens.Space.m).then(
+        if (notes == null) Modifier else Modifier.semantics { stateDescription = notes }), onClick = onClick) {
+        if (imported == null) {
+            // Unmatched rows keep the layout and accessibility they had before #9994.
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                KnowledgeRowContent(entry, metadata, name, trailing, extra)
             }
-            if (metadata) EntryMetadata(entry)
-            entry.oneLine?.takeIf { it.isNotBlank() && metadata }?.let {
-                Text(it, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        } else Row(verticalAlignment = Alignment.Top) {
+            KnowledgeImportedAvatar(entry)
+            Spacer(Modifier.width(Tokens.Space.m))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                KnowledgeRowContent(entry, metadata, name, trailing, extra)
             }
-            extra()
         }
     }
 }
+
+@Composable
+private fun ColumnScope.KnowledgeRowContent(
+    entry: KnowledgeEntry,
+    metadata: Boolean,
+    name: String,
+    trailing: @Composable () -> Unit,
+    extra: @Composable ColumnScope.() -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        Text(name, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f))
+        trailing()
+    }
+    if (metadata) EntryMetadata(entry)
+    entry.oneLine?.takeIf { it.isNotBlank() && metadata }?.let {
+        Text(it, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    }
+    extra()
+}
+
+/** Only a recording that stands for an imported meeting gets this new avatar: its connector's brand on the light logo
+ * backing, or a gray link for a connector without a brand. The row's state description names the notes for TalkBack. */
+@Composable
+private fun KnowledgeImportedAvatar(entry: KnowledgeEntry) {
+    val imported = entry.imported ?: return
+    val brand = connectorBrand(imported.source.orEmpty())
+    val palette = PersonaTheme.palette
+    Box(Modifier.testTag("knowledge-imported-avatar-${entry.id}")) {
+        JAvatar(entry.name, icon = PersonaIcons.recording)
+        Box(
+            Modifier.align(Alignment.BottomEnd).offset(Tokens.Space.xs, Tokens.Space.xs).size(Tokens.Size.badge)
+                .clip(CircleShape).background(if (brand == null) palette.ink3 else palette.catalogLogoBackground)
+                .border(Tokens.Size.lineMedium, palette.background, CircleShape).clearAndSetSemantics {},
+            contentAlignment = Alignment.Center,
+        ) {
+            if (brand != null) JBrandMark(brand, Tokens.Size.markS, contentDescription = null)
+            else JIcon(PersonaIcons.link, null, size = Tokens.Size.markXS, tint = palette.onMediaBackdrop, decorative = true)
+        }
+    }
+}
+
+@Composable
+private fun importedNotesTitle(source: String?): String = stringResource(
+    if (connectorBrand(source.orEmpty()) == null) R.string.knowledge_imported_original else R.string.knowledge_imported_lark)
 
 /** Importance in its tone (P0 needs you, P1 is busy), the project's kind and status, relevance, the first tags. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -386,6 +442,14 @@ internal fun KnowledgeDetailScreen(
                     val recording = entry.isRecording
                     val facts = if (recording) RecordingFacts.of(detail.meta) else null
                     facts?.let { recordingFacts(it) }
+                    detail.importedMeeting?.let { imported ->
+                        item("imported-notes", contentType = "row") {
+                            JGroupItem(GroupPosition.Single) {
+                                JRow(importedNotesTitle(imported.source), modifier = Modifier.testTag("knowledge-imported-notes"),
+                                    leadingIcon = PersonaIcons.link, onClick = { currentOpenLink(imported.url) })
+                            }
+                        }
+                    }
                     timeline(timeline(detail.log), allLog) { allLog = !allLog }
                     val profileText = profile(detail.summary, entry.oneLine)
                     // A card like the other sections (and iOS): bare text sat at the card edge, left of every heading.

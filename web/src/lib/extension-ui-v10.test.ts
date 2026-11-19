@@ -3,7 +3,7 @@
 // left out, and the component is then drawn as a graph without it. The layout itself is lib/graph-layout.test.ts.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { readView, UI_VERSION, type UIGraphNode } from "./extension-ui";
+import { isGraphLink, readView, UI_VERSION, type UIGraphNode } from "./extension-ui";
 
 const example = (name: string) => JSON.parse(readFileSync(new URL(`../../../schema/extension/examples/View.v10-${name}.json`, import.meta.url), "utf8"));
 const graphOf = (raw: unknown) => readView({ sections: [{ items: [raw] }] }).sections[0]?.items[0] as
@@ -63,5 +63,78 @@ describe("UI 10: reading a view's graph", () => {
   it("a graph with no node that reads is left out of the view", () => {
     expect(readView({ sections: [{ items: [{ type: "graph", nodes: [] }, { type: "text", text: "hi" }] }] }).sections[0].items.map((i) => i.type)).toEqual(["text"]);
     expect(readView({ sections: [{ items: [{ type: "graph", nodes: [{ id: "a", title: "A" }] }] }] }).sections[0].items[0].nodes).toHaveLength(1);
+  });
+});
+
+describe("UI 10: a node's inspector fields", () => {
+  const one = (node: Record<string, unknown>) => graphOf({ type: "graph", nodes: [{ id: "a", title: "A" }, { ...node, id: "b" }] }).nodes![1];
+
+  it("keeps a started and ended time, and an ended time is dropped before its start", () => {
+    expect(one({ id: "b", title: "A", started_at: 10, ended_at: 20 })).toEqual({ id: "b", title: "A", started_at: 10, ended_at: 20 });
+    expect(one({ id: "b", title: "A", ended_at: 20 })).toEqual({ id: "b", title: "A", ended_at: 20 }); // no start: nothing to compare
+    expect(one({ id: "b", title: "A", started_at: 20, ended_at: 10 })).toEqual({ id: "b", title: "A", started_at: 20 }); // before its start
+    expect(one({ id: "b", title: "A", started_at: -1, ended_at: Infinity })).toEqual({ id: "b", title: "A" });
+    expect(one({ id: "b", title: "A", started_at: "5", ended_at: NaN })).toEqual({ id: "b", title: "A" });
+  });
+
+  it("keeps only facts with a value that reads, its label under 200 and the first eight", () => {
+    expect(one({ id: "b", title: "A", facts: [{ label: "Owner", value: "me", icon: "user" }, { label: "x".repeat(201), value: "v" }, { value: "" }, "junk", { value: 7 }] })).toEqual({
+      id: "b", title: "A", facts: [{ label: "Owner", value: "me", icon: "user" }, { value: "v" }],
+    });
+    const many = Array.from({ length: 12 }, (_, i) => ({ label: `L${i}`, value: `v${i}` }));
+    expect(one({ id: "b", title: "A", facts: many }).facts).toHaveLength(8);
+    expect(one({ id: "b", title: "A", facts: [].concat([]) }).facts).toBeUndefined();
+    // a value of at most 2000 characters reads; one longer is dropped
+    expect(one({ id: "b", title: "A", facts: [{ value: "v".repeat(2000) }] }).facts).toHaveLength(1);
+    expect(one({ id: "b", title: "A", facts: [{ value: "v".repeat(2001) }] }).facts).toBeUndefined();
+  });
+
+  it("keeps a detail, cut to 2000, and drops an empty one", () => {
+    expect(one({ id: "b", title: "A", detail: "hello" }).detail).toBe("hello");
+    expect(one({ id: "b", title: "A", detail: "x".repeat(2500) }).detail).toHaveLength(2000);
+    expect(one({ id: "b", title: "A", detail: "" }).detail).toBeUndefined();
+    expect(one({ id: "b", title: "A", detail: 3 }).detail).toBeUndefined();
+  });
+
+  it("keeps credential-free https links only, first eight", () => {
+    const url = (u: string) => ({ title: "Work", url: u });
+    expect(one({ id: "b", title: "A", links: [url("https://example.com/s/1")] }).links).toEqual([{ title: "Work", url: "https://example.com/s/1" }]);
+    // http, credentials, an empty title, a too-long title, a too-long url and junk are left out
+    expect(one({ id: "b", title: "A", links: [
+      url("http://example.com"), url("https://me:secret@example.com"), { title: "", url: "https://example.com" },
+      { title: "t".repeat(81), url: "https://example.com" }, url(`https://example.com/${"p".repeat(2000)}`), "junk", { title: "no url" },
+    ] }).links).toBeUndefined();
+    const many = Array.from({ length: 12 }, (_, i) => ({ title: `T${i}`, url: `https://example.com/${i}` }));
+    expect(one({ id: "b", title: "A", links: many }).links).toHaveLength(8);
+    expect(one({ id: "b", title: "A", links: [] }).links).toBeUndefined();
+  });
+
+  it("isGraphLink accepts only a credential-free https url with a host", () => {
+    expect(isGraphLink("https://example.com/a")).toBe(true);
+    expect(isGraphLink("http://example.com")).toBe(false);
+    expect(isGraphLink("https://me:pw@example.com")).toBe(false);
+    expect(isGraphLink("https://")).toBe(false);
+    expect(isGraphLink("not a url")).toBe(false);
+    expect(isGraphLink(undefined)).toBe(false);
+  });
+
+  it("counts Unicode code points for facts, detail and link titles without splitting surrogates", () => {
+    const emoji = "🚀"; // 1 code point, 2 UTF-16 code units
+    const node = one({
+      id: "b",
+      title: "A",
+      facts: [{ label: emoji.repeat(200), value: emoji.repeat(1500) }],
+      detail: "a" + emoji.repeat(2000),
+      links: [{ title: emoji.repeat(80), url: "https://example.com/s" }],
+    });
+    expect(node.facts).toHaveLength(1);
+    expect(Array.from(node.detail!)).toHaveLength(2000);
+    expect(node.detail!.endsWith("\uD83D")).toBe(false); // never cut mid-surrogate
+    expect(node.links).toHaveLength(1);
+  });
+
+  it("keeps every rich field of the view's example node, together", () => {
+    const node = one({ id: "b", title: "A", started_at: 1, ended_at: 2, facts: [{ label: "Mod", value: "small" }], detail: "why", links: [{ title: "Session", url: "https://example.com/s" }] });
+    expect(node).toEqual({ id: "b", title: "A", started_at: 1, ended_at: 2, facts: [{ label: "Mod", value: "small" }], detail: "why", links: [{ title: "Session", url: "https://example.com/s" }] });
   });
 });

@@ -29,15 +29,17 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
     /// of task by itself from now on. Every task of such a plan carries the same; read-only, never sent back.
     var schedule: String?
     var scheduleTitle: String?
+    /// The Agent preset the assistant chose, resolved when this task starts.
+    var tier: String?
 
     enum CodingKeys: String, CodingKey {
         case title, prompt, machine, cwd, launcher, model, permission, ultracode, readonly, why, error, brief, schedule
-        case todoID = "todo_id", scheduleTitle = "schedule_title"
+        case todoID = "todo_id", scheduleTitle = "schedule_title", tier
     }
 
     init(title: String, prompt: String, machine: String, cwd: String, launcher: String? = nil, model: String? = nil,
          permission: String? = nil, ultracode: Bool? = nil, readonly: Bool? = nil, why: String? = nil, todoID: String? = nil,
-         error: String? = nil, brief: TaskBrief? = nil, schedule: String? = nil, scheduleTitle: String? = nil) {
+         error: String? = nil, brief: TaskBrief? = nil, schedule: String? = nil, scheduleTitle: String? = nil, tier: String? = nil) {
         self.title = title
         self.prompt = prompt
         self.machine = machine
@@ -53,6 +55,7 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         self.brief = brief
         self.schedule = schedule
         self.scheduleTitle = scheduleTitle
+        self.tier = tier
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +75,7 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         brief = (try? c.decodeIfPresent(TaskBrief.self, forKey: .brief)) ?? nil
         schedule = (try? c.decodeIfPresent(String.self, forKey: .schedule)).flatMap { $0?.isEmpty == false ? $0 : nil }
         scheduleTitle = (try? c.decodeIfPresent(String.self, forKey: .scheduleTitle)) ?? nil
+        tier = try c.decodeIfPresent(String.self, forKey: .tier)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -88,6 +92,7 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         try c.encodeIfPresent(why, forKey: .why)
         try c.encodeIfPresent(todoID, forKey: .todoID)
         try c.encodeIfPresent(error, forKey: .error)
+        try c.encodeIfPresent(tier, forKey: .tier)
     }
 
     var isReadOnly: Bool { readonly ?? false }

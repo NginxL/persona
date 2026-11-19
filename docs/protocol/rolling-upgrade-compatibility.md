@@ -223,6 +223,24 @@ hello; the hub lists the feature only while every manager that carries Agents na
 | New hub and managers, an older Android app | The same: it folds rows by `folded_under`, so a side is one of its parent's child sessions until the app is updated. |
 | New hub and managers, an older iOS app | From #8010 on it folds rows by `folded_under` too, so a side is one of its parent's child sessions until the app is updated; an app from before #8010 folds by its own child fields, which a side lacks (no `parent_session_id`), and the side stays a plain row of its own. |
 
+### Screen Link close confirmation (#10006)
+
+Screen Link `close_ack` is message type 14 with the same channel and 64-bit final offset as the `close` it confirms. It is
+additive and needs no feature negotiation: a new phone sends it after every `close`, including a repeated close for an
+already ended channel, and an old node skips the unknown type. A final-data `ack` is not a close confirmation, because
+it can cross with a close the phone has not processed. A new node accepts `close_ack` only for the outstanding close's
+channel and exact final offset; duplicate, stale and unknown-channel confirmations are ignored.
+
+| Pair | Behavior |
+| --- | --- |
+| New node, new phone | An unconfirmed close is offered again on a different surviving route. Confirmation stops another copy; a late valid confirmation also cancels a copy not sent yet. |
+| New node, old phone | No `close_ack` arrives. A route change can offer the close again, which the old phone already accepts idempotently. An unconfirmed video close stays recoverable while it has a route; with no route it finishes as before. |
+| Old node, new phone | The old node skips type 14. The phone's data, reset and close behavior is otherwise unchanged. |
+| Old node, old phone | Unchanged. |
+
+RFB keeps its existing completion rule in every combination: the local close finishes the channel and session at the
+next watchdog tick without waiting for `close_ack`.
+
 ## Apple 端交接
 
 原生协议兼容跟踪 #6192；本地状态与系统身份跟踪 #6152。Apple 的实现应遵循上述能力和字节约定；本清单不替它们宣称 Keychain、Intent、偏好、Shortcut、旧 controls、活动或 watch 在途数据已经验证。

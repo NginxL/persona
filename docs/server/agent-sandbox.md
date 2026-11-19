@@ -281,6 +281,9 @@ Run them locally in `server/`:
 go test ./internal/extension/sandbox/ -run ForReal -v
 ```
 
-The Darwin test skips elsewhere (CI has no macOS runner). The Linux test skips when bwrap or its user-namespace probe
-is unavailable; run it on stock bubblewrap 0.8.x after changing the profile. Apple marks `sandbox-exec` deprecated and
-does not document its profile language, so run the Darwin test after a macOS update.
+The Darwin test skips elsewhere (CI has no macOS runner). The Linux tests skip when bwrap or its user-namespace probe
+is unavailable. They also skip when the full-profile preflight reports the exact alias `open_tree: operation not
+permitted` failure seen on Linux 5.4: production reports the same start `unavailable` and leaves it unwrapped, so this
+is not a fallback or a successful sandbox run. Other profile failures, including `move_mount` failures, remain test
+failures (#11073). Run the tests on stock bubblewrap 0.8.x after changing the profile. Apple marks `sandbox-exec`
+deprecated and does not document its profile language, so run the Darwin test after a macOS update.

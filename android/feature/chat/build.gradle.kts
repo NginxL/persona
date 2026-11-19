@@ -42,6 +42,8 @@ dependencies {
     implementation(libs.coil.compose)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    testImplementation(project(":core:hub"))
+    testImplementation("com.squareup.okhttp3:mockwebserver:${libs.versions.okhttp.get()}")
     testImplementation(platform(libs.compose.bom))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.compose.ui:ui-test-manifest")

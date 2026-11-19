@@ -168,6 +168,25 @@ class GroupRoutingTest {
         try { merged.trash("mini~gffffffff", "/w", listOf("a")); fail("Expected offline") }
         catch (failure: HubFailure) { assertEquals(HubError.NoNetwork, failure.kind) }
     }
+    @Test fun keptMessageActionsReachTheirGroupWithPlainSessionIds() = runBlocking<Unit> {
+        val calls = mutableListOf<String>()
+        val source = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun retryUndelivered(session: Session, messageId: String) {
+                calls += "retry ${session.key.path} $messageId"
+            }
+            override suspend fun deleteUndelivered(session: Session, messageId: String) {
+                calls += "delete ${session.key.path} $messageId"
+            }
+        }
+        val wrapped = source.inGroup(other)
+        val merged = Session("macbook~g0a1b2c3d", "conversation")
+        wrapped.retryUndelivered(merged, "message")
+        wrapped.deleteUndelivered(merged, "message")
+        assertEquals(listOf("retry macbook/conversation message", "delete macbook/conversation message"), calls)
+    }
 
 
     @Test fun aGroupsDraftsAreStoredWithItsPlainKeys() = runBlocking<Unit> {

@@ -9,6 +9,7 @@
     <string name="chat_mode_change_restart_failed_why">「%1$s」で再起動できませんでした：%2$s</string>
     <string name="chat_mode_change_restart_dropped">取り消しました。「%1$s」では再起動しません</string>
     <string name="chat_mode_change_restart_dropped_why">取り消しました。「%1$s」では再起動しません：%2$s</string>
+    <string name="chat_mode_change_why_cancelled">セッションは現在のモードのままです</string>
     <string name="chat_mode_change_why_replaced">別の切り替えに置き換えられました</string>
     <string name="chat_mode_change_why_process_exited">元のプロセスが終了しました</string>
     <string name="chat_mode_change_why_process_replaced">セッションが別のプロセスに変わりました</string>

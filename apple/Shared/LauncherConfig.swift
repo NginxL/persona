@@ -241,6 +241,8 @@ nonisolated struct LauncherInput: Encodable, Sendable {
     var args: [String]
     var apiKey: String?
     var kind: String? = nil
+    /// The runtime an import draft names (`claude`, `codex`, …); nil keeps every existing request unchanged.
+    var agent: String? = nil
     var api: String? = nil
     /// A secret provider's reference in place of `apiKey` (docs/extensions/secret-providers.md "Launcher keys", a hub with
     /// `launcher_secret_references`): the save checks it resolves.
@@ -283,7 +285,7 @@ nonisolated struct LauncherInput: Encodable, Sendable {
     /// Send Through (kind api): a computer's id, "" the hub itself; nil keeps what the hub has.
     var viaMachine: String? = nil
     enum CodingKeys: String, CodingKey {
-        case name, model, args, kind, api, preset, auth, models, headers, env, proxy, effort, assign, share, delivery
+        case name, model, args, kind, agent, api, preset, auth, models, headers, env, proxy, effort, assign, share, delivery
         case scopeMachines = "scope_machines", ownService = "own_service", machineKeys = "machine_keys", viaMachine = "via_machine"
         case apiKeyReference = "api_key_reference", machineKeyReferences = "machine_key_references"
         case displayName = "display_name"
@@ -376,6 +378,23 @@ nonisolated struct LauncherImportPreview: Decodable, Hashable, Sendable {
 nonisolated struct LauncherImportResult: Decodable, Hashable, Sendable {
     var created: [String]?
     var updated: [String]?
+}
+
+/// One Agent preset from the model profile in use (`tiers` of GET /api/v1/machines/{id}/launchers): a named way to fill
+/// New Agent's launcher, model and thinking effort for this start. The tier itself is not a session-start field.
+nonisolated struct AgentPreset: Decodable, Hashable, Sendable, Identifiable {
+    var name: String
+    var launcher: String
+    var model: String? = nil
+    var effort: String? = nil
+    var description: String? = nil
+    var id: String { name }
+}
+
+/// The model profile whose Agent presets a computer offers.
+nonisolated struct AgentPresetProfile: Decodable, Hashable, Sendable {
+    var id: String
+    var name: String
 }
 
 /// What a machine's launcher picker runs with no pick (`default` of GET /api/v1/machines/{id}/launchers): Model Settings'

@@ -755,13 +755,8 @@ private struct SidebarClosed: View {
 /// start (New Chat, Scheduled Tasks, Knowledge; the shell's drawer: Inbox … Machines); a line; Pin and Recent, one line each with a round
 /// mark; Persona's face, where it runs and Settings at the foot.
 struct AssistantSidebar: View {
-    /// The open conversation's row. On the Mac, the shade the shell's other lists select with (`macSelected`): the
-    /// phone's `well` on the Mac's lighter fills (#1169) was hard to find there.
-    #if os(macOS)
-    private static var selectedFill: Color { Theme.Fill.macSelected } // the style's: read when drawn
-    #else
-    private static let selectedFill = Theme.Fill.well
-    #endif
+    /// The open conversation's row: every sidebar row's one selected shade (`SidebarSelectedShade`, #11032).
+    private static var selectedFill: Color { SidebarSelectedShade.fill }
 
     @Environment(AppModel.self) private var model
     var current: SessionKey?
@@ -1463,7 +1458,7 @@ extension AssistantSidebar {
             .padding(.vertical, Theme.Sidebar.rowPadding)
             .scaledFrame(minHeight: Theme.Sidebar.row)
             .background {
-                if selected { RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Self.selectedFill) }
+                if selected { SidebarSelectedShade() }
             }
             .macHoverShade(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .contentShape(.rect)
@@ -1530,7 +1525,7 @@ extension AssistantSidebar {
             .padding(.vertical, Theme.Sidebar.rowPadding)
             .scaledFrame(minHeight: Theme.Sidebar.row)
             .background {
-                if selected { RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous).fill(Self.selectedFill) }
+                if selected { SidebarSelectedShade() }
             }
             .contentShape(.rect)
         }
@@ -1791,7 +1786,7 @@ extension AssistantSidebar {
             .scaledFrame(minHeight: Theme.Sidebar.row)
             .background {
                 if selected && drawsShade {
-                    RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous).fill(Self.selectedFill)
+                    SidebarSelectedShade()
                 }
             }
             .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous), isEnabled: drawsShade)

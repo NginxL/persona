@@ -59,6 +59,7 @@ class Handler(hub.H):
 def main():
     hub.SESSIONS[:] = [
         hub.sess("macbook", CLAUDE_CHAT, "Example Claude chat", "/example/project", "idle", "unread", "Example", 1, "Claude", 1, 1, "", launcher="claude"),
+        hub.sess("studio", "e3333333-0000-4000-8000-000000000003", "Example writing chat", "/example/writing", "idle", "unread", "Example", 1, "Claude", 3, 1, "", launcher="claude"),
         hub.sess("macbook", CODEX_CHAT, "Example Codex chat", "/example/project", "idle", "unread", "Example", 1, "Codex", 2, 1, "", agent="codex", launcher="codex"),
     ]
     for session in hub.SESSIONS:

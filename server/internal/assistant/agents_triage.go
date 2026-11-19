@@ -91,9 +91,10 @@ func (s *Service) triageTurnModel(ctx context.Context, v *workView, machine stri
 		}
 		in.Answered = triageAnswered(records)
 	}
+	hello := s.hello(ctx)
 	w, same, err = judgeTriageWith(ctx, s.purposeModel("agent.triage"), triageJudgeInput{
-		System: prompts.AgentTriage{Owner: s.owner(ctx), Language: answerLanguage(s.hello(ctx).Locale)},
-		Input:  in, Reply: reply, Others: byShort, Lang: s.lang(ctx),
+		System: prompts.AgentTriage{Owner: strings.TrimSpace(hello.Owner), Language: answerLanguage(hello.Locale)},
+		Input:  in, Reply: reply, Others: byShort, Lang: i18n.Lang(hello.Locale).Or(i18n.Default),
 	})
 	if err != nil {
 		return nil, false, err
@@ -119,8 +120,10 @@ type triageJudgeInput struct {
 // on the very step the user approved (#3824). It reads nothing else, so a behaviour check can run it on written-out
 // turns (#2586, agents_triage_judge_live_test.go).
 func judgeTriageWith(ctx context.Context, m jsonModel, j triageJudgeInput) (w *proto.WorkState, same bool, err error) {
+	in := j.Input
+	in.Language = j.System.Language // One captured language for both halves of this model call.
 	var out triageOut
-	if err := m.JSON(ctx, prompts.RenderAgentTriage(j.System), prompts.RenderAgentTriageInput(j.Input), &out); err != nil {
+	if err := m.JSON(ctx, prompts.RenderAgentTriage(j.System), prompts.RenderAgentTriageInput(in), &out); err != nil {
 		return nil, false, err
 	}
 	same = out.Wait != nil && out.Wait.Approved && j.Input.ApprovedThen != ""
@@ -323,14 +326,14 @@ func (s *Service) triageRead(ctx context.Context, machine string, c proto.Sessio
 	if ok && t.read != nil && sameTurn(c, t.turn) {
 		return t.read.ask, t.read.reply
 	}
-	ask, reply, err := s.lastTurnOf(ctx, machine, c.SessionID)
+	ask, reply, items, err := s.lastTurnRead(ctx, machine, c.SessionID)
 	var re *rpc.Error
 	if err != nil && !(errors.As(err, &re) && re.Code == proto.CodeNotLoaded) {
 		return "", ""
 	}
 	s.work.mu.Lock()
 	if t, ok := s.work.tried[k]; ok && sameTurn(c, t.turn) {
-		t.read = &turnRead{ask: ask, reply: reply}
+		t.read = &turnRead{ask: ask, reply: reply, items: items}
 		s.work.tried[k] = t
 	}
 	s.work.mu.Unlock()
@@ -340,13 +343,19 @@ func (s *Service) triageRead(ctx context.Context, machine string, c proto.Sessio
 // lastTurnOf is a session's latest turn: what the user asked in it ("" when none) and its last reply ("" when none);
 // err when the turn could not be read.
 func (s *Service) lastTurnOf(ctx context.Context, machine, sid string) (ask, answer string, err error) {
+	ask, answer, _, err = s.lastTurnRead(ctx, machine, sid)
+	return ask, answer, err
+}
+
+// lastTurnRead also retains the exact items, so a later asynchronous step cannot mistake a newer turn for this one.
+func (s *Service) lastTurnRead(ctx context.Context, machine, sid string) (ask, answer string, items []proto.Item, err error) {
 	var res struct {
 		Items []proto.Item `json:"items"`
 	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if err := s.call(cctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": 1}, &res); err != nil {
-		return "", "", err
+	if err := s.call(cctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": 1, "lazy_images": true}, &res); err != nil {
+		return "", "", nil, err
 	}
 	for _, it := range res.Items {
 		if it.Kind == proto.KindText && it.Role == "user" && strings.TrimSpace(it.Text) != "" {
@@ -356,10 +365,10 @@ func (s *Service) lastTurnOf(ctx context.Context, machine, sid string) (ask, ans
 	}
 	for i := len(res.Items) - 1; i >= 0; i-- {
 		if it := res.Items[i]; it.Kind == proto.KindText && it.Role == "assistant" && strings.TrimSpace(it.Text) != "" {
-			return ask, strings.TrimSpace(it.Text), nil
+			return ask, strings.TrimSpace(it.Text), res.Items, nil
 		}
 	}
-	return ask, "", nil
+	return ask, "", res.Items, nil
 }
 
 // clipMiddleRunes keeps a long text's first and last n runes: a last answer says what was done first and what is
@@ -383,8 +392,8 @@ type agentWake = prompts.AgentWake
 
 func renderWake(w agentWake) string { return prompts.RenderAgentWake(w) }
 
-func renderAnswer(items []agentAnswerItem) string {
-	a := prompts.AgentAnswer{}
+func renderAnswer(items []agentAnswerItem, language string) string {
+	a := prompts.AgentAnswer{Language: language}
 	for _, it := range items {
 		a.Items = append(a.Items, prompts.AgentAnswerItem{Question: oneLine(it.question), Answer: it.answer})
 	}
@@ -393,14 +402,14 @@ func renderAnswer(items []agentAnswerItem) string {
 
 // renderDelegatedAnswer is renderAnswer for answers the assistant gave for the user, and why (delegate.go): the agent
 // hears that they are the assistant's, and that the user may change them.
-func renderDelegatedAnswer(items []agentAnswerItem, reason string) string {
-	a := prompts.AgentAnswer{ByAssistant: true, Reason: oneLine(reason)}
+func renderDelegatedAnswer(items []agentAnswerItem, reason string, language string) string {
+	a := prompts.AgentAnswer{Language: language, ByAssistant: true, Reason: oneLine(reason)}
 	for _, it := range items {
 		a.Items = append(a.Items, prompts.AgentAnswerItem{Question: oneLine(it.question), Answer: it.answer})
 	}
 	return prompts.RenderAgentAnswer(a)
 }
 
-func renderAuthRelayed(app string) string {
-	return prompts.RenderAgentAuthRelayed(prompts.AgentAuthRelayed{App: app})
+func renderAuthRelayed(app string, language string) string {
+	return prompts.RenderAgentAuthRelayed(prompts.AgentAuthRelayed{Language: language, App: app})
 }

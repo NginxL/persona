@@ -18,6 +18,8 @@
 import {
   checkUpdate,
   checkValue,
+  fieldValue,
+  sameValue,
   CONFIGURATION_VERSION,
   ConfigurationError,
   parseDocument,
@@ -29,6 +31,14 @@ import {
   type FieldValue,
   type KnownField,
 } from "./contract";
+import { changeGuidance, invalidConditions, type ConfigurationGuidance, type ConfirmationCopy } from "./guidance";
+
+export interface PendingConfirmation {
+  fieldId: string;
+  copy: ConfirmationCopy;
+  update: ConfigurationUpdate;
+  pending?: FieldValue;
+}
 
 export interface Problem {
   code: string;
@@ -43,8 +53,8 @@ export interface FieldState {
   /** A choice being written; shown as pending until the source answers. */
   pending?: FieldValue;
   error?: Problem;
-  /** The last write of this field committed. */
-  saved?: boolean;
+  /** A confirmed save, optionally with the module’s localized receipt. */
+  saved?: true | string;
 }
 
 export interface FormState {
@@ -56,6 +66,9 @@ export interface FormState {
   readError: Problem | null;
   /** The field being written (one write at a time: each is against the current revision). */
   busy: string | null;
+  confirmation: PendingConfirmation | null;
+  /** A guided form awaiting the latest permissions and values. */
+  refreshing: boolean;
   /** Writing waits for an explicit reload: the resource changed (a conflict), or a write's outcome is unknown. */
   blocked: Problem | null;
   /** A write's failure that names no field of this Document. */
@@ -63,7 +76,7 @@ export interface FormState {
   fields: Record<string, FieldState>;
 }
 
-const INITIAL: FormState = { phase: "loading", doc: null, writable: false, readError: null, busy: null, blocked: null, formError: null, fields: {} };
+const INITIAL: FormState = { phase: "loading", doc: null, writable: false, readError: null, busy: null, confirmation: null, refreshing: false, blocked: null, formError: null, fields: {} };
 
 function problem(e: unknown): Problem {
   if (e instanceof ConfigurationError) return e.message ? { code: e.code, message: e.message } : { code: e.code };
@@ -108,7 +121,13 @@ export class ConfigurationController {
   /** The resource changed while a write was in flight: read again once it is done. */
   private again = false;
 
-  constructor(readonly source: ConfigurationSource) {}
+  constructor(readonly source: ConfigurationSource, public guidance?: ConfigurationGuidance) {}
+
+  setGuidance(guidance?: ConfigurationGuidance) {
+    if (this.guidance === guidance) return;
+    this.guidance = guidance;
+    this.set({ confirmation: null });
+  }
 
   subscribe = (l: () => void) => {
     this.listeners.add(l);
@@ -162,6 +181,8 @@ export class ConfigurationController {
     // describe the resource before its outcome; it must not replace a committed document, drop a pending choice, or
     // clear the barrier a failed write sets. The deferred post-write read starts after the end stamp with busy clear.
     const write = this.writeSeq;
+    // A notification may revoke permission even before its replacement document arrives.
+    if (this.state.confirmation) this.set({ confirmation: null, refreshing: true });
     if (explicit && this.state.phase === "failed") this.set({ phase: "loading", readError: null });
     try {
       const parsed = parseDocument(await this.source.read(this.abort.signal));
@@ -170,7 +191,7 @@ export class ConfigurationController {
       // "Saved" alone, as when a source tells of its own write
       const same = this.state.doc && parsed.doc.id === this.state.doc.id && parsed.doc.revision === this.state.doc.revision && parsed.writable === this.state.writable;
       if (!same) this.apply(parsed.doc, parsed.writable);
-      this.set({ phase: "ready", readError: null, ...(explicit ? { blocked: null, formError: null } : {}) });
+      this.set({ phase: "ready", refreshing: false, readError: null, ...(explicit ? { blocked: null, formError: null } : {}) });
     } catch (e) {
       if (this.disposed || this.abortedByUs(e) || seq !== this.readSeq || write !== this.writeSeq || this.state.busy) return;
       this.set(this.state.doc ? { readError: problem(e) } : { phase: "failed", readError: problem(e) });
@@ -191,7 +212,7 @@ export class ConfigurationController {
       if (f.draft === undefined && f.selection === undefined) continue;
       fields[id] = Object.fromEntries(Object.entries({ draft: f.draft, selection: f.selection, error: f.error }).filter(([, v]) => v !== undefined));
     }
-    this.state = { ...this.state, doc, writable, fields };
+    this.state = { ...this.state, doc, writable, fields, confirmation: null };
   }
 
   private known(id: string): KnownField | null {
@@ -202,29 +223,36 @@ export class ConfigurationController {
   /** Whether `id` can be edited at all: a known field, not read-only, in a writable Document. */
   editable(id: string): boolean {
     const f = this.known(id);
-    return !!f && this.state.writable && !f.read_only && !f.disabled_reason;
+    return !!f && this.state.writable && !f.read_only && !f.disabled_reason && !invalidConditions(f, this.guidance?.fields?.[id]?.rules);
   }
 
   /** Whether `id` can be written now: editable, nothing else in flight, no reload owed. */
   canWrite(id: string): boolean {
-    return this.editable(id) && !this.state.busy && !this.state.blocked;
+    return !this.disposed && this.editable(id) && !this.state.busy && !this.state.refreshing && !this.state.blocked;
+  }
+
+  private edited(id: string, next: FieldState) {
+    this.set({
+      fields: this.field(id, next),
+      confirmation: this.state.confirmation?.fieldId === id ? null : this.state.confirmation,
+    });
   }
 
   setDraft(id: string, raw: string) {
     const f = this.state.fields[id] ?? {};
-    this.set({ fields: this.field(id, { ...f, draft: raw, error: undefined, saved: undefined }) });
+    this.edited(id, { ...f, draft: raw, error: undefined, saved: undefined });
   }
 
   /** A multiselect's checks, edited before Save. */
   setSelection(id: string, values: string[]) {
     const f = this.state.fields[id] ?? {};
-    this.set({ fields: this.field(id, { ...f, selection: values, error: undefined, saved: undefined }) });
+    this.edited(id, { ...f, selection: values, error: undefined, saved: undefined });
   }
 
   discard(id: string) {
     const f = this.state.fields[id];
     if (!f) return;
-    this.set({ fields: this.field(id, { ...f, draft: undefined, selection: undefined, error: undefined }) });
+    this.edited(id, { ...f, draft: undefined, selection: undefined, error: undefined });
   }
 
   /** Saves a draft (typed text, a number, a multiselect's checks), after checking it here first. */
@@ -245,19 +273,19 @@ export class ConfigurationController {
       }
       value = r.value;
     }
-    void this.write(id, { changes: { [id]: value } });
+    this.write(id, { changes: { [id]: value } });
   }
 
   /** Writes a single-step choice (a switch, a selection) at once; it shows as pending until committed. */
   choose(id: string, value: FieldValue) {
     if (!this.canWrite(id)) return;
-    void this.write(id, { changes: { [id]: value } }, value);
+    this.write(id, { changes: { [id]: value } }, value);
   }
 
   /** Back to the default: the override is removed (the source decides what the default is). */
   reset(id: string) {
     if (!this.canWrite(id)) return;
-    void this.write(id, { reset: [id] });
+    this.write(id, { reset: [id] });
   }
 
   /** `e`'s field errors on the fields they name; when it names none of this Document's, on `id`. */
@@ -271,7 +299,8 @@ export class ConfigurationController {
     return named ? fields : this.field(id, { ...fields[id], error: problem(e) }, fields);
   }
 
-  private async write(id: string, change: { changes?: Record<string, FieldValue>; reset?: string[] }, pending?: FieldValue) {
+  private write(id: string, change: { changes?: Record<string, FieldValue>; reset?: string[] }, pending?: FieldValue) {
+    if (this.state.confirmation) return;
     const doc = this.state.doc!;
     const update: ConfigurationUpdate = { schema_version: CONFIGURATION_VERSION, id: doc.id, revision: doc.revision, ...change };
     // what the writer would refuse is said here, without asking
@@ -280,23 +309,69 @@ export class ConfigurationController {
       this.set({ fields: this.fieldErrors(refused, id, this.state.fields) });
       return;
     }
+    const field = this.known(id)!;
+    if (this.guidance?.fields?.[id]?.rules?.length && change.changes && !doc.notices?.[id]
+      && sameValue(change.changes[id], fieldValue(doc, field))) {
+      this.discard(id);
+      return;
+    }
+    const decision = this.guidanceFor(id, update);
+    if (!decision) {
+      this.set({ fields: this.field(id, { ...this.state.fields[id], saved: undefined, error: { code: "invalid_guidance" } }) });
+    } else if (decision.confirm) {
+      this.set({ confirmation: { fieldId: id, copy: decision.confirm, update, pending } });
+    } else {
+      void this.commit(id, update, pending, decision.afterSave);
+    }
+  }
+
+  private guidanceFor(id: string, update: ConfigurationUpdate) {
+    const rules = this.guidance?.fields?.[id]?.rules;
+    if (!rules?.length) return {};
+    const field = this.known(id)!;
+    return changeGuidance(rules, update.reset ? "reset" : "change", fieldValue(this.state.doc!, field), update.changes?.[id] ?? field.default);
+  }
+
+  cancel(request: PendingConfirmation) {
+    if (this.state.confirmation === request) this.set({ confirmation: null });
+  }
+
+  confirm(request: PendingConfirmation) {
+    if (this.state.confirmation !== request || this.disposed) return;
+    const { fieldId, update, pending } = request;
+    if (this.canWrite(fieldId) && !checkUpdate(this.state.doc!, update)) {
+      const decision = this.guidanceFor(fieldId, update);
+      if (decision?.confirm === request.copy) {
+        void this.commit(fieldId, update, pending, decision.afterSave);
+        return;
+      }
+    }
+    this.cancel(request);
+  }
+
+  private async commit(id: string, update: ConfigurationUpdate, pending?: FieldValue, afterSave?: string) {
     // from here to the end of the write, reads requested before either edge are stale: a write may answer with an
     // older document, and a read may answer with one from before the write committed or failed
     this.writeSeq += 1;
     const before = this.state.fields[id] ?? {};
+    const guidance = this.guidance;
+    const target = afterSave && (update.changes?.[id] ?? this.known(id)?.default);
     const sent = { draft: before.draft, selection: before.selection };
-    this.set({ busy: id, formError: null, fields: this.field(id, { ...before, error: undefined, saved: undefined, pending }) });
+    this.set({ busy: id, confirmation: null, formError: null, fields: this.field(id, { ...before, error: undefined, saved: undefined, pending }) });
     try {
       const raw = await this.source.update(update, this.abort.signal);
       if (this.disposed) return;
       const parsed = parseDocument(raw);
-      if (parsed.doc.id !== doc.id) throw new ConfigurationError("invalid_document");
+      if (parsed.doc.id !== update.id) throw new ConfigurationError("invalid_document");
       this.apply(parsed.doc, parsed.writable);
       // what was sent is committed: its draft goes, unless it was edited again while on the way (that stays a draft)
       const now = this.state.fields[id] ?? {};
       const draft = now.draft !== undefined && now.draft !== sent.draft ? now.draft : undefined;
       const selection = now.selection && !sameList(now.selection, sent.selection) ? now.selection : undefined;
-      this.set({ busy: null, blocked: null, fields: this.field(id, { draft, selection, saved: draft === undefined && selection === undefined ? true : undefined }) });
+      const field = afterSave && this.known(id);
+      const matchesTarget = field && parsed.writable && sameValue(fieldValue(parsed.doc, field), target);
+      const receipt = afterSave && matchesTarget && guidance === this.guidance ? afterSave : true;
+      this.set({ busy: null, blocked: null, fields: this.field(id, { draft, selection, saved: draft === undefined && selection === undefined ? receipt : undefined }) });
     } catch (e) {
       if (this.disposed || this.abortedByUs(e)) return;
       // the latest draft stays, edited during the write or not; the pending choice goes
@@ -306,6 +381,9 @@ export class ConfigurationController {
       // successful answer that isn't a Document, may have committed: only an explicit reload can tell.
       if (!(e instanceof ConfigurationError) || e.code === "invalid_document" || e.code === "failed") {
         this.set({ busy: null, blocked: { code: "unconfirmed" }, fields });
+      } else if (this.guidance && e.code === "configuration_forbidden") {
+        this.again = true;
+        this.set({ busy: null, blocked: problem(e), fields });
       } else if (RELOAD_CODES.includes(e.code)) {
         this.set({ busy: null, blocked: problem(e), fields });
       } else if (e.code === "configuration_version") {

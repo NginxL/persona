@@ -22,7 +22,7 @@ internal val DeliveryState.pendingStatus: PendingStatus?
         DeliveryState.Verifying -> PendingStatus.Verifying
         DeliveryState.NeedsConfirmation -> PendingStatus.NeedsReview
         DeliveryState.Rejected, DeliveryState.Refused -> PendingStatus.Refused
-        DeliveryState.Sent -> null
+        DeliveryState.Sent, DeliveryState.Held -> null
     }
 
 /** [RetryNow]: one still on its way (queued, waiting for the network) tries at once (iOS's Retry Now on a waiting message). */

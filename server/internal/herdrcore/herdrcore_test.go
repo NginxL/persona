@@ -1,3 +1,7 @@
+//go:build !windows
+
+// The fake herdr-core here listens on a unix socket, which the Windows client does not dial (socket_windows_test.go).
+
 package herdrcore
 
 import (
@@ -25,21 +29,21 @@ func TestSocketPath(t *testing.T) {
 	runUser := isDir(fmt.Sprintf("/run/user/%d", os.Getuid()))
 	stateDefault := filepath.Join(home, ".local", "state", "herdr-core", "default", "default.sock")
 	if !runUser {
-		if got := SocketPath(); got != stateDefault {
+		if got := unixSocketPath(); got != stateDefault {
 			t.Errorf("default = %q, want %q", got, stateDefault)
 		}
 		t.Setenv("HC_SESSION", "iso")
-		if got, want := SocketPath(), filepath.Join(home, ".local", "state", "herdr-core", "iso", "iso.sock"); got != want {
+		if got, want := unixSocketPath(), filepath.Join(home, ".local", "state", "herdr-core", "iso", "iso.sock"); got != want {
 			t.Errorf("HC_SESSION = %q, want %q", got, want)
 		}
 		t.Setenv("XDG_STATE_HOME", "/tmp/st")
-		if got, want := SocketPath(), "/tmp/st/herdr-core/iso/iso.sock"; got != want {
+		if got, want := unixSocketPath(), "/tmp/st/herdr-core/iso/iso.sock"; got != want {
 			t.Errorf("XDG_STATE_HOME = %q, want %q", got, want)
 		}
 	}
 	t.Setenv("HC_SESSION", "")
 	t.Setenv("XDG_RUNTIME_DIR", "/tmp/run")
-	if got, want := SocketPath(), "/tmp/run/herdr-core/default.sock"; got != want {
+	if got, want := unixSocketPath(), "/tmp/run/herdr-core/default.sock"; got != want {
 		t.Errorf("XDG_RUNTIME_DIR = %q, want %q", got, want)
 	}
 	cfg := filepath.Join(home, ".config", "herdr-core")
@@ -49,11 +53,11 @@ func TestSocketPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg, "config.toml"), []byte("notes = false\nsocket = \"/tmp/cfg.sock\" # mine\n[other]\nsocket = \"/no\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := SocketPath(); got != "/tmp/cfg.sock" {
+	if got := unixSocketPath(); got != "/tmp/cfg.sock" {
 		t.Errorf("config socket = %q", got)
 	}
 	t.Setenv("HC_SOCKET", "/tmp/env.sock")
-	if got := SocketPath(); got != "/tmp/env.sock" {
+	if got := unixSocketPath(); got != "/tmp/env.sock" {
 		t.Errorf("HC_SOCKET = %q", got)
 	}
 }
@@ -173,6 +177,7 @@ func TestCalls(t *testing.T) {
 		switch method {
 		case "terminal.list":
 			return map[string]any{"terminals": []any{map[string]any{"address": "t1", "state": "live", "pid": nil,
+				"parent":     "t0",
 				"status":     map[string]any{"app": "claude-code", "state": "blocked", "kind": "permission"},
 				"foreground": map[string]any{"pid": 42, "name": "2.1.0", "argv": []string{"claude"}, "cwd": "/x"}},
 				map[string]any{"address": "m/t2", "state": "live"}}}
@@ -191,6 +196,7 @@ func TestCalls(t *testing.T) {
 	ctx := context.Background()
 	terms, err := c.List(ctx)
 	if err != nil || len(terms) != 2 || terms[0].Status.Kind != "permission" || terms[0].Foreground.Pid != 42 ||
+		terms[0].Parent != "t0" || terms[1].Parent != "" ||
 		terms[0].Remote() || !terms[1].Remote() {
 		t.Fatalf("List = %+v, %v", terms, err)
 	}

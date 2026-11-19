@@ -342,7 +342,7 @@ extension AgentRowMenu {
         self.init(key: s.key, pinned: model.isPinned(s.key), muted: model.isMuted(s), looping: s.loop != nil, live: s.state.isLive,
                   terminal: s.canTerminal, renamable: s.canRename, closable: s.canClose, attachable: s.canAttach, deletable: s.canDelete,
                   paneActions: NodeMenu.offersPaneActions(s),
-                  interruptible: (s.state == .working || s.state == .needsYou) && s.canInterrupt, unread: s.state == .unread,
+                  interruptible: (s.state == .working || s.state == .needsYou) && s.canInterrupt, unread: s.needsSeen(muted: model.isMuted(s)),
                   takeoverAvailable: s.isCodex && !s.canSend && s.capabilities?.takeover?.canResume == true,
                   continueAvailable: s.isCodex && !s.canSend && s.capabilities?.takeover != nil,
                   actions: actions)
@@ -366,9 +366,9 @@ struct SpaceHeaderMenu: View, Equatable {
     var open: () -> Void
     var linkTodo: (() -> Void)?
 
-    init(group: SpaceGroup, rename: @escaping () -> Void, open: @escaping () -> Void, linkTodo: (() -> Void)? = nil) {
+    init(group: SpaceGroup, isMuted: (Session) -> Bool, rename: @escaping () -> Void, open: @escaping () -> Void, linkTodo: (() -> Void)? = nil) {
         id = group.id + "|" + group.spaceID + "|" + group.name
-        unread = group.sessions.filter { $0.state == .unread }.map(\.key)
+        unread = group.sessions.filter { $0.needsSeen(muted: isMuted($0)) }.map(\.key)
         nodeActions = NodeMenu.offersSpaceActions(group)
         self.group = group
         self.rename = rename

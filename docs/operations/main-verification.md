@@ -19,7 +19,9 @@ process helpers, credential-free verification environment, disposable repository
 3. The `persona` profile runs `go -C server build ./...`, `go -C server vet ./...`, `scripts/ci/guards.sh` and
    `scripts/ci/scripts.sh`. It does not claim a full Go test suite, web, Android, Apple, Rust or runtime verification.
    Those are explicit `extra_lanes` (`server`, `web`, `android`, `apple`, `macos`, `core`, `runtimes`) and run in full
-   when selected. An unavailable platform must be configured on a suitable host or reported as unverified.
+   when selected. An unavailable platform must be configured on a suitable host or reported as unverified. An ordinary
+   verification resolves its checker scripts from the exact-main worktree, not from the resident watcher's older
+   implementation checkout. An explicit `trusted_checkout` is reserved for repair verification below.
 4. The `commands` profile accepts only trusted local `{name, argv}` objects with per-command timeouts. No shell snippets
    or repository-supplied commands are allowed. `{worktree}` is replaced with the exact verification path, including
    when the repair is verified in its separate clone.

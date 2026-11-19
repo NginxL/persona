@@ -69,6 +69,11 @@ describe("session metadata extractors & facet building", () => {
     expect(sessionHasError(s2)).toBe(true);
   });
 
+  it("names a gateway's routed model without its prefix", () => {
+    expect(sessionModelId(mkSession("s", { model: "passthrough/route-gemini-4-carbon/gemini-4-carbon" }))).toBe("gemini-4-carbon");
+    expect(sessionModelId(mkSession("s", { model: "passthrough/claude-opus-5-5[1m]" }))).toBe("opus 5.5 1M");
+  });
+
   it("builds facet counts across harnesses, projects, models, machines, and pins", () => {
     const list = [
       mkSession("s-pinned", { agent: "claude", model: "claude-opus-5-5", repo_root: "/code/persona", machine_id: "gcp" }),

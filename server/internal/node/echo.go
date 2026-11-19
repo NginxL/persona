@@ -522,6 +522,11 @@ func (n *Node) sendWithEcho(id, clientMsgID, text string, images int, after echo
 	if clientMsgID == "" {
 		return send()
 	}
+	if strings.HasPrefix(clientMsgID, "model-retry:") {
+		if r, known := n.echoes.record(id, clientMsgID); known && r.Line != "" {
+			return nil // a restored transcript receipt proves this continuation arrived
+		}
+	}
 	r := echoRecord{SessionID: id, ClientMsgID: clientMsgID, Text: text, Images: images, SentAt: time.Now(), AfterSeq: after.seq, In: after.in, History: after.history}
 	fresh := true
 	if retry == nil {
@@ -678,7 +683,11 @@ func (n *Node) echoed(id string, f *transcript.File, items []proto.Item) []proto
 			break
 		}
 	}
-	return n.echoes.tag(id, echoInTranscript, items)
+	items = n.echoes.tag(id, echoInTranscript, items)
+	if f != nil && n.isAssistantSession(id) {
+		items = f.FoldBackgroundPlaceholders(items)
+	}
+	return items
 }
 
 // restoreEchoes takes back the records the hub kept (session.echoes, after the node started).

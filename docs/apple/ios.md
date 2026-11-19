@@ -1233,11 +1233,22 @@ The new shell's Model · Effort menu still sends `/model <id>` as a message.
 - Effort changes wait until the turn ends and the terminal input is empty (otherwise `/effort` appends to someone else's unsent draft); herdr Agents can choose Allow everything only at creation, not in the cycle,
   unless their claude was started with `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions` or `--permission-mode bypassPermissions`, which puts it in the cycle:
   the node reads the arguments of the claude its hooks run under, once per process (`claudeCanBypass`, kern.procargs2 / `/proc/<pid>/cmdline`, no exec), and lists the session with
-  `bypass_available` (#1379). The web and the app then offer it, red and asked again (`SessionModes.switchableModes`, `confirmation`); without it the app's header menu lists it disabled, with why.
+  `bypass_available` (#1379). The web and the app then offer it, red and asked again (`SessionModes.switchableModes`, `confirmation`); without it the app's header menu lists it disabled, with why (except Antigravity `agy` runtimes with `capabilities.modes`, which switch all five modes including Allow Everything directly via ACP with no restart or confirmation and are not `setsEffortOnly` even when `efforts` are listed).
+- Allow Everything by a restart (#6513, the web's #6476; `docs/integrations/claude-integration.md` "Full access by a restart"): without `bypass_available`, a Claude Code in a pane
+  Persona can type into (`SessionModes.paneClaude`, `bypassRestarts`) is offered it anyway, with "Restarts the session to apply it once this turn ends; the conversation carries on" under it
+  and in the confirmation (`bypassNote`); the node restarts it once its turn is over. While the row has `bypass_pending`, every mode button keeps the mode the agent still runs in
+  (the header capsule's look does not change) and says "The session restarts in Allow Everything once this turn ends": the header menu's title, VoiceOver's hint and the
+  pointer's tooltip, a line over the composer menus' modes, and Allow Everything's own row. Picking the checked mode while `bypass_pending` sends `session.modes` without a confirmation
+  (`SessionModes.appliesPick`, `MenuChoice.reselect`) so the node drops the queued restart directly. An assistant conversation's Allow Everything says "Takes effect from the next message".
+- `/permissions` (#6513): in an agent's "/" list (`SlashMenuRow.permissions`; the BeautifulUI prompt bar's commands too) and in Persona conversations wherever a session's mode can be switched from here
+  (`SessionModes.offersPermissionsCommand`, including Antigravity `agy` runtimes with `capabilities.modes`). Picked, or typed and sent (with nothing attached: `SessionModes.opensPermissions`), it opens `PermissionModeSheet`: the header menu's choices with Plan Only (`SessionModes.commandRows`), the current
+  one checked, Allow Everything disabled with its reason where it can't be taken, `SheetClose` at the top leading corner, and a section footer only when Allow Everything's row does not already carry the pending restart note; a menu can't be opened from code, so it is a full-height sheet (a medium one hid Allow Everything and its note). A pick closes it and goes through
+  `ChatView.requestMode` (its confirmation); nothing is sent to the agent. On the phone, Persona's shell composer has no "/" list so typing and sending `/permissions` opens the sheet (`PermissionsCommandUITests`); where a plain "/" list shows, it lists `/permissions` (beside `/clear` in the main conversation). `-openPermissionModes YES` opens the sheet
+  and `-openSlashMenu /per` types that draft, for screenshots (with `MOCK_BYPASS_PENDING=1` for the waiting state).
 - Agents header (#3719): the agent's mode at the end of the open header's second row, icon and color only (`HeaderModeButton`,
   `SessionModes.headerLook`, `Theme.ModeTone`): Ask First a quiet gray hand, Plan Only a teal clipboard, Auto-Edit a purple pencil, Auto a purple
   wand, Allow Everything a red shield; not reported yet the plain permissions shield (never a guessed Ask First). A tap opens the mode menu; going into
-  Allow Everything asks first, and so does leaving it when `bypass_available` is false (no way back from the phone); the composer's model menu
+  Allow Everything asks first, and so does leaving it when `bypass_available` is false (no way back from the phone; assistant conversations and Antigravity `agy` switch directly without confirmation); the composer's model menu
   goes through the same `ChatView.requestMode`. Shown where the agent has a mode to see or change (`SessionModes.showsInHeader`): not Codex,
   TRAEX or a runtime without modes, not hosted pages (one-row header, #3255), not the folded bar. A row that lists its own modes (#8261, Paseo's
   Grok, OpenCode or Codex) shows its two rows instead, its own approval as the plain shield, a switch both ways (`SessionModes.menuOptions`,
@@ -1314,6 +1325,14 @@ and what this device asked are `AppModel.setUltracode` / `dismissUltracodeLost`,
   `apple/Persona/Views/Assistant/Tasks/PlanUltracodeViews.swift`; tests: `PlanUltracodeTests`.
 - **Tests**: `UltracodeTests` (FakeHub: decoding with older hubs, the requests, where it shows, graying, the ask, the quota) and `UltracodeUITests`
   against the mock hub with `MOCK_ULTRACODE=1` (`TEST_RUNNER_PERSONA_ULTRACODE_HUB`, screenshots with `TEST_RUNNER_PERSONA_SHOTS`).
+
+## Agent presets in New Agent and plan cards (#2225)
+
+`AgentPreset` / `AgentPresetProfile` decode `tiers` and `tiers_profile` from New Agent's `GET /api/v1/machines/{mid}/launchers`; `AppModel` caches them beside the launchers, default and unavailable lists and clears them with those caches. An older hub, no active profile, or no tier this computer can run leaves **Preset** out and keeps the ordinary defaults and start body unchanged. The body never carries `tier`: a preset is only a way to fill launcher, model and effort.
+
+When tiers exist, New Agent's Preset NavigationLink opens `AgentPresetPicker`, naming the active profile and showing each tier's name, description and launcher/model/effort. A launcher with blocked health has its reason on a disabled row, so it cannot be picked. Picking another row fills the three fields through the existing `restoredModel` path; manual launcher/model/effort edits unmark it, reselecting restores its defaults, and machine changes or recent-setup fills clear the pick. Explicitly choosing the list's default model through a preset remains an explicit `model` in `POST /api/v1/sessions` (`LauncherModelChoice.presetDefault`), rather than collapsing to Model Settings' default.
+
+A preset with a model or effort waits for its own launcher's model-list request: Start is disabled and guarded, with **Loading the preset's model options…**, until that request settles. This prevents the previous launcher's list from dropping or replacing the preset's values. Once the list is available (or its absence/failure is known), the form names a locked or unlisted model and an unsupported effort that the start cannot send, using the launcher's or model's own settings for the omitted field; the existing list error and locked-model explanation remain visible too. Plan tasks decode and encode their optional `tier`. Their model chip gives an explicit model precedence, then shows `launcher · Preset <tier>` or `Preset <tier>`, then the existing launcher/Default Model label.
 
 ## Launcher health in New Agent (#1643)
 

@@ -841,8 +841,9 @@ iPhone's side comes next.
   `ack` (channel, received through), `paths` (the token; candidates and the certificate with the direct routes), `attach`
   / `attached` (a transport joining with the token), `ping` / `pong` (the pong adds the node's TCP retransmitted and sent
   packets on a direct route; 0 on a relay), `use` / `resumed` (carry these channels on this transport from these
-  offsets), `close` (a channel's end) and `reset` (the video channel goes on at a message boundary). A new video
-  channel's relay starts with `resumed` naming it.
+  offsets), `close` (a channel's end), `close_ack` (the phone processed that close; its channel and final offset) and
+  `reset` (the video channel goes on at a message boundary). A new video channel's relay starts with `resumed` naming
+  it.
 - **Limits** (`screenlink.Limits`): the node keeps at most 4 MB of RFB and 512 KB of video unacknowledged, and reads
   Screen Sharing or Persona Screen only with room (Screen Sharing waits; the helper drops frames as it already does when
   the stream is full), so memory never grows with how long a route is down. Bytes left unacknowledged for 10 s mean the
@@ -867,7 +868,12 @@ iPhone's side comes next.
   can follow, and retained messages must not move the stream's end beyond that close. EOF by itself leaves buffered messages
   intact while a reset awaits confirmation. The close of a stream is handed out only once the phone has confirmed its
   final jump. A new jump after a close went out owes another close after confirmation, because the phone's reset handler
-  does not re-check an earlier close; moving or losing a route alone does not owe the close again. A reset handed to a
+  does not re-check an earlier close. A different surviving route owes an unconfirmed close again; `close_ack` stops
+  that debt, including a late confirmation that arrives before the copy goes out. An ordinary `ack` at the final offset
+  is not close confirmation, because it can cross with a close the phone has not processed. The phone answers every
+  close with `close_ack`, including a repeated close for an already ended channel. While it has a route, an unconfirmed
+  video channel stays live so a later route can carry the close; with no route it finishes as before, and RFB always
+  finishes at the next tick without waiting for this acknowledgement. A reset handed to a
   writer is outstanding until the phone confirms it, whatever the buffer holds and whether or not EOF has arrived. If no
   bytes were already in flight, its stall interval starts at handout. A route that keeps it unconfirmed for the stall
   limit is closed, and the next route owes the reset again. The phone can so get one reset over two routes; it applies

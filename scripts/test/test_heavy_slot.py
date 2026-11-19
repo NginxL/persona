@@ -321,34 +321,73 @@ class HeavySlotDefaultsTests(unittest.TestCase):
         self.assertEqual("heavy_slot: this platform has no fcntl (Windows): running without a slot\n", err.getvalue())
 
 
+# The scripts whose run takes a slot, as a CI lane or a watcher step would name them.
+WRAPPED = ("heavy_slot.py", "app/sim.sh", "app/android.sh", "check-fast.sh", "scripts/sim.sh", "scripts/android.sh")
+# The files where a CI lane's or a watcher's steps live: CI, the watchers' scripts and example configs, and the skills
+# that run them (their scripts and the SKILL.md an Agent follows); the lanes they call are the CI scripts. Patterns as
+# Path.glob reads them: * stays in one directory, **/ crosses any number.
+CALLER_GROUPS = {
+    "CI": (".github/workflows/*.yml", "scripts/ci/*.sh", "scripts/ci/*.py"),
+    "the operations scripts, the PR and main watchers among them": (
+        "scripts/operations/*.py", "scripts/operations/*watch*.json", "scripts/operations/*watch*.service"),
+    "the PR watcher's skill": (".claude/skills/pr-review-merge-loop/**/*",),
+    "the main watcher's skill": (".claude/skills/main-verify-fix-loop/**/*",),
+}
+
+
+def tracked_text(root, patterns):
+    """([(path, text)], [path]): each file git tracks under root that matches one of the patterns, test_* files left
+    out, read as UTF-8, and the ones that are not UTF-8 text. A file git does not track (a build output, a local note
+    in a skill folder) is not read (#11250). Outside a git checkout (an exported tree), every matching file is."""
+    try:
+        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", *(":(glob)" + p for p in patterns)],
+                                capture_output=True, check=True, timeout=60).stdout
+        names = sorted({os.fsdecode(name) for name in listed.split(b"\0") if name})
+    except (OSError, subprocess.SubprocessError):
+        names = sorted({path.relative_to(root).as_posix() for pattern in patterns for path in root.glob(pattern)})
+    texts, skipped = [], []
+    for name in names:
+        path = root / name
+        if path.name.startswith("test_") or not path.is_file():
+            continue
+        try:
+            texts.append((name, path.read_text(encoding="utf-8")))
+        except UnicodeDecodeError:
+            skipped.append(name)
+    return texts, skipped
+
+
 class HeavySlotCallersTests(unittest.TestCase):
     def test_ci_and_the_pr_watcher_take_no_slot(self):
         # A hosted runner runs one job, so a slot there would only make that job's own steps wait for each other, and
-        # the PR and main watchers' checks must not queue behind local builds. None of them runs a script that takes a
-        # slot today, which is why CI does not set PERSONA_HEAVY_SLOTS=0 (docs/operations/testing.md "Heavy build
-        # slots"); a lane or a watcher step that starts to run one sets it there. The watchers' steps live in their
-        # scripts and example configs, and in the skills that run them (their scripts and the SKILL.md an Agent
-        # follows); the lanes they call are the CI scripts above.
-        wrapped = ("heavy_slot.py", "app/sim.sh", "app/android.sh", "check-fast.sh", "scripts/sim.sh",
-                   "scripts/android.sh")
-        groups = {
-            "CI": (".github/workflows/*.yml", "scripts/ci/*.sh", "scripts/ci/*.py"),
-            "the operations scripts, the PR and main watchers among them": (
-                "scripts/operations/*.py", "scripts/operations/*watch*.json", "scripts/operations/*watch*.service"),
-            "the PR watcher's skill": (".claude/skills/pr-review-merge-loop/**/*",),
-            "the main watcher's skill": (".claude/skills/main-verify-fix-loop/**/*",),
-        }
+        # the PR and main watchers' checks must not queue behind local builds: a lane or a watcher step that runs a
+        # script that takes a slot sets PERSONA_HEAVY_SLOTS=0 (docs/operations/testing.md "Heavy build slots").
         callers = []
-        for group, patterns in groups.items():
-            files = sorted({path for pattern in patterns for path in ROOT.glob(pattern)
-                            if path.is_file() and not path.name.startswith("test_")})
+        for group, patterns in CALLER_GROUPS.items():
+            texts, skipped = tracked_text(ROOT, patterns)
             # A moved directory must not leave its group scanning nothing.
-            self.assertTrue(files, f"no files for {group}: {patterns}")
-            for path in files:
-                text = path.read_text(encoding="utf-8")
-                if any(name in text for name in wrapped) and "PERSONA_HEAVY_SLOTS" not in text:
-                    callers.append(str(path.relative_to(ROOT)))
+            self.assertTrue(texts or skipped, f"no files for {group}: {patterns}")
+            for name in skipped:
+                print(f"test_heavy_slot: {name} is not UTF-8 text, not read", file=sys.stderr)
+            callers += [name for name, text in texts
+                        if any(script in text for script in WRAPPED) and "PERSONA_HEAVY_SLOTS" not in text]
         self.assertEqual([], callers)
+
+    def test_only_tracked_text_files_are_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
+            (root / "scripts/ci/nested").mkdir(parents=True)
+            (root / "scripts/ci/lane.sh").write_text("scripts/app/android.sh test\n")
+            (root / "scripts/ci/picture.sh").write_bytes(b"\xff\xd8\xff not text")
+            (root / "scripts/ci/test_lane.sh").write_text("scripts/app/android.sh test\n")
+            (root / "scripts/ci/nested/deeper.sh").write_text("scripts/app/android.sh test\n")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, timeout=60)
+            (root / "scripts/ci/stray.sh").write_bytes(b"\xff untracked")
+            texts, skipped = tracked_text(root, ("scripts/ci/*.sh",))
+        self.assertEqual([("scripts/ci/lane.sh", "scripts/app/android.sh test\n")], texts)
+        self.assertEqual(["scripts/ci/picture.sh"], skipped)
+
 
 if __name__ == "__main__":
     unittest.main()

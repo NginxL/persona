@@ -43,7 +43,7 @@ class AgentListAdapterFixtureTest {
                 ShadowAgentListDiagnostics.awaitIdle()
             }
         }
-        assertEquals(60, names.size)
+        assertEquals(61, names.size)
         assertEquals(setOf(
             "composable_qualifiers_match_with_plain_term", "composable_qualifiers_reject_one_wrong_dimension",
             "dimension_settings_compose_with_plain_term", "dimension_settings_reject_wrong_model",
@@ -62,7 +62,7 @@ class AgentListAdapterFixtureTest {
             "active_space_uses_rank_not_slots", "compact_expands_idle_without_reordering", "cross_machine_same_session_id",
             "cross_machine_same_session_id_reversed", "empty_list", "filter_all", "filter_needsyou", "filter_unread", "filter_working",
             "folded_machine_hides_rows", "folded_space_keeps_counts", "folded_state_and_expanded_idle", "held_quiet_row_keeps_unread_state_section",
-            "held_quiet_space_stays_active", "held_row_stays_out_of_quiet_idle_fold", "kept_cannot_escape_base",
+            "held_quiet_space_stays_active", "held_row_stays_out_of_quiet_idle_fold", "just_finished_rank_and_precedence", "kept_cannot_escape_base",
             "machine_search_before_counts", "machine_uses_registry_order", "mute_allow_and_explicit_override", "pinned_offline_is_visible",
             "pinned_sessions_use_pin_order_once", "quick_filter_ignores_rank", "quick_spaces_use_updated_time", "rank_all_states_and_mutes",
             "search_expands_idle", "space_header_counts", "space_time_tie", "space_time_tie_reversed", "spaces_pin_busy_muted_quiet",

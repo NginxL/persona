@@ -67,7 +67,7 @@ struct PersonaFace: View {
             Circle().fill(LinearGradient(colors: ink.disc, startPoint: .top, endPoint: .bottom))
             if state == .working { mochiArc(t) }
             ZStack {
-                Canvas { ctx, box in Mochi.draw(&ctx, side: box.width, ink: ink, compact: compact, lines: mochiLines(t)) }
+                mochiBody(ink: ink, compact: compact, lines: mochiLines(t))
                 if state != .offline && !eyesShut { mochiEyes(t, ink: ink, compact: compact) }
                 if eyesShut && state != .offline {
                     Canvas { ctx, box in Mochi.closedEyes(&ctx, side: box.width, ink: ink, compact: compact) }
@@ -87,27 +87,42 @@ struct PersonaFace: View {
         .overlay { needsYouRing(t) }
     }
 
+    /// Everything except the eyes and optional call expressions. The moving iOS host reuses the same Canvas, including
+    /// the original body-and-lines composition in each noncompact working phase.
+    func mochiBody(ink: MochiInk, compact: Bool, lines: [Double]) -> some View {
+        Canvas { ctx, box in Mochi.draw(&ctx, side: box.width, ink: ink, compact: compact, lines: lines) }
+    }
+
+    /// The motion-line phase while working; the still frame selects the first line.
+    func workingLineLit(_ t: TimeInterval) -> Int {
+        moving ? Int(t * 4) % 3 : 0
+    }
+
     /// The motion lines beside the hand: steady when idle and needs-you, lit one after another while working, none
     /// while thinking (the bubble is there) or offline.
-    private func mochiLines(_ t: TimeInterval) -> [Double] {
+    func mochiLines(_ t: TimeInterval) -> [Double] {
         switch state {
         case .idle, .needsYou: return [1, 1, 1]
         case .working:
-            guard moving else { return [1, 0.35, 0.35] }
-            let lit = Int(t * 4) % 3
+            let lit = workingLineLit(t)
             return (0..<3).map { $0 == lit ? 1 : 0.35 }
         case .thinking, .offline: return []
         }
     }
 
-    /// The eyes: they blink when idle, look up at the bubble while thinking, and scan while working.
-    private func mochiEyes(_ t: TimeInterval, ink: MochiInk, compact: Bool) -> some View {
-        let r = Mochi.eyeRadius * (compact ? Mochi.compactFeatures : 1) * size
-        let look: CGSize = switch state {
+    /// Where the eyes look at time `t`, before the compositor applies any scan relative to phase zero.
+    func mochiEyeLook(_ t: TimeInterval) -> CGSize {
+        switch state {
         case .thinking: CGSize(width: size * 0.022, height: -size * 0.03)
         case .working: CGSize(width: size * (moving ? sin(t * 1.8) * 0.028 : -0.024), height: size * 0.012)
         default: .zero
         }
+    }
+
+    /// The eyes: they blink when idle, look up at the bubble while thinking, and scan while working.
+    func mochiEyes(_ t: TimeInterval, ink: MochiInk, compact: Bool) -> some View {
+        let r = Mochi.eyeRadius * (compact ? Mochi.compactFeatures : 1) * size
+        let look = mochiEyeLook(t)
         return ZStack {
             ForEach(Mochi.eyes.indices, id: \.self) { i in
                 Circle().fill(ink.line).frame(width: r * 2, height: r * 2)
@@ -120,48 +135,75 @@ struct PersonaFace: View {
     }
 
     /// Needs You waves: the body rocks on its bottom like the icon's hello.
-    private func mochiRock(_ t: TimeInterval) -> Double {
+    func mochiRock(_ t: TimeInterval) -> Double {
         state == .needsYou && moving ? sin(t * 7) * 5 : 0
     }
 
     /// Working bobs a little.
-    private func mochiBob(_ t: TimeInterval) -> CGFloat {
+    func mochiBob(_ t: TimeInterval) -> CGFloat {
         state == .working && moving ? CGFloat(abs(sin(t * 5))) * -size * 0.02 : 0
     }
 
-    /// Working's arc of the cheek's orange running around the rim.
-    private func mochiArc(_ t: TimeInterval) -> some View {
+    /// Working's arc angle, shared by the vector drawing and its compositor transform.
+    func mochiArcDegrees(_ t: TimeInterval) -> Double {
         let turn = moving ? (t / 1.6).truncatingRemainder(dividingBy: 1) * 360 : 300
+        return turn - 90
+    }
+
+    /// Working's arc before its rotation, shared by the vector drawing and the compositor's still-angle host.
+    func mochiArcShape() -> some View {
         let w = max(Self.ringMin, size * Self.ringShare)
         return Circle()
             .trim(from: 0, to: 0.28)
             .stroke(Mochi.cheekColor, style: StrokeStyle(lineWidth: w, lineCap: .round))
             .padding(w / 2)
-            .rotationEffect(.degrees(turn - 90))
     }
 
-    /// Needs You's red ring, breathing while moving.
-    @ViewBuilder private func needsYouRing(_ t: TimeInterval) -> some View {
+    /// Working's arc of the cheek's orange running around the rim.
+    func mochiArc(_ t: TimeInterval) -> some View {
+        mochiArcShape().rotationEffect(.degrees(mochiArcDegrees(t)))
+    }
+
+    /// Needs You's ring opacity at one moment, shared by the vector drawing and its compositor keyframes.
+    func needsYouPulse(_ t: TimeInterval) -> Double {
+        moving ? 0.55 + 0.45 * cos(t * 3) : 1
+    }
+
+    /// Needs You's blue ring, breathing while moving.
+    @ViewBuilder func needsYouRing(_ t: TimeInterval) -> some View {
         if state == .needsYou {
-            let pulse = moving ? 0.55 + 0.45 * cos(t * 3) : 1
-            Circle().strokeBorder(needsYou.opacity(pulse), lineWidth: max(Self.ringMin, size * Self.ringShare))
+            Circle().strokeBorder(needsYou.opacity(needsYouPulse(t)), lineWidth: max(Self.ringMin, size * Self.ringShare))
         }
     }
 
+    /// The thought-bubble phase at one moment. Phase three lights all three dots and is also the still frame.
+    func thinkingLit(_ t: TimeInterval) -> Int {
+        moving ? Int(t * 2.5) % 4 : 3
+    }
+
     /// A small thought bubble whose three dots light up in turn.
-    private func bubble(_ t: TimeInterval, lit color: Color) -> some View {
-        let lit = moving ? Int(t * 2.5) % 4 : 3
-        return HStack(spacing: size * 0.025) {
+    func bubble(_ t: TimeInterval, lit color: Color) -> some View {
+        bubbleDots(lit: thinkingLit(t), lit: color)
+        .background(.white, in: .capsule)
+        .shadow(color: .black.opacity(0.15), radius: size * 0.02, y: size * 0.01)
+    }
+
+    var bubbleDotSide: CGFloat { size * 0.05 }
+
+    /// The bubble's dots without its capsule, shared by the vector frame and the compositor's nested dot layers.
+    func bubbleDots(lit: Int, lit color: Color) -> some View {
+        bubbleDots { i in Circle().fill(i == lit || lit == 3 ? color : Color(white: 0.7)) }
+    }
+
+    /// The original HStack with caller-provided dots, used by the compositor without duplicating its spacing or padding.
+    func bubbleDots<Content: View>(@ViewBuilder _ content: @escaping (Int) -> Content) -> some View {
+        HStack(spacing: size * 0.025) {
             ForEach(0..<3) { i in
-                Circle()
-                    .fill(i == lit || lit == 3 ? color : Color(white: 0.7))
-                    .frame(width: size * 0.05, height: size * 0.05)
+                content(i).frame(width: bubbleDotSide, height: bubbleDotSide)
             }
         }
         .padding(.horizontal, size * 0.04)
         .frame(height: size * 0.13)
-        .background(.white, in: .capsule)
-        .shadow(color: .black.opacity(0.15), radius: size * 0.02, y: size * 0.01)
     }
 
     /// A blink every few seconds: a periodic timeline (one wake-up per blink, nothing between) driving a short

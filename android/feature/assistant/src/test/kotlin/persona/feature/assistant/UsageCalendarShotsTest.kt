@@ -93,6 +93,12 @@ class UsageCalendarShotsTest {
                     UsageMachineShare("mac", "MacBook Pro", input = 50_000, cacheWrite = 12_000, cacheRead = 90_000, output = 9_000),
                     UsageMachineShare("old", "", input = 12_000, cacheWrite = 3_000, cacheRead = 20_000, output = 2_000),
                 ),
+                agents = listOf(
+                    UsageAgentShare("claude", input = 30_000, cacheWrite = 7_000, cacheRead = 50_000, output = 5_000),
+                    UsageAgentShare("codex", input = 20_000, cacheWrite = 5_000, cacheRead = 40_000, output = 4_000),
+                    UsageAgentShare("", input = 7_000, cacheWrite = 2_000, cacheRead = 14_000, output = 1_000),
+                    UsageAgentShare("studio-runtime", input = 5_000, cacheWrite = 1_000, cacheRead = 6_000, output = 1_000),
+                ),
                 total = UsageTokens(input = 62_000, cacheWrite = 15_000, cacheRead = 110_000, output = 11_000), stored = true),
         )
     }
@@ -148,6 +154,9 @@ class UsageCalendarShotsTest {
             rule.onNodeWithTag("usage-card-summary", useUnmergedTree = true).performClick()
             waitForText("Token usage")
             capture("$prefix-details-top")
+            rule.runOnIdle { detailsState.requestScrollToItem(5 + hub.hourly.machines.size) }
+            rule.onNodeWithContentDescription("Claude Code, 92,000 tokens").assertExists()
+            capture("$prefix-details-agents")
             rule.runOnIdle { detailsState.dispatchRawDelta(100_000f) }
             capture("$prefix-details-bottom")
         }
@@ -184,23 +193,24 @@ class UsageCalendarShotsTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "zh-w400dp-h1000dp-xhdpi")
-    fun chineseHomeAndDetails() = languageShots("zh", "今天", "Token 用量")
+    fun chineseHomeAndDetails() = languageShots("zh", "今天", "Token 用量", "按 Agent · 最近 7 天", "未区分（更新前）", "9.2万")
 
     @Test
     @Config(sdk = [35], qualifiers = "ja-w400dp-h1000dp-xhdpi")
-    fun japaneseHomeAndDetails() = languageShots("ja", "今日", "トークン使用量")
+    fun japaneseHomeAndDetails() = languageShots("ja", "今日", "トークン使用量", "Agent別 · 過去7日間", "区別なし（更新前）", "9.2万")
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w400dp-h1000dp-xhdpi")
-    fun englishHomeAndDetails() = languageShots("en", "Today", "Token usage")
+    fun englishHomeAndDetails() = languageShots("en", "Today", "Token usage", "By Agent · Last 7 Days", "Not split (before the update)", "92K")
 
-    private fun languageShots(language: String, today: String, title: String) {
+    private fun languageShots(language: String, today: String, title: String, agentHeading: String, historical: String, largest: String) {
         val hub = hub()
+        val detailsState = LazyListState()
         var showDetails by mutableStateOf(false)
         rule.setContent {
             PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
                 Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
-                    if (showDetails) UsageCalendarPage(hub, onBack = { showDetails = false })
+                    if (showDetails) UsageCalendarPage(hub, onBack = { showDetails = false }, listState = detailsState)
                     else UsageCalendarCard(hub.history, onOpen = { showDetails = true })
                 }
             }
@@ -211,6 +221,11 @@ class UsageCalendarShotsTest {
         showDetails = true
         waitForText(title)
         capture("$language-details")
+        rule.runOnIdle { detailsState.requestScrollToItem(5 + hub.hourly.machines.size) }
+        rule.onNodeWithText(agentHeading).assertExists()
+        rule.onNodeWithText(historical, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(largest, useUnmergedTree = true).assertExists()
+        capture("$language-details-agents")
     }
 
     private fun waitForTag(tag: String) {

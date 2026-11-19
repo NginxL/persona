@@ -109,7 +109,7 @@ func (s *Service) launcherViewsFrom(ctx context.Context, zshrc []zshrcLaunchers,
 	managed := map[string]bool{}
 	for _, l := range stored {
 		managed[l.Name] = true
-		out = append(out, launcherView(l))
+		out = append(out, s.launcherView(l))
 	}
 	hidden := s.hiddenLaunchers(ctx)
 	byName := map[string]*LauncherView{}
@@ -350,10 +350,57 @@ func (s *Service) assistantLaunchersOf(ctx context.Context, machine string, pick
 // a few minutes ago at most, or the user typed it for this launcher and machine before (models_custom.go). Unknown (an
 // agent with no list, a failed call) counts as yes.
 func (s *Service) launcherHasModel(ctx context.Context, machine, launcher, model string) bool {
-	if set := s.launcherModelSet(ctx, machine, launcher); set == nil || set[model] {
-		return true
+	_, ok := s.resolveLauncherModel(ctx, machine, launcher, model)
+	return ok
+}
+
+// resolveLauncherModel is model as the launcher's own spelling, and whether the launcher offers it at all. An unknown
+// list (an agent with no list, a failed call) counts as yes and keeps model. An exact id passes as it is; a transcript
+// echo the gateway rewrote — routed under a prefix, or with/without the 1M marker — folds to the declared id (or stays,
+// as a remembered typed id). A model in no list and no remembered id is not offered: ok false.
+func (s *Service) resolveLauncherModel(ctx context.Context, machine, launcher, model string) (string, bool) {
+	set := s.launcherModelSet(ctx, machine, launcher)
+	if set == nil {
+		return model, true
 	}
-	return s.isCustomModel(ctx, machine, launcher, model)
+	if set[model] {
+		return model, true
+	}
+	declared := s.declaredLauncherModels(ctx, machine, launcher)
+	base := proto.TrimModelWindow(model)
+	for _, d := range declared {
+		if strings.EqualFold(base, proto.TrimModelWindow(d)) || proto.SameLauncherModel(model, d) {
+			if s.isCustomModel(ctx, machine, launcher, model) {
+				return model, true
+			}
+			return d, true
+		}
+	}
+	if norm := proto.NormalizeSessionModel(model, declared); norm != model && set[norm] {
+		return norm, true
+	}
+	if s.isCustomModel(ctx, machine, launcher, model) {
+		return model, true
+	}
+	return "", false
+}
+
+// declaredLauncherModels is every id the launcher declared in its cached list (ids, resolved ids, folded aliases). The
+// list is read through launcherModelSet first, so it is there; unknown is nil.
+func (s *Service) declaredLauncherModels(ctx context.Context, machine, launcher string) []string {
+	key := launcherModelCacheKey(ctx, machine, launcher)
+	c := &s.models
+	c.cacheMu.Lock()
+	if c.cacheAt != nil && time.Since(c.cacheAt[key]) < 5*time.Minute {
+		out := c.declared[key]
+		c.cacheMu.Unlock()
+		return out
+	}
+	c.cacheMu.Unlock()
+	s.launcherModelSet(ctx, machine, launcher)
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	return c.declared[key]
 }
 
 // launcherModelSet is the launcher's own /model list on machine (ids and what aliases resolve to), as it was a few
@@ -375,17 +422,21 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 		return nil
 	}
 	set := map[string]bool{}
+	declared := make([]string, 0, len(res.Models)*2)
 	aliases := map[string]string{}
 	defaultModel := ""
 	for _, x := range res.Models {
 		set[x.ID] = true
+		declared = append(declared, x.ID)
 		if x.Resolved != "" {
 			set[x.Resolved] = true
+			declared = append(declared, x.Resolved)
 			aliases[x.ID] = x.Resolved
 		}
 		// a folded row's other spellings (oneRowPerModel) stand for the model it runs
 		for _, a := range x.Aliases {
 			set[a] = true
+			declared = append(declared, a)
 			if a != cmp.Or(x.Resolved, x.ID) {
 				aliases[a] = cmp.Or(x.Resolved, x.ID)
 			}
@@ -404,10 +455,13 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 	if c.cacheAt == nil {
 		c.cacheAt, c.have = map[string]time.Time{}, map[string]map[string]bool{}
 	}
+	if c.declared == nil {
+		c.declared = map[string][]string{}
+	}
 	if c.aliases == nil {
 		c.aliases, c.defaults = map[string]map[string]string{}, map[string]string{}
 	}
-	c.cacheAt[key], c.have[key] = time.Now(), set
+	c.cacheAt[key], c.have[key], c.declared[key] = time.Now(), set, declared
 	c.aliases[key], c.defaults[key] = aliases, defaultModel
 	c.cacheMu.Unlock()
 	return set
@@ -440,6 +494,9 @@ func (s *Service) askLauncherModels(ctx context.Context, machine, name string, r
 	params := map[string]any{"refresh": refresh}
 	if purpose := launcherPurpose(ctx); purpose != "" {
 		params["purpose"] = purpose
+	}
+	if host, _ := ctx.Value(launcherModelHostKey{}).(string); host != "" {
+		params["host"] = host
 	}
 	if err := s.call(ctx, machine, assistantwire.DeviceLaunchersModels, s.launcherParams(ctx, machine, name, params), &res); err != nil {
 		return res, err

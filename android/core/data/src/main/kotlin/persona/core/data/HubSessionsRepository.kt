@@ -19,6 +19,7 @@ class HubSessionsRepository(
     private val connection: HubConnection,
     scope: CoroutineScope,
     private val snapshots: ListSnapshotStore? = null,
+    private val reconcileHeldRetries: (suspend (Session, Session) -> Unit)? = null,
 ) : SessionsRepository, VerifiedSessionsRepository {
     private val mutableMachines = MutableStateFlow<List<Machine>>(emptyList())
     override val machines = mutableMachines.asStateFlow()
@@ -138,14 +139,22 @@ class HubSessionsRepository(
                             revisionChanges.keys.removeAll { it.machineId == event.machineId }
                             val remaining = mutableSessions.value.filterNot { it.machineId == event.machineId }
                             val incoming = if (mode == Mode.Legacy) event.sessions else event.sessions.take(WINDOW_SIZE)
-                            mutableSessions.value = (remaining + incoming.map { it.copy(machineId = event.machineId) })
+                            val machineRows = incoming.map { it.copy(machineId = event.machineId) }
+                            for (row in machineRows) if (!row.undelivered.isNullOrEmpty()) reconcileHeldRow(row)
+                            mutableSessions.value = (remaining + machineRows)
                                 .let { if (mode == Mode.Legacy) it else it.take(WINDOW_SIZE) }
                             if (mode == Mode.Legacy && connection.state.value == ConnectionState.Online) verifiedLists.update {
                                 it.copy(sessions = if (it.machines?.firstOrNull { machine -> machine.id == event.machineId }?.online == false)
                                     it.sessions - event.machineId
-                                else it.sessions + (event.machineId to incoming.map { session -> session.copy(machineId = event.machineId) }))
+                                else it.sessions + (event.machineId to machineRows))
                             }
                             if (mode == Mode.Legacy) mutableListStatus.update { it.copy(total = mutableSessions.value.size) }
+                        }
+                        is SessionRowEvent -> {
+                            val row = event.session
+                            if (row.waiting != null && row.undelivered == null) return@withLock
+                            reconcileHeldRow(row)
+                            updateHeld(row.key) { row.undelivered.orEmpty() }
                         }
                         is RevsEvent -> {
                             revision++
@@ -410,7 +419,9 @@ class HubSessionsRepository(
                 }.toSet()
                 val loaded = mutableSessions.value.mapTo(mutableSetOf()) { it.key }
                 val kept = mutableSessions.value.mapNotNull { row ->
-                    if (row.key in removals) null else changes[row.key] ?: row
+                    if (row.key in removals) null else changes[row.key]?.also { changed ->
+                        if (!changed.undelivered.isNullOrEmpty()) reconcileHeldRow(changed, row)
+                    } ?: row
                 }
                 val unloaded = changes.values.filter { it.key !in loaded }
                 // The complete collection takes every new row; a bounded window only those that belong in it.
@@ -554,6 +565,52 @@ class HubSessionsRepository(
             (mutableMachines.value.map { it.id } + mutableSessions.value.map { it.machineId })
                 .distinct().associateWith { machine -> mutableSessions.value.filter { it.machineId == machine } },
         )
+    }
+
+    /** Only transitions that the manager pushed or exposed in a changes-only read can rearm an identical failure. */
+    private suspend fun reconcileHeldRow(row: Session, previousRow: Session? = null) {
+        val reconcile = reconcileHeldRetries ?: return
+        val previous = previousRow ?: mutableSessions.value.firstOrNull { it.key == row.key }
+            ?: mutableAdoptedSessions.value.firstOrNull { it.key == row.key } ?: return
+        if (!previous.undelivered.isNullOrEmpty() && previous.undelivered != row.undelivered) {
+            quietly { reconcile(previous, row) }
+        }
+    }
+
+    /** Patch only the held queue of an existing row, leaving filtered-list membership to the list protocol. */
+    private fun updateHeld(key: SessionKey, transform: (List<HeldAgentMessage>) -> List<HeldAgentMessage>) {
+        fun patch(rows: List<Session>) = rows.map { row ->
+            if (row.key != key) row else row.copy(undelivered = transform(row.undelivered.orEmpty()).ifEmpty { null })
+        }
+        sessionChanges[key.machineId] = ++revision
+        mutableSessions.value = patch(mutableSessions.value)
+        mutableAdoptedSessions.value = patch(mutableAdoptedSessions.value)
+        verifiedLists.update { known ->
+            val sameMachine = known.sessions[key.machineId] ?: return@update known
+            known.copy(sessions = known.sessions + (key.machineId to patch(sameMachine)))
+        }
+    }
+
+    suspend fun showHeld(key: SessionKey, message: HeldAgentMessage) {
+        restored.await()
+        lock.withLock {
+            updateHeld(key) { list -> if (list.any { it.id == message.id }) list else list + message }
+            persistLater()
+        }
+    }
+
+    suspend fun heldActionCompleted(key: SessionKey, id: String, retry: Boolean) {
+        if (retry) {
+            // Only the manager knows whether Retry will send, check for an earlier delivery, or need another decision.
+            // A new socket row can already have arrived while the action was in flight.
+            invalidations.trySend("")
+            return
+        }
+        restored.await()
+        lock.withLock {
+            updateHeld(key) { it.filterNot { m -> m.id == id } }
+            persistLater()
+        }
     }
 
     override suspend fun adopt(session: Session) {

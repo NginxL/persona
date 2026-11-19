@@ -73,6 +73,7 @@ func (s *Service) assistantTurnSettled(ctx context.Context, machine, sid string)
 			cmp.Or(sess.TurnErrorKind, "-"), cmp.Or(sess.TurnErrorCode, turnErrorCode(sess.TurnError), "-"))
 	}
 	s.spawnedTurnSettled(ctx, sess, failed)
+	s.recoverMissingReply(ctx, machine, sess)
 	if !failed {
 		s.inboxPostEvery(ctx, machine, sid) // a task set to put every run in the Inbox (inbox_post.go)
 	}

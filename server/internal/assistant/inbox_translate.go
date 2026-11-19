@@ -173,7 +173,11 @@ func (s *Service) translateMailFresh(ctx context.Context, ref assistantwire.Inbo
 		return mailTranslation{}, i18n.ErrEnglish("inbox-errors.translation_target", i18n.Args{"target": strconv.Quote(target)})
 	}
 	b := &s.inbox
-	key := translateKey("m", fingerprint, ref.AccountID, ref.Mailbox, fmt.Sprint(ref.UID), target)
+	folder := assistantwire.MailFolderKey(ref.AccountID, ref.Mailbox)
+	b.mu.Lock()
+	generation := b.mailBaselines[folder+"#e"]
+	b.mu.Unlock()
+	key := translateKey("m", fingerprint, folder, fmt.Sprint(generation), fmt.Sprint(ref.UID), target)
 	if v, ok := b.translations.get(key); ok {
 		var t mailTranslation
 		if json.Unmarshal([]byte(v), &t) == nil {
@@ -418,9 +422,10 @@ func (s *Service) storedMailTranslation(ctx context.Context, ref assistantwire.I
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	folder := assistantwire.MailFolderKey(ref.AccountID, ref.Mailbox)
 	for _, it := range b.items {
 		m := it.Mail
-		if m == nil || m.AccountID != ref.AccountID || len(m.UIDs) == 0 || m.UIDs[len(m.UIDs)-1] != ref.UID || (ref.Mailbox != "" && m.Mailbox != ref.Mailbox) {
+		if m == nil || m.folderKey() != folder || len(m.UIDs) == 0 || m.UIDs[len(m.UIDs)-1] != ref.UID {
 			continue
 		}
 		if t := it.Translations[target]; t != nil && t.Of == it.Last && t.Text != "" && t.ModelFingerprint == fingerprint {

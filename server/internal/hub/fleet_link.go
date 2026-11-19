@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
@@ -619,7 +620,15 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 			writeErr(w, http.StatusForbidden, errors.New("this device can only answer with a card's own choices"))
 			return
 		}
-		if pr := principalOf(r.Context()); pr.Role == roleExtension {
+		pr := principalOf(r.Context())
+		if pr.Role == roleScoped {
+			ix, pending := h.pendingInteraction(r.PathValue("id"))
+			if !pending || !h.scopedQuestion(ix) || res.Approve != nil || res.Allow != nil || res.Mode != "" || res.Always || len(res.Keys) > 0 || len(res.PreKeys) > 0 {
+				scopedPermissionDenied(w, "")
+				return
+			}
+		}
+		if pr.Role == roleExtension {
 			if why, mode, mid, sid := h.extensionResolveRefused(pr, r.PathValue("id"), res); why != "" { // extension_modes.go
 				h.refuseExtensionMode(w, r, pr, mid, sid, mode, why)
 				return
@@ -637,6 +646,41 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 			writeErr(w, http.StatusForbidden, errors.New("only the owner can ask an approval question"))
 			return
 		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
+		if err != nil {
+			writeBodyErr(w, err, err)
+			return
+		}
+		var in struct {
+			Text        string `json:"text"`
+			ClientMsgID string `json:"client_msg_id"`
+		}
+		if json.Unmarshal(body, &in) == nil {
+			clientID := strings.TrimSpace(in.ClientMsgID)
+			ix, pending := h.pendingInteraction(r.PathValue("id"))
+			question := assistantwire.ClarificationProof{InteractionID: r.PathValue("id"), MachineID: ix.MachineID,
+				SessionID: ix.SessionID, Text: in.Text, ClientMsgID: clientID}
+			if pending && ix.CanClarify && utf8.RuneCountInString(strings.TrimSpace(in.Text)) <= 1000 {
+				admitted := h.captureHumanSubmission(r, in.Text)
+				if _, verified := admitted.Context().Value(trustedSubmissionKey{}).(devicewire.Submission); verified {
+					if clientID == "" {
+						clientID = "approval-question-" + ix.ID + "-" + randomHex(6)
+						question.ClientMsgID = clientID
+						var fields map[string]json.RawMessage
+						if json.Unmarshal(body, &fields) == nil {
+							fields["client_msg_id"], _ = json.Marshal(clientID)
+							body, _ = json.Marshal(fields)
+						}
+					}
+					if validHubClarification(question) {
+						manager := cmp.Or(ix.Manager, assistantwire.AssistantID)
+						token := h.clarificationProofs.issue(manager, question)
+						r = withClarificationRequestProof(admitted, token)
+					}
+				}
+			}
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		h.forwardOwned(w, r, h.byInteraction)
 	})))
 	// Body client_id uses the same durable operation receipts as resolve.

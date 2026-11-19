@@ -137,7 +137,7 @@ func TestInjectedTemplatesKeepTheirHead(t *testing.T) {
 
 // The continue after a usage limit reset (#1710) is one line, as a wake is.
 func TestParseInjectedLimitContinue(t *testing.T) {
-	got := ParseInjected(RenderAgentLimitContinue())
+	got := ParseInjected(RenderAgentLimitContinue(""))
 	if got == nil || got.Kind != proto.InjectedFollowup || got.State != "limit_continue" || got.Line != "用量额度重置了，Persona 让它接着做" {
 		t.Fatalf("ParseInjected = %+v", got)
 	}

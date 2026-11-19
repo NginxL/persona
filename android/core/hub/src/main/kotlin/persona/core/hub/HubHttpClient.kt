@@ -288,6 +288,7 @@ class HubHttpClient(
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .pingInterval(0, TimeUnit.SECONDS)
+            .addInterceptor(persona.core.hub.dev.DevHttpInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request()
                 if (request.url.username.isNotEmpty() || request.url.password.isNotEmpty()) {

@@ -315,12 +315,18 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
 
     nonisolated struct Mail: Codable, Hashable, Sendable {
         var accountID: String
-        var mailbox: String
+        var mailbox: String?
         var uids: [UInt32]
         var messageID: String?
         var from: MailAddress?
         var direct: Bool?
         var thread: String?
+
+        /// INBOX is the implicit source on older hubs. Preserve every other folder's spelling and hierarchy.
+        var sourceMailbox: String? {
+            guard let mailbox, !mailbox.isEmpty, mailbox.lowercased() != "inbox" else { return nil }
+            return mailbox
+        }
 
         enum CodingKeys: String, CodingKey {
             case mailbox, uids, from, direct, thread

@@ -16,6 +16,9 @@ import (
 
 func stalledCodexNode(t *testing.T) (*Node, *fakeHerdr) {
 	t.Helper()
+	oldPaste := codexStartPaste
+	codexStartPaste = false
+	t.Cleanup(func() { codexStartPaste = oldPaste })
 	withCodexLaunchers(t, map[string][]string{"codex": {"codex"}})
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))

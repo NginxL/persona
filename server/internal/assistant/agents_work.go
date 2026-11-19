@@ -17,7 +17,7 @@ import (
 
 // Where an agent stands in its work (docs/assistant/agent-work.md, #1686), the manager's: when a turn ends it triages it — rules
 // first, then a cheap model reading the last reply — into done or blocked on a named precondition, and acts on what it
-// can: "Continue" after a transient model error (with backoff and a cap), a wake when what it waits for should be over, a
+// can: "Continue" after a transient model error (with capped backoff), a wake when what it waits for should be over, a
 // card for what the user is to decide (the answer goes back to the agent). Everything else (pushing code, deploying,
 // messaging people, touching someone else's MR) is only ever a card. Each action checks, the moment before, that the
 // session is still stopped on the same turn with nothing pending or queued: whatever the user did meanwhile wins.
@@ -49,7 +49,7 @@ type TriageSwitches struct {
 	// ReplyReminderMinutes: after how long since the user looked. 0: 30 (a PUT with 0 keeps it, a negative one clears it).
 	ReplyReminderMinutes int `json:"reply_reminder_minutes,omitempty"`
 	// TransientRetry: "Continue" after a transient model error (a dropped connection, a 5xx, overloaded), with backoff
-	// and a cap (#3208). A rule, no triage model call: independent of Enabled, and unset is on.
+	// capped delays and no attempt limit (#10444). A rule, no triage model call: independent of Enabled, and unset is on.
 	TransientRetry *bool `json:"transient_retry,omitempty"`
 }
 
@@ -85,8 +85,7 @@ func switchesOf(c assistantwire.TriageConfig) TriageSwitches {
 		Closeout: set(c.Closeout), CloseoutAsk: set(c.CloseoutAsk), TransientRetry: c.TransientRetry}
 }
 
-func maxRetries(c assistantwire.TriageConfig) int { return cmp0(c.MaxRetries, 5) }
-func maxWakes(c assistantwire.TriageConfig) int   { return cmp0(c.MaxWakes, 6) }
+func maxWakes(c assistantwire.TriageConfig) int { return cmp0(c.MaxWakes, 6) }
 func settleOf(c assistantwire.TriageConfig) time.Duration {
 	return time.Duration(cmp0(c.SettleSeconds, 15)) * time.Second
 }
@@ -102,26 +101,6 @@ func cmp0(n, def int) int {
 	}
 	return def
 }
-
-// retryBackoff is how long after a transient error the "Continue" numbered attempt (0: the first) goes: the base
-// (retry_base_seconds, 15 s by default) doubled for each attempt before it, four times that for a rate limit, never
-// more than retryBackoffMost. 15 s, 30 s, 60 s, 120 s, 240 s by default; 60 s … 960 s for a rate limit.
-func retryBackoff(c assistantwire.TriageConfig, attempt int, rateLimited bool) time.Duration {
-	d := time.Duration(cmp0(c.RetryBaseSeconds, 15)) * time.Second
-	if rateLimited {
-		d *= 4
-	}
-	for range max(attempt, 0) {
-		if d >= retryBackoffMost {
-			break
-		}
-		d *= 2
-	}
-	return min(d, retryBackoffMost)
-}
-
-// retryBackoffMost caps one transient error's backoff, however large max_retries is set.
-const retryBackoffMost = 30 * time.Minute
 
 // workEvery is how often the manager looks for due wakes and expired cards; workBackfillEvery how often it looks for
 // turns that ended unseen (while it was away, or whose triage failed a while ago).
@@ -204,6 +183,7 @@ type workBook struct {
 	cards        map[string]proto.Interaction // the cards out, by id (the snapshot's interactions)
 	loaded       bool
 	triaging     map[[2]string]bool
+	retrying     map[[2]string]bool           // one due-wake delivery per session at a time
 	ciPolling    map[[2]string]bool           // bounded concurrent check reads
 	loops        map[[2]string]*toolLoopState // running-turn loop candidates and cards
 	loopLoadMu   sync.Mutex                   // serialize loading without holding work.mu on the database
@@ -302,8 +282,11 @@ type triedTurn struct {
 	read     *turnRead
 }
 
-// turnRead is a session's latest turn as triage read it: what the user asked in it and its last reply ("" when none).
-type turnRead struct{ ask, reply string }
+// turnRead is a session's latest turn as triage read it: what the user asked, its last reply and the exact items.
+type turnRead struct {
+	ask, reply string
+	items      []proto.Item
+}
 
 // triageCfg is manager.json's agents.triage, as the hello has it.
 func (s *Service) triageCfg(ctx context.Context) assistantwire.TriageConfig {
@@ -670,8 +653,9 @@ func (s *Service) putWork(_ context.Context, e db.SessionWork) {
 	s.work.init()
 	key := [2]string{e.MachineID, e.SessionID}
 	current := s.work.entries[key]
-	if current != nil && current.Work.Deferred && current.TurnAt.Equal(e.TurnAt) {
+	if current != nil && (current.Work.Deferred || current.Work.RetiredAt != nil) && current.TurnAt.Equal(e.TurnAt) {
 		e.Work.Deferred = true
+		e.Work.RetiredAt, e.Work.RetiredTurnAt = current.Work.RetiredAt, current.Work.RetiredTurnAt
 		e.InteractionID, e.Work.InteractionID, e.WakeAt, e.Work.WakeAt = "", "", nil, nil
 	}
 	old, out := s.supersededCardLocked(current, e)
@@ -721,7 +705,8 @@ func (s *Service) putTriageWork(e db.SessionWork, generation uint64) bool {
 	s.work.mu.Lock()
 	s.work.init()
 	current := s.work.entries[key]
-	if s.work.generation[key] != generation || current != nil && (current.TurnAt.After(e.TurnAt) || current.Work.Deferred && current.TurnAt.Equal(e.TurnAt)) {
+	retired := current != nil && current.Work.RetiredAt != nil && (current.Work.RetiredTurnAt == nil || !e.TurnAt.After(current.Work.RetiredTurnAt.Add(2*time.Second)))
+	if s.work.generation[key] != generation || current != nil && (current.TurnAt.After(e.TurnAt) || retired || current.Work.Deferred && current.TurnAt.Equal(e.TurnAt)) {
 		s.work.mu.Unlock()
 		return false
 	}

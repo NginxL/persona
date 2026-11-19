@@ -3016,6 +3016,252 @@
         ],
         "shelved": []
       }
+    },
+    {
+      "name": "invalid_conversation_unfinished",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-invalid"
+        ],
+        "running": [],
+        "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_replacement",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              },
+              {
+                "machine_id": "box",
+                "session_id": "new",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          },
+          {
+            "machine_id": "box",
+            "session_id": "new",
+            "title": "Current attempt",
+            "cwd": "/code/app",
+            "status": "working",
+            "state": "working",
+            "updated_at": "2026-11-18T09:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [
+          "task:t-invalid"
+        ],
+        "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_parked",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ],
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "parked",
+              "updated_at": "2026-11-18T09:00:00Z",
+              "reviews": [],
+              "parked": {
+                "reason": "Waiting for review",
+                "waiting_on": "someone_else",
+                "count": 1,
+                "until": "2026-11-19T09:00:00Z"
+              }
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [
+          "task:t-invalid"
+        ],
+        "shelved": [],
+        "web_parked": [
+          "task:t-invalid"
+        ]
+      }
+    },
+    {
+      "name": "invalid_conversation_closed",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ],
+            "done_at": "2026-11-18T09:00:00Z"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [],
+        "shelved": [],
+        "finished": [
+          "task:t-invalid"
+        ],
+        "finished_new": [
+          "task:t-invalid"
+        ]
+      }
     }
   ]
 }

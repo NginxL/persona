@@ -70,6 +70,16 @@ class RouterTest {
         assertNull(router.parseDebug(mapOf("debug.openRequest" to "request")))
     }
 
+    @Test fun canonicalAppLinksResolveColdAndRefuseUnsafeRoutes() {
+        assertRoute(router.parse(RouteInput.DeepLink("persona://open/todos/t-19")), AppTab.Agents, TodoDetailRoute("t-19"))
+        for (link in listOf(
+            "persona://open//evil.example/x",
+            "persona://open:8080/s/machine/agent",
+            "persona://open?route=%2F%2Fevil.example%2Fx",
+            "persona://open/%5Cevil",
+        )) assertNull(link, router.parse(RouteInput.DeepLink(link)))
+    }
+
     @Test fun personaDeepLinksKeepCredentialsTransient() {
         val pair = "persona://pair?url=https%3A%2F%2Fhub.example.com&token=fixture"
         val route = router.parse(RouteInput.DeepLink(pair))

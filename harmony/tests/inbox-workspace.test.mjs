@@ -56,7 +56,7 @@ registerHooks({
   }
 });
 
-const { InboxAttachmentDraft, InboxWorkspace } = await import('../entry/src/main/ets/models/InboxWorkspace.ets');
+const { InboxAttachmentDraft, InboxWorkspace, inboxRowSourceLabel } = await import('../entry/src/main/ets/models/InboxWorkspace.ets');
 const { HubRepository } = await import('../entry/src/main/ets/models/HubRepository.ets');
 const { ResourceRow } = await import('../entry/src/main/ets/models/Wire.ets');
 const { HttpFailure, EndpointConfig } = await import('persona-inbox:transport');
@@ -468,6 +468,25 @@ test('source, account, and open/done filters keep generic connector rows out of 
   assert.deepEqual(workspace.filteredItems.map((entry) => entry.id), ['mail-done']);
   assert.equal(workspace.isMail(rowFor(rows[2])), false);
   assert.ok(workspace.sourceOptions.includes('github'));
+  await workspace.close();
+});
+
+test('mail rows and their loaded details show the named IMAP folder without changing the account filter', async () => {
+  const message = mailDetail('filed');
+  message.mail.mailbox = 'Projects/通知';
+  const f = makeHarness({ rows: [message], details: { filed: message } });
+  const workspace = new InboxWorkspace();
+  await workspace.open(f.client);
+  const row = workspace.filteredItems[0];
+  const expected = 'Mail · mail-a@example.test · Projects/通知';
+  assert.equal(inboxRowSourceLabel(row.data(), 'Mail'), expected);
+  assert.deepEqual(workspace.accountOptions, ['all', 'mail-a']);
+  await workspace.openRow(row);
+  assert.equal(inboxRowSourceLabel(workspace.selected.data(), 'Mail'), expected);
+  for (const folder of [undefined, '', 'InBoX']) {
+    assert.equal(inboxRowSourceLabel(item('default', {mail: {mailbox: folder}}), 'Mail'), 'Mail · mail-a@example.test');
+  }
+  assert.equal(inboxRowSourceLabel(item('spaces', {mail: {mailbox: ' INBOX '}}), 'Mail'), 'Mail · mail-a@example.test ·  INBOX ');
   await workspace.close();
 });
 

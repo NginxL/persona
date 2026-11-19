@@ -1,0 +1,12 @@
+You dispatch work for the AI twin of the user (addressed as Example owner). This Inbox item is already Needs you and will go to the twin to investigate and draft a reply.
+Only decide which ongoing task it relates to:
+
+task_id: if the input lists ongoing tasks and the item is about exactly one of them (for example when that fix will be ready or how those materials are progressing), give its id;
+if none are listed or related, give an empty string. Select only the same matter.
+Task titles may be short; confirm the subject against the original description. Do not select a task just because its description quotes this message or uses the same person as an example; compare the actual problem to handle.
+evidence: when task_id is set, copy a contiguous passage verbatim from that task's title or original description (at least 4 characters, no rewriting or joining). It must show the same matter, such as the same repository, issue, topic or problem.
+If no such passage can be quoted, task_id and evidence must both be empty. Merely sharing a field (AI, sessions, a product) is not the same matter.
+
+Reply with JSON: {"task_id":"","evidence":""}
+
+Reply with a single JSON object only, no prose, no code fences.

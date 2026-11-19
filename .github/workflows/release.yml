@@ -113,23 +113,39 @@ jobs:
   darwin-cli-sign:
     name: Sign Darwin command-line programs
     needs: [authorize, desktop-gate, publish]
-    if: needs.desktop-gate.outputs.mac == 'true'
+    if: needs.desktop-gate.outputs.darwin_cli == 'true'
     runs-on: macos-latest
     timeout-minutes: 90
     environment: persona-desktop-release
     permissions:
       contents: write
     steps:
+      - name: Check whether release-publish owns this tag's verified artifacts
+        id: owner
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          owned=false
+          if gh release view "$RELEASE_TAG" --json body --jq .body | grep -Eq '^release-pr: [0-9]+$'; then
+            echo 'This Release belongs to a verified release PR; release-publish owns its exact artifacts.'
+            owned=true
+          fi
+          printf 'release_pr=%s\n' "$owned" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.owner.outputs.release_pr == 'false'
         with:
           persist-credentials: false
       - name: Build release command-line programs
+        if: steps.owner.outputs.release_pr == 'false'
         env:
           VERSION: ${{ needs.desktop-gate.outputs.version }}
           NO_DEPLOY: '1'
           RELEASE_CHANNEL: ${{ contains(github.ref_name, '-') && 'beta' || 'release' }}
         run: scripts/release/publish.sh
       - name: Install the existing signing certificate
+        if: steps.owner.outputs.release_pr == 'false'
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -146,14 +162,16 @@ jobs:
           security import "$packet" -k "$PERSONA_SIGNING_KEYCHAIN" -P "$MAC_CSC_KEY_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CSC_KEY_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
           identity="$(security find-identity -v -p codesigning "$PERSONA_SIGNING_KEYCHAIN" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
-          test -n "$identity" || { echo 'No Developer ID Application signing identity is available.' >&2; exit 1; }
+          test -n "$identity" || { echo 'Darwin CLI signing blocked: No Developer ID Application signing identity is available.' >&2; exit 1; }
           printf '%s\n' "$identity" > "${RUNNER_TEMP}/persona-cli-signing-identity"
       - name: Sign and verify fixed-identifier binaries
+        if: steps.owner.outputs.release_pr == 'false'
         run: |
           identity="$(cat "${RUNNER_TEMP}/persona-cli-signing-identity")"
-          test -n "$identity" || { echo 'No Developer ID Application signing identity is available.' >&2; exit 1; }
+          test -n "$identity" || { echo 'Darwin CLI signing blocked: No Developer ID Application signing identity is available.' >&2; exit 1; }
           python3 scripts/release/sign_darwin_cli.py build-publish/bin --identity "$identity"
       - name: Rebuild the manifest from the signed downloads
+        if: steps.owner.outputs.release_pr == 'false'
         env:
           VERSION: ${{ needs.desktop-gate.outputs.version }}
           COMMIT: ${{ github.sha }}
@@ -162,10 +180,18 @@ jobs:
           set -euo pipefail
           host="build-publish/bin/personad-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
           build="$(date -u +%Y%m%d%H%M)"
+          # publish.sh compressed the unsigned build. Replace every darwin archive with the signed bytes before hashing.
+          for program in personad persona-node persona-link persona-hub persona-manager; do
+            for architecture in amd64 arm64; do
+              bin="build-publish/bin/${program}-darwin-${architecture}"
+              gzip -n -9 -c "$bin" > "$bin.gz"
+            done
+          done
           (cd build-publish/bin && shasum -a 256 -- *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
           "$host" release manifest --dir build-publish/bin --version "$VERSION" --build "$build" --commit "$COMMIT" --channel "$RELEASE_CHANNEL" --out build-publish/bin/latest.json
           "$host" release verify --dir build-publish/bin --manifest build-publish/bin/latest.json
       - name: Upload signed Darwin downloads
+        if: steps.owner.outputs.release_pr == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -193,6 +219,7 @@ jobs:
       version: ${{ steps.gate.outputs.version }}
       mac: ${{ steps.gate.outputs.mac }}
       win: ${{ steps.gate.outputs.win }}
+      darwin_cli: ${{ steps.gate.outputs.darwin_cli }}
     steps:
       - uses: actions/checkout@v4
         with:

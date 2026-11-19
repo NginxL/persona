@@ -3,7 +3,12 @@ package devices
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/streams"
 )
 
 // What the hub opens on a node through the manager — a stream (a forwarded port's: port.dial, a plugin program's:
@@ -15,8 +20,42 @@ import (
 
 // hubOpened is what the hub has open on the machine's node now; m.mu guards it.
 type hubOpened struct {
-	streams map[string]bool // streams by id
+	streams map[string]bool // stream id -> offered directional EOF
 	terms   map[string]bool // watched terminals by session id
+}
+
+// callPortDial records the stream before the request goes out. The node can send a close before its reply, and a
+// new bus connection must also clean up a dial whose reply was lost or is still pending.
+func (m *Machine) callPortDial(ctx context.Context, peer *rpc.Peer, dial devicewire.PortDial, out any) error {
+	halfClose := dial.StreamVersion == devicewire.PortStreamHalfCloseV1
+	m.mu.Lock()
+	if err := rpc.ConnContext(ctx).Err(); err != nil {
+		m.mu.Unlock()
+		return rpc.NotSent(err)
+	}
+	if m.peer != peer {
+		m.mu.Unlock()
+		return rpc.NotSent(errOffline)
+	}
+	if m.opened.streams == nil {
+		m.opened.streams = map[string]bool{}
+	}
+	m.opened.streams[dial.ID] = halfClose
+	m.mu.Unlock()
+
+	err := peer.Call(ctx, devicewire.MethodPortDial, dial, out)
+	if err == nil {
+		return nil
+	}
+	m.mu.Lock()
+	_, tracked := m.opened.streams[dial.ID]
+	delete(m.opened.streams, dial.ID)
+	m.mu.Unlock()
+	var refusal *rpc.Error
+	if tracked && !errors.Is(err, rpc.ErrNotSent) && !errors.As(err, &refusal) {
+		m.closePort(dial.ID, halfClose)
+	}
+	return err
 }
 
 // noteOpened keeps what a call of the hub's opened or closed on the node.
@@ -26,7 +65,7 @@ func (m *Machine) noteOpened(method string, params json.RawMessage, err error) {
 		SessionID string `json:"session_id"`
 	}
 	switch method {
-	case "port.dial", "plugin.node.dial", "preview.open", "terminal.watch", "terminal.unwatch":
+	case "plugin.node.dial", "preview.open", "terminal.watch", "terminal.unwatch":
 	default:
 		return
 	}
@@ -37,11 +76,11 @@ func (m *Machine) noteOpened(method string, params json.RawMessage, err error) {
 	defer m.mu.Unlock()
 	o := &m.opened
 	switch {
-	case (method == "port.dial" || method == "plugin.node.dial" || method == "preview.open") && err == nil && p.ID != "":
+	case (method == "plugin.node.dial" || method == "preview.open") && err == nil && p.ID != "":
 		if o.streams == nil {
 			o.streams = map[string]bool{}
 		}
-		o.streams[p.ID] = true
+		o.streams[p.ID] = false
 	case method == "terminal.watch" && err == nil && p.SessionID != "":
 		if o.terms == nil {
 			o.terms = map[string]bool{}
@@ -54,7 +93,7 @@ func (m *Machine) noteOpened(method string, params json.RawMessage, err error) {
 
 // noteClosed: a stream or a terminal ended (the hub's stream.close, the node's stream.close or terminal.end).
 func (m *Machine) noteClosed(event string, params json.RawMessage) {
-	if event != "stream.close" && event != "terminal.end" {
+	if event != streams.EventClose && event != "terminal.end" {
 		return
 	}
 	var p struct {
@@ -67,7 +106,7 @@ func (m *Machine) noteClosed(event string, params json.RawMessage) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if event == "stream.close" {
+	if event == streams.EventClose {
 		delete(m.opened.streams, p.ID)
 	} else if !p.Control {
 		delete(m.opened.terms, p.SessionID)
@@ -89,9 +128,8 @@ func (d *Devices) endHubOpened() {
 		}
 		d.logf("[%s] the hub's connection is new: %d streams and %d terminals of the last one end on the node", m.cfg.ID,
 			len(o.streams), len(o.terms))
-		for id := range o.streams {
-			b, _ := json.Marshal(map[string]any{"id": id})
-			m.queueNote("stream.close", b)
+		for id, halfClose := range o.streams {
+			m.closePort(id, halfClose)
 		}
 		// On this node connection, now: before the hub asks anything through the new bus connection (a terminal an
 		// app watches again).
@@ -103,4 +141,12 @@ func (d *Devices) endHubOpened() {
 			}()
 		}
 	}
+}
+
+func (m *Machine) closePort(id string, abort bool) {
+	b, _ := json.Marshal(struct {
+		ID    string `json:"id"`
+		Abort bool   `json:"abort,omitempty"`
+	}{id, abort})
+	m.queueNote(streams.EventClose, b)
 }

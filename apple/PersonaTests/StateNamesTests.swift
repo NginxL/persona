@@ -12,7 +12,7 @@ struct StateNamesTests {
 
     /// The names only an agent's or a task's state has. 「已完成」, 「未知」… also name other things (a tool run, a project, a
     /// step), so they are not checked.
-    private static let names = ["需要你", "工作中", "完成未看", "已看", "未运行", "待唤醒", "待你回复", "待跟进", "全部标为已看"]
+    private static let names = ["需要你", "工作中", "完成未看", "已看", "未运行", "待唤醒", "待你回复", "待跟进", "刚做完待看", "全部标为已看"]
     /// Names a screen used before #3960 for one of those states.
     private static let old = ["等你", "在做", "待查看", "做完", "做完了", "做完了，还没看", "做完未看", "停着", "等你处理", "需要你处理",
                               "正在工作", "待回答", "没在运行", "全部标为已读"]
@@ -35,7 +35,7 @@ struct StateNamesTests {
     @Test func areTheGlossarysNames() {
         let want: [StateName: String] = [
             .needsYou: "需要你", .working: "工作中", .unread: "完成未看", .seen: "已看", .notRunning: "未运行", .unknown: "未知",
-            .waiting: "待唤醒", .awaitsReply: "待你回复", .done: "已完成", .followUp: "待跟进", .taskWaiting: "等待中",
+            .waiting: "待唤醒", .justFinished: "刚做完待看", .awaitsReply: "待你回复", .done: "已完成", .followUp: "待跟进", .taskWaiting: "等待中",
         ]
         for s in StateName.allCases { #expect(s.text == want[s], "\(s)") }
         #expect(StateName.count(.needsYou, 2) == "2 个需要你")
@@ -49,6 +49,7 @@ struct StateNamesTests {
     @MainActor @Test func screensUseThem() {
         #expect(AgentState.needsYou.label == StateName.needsYou.text && AgentState.idle.label == StateName.seen.text)
         #expect(AgentState.unread.label == "完成未看" && AgentState.offline.label == "未运行")
+        #expect(TodoSection.justDone.title == StateName.justFinished.text)
         #expect(PersonaState.needsYou.title == "需要你" && SessionStatus.blocked.label == "需要你")
     }
 

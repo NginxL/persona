@@ -65,7 +65,7 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 			return "", fmt.Errorf("text is required: what %s should do on the new launcher (only an agent stopped on a usage limit "+
 				"goes on without it). Nothing was done", label)
 		}
-		text = prompts.RenderAgentLimitContinue() // what the manager sends it once the limit resets (agents_work_tick.go)
+		text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale)) // what the manager sends it once the limit resets (agents_work_tick.go)
 	}
 	if exitText(text) {
 		return "", errors.New("text cannot be /exit or /quit: the agent is moved to go on working. Nothing was done")

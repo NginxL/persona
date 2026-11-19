@@ -500,7 +500,7 @@ private struct SettingsDestinations: ViewModifier {
         content
             .navigationDestination(for: SettingsPage.self) { destination($0).splitDetailPage() }
             .navigationDestination(for: MachineListRoute.self) { _ in MachinesView(settingsScope: true).splitDetailPage() }
-            .navigationDestination(for: ModelLaunchersRoute.self) { _ in ModelLaunchersView().splitDetailPage() }
+            .navigationDestination(for: ModelLaunchersRoute.self) { r in ModelLaunchersView(route: r).splitDetailPage() }
             .navigationDestination(for: ModelPurposeRoute.self) { r in ModelPurposeEditorView(purposeID: r.id).splitDetailPage() }
             .navigationDestination(for: ModelLauncherRoute.self) { r in ModelLauncherDetailView(name: r.name).splitDetailPage() }
             .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref).splitDetailPage() }

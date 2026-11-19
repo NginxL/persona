@@ -2,10 +2,10 @@ import { decisionSourceLabel } from "../lib/todo-decision-label";
 import { NewTodoRepositoryBindings, TodoRepositoryBindings, useRepositoryRequestContext } from "../ui/TaskRepositoryBindingsEditor";
 import { cleanRepositoryDraft, createTodoWithRepositories, repositoryDuplicateLink, validRepositoryDraft, type CreateRepositoryBindings, type RepositoryCatalog } from "../lib/task-repositories";
 import { hasRequestPieces } from "../lib/request-pieces";
-import { defaultManager, useShownManager } from "../lib/manager-choice";
+import { defaultManager, MANAGER_HEADER, useShownManager } from "../lib/manager-choice";
 // Beautiful UI Todos View: left list (sorted by status & created_at), right detail, handover dialog.
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode, type RefObject } from "react";
-import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../lib/api";
+import { api, apiBlob, credentialOwner, enc, errorText, getToken, subscribeCredentialOwner } from "../lib/api";
 import { ago, clock, sessionCan, shortPath, stateOf, tabLabel, uuid } from "../lib/format";
 import { foldedState } from "../lib/child-sessions";
 import { sessionCard } from "../lib/folded-rows";
@@ -44,14 +44,12 @@ import {
   mostUrgentAgent,
   orphanedLine,
   sortTodos,
-  TODO_STATUS_INFO,
   heldDelivery,
   TODO_TONE_CLASS,
   isAutoDone,
   isOverdue,
   todoDueDay,
   todoDueText,
-  todoStatusLabel,
   shownStatus,
   todoStatus,
   unlinkAgentFromTodo,
@@ -59,12 +57,14 @@ import {
   updateTodo,
   type Todo,
   type TodoAgent,
+  type TodoImage,
   type TodoPatch,
   type TodoDecision,
   type TodoStatus,
   type SessionLookup,
   taskNow,
 } from "../lib/todos";
+import { todoLook, waitOf, type WaitReason } from "../lib/todo-wait-reason";
 import type { AgentState, Interaction, Launcher, Machine } from "../lib/types";
 import { Button, cx, Dialog, IconButton, Loading, Menu, toast, useMenu } from "../ui/atoms";
 import { contextMenuProps } from "../ui/context-menu";
@@ -121,6 +121,8 @@ import { retryKey, retryTask, useFeed } from "../lib/feed";
 import { planTaskOf, retryLauncher, retryOnLauncher } from "../lib/start-retry";
 import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
 import { PageBoundary } from "./PageBoundary";
+import { imagePayload, pickAttachment, releaseAttachments, type LocalAttachment } from "../lib/attachments";
+import { AttachmentTray } from "../ui/AttachmentTray";
 
 /** What this browser was last on (#2029): the list or the calendar, the calendar's mode, and whether it shows done ones. */
 const VIEW_KEY = "persona.todos.view";
@@ -1464,6 +1466,8 @@ export type TodoRowView = {
   ultracode: boolean;
   /** Its status section (sectionOf), in every grouping: its checkbox reads open or done by it (checksAsOpen). */
   section?: TriageSection;
+  /** What it waits on while its status is Waiting (#11090, lib/todo-wait-reason.ts waitOf): its label says so. */
+  wait?: WaitReason;
 };
 
 const DOT_STATE: Record<TodoStatus, AgentState> = {
@@ -1513,7 +1517,7 @@ function agentRowView(todo: Todo, lookup: SessionLookup, interactions: Interacti
   const status = todoStatus(todo, lookup);
   const urgent = mostUrgentAgent(todo, lookup);
   const activeCount = (todo.agents ?? []).filter((a) => !a.released_at).length;
-  const view: TodoRowView = { status, dotState: DOT_STATE[shownStatus(todo, status)], age: lastMoved(todo, lookup), activeCount, urgentLine: false, urgentLead: "", urgentText: "", orphaned: false, ultracode: todoUltracode(todo, lookup) };
+  const view: TodoRowView = { status, dotState: DOT_STATE[shownStatus(todo, status)], age: lastMoved(todo, lookup), activeCount, urgentLine: false, urgentLead: "", urgentText: "", orphaned: false, ultracode: todoUltracode(todo, lookup), wait: waitOf(todo, status, lookup) };
   if (todo.done_at || !urgent?.session) return view;
   const limit = status === "usage_limit" ? usageLimitLabel(urgent.session) : undefined;
   if (limit) {
@@ -1571,7 +1575,8 @@ const TodoListItem = memo(function TodoListItem({
   const showWait = (section ?? view.section) === "parked";
   // the PR it waits on: its current one, or an earlier one still open (#7935)
   const openPR = (section ?? view.section) === "parked" ? openMergePRs(todo, Date.now())[0] : undefined;
-  const toneClass = TONE_CLASS[TODO_STATUS_INFO[shownStatus(todo, status)].tone];
+  // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
+  const look = todoLook(todo, status, view.wait);
   const held = heldDelivery(todo);
   const thread = useStore((s) => todoThreadsOn(s.features)) ? boundThread(todo) : undefined;
   // a failed start still waiting on the owner reads open, not done, with why it did not start (#3713), in every grouping
@@ -1649,7 +1654,7 @@ const TodoListItem = memo(function TodoListItem({
         {/* Status Line */}
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
           {open && <StatusMark state={dotState} size="sm" />}
-          <span className={cx("shrink-0 whitespace-nowrap font-medium", toneClass)}>{todoStatusLabel(todo, status)}</span>
+          <span className={cx("shrink-0 whitespace-nowrap font-medium", TONE_CLASS[look.tone])} data-testid="todo-status">{look.label}</span>
           {!todo.done_at && activeCount > 0 && (
             <>
               <span className="text-ink-3">·</span>
@@ -1943,6 +1948,7 @@ const TaskBriefHistory = lazy(() => import("./assistant/TaskBrief").then((m) => 
 const BriefResultExtras = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.BriefResultExtras })));
 // the question a failed start's tab stopped on, answered on its page (#10365): only for such a failure
 const ShellQuestion = lazy(() => import("./ShellQuestionCard"));
+const TodoImageViewer = lazy(() => import("./chat/ImageViewer").then((m) => ({ default: m.ImageViewer })));
 
 // The existing review UI lives with this lazy page, not the first screen's card badges.
 const MARK: Record<CheckMark, { icon: "check" | "x" | "clock" | "minus"; className: string; label: () => string }> = {
@@ -2033,6 +2039,156 @@ function AutoReviewResult({ sup }: { sup: Supervision }) {
         </div>
       )}
     </div>
+  );
+}
+
+const TODO_IMAGE_LIMIT = 50;
+const TODO_IMAGE_MAX_BYTES = 1024 * 1024;
+const TODO_IMAGE_PARALLEL = 3;
+
+type TodoImageEntry = {
+  id: string;
+  path: string;
+  state: "queued" | "reading" | "ready" | "failed";
+  url?: string;
+};
+type TodoImageBook = {
+  scope: string;
+  owner: string;
+  manager: string;
+  token: string;
+  ac: AbortController;
+  entries: Map<string, TodoImageEntry>;
+  queue: TodoImageEntry[];
+  running: number;
+};
+
+/** Only the owning manager's own media route is safe to turn back into apiBlob's path form. */
+function storedTodoImagePath(todoId: string, image: TodoImage): string | undefined {
+  const expected = `/api/v1/todos/${encodeURIComponent(todoId)}/images/${encodeURIComponent(image.id)}`;
+  return image.url === expected ? image.url.slice("/api/v1".length) : undefined;
+}
+
+/** Read each listed private image once, at most three at a time. A refresh reconciles metadata without replacing
+ *  unchanged object URLs; a credential, manager or to-do change retires the whole book and every late answer. */
+function useStoredTodoImages(todo: Todo, owner: string) {
+  const manager = todo.manager ?? defaultManager();
+  const scope = `${owner}/${manager}/${todo.id}`;
+  const images = useMemo(() => (todo.images ?? []).slice(0, TODO_IMAGE_LIMIT).filter((image) => storedTodoImagePath(todo.id, image)), [todo.id, todo.images]);
+  const book = useRef<TodoImageBook | null>(null);
+  const [, setRevision] = useState(0);
+  const redraw = useCallback(() => setRevision((n) => n + 1), []);
+  const drop = useCallback(() => {
+    const b = book.current;
+    if (!b) return;
+    b.ac.abort();
+    b.entries.forEach((entry) => { if (entry.url) URL.revokeObjectURL(entry.url); });
+    book.current = null;
+  }, []);
+  const pump = useCallback((b: TodoImageBook) => {
+    while (b.running < TODO_IMAGE_PARALLEL && b.queue.length) {
+      const entry = b.queue.shift()!;
+      if (b.entries.get(entry.id) !== entry || entry.state !== "queued") continue;
+      entry.state = "reading";
+      b.running++;
+      apiBlob(entry.path, {
+        signal: b.ac.signal,
+        token: b.token,
+        tokenOwner: b.owner,
+        isAuthContextCurrent: () => book.current === b && credentialOwner() === b.owner,
+        headers: { [MANAGER_HEADER]: b.manager },
+      }).then((blob) => {
+        if (book.current !== b || b.ac.signal.aborted || b.entries.get(entry.id) !== entry || entry.state !== "reading" || credentialOwner() !== b.owner) return;
+        entry.url = URL.createObjectURL(blob);
+        entry.state = "ready";
+        redraw();
+      }).catch(() => {
+        if (book.current !== b || b.ac.signal.aborted || b.entries.get(entry.id) !== entry || entry.state !== "reading" || credentialOwner() !== b.owner) return;
+        entry.state = "failed";
+        redraw();
+      }).finally(() => {
+        b.running--;
+        if (book.current === b) pump(b);
+      });
+    }
+  }, [redraw]);
+
+  useEffect(() => {
+    let b = book.current;
+    let changed = false;
+    if (!b || b.scope !== scope) {
+      drop();
+      b = { scope, owner, manager, token: getToken(), ac: new AbortController(), entries: new Map(), queue: [], running: 0 };
+      book.current = b;
+      changed = true;
+    }
+    const wanted = new Map(images.map((image) => [image.id, storedTodoImagePath(todo.id, image)!] as const));
+    b.entries.forEach((entry, id) => {
+      if (wanted.get(id) === entry.path) return;
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      b.entries.delete(id);
+      changed = true;
+    });
+    b.queue = b.queue.filter((entry) => b.entries.get(entry.id) === entry);
+    for (const [id, path] of wanted) {
+      if (b.entries.has(id)) continue;
+      const entry: TodoImageEntry = { id, path, state: "queued" };
+      b.entries.set(id, entry);
+      b.queue.push(entry);
+      changed = true;
+    }
+    pump(b);
+    if (changed) redraw();
+  }, [scope, owner, manager, todo.id, images, drop, pump, redraw]);
+  useEffect(() => () => drop(), [drop]);
+
+  const retry = useCallback((id: string) => {
+    const b = book.current;
+    const entry = b?.scope === scope ? b.entries.get(id) : undefined;
+    if (!b || !entry || entry.state !== "failed") return;
+    entry.state = "queued";
+    b.queue.push(entry);
+    redraw();
+    pump(b);
+  }, [scope, pump, redraw]);
+  return { images, entries: book.current?.scope === scope ? book.current.entries : undefined, retry };
+}
+
+function TodoImages({ todo, owner }: { todo: Todo; owner: string }) {
+  const { images, entries, retry } = useStoredTodoImages(todo, owner);
+  const [open, setOpen] = useState<string>();
+  const shown = images.map((image, index) => {
+    const entry = entries?.get(image.id);
+    return { image, entry, name: image.name?.trim() || t("todos.image_label", { n: index + 1 }) };
+  });
+  const ready = shown.flatMap(({ image, entry, name }) => entry?.url ? [{ id: image.id, name, url: entry.url, mime: image.mime }] : []);
+  const failed = shown.filter(({ entry }) => entry?.state === "failed");
+  const openAt = ready.findIndex((image) => image.id === open);
+  if (!images.length) return null;
+  return (
+    <section className="mt-4" aria-label={t("todos.images_section", { count: images.length })}>
+      <div className="mb-2 text-submeta font-medium text-ink-3">{t("todos.images_section", { count: images.length })}</div>
+      <AttachmentTray attachments={ready} onOpen={setOpen} openLabel={(name) => t("todos.image_open", { name })} />
+      {ready.length === 0 && failed.length === 0 && <p className="text-submeta text-ink-3">{t("todos.images_loading")}</p>}
+      {failed.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {failed.map(({ image, name }) => (
+            <Button key={image.id} tone="quiet" icon="retry" className="touch-hit whitespace-nowrap" onClick={() => retry(image.id)}>
+              {t("todos.image_retry", { name })}
+            </Button>
+          ))}
+        </div>
+      )}
+      {openAt >= 0 && (
+        <Suspense fallback={null}>
+          <TodoImageViewer
+            images={ready.map((image) => ({ id: image.id, src: image.url, mime: image.mime, label: image.name, name: image.name }))}
+            start={openAt}
+            onClose={() => setOpen(undefined)}
+          />
+        </Suspense>
+      )}
+    </section>
   );
 }
 
@@ -2131,7 +2287,8 @@ function TodoDetail({
   const retry = (launcher?: string) =>
     (launcher ? retryOnLauncher(todo, launcher) : retryTask(todo)).catch((e) => toast(t("todos.action_failed", { error: errorText(e) }), "error"));
   const status = todoStatus(todo, lookup);
-  const statusInfo = TODO_STATUS_INFO[shownStatus(todo, status)];
+  // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
+  const look = todoLook(todo, status, waitOf(todo, status, lookup));
   // The to-do's own PR, parsed once here (the list row and the repository section's fallback share it).
   const legacyPR = prLink(todo.pr_url);
   const toneClass = {
@@ -2140,7 +2297,8 @@ function TodoDetail({
     amber: status === "needs_you" ? "bg-field text-attention" : "bg-orange-tint text-orange",
     idle: "bg-hover text-ink-2",
     off: "bg-hover text-ink-3",
-  }[statusInfo.tone];
+    attention: "bg-field text-attention",
+  }[look.tone];
 
   const shown = shownStatus(todo, status);
   const dotState =
@@ -2199,7 +2357,7 @@ function TodoDetail({
       <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-ink-2">
         <span className={cx("inline-flex h-5.5 items-center gap-1.5 rounded-md px-2 text-[12px] font-semibold", toneClass)}>
           <StatusMark state={dotState} size="sm" />
-          {todoStatusLabel(todo, status)}
+          {look.label}
         </span>
         <span className="text-ink-3">·</span>
         <span>{t("todos.agent_count", { count: activeAgents.length })}</span>
@@ -2259,6 +2417,8 @@ function TodoDetail({
           />
         </div>
       </div>
+
+      <TodoImages todo={todo} owner={owner} />
 
       <TodoRepositoryBindings key={`${owner}:${todo.manager ?? defaultManager()}:${todo.id}`} manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id}
         legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} />
@@ -2916,6 +3076,13 @@ function NewTodoDialog({
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  const imagesSupported = useStore((s) => s.features.includes("todo_images"));
+  const keptAttachments = useRef<LocalAttachment[]>([]);
+  const operationId = useRef(uuid());
+  const operationKey = useRef("");
+  const imageInput = useRef<HTMLInputElement>(null);
   const [dueDay, setDueDay] = useState("");
   const [dueTime, setDueTime] = useState("");
   const [allDay, setAllDay] = useState(true);
@@ -2923,6 +3090,17 @@ function NewTodoDialog({
   const cleanBindings = repositoryBindings ? cleanRepositoryDraft(repositoryBindings.repositories) : [];
   const duplicateLinks = repositoryBindings ? repositoryDuplicateLink(cleanBindings, repositoryIdentities) : false;
   const bindingsValid = !repositoryBindings || validRepositoryDraft(cleanBindings, repositoryIdentities);
+
+  useEffect(() => () => releaseAttachments(keptAttachments.current), []);
+  useEffect(() => {
+    if (!open) return;
+    operationId.current = uuid();
+    operationKey.current = "";
+    setFailure("");
+    releaseAttachments(keptAttachments.current);
+    keptAttachments.current = [];
+    setAttachments([]);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -2935,6 +3113,55 @@ function NewTodoDialog({
       }
     }
   }, [open, slot]);
+
+  const discardImages = () => {
+    releaseAttachments(keptAttachments.current);
+    keptAttachments.current = [];
+    setAttachments([]);
+  };
+  const cancel = () => {
+    if (creating.current) return;
+    discardImages();
+    onClose();
+  };
+  const addImages = (files: FileList | File[]) => {
+    if (creating.current) return;
+    const picked: LocalAttachment[] = [];
+    let problem = "";
+    for (const file of Array.from(files)) {
+      if (keptAttachments.current.length + picked.length >= TODO_IMAGE_LIMIT) {
+        problem = t("todos.images_limit", { max: TODO_IMAGE_LIMIT });
+        break;
+      }
+      if (file.type !== "image/png" && file.type !== "image/jpeg") {
+        problem = t("todos.image_type", { name: file.name });
+        continue;
+      }
+      if (file.size > TODO_IMAGE_MAX_BYTES) {
+        problem = t("todos.image_too_big", { name: file.name });
+        continue;
+      }
+      try {
+        picked.push(pickAttachment(file));
+      } catch (error) {
+        problem = errorText(error);
+      }
+    }
+    if (picked.length) {
+      const next = [...keptAttachments.current, ...picked];
+      keptAttachments.current = next;
+      setAttachments(next);
+    }
+    setFailure(problem);
+  };
+  const removeImage = (id: string) => {
+    if (creating.current) return;
+    releaseAttachments(keptAttachments.current.filter((image) => image.id === id));
+    const next = keptAttachments.current.filter((image) => image.id !== id);
+    keptAttachments.current = next;
+    setAttachments(next);
+    setFailure("");
+  };
 
   /** What the slot's row now says: due on the day, or at the day's time. */
   const due = (): { due_at?: string; due_date?: string } | undefined => {
@@ -2949,22 +3176,48 @@ function NewTodoDialog({
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!title.trim() || creating.current || !bindingsValid || !repositoryContext.isCurrent()) return;
+    if (keptAttachments.current.length > 0 && !imagesSupported) {
+      setFailure(t("lib-todos.images_unsupported"));
+      return;
+    }
+    const nextOperationKey = JSON.stringify({
+      title: title.trim(), notes: notes.trim(), due: due(), repositoryBindings,
+      images: keptAttachments.current.map((image) => image.id),
+    });
+    if (nextOperationKey !== operationKey.current) {
+      operationKey.current = nextOperationKey;
+      operationId.current = uuid();
+    }
     creating.current = true;
     setBusy(true);
+    setFailure("");
     try {
+      const creation = keptAttachments.current.length ? {
+        operationId: operationId.current,
+        images: await Promise.all(keptAttachments.current.map(async (image) => ({
+          id: image.id,
+          name: image.name,
+          ...await imagePayload(image.file),
+        }))),
+      } : undefined;
       const todo = repositoryBindings
-        ? await createTodoWithRepositories(repositoryContext, title, notes, due(), repositoryBindings, repositoryIdentities)
-        : await createTodo(title, notes, due());
+        ? await createTodoWithRepositories(repositoryContext, title, notes, due(), repositoryBindings, repositoryIdentities, creation)
+        : await createTodo(title, notes, due(), creation);
       if (!repositoryContext.isCurrent()) return;
       await refreshTodos();
       await refresh();
       toast(t("todos.created"), "ok");
+      discardImages();
       onClose();
       if (slot) return; // the calendar stays, the new one on it
       onCreated(todo.id);
       navigate(`/todos?id=${encodeURIComponent(todo.id)}`);
     } catch (err) {
-      if (repositoryContext.isCurrent()) toast(t("todos.create_failed", { error: errorText(err) }), "error");
+      if (repositoryContext.isCurrent()) {
+        const message = t("todos.create_failed", { error: errorText(err) });
+        setFailure(message);
+        toast(message, "error");
+      }
     } finally {
       creating.current = false;
       setBusy(false);
@@ -2972,7 +3225,7 @@ function NewTodoDialog({
   };
 
   return (
-    <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={t("todos.new_todo")}>
+    <Dialog open={open} onClose={cancel} title={t("todos.new_todo")}>
       <form onSubmit={submit} onKeyDown={submitOnModEnter} className="flex flex-col gap-3.5">
         <div>
           <label className="mb-1 block text-[12px] font-medium text-ink-2">{t("todos.title_label")}</label>
@@ -3026,15 +3279,43 @@ function NewTodoDialog({
           />
         </div>
 
+        {imagesSupported && (
+        <div>
+          <input
+            ref={imageInput}
+            type="file"
+            accept="image/jpeg,image/png"
+            multiple
+            hidden
+            disabled={busy}
+            aria-label={t("todos.add_images")}
+            onChange={(e) => {
+              if (e.currentTarget.files) addImages(e.currentTarget.files);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Button tone="quiet" icon="plus" className="touch-hit whitespace-nowrap" disabled={busy || attachments.length >= TODO_IMAGE_LIMIT} onClick={() => imageInput.current?.click()}>
+            {t("todos.add_images")}
+          </Button>
+          <p className="mt-1 text-submeta text-ink-3">{t("todos.images_hint", { max: TODO_IMAGE_LIMIT })}</p>
+          {attachments.length > 0 && (
+            <div className="mt-2">
+              <AttachmentTray attachments={attachments} onRemove={busy ? undefined : removeImage} />
+            </div>
+          )}
+        </div>
+        )}
+
         <NewTodoRepositoryBindings context={repositoryContext} value={repositoryBindings} onChange={setRepositoryBindings} pending={busy} onCatalog={setRepositoryCatalog} />
         {!bindingsValid && <p role="alert" className="text-submeta text-red">{t(duplicateLinks ? "task-repositories.duplicate_link" : "task-repositories.draft_invalid")}</p>}
+        {failure && <p role="alert" className="text-meta text-red">{failure}</p>}
 
         <div className="mt-2 flex justify-end gap-2">
-          <Button tone="secondary" disabled={busy} onClick={onClose}>
+          <Button tone="secondary" disabled={busy} onClick={cancel}>
             {t("common.cancel")}
           </Button>
           <Button tone="accent" type="submit" disabled={!title.trim() || busy || !bindingsValid} busy={busy}>
-            {t("todos.create")}
+            {busy && attachments.length > 0 ? t("todos.images_uploading") : t("todos.create")}
           </Button>
         </div>
       </form>

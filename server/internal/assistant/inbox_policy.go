@@ -49,6 +49,41 @@ func (s *Service) isInboxModelCall(ctx context.Context, machine, session, origin
 	return o != nil && o.Origin == OriginInbox && (o.MachineID == "" || s.sameMachine(machine, o.MachineID))
 }
 
+// managerOriginDecision returns the only origin attestation a node may trust. A new conversation carries the manager's
+// own start origin; an existing one requires a successful origin-book read. A store error is unknown, never ordinary.
+func (s *Service) managerOriginDecision(ctx context.Context, machine, session, startOrigin string, newConversation bool) (string, bool) {
+	if newConversation {
+		return startOrigin, true
+	}
+	b := &s.origins
+	b.mu.Lock()
+	if !s.originsLocked(ctx) {
+		b.mu.Unlock()
+		return "", false
+	}
+	o := b.m[session]
+	if o == nil {
+		b.mu.Unlock()
+		// Backfill is asynchronous. A missing record is not positive evidence of an ordinary conversation: a legacy
+		// Inbox handling chat can reach this path before its first backfill completes. A current guest registration is
+		// separate manager-owned evidence; guests never share the assistant's origin book.
+		_, guest, err := s.guestOf(ctx, machine, session)
+		if err != nil {
+			return "", false
+		}
+		return "", guest
+	}
+	origin, originMachine := o.Origin, o.MachineID
+	b.mu.Unlock()
+	if origin == OriginInbox {
+		if originMachine == "" || s.sameMachine(machine, originMachine) {
+			return OriginInbox, true
+		}
+		return "", false
+	}
+	return "", true
+}
+
 // inboxModelRefusal applies only to model/node tool entry points, never runTool. Owner-confirmed reply, Agent and to-do
 // execution deliberately takes the latter path as the owner's action.
 func (s *Service) inboxModelRefusal(ctx context.Context, machine, session, originHint, name string) (proto.ToolResult, bool) {

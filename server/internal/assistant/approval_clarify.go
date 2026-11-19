@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	approvalops "github.com/nwverse/persona/server/internal/approval"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -34,12 +35,13 @@ type preparedApproval struct {
 	terminal   bool
 	deliveries map[string]clarifyDelivery
 
-	decisionTimer *time.Timer
-	pauseTimer    *time.Timer
-	remaining     time.Duration
-	paused        bool
-	pauseStarted  time.Time
-	pausedTotal   time.Duration
+	decisionTimer    *time.Timer
+	pauseTimer       *time.Timer
+	decisionDeadline time.Time // current effective decision deadline while not paused
+	remaining        time.Duration
+	paused           bool
+	pauseStarted     time.Time
+	pausedTotal      time.Duration
 
 	// A turn covers only questions accepted before it starts. A question
 	// accepted during that turn waits for the next one, as the node queues it.
@@ -87,10 +89,32 @@ var (
 // caller returns either its final tool result or, on the first accepted
 // question, a non-final Clarifying outcome while the card stays pending.
 func (s *Service) waitPreparedCard(ctx context.Context, ix proto.Interaction, op approvalops.Operation) (approvalops.Outcome, error) {
-	if reservedCard(ix) || ix.MachineID == "" || ix.SessionID == "" || ix.Kind != proto.IxPermission || op.Apply == nil {
+	if reservedCard(ix) || ix.Kind != proto.IxPermission || op.Apply == nil {
 		return approvalops.Outcome{}, errClarifyUnavailable
 	}
-	state := &preparedApproval{op: op, caller: ctx, release: make(chan struct{}), deliveries: map[string]clarifyDelivery{}}
+	live := ix.MachineID != "" && ix.SessionID != ""
+	if live {
+		// Clarification needs an exact live conversation for the owner's question
+		// and its answer. Unavailable origins retain the older one-shot card instead.
+		// A deleted or unreadable origin stays prepared so clarify returns that exact
+		// error rather than disguising it as a different fallback.
+		if err := s.conversationAvailable(ctx, ix.MachineID, ix.SessionID); err == nil {
+			// The latest complete session list already answers the common case;
+			// ask the node only when that list does not contain the conversation.
+			s.fleet.mu.Lock()
+			_, listed := s.fleet.prev[ix.MachineID][ix.SessionID]
+			s.fleet.mu.Unlock()
+			if !listed {
+				if _, ok := s.session(ctx, ix.MachineID, ix.SessionID); !ok {
+					live = false
+				}
+			}
+		}
+	}
+	if !live {
+		return s.waitOneShotPreparedCard(ctx, ix, op)
+	}
+	state := &preparedApproval{op: op, caller: ctx, release: make(chan struct{}), deliveries: map[string]clarifyDelivery{}, decisionDeadline: ix.ExpiresAt}
 	ix.CanClarify = true
 	_, err := s.waitInteractionPrepared(ctx, s.ownCard(ctx, ix), state)
 	if errors.Is(err, errApprovalClarifying) {
@@ -213,6 +237,7 @@ func (s *Service) keepWaiting(p *pending) bool {
 		}
 		a.clarified, a.waiting = true, true
 		p.ix.ExpiresAt = time.Now().Add(approvalWaitingWindow).UTC()
+		a.decisionDeadline = p.ix.ExpiresAt
 		ix = p.ix
 		if a.decisionTimer != nil {
 			a.decisionTimer.Stop()
@@ -226,9 +251,9 @@ func (s *Service) keepWaiting(p *pending) bool {
 }
 
 // approvalNudgeDeadline returns the live effective deadline for a card the Lark
-// sweep is about to nudge. A question pauses that deadline; completed pauses move
-// it by their cumulative duration. Reading the prepared interaction here also
-// follows an implementation that extends its window without changing this sweep.
+// sweep is about to nudge. A question pauses that deadline; completed pauses have
+// already moved the published deadline by their cumulative duration. Reading the
+// prepared interaction here also follows an implementation that extends its window.
 func (s *Service) approvalNudgeDeadline(ix proto.Interaction) (time.Time, bool) {
 	s.fleet.mu.Lock()
 	defer s.fleet.mu.Unlock()
@@ -248,23 +273,26 @@ func (s *Service) approvalNudgeDeadline(ix proto.Interaction) (time.Time, bool) 
 	if a.terminal || a.paused {
 		return time.Time{}, false
 	}
-	return p.ix.ExpiresAt.Add(a.pausedTotal), true
+	return p.ix.ExpiresAt, true
 }
 
-// pausePreparedLocked preserves the remaining decision time and starts the one
-// cumulative pause budget. Repeated questions while paused change neither.
-func (s *Service) pausePreparedLocked(p *pending) {
+// pausePreparedLocked preserves the remaining decision time and publishes the
+// actual cumulative-pause deadline. Repeated questions while paused change neither.
+func (s *Service) pausePreparedLocked(p *pending) bool {
 	a := p.prepared
 	if a.paused || a.terminal {
-		return
+		return false
 	}
-	a.remaining = max(0, time.Until(p.ix.ExpiresAt.Add(a.pausedTotal)))
+	now := time.Now()
+	a.remaining = max(0, a.decisionDeadline.Sub(now))
 	if a.decisionTimer != nil {
 		a.decisionTimer.Stop()
 	}
 	a.paused = true
-	a.pauseStarted = time.Now()
+	a.pauseStarted = now
+	p.ix.ExpiresAt = now.Add(clarificationPauseBudget - a.pausedTotal).UTC()
 	s.armPauseBudgetLocked(p)
+	return true
 }
 
 func (s *Service) armPauseBudgetLocked(p *pending) {
@@ -285,19 +313,24 @@ func (s *Service) armPauseBudgetLocked(p *pending) {
 
 // resumePreparedLocked is called when the turn covering every accepted
 // question has committed its answer (and every required channel run has
-// finished). A stale timer callback cannot resume a new pause.
-func (s *Service) resumePreparedLocked(p *pending) {
+// finished). A stale timer callback cannot resume a new pause. The returned card
+// tells clients the resumed decision deadline without another arrival or push.
+func (s *Service) resumePreparedLocked(p *pending) (proto.Interaction, bool) {
 	a := p.prepared
 	if !a.paused || a.terminal || a.attempt != nil || a.questionSeq != a.acceptedSeq || a.acceptedSeq != a.answeredSeq || len(a.channelRuns) != 0 {
-		return
+		return proto.Interaction{}, false
 	}
-	a.pausedTotal += time.Since(a.pauseStarted)
+	now := time.Now()
+	a.pausedTotal += now.Sub(a.pauseStarted)
 	a.paused = false
 	if a.pauseTimer != nil {
 		a.pauseTimer.Stop()
 		a.pauseTimer = nil
 	}
+	a.decisionDeadline = now.Add(a.remaining).UTC()
+	p.ix.ExpiresAt = a.decisionDeadline
 	a.decisionTimer = time.AfterFunc(a.remaining, func() { s.expirePrepared(p) })
+	return p.ix, true
 }
 
 // clarificationTurnStarted associates the new turn with questions accepted
@@ -317,7 +350,7 @@ func (s *Service) clarificationTurnStarted(machine, session string) {
 
 func (s *Service) clarificationTurnEnded(machine, session string) {
 	s.fleet.mu.Lock()
-	defer s.fleet.mu.Unlock()
+	var tells []proto.Interaction
 	for _, p := range s.fleet.interactions {
 		a := p.prepared
 		if a == nil || !a.clarified || a.terminal || p.ix.MachineID != machine || p.ix.SessionID != session || !a.turnActive {
@@ -325,7 +358,13 @@ func (s *Service) clarificationTurnEnded(machine, session string) {
 		}
 		a.turnActive = false
 		a.answeredSeq = max(a.answeredSeq, a.turnSeq)
-		s.resumePreparedLocked(p)
+		if ix, ok := s.resumePreparedLocked(p); ok {
+			tells = append(tells, ix)
+		}
+	}
+	s.fleet.mu.Unlock()
+	for _, ix := range tells {
+		s.show(ix)
 	}
 }
 
@@ -404,8 +443,12 @@ func (s *Service) clarify(ctx context.Context, id, text, clientMsgID string, ori
 
 	// Validate the exact destination before changing expiry or releasing the
 	// tool. SendParams rejects a missing/ended conversation; no main-chat fallback.
-	params, err := s.SendParams(ctx, SendParams{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID,
-		Params: map[string]any{"session_id": p.ix.SessionID, "text": text, "client_msg_id": clientMsgID}})
+	questionParams := map[string]any{"session_id": p.ix.SessionID, "text": text, "client_msg_id": clientMsgID}
+	if token := assistantwire.ClarificationProofOf(ctx); token != "" {
+		questionParams[assistantwire.ClarificationProofParam] = token
+		questionParams[assistantwire.ClarificationInteractionParam] = id
+	}
+	params, err := s.SendParams(ctx, SendParams{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID, Params: questionParams, VerbatimText: true})
 	if err != nil {
 		s.finishClarifyAttempt(p, attempt, nil, err)
 		return err
@@ -447,6 +490,8 @@ func (s *Service) finishClarifyAttempt(p *pending, attempt *clarifyAttempt, run 
 	a := p.prepared
 	attempt.err = err
 	release := false
+	var tell proto.Interaction
+	tellDeadline := false
 	if err == nil && !a.terminal && !p.claimed && s.fleet.interactions[p.ix.ID] == p {
 		release = attempt.first && !a.clarified
 		a.clarified = true
@@ -459,18 +504,24 @@ func (s *Service) finishClarifyAttempt(p *pending, attempt *clarifyAttempt, run 
 			}
 			a.channelRuns[run.ID] = true
 		}
-		s.pausePreparedLocked(p)
+		tellDeadline = s.pausePreparedLocked(p)
+		tell = p.ix
 	} else if err == nil {
 		err = errClarifyUnavailable
 		attempt.err = err
 	}
 	a.attempt = nil
 	if !a.terminal {
-		s.resumePreparedLocked(p)
+		if ix, ok := s.resumePreparedLocked(p); ok {
+			tell, tellDeadline = ix, true
+		}
 	}
 	close(attempt.done)
 	s.fleet.mu.Unlock()
 
+	if tellDeadline {
+		s.show(tell)
+	}
 	if err != nil && attempt.first {
 		s.approvalJournalAborted(context.Background(), p.ix.ID)
 	}
@@ -487,13 +538,17 @@ func (s *Service) finishClarifyAttempt(p *pending, attempt *clarifyAttempt, run 
 // keep their own entries and continue to hold the pause.
 func (s *Service) clarificationChannelEnded(id, runID string) {
 	s.fleet.mu.Lock()
-	defer s.fleet.mu.Unlock()
 	p := s.fleet.interactions[id]
 	if p == nil || p.prepared == nil {
+		s.fleet.mu.Unlock()
 		return
 	}
 	delete(p.prepared.channelRuns, runID)
-	s.resumePreparedLocked(p)
+	ix, tell := s.resumePreparedLocked(p)
+	s.fleet.mu.Unlock()
+	if tell {
+		s.show(ix)
+	}
 }
 
 // approvalAnswerTurnStarted/Ended are small indirections used by Service's turn

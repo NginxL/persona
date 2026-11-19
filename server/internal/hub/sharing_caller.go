@@ -11,6 +11,23 @@ import (
 )
 
 type trustedSubmissionKey struct{}
+type clarificationRequestProofKey struct{}
+type verifiedClarificationKey struct{}
+
+func withClarificationRequestProof(r *http.Request, token string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), clarificationRequestProofKey{}, token))
+}
+
+func clarificationRequestProof(ctx context.Context) string {
+	token, _ := ctx.Value(clarificationRequestProofKey{}).(string)
+	return token
+}
+
+func withVerifiedClarification(ctx context.Context, text string) context.Context {
+	return context.WithValue(ctx, verifiedClarificationKey{}, devicewire.Submission{
+		ID: rand.Text(), Kind: devicewire.SubmissionApprovalClarification, OriginalText: text,
+	})
+}
 
 // captureHumanSubmission runs before to-do, project or model-context augmentation.
 // A cached principal or a caller-supplied provenance descriptor is not evidence.
@@ -67,5 +84,10 @@ func attachNodeCaller(ctx context.Context, p *devicewire.NodeCall) {
 		if submission, ok := ctx.Value(trustedSubmissionKey{}).(devicewire.Submission); ok {
 			p.Submission = &submission
 		}
+	}
+	if submission, ok := ctx.Value(verifiedClarificationKey{}).(devicewire.Submission); ok {
+		// A manager's call reaches here only after the hub consumed the exact
+		// one-time proof. The manager itself can never attach this Submission.
+		p.Submission = &submission
 	}
 }

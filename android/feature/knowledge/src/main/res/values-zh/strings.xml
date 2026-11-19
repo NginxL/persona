@@ -104,6 +104,8 @@
     <string name="knowledge_linked_recordings">关联的录音</string>
     <string name="knowledge_recorded">录于 %1$s</string>
     <string name="knowledge_recording_info">录音信息</string>
+    <string name="knowledge_imported_lark">飞书会议纪要</string>
+    <string name="knowledge_imported_original">原会议纪要</string>
     <string name="knowledge_recording_started">开始</string>
     <string name="knowledge_recording_duration">时长</string>
     <string name="knowledge_recording_device">设备</string>

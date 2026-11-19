@@ -18,6 +18,22 @@ const tool = (name: string, spawning?: boolean): RunStep => ({ kind: "tool", too
 const agent = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step).text;
 const plain = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step, true).text;
 
+it("keeps the status content mounted across breath cycles and a real completion", () => {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const draw = (tokens: number, working = true) => act(() => root.render(<RunningStatusView live={{ tokens_down: tokens }} working={working} done={!working} step={tool("Bash")} />));
+  try {
+    draw(1);
+    const content = host.querySelector("[data-running-status]")!.firstElementChild!;
+    draw(2);
+    draw(3);
+    act(() => content.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(host.querySelector("[data-running-status]")?.firstElementChild).toBe(content);
+    draw(3, false);
+    expect(host.querySelector("[data-running-done]")).toBe(content);
+  } finally { act(() => root.unmount()); }
+});
+
 describe("the Agent session's state words (cindy's, #5312)", () => {
   it("says what the turn does: thinking, writing, editing, searching, a subagent, a tool", () => {
     expect(agent()).toBe("正在思考…");

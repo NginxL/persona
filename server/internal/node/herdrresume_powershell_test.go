@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // withWindowsRestore makes the test node resolve herdr's restore as classic herdr on Windows does, with
@@ -181,23 +182,27 @@ func TestHerdrRestoreOutsideWindowsIgnoresDefaultShell(t *testing.T) {
 	}
 }
 
-// Codex, a compatible CLI and the work agents get the same handoff, with their own commands.
+// Codex, a compatible CLI and the work agents get the same handoff, with their own commands: agy keeps its model, its
+// effort and its verified conversation, and a managed agy's personad path is quoted for Git Bash, not for eval.
 func TestWindowsHerdrRestorePowerShellOtherAgents(t *testing.T) {
 	withWindowsRestore(t, "pwsh.exe")
-	n := &Node{dir: `C:\node dir`, home: t.TempDir()}
+	n := &Node{dir: `C:\node dir`, home: t.TempDir(), bin: `C:\Program Files\Persona\personad.exe`}
+	n.managed.byID = map[string]proto.ManagedLauncher{"work-agy": {Name: "work-agy"}}
 	prefix := "unset " + strings.Join(agentUnsetNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' ` + agentMarkEnv + " "
-	for _, tc := range []struct{ kind, launcher, model, want string }{
-		{"codex", "cx", "", "cx resume " + startID},
-		{traexAgent, "tx", "", "tx resume " + startID},
-		{piAgent, "pi", "", "pi --approve --session " + startID},
-		{cursorAgent, "", "gpt 5", "cursor-agent --model 'gpt 5'"},
+	for _, tc := range []struct{ kind, launcher, model, effort, conv, want string }{
+		{"codex", "cx", "", "", "", "cx resume " + startID},
+		{traexAgent, "tx", "", "", "", "tx resume " + startID},
+		{piAgent, "pi", "", "", "", "pi --approve --session " + startID},
+		{cursorAgent, "", "gpt 5", "", "", "cursor-agent --model 'gpt 5'"},
+		{agyAgent, agyAgent, "test model", "high", agyTestID, "agy --model 'test model' --effort high --conversation " + agyTestID},
+		{agyAgent, "work-agy", "m", "xhigh", "", `'C:'\\'Program Files'\\'Persona'\\'personad.exe' launch work-agy --model m --effort xhigh`},
 	} {
-		argv, ok := n.agentResumeArgv(agentLaunch{Agent: tc.kind, Launcher: tc.launcher, Model: tc.model}, startID)
+		argv, ok := n.agentResumeArgv(agentLaunch{Agent: tc.kind, Launcher: tc.launcher, Model: tc.model, Effort: tc.effort, AgyConversation: tc.conv}, startID)
 		if !ok || !herdrTakes(argv) {
-			t.Fatalf("%s: resume_argv = %q, %v", tc.kind, argv, ok)
+			t.Fatalf("%s (%s): resume_argv = %q, %v", tc.kind, tc.launcher, argv, ok)
 		}
 		if got := decodedResume(t, argv); got != prefix+tc.want {
-			t.Errorf("%s: Git Bash gets %q, want %q", tc.kind, got, prefix+tc.want)
+			t.Errorf("%s (%s): Git Bash gets %q, want %q", tc.kind, tc.launcher, got, prefix+tc.want)
 		}
 	}
 }

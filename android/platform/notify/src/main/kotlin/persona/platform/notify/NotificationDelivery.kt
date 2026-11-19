@@ -2,6 +2,7 @@ package persona.platform.notify
 
 import persona.core.contracts.GroupKeys
 import persona.core.contracts.Interaction
+import persona.core.contracts.InteractionEvent
 import persona.core.contracts.InteractionResolvedEvent
 import persona.core.contracts.NotifyEvent
 import persona.core.contracts.ServerEvent
@@ -23,7 +24,7 @@ import java.time.Instant
  * streaming included, until it was done.
  */
 internal fun Flow<ServerEvent>.notificationEvents(): Flow<ServerEvent> =
-    filter { it is NotifyEvent || it is InteractionResolvedEvent }.buffer(Channel.UNLIMITED)
+    filter { it is NotifyEvent || it is InteractionEvent || it is InteractionResolvedEvent }.buffer(Channel.UNLIMITED)
 
 /** Live alerts require hub-approved notify events; [catchUp] is the bounded fallback when no live service can run. */
 internal class NotificationDelivery(
@@ -41,10 +42,22 @@ internal class NotificationDelivery(
     private val catchUpPreferences: suspend () -> Map<String?, DeviceNotificationPreferences> = {
         preferences()?.let { mapOf<String?, DeviceNotificationPreferences>(null to it) }.orEmpty()
     },
+    /** Only notifications showing now, not the delivered/dismissed history used to suppress a second arrival. */
+    private val showing: () -> Set<String> = notified,
 ) {
     suspend fun accept(event: ServerEvent) {
         when (event) {
             is InteractionResolvedEvent -> retract(event.id)
+            is InteractionEvent -> {
+                // A current snapshot is not a new arrival. Only redraw a notification this device already delivered,
+                // with the server's latest deadline and without notifying again for an unseen card.
+                if (!event.interaction.canClarify || event.interaction.id !in showing()) return
+                interactions.refresh()
+                val current = interactions.pending.value.firstOrNull { it.id == event.interaction.id } ?: return
+                if (NotificationPolicy.expired(current)) { retract(current.id); return }
+                val session = current.sessionKey.takeIf { it.machineId.isNotBlank() && it.sessionId.isNotBlank() }
+                if (session == null || !suppressed(session)) postInteraction(current, false, null)
+            }
             is NotifyEvent -> {
                 val session = NotificationPolicy.session(event)
                 if (session != null && (suppressed(session) || quiet(session))) return

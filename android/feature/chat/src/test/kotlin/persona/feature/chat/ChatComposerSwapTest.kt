@@ -1,5 +1,10 @@
 package persona.feature.chat
 
+import android.Manifest
+import android.app.Application
+import android.os.Bundle
+import android.speech.SpeechRecognizer
+import org.robolectric.shadows.ShadowSpeechRecognizer
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -14,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -25,6 +31,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -80,6 +87,7 @@ class ChatComposerSwapTest {
 
     /** The phone has a voice input screen, so the composer offers its mic (Dictation.kt asks the package manager). */
     private fun withMic() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(false)
         val info = ResolveInfo().apply { activityInfo = ActivityInfo().apply { packageName = "com.example.voice"; name = "Voice" } }
         shadowOf(ApplicationProvider.getApplicationContext<Context>().packageManager)
             .addResolveInfoForIntent(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), info)
@@ -107,6 +115,61 @@ class ChatComposerSwapTest {
     private fun frames(ms: Long) = rule.mainClock.advanceTimeBy(ms)
 
     // --- Which button shows -----------------------------------------------------------------------------------------------
+
+    @Test fun aTalkBackTapCanStopDictationInTheComposerAndKeepItsWords() {
+        withMic()
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        mount()
+        typed("Review")
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        rule.onNodeWithContentDescription("Stop dictation").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Listening…"))
+        val speech = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        val phrase = Bundle().apply { putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf("these notes")) }
+        rule.runOnIdle { speech.triggerOnPartialResults(phrase) }
+        rule.onNodeWithContentDescription("Stop dictation").performClick()
+        rule.runOnIdle { speech.triggerOnResults(phrase) }
+        rule.waitForIdle()
+        assertEquals("Review these notes", state.value.text)
+        assertEquals(0, sends)
+    }
+
+    @Test fun aFingerReleasedBeforeTheHoldDelayStartsOnlyTheHandsFreeTap() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        mount()
+        val mic = rule.onNodeWithContentDescription("Dictate")
+        mic.performTouchInput { down(center) }
+        rule.mainClock.advanceTimeBy(200)
+        assertFalse(shown("Stop dictation"))
+        mic.performTouchInput { up() }
+        rule.onNodeWithContentDescription("Stop dictation").assertExists()
+        assertEquals(0, sends)
+    }
+
+    @Test fun slidingAnActiveHoldDropsWordsAndLiftingDoesNotStartAnotherTap() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        mount(); typed("Original")
+        rule.onNodeWithContentDescription("Dictate").performTouchInput { down(center) }
+        rule.mainClock.advanceTimeBy(320)
+        rule.onNodeWithText("Slide left to cancel").assertExists()
+        val speech = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        val words = Bundle().apply { putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf("discard")) }
+        rule.runOnIdle { speech.triggerOnPartialResults(words) }
+        rule.onRoot().performTouchInput { moveBy(Offset(-160 * density, 0f)); up() }
+        rule.waitForIdle()
+        assertTrue(speech.isDestroyed); assertFalse(shown("Stop dictation"))
+        assertEquals("Original", state.value.text); assertEquals(0, sends)
+    }
+
+    @Test fun aPhoneWithOnlyAVoiceInputActivityOpensItsOwnScreen() {
+        withMic(); mount()
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        val launched = shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedActivity
+        assertEquals(RecognizerIntent.ACTION_RECOGNIZE_SPEECH, launched.action)
+        assertFalse(shown("Stop dictation")); assertEquals(0, sends)
+    }
 
     @Test fun anEmptyBoxShowsTheMicAndNeitherSendNorStop() {
         withMic(); mount()
@@ -143,6 +206,7 @@ class ChatComposerSwapTest {
     }
 
     @Test fun withoutAMicTheEmptyBoxKeepsASendThatCannotBePressed() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(false)
         mount()
         rule.waitForIdle()
         assertFalse(shown("Dictate"))

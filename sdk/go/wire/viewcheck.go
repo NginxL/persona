@@ -163,9 +163,7 @@ func checkViewSemantics(v *View, hubNames bool) error {
 			}
 			switch e.Type {
 			case "link":
-				if u, perr := url.Parse(e.URL); perr != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
-					err = errors.New("link needs an https url")
-				}
+				err = CheckHTTPS(e.URL, "link")
 			case "field":
 				switch {
 				case e.Kind == "choice" && len(e.Choices) == 0:

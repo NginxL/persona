@@ -59,6 +59,23 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := checkModelID(p.Tasks[i].Model); err != nil { // typed on the card (#1644): refused before anything starts
 			return nil, planInvalid{err}
 		}
+		params := map[string]any{"speed": p.Tasks[i].Speed}
+		if _, err := validateStartSpeed(params); err != nil {
+			return nil, planInvalid{err}
+		}
+		preview := p.Tasks[i]
+		checkSpeed := false
+		if err := s.applyTaskTier(ctx, &preview); err == nil {
+			checkSpeed = proto.FasterSpeed(preview.Speed)
+		} else {
+			// An unknown tier has always been recorded as the task's start failure below, not an HTTP refusal here.
+			checkSpeed = false
+		}
+		if checkSpeed {
+			if _, err := s.fitPlanTaskSpeed(ctx, &p.Tasks[i]); err != nil {
+				return nil, planInvalid{err}
+			}
+		}
 		p.Tasks[i].Permission = strings.TrimSpace(p.Tasks[i].Permission)
 		if m, ok := s.machineByName(ctx, p.Tasks[i].Machine); ok && p.Tasks[i].Role == roleLeader && s.isWorkMachine(m.ID) {
 			return nil, planInvalid{fmt.Errorf("task %d: role \"leader\" cannot run on %s: a work-trust computer gives its agents only "+
@@ -1074,6 +1091,9 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 	if cut.SessionID == "" {
 		return s.todoView(ctx, cur.ID)
 	}
+	if proto.UnrecoverableTurnErrorCode(cut.TurnError) != "" || cut.TurnErrorKind == proto.TurnErrorUnrecoverable {
+		return nil, i18n.Err("assistant-agents_work.conversation_invalid")
+	}
 	at := s.cutRow(cut) // the turn picked, by the identity it shows by: every check below goes by it
 	m, ok := s.device(ctx, cut.MachineID)
 	if !ok || !m.Reachable {
@@ -1102,6 +1122,7 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		}
 		var err error
 		if started, err = s.startTaskSuccessor(ctx, cur, cut, continueText); err != nil {
+			_, st.uncertain = errors.AsType[*uncertainTaskStart](err)
 			return nil, err
 		}
 		return s.todoView(ctx, cur.ID)

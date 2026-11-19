@@ -92,9 +92,8 @@ func (e notWrittenError) Error() string        { return e.err.Error() }
 func (e notWrittenError) Unwrap() error        { return e.err }
 func (e notWrittenError) Is(target error) bool { return target == ErrNotWritten }
 
-// ErrWriteDelayed is matched (errors.Is) by what Call answers when its request reached the wire only after waiting
-// behind another write, then its reply wait ended. The error is still the ctx's error. A ping delayed this way says
-// the write channel was busy; it is not the same as an uninterrupted ping that nobody answered.
+// ErrWriteDelayed matches a timed-out call that waited behind another write. For a framed ping it also covers
+// observed acknowledgements draining earlier events or answers during that ping's response budget.
 var ErrWriteDelayed = errors.New("rpc: request written after waiting for the writer")
 
 type writeDelayedError struct {
@@ -106,8 +105,8 @@ func (e writeDelayedError) Error() string        { return e.err.Error() }
 func (e writeDelayedError) Unwrap() error        { return e.err }
 func (e writeDelayedError) Is(target error) bool { return target == ErrWriteDelayed }
 
-// WriteDelayRemaining reports how much of the caller's deadline budget remained when its delayed request finished
-// writing. Negative means the write finished after the deadline. The boolean is false for other errors.
+// WriteDelayRemaining reports the budget left after a delayed write, including observed transport backlog ahead
+// of a framed ping. A negative value means the write finished after its deadline.
 func WriteDelayRemaining(err error) (time.Duration, bool) {
 	var e writeDelayedError
 	if errors.As(err, &e) {
@@ -514,8 +513,25 @@ func (p *Peer) writeContext(ctx context.Context, m message, r route) error {
 }
 
 type writeObservation struct {
-	delayed   bool
-	remaining time.Duration
+	delayed      bool
+	remaining    time.Duration
+	writer       *laneWriter // a control frame queued behind previously written, unacknowledged events or answers
+	acked, ahead uint64      // acknowledged at enqueue, and the last uncredited frame before this control frame
+}
+
+// A later cumulative acknowledgement through the traffic ahead of this ping proves the peer was draining its path.
+// A silent peer, a duplicate acknowledgement or one covering the ping itself cannot extend its response budget.
+func (o *writeObservation) observePingDrain(deadline time.Time) {
+	if o.writer == nil {
+		return
+	}
+	o.writer.mu.Lock()
+	through, at := o.writer.ackedThrough, o.writer.ackAdvanced
+	o.writer.mu.Unlock()
+	if through > o.acked && through <= o.ahead && !at.After(deadline) {
+		o.delayed = true
+		o.remaining = min(o.remaining, max(deadline.Sub(at), 0))
+	}
 }
 
 // writeContextObserved also reports whether this message had to wait behind another writer before reaching the wire,
@@ -655,6 +671,9 @@ func (p *Peer) Call(ctx context.Context, method string, params any, out any) err
 		if p.Cancels[method] {
 			params, _ := json.Marshal(map[string]string{"id": id})
 			_ = p.write(message{Event: cancelEvent, Params: params}, controlRoute)
+		}
+		if deadline, ok := ctx.Deadline(); ok && method == "ping" && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			writeObservation.observePingDrain(deadline)
 		}
 		if writeObservation.delayed {
 			return writeDelayedError{err: ctx.Err(), remaining: writeObservation.remaining}

@@ -40,22 +40,27 @@ class AgentsListTest {
         assertNotEquals(agentRangeKey("first/pairing"), agentRangeKey("second/pairing"))
     }
 
-    @Test fun botmuxCountMatchesTheListsOwnFeishuCountInEveryRange() {
-        val live = Session(machineId = "machine", sessionId = "live", status = "working", cwd = "/code/a", paneId = "botmux:1", title = "group a")
-        val old = live.copy(sessionId = "old", status = "offline", paneId = "botmux:2", title = "group b")
-        val elsewhere = live.copy(machineId = "other", sessionId = "elsewhere", paneId = "botmux:3")
+    @Test fun mixedOriginsUseEachHubsSettingForRowsAndCountsAcrossRanges() {
+        val live = Session("machine", "live", state = "working", cwd = "/code/a", paneId = "botmux:1")
+        val old = live.copy(sessionId = "old", status = "offline", state = "offline", paneId = "botmux:2")
+        val other = live.copy(machineId = GroupKeys.machine("machine", "g11111111"), sessionId = "other")
         val pane = live.copy(sessionId = "pane", paneId = "w1:p1")
-        val assistant = live.copy(sessionId = "assistant", assistant = true)
-        val rows = listOf(live, old, elsewhere, pane, assistant).map(::AgentSession)
-        val machines = listOf(Machine("machine"), Machine("other"))
-        for (range in AgentRange.entries) for (settings in listOf(AgentListSettings(), AgentListSettings(machineFilter = "machine"),
-            AgentListSettings(query = "group b"), AgentListSettings(query = "nothing"))) {
-            val prefs = AgentsPreferencesSnapshot(range = range)
-            val expected = scopedAgentList(rows, machines, prefs, settings).counts[AgentQuickFilter.Feishu] ?: 0
-            assertEquals("$range $settings", expected, botmuxCount(rows, prefs, settings.copy(hideBotmux = true)))
+        val history = old.copy(sessionId = "history", paneId = "w1:p2")
+        val sessions = listOf(live, old, other, pane, history)
+        val machines = listOf(Machine(live.machineId), Machine(other.machineId))
+        fun list(range: AgentRange, hidden: Set<String?>, grouping: AgentGrouping = AgentGrouping.Repo): Pair<Set<String>, Int> {
+            val prefs = AgentsPreferencesSnapshot(range = range, hiddenBotmuxHubs = hidden)
+            val result = scopedAgentList(sessions.filterNot(prefs::hides).map(::AgentSession), machines, prefs, AgentListSettings(grouping = grouping))
+            return result.groups.flatMap { it.rows }.map { it.session.sessionId }.toSet() to (result.counts[AgentQuickFilter.Feishu] ?: 0)
         }
-        assertEquals(3, botmuxCount(rows, AgentsPreferencesSnapshot(range = AgentRange.Running), AgentListSettings(hideBotmux = true)))
-        assertEquals(1, botmuxCount(rows, AgentsPreferencesSnapshot(range = AgentRange.History), AgentListSettings(hideBotmux = true)))
+        assertEquals(setOf("other", "pane") to 1, list(AgentRange.Running, setOf(null)))
+        assertEquals(setOf("history") to 0, list(AgentRange.History, setOf(null)))
+        assertEquals(setOf("other", "pane", "history") to 1, list(AgentRange.All, setOf(null)))
+        assertEquals(setOf("live", "other", "pane") to 2, list(AgentRange.Running, emptySet()))
+        assertEquals(setOf("old", "history") to 1, list(AgentRange.History, emptySet()))
+        // Recently Used includes past sessions in its flat timeline. Its origin count follows those rows too.
+        assertEquals(sessions.map { it.sessionId }.toSet() to 3, list(AgentRange.Running, emptySet(), AgentGrouping.Recent))
+        assertFalse(AgentQuickFilter.Feishu in AgentQuickFilter.shown(AgentQuickFilter.Feishu, emptyMap()))
     }
 
     @Test fun missingRequestSourceIsOmittedWhileKnownSourcesRemain() {

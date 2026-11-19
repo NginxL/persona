@@ -6,7 +6,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
-import { LabsSettings } from "./Labs";
+import { allTypes } from "../../lib/configuration/fixtures/shared";
+import type { ConfigurationUpdate } from "../../lib/configuration/contract";
+import { LabsDialog, LabsSettings, type LabsModule } from "./Labs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -127,5 +129,54 @@ describe("Settings › Labs", () => {
     act(() => void window.dispatchEvent(new StorageEvent("storage", { key: KEY })));
     await settle();
     expect(chosen()).toBe(t("settings-labs.terminal_renderer_webgl"));
+  });
+});
+
+describe.each(["settings", "feature dialog"])("experiment guidance from %s", (entry) => {
+  it("shows notes, asks only for the trial and reports its timing after saving", async () => {
+    const update = vi.fn(async (u: ConfigurationUpdate) => ({
+      ...allTypes, revision: "next", values: { ...allTypes.values, ...u.changes },
+    }));
+    const module: LabsModule = {
+      source: { key: "example", read: async () => allTypes, update },
+      guidance: {
+        notes: [{ kind: "info", text: "Try different layouts." }, { kind: "info", text: " " }],
+        fields: { compact: {
+          notes: [{ kind: "warning", text: "Cards show less detail." }],
+          rules: [{
+            when: { action: "change", to: true },
+            confirm: { title: "Use compact cards?", body: "Cards will show a shorter preview.", scope: "This browser", impact: "Shorter previews", activation: "New views", confirmLabel: "Save compact layout" },
+            afterSave: "Saved. New views will use compact cards.",
+          }],
+        } },
+      },
+    };
+    const outerClose = vi.fn();
+    await act(async () => root.render(entry === "settings" ? <LabsSettings modules={[module]} /> : <LabsDialog modules={[module]} open onClose={outerClose} />));
+    const form = document.querySelector<HTMLElement>('[data-configuration="example-preferences"]')!;
+    const row = form.querySelector<HTMLElement>('[data-configuration-field="compact"]')!;
+    expect(form.textContent?.split("Try different layouts.")).toHaveLength(2);
+    expect(row.textContent).toContain("Cards show less detail.");
+    const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    toggle.focus();
+    const dialog = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find(d => d.querySelector("h2")?.textContent === "Use compact cards?")!;
+    await click(toggle);
+    const modal = dialog();
+    expect(document.activeElement).toBe(modal);
+    expect(document.getElementById(modal.getAttribute("aria-describedby")!)?.textContent).toBe("Cards will show a shorter preview.");
+    expect(update).not.toHaveBeenCalled();
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(dialog()).toBeUndefined();
+    expect(document.activeElement).toBe(toggle);
+    expect(outerClose).not.toHaveBeenCalled();
+    await click(toggle);
+    const submit = [...dialog().querySelectorAll("button")].find(b => b.textContent === "Save compact layout")!;
+    await click(submit);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(row.querySelector("[aria-live]")?.textContent).toBe("Saved. New views will use compact cards.");
+    await click(toggle);
+    expect(dialog()).toBeUndefined();
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(row.querySelector("[aria-live]")?.textContent).toBe(t("settings-configuration.saved"));
   });
 });

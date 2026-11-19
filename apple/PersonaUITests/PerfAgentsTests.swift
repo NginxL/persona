@@ -16,19 +16,14 @@ final class PerfAgentsTests: PerfTestCase {
         launch(["-app.tab", "chats", "-tab", "dev", "-dev.openChat", "", "-openAgentsFresh", "YES"] + extra)
     }
 
-    /// `title`: the session's own title, to wait for its header (`chat.title`). Opened before the session list is in, the
-    /// chat can stay a generic page (no tabs, nothing live) that measures about half the hitches of the real one (#8828):
-    /// launched again, up to three times, until the real page is there.
+    /// Wait for the session's own header so the single cold launch measures the populated chat (#9167).
     @MainActor private func openChat(_ key: String, _ extra: [String] = [], title: String? = nil) {
-        for attempt in 1...3 {
-            launch(["-app.tab", "chats", "-tab", "dev", "-dev.openChat", "", "-openSession", key, "-holdChromeOpen", "YES"] + extra)
-            see(chatReady, "the chat \(key)", timeout: 30)
-            guard let title else { break }
+        launch(["-app.tab", "chats", "-tab", "dev", "-dev.openChat", "", "-openSession", key, "-holdChromeOpen", "YES"] + extra)
+        see(chatReady, "the chat \(key)", timeout: 30)
+        if let title {
             let header = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "chat.title", title)).firstMatch
-            if header.waitForExistence(timeout: 20) { break }
-            if attempt == 3 { XCTFail("the header of \(title) not found in three launches"); return }
-            app.terminate()
+            see(header, "the header of \(title)", timeout: 20)
         }
         sleep(2)
     }

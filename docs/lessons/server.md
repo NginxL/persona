@@ -14,6 +14,10 @@ such an interface.
 
 A local context cancellation only starts delivery of `rpc.cancel`; it does not prove the node has processed it. A test that releases a held file write immediately can let the operation finish as `done`, after which polling for `cancelled` times out and the original destination is not restored. Keep the write held until a following `file.operation` request on the same ordered connection has been answered, then release it. Exercise cancellation and normal completion in the same command, and keep the existing deadline, cleanup and restoration assertions.
 
+## Connected Link status does not acknowledge the hub's initial writes (#10409)
+
+The active Link client reports `connected` immediately after writing `hello`; the hub may still be writing its initial `endpoints` and `node` messages. A lifecycle test that kills SSH, switches mode or unpairs on that status can make the hub write to a closed socket. Wait for the same connection to report the hub name and online node, in that order, before the destructive step. To reproduce the early close deterministically, hold the hub at that write boundary, use an abortive tunnel close and wait for the SSH process to die: a graceful FIN alone can still let the first writes succeed (`server/internal/link/ssh_readiness_test.go`).
+
 ## Queue admission decides notification replay (#10394)
 
 A connected WebSocket is not evidence that its outbound queue accepted a notification. Record admission per device
@@ -38,6 +42,14 @@ UI routes and switches identify a contribution by extension plus local ID. A glo
 make an unrelated disabled built-in block installation. Check both registry preview and plan commit: fixing only
 preview leaves the install broken. Exercise real installs, batched plans, upgrades, rollback and reload, while keeping
 non-UI contribution conflicts and within-manifest duplicate checks intact.
+
+## Queue admission decides notification replay (#10394)
+
+A connected WebSocket is not evidence that its outbound queue accepted a notification. Record admission per device
+and retain the event in the existing reconnect ring when every eligible socket rejects it. If another socket for the
+same credential accepts it, do not retain a duplicate. Keep recipient-selection counts separate from queue admission
+and delivery. Exercise the real notification bus handler with a full queue, same-ID outbox retry and reconnect;
+keep push-route, capability and preference exclusions intact.
 
 ## Empty assistant creation must not become a model turn
 
@@ -603,7 +615,9 @@ following the destination. Run the same helper in preflight and exec the agent a
 `CAP_SYS_ADMIN` to harden these mounts: that breaks `unshare -rm`, which was working; direct `umount` in the original
 namespace therefore remains an explicit boundary. Bubblewrap keeps a supervisor even without `--unshare-pid` or with
 `--as-pid-1`: verify the agent's `PPID` in the host pid namespace, not equal pids, and use `--die-with-parent` for
-lifecycle cleanup.
+lifecycle cleanup. A kernel can pass the basic bwrap probe yet refuse `open_tree` on an alias symlink with `EPERM`
+(observed on Linux 5.4). Keep that start fail closed. Real tests may skip only the structured alias-`open_tree` `EPERM`
+from the full-profile preflight, never every unavailable result or a `move_mount` failure (#11073).
 
 ## Runtime policy and publisher-owned node packages (#2566)
 
@@ -2089,6 +2103,12 @@ A connection that outlives its transport (protocol.md "Resuming") changes what s
 - **A side that decides the transport is dead must tell the other.** One side's silence check fired while the other's
   read loop was busy (not dead); the busy side then waited for its own pings, past the other side's window. The side
   that loses a transport closes it, and the node keeps the connection longer than the manager takes to notice.
+- **A resumed connection can change path, not only transport (#10944).** After a failed try on the old path, a better
+  path may take the connection back. `path` / `via` can no longer be captured for the connection's lifetime: final
+  `pathEnded`, the better-path watcher, the machine's route and the tailcat watcher all need the pair after a successful
+  move. Commit it only after `Peer.Resume` succeeds; a failed attempt must leave the route and its accounting alone.
+  Callbacks that outlive a route (a planned switch, an RTT ping or a tailcat probe) carry its generation and check it
+  before acting. Path failure and SSH flap timing use the current route's own start, not the whole connection's.
 
 ## A new value for an existing RPC parameter may be silently ignored by an old node (2026-11-06, #4858)
 

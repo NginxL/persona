@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Voice input: Android 11+ only sees the phone's speech recognizer when the app declares it wants to. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <queries>
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>

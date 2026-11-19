@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import persona.core.contracts.ImagePayload
 import persona.core.contracts.api.SessionFiles
 import persona.core.designsystem.PathChip
 import persona.core.designsystem.PhotoRow
@@ -43,14 +44,20 @@ import kotlinx.coroutines.withContext
 internal class AttachedPhotos(private val files: SessionFiles, private val machineId: String, cwd: String) {
     private val folder = cwd.ifBlank { "~" }
 
+    /** The photo as the file API returns it; throws when the machine cannot give it or it is not a picture. */
+    suspend fun payload(path: String): ImagePayload {
+        val file = files.file(machineId, folder, path)
+        val data = file.data
+        check(!file.isDir && !file.truncated && data != null && file.mime.orEmpty().startsWith("image/")) { "not a picture" }
+        return ImagePayload(mime = file.mime.orEmpty(), data = data)
+    }
+
     /** The photo's bytes; throws when the machine cannot give them or they are not a picture. */
     suspend fun bytes(path: String): ByteArray {
         val key = "$machineId:$path"
         cachedBytes[key]?.let { return it }
-        val file = files.file(machineId, folder, path)
-        val data = file.data
-        check(!file.isDir && !file.truncated && data != null && file.mime.orEmpty().startsWith("image/")) { "not a picture" }
-        val bytes = withContext(Dispatchers.Default) { Base64.getMimeDecoder().decode(data) }
+        val payload = payload(path)
+        val bytes = withContext(Dispatchers.Default) { Base64.getMimeDecoder().decode(payload.data) }
         check(bytes.isNotEmpty()) { "empty picture" }
         cachedBytes[key] = bytes
         return bytes

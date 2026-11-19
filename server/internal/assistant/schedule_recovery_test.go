@@ -34,6 +34,12 @@ func TestTaskModelRecoveryFailsOnlyAfterTheFinalTurn(t *testing.T) {
 		synctest.Wait()
 		<-time.After(4 * s.turnPoll) // several polls with a recoverable failure still in progress
 		synctest.Wait()
+		// A durable backoff publishes a stopped turn rather than holding the
+		// execution process busy. It still must not restart the task prompt.
+		working.Status, working.State = proto.StatusDone, proto.StateUnread
+		f.setSessions("server", working)
+		<-time.After(4 * s.turnPoll)
+		synctest.Wait()
 		sc := s.loadSchedule(context.Background())
 		sc.mu.Lock()
 		failedEarly := slices.ContainsFunc(sc.runs, func(r ScheduleRun) bool { return r.Status == runFailed })

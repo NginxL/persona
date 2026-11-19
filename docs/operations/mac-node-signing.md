@@ -120,14 +120,18 @@ cdhash. Builds made elsewhere (the Docker image, Linux release workers) keep `a.
 
 The `darwin-cli-sign` job in `release.yml` signs `personad`, `persona-node`,
 `persona-link`, `persona-hub` and `persona-manager` for both darwin architectures
-under fixed `com.nwverse.<program>` identifiers. It uses the existing Developer ID
-certificate in the protected `persona-desktop-release` environment, never an
-ad-hoc signature. The job runs only when that environment supplies a Developer ID
-Application identity and the notarization credentials already used by the desktop
-packages. `sign_darwin_cli.py` verifies each signature and rejects a remaining
-ad-hoc `cdhash`; the manifest is rebuilt from the signed downloads before upload,
-so a stable feed never carries a mismatched binary digest. This is a CI publication
-choice, not a local signing requirement for other builders.
+under fixed `com.nwverse.<program>` identifiers on stable and prerelease version
+tags. It uses the existing Developer ID certificate in the protected
+`persona-desktop-release` environment, never an ad-hoc signature. Its availability
+check needs only `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`, independently of the
+desktop package version gate and its notarization credentials. If either is
+missing, the gate reports `Darwin CLI signing blocked` and the job does not build
+or upload. `sign_darwin_cli.py` verifies each signature and rejects a remaining
+ad-hoc `cdhash`; the downloads are then recompressed from the signed binaries and
+the manifest is rebuilt before upload, so a release feed never carries stale
+ad-hoc bytes or a mismatched binary digest. A prerelease manifest belongs to that
+prerelease and does not move `releases/latest`. This is a CI publication choice,
+not a local signing requirement for other builders.
 
 The first certificate-signed build after the historical ad-hoc ones is a new
 program to macOS, so grant the privacy permissions once more. Subsequent updates

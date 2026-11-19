@@ -7,7 +7,7 @@ import os
 /// `… [State Names]` keys; `StateNamesTests` keeps other entries and other files from defining them again.
 /// `interfaceText`, so the Live Activity follows the app's language at once.
 nonisolated enum StateName: String, CaseIterable, Sendable {
-    case needsYou, working, unread, seen, notRunning, unknown
+    case needsYou, working, unread, justFinished, seen, notRunning, unknown
     /// Waiting to be woken (`isWaiting`): a loop or a timer brings it back.
     case waiting
     /// Seen, but its last turn asks the user something (#5096).
@@ -28,6 +28,7 @@ nonisolated enum StateName: String, CaseIterable, Sendable {
         case .needsYou: interfaceText("Needs You [State Names]")
         case .working: interfaceText("Working [State Names]")
         case .unread: interfaceText("Unread [State Names]")
+        case .justFinished: interfaceText("Just finished [State Names]") // perf-ok: StateName.text caches this lookup per locale
         case .seen: interfaceText("Seen [State Names]")
         case .notRunning: interfaceText("Not Running [State Names]")
         case .unknown: interfaceText("Unknown [State Names]")

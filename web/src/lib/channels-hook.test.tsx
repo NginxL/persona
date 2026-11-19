@@ -12,7 +12,7 @@ const reads: { path: string; resolve: (v: { channels: Channel[] }) => void }[] =
 
 vi.mock("./api", () => ({
   api: vi.fn((path: string) => new Promise((resolve) => reads.push({ path, resolve }))),
-  enc: encodeURIComponent,
+  enc: encodeURIComponent, onCredentialChange: () => () => {}, credentialOwner: () => "test-owner",
 }));
 
 const ch = (id: string, name: string): Channel => ({

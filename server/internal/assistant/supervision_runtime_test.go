@@ -361,3 +361,197 @@ func TestRuntimeLeaderTasksAreReviewedByBackgroundSupervisor(t *testing.T) {
 		t.Fatal("the background supervisor may not review the task it is told about")
 	}
 }
+
+func capableRuntimeCaps() *proto.SessionCapabilities {
+	return &proto.SessionCapabilities{Read: true, Send: true, Interrupt: true, Approve: true, SupervisionPolicy: true}
+}
+
+// A runtime session that advertises capabilities.supervision_policy (e.g. Antigravity) supervises its own planned
+// tasks, receives separate supervision_instructions on supervision deliveries, and loses the policy once its last
+// open task closes.
+func TestCapableRuntimeSideChatSupervisesOwnTasks(t *testing.T) {
+	ctx := context.Background()
+	s, f := newQuietService(t)
+	persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: "claude", Status: proto.StatusIdle}
+	side := proto.Session{
+		SessionID:    "agy-side",
+		MachineID:    "server",
+		Assistant:    true,
+		SourceKind:   proto.SourceRuntime,
+		Agent:        "agy",
+		Launcher:     "agy",
+		Status:       proto.StatusIdle,
+		Capabilities: capableRuntimeCaps(),
+	}
+	f.setSessions("server", persona, side)
+	f.mu.Lock()
+	f.known[side.SessionID] = true
+	f.mu.Unlock()
+
+	result, err := s.toolTaskPlan(ctx, side.SessionID, json.RawMessage(runtimePlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "You supervise them") {
+		t.Fatalf("capable runtime side chat was not kept as supervisor: %s", result)
+	}
+	waitFor(t, "the worker to link", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	task := onlyTodo(s)
+	if task.Origin != side.SessionID || task.Supervision == nil || task.Supervision.Supervisor != side.SessionID {
+		t.Fatalf("task origin or supervisor is wrong: %q, %+v", task.Origin, task.Supervision)
+	}
+	worker := task.Agents[0]
+	const report = "Build finished cleanly."
+	if _, err := s.reportToSupervisor(ctx, worker.MachineID, worker.SessionID, json.RawMessage(`{"kind":"done","text":"`+report+`"}`), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the worker report with policy at the capable runtime side chat", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return slices.ContainsFunc(f.sends, func(p map[string]any) bool {
+			text, _ := p["text"].(string)
+			return p["session_id"] == side.SessionID && strings.Contains(text, report) &&
+				p["supervision_instructions"] == prompts.RenderSupervisionInstructions()
+		})
+	})
+	if _, err := runJSON(t, s, side.SessionID, "task_review", map[string]any{
+		"todo_id": task.ID, "verdict": "accepted", "note": report,
+	}); err != nil {
+		t.Fatalf("capable runtime side chat could not review its own task: %v", err)
+	}
+	if todoNow(s, task.ID).DoneAt == nil {
+		t.Fatal("the capable runtime side chat's review did not close the task")
+	}
+	// Once its last open task closes, ordinary follow-ups receive empty supervision_instructions so the runtime clears the role.
+	if got := mustSupervisionInstructions(t, s, ctx, "server", side.SessionID); got != "" {
+		t.Fatalf("closed-task side chat retained supervision policy (%d bytes)", len(got))
+	}
+}
+
+// A capable runtime leader keeps its own supervision signals (not diverted to the background supervisor), and a
+// capable runtime background supervisor stays recognized by backgroundThere and reviews main-chat tasks with policy.
+func TestCapableRuntimeLeaderAndBackgroundSupervisor(t *testing.T) {
+	ctx := context.Background()
+	s, f := newQuietService(t)
+	off := false
+	s.noBackground = false
+	setSettings(t, s, func(v *Settings) {
+		v.MainSupervisesOwnTasks = &off
+		v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "agy-bg", "server"
+		v.Leaders = []string{"agy-lead"}
+	})
+	main := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle, Capabilities: capableRuntimeCaps()}
+	bg := proto.Session{SessionID: "agy-bg", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle, Capabilities: capableRuntimeCaps()}
+	lead := proto.Session{SessionID: "agy-lead", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle, Capabilities: capableRuntimeCaps()}
+	dshSide := proto.Session{SessionID: "dsh-side", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "dsh", Launcher: "dsh", Status: proto.StatusIdle}
+	f.setSessions("server", main, bg, lead, dshSide)
+	f.mu.Lock()
+	f.known[bg.SessionID] = true
+	f.known[lead.SessionID] = true
+	f.mu.Unlock()
+
+	cfg := s.settings(ctx)
+	if !s.backgroundThere(ctx, cfg, bg.SessionID) {
+		t.Fatal("capable runtime background supervisor was treated as gone")
+	}
+	// A non-capable runtime background supervisor is still treated as gone so it can be replaced.
+	if s.backgroundThere(ctx, Settings{MachineID: "server", BackgroundSupervisor: dshSide.SessionID, BackgroundSupervisorMachineID: "server"}, dshSide.SessionID) {
+		t.Fatal("non-capable runtime background supervisor was treated as valid")
+	}
+	// Main chat (with background supervisor on) receives no supervision policy; background and leader both receive it.
+	if got := mustSupervisionInstructions(t, s, ctx, "server", main.SessionID); got != "" {
+		t.Fatalf("main chat with background supervisor on got policy (%d bytes)", len(got))
+	}
+	for _, id := range []string{bg.SessionID, lead.SessionID} {
+		if got := mustSupervisionInstructions(t, s, ctx, "server", id); got != prompts.RenderSupervisionInstructions() {
+			t.Fatalf("%s did not receive supervision policy", id)
+		}
+	}
+	// Leader task stays with the capable leader; background supervisor does not usurp it.
+	leadTodo, err := s.newTodo(ctx, "Leader check", "", lead.SessionID, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.updateSupervision(ctx, leadTodo.ID, func(v *Supervision) bool { v.Supervisor = lead.SessionID; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.digestTarget(ctx, cfg, superviseSignal{Todo: leadTodo.ID, Kind: sigReview}); got != lead.SessionID {
+		t.Fatalf("capable leader signal went to %q, want %q", got, lead.SessionID)
+	}
+	if s.backgroundSupervises(ctx, bg.SessionID, todoNow(s, leadTodo.ID)) {
+		t.Fatal("background supervisor usurped a capable runtime leader's task")
+	}
+	// A non-capable DSH side chat's task still routes to the compatible main/background route (here, capable AGY background).
+	if _, err := s.toolTaskPlan(ctx, dshSide.SessionID, json.RawMessage(runtimePlan)); err != nil {
+		t.Fatalf("non-capable runtime side chat could not route to capable AGY background supervisor: %v", err)
+	}
+	todoByOrigin := func(origin string) (Todo, bool) {
+		s.todos.mu.RLock()
+		defer s.todos.mu.RUnlock()
+		for _, td := range s.todos.todos {
+			if td.Origin == origin {
+				return *td, true
+			}
+		}
+		return Todo{}, false
+	}
+	waitFor(t, "the worker to link", func() bool {
+		td, ok := todoByOrigin(dshSide.SessionID)
+		return ok && len(td.Agents) == 1
+	})
+	routed, _ := todoByOrigin(dshSide.SessionID)
+	if routed.Supervision == nil || routed.Supervision.Supervisor != main.SessionID {
+		t.Fatalf("routed supervisor = %+v, want main route %q", routed.Supervision, main.SessionID)
+	}
+	if got := s.digestTarget(ctx, cfg, superviseSignal{Todo: routed.ID, Kind: sigReview}); got != bg.SessionID {
+		t.Fatalf("routed digest target = %q, want capable background supervisor %q", got, bg.SessionID)
+	}
+}
+
+// When a capable runtime fails closed at delivery time (e.g. older agy CLI lacking additionalDirectories or disk write
+// failure returning assistant_supervision_runtime), the hub stops retrying and notifies the owner while leaving the
+// task open for review.
+func TestCapableRuntimeFailClosedRefusalStopsRelay(t *testing.T) {
+	ctx := context.Background()
+	s, f, task := newSupervisedService(t)
+	agyMain := proto.Session{
+		SessionID:    "conv1",
+		MachineID:    "server",
+		Assistant:    true,
+		SourceKind:   proto.SourceRuntime,
+		Agent:        "agy",
+		Launcher:     "agy",
+		Status:       proto.StatusIdle,
+		Capabilities: capableRuntimeCaps(),
+	}
+	f.setSessions("server", agyMain)
+	f.mu.Lock()
+	f.hello.Locale = "en"
+	f.failAssistant = &rpc.Error{Code: assistantwire.CodeSupervisionRuntime, Message: "Antigravity CLI does not support separate supervision policy directories"}
+	f.mu.Unlock()
+	tries := relayTries(f, "conv1")
+	if _, _, err := s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+		v.State = reviewPending
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	task = todoNow(s, task.ID)
+	if !s.deliverDigest(ctx, s.settings(ctx), "conv1", watchSignals(task, nil, now), "", now, time.Time{}) {
+		t.Fatal("the capable runtime fail-closed refusal was not handled")
+	}
+	waitFor(t, "the delivery failure notice", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return slices.ContainsFunc(f.pushes, func(p Notification) bool {
+			return p.SessionID == "conv1" && strings.Contains(p.Body, "Open the task")
+		})
+	})
+	if got := triesOf(f, tries); len(got) != 1 {
+		t.Fatalf("attempts = %v, want one", got)
+	}
+	if got := todoNow(s, task.ID); got.DoneAt != nil || got.Supervision.State != reviewPending {
+		t.Fatalf("task must remain pending review: %+v", got)
+	}
+}

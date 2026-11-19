@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -89,32 +90,96 @@ var errFallbackOnRedeploy = errors.New("a fallback build is sent only on Redeplo
 
 var errAutoNodeUpdatesDisabled = errors.New("automatic node upgrades are disabled")
 
+// deployRun is one deployment's private completion signal. Its error is written before done closes and never
+// overwritten by a later deployment.
+type deployRun struct {
+	done chan struct{}
+	err  error
+}
+
+// Redeploy starts the same explicit deployment as the app's Redeploy route and waits for its outcome. Canceling the
+// caller stops only the wait: the deployment keeps its own manager context and machine-card state.
+func (d *Devices) Redeploy(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m := d.machineByID(id)
+	if m == nil {
+		return errUnknownMachine
+	}
+	run, err := m.startDeployOf(false)
+	if err != nil {
+		return err
+	}
+	return m.waitDeploy(ctx, run)
+}
+
+func (m *Machine) waitDeploy(ctx context.Context, run *deployRun) error {
+	if run == nil {
+		return errors.New("redeploy is running but its result cannot be awaited")
+	}
+	select {
+	case <-run.done:
+		return run.err
+	case <-ctx.Done():
+		select {
+		case <-run.done:
+			return run.err
+		default:
+		}
+		return fmt.Errorf("redeploy is still running; its result is not confirmed: %w", ctx.Err())
+	}
+}
+
+// beginDeployLocked starts one outcome wait for every caller that joins this deployment.
+func (m *Machine) beginDeployLocked(phase string) *deployRun {
+	m.deploying, m.deployErr, m.deployPhase = true, "", phase
+	m.deployRun = &deployRun{done: make(chan struct{})}
+	return m.deployRun
+}
+
+func (m *Machine) endDeployLocked(err error) {
+	m.deploying, m.deployPhase = false, ""
+	if m.deployRun != nil {
+		m.deployRun.err = err
+		close(m.deployRun.done)
+		m.deployRun = nil
+	}
+}
+
 // startDeploy checks a deploy can start and runs it in the background; the machine list shows its progress. It is the
 // explicit Redeploy: any build the node's platform resolves to goes, a fallback too.
-func (m *Machine) startDeploy() error { return m.startDeployOf(false) }
+func (m *Machine) startDeploy() error {
+	_, err := m.startDeployOf(false)
+	return err
+}
 
 // startAutoDeploy is startDeploy for the updates the manager makes by itself (a machine back on another build, the
 // update after the hub's): only a build of the hub's own version goes, the hub's or its release's; a fallback build
 // is left to Redeploy (errFallbackOnRedeploy), as nobody chose to run another version than the hub's.
-func (m *Machine) startAutoDeploy() error { return m.startDeployOf(true) }
+func (m *Machine) startAutoDeploy() error {
+	_, err := m.startDeployOf(true)
+	return err
+}
 
-func (m *Machine) startDeployOf(auto bool) error {
+func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	if auto && !m.d.config().AutoUpdateNodes {
-		return errAutoNodeUpdatesDisabled
+		return nil, errAutoNodeUpdatesDisabled
 	}
 	if m.d.linkSwitchUnfinished(m.cfg.ID) { // the switch replaces the node's connection and may install its service
-		return errLinkSwitchDeploy
+		return nil, errLinkSwitchDeploy
 	}
 	m.mu.Lock()
 	if m.deploying {
+		run := m.deployRun
 		m.mu.Unlock()
-		return nil
+		return run, nil
 	}
 	blocked := m.canDeployLocked()
 	info, linked := m.info, m.rpcDeploymentLocked()
 	m.mu.Unlock()
 	if blocked != nil {
-		return blocked
+		return nil, blocked
 	}
 	// The build for its platform and kind of program (packages.go): looked up afresh, a release's manifest at most.
 	lookup, cancel := context.WithTimeout(m.d.deployContext(), packageLookup)
@@ -122,20 +187,21 @@ func (m *Machine) startDeployOf(auto bool) error {
 	cancel()
 	m.d.changed() // what the machine should run may be another build now
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if auto && pkg.Fallback {
-		return errFallbackOnRedeploy
+		return nil, errFallbackOnRedeploy
 	}
 	if linked {
-		return m.startRPCDeployment(pkg, nil)
+		return m.startRPCDeploymentRun(pkg, nil)
 	}
 	m.mu.Lock()
 	if m.deploying {
+		run := m.deployRun
 		m.mu.Unlock()
-		return nil
+		return run, nil
 	}
-	m.deploying, m.deployErr, m.deployPhase = true, "", "transferring"
+	run := m.beginDeployLocked("transferring")
 	m.mu.Unlock()
 	m.d.changed()
 	target := pkg.Version
@@ -146,7 +212,7 @@ func (m *Machine) startDeployOf(auto bool) error {
 			err = m.deploy(ctx, bin, target)
 		}
 		m.mu.Lock()
-		m.deploying, m.deployPhase = false, ""
+		m.endDeployLocked(err)
 		if err != nil {
 			m.deployErr = err.Error()
 		}
@@ -159,7 +225,7 @@ func (m *Machine) startDeployOf(auto bool) error {
 		m.saveDeployOutcome(ctx, target, err)
 		m.d.changed()
 	}()
-	return nil
+	return run, nil
 }
 
 // deployExitWrapper is the deploy script's exit status when bin is a script (remote_bin a wrapper that sets the node's

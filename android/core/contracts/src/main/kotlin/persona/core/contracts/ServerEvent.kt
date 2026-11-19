@@ -101,6 +101,10 @@ data class SessionsEvent(
     @SerialName("machine_id") val machineId: String, val sessions: List<Session> = emptyList(),
 ) : ServerEvent
 
+/** A whole, authoritative row, including an empty Agent queue when undelivered is absent. */
+@Serializable
+data class SessionRowEvent(val session: Session) : ServerEvent
+
 /** Session-scoped hub receipt, not proof of durable delivery to the Agent. */
 @KeepGeneratedSerializer
 @Serializable(with = MessageSendStateEventSerializer::class)
@@ -108,7 +112,7 @@ data class MessageSendStateEvent(
     @SerialName("machine_id") val machineId: String,
     @SerialName("session_id") val sessionId: String,
     @SerialName("client_msg_id") val clientMessageId: String,
-    @WireEnum("processing", "delivered", "failed", "unknown") val state: String,
+    @WireEnum("processing", "delivered", "failed", "unknown", "kept") val state: String,
     @WireTime val at: String,
     /** Stamped by the authenticated socket, never read from or written to JSON. */
     @kotlinx.serialization.Transient val socketGeneration: Long? = null,
@@ -316,8 +320,11 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             "sessions" -> input.json.decodeFromJsonElement<SessionsEvent>(obj).let { event ->
                 event.copy(sessions = event.sessions.map { it.copy(machineId = event.machineId) })
             }
+            "session" -> input.json.decodeFromJsonElement<SessionRowEvent>(obj).also {
+                require(it.session.machineId.isNotBlank() && it.session.sessionId.isNotBlank())
+            }
             "message_send_state" -> {
-                require((obj["state"] as? JsonPrimitive)?.content in setOf("processing", "delivered", "failed", "unknown"))
+                require((obj["state"] as? JsonPrimitive)?.content in setOf("processing", "delivered", "failed", "unknown", "kept"))
                 input.json.decodeFromJsonElement<MessageSendStateEvent>(obj).also {
                     require(it.machineId.isNotBlank() && it.sessionId.isNotBlank() && it.clientMessageId.isNotBlank())
                     require(parseTime(it.at) != null)
@@ -389,6 +396,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
         val (type, payload) = when (value) {
             is Hello -> "hello" to output.json.encodeToJsonElement(value)
             is ItemsEvent -> "items" to output.json.encodeToJsonElement(value)
+            is SessionRowEvent -> "session" to output.json.encodeToJsonElement(value)
             is SessionsEvent -> "sessions" to output.json.encodeToJsonElement(value)
             is MessageSendStateEvent -> "message_send_state" to output.json.encodeToJsonElement(value)
             is SessionsListEvent -> "sessions_list" to output.json.encodeToJsonElement(value)

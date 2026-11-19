@@ -91,7 +91,7 @@ func TestAgentsSwitchEachByItsState(t *testing.T) {
 		t.Errorf("limited: %v", got)
 	}
 	for _, c := range nodeCalls(ft.f) {
-		if p := callParams(t, c); c.Method == DeviceSessionSend && (p["switch_now"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue())) {
+		if p := callParams(t, c); c.Method == DeviceSessionSend && (p["switch_now"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue(""))) {
 			t.Errorf("continuation: %v", p)
 		}
 	}

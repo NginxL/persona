@@ -592,6 +592,25 @@ describe("Feishu bot dialog", () => {
     await act(async () => calls.update[0].resolve(saved({ enabled: false, app_id: "cli_elsewhere" })));
     expect(input("App ID").value).toBe("cli_elsewhere");
   });
+
+  // AC5: the native topic process control is visible, on by default, and reversible through the bot-settings API.
+  it("shows native topic process on by default and turns it off and on", async () => {
+    const features = { ...saved().features, topic_cot: true };
+    const nativeProcess = () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-feishubot.feature_topic_cot_title")}"]`);
+    await open(saved({ features }));
+    expect(nativeProcess()).not.toBeNull();
+    expect(nativeProcess()!.getAttribute("aria-checked")).toBe("true");
+
+    await act(async () => nativeProcess()!.click());
+    expect(calls.update[0].body).toEqual({ features: { topic_cot: false } });
+    await act(async () => calls.update[0].resolve(saved({ features: { ...features, topic_cot: false } })));
+    expect(nativeProcess()!.getAttribute("aria-checked")).toBe("false");
+
+    await act(async () => nativeProcess()!.click());
+    expect(calls.update[1].body).toEqual({ features: { topic_cot: true } });
+    await act(async () => calls.update[1].resolve(saved({ features })));
+    expect(nativeProcess()!.getAttribute("aria-checked")).toBe("true");
+  });
 });
 
 describe("topic group policies", () => {

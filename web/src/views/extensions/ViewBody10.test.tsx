@@ -393,8 +393,8 @@ describe("UI 10: the graph canvas", () => {
     const lw = Number.parseFloat(layer.style.width);
     const lh = Number.parseFloat(layer.style.height);
     const wantZ = Math.max(0.25, Math.min(1, Math.min((600 - 80) / lw, (400 - 80) / lh)));
-    expect(transformOf(layer)[2]).toBeCloseTo(0.5, 9); // the opening view, held to 50%-100%
-    expect(wantZ).toBeLessThan(0.5); // the stage makes the two differ: the check below can see a lost Fit
+    expect(transformOf(layer)[2]).toBeCloseTo(0.75, 9); // the first screen: a wide graph opens at the readable floor
+    expect(wantZ).toBeLessThan(0.75); // the stage makes the two differ: the check below can see a lost Fit
     act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${t("extensions-viewbody.graph_fit")}"]`)!.click());
     expect(transformOf(layer)[2]).toBeCloseTo(wantZ, 9); // Fit went below the opening view's 50% floor
     const again = structuredClone(WORK);
@@ -429,11 +429,17 @@ describe("UI 10: the graph canvas", () => {
     spy.mockRestore();
   });
 
-  it("without a selected node, opens with the first root at the top start", async () => {
+  it("without a selected node and nothing needing the person, opens with the first root at the top start", async () => {
     const spy = sizeStage(900, 500);
     const noSel = structuredClone(WORK);
     delete (noSel.sections[0].items[0] as { selected?: string }).selected;
     (noSel.sections[0].items[0] as { key?: string }).key = "fresh-root";
+    // no tone, badge, progress or timing: nothing for the opening view to focus instead of the first root
+    const nodes = (noSel.sections[0].items[0] as { nodes: Record<string, unknown>[] }).nodes;
+    const c = nodes.find((n) => n.id === "c")!;
+    delete c.tone;
+    delete c.badge;
+    delete c.progress;
     await mountView(noSel);
     const layer = host.querySelector("[data-graph-layer]") as HTMLElement;
     const lw = Number.parseFloat(layer.style.width);
@@ -464,7 +470,7 @@ describe("UI 10: the graph canvas", () => {
     const lw = Number.parseFloat(layer.style.width);
     const lh = Number.parseFloat(layer.style.height);
     const [x, y, zoom] = transformOf(layer);
-    expect(zoom).toBeCloseTo(0.5, 9); // the fitted scale held to 50%-100%
+    expect(zoom).toBeCloseTo(0.75, 9); // the readable floor, never under 75% on a first screen
     expect(lw * zoom).toBeGreaterThan(300); // the drawing overflows both axes: clamping centres neither
     expect(lh * zoom).toBeGreaterThan(150);
     const centreOf = (id: string): [number, number] => {
@@ -684,7 +690,7 @@ describe("UI 10: the graph canvas", () => {
     const key = (k: string) => act(() => stage.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })));
     key("+");
     const plus = transformOf(layer);
-    expect(plus[2]).toBeCloseTo(0.5 * 1.25, 6); // + zooms in from the opening view
+    expect(plus[2]).toBeCloseTo(0.75 * 1.25, 6); // + zooms in from the opening view
     key("0");
     const zero = transformOf(layer);
     expect(zero[2]).toBeCloseTo(wantZ, 6); // 0 fits: the fitted scale, centred — not the floor, not the opening view
@@ -948,7 +954,7 @@ describe("UI 10: the graph canvas", () => {
     const stage = holderHost.querySelector("[data-graph-stage]")!;
     act(() => stage.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true })));
     const kept = transformOf(holderHost.querySelector("[data-graph-layer]"));
-    expect(kept[2]).not.toBeCloseTo(0.5, 9); // the person zoomed: the store keeps it as moved
+    expect(kept[2]).not.toBeCloseTo(0.75, 9); // the person zoomed: the store keeps it as moved
     // mount 140 other keys (over the cap of 128) — each on its own host, unmounted at once: never this one
     const fillerHost = document.createElement("div");
     document.body.append(fillerHost);
@@ -992,4 +998,303 @@ describe("UI 10: a graph in a view", () => {
     await vi.waitFor(() => expect(host.querySelectorAll("[data-graph-node]")).toHaveLength(VISIBLE.length), { timeout: 30_000 });
     expect(host.querySelector(".graph-canvas")).not.toBeNull(); // the page keeps its height meanwhile
   }, 60_000);
+});
+
+// ── the control room: outline, inspector, timeline (UI version 10, #9727) ─────────────────────────────────────────
+// A rich "run" graph: one node with timing, readings, a summary and a session link (a press opens it in place), one
+// plain node that still presses its action, and two leaves.
+const NOW = 1_700_000_000;
+const RICH = (startedAgo = 10, span?: number) => {
+  const started = NOW - startedAgo;
+  return {
+    sections: [{
+      title: "Run",
+      items: [{ type: "graph", key: `rich-${startedAgo}-${span ?? "live"}`, nodes: [
+        { id: "root", title: "Ship it", subtitle: "2 parts", action: { id: "open", values: { id: "root" } } },
+        { id: "run", title: "Build", tone: "caution", badge: { text: "Running", tone: "caution" }, started_at: started, ...(span !== undefined ? { ended_at: started + span } : {}),
+          facts: [{ label: "Model", value: "small" }], detail: "Verifier says hi", links: [{ title: "Session 1", url: "https://example.com/s/1" }],
+          action: { id: "open-run", values: { id: "run" } } },
+        { id: "leaf1", title: "Unit", action: { id: "open-leaf", values: { id: "leaf1" } } },
+        { id: "leaf2", title: "UI" },
+      ], edges: [{ from: "root", to: "run" }, { from: "root", to: "leaf1" }, { from: "root", to: "leaf2" }] }],
+    }],
+  };
+};
+const keyEl = (el: Element, k: string) => act(() => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })));
+
+describe("UI 10: the control room", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW * 1000);
+    forgetGraphStores();
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+    document.querySelectorAll("[role=dialog]").forEach((d) => d.remove());
+    vi.useRealTimers();
+  });
+
+  const mountPress = async (view: unknown) => {
+    const spy = sizeStage(900, 600);
+    const pressed: UIAction[] = [];
+    await mount(draw(view), { compact: false, onPress: (a) => pressed.push(a) });
+    return { pressed, spy };
+  };
+
+  it("draws the reading-order outline, never as canvas nodes", async () => {
+    const { spy } = await mountPress(RICH());
+    const outline = host.querySelector("[data-graph-outline]")!;
+    expect(outline).not.toBeNull();
+    expect([...host.querySelectorAll("[data-graph-outline-node]")].map((b) => b.getAttribute("data-graph-outline-node"))).toEqual(["root", "run", "leaf1", "leaf2"]);
+    expect([...host.querySelectorAll("[data-graph-outline-node]")].every((b) => b.getAttribute("data-graph-node") === null)).toBe(true);
+    expect(host.querySelector("[data-graph-inspector]")).toBeNull(); // nothing selected yet
+    expect(host.querySelector("[data-graph-timeline]")).not.toBeNull(); // run carries a start time
+    spy.mockRestore();
+  });
+
+  it("walks the outline with j / k and the arrows, guards typing, and Esc closes the inspector", async () => {
+    const { spy } = await mountPress(RICH());
+    const outline = host.querySelector("[data-graph-outline]")!;
+    keyEl(outline, "j");
+    expect(host.querySelector('[data-graph-outline-node="root"]')).toBe(document.activeElement);
+    expect(host.querySelector("[data-graph-selected]")).not.toBeNull();
+    keyEl(outline, "j");
+    expect(host.querySelector('[data-graph-outline-node="run"]')).toBe(document.activeElement);
+    expect(host.querySelector("[data-graph-inspector]")).not.toBeNull(); // run is rich: its inspector opens
+    keyEl(outline, "ArrowDown");
+    expect(host.querySelector("[data-graph-outline-node=" + '"leaf1"]')).toBe(document.activeElement);
+    keyEl(outline, "ArrowUp");
+    expect(host.querySelector('[data-graph-outline-node="run"]')).toBe(document.activeElement);
+    keyEl(outline, "k");
+    expect(host.querySelector('[data-graph-outline-node="root"]')).toBe(document.activeElement);
+    // the last row stops the walk
+    keyEl(outline, "ArrowDown"); keyEl(outline, "ArrowDown"); keyEl(outline, "ArrowDown");
+    expect(host.querySelector('[data-graph-outline-node="leaf2"]')).toBe(document.activeElement);
+    // Esc closes the inspector and the pick
+    keyEl(outline, "Escape");
+    expect(host.querySelector("[data-graph-inspector]")).toBeNull();
+    expect(host.querySelector("[data-graph-selected]")).toBeNull();
+    // a field inside the outline keeps its own keys
+    const input = document.createElement("input");
+    outline.appendChild(input);
+    input.focus();
+    keyEl(outline, "j");
+    keyEl(input, "j");
+    expect(host.querySelector('[data-graph-outline-node="root"]')).toBe(document.activeElement); // j from outline picked root
+    spy.mockRestore();
+  });
+
+  it("Enter opens a rich node's first link and presses a plain node's action", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const { pressed, spy } = await mountPress(RICH());
+    const outline = host.querySelector("[data-graph-outline]")!;
+    keyEl(outline, "j"); // root (plain, has an action)
+    keyEl(outline, "Enter");
+    expect(pressed).toEqual([{ id: "open", values: { id: "root" } }]);
+    keyEl(outline, "j"); // run (rich, has a link)
+    keyEl(outline, "Enter");
+    expect(open).toHaveBeenCalledWith("https://example.com/s/1", "_blank", "noopener,noreferrer");
+    expect(pressed).toHaveLength(1); // the link wins over the run's own action
+    open.mockRestore();
+    spy.mockRestore();
+  });
+
+  it("collapses and reopens the outline from its toggles", async () => {
+    const { spy } = await mountPress(RICH());
+    expect(host.querySelectorAll("[data-graph-outline-toggle]")).toHaveLength(1);
+    act(() => host.querySelector<HTMLElement>("[data-graph-outline-toggle]")!.click());
+    await act(async () => {});
+    expect(host.querySelector("[data-graph-outline]")).toBeNull();
+    const reopen = host.querySelector<HTMLElement>("[data-graph-outline-toggle]")!; // the floating one in the stage
+    expect(reopen.getAttribute("aria-expanded")).toBe("false");
+    act(() => reopen.click());
+    await act(async () => {});
+    expect(host.querySelector("[data-graph-outline]")).not.toBeNull();
+    spy.mockRestore();
+  });
+
+  it("a click on an outline row pans the canvas to the node", async () => {
+    const spy = sizeStage(300, 180); // the drawing overflows: centring does not hide the move
+    await mount(draw(RICH()), { compact: false, onPress: () => {} });
+    const layer = host.querySelector("[data-graph-layer]") as HTMLElement;
+    const before = transformOf(layer);
+    act(() => host.querySelector<HTMLElement>('[data-graph-outline-node="leaf2"]')!.click());
+    await act(async () => {});
+    expect(transformOf(layer)).not.toEqual(before);
+    spy.mockRestore();
+  });
+
+  it("a rich node's card press opens its inspector instead of pressing; a plain node still presses", async () => {
+    const { pressed, spy } = await mountPress(RICH());
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="run"]')!.click());
+    await act(async () => {});
+    expect(pressed).toEqual([]); // the card only opens the inspector
+    const inspector = host.querySelector("[data-graph-inspector]")!;
+    expect(inspector).not.toBeNull();
+    expect(inspector.textContent).toContain("Model");
+    expect(inspector.textContent).toContain("small");
+    expect(inspector.textContent).toContain("Verifier says hi");
+    expect(inspector.querySelectorAll("[data-graph-inspector-link]")).toHaveLength(1);
+    // the action lives in the inspector and presses the node's own action
+    act(() => inspector.querySelector<HTMLElement>("[data-graph-inspector-action]")!.click());
+    expect(pressed).toEqual([{ id: "open-run", values: { id: "run" } }]);
+    // the close button clears both
+    act(() => inspector.querySelector<HTMLElement>("[data-graph-inspector-close]")!.click());
+    await act(async () => {});
+    expect(host.querySelector("[data-graph-inspector]")).toBeNull();
+    // a plain node's card keeps pressing its own action
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="leaf1"]')!.click());
+    expect(pressed).toContainEqual({ id: "open-leaf", values: { id: "leaf1" } });
+    spy.mockRestore();
+  });
+
+  it("an inspector link opens through the link manager, not a page navigation", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const { spy } = await mountPress(RICH());
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="run"]')!.click());
+    await act(async () => {});
+    act(() => host.querySelector<HTMLElement>("[data-graph-inspector-link]")!.click());
+    expect(open).toHaveBeenCalledWith("https://example.com/s/1", "_blank", "noopener,noreferrer");
+    open.mockRestore();
+    spy.mockRestore();
+  });
+
+  it("draws a timeline bar and ticks, selects on a row press, and collapses", async () => {
+    // two running nodes: the one started later has a bar that grows against the fixed earlier start
+    const view = RICH(30);
+    const graph = view.sections[0].items[0] as { nodes: Record<string, unknown>[]; edges: Record<string, string>[] };
+    graph.nodes.push({ id: "run2", title: "Later", started_at: NOW - 5 });
+    graph.edges.push({ from: "root", to: "run2" });
+    const { spy } = await mountPress(view);
+    const timeline = host.querySelector("[data-graph-timeline]")!;
+    expect(timeline).not.toBeNull();
+    const ticks = [...host.querySelectorAll("[data-graph-timeline-tick]")];
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    expect(ticks.every((x) => /^\d\d:\d\d:\d\d$/.test(x.textContent ?? ""))).toBe(true); // a small span ticks in seconds
+    const bar = host.querySelector<HTMLElement>('[data-graph-timeline-bar="run2"]')!;
+    expect(bar).not.toBeNull();
+    const before = bar.getAttribute("style");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(bar.getAttribute("style")).not.toBe(before); // a running node's bar grows with the clock
+    act(() => host.querySelector<HTMLElement>('[data-graph-timeline-row="run"]')!.click());
+    await act(async () => {});
+    expect(host.querySelector("[data-graph-inspector]")).not.toBeNull();
+    expect(host.querySelector('[data-graph-at="run"] [data-graph-node="run"]')).not.toBeNull();
+    act(() => host.querySelector<HTMLElement>("[data-graph-timeline-toggle]")!.click());
+    await act(async () => {});
+    expect(host.querySelector('[data-graph-timeline-bar="run"]')).toBeNull();
+    spy.mockRestore();
+  });
+
+  it.each([
+    [60, true],
+    [300, false],
+    [1500, false],
+    [5400, false],
+    [18000, false],
+    [90000, false],
+  ])("ticks a %ss span at its step", async (span, seconds) => {
+    const { spy } = await mountPress(RICH(span, span));
+    const ticks = [...host.querySelectorAll("[data-graph-timeline-tick]")].map((x) => x.textContent ?? "");
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    expect(ticks.length).toBeLessThanOrEqual(10);
+    expect(ticks.every((x) => (seconds ? /^\d\d:\d\d:\d\d$/ : /^\d\d:\d\d$/).test(x))).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("opens a wide fan-out at a readable scale on the node that needs the person", async () => {
+    const spy = sizeStage(400, 300);
+    const view = { sections: [{ items: [{ type: "graph", key: "fan", nodes: [
+      { id: "root", title: "Root" },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `l${i}`, title: `Leaf ${i}` })),
+    ], edges: Array.from({ length: 12 }, (_, i) => ({ from: "root", to: `l${i}` })) }] }] };
+    (view.sections[0].items[0].nodes.find((n) => n.id === "l7") as { tone?: string }).tone = "danger";
+    await mount(draw(view), { compact: false, onPress: () => {} });
+    const layer = host.querySelector("[data-graph-layer]") as HTMLElement;
+    const [x, y, zoom] = transformOf(layer);
+    expect(zoom).toBeGreaterThanOrEqual(0.75);
+    // the danger node l7 is the stage's centre
+    const el = host.querySelector('[data-graph-at="l7"]') as HTMLElement;
+    const cx = x + (Number.parseFloat(el.style.left) + Number.parseFloat(el.style.width) / 2) * zoom;
+    const cy = y + (Number.parseFloat(el.style.top) + Number.parseFloat(el.style.height) / 2) * zoom;
+    expect(cx).toBeCloseTo(200, 3);
+    expect(cy).toBeCloseTo(150, 3);
+    // Fit still goes down to the floor (this drawing is wide enough that it would shrink past it)
+    const lw = Number.parseFloat(layer.style.width);
+    const lh = Number.parseFloat(layer.style.height);
+    const wantZ = Math.max(0.25, Math.min(1, Math.min((400 - 80) / lw, (300 - 80) / lh)));
+    act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${t("extensions-viewbody.graph_fit")}"]`)!.click());
+    expect(transformOf(layer)[2]).toBeCloseTo(wantZ, 6);
+    spy.mockRestore();
+  });
+
+  it("a compact still preview keeps the old shape: no outline, inspector or timeline", async () => {
+    const d = doc(renderToStaticMarkup(<GraphCanvas item={draw(RICH())} compact busy="" onPress={() => {}} />));
+    expect(d.querySelector("[data-graph-outline]")).toBeNull();
+    expect(d.querySelector("[data-graph-inspector]")).toBeNull();
+    expect(d.querySelector("[data-graph-timeline]")).toBeNull();
+    expect(d.querySelector(".graph-preview")).not.toBeNull();
+  });
+
+  it("gives a lone node no outline (laid.order under two), but a rich one still opens its inspector", async () => {
+    const spy = sizeStage(900, 600);
+    const one = { sections: [{ items: [{ type: "graph", key: "one", nodes: [{ id: "only", title: "Only", facts: [{ label: "k", value: "v" }] }], edges: [] }] }] };
+    await mount(draw(one), { compact: false, onPress: () => {} });
+    expect(host.querySelector("[data-graph-outline]")).toBeNull();
+    expect(host.querySelector("[data-graph-outline-toggle]")).toBeNull();
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="only"]')!.click());
+    await act(async () => {});
+    expect(host.querySelector("[data-graph-inspector]")).not.toBeNull();
+    spy.mockRestore();
+  });
+
+  it("draws the control room with design tokens only: no hex color in the markup", async () => {
+    await mount(draw(RICH()), { compact: false, onPress: () => {} });
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="run"]')!.click());
+    await act(async () => {});
+    const html = host.innerHTML;
+    expect(html).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("caps timeline ticks and prints dates even when a node has started_at: 0 alongside current timestamps", async () => {
+    const spy = sizeStage(900, 600);
+    const epoch = {
+      sections: [{ items: [{ type: "graph", key: "epoch", nodes: [
+        { id: "a", title: "Epoch", started_at: 0, ended_at: 1726400000 },
+        { id: "b", title: "Now", started_at: 1726400000 },
+      ], edges: [{ from: "a", to: "b" }] }] }],
+    };
+    await mount(draw(epoch), { compact: false, onPress: () => {} });
+    const ticks = [...host.querySelectorAll("[data-graph-timeline-tick]")].map((x) => x.textContent ?? "");
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    expect(ticks.length).toBeLessThanOrEqual(14);
+    expect(ticks.every((x) => /^\d{4}-\d\d-\d\d$/.test(x))).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("in Full screen with the inspector open, first Escape closes the inspector and second Escape closes Full screen", async () => {
+    const spy = sizeStage(900, 600);
+    await mount(draw(RICH()), { compact: false, onPress: () => {} });
+    act(() => host.querySelector<HTMLElement>('[data-graph-node="run"]')!.click());
+    await act(async () => {});
+    act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${t("extensions-viewbody.graph_full_screen")}"]`)!.click());
+    await act(async () => {});
+    const overlay = document.querySelector("[role=dialog]")!;
+    expect(overlay).not.toBeNull();
+    expect(overlay.querySelector("[data-graph-inspector]")).not.toBeNull();
+    // First Escape while dialog itself holds focus: closes the inspector, keeps Full screen open
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    await act(async () => {});
+    expect(document.querySelector("[role=dialog]")).not.toBeNull();
+    expect(document.querySelector("[role=dialog] [data-graph-inspector]")).toBeNull();
+    // Second Escape: closes Full screen
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    await act(async () => {});
+    expect(document.querySelector("[role=dialog]")).toBeNull();
+    spy.mockRestore();
+  });
 });

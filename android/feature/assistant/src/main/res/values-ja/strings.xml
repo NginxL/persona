@@ -165,10 +165,10 @@
     <string name="assistant_settings_target">アシスタント</string>
     <string name="assistant_settings_permission">新しい会話の権限</string>
     <string name="assistant_settings_permission_hint">権限を明示的に選択していない新しい会話に適用します。既存の会話の権限は変わりません。</string>
-    <string name="assistant_settings_permission_default">デフォルト</string>
-    <string name="assistant_settings_permission_edits">編集を許可</string>
-    <string name="assistant_settings_permission_plan">計画のみ</string>
-    <string name="assistant_settings_permission_auto">自動</string>
+    <string name="assistant_settings_permission_default">デフォルト権限</string>
+    <string name="assistant_settings_permission_edits">編集を自動承認</string>
+    <string name="assistant_settings_permission_plan">計画モード</string>
+    <string name="assistant_settings_permission_auto">自動レビュー</string>
     <string name="assistant_settings_permission_full">フルアクセス</string>
     <string name="assistant_settings_permission_failed">デフォルトの権限を保存できませんでした</string>
     <string name="assistant_settings_permission_unavailable">このアシスタントがデフォルト権限への対応を確認できるまで変更できません。他の設定は引き続き使えます。</string>
@@ -210,7 +210,7 @@
     <string name="assistant_usage_last_30_label">過去 30 日</string>
     <string name="assistant_usage_today_label">今日</string>
     <string name="assistant_usage_day">%1$s · %2$s トークン</string>
-    <string name="assistant_usage_day_description">%1$s、%2$s トークン</string>
+    <string name="assistant_usage_token_description">%1$s、%2$s トークン</string>
     <string name="assistant_usage_hour_description">%1$s %2$s、%3$s トークン</string>
     <string name="assistant_usage_input">入力</string>
     <string name="assistant_usage_output">出力</string>
@@ -218,6 +218,8 @@
     <string name="assistant_usage_cache_read">キャッシュ読み取り</string>
     <string name="assistant_usage_by_hour">過去 7 日の時間別</string>
     <string name="assistant_usage_by_computer">コンピューター別</string>
+    <string name="assistant_usage_by_agent">Agent別 · 過去7日間</string>
+    <string name="assistant_usage_before_agent_split">区別なし（更新前）</string>
     <string name="assistant_usage_by_kind">トークンの種類別</string>
     <string name="assistant_usage_less">少</string>
     <string name="assistant_usage_more">多</string>

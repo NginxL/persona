@@ -9,6 +9,7 @@
    only so it never covers the fade (cindy's status-bar-shimmer and status-bar-done; views/chat/RunningStatusBar.tsx). */
 .status-breath { animation: status-breath 1.5s steps(18, end) 1; }
 @keyframes status-breath { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes status-breath-again { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 .status-done { animation: status-done-pop .4s cubic-bezier(.34, 1.56, .64, 1) both; }
 @keyframes status-done-pop { 0% { transform: scale(.85); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .stream-word, [data-stream-marker]::marker, .status-breath, .status-done { animation: none; } }

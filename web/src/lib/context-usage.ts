@@ -73,6 +73,8 @@ export function contextTooltip(u: ContextUsage): string {
 export function modelShort(model: string | undefined): string {
   let id = (model ?? "").trim();
   if (!id) return "";
+  // A gateway routes a model under a prefix: the model after the last "/" is the one that answers.
+  if (id.includes("/")) id = id.slice(id.lastIndexOf("/") + 1) || id;
   const m = /^claude-([a-z]+)((?:-\d{1,2})*)(?:-\d{8})?(\[1m\])?$/i.exec(id);
   if (!m) return id;
   const version = m[2].split("-").filter(Boolean).join(".");

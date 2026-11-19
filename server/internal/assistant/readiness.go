@@ -851,6 +851,7 @@ func (s *Service) readinessProbe(ctx context.Context, machine string, v Settings
 		// Not the model's answer (the machine could not be asked): said, not kept.
 		return &proto.LauncherCheck{Error: i18n.Localize(err, s.requestCtxLang(ctx))}
 	}
+	cleanCheck(&res) // an un-updated node still sends the terminal's escapes and startup noise
 	// Detached from the client, the save needs its own deadline: one the database does not answer would hold the
 	// readiness lock, and every readiness request behind it, for good.
 	wctx, wcancel := context.WithTimeout(ctx, historyTimeout)

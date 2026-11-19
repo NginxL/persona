@@ -264,18 +264,24 @@ type triageVerdict struct {
 // inbox.rules; the default criteria stay underneath). last is the Last it asked about.
 func (s *Service) askTriage(ctx context.Context, it *InboxItem, timeout time.Duration) (last string, v triageVerdict) {
 	b := &s.inbox
+	hello := s.hello(ctx)
+	language := answerLanguage(hello.Locale)
 	b.mu.Lock()
-	last, input, rules := it.Last, b.triageInput(it), strings.TrimSpace(it.Rules)
+	last, input, rules := it.Last, prompts.RenderInboxItem(b.triagePromptItem(it, language)), strings.TrimSpace(it.Rules)
 	b.mu.Unlock()
-	return last, s.triageModel(ctx, input, rules, timeout)
+	return last, s.triageModelIn(ctx, input, rules, timeout, hello)
 }
 
 // triageModel asks the triage model about one item's prompt input under rules (its source's; "" the Inbox's).
 func (s *Service) triageModel(ctx context.Context, input, rules string, timeout time.Duration) (v triageVerdict) {
+	return s.triageModelIn(ctx, input, rules, timeout, s.hello(ctx))
+}
+
+// triageModelIn uses the same owner/language snapshot as the input wrapper.
+func (s *Service) triageModelIn(ctx context.Context, input, rules string, timeout time.Duration, hello Hello) (v triageVerdict) {
 	if rules == "" {
 		rules = s.inboxConfig(ctx).Rules
 	}
-	hello := s.hello(ctx)
 	extContext, _ := s.inboxExtensionContext(ctx)
 	system := prompts.RenderInboxTriage(prompts.InboxTriage{Owner: hello.Owner, Rules: rules, Language: answerLanguage(hello.Locale),
 		Context: extContext})
@@ -348,17 +354,21 @@ func (b *inboxBook) ruleTier(it *InboxItem) string {
 	return TierNoise
 }
 
-// triageInput is the item as the models read it (prompts/inbox/item.md).
-func (b *inboxBook) triageInput(it *InboxItem) string {
-	p := b.promptItem(it)
+// triagePromptItem separates the latest Lark DM for triage and the no-write preview.
+func (b *inboxBook) triagePromptItem(it *InboxItem, language string) prompts.InboxItem {
+	p := b.promptItemIn(it, language)
 	if it.Connector != nil && it.Source == "larkcli" && it.Kind == KindDM {
 		p.Latest = it.Preview
 	}
-	return prompts.RenderInboxItem(p)
+	return p
 }
 
 func (b *inboxBook) promptItem(it *InboxItem) prompts.InboxItem {
-	p := prompts.InboxItem{Kind: it.Kind, MailDirect: it.Mail != nil && it.Mail.Direct, Context: it.Context}
+	return b.promptItemIn(it, answerLanguage(string(b.userLang())))
+}
+
+func (b *inboxBook) promptItemIn(it *InboxItem, language string) prompts.InboxItem {
+	p := prompts.InboxItem{Language: language, Kind: it.Kind, MailDirect: it.Mail != nil && it.Mail.Direct, Context: it.Context}
 	if it.Connector != nil {
 		p.Source = it.Source
 		p.Described = b.kindWords(it.Source, it.Kind)
@@ -371,22 +381,23 @@ const draftModelWait = 2 * time.Minute
 
 // draftReply writes a reply to an inbox item in the user's voice (optionally following their instruction).
 func (s *Service) draftReply(ctx context.Context, id, instruction string) (string, error) {
+	hello := s.hello(ctx)
+	language := answerLanguage(hello.Locale)
 	b := &s.inbox
 	b.mu.Lock()
 	it, ok := b.items[id]
 	var item prompts.InboxItem
 	if ok {
-		item = b.promptItem(it)
+		item = b.promptItemIn(it, language)
 	}
 	b.mu.Unlock()
 	if !ok {
 		return "", errNoInboxItem
 	}
-	hello := s.hello(ctx)
 	extContext, neverQuote := s.inboxExtensionContext(ctx)
 	// About me as the user last edited it in the app, else the config file's (notes), as the main chat has it.
 	d := prompts.InboxDraft{Owner: hello.Owner, Notes: s.notes(ctx), Language: answerLanguage(hello.Locale), Context: extContext}
-	input := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Item: item, Instruction: strings.TrimSpace(instruction)})
+	input := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Language: language, Item: item, Instruction: strings.TrimSpace(instruction)})
 	cctx, cancel := context.WithTimeout(ctx, draftModelWait)
 	defer cancel()
 	// A draft that repeats a sentence an extension marked never to quote (what it keeps about people: evaluations,
@@ -658,4 +669,19 @@ func (s *Service) replyMail(ctx context.Context, r inboxReplyReq) (bool, error) 
 	// A hub "already" can be the first answer this manager got after an in-doubt send: this manager still writes the
 	// resulting item state. Only the local repeat check above may skip that write.
 	return false, err
+}
+
+// inboxPromptOwner keeps the legacy default while naming the owner in new prompt languages.
+func inboxPromptOwner(hello Hello) string {
+	if owner := strings.TrimSpace(hello.Owner); owner != "" {
+		return owner
+	}
+	switch answerLanguage(hello.Locale) {
+	case "日本語":
+		return "ユーザー"
+	case "":
+		return "用户"
+	default:
+		return "the user"
+	}
 }

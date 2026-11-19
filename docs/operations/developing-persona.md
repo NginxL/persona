@@ -11,7 +11,7 @@ hub or anyone else unless the owner sends the file, and then only as an ordinary
 | --- | --- |
 | iPhone / iPad | #9460: switch, recording, MetricKit, export with Send to Agent and Share File; #10589: Replay a Meeting Tape |
 | Web, desktop app | #9617: switch, recording, export with Send to Agent and Download; #9675: the desktop app's main process |
-| Android | planned, #9618 |
+| Android | #9618: switch, local recording, export with Share File and Send to Agent |
 | Watch | not in the first version (MetricKit is not available on watchOS) |
 
 ## The switch
@@ -130,6 +130,26 @@ shell has neither and the package goes without. Code: `desktop/src/dev-diagnosti
 the sender check; tests in `desktop/test/dev-diagnostics.test.ts`), `desktop/src/dev-diagnostics.ts` (Electron wiring,
 installed at the end of `desktop/src/main.ts`), `desktop/src/preload.cts`, `spec/desktop-bridge.d.ts`.
 
+## What is recorded (Android)
+
+Android keeps the same event/error limits and ZIP contract in `noBackupFilesDir/developing-persona`. Its recorder starts
+from `ProcessLifecycleOwner`; only foreground work has the one-minute ticker. Battery, power-save, thermal and default
+network changes come from `BatteryManager`, `PowerManager` and `ConnectivityManager`. Own-process CPU time comes from
+`Process.getElapsedCpuTime`. The OkHttp interceptor counts streamed request/response bytes without retaining bodies;
+the WebSocket listener keeps only frame type, UTF-8 byte count, connects and drops.
+
+`ApplicationExitInfo` supplies previous exits. ANR and crash reports, including the ANR's parsed main-thread frames,
+use the existing error-report path and leave a local copy while recording is on. Every other exit reason becomes an
+`app` event with `event: "exit"` and a fixed reason word. This does not add new exit kinds to hub error reporting.
+The export reads at most 5000 lines from this process's logcat, only when the owner creates an archive; there is no
+persistent logcat process.
+
+**Send to Agent** uses the ordinary Forward targets and file upload. It saves the archive as an uploaded file attachment
+and appends the note to the current structured draft, then opens that chat. The owner still sends the draft; this flow
+never sends a message itself. A missing binding, failed upload, draft conflict or pairing change leaves the chat closed
+and shows an error. The system share URI covers only a real file under `cache/dev-exports`; the provider and target
+picker are not exported.
+
 ## The package
 
 `persona-diagnostics-<platform>-<yyyyMMdd-HHmm>.zip` (local time), a folder of the same name inside:
@@ -200,3 +220,19 @@ Tests: `apple/PersonaTests/DevModeTests.swift`.
 rows), `web/src/views/settings/DevExportDialog.tsx` (export, Send To, Download), `web/src/features/todos/model/view-shadow.ts`
 (the To-dos view's shadow). Tests: `web/src/lib/dev-mode.test.ts`, `web/src/views/settings/DevModeSettings.test.tsx`,
 `web/src/features/todos/model/view-shadow.test.ts`.
+
+## Code (Android)
+
+- `core/contracts/DevScrub.kt`, `DevProbe.kt`: shared scrub rules and no-op-by-default probes.
+- `core/data/dev/`: `DevStore`, `DevRecorder`, `DevPackage` (bounded JSONL storage, counters and the real ZIP writer).
+- `core/hub/dev/DevHttpInterceptor.kt` and the WebSocket hooks in `OkHttpHubConnection.kt`: network numbers without
+  payloads. `ErrorReportQueue.localCopy` leaves the existing hub queue semantics unchanged.
+- `app/dev/DevelopingPersona.kt`: the device-local switch, lifecycle/system observers, export and sharing.
+- `feature/settings/DevelopingDiagnosticsPages.kt`: About's switch and deletion warning, and the export page.
+- `feature/chat/DiagnosticsHandoff.kt` and `app/dev/DiagnosticsShare*`: Forward targets, uploaded file draft and chat
+  handoff. `app/navigation/DevScreens.kt` supplies fixed page names without route arguments.
+
+The JVM tests exercise real files, ZIPs, loopback HTTP/WebSocket traffic, structured drafts and Robolectric Intents.
+`DevelopingDiagnosticsShotsTest` and `DiagnosticsShareShotsTest` render the pages in every style, language, light/dark,
+phone/tablet width and default/large text. These are native JVM Compose captures, not evidence of physical-device
+thermal, battery, ANR, logcat or system-share behavior; those still require a device when such a change needs it.

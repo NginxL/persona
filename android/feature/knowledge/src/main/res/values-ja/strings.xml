@@ -104,6 +104,8 @@
     <string name="knowledge_linked_recordings">関連する録音</string>
     <string name="knowledge_recorded">録音：%1$s</string>
     <string name="knowledge_recording_info">録音の情報</string>
+    <string name="knowledge_imported_lark">Lark の議事録</string>
+    <string name="knowledge_imported_original">元の議事録</string>
     <string name="knowledge_recording_started">開始</string>
     <string name="knowledge_recording_duration">長さ</string>
     <string name="knowledge_recording_device">デバイス</string>

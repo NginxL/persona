@@ -358,6 +358,11 @@ func noticeAsk(ix proto.Interaction) string {
 			}
 			b.WriteByte('\n')
 		}
+	case terminalQuestion(ix):
+		if title := clip(oneLine(ix.SessionTitle), 70); title != "" {
+			b.WriteString(title + " · ")
+		}
+		b.WriteString(terminalQuestionText(ix))
 	case ix.Kind == proto.IxPlan:
 		b.WriteString("批准它的计划：\n" + clipMarkdown(ix.Plan, 1200))
 	default:

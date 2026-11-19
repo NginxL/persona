@@ -1,0 +1,19 @@
+{
+  "name": "repository_get",
+  "description": "Read one saved repository reference belonging to the current assistant, using its id from repositories_list. Returns provider, instance, full path, canonical URL, optional name/aliases/purpose and verified_at from saved metadata only. Use details only when useful to resolve repository context. An explicit repository URL or path supplied by the user takes precedence. A binding is a reference, not authorization or an allowlist; never infer a machine or local checkout path from it. Does not check the remote, read source, clone, expose credentials or establish permissions.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80,
+        "description": "Stable saved binding id returned by this assistant's repositories_list, not a URL, machine, path or another assistant's id."
+      }
+    }
+  }
+}

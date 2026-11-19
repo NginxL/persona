@@ -1,0 +1,90 @@
+{
+  "base": "assistant",
+  "added": [
+    {
+      "at": "end",
+      "tool": {
+        "name": "imessage_chats",
+        "description": "List the user's iMessage / SMS conversations (the Messages app on their Mac), newest first: each one's name, id, whether it is a group and who is in it, when the last message came, how many are unread and the last message. Only real conversations are listed (someone in the user's contacts, or the user has written there); one-time codes are masked. Use imessage_read with an id to read a conversation, imessage_search to find messages by what they say.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "How many conversations (default 30)"
+            },
+            "before": {
+              "type": "string",
+              "description": "The before value a previous answer gave, for older conversations"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "at": "end",
+      "tool": {
+        "name": "imessage_read",
+        "description": "Read one iMessage / SMS conversation of the user's: its newest messages, oldest first, with who wrote each one and when (what a reply answers, attachments as [图片] / [文件 name] / [语音], group changes as lines; one-time codes masked). Ask again with the before value it gives for earlier messages.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "chat": {
+              "type": "string",
+              "description": "The conversation's id (imessage-\u003c12 hex\u003e) from imessage_chats or imessage_search"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "How many messages (default 40)"
+            },
+            "before": {
+              "type": "string",
+              "description": "The before value a previous answer gave, for earlier messages"
+            }
+          },
+          "required": [
+            "chat"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "at": "end",
+      "tool": {
+        "name": "imessage_search",
+        "description": "Search the user's iMessage / SMS messages for a word or phrase (plain substring, any case; not a query language): the newest matching messages, each with its conversation's name and id, who wrote it and when. Covers the last year by default. Only real conversations are searched (someone in the user's contacts, or the user has written there); one-time codes are masked. Read the conversation around a hit with imessage_read.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Text the message contains"
+            },
+            "days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650,
+              "description": "How far back to look, in days (default 365)"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "How many messages (default 20)"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

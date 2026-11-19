@@ -18,7 +18,7 @@
    - 选项「{{.Label}}」：{{.LeadsTo}}{{end}}{{with .Recommend}}
    - 推荐：{{.}}{{end}}{{with .Cost}}
    - 等待的代价：{{.}}{{end}}{{end}}{{range $e.Asks}}
-   - 卡片 interaction_id={{.ID}}（machine={{.Machine}}，{{if eq .Kind "permission"}}权限{{else if eq .Kind "plan"}}计划{{else}}问题{{end}}，session_id={{.Session}}{{if .Reminded}}，到时间没处理；用户开了低打扰模式，没有发给用户，再交给你处理一次{{else if .Raised}}，下一层没有及时处理，上交到你这里{{end}}）：
+   - 卡片 interaction_id={{.ID}}（machine={{.Machine}}，{{if eq .Kind "permission"}}权限{{else if eq .Kind "plan"}}计划{{else if eq .Kind "screen"}}终端选项，仅用户能操作；需要用户选择时用 ask_escalate{{else}}问题{{end}}，session_id={{.Session}}{{if .Reminded}}，到时间没处理；用户开了低打扰模式，没有发给用户，再交给你处理一次{{else if .Raised}}，下一层没有及时处理，上交到你这里{{end}}）：
 {{chomp (indent "     " .Text)}}{{end}}{{with $e.Decisions}}
    这个任务已经定下的事：
 {{chomp (indent "   " .)}}{{end}}{{with $e.Ask}}

@@ -175,7 +175,7 @@ try {
   await loading.locator("textarea").press("Escape");
   await openSlash(loading, "/security");
   await skill(loading, "Inspect security boundaries").waitFor({ state: "visible" });
-  assert((await loading.locator("body").innerText()).includes("Verified local skills only"));
+  await loading.getByText("Verified local skills only", { exact: false }).waitFor();
   await shot(loading, "claude-wide-dark-partial");
   await state("error");
   await loading.locator("textarea").press("Escape");

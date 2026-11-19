@@ -2,10 +2,13 @@ package node
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +84,7 @@ func TestInboxClaudeUsesDefaultAndPersistsOrigin(t *testing.T) {
 		t.Fatalf("Persona's own MCP tools lost their permission allowlist: %s", argv)
 	}
 	st, ok := f.n.state.get(id)
-	if !ok || st.Origin != originInbox || st.AppMode != "default" {
+	if !ok || st.Origin != originInbox || !st.OriginKnown || st.AppMode != "default" {
 		t.Fatalf("persisted session state=%+v present=%v", st, ok)
 	}
 	p := f.proc(id)
@@ -93,6 +96,78 @@ func TestInboxClaudeUsesDefaultAndPersistsOrigin(t *testing.T) {
 	}
 	if got := f.n.assistantOrigin(id); got != originInbox {
 		t.Fatalf("live process origin=%q, want inbox", got)
+	}
+}
+
+// Inbox may read its owner's installed Skills and knowledge base without a working-directory approval, including a
+// linked Skill checkout and a linked knowledge root. The launch gets no file-write allow rule, ordinary conversations
+// keep the old boundary, and Claude's health denies stay in force.
+func TestInboxClaudeReadOnlyLocalResourceRules(t *testing.T) {
+	n, home := testNode(t)
+	n.dir = filepath.Join(home, ".persona")
+	cwd := filepath.Join(n.dir, "assistant")
+	skillRoot := filepath.Join(home, ".claude", "skills")
+	linkedSkill := filepath.Join(home, "skill-checkout")
+	linkedData := filepath.Join(home, "knowledge")
+	for _, dir := range []string{skillRoot, linkedSkill, linkedData, n.dir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(linkedSkill, filepath.Join(skillRoot, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linkedData, filepath.Join(n.dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	// A link's target is allowed by its physical path: macOS's temporary directory is behind a link.
+	for _, dir := range []*string{&linkedSkill, &linkedData} {
+		physical, err := filepath.EvalSymlinks(*dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		*dir = physical
+	}
+	const id = "inbox-read-only-resources"
+	n.state.put(id, sessionState{Origin: originInbox})
+	flags := n.claudeAssistantMCPAndTools(id, cwd, true)
+	allowed := strings.Split(mcpFlag(t, flags, "--allowedTools"), ",")
+	fileRule := func(tool, dir string) string {
+		path := filepath.ToSlash(filepath.Clean(dir))
+		if path[0] != '/' {
+			path = "/" + path // a Windows drive path
+		}
+		return tool + "(/" + path + "/**)"
+	}
+	var readRules []string
+	for _, dir := range []string{skillRoot, filepath.Join(n.dir, "skills"), filepath.Join(n.dir, "data"), linkedSkill, linkedData} {
+		rule := fileRule("Read", dir)
+		readRules = append(readRules, rule)
+		if !slices.Contains(allowed, rule) {
+			t.Errorf("Inbox --allowedTools lacks %q: %q", rule, allowed)
+		}
+	}
+	for _, rule := range allowed {
+		if strings.HasPrefix(rule, "Write(") || strings.HasPrefix(rule, "Edit(") {
+			t.Errorf("Inbox gained a file-write allow rule: %q", rule)
+		}
+	}
+	ordinary := strings.Split(mcpFlag(t, n.claudeAssistantMCPAndTools("ordinary", cwd, true), "--allowedTools"), ",")
+	for _, rule := range readRules {
+		if slices.Contains(ordinary, rule) {
+			t.Errorf("ordinary conversation gained Inbox-only rule %q", rule)
+		}
+	}
+	denyAt := slices.Index(flags, "--disallowedTools")
+	if denyAt < 0 {
+		t.Fatalf("Inbox lost its health denies: %q", flags)
+	}
+	denied := flags[denyAt+1:]
+	for _, tool := range []string{"Read", "Edit"} {
+		rule := fileRule(tool, filepath.Join(n.dir, "health"))
+		if !slices.Contains(denied, rule) {
+			t.Errorf("Inbox --disallowedTools lacks %q: %q", rule, denied)
+		}
 	}
 }
 
@@ -179,7 +254,7 @@ func TestInboxSessionSendRestoresDefaultAndRestrictedTools(t *testing.T) {
 	}
 	f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "plan"})
 	inboxResumeTranscript(t, f.n, id)
-	if _, err := nodeCall(t, f.n, "session.send", map[string]any{"session_id": id, "text": "Continue", "origin": originInbox}); err != nil {
+	if _, err := nodeCall(t, f.n, "session.send", map[string]any{"session_id": id, "text": "Continue", "origin": originInbox, "origin_known": true}); err != nil {
 		t.Fatal(err)
 	}
 	f.idle(t, id)
@@ -199,16 +274,67 @@ func TestInboxSessionSendRestoresDefaultAndRestrictedTools(t *testing.T) {
 	}
 }
 
+// If a manager cannot make a fresh decision (for example, its origin store is unavailable), a persisted Inbox decision
+// remains authoritative. Missing wire fields must not downgrade it to ordinary tools.
+func TestSessionSendWithoutNewAttestationRetainsPersistedInbox(t *testing.T) {
+	f := cliTest(t)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "11111111-1111-4111-8111-111111111116"
+	cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "plan", Origin: originInbox, OriginKnown: true})
+	inboxResumeTranscript(t, f.n, id)
+	if _, err := nodeCallWithoutAttestation(t, f.n, "session.send", map[string]any{"session_id": id, "text": "Continue"}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	st, _ := f.n.state.get(id)
+	argv := f.file("cli-argv")
+	if st.Origin != originInbox || !st.OriginKnown || !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+		t.Fatalf("missing fresh attestation downgraded persisted Inbox: state=%+v argv=%s", st, argv)
+	}
+	if got := f.file("permission-requests"); got != "" {
+		t.Fatalf("persisted Inbox resumed a permission stall: %s", got)
+	}
+}
+
+func TestUnattestedOriginCannotOverridePersistedInbox(t *testing.T) {
+	f := cliTest(t)
+	const id = "11111111-1111-4111-8111-111111111118"
+	cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default", Origin: originInbox, OriginKnown: true})
+	inboxResumeTranscript(t, f.n, id)
+	// An older manager can supply a non-empty origin string, but without origin_known it is not a new decision and
+	// cannot replace the node's persisted Inbox policy with ordinary tools.
+	if _, err := nodeCallWithoutAttestation(t, f.n, "session.send", map[string]any{"session_id": id, "text": "Continue", "origin": "user"}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	st, _ := f.n.state.get(id)
+	argv := f.file("cli-argv")
+	if st.Origin != originInbox || !st.OriginKnown || !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+		t.Fatalf("unattested caller origin replaced persisted Inbox: state=%+v argv=%s", st, argv)
+	}
+}
+
 // Node-owned recovery runs before any manager continuation can re-attest the conversation. Load the hub's persisted
 // NodeSession representation through the real state.load/fetchState path, then recover its lost background task. Both
 // a new record with origin and a pre-upgrade record without it must recover safely; assistant.model re-attests the latter.
 func TestInboxNodeRecoveryKeepsPersistedOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		name, persistedOrigin string
+		originKnown           bool
 		model                 map[string]any
 	}{
-		{name: "origin persisted", persistedOrigin: originInbox},
-		{name: "legacy record re-attested by assistant model", model: map[string]any{"origin": originInbox}},
+		{name: "origin persisted", persistedOrigin: originInbox, originKnown: true},
+		{name: "legacy record re-attested by assistant model", model: map[string]any{"origin": originInbox, "origin_known": true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := cliTest(t)
@@ -223,7 +349,8 @@ func TestInboxNodeRecoveryKeepsPersistedOrigin(t *testing.T) {
 			inboxResumeTranscript(t, f.n, id)
 			f.fh.mu.Lock()
 			f.fh.state = map[string]db.NodeSession{id: {
-				Launcher: "claude", Cwd: cwd, Origin: tc.persistedOrigin, AppMode: "plan", Tasks: []string{"watch a background task"},
+				Launcher: "claude", Cwd: cwd, Origin: tc.persistedOrigin, OriginKnown: tc.originKnown,
+				AppMode: "plan", Tasks: []string{"watch a background task"},
 			}}
 			f.fh.model = tc.model
 			f.fh.mu.Unlock()
@@ -243,10 +370,456 @@ func TestInboxNodeRecoveryKeepsPersistedOrigin(t *testing.T) {
 			if in := f.file("stdin.jsonl"); !strings.Contains(in, `"mode":"default"`) {
 				t.Fatalf("node-owned recovery did not force default: %s", in)
 			}
-			if st, _ := f.n.state.get(id); len(st.Tasks) != 0 || st.Origin != originInbox {
-				t.Fatalf("recovered session state=%+v, want cleared tasks and retained origin", st)
+			cliWait(t, "recovered task cleanup", func() bool {
+				st, _ := f.n.state.get(id)
+				return len(st.Tasks) == 0 && st.Origin == originInbox && st.OriginKnown
+			})
+			if st, _ := f.n.state.get(id); len(st.Tasks) != 0 || st.Origin != originInbox || !st.OriginKnown {
+				t.Fatalf("recovered session state=%+v, want cleared tasks and retained origin decision", st)
 			}
 		})
+	}
+}
+
+// Neither an unavailable nor a successful empty assistant.model response is an ordinary-origin attestation. An
+// originless pre-upgrade record keeps its tasks for retry without starting a CLI; a persisted ordinary decision retains
+// the older-hub fallback, and a new manager can explicitly attest a legacy record ordinary.
+func TestRecoveryWithoutModelAnswerRequiresKnownOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		originKnown   bool
+		model         map[string]any
+		wantRecovered bool
+	}{
+		{name: "legacy origin unknown stays pending"},
+		{name: "empty model answer stays pending", model: map[string]any{}},
+		{name: "known ordinary retains fallback", originKnown: true, wantRecovered: true},
+		{name: "legacy ordinary explicitly attested", model: map[string]any{"origin_known": true}, wantRecovered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			const id = "11111111-1111-4111-8111-111111111113"
+			cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			inboxResumeTranscript(t, f.n, id)
+			f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default", OriginKnown: tc.originKnown,
+				Tasks: []string{"watch a background task"}})
+			f.fh.mu.Lock()
+			f.fh.model = tc.model
+			f.fh.mu.Unlock()
+			f.n.recoverAssistantTasks(f.n.recoverAssistantSend)
+			st, _ := f.n.state.get(id)
+			if tc.wantRecovered {
+				f.idle(t, id)
+				if len(st.Tasks) != 0 || st.Origin != "" || !st.OriginKnown {
+					t.Fatalf("known ordinary recovery state=%+v, want completed with its origin decision", st)
+				}
+				if argv := f.file("cli-argv"); !strings.Contains(argv, "--tools "+assistantBuiltinTools) || !strings.Contains(argv, "SendMessage") {
+					t.Fatalf("known ordinary fallback lost its existing tools: %s", argv)
+				}
+			} else {
+				if len(st.Tasks) != 1 || st.OriginKnown || f.proc(id) != nil || f.file("cli-argv") != "" {
+					t.Fatalf("unknown legacy recovery started a process or cleared tasks: state=%+v argv=%q", st, f.file("cli-argv"))
+				}
+			}
+		})
+	}
+}
+
+// Recovery without a fresh manager answer retains both the persisted origin decision and its working directory. The
+// send's empty cwd means "use the stored directory", not "clear it before the storedCwd fallback runs".
+func TestRecoveryWithoutModelAnswerPreservesStoredCwd(t *testing.T) {
+	for _, origin := range []string{"user", originInbox} {
+		t.Run(origin, func(t *testing.T) {
+			f := cliTest(t)
+			if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\nprintf '%s\\n' \"$PWD\" >> \"$CLI_FAKE_DIR/cli-cwd\"\n"+fakeCLI), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const id = "11111111-1111-4111-8111-11111111111a"
+			// The fake CLI writes the shell's $PWD, the physical path: macOS's temporary directory is behind a link.
+			cwd := filepath.Join(physicalTempDir(t), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default", Origin: origin, OriginKnown: true,
+				Tasks: []string{"watch a background task"}})
+			inboxResumeTranscript(t, f.n, id)
+			f.n.recoverAssistantTasks(f.n.recoverAssistantSend)
+			f.idle(t, id)
+			st, _ := f.n.state.get(id)
+			p := f.proc(id)
+			if p == nil {
+				t.Fatal("known-origin recovery did not start a process")
+			}
+			p.mu.Lock()
+			processCwd := p.cwd
+			p.mu.Unlock()
+			if st.Cwd != cwd || processCwd != cwd || strings.TrimSpace(f.file("cli-cwd")) != cwd {
+				t.Fatalf("recovery lost stored cwd %q: state=%q process=%q actual=%q", cwd, st.Cwd, processCwd, strings.TrimSpace(f.file("cli-cwd")))
+			}
+		})
+	}
+}
+
+// A legacy manager cannot attest an ordinary empty origin. Both continuation RPCs fail closed on a pre-upgrade record,
+// even if it supplies an origin string without origin_known; the new manager's explicit ordinary decision resumes it.
+func TestLegacyManagerSendRequiresExplicitOriginDecision(t *testing.T) {
+	for _, method := range []string{"assistant.send", "session.send"} {
+		for _, tc := range []struct {
+			name      string
+			params    map[string]any
+			wantStart bool
+		}{
+			{name: "older manager"},
+			{name: "origin without explicit decision", params: map[string]any{"origin": originInbox}},
+			{name: "explicit ordinary decision", params: map[string]any{"origin_known": true}, wantStart: true},
+		} {
+			t.Run(method+"/"+tc.name, func(t *testing.T) {
+				f := cliTest(t)
+				const id = "11111111-1111-4111-8111-111111111114"
+				cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+				if err := os.MkdirAll(cwd, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default"})
+				inboxResumeTranscript(t, f.n, id)
+				params := map[string]any{"session_id": id, "text": "Continue"}
+				for k, v := range tc.params {
+					params[k] = v
+				}
+				_, err := nodeCallWithoutAttestation(t, f.n, method, params)
+				if !tc.wantStart {
+					if !errors.Is(err, errAssistantOriginUnknown) {
+						t.Fatalf("legacy send error=%v, want errAssistantOriginUnknown", err)
+					}
+					st, _ := f.n.state.get(id)
+					if st.OriginKnown || f.proc(id) != nil || f.file("cli-argv") != "" {
+						t.Fatalf("unattested manager send started ordinary tools: state=%+v argv=%q", st, f.file("cli-argv"))
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.idle(t, id)
+				st, _ := f.n.state.get(id)
+				if !st.OriginKnown || st.Origin != "" {
+					t.Fatalf("explicit ordinary decision was not persisted: %+v", st)
+				}
+				if argv := f.file("cli-argv"); !strings.Contains(argv, "--tools "+assistantBuiltinTools) || !strings.Contains(argv, "SendMessage") {
+					t.Fatalf("explicit ordinary continuation lost its existing tools: %s", argv)
+				}
+			})
+		}
+	}
+}
+
+// Cold compaction directly spawns a stopped process. It must consume the same explicit origin decision as recovery and
+// record it before tool selection, rather than starting an originless legacy Inbox transcript with ordinary built-ins.
+func TestColdCompactionRequiresAndCarriesExplicitOriginDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		originKnown bool
+		model       map[string]any
+		wantStart   bool
+		wantOrigin  string
+	}{
+		{name: "unavailable model answer stays stopped"},
+		{name: "empty model answer stays stopped", model: map[string]any{}},
+		{name: "known ordinary retains fallback", originKnown: true, wantStart: true},
+		{name: "legacy Inbox re-attested", model: map[string]any{"origin": originInbox, "origin_known": true}, wantStart: true, wantOrigin: originInbox},
+		{name: "legacy ordinary re-attested", model: map[string]any{"origin_known": true}, wantStart: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			const id = "11111111-1111-4111-8111-111111111115"
+			cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default", OriginKnown: tc.originKnown})
+			inboxResumeTranscript(t, f.n, id)
+			f.fh.mu.Lock()
+			f.fh.model = tc.model
+			f.fh.mu.Unlock()
+			err := f.n.assistantCompact(context.Background(), id, false)
+			st, _ := f.n.state.get(id)
+			if !tc.wantStart {
+				if !errors.Is(err, errAssistantOriginUnknown) || f.proc(id) != nil || f.file("cli-argv") != "" || st.OriginKnown || st.Compaction != nil {
+					t.Fatalf("unattested cold compaction started: err=%v state=%+v argv=%q", err, st, f.file("cli-argv"))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			cliWait(t, "cold compaction process arguments", func() bool { return strings.Contains(f.file("cli-argv"), "--resume") })
+			argv := f.file("cli-argv")
+			if tc.wantOrigin == originInbox {
+				if !strings.Contains(argv, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(argv, "SendMessage") {
+					t.Fatalf("cold-compacted Inbox process lost restricted tools: %s", argv)
+				}
+			} else if !strings.Contains(argv, "--tools "+assistantBuiltinTools) || !strings.Contains(argv, "SendMessage") {
+				t.Fatalf("cold-compacted ordinary process lost its existing tools: %s", argv)
+			}
+			if !st.OriginKnown || st.Origin != tc.wantOrigin {
+				t.Fatalf("cold compaction persisted origin=%q known=%v, want %q/true", st.Origin, st.OriginKnown, tc.wantOrigin)
+			}
+		})
+	}
+}
+
+// Model-error recovery and impossible-usage resend can restart a stopped old process without a new manager RPC.
+// Their production send helpers must apply the same explicit-origin gate rather than reviving ordinary built-ins.
+func TestAutonomousRetriesRequireKnownOrigin(t *testing.T) {
+	for _, name := range []string{"model recovery", "usage resend"} {
+		t.Run(name, func(t *testing.T) {
+			f := cliTest(t)
+			if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const id = "11111111-1111-4111-8111-111111111117"
+			cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default"})
+			inboxResumeTranscript(t, f.n, id)
+			var err error
+			if name == "model recovery" {
+				err = sendAssistantRecovery(context.Background(), f.n, &assistantProc{id: id}, "claude", cwd, modelExecution{})
+			} else {
+				err = sendAssistantUsageRetry(context.Background(), f.n, id, cwd, "claude", "retry", modelExecution{})
+			}
+			if !errors.Is(err, errAssistantOriginUnknown) || f.proc(id) != nil || f.file("cli-argv") != "" {
+				t.Fatalf("unattested %s restarted ordinary tools: err=%v argv=%q", name, err, f.file("cli-argv"))
+			}
+		})
+	}
+}
+
+func TestOriginReattestationRestartsClaudeToolPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, initialOrigin, targetOrigin, wantTools string
+	}{
+		{name: "ordinary to Inbox", targetOrigin: originInbox, wantTools: wantInboxClaudeBuiltins},
+		{name: "Inbox to ordinary", initialOrigin: originInbox, wantTools: assistantBuiltinTools},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			cwd := t.TempDir()
+			id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "Investigate", nil, "default", "", modelExecution{Origin: tc.initialOrigin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			first := f.proc(id)
+			inboxResumeTranscript(t, f.n, id)
+			if _, err := f.n.assistantSend(context.Background(), id, cwd, "claude", "Continue", nil, "default", "", modelExecution{Origin: tc.targetOrigin, OriginKnown: true, OriginDecisionRequired: true}); err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			second := f.proc(id)
+			if second == nil || second == first {
+				t.Fatal("origin re-attestation retained the process with the previous built-in tools")
+			}
+			lines := strings.Split(strings.TrimSpace(f.file("cli-argv")), "\n")
+			argv := lines[len(lines)-1]
+			if !strings.Contains(argv, "--tools "+tc.wantTools) {
+				t.Fatalf("re-attested process argv has the wrong tool policy: %s", argv)
+			}
+			if tc.targetOrigin == originInbox && strings.Contains(argv, "SendMessage") {
+				t.Fatalf("ordinary process retained SendMessage after Inbox re-attestation: %s", argv)
+			}
+			if tc.targetOrigin == "" && !strings.Contains(argv, "SendMessage") {
+				t.Fatalf("ordinary re-attestation did not restore SendMessage: %s", argv)
+			}
+			st, _ := f.n.state.get(id)
+			if st.Origin != tc.targetOrigin || !st.OriginKnown {
+				t.Fatalf("re-attested state origin=%q known=%v, want %q/true", st.Origin, st.OriginKnown, tc.targetOrigin)
+			}
+		})
+	}
+}
+
+// A fallback hold changes only the model choice. It must not restore the fallback's old origin and thereby deliver an
+// Inbox message to a process that still has the ordinary built-in SendMessage tool.
+func TestInboxReattestationOverridesActiveFallbackHold(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		hold, release func(*assistantProc)
+		wantBusy      bool
+	}{
+		{name: "idle", hold: func(*assistantProc) {}, release: func(*assistantProc) {}},
+		{name: "compacting", hold: func(p *assistantProc) { p.compacting = true }, release: func(p *assistantProc) { p.compacting = false }, wantBusy: true},
+		{name: "queued input", hold: func(p *assistantProc) {
+			p.written = []assistantInput{{queued: true, at: time.Now()}}
+		}, release: func(p *assistantProc) { p.written = nil }, wantBusy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			cwd := t.TempDir()
+			from := modelExecution{Model: "primary-model", Fingerprint: "fp", Origin: "user", OriginKnown: true}
+			fallback := modelExecution{Model: "fallback-model", Fingerprint: "fp", Origin: "user", OriginKnown: true}
+			id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "Investigate", nil, "default", "", fallback)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			first := f.proc(id)
+			f.n.mu.Lock()
+			f.n.holdFallback(id, "claude", from, fallback)
+			f.n.mu.Unlock()
+			first.mu.Lock()
+			tc.hold(first)
+			first.mu.Unlock()
+			defer func() {
+				first.mu.Lock()
+				tc.release(first)
+				first.mu.Unlock()
+			}()
+			argvBefore, stdinBefore := f.file("cli-argv"), f.file("stdin.jsonl")
+			asked := from
+			asked.Origin, asked.OriginKnown, asked.OriginDecisionRequired = originInbox, true, true
+			_, err = f.n.assistantSend(context.Background(), id, cwd, "claude", "Continue as Inbox", nil, "default", "", asked)
+			if tc.wantBusy {
+				if !errors.Is(err, errAssistantOriginBusy) {
+					t.Fatalf("fallback-held working process error=%v, want errAssistantOriginBusy", err)
+				}
+				first.mu.Lock()
+				stillWorking := first.workingLocked()
+				first.mu.Unlock()
+				if !stillWorking || f.proc(id) != first || f.file("cli-argv") != argvBefore || f.file("stdin.jsonl") != stdinBefore {
+					t.Fatal("fallback hold let an Inbox message reach or replace the ordinary working process")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			second := f.proc(id)
+			lines := strings.Split(strings.TrimSpace(f.file("cli-argv")), "\n")
+			latest := lines[len(lines)-1]
+			if second == nil || second == first {
+				t.Fatalf("fallback hold retained the ordinary process for Inbox input; latest argv=%s", latest)
+			}
+			if !strings.Contains(latest, "--tools "+wantInboxClaudeBuiltins) || strings.Contains(latest, "SendMessage") {
+				t.Fatalf("fallback-held Inbox process has the wrong built-in tools: %s", latest)
+			}
+			st, _ := f.n.state.get(id)
+			if st.Origin != originInbox || !st.OriginKnown {
+				t.Fatalf("fallback-held Inbox state origin=%q known=%v", st.Origin, st.OriginKnown)
+			}
+		})
+	}
+}
+
+func TestOrdinaryOriginAliasesKeepClaudeProcess(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("busy=%v", busy), func(t *testing.T) {
+			f := cliTest(t)
+			cwd := t.TempDir()
+			id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "Investigate", nil, "default", "",
+				modelExecution{Origin: "user", OriginKnown: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			first := f.proc(id)
+			argvBefore := f.file("cli-argv")
+			first.mu.Lock()
+			first.busy = busy
+			first.mu.Unlock()
+			_, err = f.n.assistantSend(context.Background(), id, cwd, "claude", "Continue", nil, "default", "",
+				modelExecution{OriginKnown: true, OriginDecisionRequired: true})
+			first.mu.Lock()
+			first.busy = false
+			first.mu.Unlock()
+			if err != nil {
+				t.Fatalf("ordinary origin alias changed the tool-policy boundary: %v", err)
+			}
+			f.idle(t, id)
+			if f.proc(id) != first || f.file("cli-argv") != argvBefore {
+				t.Fatal("ordinary user to empty origin restarted an identical tool policy")
+			}
+			st, _ := f.n.state.get(id)
+			if st.Origin != "" || !st.OriginKnown {
+				t.Fatalf("ordinary re-attestation was not persisted: %+v", st)
+			}
+		})
+	}
+}
+
+func TestInboxReattestationRefusesBusyOrdinaryProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		hold, release func(*assistantProc)
+	}{
+		{name: "turn", hold: func(p *assistantProc) { p.busy = true }, release: func(p *assistantProc) { p.busy = false }},
+		{name: "compaction", hold: func(p *assistantProc) { p.compacting = true }, release: func(p *assistantProc) { p.compacting = false }},
+		{name: "queued input", hold: func(p *assistantProc) {
+			p.written = []assistantInput{{queued: true, at: time.Now()}}
+		}, release: func(p *assistantProc) { p.written = nil }},
+		{name: "accepted unacknowledged input", hold: func(p *assistantProc) {
+			p.lifecycle = true
+			p.written = []assistantInput{{at: time.Now()}}
+		}, release: func(p *assistantProc) {
+			p.lifecycle = false
+			p.written = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTest(t)
+			cwd := t.TempDir()
+			id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "Investigate", nil, "default", "", modelExecution{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, id)
+			p := f.proc(id)
+			p.mu.Lock()
+			tc.hold(p)
+			p.mu.Unlock()
+			defer func() {
+				p.mu.Lock()
+				tc.release(p)
+				p.mu.Unlock()
+			}()
+			argvBefore, stdinBefore := f.file("cli-argv"), f.file("stdin.jsonl")
+			_, err = f.n.assistantSend(context.Background(), id, cwd, "claude", "Continue as Inbox", nil, "default", "", modelExecution{Origin: originInbox, OriginKnown: true, OriginDecisionRequired: true})
+			if !errors.Is(err, errAssistantOriginBusy) {
+				t.Fatalf("working origin re-attestation error=%v, want errAssistantOriginBusy", err)
+			}
+			p.mu.Lock()
+			stillWorking := p.workingLocked()
+			p.mu.Unlock()
+			if !stillWorking {
+				t.Fatal("origin re-attestation discarded the process's held work")
+			}
+			if f.proc(id) != p || f.file("cli-argv") != argvBefore || f.file("stdin.jsonl") != stdinBefore {
+				t.Fatal("Inbox message reached or replaced the working process that still had ordinary built-in tools")
+			}
+		})
+	}
+}
+
+func TestExplicitOrdinaryDecisionClearsPersistedInboxBeforeSpawn(t *testing.T) {
+	f := cliTest(t)
+	const id = "11111111-1111-4111-8111-111111111119"
+	cwd := t.TempDir()
+	f.n.state.put(id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: "default", Origin: originInbox, OriginKnown: true})
+	inboxResumeTranscript(t, f.n, id)
+	if _, err := f.n.assistantSend(context.Background(), id, cwd, "claude", "Continue", nil, "default", "", modelExecution{OriginKnown: true, OriginDecisionRequired: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	st, _ := f.n.state.get(id)
+	argv := f.file("cli-argv")
+	if st.Origin != "" || !st.OriginKnown || !strings.Contains(argv, "--tools "+assistantBuiltinTools) || !strings.Contains(argv, "SendMessage") {
+		t.Fatalf("stale Inbox state restricted explicitly ordinary spawn: state=%+v argv=%s", st, argv)
 	}
 }
 
@@ -265,6 +838,23 @@ func TestInboxDoesNotAdoptOrdinaryToolSpare(t *testing.T) {
 	}
 	if got := n.adoptSpareFor(n.home, "claude", "default", modelExecution{}); got != p {
 		t.Fatal("ordinary conversation did not retain warm-spare adoption")
+	}
+	// Isolate the explicit guard from the origin-bearing execution fingerprint: even matching metadata must not let an
+	// Inbox conversation adopt a spare whose actual ordinary process already exposed SendMessage.
+	matching := &assistantProc{id: "matching-spare", agent: "claude", launcher: "claude", cwd: n.home, born: time.Now(),
+		fingerprint: n.executionFingerprint("claude", modelExecution{Origin: originInbox})}
+	n.spare = matching
+	if got := n.adoptSpareFor(n.home, "claude", "default", modelExecution{Origin: originInbox}); got != nil {
+		t.Fatal("matching fingerprint bypassed the explicit ordinary-tool spare guard")
+	}
+	if n.spare != matching {
+		t.Fatal("the guarded matching spare was consumed")
+	}
+	ordinaryAlias := &assistantProc{id: "ordinary-alias-spare", agent: "claude", launcher: "claude", cwd: n.home, born: time.Now(),
+		fingerprint: n.executionFingerprint("claude", modelExecution{})}
+	n.spare = ordinaryAlias
+	if got := n.adoptSpareFor(n.home, "claude", "default", modelExecution{Origin: "user"}); got != ordinaryAlias {
+		t.Fatal("an ordinary origin alias rejected a spare with the same built-in tool policy")
 	}
 }
 
@@ -292,6 +882,8 @@ func TestInboxLarkOutboundDeniedOrdinaryBypassPreserved(t *testing.T) {
 		{"Inbox ordinary write", originInbox, "lark-cli docs +create --title example", "deny"},
 		{"Inbox unknown write", originInbox, "lark-cli custom $action", "deny"},
 		{"Inbox read", originInbox, "lark-cli docs +fetch --doc-id example", "allow"},
+		{"Inbox ol write", originInbox, "ol POST /messages/1/recall", "deny"},
+		{"Inbox ol read", originInbox, "ol GET /messages/1", "allow"},
 		{"ordinary bot send", "", "lark-cli im +messages-send --as bot --text hello", "allow"},
 		{"ordinary bot reply", "", "lark-cli im +messages-reply --as bot --text hello", "allow"},
 		{"ordinary read", "", "lark-cli docs +fetch --doc-id example", "allow"},
@@ -301,6 +893,7 @@ func TestInboxLarkOutboundDeniedOrdinaryBypassPreserved(t *testing.T) {
 			fh := withFakeHub(t, n)
 			const sid = "11111111-1111-4111-8111-111111111111"
 			cfg := olCfg()
+			cfg.Gates[0].Command = "ol"
 			cfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
 			n.larkRisks = map[string]string{"\x00docs +fetch": "read", "\x00docs +create": "write"}
 			n.mu.Lock()

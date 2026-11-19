@@ -59,6 +59,8 @@ describe("ModeChangeDivider", () => {
     expect(modeChangeLabel(change(1))).toBe("Phone 把权限模式从「默认权限」改成了「允许编辑」");
     expect(modeChangeLabel(change(1, { from: "" }))).toBe("Phone 把权限模式改成了「允许编辑」");
     expect(modeChangeLabel(change(1, { actor_kind: "hub", device_name: "" }))).toBe("hub 把权限模式从「默认权限」改成了「允许编辑」");
+    expect(modeChangeLabel(change(1, { actor_kind: "assistant", device_name: "Persona", from: "default", to: "plan" }))).toBe("Persona 把权限模式从「默认权限」改成了「计划模式」");
+    expect(modeChangeLabel(change(1, { actor_kind: "device", device_name: "Phone", from: "plan", to: "acceptEdits", applied: "" }))).toBe("Phone 把权限模式从「计划模式」改成了「允许编辑」");
     const outcome = (kind: ModeChange["kind"], reason?: string) => modeChangeLabel({ kind, to: "bypassPermissions", reason, at: at(1) });
     expect(outcome("restart_done")).toBe("已重启，切到了「完全访问」");
     expect(outcome("restart_done", "already_in")).toBe("已经是「完全访问」了，不用重启");

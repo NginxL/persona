@@ -3,6 +3,8 @@ package wire
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 )
 
 // UI version 10's checks (docs/extensions/extensions.md "UI version 10"): a graph's nodes and edges. What the schema
@@ -32,6 +34,44 @@ func CheckGraph(e *Component) error {
 		}
 		if !finitePtr(n.Progress) || n.Progress != nil && (*n.Progress < 0 || *n.Progress > 1) {
 			return fmt.Errorf("node %q: progress is 0 to 1", n.ID)
+		}
+		if !finitePtr(n.StartedAt) || n.StartedAt != nil && *n.StartedAt < 0 {
+			return fmt.Errorf("node %q: started_at must be 0 or more", n.ID)
+		}
+		if !finitePtr(n.EndedAt) || n.EndedAt != nil && *n.EndedAt < 0 {
+			return fmt.Errorf("node %q: ended_at must be 0 or more", n.ID)
+		}
+		if n.StartedAt != nil && n.EndedAt != nil && *n.EndedAt < *n.StartedAt {
+			return fmt.Errorf("node %q: ended_at before started_at", n.ID)
+		}
+		if len(n.Facts) > 8 {
+			return fmt.Errorf("node %q: at most 8 facts", n.ID)
+		}
+		for f := range n.Facts {
+			if err := checkFact(&n.Facts[f]); err != nil {
+				return fmt.Errorf("node %q fact %d: %v", n.ID, f, err)
+			}
+		}
+		if utf8.RuneCountInString(n.Detail) > 2000 {
+			return fmt.Errorf("node %q: detail has at most 2000 characters", n.ID)
+		}
+		if len(n.Links) > 8 {
+			return fmt.Errorf("node %q: at most 8 links", n.ID)
+		}
+		for l := range n.Links {
+			title, raw := n.Links[l].Title, n.Links[l].URL
+			if k := utf8.RuneCountInString(title); k < 1 || k > 80 {
+				return fmt.Errorf("node %q link %d: a title of 1 to 80 characters", n.ID, l)
+			}
+			if k := utf8.RuneCountInString(raw); k < 1 || k > 2000 {
+				return fmt.Errorf("node %q link %d: a url of 1 to 2000 characters", n.ID, l)
+			}
+			if !strings.HasPrefix(raw, "https://") || strings.TrimSpace(raw) != raw {
+				return fmt.Errorf("node %q link %d: link needs an https url", n.ID, l)
+			}
+			if err := CheckHTTPS(raw, "link"); err != nil {
+				return fmt.Errorf("node %q link %d: %v", n.ID, l, err)
+			}
 		}
 	}
 	parents := make(map[string]int, len(e.Nodes))

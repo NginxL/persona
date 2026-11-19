@@ -224,7 +224,7 @@ type ManagedLauncher struct {
 	// SubagentForce: CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 (the subagent model wins over an agent's own model:).
 	SubagentForce bool `json:"subagent_force,omitempty"`
 	// Headers: ANTHROPIC_CUSTOM_HEADERS, one "Name: value" a line. A secret like the key: sealed at rest, never sent
-	// back to clients (they see HasHeaders).
+	// back to clients (they see HasHeaders and, in the manager's LauncherView, only the configured names).
 	Headers    string `json:"headers,omitempty"`
 	HasHeaders bool   `json:"has_headers,omitempty"`
 	// Proxy / NoProxy: HTTP_PROXY and HTTPS_PROXY / NO_PROXY for the gateway.
@@ -337,6 +337,21 @@ func (l ManagedLauncher) AgentType() string {
 		return l.Agent
 	}
 	return "claude"
+}
+
+// CustomHeadersSupported reports whether this managed runtime has a real launch-time channel for every configured
+// header. A probe may send a header over HTTP even when the runtime cannot; those combinations must be refused instead
+// of presenting the probe as proof of a working launch.
+func (l ManagedLauncher) CustomHeadersSupported() bool {
+	switch l.AgentType() {
+	case "claude", "codex":
+		return true
+	case "omp":
+		// omp documents ANTHROPIC_CUSTOM_HEADERS for its Anthropic provider behind a non-Anthropic base URL.
+		return (l.API == "" || l.API == "messages") && !AnthropicAPI(l.LaunchBaseURL())
+	default:
+		return false
+	}
 }
 
 // PiAPI is the pi API (pi's registerProvider "api") a provider speaks when pi can use it too (docs/integrations/pi.md

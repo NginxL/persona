@@ -54,6 +54,9 @@
     <string name="settings_paste_format_curl">A curl request</string>
     <string name="settings_paste_format_cindy">A cindy provider</string>
     <string name="settings_paste_format_link">A provider import link</string>
+    <string name="settings_provider_import_link_unsupported">This hub can\'t open import links yet. Update the hub to open them.</string>
+    <string name="settings_paste_link_opened">Opened from a link. Nothing is saved until you review it and confirm Save.</string>
+    <string name="settings_paste_something_else">Paste something else</string>
     <string name="settings_paste_nothing">No provider was found in this text.</string>
     <plurals name="settings_paste_several">
         <item quantity="one">Choose the %1$d provider found.</item>

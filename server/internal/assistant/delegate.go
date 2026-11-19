@@ -62,7 +62,8 @@ func (s *Service) Delegate(ctx context.Context, p DelegateParams) (DelegateResul
 		return asIs, nil
 	}
 	in := s.delegateInput(ctx, ix, c)
-	sys := prompts.AgentDelegate{Owner: s.owner(ctx), Rules: strings.TrimSpace(s.hello(ctx).Agents.Delegate.Rules)}
+	hello := s.hello(ctx)
+	sys := prompts.AgentDelegate{Language: answerLanguage(hello.Locale), Owner: strings.TrimSpace(hello.Owner), Rules: strings.TrimSpace(hello.Agents.Delegate.Rules)}
 	res, err := judgeDelegateWith(ctx, s.purposeModel("agent.delegate"), sys, in, ix)
 	if err != nil {
 		s.workEvent(ix.MachineID, ix.SessionID, "delegate_failed", map[string]any{"error": clip(err.Error(), 200)})
@@ -80,6 +81,7 @@ func (s *Service) Delegate(ctx context.Context, p DelegateParams) (DelegateResul
 // read around the question), and applies the hub's rules to what it answers (delegateResult). It reads nothing else,
 // so a behaviour check can run it on written-out questions (#2586, delegate_judge_live_test.go).
 func judgeDelegateWith(ctx context.Context, m jsonModel, sys prompts.AgentDelegate, in prompts.AgentDelegateInput, ix proto.Interaction) (DelegateResult, error) {
+	in.Language = sys.Language // System and data wrappers use the same captured locale.
 	var out delegateOut
 	if err := m.JSON(ctx, prompts.RenderAgentDelegate(sys), prompts.RenderAgentDelegateInput(in), &out); err != nil {
 		return DelegateResult{}, err

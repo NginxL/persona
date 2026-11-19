@@ -33,7 +33,7 @@ func TestWorkAgentStartTypesTheModel(t *testing.T) {
 					cancel()
 				}
 			})
-			_, _ = n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, tc.kind, tc.kind, tc.model, "do the thing", "w1", "")
+			_, _ = n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, tc.kind, tc.kind, tc.model, "", "do the thing", "w1", "")
 			want := call("pane.send_input", map[string]any{"pane_id": "w1:p2", "keys": []string{"Enter"}, "text": inAgentEnv(n.dir, tc.want, shellQuote)})
 			var got []string
 			for _, c := range f.trace("pane.send_input") {
@@ -58,11 +58,11 @@ func TestWorkAgentCommandApprovesPiProjectFiles(t *testing.T) {
 		{"cursor", "cursor-agent", "cursor/grok-4.7", "cursor-agent --model cursor/grok-4.7"},
 		{"agy", "agy", "", "agy"},
 	} {
-		if got := workAgentCommand(tc.launcher, tc.program, tc.model); got != tc.want {
+		if got := workAgentCommand(tc.launcher, tc.program, tc.model, ""); got != tc.want {
 			t.Errorf("workAgentCommand(%q, %q, %q) = %q, want %q", tc.launcher, tc.program, tc.model, got, tc.want)
 		}
 	}
-	if got, want := workAgentResume(piAgent, workAgentCommand("pi", "pi", ""), "/s/a.jsonl"), `pi --approve --session /s/a.jsonl`; got != want {
+	if got, want := workAgentResume(piAgent, workAgentCommand("pi", "pi", "", ""), "/s/a.jsonl"), `pi --approve --session /s/a.jsonl`; got != want {
 		t.Errorf("resume = %q, want %q", got, want)
 	}
 }
@@ -204,7 +204,7 @@ func TestWorkAgentStartHoldsPaneLockThroughCleanup(t *testing.T) {
 	})
 	startDone := make(chan error, 1)
 	go func() {
-		_, err := n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "do the thing", "w1", "")
+		_, err := n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "do the thing", "w1", "")
 		startDone <- err
 	}()
 	select {
@@ -319,7 +319,7 @@ func TestWorkAgentLaunchRunErrorKeepsTabAndQuitsAgent(t *testing.T) {
 	})
 	quitsOn(f, "w1:p2", id, nil, shellPane("w1:p2", "w1:t2", "w1", home, id))
 	withStop(t, 1, time.Millisecond)
-	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "do the thing", "w1", "")
+	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "do the thing", "w1", "")
 	if err == nil || !strings.Contains(err.Error(), "run launcher") {
 		t.Fatalf("start: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestWorkAgentStartRefusesWhenPaneHostRefreshFails(t *testing.T) {
 	f.handle("agent.list", func(map[string]any) any {
 		return herdrFail{Code: "unavailable", Message: "snapshot failed"}
 	})
-	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "w1", "")
+	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "", "w1", "")
 	if err == nil || !strings.Contains(err.Error(), "snapshot failed") {
 		t.Fatalf("start: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestWorkAgentStartPromptsThroughHerdr(t *testing.T) {
 		}
 	})
 	s, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, "cursor", cursorAgent,
-		"cursor/grok-4.7", "do the thing", "w1", "")
+		"cursor/grok-4.7", "", "do the thing", "w1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +441,7 @@ func TestPiStartWithoutExtensionQuitsAgentAndKeepsTheTab(t *testing.T) {
 		})
 		// A short message such as "hi" can also occur in the launch command's temporary path.
 		const message = "the first message must stay unsent"
-		_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", message, "w1", "")
+		_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", "", message, "w1", "")
 		if err == nil || !strings.Contains(err.Error(), "pi_no_extension") && !strings.Contains(err.Error(), "没有 Persona 扩展") {
 			t.Fatalf("start: %v", err)
 		}

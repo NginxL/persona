@@ -14,10 +14,10 @@ import (
 // Resuming a node connection (#10663, docs/protocol/protocol.md "Resuming"): a resident node that announces
 // node_resume_v1 keeps the connection when its transport ends, and so does the manager (rpc.Peer.EnableResume). The
 // transport going (a relay ended, a link dropped, pings unanswered over a half-open one) then leaves the peer waiting:
-// its calls pending, its watches on, the machine shown as it was. resumeConn opens a new transport on the same path
-// and takes the connection back over it, the node writing again what the manager did not read and the other way
-// round; nothing is watched again. Refused (the node restarted), or not done within resumeWindow, the peer closes and
-// the run loop connects anew as it always did.
+// its calls pending, its watches on, the machine shown as it was. resumeConn opens a new transport on the same path,
+// or on a better path when the same-path try failed, and takes the connection back over it, the node writing again
+// what the manager did not read and the other way round; nothing is watched again. Refused (the node restarted), or
+// not done within resumeWindow, the peer closes and the run loop connects anew as it always did.
 
 // resumeWindow is how long a dropped connection waits to be resumed, from when the manager noticed (the node keeps it
 // longer, nodeproto.ResumeKeepSeconds: it may have noticed first).
@@ -61,7 +61,8 @@ func (m *Machine) openPipe(ctx context.Context, p *nodePath, via string) (*nodeP
 }
 
 // resumeConn takes c back after its transport was lost with err (rpc.Peer.OnLost): the old transport is closed, and
-// new ones are tried on its path until one resumes it, the node refuses, or the window ends.
+// new ones are tried on its path until one resumes it, the node refuses, or the window ends. When a try on that path
+// fails and another path is better by then, one resume is tried there before the connection falls back to a reconnect.
 func (m *Machine) resumeConn(c *nodeConn, err error) {
 	lostAt := time.Now()
 	m.mu.Lock()
@@ -77,20 +78,15 @@ func (m *Machine) resumeConn(c *nodeConn, err error) {
 		m.fellBack(lostAt, "the node restarts")
 		return
 	}
-	m.d.logf("[%s] connection over %s lost (%v): resuming within %s", m.cfg.ID, c.via, oneLineErr(err), resumeWindow)
+	_, lostVia := c.route()
+	m.d.logf("[%s] connection over %s lost (%v): resuming within %s", m.cfg.ID, lostVia, oneLineErr(err), resumeWindow)
 	deadline := lostAt.Add(resumeWindow)
 	wait := 200 * time.Millisecond
 	for try := 1; time.Until(deadline) > 0; try++ {
-		rerr := m.tryResume(c)
+		p, via := c.route()
+		rerr := m.tryResume(c, p, via, nil)
 		if rerr == nil {
-			took := time.Since(lostAt)
-			m.mu.Lock()
-			m.resumes.resumed++
-			m.resumes.last, m.resumes.most = took, max(m.resumes.most, took)
-			counts := m.resumes
-			m.mu.Unlock()
-			m.d.logf("[%s] connection over %s resumed after %s (try %d): %s %s", m.cfg.ID, c.via, took.Round(time.Millisecond),
-				try, counts, c.peer.LaneStats())
+			m.resumeSucceeded(c, lostAt, try)
 			return
 		}
 		if errors.Is(rerr, rpc.ErrResumeRefused) {
@@ -98,11 +94,18 @@ func (m *Machine) resumeConn(c *nodeConn, err error) {
 			m.fellBack(lostAt, oneLineErr(rerr))
 			return
 		}
-		if p, _ := m.d.choosePath(m); p != nil && pathName(m.d, p) != pathName(m.d, c.path) {
-			// Its path failed and the machine has a better one now (a network changed): connecting anew over it
-			// is quicker than waiting for this one to come back.
-			c.peer.Close(fmt.Errorf("%s failed (%v) after: %w", pathName(m.d, c.path), oneLineErr(rerr), err))
-			m.fellBack(lostAt, "another path: "+pathName(m.d, p))
+		if better, _ := m.d.choosePath(m); better != nil && better.key != p.key {
+			// Its path failed and the machine has a better one now (a network changed): the same resident node can take
+			// the connection back over that path too. Only a failed resume there makes the run loop connect anew.
+			oldErr := rerr
+			rerr = m.tryResumePath(c, better, oldErr)
+			if rerr == nil {
+				m.resumeSucceeded(c, lostAt, try)
+				return
+			}
+			c.peer.Close(fmt.Errorf("%s failed (%v); resume over %s failed (%v) after: %w",
+				pathName(m.d, p), oneLineErr(oldErr), pathName(m.d, better), oneLineErr(rerr), err))
+			m.fellBack(lostAt, "another path: "+pathName(m.d, better)+": "+oneLineErr(rerr))
 			return
 		}
 		select {
@@ -123,9 +126,49 @@ func (m *Machine) resumeConn(c *nodeConn, err error) {
 	}
 }
 
-// tryResume opens one transport on c's path and resumes c over it, within resumeTryWait: a dial that hangs (the old
-// route gone quiet) gives up for the next try. The transport lasts as long as the connection.
-func (m *Machine) tryResume(c *nodeConn) error {
+// resumeSucceeded counts and logs a connection taken back, naming the path it now uses.
+func (m *Machine) resumeSucceeded(c *nodeConn, lostAt time.Time, try int) {
+	took := time.Since(lostAt)
+	m.mu.Lock()
+	m.resumes.resumed++
+	m.resumes.last, m.resumes.most = took, max(m.resumes.most, took)
+	counts := m.resumes
+	m.mu.Unlock()
+	p, via := c.route()
+	m.d.logf("[%s] connection over %s resumed after %s (try %d, path %s): %s %s", m.cfg.ID, via, took.Round(time.Millisecond),
+		try, pathName(m.d, p), counts, c.peer.LaneStats())
+	// A link that came back meanwhile (the one the connection was resumed over, often) has not heard the node is
+	// online: only a new connection said so (serve). Not when it is lost again by then, or no longer the machine's.
+	m.tellLinksIf(true, "", func() bool { return m.nodeConnected(c.peer) })
+}
+
+// tryResumePath tries a newly better path's transports in the same order establish would. If it moves the route,
+// moveCause is the failed same-path try to record against the route left behind.
+func (m *Machine) tryResumePath(c *nodeConn, p *nodePath, moveCause error) error {
+	vias := []string{viaHub}
+	if p.src != nil {
+		vias = p.src.transports()
+	}
+	var err error
+	for _, via := range vias {
+		err = m.tryResume(c, p, via, moveCause)
+		if err == nil || errors.Is(err, rpc.ErrResumeRefused) {
+			return err
+		}
+		if c.ctx.Err() != nil || errors.Is(err, errSwitched) {
+			return err
+		}
+		if via == "ssh" && p.src != nil && p.src.cfg.TailcatAddr != "" {
+			p.src.noteDirectFailed()
+		}
+	}
+	return err
+}
+
+// tryResume opens one transport on p by via and resumes c over it, within resumeTryWait: a dial that hangs (the old
+// route gone quiet) gives up for the next try. The transport lasts as long as the connection. The recorded route moves
+// only after the peer accepted the resume.
+func (m *Machine) tryResume(c *nodeConn, p *nodePath, via string, moveCause error) error {
 	tctx, cancel := context.WithTimeout(c.ctx, resumeTryWait)
 	defer cancel()
 	type opened struct {
@@ -134,7 +177,7 @@ func (m *Machine) tryResume(c *nodeConn) error {
 	}
 	ch := make(chan opened, 1)
 	go func() {
-		l, err := m.openPipe(c.ctx, c.path, c.via)
+		l, err := m.openPipe(c.ctx, p, via)
 		ch <- opened{l, err}
 	}()
 	var o opened
@@ -157,6 +200,66 @@ func (m *Machine) tryResume(c *nodeConn) error {
 		o.l.close()
 		return err
 	}
+	if err := m.moveRoute(c, p, via, moveCause); err != nil {
+		o.l.close()
+		return err
+	}
+	return nil
+}
+
+// moveRoute records a successful resume's path and transport on the live connection and, when it is the machine's
+// serving connection, on the machine's route snapshot. A generation ends stale path-switch and probe callbacks, and
+// each route keeps its own start for failure and flap accounting.
+func (m *Machine) moveRoute(c *nodeConn, p *nodePath, via string, moveCause error) error {
+	c.routeMu.Lock()
+	if c.switching {
+		c.routeMu.Unlock()
+		return errSwitched
+	}
+	if err := c.peer.Err(); err != nil {
+		c.routeMu.Unlock()
+		return err
+	}
+	if err := c.ctx.Err(); err != nil {
+		c.routeMu.Unlock()
+		return err
+	}
+	previousPath, previousVia, previousStarted := c.path, c.via, c.routeStarted
+	if previousPath.key == p.key && previousVia == via {
+		c.routeMu.Unlock()
+		return nil
+	}
+	c.path, c.via = p, via
+	c.routeRev++
+	c.routeStarted = time.Now()
+	rev := c.routeRev
+	m.mu.Lock()
+	active := m.peer == c.peer
+	if active {
+		m.active, m.transport, m.via, m.path = p, via, via, ""
+		m.routeRev = rev
+		if via == "ssh" && p.src == m {
+			m.directFailed = time.Time{}
+		}
+	}
+	m.mu.Unlock()
+	c.routeMu.Unlock()
+	if !active {
+		return nil // serve will install this route and its path-specific watchers
+	}
+	if moveCause != nil && !previousStarted.IsZero() {
+		m.d.pathEnded(previousPath, true, moveCause, time.Since(previousStarted), false)
+	}
+	m.d.pathConnected(p)
+	if via == "ssh" && p.src != nil && p.src != m {
+		p.src.mu.Lock()
+		p.src.directFailed = time.Time{}
+		p.src.mu.Unlock()
+	}
+	if via == "tailcat" && p.src == m && (previousVia != "tailcat" || previousPath.src != m) {
+		go m.watchTailcat(c.ctx, c)
+	}
+	m.d.changed()
 	return nil
 }
 

@@ -1,0 +1,517 @@
+{
+  "version": 1,
+  "synthetic_only": true,
+  "runtime": {
+    "enabled": false,
+    "production_transport": false,
+    "real_account_access": false,
+    "source_migration": "blocked",
+    "sdk_methods_added": false,
+    "marketplace_or_release_change": false
+  },
+  "minimum_runtime": {
+    "capability": "telegram.mtproto.v1",
+    "adapter_protocol": 1,
+    "platform": "supported Linux source-runtime host",
+    "fallback": "none"
+  },
+  "protocol": {
+    "owner": "trusted_host_adapter",
+    "adapter": "persona-telegram-mtproto",
+    "reviewed_pinned_implementation": true,
+    "library": "gotd/td",
+    "library_version": "v0.163.0",
+    "session_format": "gotd-session-v1",
+    "linked_into_hub": false,
+    "manager_owns_leases_grants_storage_and_audit": true,
+    "egress_owns_checked_dialing": true,
+    "guest_supplied_native_code": false
+  },
+  "scalars": {
+    "int64": {
+      "wire_type": "string",
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+      "encoding": "canonical-decimal-i64",
+      "decimal_minimum": "-9223372036854775808",
+      "decimal_maximum": "9223372036854775807",
+      "json_number_allowed": false
+    },
+    "uint64": {
+      "wire_type": "string",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$",
+      "encoding": "canonical-decimal-u64",
+      "decimal_minimum": "0",
+      "decimal_maximum": "18446744073709551615",
+      "json_number_allowed": false
+    }
+  },
+  "definitions": {
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "access_hash"],
+      "properties": {
+        "kind": {"enum": ["u", "g", "c"]},
+        "id": {"$ref": "#/scalars/int64"},
+        "access_hash": {"$ref": "#/scalars/int64"}
+      }
+    },
+    "dialog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "peer", "folder", "muted", "top_cursor", "unread_count", "read_max", "bot", "self", "broadcast"],
+      "properties": {
+        "key": {"type": "string"},
+        "peer": {"$ref": "#/definitions/peer"},
+        "name": {"type": "string"},
+        "folder": {"enum": ["main", "archive"]},
+        "muted": {"type": "boolean"},
+        "top_cursor": {"type": "string"},
+        "unread_count": {"type": "integer", "minimum": 0},
+        "unread_mentions_count": {"type": "integer", "minimum": 0},
+        "read_max": {"type": "string"},
+        "member_count": {"type": ["integer", "null"], "minimum": 0},
+        "bot": {"type": "boolean"},
+        "self": {"type": "boolean"},
+        "broadcast": {"type": "boolean"},
+        "avatar": {"$ref": "#/definitions/media"}
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "peer", "at", "mine", "text", "media"],
+      "properties": {
+        "id": {"$ref": "#/scalars/int64"},
+        "peer": {"$ref": "#/definitions/peer"},
+        "sender": {"$ref": "#/definitions/peer"},
+        "at": {"type": "string", "format": "date-time"},
+        "mine": {"type": "boolean"},
+        "mentioned": {"type": "boolean"},
+        "text": {"type": "string"},
+        "reply_to": {"$ref": "#/definitions/message"},
+        "media": {"type": "array", "items": {"$ref": "#/definitions/media"}},
+        "edited": {"type": "boolean"},
+        "event": {"type": "boolean"}
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peer", "bot"],
+      "properties": {
+        "peer": {"$ref": "#/definitions/peer"},
+        "name": {"type": "string"},
+        "bot": {"type": "boolean"}
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_ref", "origin_peer", "dc", "size", "kind"],
+      "properties": {
+        "media_ref": {"type": "string"},
+        "origin_peer": {"$ref": "#/definitions/peer"},
+        "origin_message_id": {"$ref": "#/scalars/int64"},
+        "dc": {"type": "integer", "minimum": 1},
+        "size": {"$ref": "#/scalars/uint64"},
+        "kind": {"enum": ["avatar", "image", "sticker", "video", "voice", "file", "thumbnail"]},
+        "mime": {"type": "string"},
+        "name": {"type": "string"},
+        "duration": {"type": ["integer", "null"], "minimum": 0},
+        "width": {"type": ["integer", "null"], "minimum": 0},
+        "height": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "cursor", "gap"],
+      "properties": {
+        "kind": {"enum": ["message", "edit", "delete", "read", "gap"]},
+        "cursor": {"type": "string"},
+        "gap": {"type": "boolean"},
+        "message": {"$ref": "#/definitions/message"}
+      }
+    },
+    "inbox_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dialog", "message", "context", "done_state"],
+      "properties": {
+        "dialog": {"$ref": "#/definitions/dialog"},
+        "message": {"$ref": "#/definitions/message"},
+        "context": {"type": "array", "maxItems": 10, "items": {"$ref": "#/definitions/message"}},
+        "done_state": {"enum": ["none", "read", "replied"]}
+      }
+    }
+  },
+  "session": {
+    "opaque": true,
+    "exportable": false,
+    "random_bits": 128,
+    "bound_to": ["installation", "connector", "account", "generation", "grants"],
+    "cross_installation_replay": false,
+    "cross_generation_replay": false,
+    "raw_socket_or_secret_stream": false
+  },
+  "grants": {
+    "owner_auth": {
+      "caller": "authenticated owner host flow",
+      "source_visible": false
+    },
+    "read": {
+      "operations": ["session.restore", "dialogs.list", "messages.read", "messages.get", "messages.search", "members.list", "inbox.collect"]
+    },
+    "updates": {
+      "operations": ["updates.subscribe", "updates.ack"]
+    },
+    "media": {
+      "operations": ["media.download"]
+    },
+    "write": {
+      "operations": ["message.send", "message.forward", "message.react", "message.mark_read"],
+      "confirmation_required_for_every_request": true
+    },
+    "authorization_export": {
+      "operations": ["authorization.export"],
+      "caller": "trusted adapter only",
+      "rpc_gated": true
+    }
+  },
+  "operations": {
+    "credentials.validate": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["api_id_secret", "api_hash_secret"], "properties": {"api_id_secret": {"type": "string"}, "api_hash_secret": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["valid"], "properties": {"valid": {"type": "boolean"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "auth.start": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["credential_ref", "phone_secret"], "properties": {"credential_ref": {"type": "string"}, "phone_secret": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["flow", "stage"], "properties": {"flow": {"type": "string"}, "stage": {"enum": ["code_required"]}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "auth.code": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["flow", "code_secret"], "properties": {"flow": {"type": "string"}, "code_secret": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["stage"], "properties": {"stage": {"enum": ["password_required", "done"]}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "auth.password": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["flow", "password_secret"], "properties": {"flow": {"type": "string"}, "password_secret": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["stage", "account"], "properties": {"stage": {"const": "done"}, "account": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "auth.cancel": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["flow"], "properties": {"flow": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["status"], "properties": {"status": {"const": "canceled"}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false
+    },
+    "auth.check": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account"], "properties": {"account": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["status", "session_retained"], "properties": {"status": {"enum": ["authorized", "network_failure", "authorization_expired"]}, "session_retained": {"type": "boolean"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "auth.logout": {
+      "typed": true,
+      "grant": "owner_auth",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account"], "properties": {"account": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["local_transport_closed", "remote_session_revoked"], "properties": {"local_transport_closed": {"const": true}, "remote_session_revoked": {"type": "boolean"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "session.restore": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "sealed_ref"], "properties": {"account": {"type": "string"}, "sealed_ref": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["status"], "properties": {"status": {"const": "restored"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "dialogs.list": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "folder", "cursor", "limit"], "properties": {"account": {"type": "string"}, "folder": {"enum": ["main", "archive"]}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}},
+      "result_schema": {"type": "object", "required": ["dialogs", "next_cursor"], "properties": {"dialogs": {"type": "array", "maxItems": 200, "items": {"$ref": "#/definitions/dialog"}}, "next_cursor": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "messages.read": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "limit"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "before": {"type": "string"}, "after": {"type": "string"}, "since": {"type": "string"}, "until": {"type": "string"}, "unread_only": {"type": "boolean"}, "mentions_only": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}},
+      "result_schema": {"type": "object", "required": ["messages", "reply_references", "next_cursor"], "properties": {"messages": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/message"}}, "reply_references": {"type": "array", "items": {"$ref": "#/definitions/message"}}, "next_cursor": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "messages.get": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "message_ids"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "message_ids": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"type": "string"}}}},
+      "result_schema": {"type": "object", "required": ["messages", "reply_references"], "properties": {"messages": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/message"}}, "reply_references": {"type": "array", "items": {"$ref": "#/definitions/message"}}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "messages.search": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "query", "cursor", "limit"], "properties": {"account": {"type": "string"}, "query": {"type": "string", "maxLength": 256}, "peer": {"$ref": "#/definitions/peer"}, "since": {"type": "string"}, "until": {"type": "string"}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 30}}},
+      "result_schema": {"type": "object", "required": ["messages", "next_cursor"], "properties": {"messages": {"type": "array", "maxItems": 30, "items": {"$ref": "#/definitions/message"}}, "next_cursor": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "members.list": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "cursor", "limit"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}},
+      "result_schema": {"type": "object", "required": ["members", "next_cursor"], "properties": {"members": {"type": "array", "maxItems": 100, "items": {"$ref": "#/definitions/member"}}, "total_count": {"type": ["integer", "null"]}, "next_cursor": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "updates.subscribe": {
+      "typed": true,
+      "grant": "updates",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "cursor"], "properties": {"account": {"type": "string"}, "cursor": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["subscription", "events"], "properties": {"subscription": {"type": "string"}, "events": {"type": "array", "items": {"$ref": "#/definitions/update"}}, "gap": {"type": "boolean"}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false
+    },
+    "updates.ack": {
+      "typed": true,
+      "grant": "updates",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "cursor"], "properties": {"account": {"type": "string"}, "cursor": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["acknowledged"], "properties": {"acknowledged": {"type": "boolean"}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false
+    },
+    "inbox.collect": {
+      "typed": true,
+      "grant": "read",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account"], "properties": {"account": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["items", "remote_requests"], "properties": {"items": {"type": "array", "items": {"$ref": "#/definitions/inbox_item"}}, "remote_requests": {"const": 0}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false
+    },
+    "media.download": {
+      "typed": true,
+      "grant": "media",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "media_ref", "offset", "limit"], "properties": {"account": {"type": "string"}, "media_ref": {"type": "string"}, "offset": {"$ref": "#/scalars/uint64"}, "limit": {"type": "integer", "minimum": 1, "maximum": 32768}}},
+      "result_schema": {"type": "object", "required": ["data_base64", "offset", "eof"], "properties": {"data_base64": {"type": "string", "maxLength": 43692}, "offset": {"$ref": "#/scalars/uint64"}, "eof": {"type": "boolean"}, "resume": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true,
+      "remote_part_bytes": 524288,
+      "source_part_bytes": 32768
+    },
+    "authorization.export": {
+      "typed": true,
+      "grant": "authorization_export",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "dc"], "properties": {"account": {"type": "string"}, "dc": {"type": "integer", "minimum": 1}}},
+      "result_schema": {"type": "object", "required": ["authorization_ref"], "properties": {"authorization_ref": {"type": "string"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true
+    },
+    "message.send": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "text", "reply_to", "request_id", "confirmation"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "text": {"type": "string", "maxUtf16CodeUnits": 4096}, "reply_to": {"type": ["string", "null"]}, "request_id": {"type": "string"}, "confirmation": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status", "random_id"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["reserved", "sent", "confirmed", "unknown", "canceled"]}, "random_id": {"$ref": "#/scalars/int64"}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true,
+      "automatic_retry": false
+    },
+    "message.forward": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "source_peer", "destination_peer", "message_ids", "request_id", "confirmation"], "properties": {"account": {"type": "string"}, "source_peer": {"$ref": "#/definitions/peer"}, "destination_peer": {"$ref": "#/definitions/peer"}, "message_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "request_id": {"type": "string"}, "confirmation": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status", "random_ids"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["reserved", "sent", "confirmed", "unknown", "canceled"]}, "random_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"$ref": "#/scalars/int64"}}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true,
+      "automatic_retry": false
+    },
+    "message.react": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "message_id", "emoji", "request_id", "confirmation"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "message_id": {"type": "string"}, "emoji": {"type": "string", "maxUnicodeCodePoints": 8}, "request_id": {"type": "string"}, "confirmation": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["reserved", "sent", "confirmed", "unknown", "canceled"]}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true,
+      "automatic_retry": false
+    },
+    "message.mark_read": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "peer", "up_to", "request_id", "confirmation"], "properties": {"account": {"type": "string"}, "peer": {"$ref": "#/definitions/peer"}, "up_to": {"type": ["string", "null"]}, "request_id": {"type": "string"}, "confirmation": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["reserved", "sent", "confirmed", "unknown", "canceled"]}}},
+      "deadline_ms": 30000,
+      "rpc_gated": true,
+      "automatic_retry": false
+    },
+    "write.status": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "request_id"], "properties": {"account": {"type": "string"}, "request_id": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["reserved", "sent", "confirmed", "unknown", "canceled"]}, "random_id": {"$ref": "#/scalars/int64"}, "random_ids": {"type": "array", "maxItems": 20, "items": {"$ref": "#/scalars/int64"}}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false,
+      "retransmits": false
+    },
+    "write.cancel": {
+      "typed": true,
+      "grant": "write",
+      "request_schema": {"type": "object", "additionalProperties": false, "required": ["account", "request_id"], "properties": {"account": {"type": "string"}, "request_id": {"type": "string"}}},
+      "result_schema": {"type": "object", "required": ["request_id", "status"], "properties": {"request_id": {"type": "string"}, "status": {"enum": ["unknown", "canceled"]}, "random_id": {"$ref": "#/scalars/int64"}, "random_ids": {"type": "array", "maxItems": 20, "items": {"$ref": "#/scalars/int64"}}}},
+      "deadline_ms": 1000,
+      "rpc_gated": false,
+      "retransmits": false
+    }
+  },
+  "secrets": {
+    "fields": ["api_hash", "authorization_key", "phone", "code", "password", "phone_code_hash", "proxy_password"],
+    "submission_terminal": "trusted_host",
+    "storage": "sealed",
+    "ordinary_rpc_events_logs_ui": false,
+    "source_program_storage": false,
+    "plaintext_database": false
+  },
+  "endpoint_policy": {
+    "source": "verified_telegram_protocol_data",
+    "registry": "telegram-production-dc-v1",
+    "caller_provided_addresses": false,
+    "authenticate_discovered_dc": true,
+    "discovered_dc_must_match_reviewed_registry": true,
+    "checked_address_pinning": true,
+    "proxy_side_reresolution": false,
+    "forbidden": ["hub", "loopback", "link_local", "metadata", "unrelated_private", "non_telegram", "arbitrary_tcp_connect"]
+  },
+  "proxy_policy": {
+    "host_owned": true,
+    "kind": "authenticated HTTP CONNECT to a checked Telegram DC",
+    "credentials": "sealed host reference",
+    "direct_fallback_on_failure": false,
+    "guest_connect": false
+  },
+  "budgets": {
+    "account_lease_seconds": 900,
+    "dc_lease_seconds": 900,
+    "pending_calls": 64,
+    "pending_calls_aggregate": 256,
+    "pending_call_bytes_per_account": 2097152,
+    "update_queue": 1024,
+    "update_queue_bytes": 4194304,
+    "media_pool_per_dc": 1,
+    "dc_per_account": 5,
+    "dc_connections_aggregate": 128,
+    "media_streams_per_account": 2,
+    "media_streams_aggregate": 16,
+    "media_buffer_bytes_per_account": 8388608,
+    "aggregate_host_bytes": 67108864,
+    "handshake_deadline_ms": 15000,
+    "request_deadline_ms": 30000,
+    "reconnect_attempts": 5,
+    "reconnect_backoff_ms_minimum": 10000,
+    "reconnect_backoff_ms_maximum": 600000,
+    "refresh_per_burst": 100,
+    "refresh_interval_ms_minimum": 60000,
+    "refresh_interval_ms_maximum": 960000,
+    "context_batches_per_round": 10,
+    "reply_reference_depth": 1,
+    "archive_first_days": 30,
+    "archive_first_messages_per_peer": 500,
+    "archive_dialogs_per_folder": 200,
+    "cached_dialogs_per_account": 400,
+    "stable_peers_per_account": 1000,
+    "media_references_per_account": 256,
+    "media_reference_bytes_per_account": 4194304,
+    "accounts_per_manager": 32,
+    "legacy_import_bytes": 1048576,
+    "archive_cursor_bytes": 4194304,
+    "write_journal_entries": 1024,
+    "write_journal_bytes": 4194304,
+    "media_part_bytes": 524288,
+    "source_media_part_bytes": 32768,
+    "rpc_interval_ms": {"minimum": 500, "maximum": 1000},
+    "authentication_flow_seconds": 600,
+    "authentication_failures": 5,
+    "shutdown_ms": 5000
+  },
+  "gate": {
+    "active_rpc_per_account": 1,
+    "pace_after_previous_completion": true,
+    "flood_wait_blocks_requests": true,
+    "flood_wait_blocks_connection_setup": true,
+    "authorization_export_gated": true,
+    "helper_requests_gated": true,
+    "dc_connection_establishment_outside_gate": true,
+    "independent_dc_connections": true,
+    "automatic_write_retry": false
+  },
+  "updates": {
+    "persistent_connection": true,
+    "bounded_refresh": true,
+    "flood_backoff": "double to sixteen minutes",
+    "success_backoff": "halve toward one minute",
+    "overflow": "durable gap and cursor reconciliation",
+    "inbox_collection": "cache only",
+    "exclusions": ["bot", "self", "broadcast", "muted", "archived"]
+  },
+  "write_policy": {
+    "confirmation_binding": ["operation", "source_target", "destination_target", "request_id", "payload_digest", "random_ids", "installation", "account", "generation", "expiry"],
+    "reservation_before_transmission": true,
+    "duplicate_retransmits": false,
+    "changed_payload": "request_conflict",
+    "ambiguous_outcome": "unknown",
+    "unknown_entries_silently_evicted": false,
+    "text_utf16_code_units_maximum": 4096,
+    "forward_messages_maximum": 20
+  },
+  "lifecycle": {
+    "rules": ["cancellation", "revocation", "logout", "generation_change", "late_event_rejection", "remote_revocation_status", "local_revocation_before_remote_logout", "no_late_login_or_save_resurrection"],
+    "pending_cancellation_releases_work": true,
+    "possibly_committed_write_becomes_unknown": true,
+    "revocation_closes_only_owned_account": true,
+    "sealed_remote_revocation_recovery_generations": 1
+  },
+  "audit": {
+    "includes": ["grant_session_lifecycle", "operation_category", "budgets", "latency", "flood_wait", "redacted_outcomes", "confirmation_decision", "dc_number"],
+    "excludes": ["message_content", "phone", "credentials", "authorization_keys", "usernames", "peer_or_access_hash_values", "random_ids", "proxy_secrets", "raw_media_references", "upstream_error_payloads"]
+  },
+  "legacy_import": {
+    "versioned": true,
+    "bounded": true,
+    "atomic_commit": true,
+    "preserve_original_until_commit": true,
+    "rollback": true,
+    "single_owner_during_handoff": true,
+    "gotd_session_conversion": "none in v1",
+    "preserves": ["api_credentials", "gotd_session", "account_identity", "archive_cursors", "inbox_cursors", "partial_archive_progress", "media_origin_references"],
+    "failure_clears_credentials": false,
+    "rollback_generations": 1
+  },
+  "forbidden_capabilities": ["raw_tl_invocation", "arbitrary_methods", "raw_socket", "guest_connect", "guest_tunnel", "caller_endpoint", "guest_native_code", "bot_api_substitution", "unchecked_inbox_reply"],
+  "acceptance": {
+    "synthetic_results_are_not_real_acceptance": true,
+    "real_manager_bridge_isolated_hub": "required",
+    "real_account_tests": "separate_explicit_approval",
+    "real_account_evidence": "sanitized",
+    "production_isolation_gate": "#1151",
+    "source_migration_remains_blocked": true
+  }
+}

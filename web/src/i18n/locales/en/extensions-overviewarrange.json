@@ -1,0 +1,18 @@
+{
+  "title": "Arrange cards",
+  "hint": "Drag a card, or use its arrows, to move it. Choose a half or a full row, and switch a card off to hide it.",
+  "done": "Done",
+  "reset": "Reset",
+  "reset_done": "The cards are back as they were.",
+  "undo": "Undo",
+  "drag": "Drag to move",
+  "width": "Width of {name}",
+  "half": "Half row",
+  "full": "Full row",
+  "earlier": "Move {name} earlier",
+  "later": "Move {name} later",
+  "show": "Show {name} on Overview",
+  "hidden": "Hidden: not loaded",
+  "line": "{hint} {where}",
+  "undo_stale": "Not undone: the cards were changed since."
+}

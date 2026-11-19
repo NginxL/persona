@@ -46,7 +46,7 @@ extension AppModel {
         #endif
         for paired in registry.hubs where paired.deviceID == nil {
             let old = paired.config
-            guard let t = try? await APIClient(config: old).createToken(name: UIDevice.current.name, kind: Self.credentialKind) else { continue }
+            guard let t = try? await APIClient(config: old).createToken(name: UIDevice.current.name, kind: Self.credentialKind), t.role == "full" else { continue }
             adoptDeviceToken(hub: paired.id, old: old.token, token: t.token, deviceID: t.id)
         }
         #if canImport(WatchConnectivity)

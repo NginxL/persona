@@ -122,7 +122,7 @@ func TestUsageLimitIsContinuedAfterTheReset(t *testing.T) {
 		t.Fatalf("sent before the reset: %v", got)
 	}
 	s.workTick(ctx, reset.Add(2*time.Minute))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+prompts.MessageSourceText(prompts.RenderAgentLimitContinue(), &proto.MessageSource{Kind: proto.SourceFollowup}) {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+prompts.MessageSourceText(prompts.RenderAgentLimitContinue(""), &proto.MessageSource{Kind: proto.SourceFollowup}) {
 		t.Fatalf("sent %v", got)
 	}
 	if e := entryOf(t, s, "s1"); e.Retries != 1 || e.WakeAt != nil {
@@ -443,7 +443,7 @@ func TestUsageLimitTaskState(t *testing.T) {
 }
 
 func TestGoldenAgentLimitContinue(t *testing.T) {
-	golden(t, "agent_limit_continue", prompts.RenderAgentLimitContinue())
+	golden(t, "agent_limit_continue", prompts.RenderAgentLimitContinue(""))
 }
 
 // The wait's wakes end a turn each: a task agent's usage-limit wait is looked at again once, not once per turn; an

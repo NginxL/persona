@@ -68,7 +68,7 @@ fun Todo.triageStatus(lookup: (SessionKey) -> Session?, now: Long = System.curre
         }
     }
     return when {
-        interrupted -> TriageStatus.Interrupted
+        interrupted && !working && supervision?.state != "parked" -> TriageStatus.Interrupted
         limit -> TriageStatus.UsageLimit
         unread -> TriageStatus.Unread
         working -> TriageStatus.Working

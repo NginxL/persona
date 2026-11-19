@@ -16,6 +16,7 @@ import persona.core.contracts.api.ProviderTest
 import persona.core.contracts.api.ReadinessStep
 import persona.core.designsystem.UiText
 import persona.core.designsystem.failureReasonText
+import persona.core.designsystem.hubAnswer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -322,6 +323,22 @@ internal class NewProviderModel(
         if (!it.importParse || it.busy) it else it.copy(step = WizardStep.Paste, error = null, saved = false)
     }
 
+    /** An import link opened from outside (#5428): the hub reads it, and the reviewed draft continues into this form. */
+    suspend fun openImportLink(link: String) {
+        mutable.update {
+            it.copy(step = WizardStep.Paste, error = null, saved = false,
+                paste = it.paste.copy(text = link, answer = null, answerText = "", draft = -1, action = null,
+                    reading = false, readImmediately = true, fromLink = true, error = null))
+        }
+        parsePaste()
+    }
+
+    /** Leaves the link behind before showing the ordinary paste box; its payload may carry a key. */
+    fun pasteSomethingElse() {
+        pasteSeq++
+        mutable.update { it.copy(paste = ProviderPasteUiState(), error = null) }
+    }
+
     fun leavePaste() = mutable.update {
         it.copy(step = if (it.hubNames) WizardStep.Pick else WizardStep.Form, existing = null, draft = NewProviderDraft(),
             opened = null, scope = if (it.scope == null) null else ScopeForm(), pasteContinued = false, error = null, saved = false)
@@ -333,7 +350,7 @@ internal class NewProviderModel(
         pasteSeq++
         mutable.update {
             val immediate = text.length - it.paste.text.length > 1
-            it.copy(paste = it.paste.copy(text = text, reading = false, readImmediately = immediate, error = null))
+            it.copy(paste = it.paste.copy(text = text, reading = false, readImmediately = immediate, fromLink = false, error = null))
         }
     }
 
@@ -355,7 +372,10 @@ internal class NewProviderModel(
             val answer = api.parse(text)
             mutable.update {
                 if (seq != pasteSeq || it.paste.text != text) it
-                else it.copy(paste = it.paste.copy(answer = answer, answerText = text, draft = if (answer.drafts.size == 1) 0 else -1,
+                else if (it.paste.fromLink && answer.format != "link") {
+                    it.copy(paste = it.paste.copy(answer = null, draft = -1, action = null, reading = false,
+                        error = ResText.of(R.string.settings_provider_import_link_unsupported)))
+                } else it.copy(paste = it.paste.copy(answer = answer, answerText = text, draft = if (answer.drafts.size == 1) 0 else -1,
                     action = null, reading = false, error = null))
             }
         } catch (cancelled: CancellationException) {
@@ -364,7 +384,9 @@ internal class NewProviderModel(
         } catch (error: Exception) {
             mutable.update {
                 if (seq != pasteSeq || it.paste.text != text) it
-                else it.copy(paste = it.paste.copy(reading = false, error = ResText.of(R.string.settings_paste_read_failed, failureReasonText(error))))
+                else if (it.paste.fromLink && hubAnswer(error)?.status == 404) {
+                    it.copy(paste = it.paste.copy(reading = false, error = ResText.of(R.string.settings_provider_import_link_unsupported)))
+                } else it.copy(paste = it.paste.copy(reading = false, error = ResText.of(R.string.settings_paste_read_failed, failureReasonText(error))))
             }
         }
     }

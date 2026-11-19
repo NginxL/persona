@@ -101,7 +101,7 @@ func TestReportLineLanguageFollowsLocale(t *testing.T) {
 		locale, has, hasNot string
 	}{
 		{"zh-Hans", "不超过 30 个字，只写一句", "个字符"},
-		{"en", "用English写，不超过 60 个字符，只写一句", "不超过 30"},
+		{"en", "Write in English, at most 60 characters", "不超过 30"},
 	} {
 		t.Run(tc.locale, func(t *testing.T) {
 			s, f := newQuietService(t)

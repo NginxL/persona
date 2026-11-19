@@ -173,6 +173,37 @@ test('rename, close, delete, and seen use the existing routes and exact request 
   ]);
 });
 
+test('a Just finished row uses the existing seen route and leaves its section immediately', async () => {
+  const finished = agent('finished', {
+    state: 'idle', status: 'done', work: { phase: 'done', just_finished: true }
+  });
+  const { workspace, state } = await opened({ sessions: [finished] });
+  assert.deepEqual(workspace.groups.map((group) => group.id), ['state/just_finished']);
+  assert.equal(workspace.canMarkSeen(finished), true);
+  state.calls.length = 0;
+
+  assert.equal(await workspace.markSeen(finished), true);
+  assert.deepEqual(state.calls.map((call) => [call.method, call.path]), [
+    ['POST', '/api/v1/sessions/m1/finished/seen']
+  ]);
+  assert.equal(finished.data().work.just_finished, true, 'the caller keeps its immutable row');
+  const current = workspace.latestSourceRows.find((row) => row.id === 'finished');
+  assert.equal(current.data().work.just_finished, false);
+  assert.equal(workspace.canMarkSeen(current), false);
+  assert.equal(workspace.groups.some((group) => group.id === 'state/just_finished'), false);
+  assert.equal(workspace.visibleRows().some((row) => row.id === 'finished'), false);
+});
+
+test('the Just finished group has a native label in every resource set', () => {
+  const source = readFileSync(new URL('../entry/src/main/ets/components/AgentListPage.ets', import.meta.url), 'utf8');
+  assert.ok(source.includes("'state/just_finished': 'agent_group_just_finished'"));
+  const expected = { base: 'Just finished', en_US: 'Just finished', zh_CN: '刚做完待看', ja_JP: '完了したばかり' };
+  for (const [locale, value] of Object.entries(expected)) {
+    const resources = JSON.parse(readFileSync(new URL(`../entry/src/main/resources/${locale}/element/string.json`, import.meta.url), 'utf8'));
+    assert.equal(resources.string.find((entry) => entry.name === 'agent_group_just_finished')?.value, value, locale);
+  }
+});
+
 test('history loads only when the hub advertises the archive capability and honors machine selection', async () => {
   const archived = agent('archive-1', { archived: true, state: 'offline', status: 'offline' });
   const { workspace, state, client } = await opened({ history: [archived] });

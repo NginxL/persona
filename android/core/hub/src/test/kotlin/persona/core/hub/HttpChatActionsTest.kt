@@ -105,6 +105,11 @@ class HttpChatActionsTest {
         assertFalse("its own launcher drops it", modesApplied(waiting, ChatAction.Modes(launcher = "example", from = "example")))
         assertTrue(modesApplied(waiting.copy(pendingSwitch = null), ChatAction.Modes(launcher = "example", from = "example")))
         assertTrue(modesApplied(waiting.copy(model = "SONNET"), ChatAction.Modes(model = "sonnet")))
+        // A queued bypass restart counts as applied when bypassPending is set; cancelling it requires bypassPending cleared.
+        val pendingBypass = Session("m", "s1", permissionMode = "acceptEdits", bypassPending = true)
+        assertTrue(modesApplied(pendingBypass, ChatAction.Modes(permissionMode = "bypassPermissions")))
+        assertFalse(modesApplied(pendingBypass, ChatAction.Modes(permissionMode = "acceptEdits")))
+        assertTrue(modesApplied(pendingBypass.copy(bypassPending = false), ChatAction.Modes(permissionMode = "acceptEdits")))
     }
 
     /** The complete row a summary leaves out (`sessions_lookup`): one exact lookup, its machine kept. */
@@ -198,6 +203,26 @@ class HttpChatActionsTest {
             assertEquals(ChatActionResult.Done, actions.verify(session, ChatAction.Delete))
             assertEquals("GET", (server.takeRequest().method).zhAny())
             assertEquals(4, server.requestCount)
+        }
+    }
+
+    @Test fun undeliveredRetryAndDeleteUseTheSelectedAssistantConversationAndMessage() = runBlocking {
+        MockWebServer().use { server ->
+            val actions = actions(server)
+            val session = Session(machineId = "machine", sessionId = "conversation/with#separator", assistant = true)
+            val messageId = "message/with#separator"
+            server.enqueue(MockResponse().setBody("{}"))
+            actions.retryUndelivered(session, messageId)
+            val retry = server.takeRequest()
+            assertEquals("POST", retry.method)
+            assertEquals("/api/v1/assistant/conversations/conversation%2Fwith%23separator/undelivered/message%2Fwith%23separator/retry", retry.path)
+
+            server.enqueue(MockResponse().setBody("{}"))
+            actions.deleteUndelivered(session, messageId)
+            val delete = server.takeRequest()
+            assertEquals("DELETE", delete.method)
+            assertEquals("/api/v1/assistant/conversations/conversation%2Fwith%23separator/undelivered/message%2Fwith%23separator", delete.path)
+            assertEquals(2, server.requestCount)
         }
     }
 

@@ -80,7 +80,10 @@ func (n *Node) heldFallbackWithExpiry(id, launcher string, asked modelExecution)
 			return asked, expired
 		}
 		out := f.to
-		out.IsMain, out.Interject, out.Ultracode = asked.IsMain, asked.Interject, asked.Ultracode // the message's own
+		// The hold selects a fallback model, never the fallback turn's authorization. Keep this message's fresh origin
+		// decision so an ordinary-to-Inbox change still selects a new built-in tool policy before any input is written.
+		out.Origin, out.OriginKnown = asked.Origin, asked.OriginKnown
+		out.IsMain, out.Public, out.Interject, out.Ultracode = asked.IsMain, asked.Public, asked.Interject, asked.Ultracode // the message's own
 		out.SupervisionInstructions = asked.SupervisionInstructions
 		out.NewModelChoice = false // the old hold selected this execution, not a new pick
 		return out, false

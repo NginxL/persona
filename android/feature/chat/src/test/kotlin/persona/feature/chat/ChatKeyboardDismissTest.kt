@@ -337,6 +337,8 @@ class ChatKeyboardDismissTest {
     }
 
     @Test fun narrowCompactAgentComposerKeepsThePrimaryActionsTappable() {
+        // This phone has a voice-input activity only, so the last tap opens its screen.
+        org.robolectric.shadows.ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(false)
         val voice = ResolveInfo().apply {
             activityInfo = ActivityInfo().apply { packageName = "com.example.voice"; name = "Voice" }
         }

@@ -74,29 +74,39 @@ fun LargeWindowComposer(
     onMentionTask: (String) -> Unit = {},
     onMentionOpen: (Boolean) -> Unit = {},
     onModel: (() -> Unit)? = null,
+    // /permissions opens the chat's permission mode picker (#6513); null where the chat has none.
+    onPermissions: (() -> Unit)? = null,
     loop: Boolean = false,
     blockedLabel: String? = null,
     onBlocked: () -> Unit = {},
     useShellSurface: Boolean = false,
     modelPill: (@Composable (ModelPillWidth) -> Unit)? = null,
+    upload: ComposerAttachmentUpload? = null,
+    wrapPlaceholder: Boolean = false,
+    covered: Boolean = false,
 ) {
     val largeWindow = LocalLargeWindowInput.current
+    val dictate = rememberComposerDictation(session, state, visible && enabled, onNotice)
+    if (covered) SideEffect { dictate?.session?.cover() }
     val composer: @Composable () -> Unit = {
         ChatComposer(
             session = session, state = state, working = working, sending = sending, canClear = canClear,
-            service = service, uploadDestination = uploadDestination, onSend = onSend, onCommand = onCommand, onNotice = onNotice,
+            service = service, uploadDestination = uploadDestination, upload = upload, onSend = onSend, onCommand = onCommand, onNotice = onNotice,
             extraContent = extraContent, assistantChat = assistantChat, enabled = enabled, placeholder = placeholder, leading = leading,
-            accessory = accessory, modeHint = modeHint, onOverlay = onOverlay, visible = visible,
+            accessory = accessory, modeHint = modeHint, onOverlay = onOverlay, visible = visible, dictate = dictate.takeUnless { covered },
             agentName = agentName, canInterrupt = canInterrupt, mentions = mentions, onMention = onMention,
-            onMentionTask = onMentionTask, onMentionOpen = onMentionOpen, onModel = onModel, loop = loop,
-            blockedLabel = blockedLabel, onBlocked = onBlocked, useShellSurface = useShellSurface, modelPill = modelPill,
+            onMentionTask = onMentionTask, onMentionOpen = onMentionOpen, onModel = onModel, onPermissions = onPermissions, loop = loop,
+            blockedLabel = blockedLabel, onBlocked = onBlocked, useShellSurface = useShellSurface, modelPill = modelPill, wrapPlaceholder = wrapPlaceholder,
         )
     }
 
-    val currentOnSend by rememberUpdatedState(onSend)
-    val sendAction = remember { { currentOnSend() } }
+    val mainClear = LocalMainChatClear.current?.takeIf { enabled }
+    val currentSubmit by rememberUpdatedState {
+        if (!covered && dictate?.active != true) dispatchComposerSend(state, extraContent, mainClear, onPermissions, onSend)
+    }
+    val sendAction = remember { { currentSubmit() } }
     val hasContent = state.hasContent || extraContent
-    val canSend = enabled && state.ready && !sending
+    val canSend = visible && !covered && enabled && state.ready && !sending && dictate?.active != true
     val sendEnabled = canSend && hasContent && blockedLabel == null
     val collapseForSend = remember(state) {
         { collapse: () -> Unit ->

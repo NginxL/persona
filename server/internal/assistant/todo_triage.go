@@ -189,7 +189,7 @@ func triageStatus(t Todo, look triageLookup, now time.Time) string {
 		}
 	}
 	switch {
-	case interrupted:
+	case interrupted && !working && !waiting && (t.Supervision == nil || t.Supervision.State != "parked"):
 		return "interrupted"
 	case limited:
 		return "usage_limit"

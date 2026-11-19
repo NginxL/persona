@@ -61,7 +61,20 @@ func (s *Service) readinessReplySucceeded(ctx context.Context, machine, launcher
 		}
 		want = defaultModel
 	}
-	return sess.Model == want || aliases[want] == sess.Model || aliases[sess.Model] == want
+	if sess.Model == want || proto.SameLauncherModel(sess.Model, want) {
+		return true
+	}
+	// The alias and default relationships, comparing the same model under another spelling: a gateway may echo one
+	// routed under a prefix, or with/without the 1M marker (proto.SameLauncherModel).
+	for alias, resolved := range aliases {
+		if proto.SameLauncherModel(alias, sess.Model) && (resolved == want || proto.SameLauncherModel(resolved, want)) {
+			return true
+		}
+		if proto.SameLauncherModel(resolved, sess.Model) && (alias == want || proto.SameLauncherModel(alias, want)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Capture completion without requiring an open client to poll readiness before the process exits.

@@ -56,7 +56,7 @@ final class ModeCapabilityTests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 20), "an agy runtime with modes:true must offer its modes:\n\(app.debugDescription)")
         menu.tap()
         try shot(app, "agy-menu")
-        let plan = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "只做计划")).firstMatch
+        let plan = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "计划模式")).firstMatch
         XCTAssertTrue(plan.waitForExistence(timeout: 5), "the runtime's permission modes are missing:\n\(app.debugDescription)")
         try shot(app, "agy")
     }

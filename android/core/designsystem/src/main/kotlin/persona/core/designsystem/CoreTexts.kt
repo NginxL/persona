@@ -110,6 +110,8 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.ApiBadRequest -> R.string.designsystem_core_api_bad_request
     CoreText.Key.ApiUnavailable -> R.string.designsystem_core_api_unavailable
     CoreText.Key.ApiFailed -> R.string.designsystem_core_api_failed
+    CoreText.Key.ApiConversationInvalid -> R.string.designsystem_core_api_conversation_invalid
+    CoreText.Key.ApiConversationInvalidLabel -> R.string.designsystem_core_api_conversation_invalid_label
     CoreText.Key.TaskNeedsYou -> R.string.designsystem_core_task_needs_you
     CoreText.Key.TaskInterrupted -> R.string.designsystem_core_task_interrupted
     CoreText.Key.TaskWorking -> R.string.designsystem_core_task_working

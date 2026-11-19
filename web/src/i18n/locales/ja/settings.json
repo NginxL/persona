@@ -107,6 +107,7 @@
   "kind_cli": "その他（Web / コマンドライン）",
   "kind_web": "Web",
   "role_answer": "回答のみ",
+  "role_scoped": "アクセス制限",
   "revoked_ago": "{time}に取り消し",
   "used_ago": "{time}に使用",
   "added_ago": "{time}に追加",
@@ -177,5 +178,10 @@
   "search_key_words": "API キー、シークレットキー",
   "device_tokens": "デバイスのトークン",
   "pi_too": "pi でも使用可",
-  "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます"
+  "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます",
+  "show_botmux": "Agents に botmux セッションを表示",
+  "show_botmux_hint": "このハブのデバイス間で同期します。非表示にしてもタスクには利用できます。",
+  "show_botmux_inventory": "コンピュータの「botmux セッションも表示」スイッチで、ハブに届くセッションを設定します。",
+  "show_botmux_computers": "コンピュータを開く",
+  "botmux_saving": "保存中…"
 }

@@ -100,11 +100,13 @@ private fun directionLines(direction: Direction, open: Set<String>): List<Direct
  * group's last row) and the caret to put on it; null (no tree from an older hub, or nothing open under it) leaves the
  * row exactly as it was. [title] is the lead's name, for the caret's TalkBack label ("To-dos of …"). Without
  * [onOpenTodo] / [onOpenAgent] a to-do's or Agent's row only folds.
+ * [shadedPlace] selects the visible Agent's exact row; a sub-Agent still opens its parent without selecting both rows.
  */
 @Composable
 internal fun DirectionLeadRows(
     direction: Direction?, title: String, position: GroupPosition,
     onOpenTodo: ((String) -> Unit)?, onOpenAgent: ((SessionKey) -> Unit)?,
+    shadedPlace: String?,
     row: @Composable (position: GroupPosition, disclosure: (@Composable () -> Unit)?) -> Unit,
 ) {
     if (direction == null || direction.tasks.isEmpty()) {
@@ -128,7 +130,8 @@ internal fun DirectionLeadRows(
                     is DirectionLine.Task -> TaskRow(line.task, line.open, { folds.toggle(directionTaskFoldKey(line.direction, line.task.id)) },
                         onOpenTodo?.let { openTodo -> { openTodo(line.task.id) } })
                     is DirectionLine.Agent -> AgentRow(line.agent, line.depth, line.open, { folds.toggle(directionAgentFoldKey(line.task, line.agent.key)) },
-                        onOpenAgent?.let { openAgent -> { openAgent(line.agent.openKey) } }, untitled)
+                        onOpenAgent?.let { openAgent -> { openAgent(line.agent.openKey) } }, untitled,
+                        selected = shadedPlace == AssistantSidebarShade.agent(line.agent.key))
                 }
             }
             // The drawer's rows stand alone; the wide list's continue the lead's group.
@@ -170,10 +173,10 @@ private fun TaskRow(task: DirectionTask, open: Boolean, onToggle: () -> Unit, on
 
 /** An Agent on a to-do (or one it started, a level further in): its name and, while it matters, its state in words. */
 @Composable
-private fun AgentRow(agent: DirectionAgent, depth: Int, open: Boolean, onToggle: () -> Unit, onOpen: (() -> Unit)?, untitled: String) {
+private fun AgentRow(agent: DirectionAgent, depth: Int, open: Boolean, onToggle: () -> Unit, onOpen: (() -> Unit)?, untitled: String, selected: Boolean) {
     val title = agent.title.ifBlank { agent.agent.ifBlank { untitled } }
     val status = AgentState.of(agent.state.ifEmpty { null }, null).drawerStatus
-    JRow(onClick = onOpen ?: onToggle.takeIf { agent.children.isNotEmpty() }, chevron = false,
+    JRow(onClick = onOpen ?: onToggle.takeIf { agent.children.isNotEmpty() }, chevron = false, selected = selected,
         trailing = { RowEnd(agent.children.isNotEmpty(), open, onToggle, stringResource(R.string.assistant_direction_agents_of, title),
             if (status != null) ({ StatusLabel(status) }) else null) }) {
         Indent(2 + depth)

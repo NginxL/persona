@@ -421,7 +421,11 @@ Restore commits atomically, clears old-installation replay receipts and leaves d
 
 This generic store is **not a legacy filesystem importer, business-schema upgrade/downgrade, lease-renewal service, media URL or protocol-specific send/recovery implementation**. Migrations needing those contracts remain blocked until their separately scoped implementation and installed-source restart/crash acceptance preserve the original behavior. The store's schema version is 1; unsupported persisted versions fail closed. Source-default packages, marketplace indexes, signing changes and production activation remain separate phase gates.
 
+The [authenticated source handler design](source-api-handlers.md) defines how owner confirmation, manager-owned reservations and external-effect receipts compose with this store. It is a design gate, not an implemented capability.
+
 #### Hub API: scopes (#1855)
+
+The [source handler design](source-api-handlers.md) keeps its per-operation session rename/mode tickets separate from these legacy standing scopes; it neither broadens nor silently migrates them.
 
 To call the hub's HTTP API, an extension lists the scopes it uses in `permissions.hub` instead of asking for the full token:
 
@@ -1553,6 +1557,8 @@ An extension installed from a package (a marketplace, `file:`, `dir:`, …) can 
 
 The [2026-11-07 migration and acceptance record](../archive/extensions/source-extension-migration-2026-11-07.md) separates merged implementation, native-client evidence, complete source-package acceptance and outstanding production/platform gates. It is a historical snapshot, not deployment authorization.
 
+The [authenticated source API and assistant handler contract](source-api-handlers.md) is the design gate for source-dispatched API routes, bounded media and durable external writes. It does not make the source runtime an HTTP host or authorize activation.
+
 Executable packages retain the default `runtime.mode: "process"` behavior. A source package explicitly selects `"deno"` and carries a prebuilt, self-contained JavaScript module:
 
 ```json
@@ -1814,6 +1820,8 @@ When a request goes to the extension's own HTTP (the last row of the table above
 
 ## App endpoints
 
+The [source handler contract](source-api-handlers.md) deliberately keeps this native contribution separate from a future source-dispatched `namespaces.api` handler; an existing `api` grant does not open an inbound source route.
+
 An extension contributes `api` to provide a set of app-facing endpoints `/api/v1/<prefix>/…` on its own HTTP side (`PERSONA_EXTENSION_SOCKET`):
 
 - The hub authenticates first (like any other endpoint; read-only devices are restricted as usual), then forwards as-is to the extension: path unchanged, `Authorization` and `token` removed, `X-Persona-Device` (device id, empty for the master token) and
@@ -1836,6 +1844,8 @@ An extension contributes `api` to provide a set of app-facing endpoints `/api/v1
 ## Assistant
 
 An extension contributes `assistant`:
+
+The [source handler contract](source-api-handlers.md) defines the separate typed command-to-handler mapping and its independent credential-reference and per-write grants. It does not replace this command gate or open a generic command forwarder.
 
 - `skills`: skill directories in the package (each with a `SKILL.md`). The hub brings them in `assistant.prepare` to the computer that runs the assistant (each skill's files only once per computer, after that only a digest;
   those the node reports as "missing" are brought again next time). The assistant's check of its directories every minute compares the skills' digests as well as the CLAUDE.md, so a skill that an upgrade changes reaches that computer within a minute even when the CLAUDE.md stays the same (#4256). The node puts them in `~/.persona/plugin-skills/<name>` and copies them into the assistant directory like built-in skills; the user's own skill with the same name takes precedence; they are removed from the assistant directory when the extension is disabled or uninstalled.
@@ -2102,7 +2112,7 @@ Where each client puts them:
 | placement | Web | Mac | iOS | Android |
 | --- | --- | --- | --- | --- |
 | `nav_page` | In the sidebar's **Overview / Machines / Settings** group, before Settings, one row per page (icon, title, badge); at most 3 in the sidebar, later ones go first under **More** at the end of the group, and the user can reorder, show or put away pages in settings (web.md "The sidebar's pages") and choose one as the page the app opens on (web.md "Start page", #9071); a page that names a `group` comes in under that group's heading, a foldable section of its own after **Pages** (web.md "The sidebar's pages"); after a reload the entries and an open page's last view are drawn from this browser's cache until the hub answers (web.md "Extension pages on reload") | The left section column, same group and position as the web | In the new shell's drawer (iPhone) and iPad sidebar, after the **Machines** group, one row per page (icon, title, badge), opening directly when tapped (#2961); also above the installed list on **Settings › Extensions**; the Settings tab badge adds these badges (numbers summed; a dot when there are only text badges), and when the drawer already lists these entries, the Settings button at the bottom of the drawer does not add them again | Same as iOS: in the drawer after Machines, and above the list on **Settings › Extensions**; the Settings tab badge adds these badges |
-| `overview_card` | On the Overview page (`/overview`), a row of cards at the end of the page, under the Agent sections and the computers | No Overview page: above the list in **Settings › Extensions** | No Overview page: above the list in **Settings › Extensions** | Same as iOS |
+| `overview_card` | On the Overview page (`/overview`), a row of cards at the end of the page, under the Agent sections and the computers, in the hub's order (by extension, then the manifest's) unless the user arranged them: order, hidden, half or full row, kept per user on the hub (web.md "Overview's extension cards", #9745) | No Overview page: above the list in **Settings › Extensions** | No Overview page: above the list in **Settings › Extensions** | Same as iOS |
 | `machine_section` | Machine detail page | Machine detail page | Machine detail page | Machine detail page |
 | `inbox_item` | The Inbox detail pane: the header (title, source, **Done**, ✦ summary, **AI draft reply** / **Hand to AI**) stays, and the conversation / body below is replaced by what the extension draws | When an item from this connector's source is opened in the Inbox, the right column (✦ summary and buttons, **Done**) stays, and the conversation / body on the left is replaced by the extension's View | When an item from this connector's source is opened in the Inbox, the action bar under the navigation bar (✦ summary, **AI Draft Reply** / **Hand to AI**) and **Done** stay, and the conversation / body below is replaced by the extension's View | Same as web (Android's own PR) |
 
@@ -2804,6 +2814,14 @@ them (`docs/design/PRINCIPLES.md`, principle 4).
 | `selected` | A node drawn as selected; the canvas opens centred on it |
 | `folded` | Nodes whose children start folded. Once the person folds or unfolds one, the app keeps their choice for this `key` |
 | `key` | As every component's: keeps the person's pan, zoom and folding across redraws |
+| `started_at` | Unix seconds (at least 0) when the node started; drawn on the timeline and read out in the inspector |
+| `ended_at` | Unix seconds (at least 0) when the node ended; omitted while it still runs, and never before `started_at` when both are set |
+| `facts` | Up to 8 `Fact` items (`value`, optional `label` and `icon`): short readings shown in the node inspector |
+| `detail` | Up to 2000 characters of plain text (a summary, verifier feedback or an error) shown in the node inspector |
+| `links` | Up to 8 `{title, url}` items in the node inspector: `title` 1–80 characters, a credential-free `https://` url up to 2000 characters |
+
+The last five are optional and only feed the inspector and the timeline, so a source that has them adds depth without changing
+the graph's shape.
 
 The layout rules are exact and shared: `spec/fixtures/graph-layout/README.md` states them, `scripts/gen/graph_layout.py` is the
 reference and writes the cases every app and the hub check themselves against. A layout is in slots (a node and its gap); each
@@ -2813,7 +2831,10 @@ app multiplies by its own node size.
 edge names known nodes, never one node twice (`from` = `to`) and never the same pair twice; no cycle; in a `tree`, no node with two
 parents; `selected` and every `folded` id name a node; not both `tone` and `color` on a node; the page's components, each node
 counted, at most 300. A graph's nodes' actions are the view's actions (`wire.Actions`): their `push` is checked as any other, an
-assistant-only action is taken out of an extension's view.
+assistant-only action is taken out of an extension's view. The optional inspector and timeline fields are checked too: `started_at`
+and `ended_at` are seconds at least 0, `ended_at` is never before `started_at` when both are set, `facts` holds at most 8 items
+(each a `Fact`), `detail` at most 2000 characters, and `links` at most 8 items whose `title` is 1–80 characters and whose `url` is a
+credential-free `https://` address of at most 2000 characters.
 
 **Drawing, on every app:**
 
@@ -2855,10 +2876,13 @@ the same titles, states and actions are there, as a list:
 | a node's `progress` | the row's `value`, the percentage (`40%`) |
 | a folded node | its row's `value` gains `+12` (the nodes it hides), after the percentage with ` · ` when it has one; what it hides has no row |
 | `tone`, `group`, `selected`, `layout`, `direction`, `key` | left out (a row's key is `key/id` when the graph has a key and that is free on the page; a native stream's row always has a key, so a taken or overlong one becomes a free digest of the node id) |
+| a node's `started_at`, `ended_at`, `facts`, `detail`, `links` | left out: neither a fallback row nor a native stream's row carries timing, inspector or timeline data |
 
 Below versions 6 and 3 the rows then lose what those versions did not have (`icon_color`, `icon`), as any row. A native stream's
-client (whose components never include `graph`) gets the same rows. Extensions may still draw an older app differently (`ui_version`).
-An action's `items` holding a graph are left out for an app below 10, which then draws the whole page again.
+client (whose components never include `graph`) gets the same rows, so it never sees the inspector or timeline fields either.
+Extensions may still draw an older app differently (`ui_version`). An older client that does send `10` but predates these fields
+simply ignores the unknown node properties; only the downgrade below 10 strips them. An action's `items` holding a graph are left
+out for an app below 10, which then draws the whole page again.
 
 **The web** (#9727) draws all of it and sends `10` (`web/src/views/extensions/ViewBody10.tsx`, a chunk loaded with the first view that has
 a graph; the page keeps the canvas's height meanwhile, and the card's fallback keeps the card's height too). The nodes are cards of the node token's size — growing with the
@@ -2871,6 +2895,19 @@ node, never over it — inside the node's own list item, so Tab walks a node the
 they fold one themselves. The keyboard walks the nodes in reading order (arrows pan, +/- zoom, 0 fits) and a focused node is panned into view; nodes fade in only when they
 are new or their fields changed. A card draws the same graph as a still fitted preview 200 px tall — fitted with no zoom floor, so a big graph fits too — with no buttons or
 presses; pressing it opens Full screen, the same interactive canvas as the page's. The web's native stream still sends 7.
+
+**The web's non-still canvas** (#11234) is a control room; a page, Full screen and a card's Full screen all draw it (the card itself stays a
+still 200 px preview). A collapsible outline of the visible nodes runs down the leading side: `j` / `k` and the arrow keys walk it,
+Enter opens the selected node's first link or runs its action, and Escape clears the selection and closes the inspector. Tapping a node
+that carries `facts`, `detail` or `links` opens an in-place node inspector beside the canvas (stacked below on narrow screens) with
+those readings, summary, HTTPS links (`openLink` opens hub session links in the side panel when supported) and any node `action`
+button; nodes without rich inspector metadata still run their `action` directly on tap. Beneath the canvas a collapsible parallel
+wall-clock timeline draws every node's `started_at`–`ended_at` span on one clock with adaptive ticks (`15s` / `1m` / `5m` / `15m` / `1h` / `6h`,
+scaling to date ticks across multi-day spans), so attempts running side by side read as concurrent bars; pressing a row selects and
+inspects that node in place, without leaving the page. In a `tree`, a run of more than 6 sibling leaves packs into columns instead of
+one long line. The opening viewport stays readable: when the fitted scale would fall below 65% it opens at 75% instead, centred on
+`selected`, else on the first running, caution or danger node, so a wide graph opens where the action is; Fit still zooms down to
+25% to show all of it.
 `web/e2e/extension-graph.mjs` checks it in a browser against the mock (`MOCK_EXTENSIONS=1 MOCK_EXTENSION_GRAPH=1`), keyboard included.
 
 **iOS** (#9727) draws all of it and sends `10` for whole pages and the app's cards and sections

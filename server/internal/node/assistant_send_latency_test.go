@@ -95,6 +95,31 @@ func TestAssistantSendOverlapsContextAndAcknowledgedModes(t *testing.T) {
 	}
 }
 
+// A public mention turn must not pull the owner's private live snapshot into the main conversation. This is per send:
+// the ordinary-send control above keeps requesting the snapshot, and Public never becomes process/model state (#11130).
+func TestAssistantPublicSendSkipsOwnerSnapshot(t *testing.T) {
+	f := cliTest(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(os.Getenv("HOME"), ".claude"))
+	calls := 0
+	f.fh.mu.Lock()
+	f.fh.onContext = func(context.Context) { calls++ }
+	f.fh.mu.Unlock()
+	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "public mention request", nil, "", "", modelExecution{Public: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.n.stopAssistant(id) })
+	input := f.file("stdin.jsonl")
+	if !strings.Contains(input, "public mention request") || strings.Contains(input, "snapshot") {
+		t.Fatalf("public input carries an owner snapshot: %s", input)
+	}
+	f.fh.mu.Lock()
+	defer f.fh.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("the public send requested %d owner snapshots", calls)
+	}
+}
+
 // Opt-in wall-clock probe, also usable unchanged against the base with go
 // -overlay. These delays simulate RPC/runtime latency; this is not real model
 // latency. The production Node and a real local claude-shaped subprocess run.

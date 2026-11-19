@@ -7,7 +7,8 @@ An assistant-owned permission card can carry **Have a question** in addition to 
 - Web shows a question editor when the interaction has `can_clarify`. `POST /api/v1/interactions/{id}/clarify` takes only `{text, client_msg_id}`. The trimmed question is at most 1,000 Unicode code points. An unchanged retry reuses its `client_msg_id`; a deliberate new question uses a new one.
 - Feishu shows the same action only on a public card. Every press must be a fresh, one-time owner action bound to that channel, card, and permission kind. The answer run returns to the card's explicit chat and message target as well as the originating assistant conversation.
 - The owner's original text is delivered to the interaction's exact machine and session. An archived conversation is explicitly reopened. A deleted conversation or ended room returns a visible error; delivery never falls back to another conversation.
-- A successful question returns the original tool call with a non-final Clarifying outcome. Its result says that the same card remains valid and must not be recreated. The card stays pending for Allow or Deny, and further questions are allowed.
+- The hub issues a short-lived, one-time proof for an authenticated Web question, bound to the card, exact text, destination and `client_msg_id`. Feishu gets the same bound proof only after its fresh owner action succeeds. The opaque token travels only inside `session.send_once`; the hub consumes it before sending and the devices manager writes `owner_input`. A manager-written `owner_input`, caller or submission is never accepted. Missing proof on an older hub/manager combination keeps the previous unmarked delivery; proof never grants Apply or another owner action.
+- A successful question returns the original tool call with a non-final Clarifying outcome. Its result says that the question is not an approval decision, that it arrives as a separate owner message to be answered then, and that the same card remains valid and must not be recreated. The card stays pending for Allow or Deny, and further questions are allowed.
 - Private interactions remain in their private Web conversation: they are not drawn or answered in Feishu. Field cards may be questioned, but field values are never put in the question and channel Allow remains unavailable. Only the owner can clarify; an assistant, supervisor, answer-only principal, remembered grant, or standing authorization cannot execute the prepared operation.
 
 ## Prepared operation and compatibility
@@ -18,9 +19,13 @@ For a hub-owned setting, `fleet.ask_prepared` retains the executable handle in t
 
 Immediately before Apply, the operation re-reads current state and verifies that it still produces the visible before/after proposal. A revision-checked operation keeps its original revision baseline rather than rebasing it. A stale proposal applies nothing and ends as stale/cancelled with a request for a fresh card. An equivalent newer proposal replaces and closes an older Clarifying card so both cannot execute. Subscription deletion uses an atomic revision predicate.
 
+A prepared operation without a live origin conversation uses the older one-shot card instead: `can_clarify` stays false, a fresh Allow applies once, Deny or expiry applies nothing, and the original caller is the only terminal recipient. No approval journal or other conversation receives a fallback result. Legacy wait failures and pre-Apply validation errors say definitely that nothing was applied; an error after Apply begins remains uncertain. `repository_add` finishes argument and current-state validation before presenting its card.
+
 ## Timing and terminal delivery
 
 Before the first question, the card keeps its original decision deadline. While an accepted question is being answered, that remaining decision time is paused. The pause has a cumulative 24-hour budget per card; repeated questions do not reset it. The turn that produced the card does not count as its answer turn, and a question accepted during an answer turn waits for the next turn before timing resumes.
+
+Every pending snapshot carries the current effective `expires_at`: during a pause it is the remaining pause-budget deadline, and after all answers finish it is the resumed decision deadline with exactly the preserved time left. Same-ID interaction updates publish those changes without another arrival or push. Android replaces its card and delivered notification with that current deadline, including notification action metadata and system timeout. A genuinely expired current card still cannot execute; stale notification timestamps alone cannot revive it.
 
 ### Unanswered cards keep waiting (#10096)
 

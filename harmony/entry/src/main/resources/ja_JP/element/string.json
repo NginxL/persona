@@ -1546,11 +1546,19 @@
     },
     {
       "name": "assistant_feed_permission_default",
-      "value": "デフォルト"
+      "value": "デフォルト権限"
+    },
+    {
+      "name": "assistant_feed_permission_acceptEdits",
+      "value": "編集を自動承認"
     },
     {
       "name": "assistant_feed_permission_plan",
-      "value": "読み取り専用"
+      "value": "計画モード"
+    },
+    {
+      "name": "assistant_feed_permission_auto",
+      "value": "自動レビュー"
     },
     {
       "name": "assistant_feed_persona_message",
@@ -4635,6 +4643,10 @@
     {
       "name": "agent_group_background",
       "value": "バックグラウンド待機"
+    },
+    {
+      "name": "agent_group_just_finished",
+      "value": "完了したばかり"
     },
     {
       "name": "agent_group_waiting",

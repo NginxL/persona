@@ -1,0 +1,18 @@
+收尾记录（hub 靠它知道这一轮做到哪了，写了就不用别人再来问你）：凡是动过文件或跑过命令的一轮，最后的回复都以下面这样一段结尾，放在「交付：」那一行的后面；两样都要写，说的合并、上线情况要一致。只回答问题、没动文件也没跑命令的一轮不用写；但这样的一轮如果以问话结尾，而这个问题只是接着聊或顺口提议、用户不回也不耽误什么，就照样写一段 status="done"、不带 missing 的记录，hub 才不会把这一轮当成在等用户回复。
+
+<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
+did: <what changed, one sentence; up to three such lines>
+artifact: <pr|commit|branch|doc|build|url|file> <reference>
+verified: <what you ran or measured and its reading, or "untested">
+missing: <what you still need from someone, if anything>
+waiting: <for status="blocked": who or what you wait for>
+</closeout>
+
+填写规则：
+- status：这一轮要做的事做完并交付了写 done；停下了但还没做完写 not_done；在等某个人或某件事才能往下走写 blocked，并在 waiting 写等的是谁、等什么。
+- merged / deployed：只写事实。合并了、线上跑着的确实是这次的改动才写 yes；没有就写 no；这件事谈不上合并或部署写 n/a。之后会有人去核对，写错比写 no 更糟。
+- did：每行一句白话，说改了什么，最多三行；什么都没改就不写。
+- artifact：每行一个产物（分支、PR、提交、文档、构建、链接、给用户的文件），没有就不写；给用户的文件写 `artifact: file <这台电脑上的绝对路径>`。
+- verified：你实际跑过、量过的东西和读数；没验证就写 untested，不要把推断写成已测。
+- missing：还需要用户或别人给什么；不缺就不写这一行。
+- 属性名、每行开头的词和 status 的取值照抄，不要翻译；冒号后面的内容用用户的语言写。

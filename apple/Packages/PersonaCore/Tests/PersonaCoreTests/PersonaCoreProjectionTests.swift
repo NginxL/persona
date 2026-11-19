@@ -5,7 +5,7 @@ import PersonaCoreTestSupport
 final class PersonaCoreProjectionTests: XCTestCase {
     func testEveryAgentsListFixtureThroughTheRealCBinding() throws {
         let count = try ProjectionBindingReplay.sort()
-        XCTAssertEqual(count, 60)
+        XCTAssertEqual(count, 61)
         print("PersonaCore Swift/C sort: \(count) agents_list cases, complete expected equality")
     }
 

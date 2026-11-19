@@ -50,7 +50,7 @@ struct AssistantScheduleTests {
         t.launcher = "claude-fast"
         t.permissionMode = "acceptEdits"
         t.effort = "low"
-        #expect(AssistantScheduleText.runsWith(t)?.text == "claude-fast · 自动改文件 · 思考低")
+        #expect(AssistantScheduleText.runsWith(t)?.text == "claude-fast · 允许编辑 · 思考低")
         #expect(AssistantScheduleText.runsWith(t)?.danger == false)
         t.permissionMode = "bypassPermissions"
         #expect(AssistantScheduleText.runsWith(t)?.danger == true)

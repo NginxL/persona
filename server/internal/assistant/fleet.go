@@ -343,6 +343,9 @@ var rateLimited = lazyre.New(`(?i)\b429\b|rate[ _-]?limit|too many requests|usag
 // turnErrorCode is what a turn's model API error says is wrong, for a card that says what to fix (Session.TurnErrorCode,
 // docs/assistant/onboarding.md 5.2); "" when it does not say.
 func turnErrorCode(text string) string {
+	if code := proto.UnrecoverableTurnErrorCode(text); code != "" {
+		return code
+	}
 	t := strings.TrimSpace(text)
 	switch {
 	case strings.HasPrefix(strings.ToLower(t), "not logged in"):
@@ -377,6 +380,9 @@ func sessionTurnErrorCode(c proto.Session) string {
 		return ""
 	}
 	code := turnErrorCode(c.TurnError)
+	if proto.UnrecoverableTurnErrorCode(c.TurnError) != "" {
+		return code
+	}
 	if c.TurnErrorKind == proto.TurnErrorUsageLimit {
 		return proto.TurnErrorRateLimited
 	}

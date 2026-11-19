@@ -4,12 +4,15 @@
 // Fit, and a Full screen overlay with the same canvas. A chunk of its own, loaded with the first view that has a
 // graph (ViewBody.tsx), never the first screen or the idle preload. The layout is lib/graph-layout.ts, the shared
 // rules in slots; this file only multiplies by the web's node pitch and draws.
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../i18n";
 import { layOutGraph } from "../../lib/graph-layout";
 import { toneOf, type UIAction, type UIItem, type UIGraphNode } from "../../lib/extension-ui";
 import { hue } from "../../lib/extension-ui-v6";
+import { linkHref, openLink, opensInApp } from "../../lib/links";
+import { useLinkManager } from "../../lib/manager-choice";
+import { formatDuration } from "../../lib/turns";
 import { useExtensionOwner } from "../../lib/extension-owner";
 import { useCloseOnBack } from "../../lib/back-close";
 import { cx, EASE, IconButton, Spinner } from "../../ui/atoms";
@@ -44,6 +47,20 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
 /** A node's tone (a role color) as one of the named hues the web's `--hue-*` colors are. */
 const TONE_HUE: Record<string, string> = { positive: "green", caution: "orange", danger: "red" };
 const nodeColor = (n: UIGraphNode): string | undefined => (n.color ? hue(n.color) : n.tone ? hue(TONE_HUE[toneOf(n.tone)]) : undefined);
+
+/** A node the control room opens in place: it carries readings, a summary or links. */
+const isRichNode = (n: UIGraphNode): boolean => Boolean(n.facts?.length || n.detail || n.links?.length);
+
+/** The clock ladder of the timeline: whole seconds from 15s up to multi-day spans, with a dynamic cap beyond that. */
+const STEPS = [15, 60, 300, 900, 3600, 21600, 86400, 604800, 2592000, 31536000];
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** A tick as the person's own clock: HH:MM:SS under a minute, HH:MM under a day, YYYY-MM-DD at a day or wider. */
+const clockAt = (seconds: number, step: number): string => {
+  const d = new Date(seconds * 1000);
+  if (step >= 86400) return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return step < 60 ? `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}` : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+const reducedMotion = (): boolean => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 interface CanvasView { x: number; y: number; zoom: number }
 
@@ -102,7 +119,10 @@ function textScaleNow(): number {
 // fields changed since, fades in; one that only moved place does not. The memory is one map per canvas instance, so it
 // survives the layer being swapped (opening Full screen replaces the layer element) and dies with the canvas itself.
 const drawSig = (n: UIGraphNode, parentTitle: string | undefined): string =>
-  JSON.stringify([n.title, n.badge?.text ?? "", n.subtitle ?? "", n.progress ?? null, n.tone ?? "", n.color ?? "", n.icon ?? "", n.group ?? "", n.action?.id ?? "", parentTitle ?? ""]);
+  JSON.stringify([
+    n.title, n.badge?.text ?? "", n.subtitle ?? "", n.progress ?? null, n.tone ?? "", n.color ?? "", n.icon ?? "", n.group ?? "", n.action?.id ?? "",
+    n.started_at ?? null, n.ended_at ?? null, n.detail ?? "", n.facts?.length ?? 0, n.links?.map((l) => `${l.title}\u0000${l.url}`) ?? [], parentTitle ?? "",
+  ]);
 
 interface NodeProps {
   node: UIGraphNode;
@@ -117,7 +137,10 @@ interface NodeProps {
   pressable: boolean;
   onPress: (a: UIAction) => void;
   onReveal: (id: string) => void;
-  /** The view's `selected` node: drawn with the accent's ring, and read as the current one. */
+  /** The control room's node to open in place, when this node carries readings, a summary or links. */
+  rich: boolean;
+  onInspect: (id: string) => void;
+  /** The view's `selected` node or the control room's pick: drawn with the accent's ring, and read as the current one. */
   selected?: boolean;
   /** True when the previous committed render of this canvas drew this node differently (or not at all). */
   fade: boolean;
@@ -130,12 +153,15 @@ interface NodeProps {
  *  focus included). A node without an action is a focusable group, so Tab reaches it too and a screen reader reads
  *  its whole label. The node being pressed stays enabled (as the row's own button, ViewBody's ItemButton): disabling
  *  it would blur it mid-action and the browser would drop the keyboard focus to the page. */
-const GraphNode = memo(function GraphNode({ node: n, parentTitle, id, x, y, w, h, still, busy, pressable, onPress, onReveal, selected, fade, fold }: NodeProps) {
+const GraphNode = memo(function GraphNode({ node: n, parentTitle, id, x, y, w, h, still, busy, pressable, onPress, onReveal, rich, onInspect, selected, fade, fold }: NodeProps) {
   const color = nodeColor(n);
   const glyph = glyphOf(n.icon, ROW_ICON);
   const label = nodeLabel(n, parentTitle);
   const act = still ? undefined : n.action; // a still preview presses nothing: it opens Full screen
   const isBusy = !!act && busy === act.id; // a slow action shows the row's own busy cue: a spinner and aria-busy
+  // A rich node opens its inspector instead of pressing: a press on the card is the way in, and the pressable gate
+  // waits inside the inspector. The card stays enabled whatever the action (the focused card never drops its focus).
+  const inspect = !still && rich;
   const body = (
     <>
       {color && <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-current" style={{ color }} />}
@@ -166,14 +192,14 @@ const GraphNode = memo(function GraphNode({ node: n, parentTitle, id, x, y, w, h
   const common = { "data-graph-node": id, "aria-label": label, title: label, "aria-current": selected ? ("true" as const) : undefined } as const;
   return (
     <div role="listitem" data-graph-at={id} className="absolute" style={{ left: x, top: y, width: w, height: h }}>
-      {act ? (
+      {inspect || act ? (
         <button
           type="button"
           {...common}
-          disabled={(!!busy && busy !== act.id) || !pressable}
+          disabled={inspect ? false : (!!busy && busy !== act!.id) || !pressable}
           aria-busy={isBusy || undefined}
           onFocus={() => onReveal(id)}
-          onClick={() => onPress(act)}
+          onClick={inspect ? () => onInspect(id) : () => onPress(act!)}
           className={cx(
             "group flex h-full w-full items-center overflow-hidden rounded-card border border-line bg-surface pl-2.5 pr-2 text-left shadow-card",
             "transition-colors duration-300 enabled:hover:bg-hover focus-visible:z-10 disabled:opacity-60",
@@ -302,6 +328,9 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   }, [scoped, keyed]);
   const folds = useMemo(() => personFolds ?? new Set(item.folded ?? []), [personFolds, item.folded]);
   const [full, setFull] = useState(false);
+  // A still preview is the one place this canvas is not interactive: a compact card that is not Full screen. Full
+  // screen is the same canvas as the page's, gestures, buttons, folds and node presses included.
+  const still = !!compact && !full;
   const stage = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -335,10 +364,6 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   // keeps the canvas's own memory across the swap. Written only by the commit effect (sigs), never in render.
   const memRef = useRef(new Map<string, string>());
   const controls = useRef<{ zoom: (factor: number) => void; fit: () => void } | null>(null);
-  useModalFocus(dialog, full);
-  useEscapeClose(full, () => setFull(false));
-  // Back closes Full screen before it leaves the page, on a phone's gesture and a desktop's button alike.
-  useCloseOnBack(full, () => setFull(false));
   // The node pitch follows the text-size choice (applyLook writes data-text-size on <html> when it changes).
   const [textScale, setTextScale] = useState(textScaleNow);
   useLayoutEffect(() => {
@@ -355,21 +380,19 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   // The layout follows from the nodes, edges and folds alone, so a redraw that changes only states keeps every node
   // in place (spec/fixtures/graph-layout/README.md).
   const laid = useMemo(
-    () => layOutGraph({ nodes: item.nodes ?? [], edges: item.edges, layout: item.layout, direction: item.direction }, [...folds]),
-    [item.nodes, item.edges, item.layout, item.direction, folds],
+    () => layOutGraph({ nodes: item.nodes ?? [], edges: item.edges, layout: item.layout, direction: item.direction }, [...folds], still ? undefined : { maxLeafRows: 6 }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- still is the only reading of `full`/`compact` this takes
+    [item.nodes, item.edges, item.layout, item.direction, folds, still],
   );
   const byId = useMemo(() => Object.fromEntries((item.nodes ?? []).map((n) => [n.id, n])), [item.nodes]);
   const down = item.direction === "down";
   const lw = (laid.size[0] - 1) * pitchX + nodeW + 2 * MARGIN;
   const lh = (laid.size[1] - 1) * pitchY + nodeH + 2 * MARGIN;
-  // A still preview is the one place this canvas is not interactive: a compact card that is not Full screen. Full
-  // screen is the same canvas as the page's, gestures, buttons, folds and node presses included.
-  const still = !!compact && !full;
 
   // The parent each node is read "under": the first edge that names it as a child, in the view's order.
   const parentTitle = useMemo(() => {
-    const out: Record<string, string | undefined> = {};
-    for (const [from, to] of laid.edges) if (!out[to]) out[to] = byId[from]?.title;
+    const out: Record<string, string | undefined> = Object.create(null) as Record<string, string | undefined>;
+    for (const [from, to] of laid.edges) if (!Object.hasOwn(out, to)) out[to] = byId[from]?.title;
     return out;
   }, [laid, byId]);
 
@@ -378,7 +401,118 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     const p = laid.at[id];
     return p ? [p[0] * pitchX + MARGIN, p[1] * pitchY + MARGIN] : [0, 0];
   }, [laid, pitchX, pitchY]);
-  const sel = item.selected && laid.at[item.selected] ? item.selected : undefined;
+  const sel = item.selected && Object.hasOwn(laid.at, item.selected) ? item.selected : undefined;
+
+  // ── the control room: the outline, the in-place inspector and the timeline (a page or Full screen, never still) ──
+  const linkManager = useLinkManager();
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => (sel && byId[sel] && isRichNode(byId[sel]) ? sel : null));
+  const [inspectorOpen, setInspectorOpen] = useState(() => Boolean(sel && byId[sel] && isRichNode(byId[sel])));
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const outlineRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const focusCleanupRef = useRef<(() => void) | null>(null);
+  const [trackW, setTrackW] = useState(600);
+  // A pick whose node a redraw took away or folded out of sight is no pick; otherwise the view's `selected` stays current.
+  const activeId = selectedNodeId && Object.hasOwn(laid.at, selectedNodeId) && byId[selectedNodeId] ? selectedNodeId : null;
+  const activeSelectedId = activeId ?? sel;
+  const activeInspectorNode = inspectorOpen && activeId ? byId[activeId] : undefined;
+
+  const closeInspector = useCallback(() => {
+    const hadFocusInside = typeof document !== "undefined" && !!inspectorRef.current?.contains(document.activeElement);
+    setSelectedNodeId(null);
+    setInspectorOpen(false);
+    if (hadFocusInside) {
+      if (full) dialog.current?.focus({ preventScroll: true });
+      else stage.current?.focus({ preventScroll: true });
+    }
+  }, [full]);
+
+  useModalFocus(dialog, full);
+  useEscapeClose(full, () => {
+    if (activeInspectorNode) closeInspector();
+    else setFull(false);
+  });
+  // Back closes the inspector first, then Full screen before it leaves the page.
+  useCloseOnBack(full, () => {
+    if (activeInspectorNode) closeInspector();
+    else setFull(false);
+  });
+
+  useEffect(() => () => focusCleanupRef.current?.(), []);
+
+  /** Centres the stage on a node (clamped like a pan), briefly easing there unless reduced motion asks otherwise. */
+  const focusNode = useCallback((id: string) => {
+    const area = stage.current;
+    const pane = layer.current;
+    if (!area || !pane) return;
+    const w = area.clientWidth;
+    const h = area.clientHeight;
+    if (!w || !h) return;
+    const v = view.current;
+    const [nx, ny] = at(id);
+    const cw = lw * v.zoom;
+    const ch = lh * v.zoom;
+    const next: CanvasView = {
+      zoom: v.zoom,
+      x: cw <= w ? (w - cw) / 2 : clamp(w / 2 - (nx + nodeW / 2) * v.zoom, INSET - cw, w - INSET),
+      y: ch <= h ? (h - ch) / 2 : clamp(h / 2 - (ny + nodeH / 2) * v.zoom, INSET - ch, h - INSET),
+    };
+    focusCleanupRef.current?.();
+    if (!reducedMotion()) {
+      pane.style.transition = `transform 200ms ${EASE}`;
+      let timer = 0;
+      const clear = () => {
+        window.clearTimeout(timer);
+        area.removeEventListener("pointerdown", clear, true);
+        area.removeEventListener("wheel", clear, true);
+        pane.style.transition = "";
+        if (focusCleanupRef.current === clear) focusCleanupRef.current = null;
+      };
+      area.addEventListener("pointerdown", clear, { once: true, capture: true });
+      area.addEventListener("wheel", clear, { once: true, capture: true });
+      timer = window.setTimeout(clear, 240);
+      focusCleanupRef.current = clear;
+    }
+    view.current = next;
+    pane.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.zoom})`;
+    pane.style.setProperty("--graph-fold-scale", String(Math.max(1, 1 / next.zoom)));
+    moved.current = true;
+    if (!still) {
+      const s = readStore();
+      s.view = next;
+      s.moved = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readStore closes over keyed/scoped only through the store's own id
+  }, [at, nodeW, nodeH, lw, lh, still, keyed, scoped]);
+
+  const inspect = useCallback((id: string) => {
+    setSelectedNodeId(id);
+    setInspectorOpen(true);
+  }, []);
+
+  const timedNodes = useMemo(
+    () => laid.order.map((id) => byId[id]).filter((n): n is UIGraphNode => !!n && n.started_at !== undefined),
+    [laid, byId],
+  );
+  const anyRunning = timedNodes.some((n) => n.ended_at === undefined);
+  const liveClockNeeded = !still && anyRunning && (timelineOpen || activeInspectorNode?.ended_at === undefined && activeInspectorNode?.started_at !== undefined);
+  // The clock runs while an open timeline or an open running-node inspector displays live elapsed time.
+  useEffect(() => {
+    if (!liveClockNeeded) return;
+    const timer = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [liveClockNeeded]);
+  useLayoutEffect(() => {
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setTrackW(el.clientWidth || 600));
+    ro.observe(el);
+    setTrackW(el.clientWidth || 600);
+    return () => ro.disconnect();
+  }, [timelineOpen, still, activeInspectorNode]);
 
   useLayoutEffect(() => {
     const area = stage.current;
@@ -426,16 +560,24 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       apply(clampPan({ x: cx - (cx - v.x) * ratio, y: cy - (cy - v.y) * ratio, zoom }));
     };
 
-    // It opens at the fitted scale held to 50%–100%, centred on `selected`, else with the first root at the top
-    // start — a right tree's first root sits halfway down its children, so the layer's corner would not do.
+    // It opens at a readable scale: when the drawing has to shrink under 65% to fit, it holds at least 75% (so a
+    // wide fan-out is legible instead of a speck) and centres on what needs the person — the selected node, else the
+    // first node that is running, needs them or is in progress — and otherwise at the fitted scale held to 50%–100%.
     const open = () => {
       const { w, h } = size();
       if (!w || !h) return;
       const fit = Math.min((w - 2 * INSET) / lw, (h - 2 * INSET) / lh);
-      const zoom = clamp(fit, 0.5, 1);
-      const origin = sel
+      const zoom = fit < 0.65 ? clamp(Math.max(fit, 0.75), MIN_ZOOM, MAX_ZOOM) : clamp(fit, 0.5, 1);
+      const focusId = sel ?? (fit < 0.65
+        ? laid.order.find((id) => {
+            const n = byId[id];
+            return n && (n.tone === "danger" || n.tone === "caution" || n.badge?.tone === "danger" || n.badge?.tone === "caution"
+              || (n.started_at !== undefined && n.ended_at === undefined) || (n.progress !== undefined && n.progress > 0 && n.progress < 1));
+          })
+        : undefined);
+      const origin = focusId
         ? (() => {
-            const [sx, sy] = at(sel);
+            const [sx, sy] = at(focusId);
             return { x: w / 2 - (sx + nodeW / 2) * zoom, y: h / 2 - (sy + nodeH / 2) * zoom };
           })()
         : (() => {
@@ -570,9 +712,13 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     if (!still) {
       area.addEventListener("wheel", wheel, { passive: false });
       area.addEventListener("pointerdown", down);
-      area.addEventListener("pointermove", move);
-      area.addEventListener("pointerup", end);
-      area.addEventListener("pointercancel", end);
+      // A drag that leaves the canvas keeps panning: the outline and the inspector sit right beside it, and the
+      // move, up and cancel were once the area's own, so crossing into the outline on the first step ended the
+      // gesture and left its point behind (the next hover then panned). The document listens instead; the points
+      // map, which only has an entry between down and up, still gates them to a real drag.
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
       area.addEventListener("lostpointercapture", end);
       area.addEventListener("keydown", key);
     }
@@ -583,20 +729,17 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       if (!still) {
         area.removeEventListener("wheel", wheel);
         area.removeEventListener("pointerdown", down);
-        area.removeEventListener("pointermove", move);
-        area.removeEventListener("pointerup", end);
-        area.removeEventListener("pointercancel", end);
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
         area.removeEventListener("lostpointercapture", end);
         area.removeEventListener("keydown", key);
       }
     };
     // laid changes when the view is drawn again or a fold is toggled; the person's view survives it in `view`.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readStore closes over keyed/scoped only through the store's own id
-  }, [laid, still, full, storeKey, keyed, at, sel, nodeW, nodeH, lw, lh]);
+  }, [laid, still, full, storeKey, keyed, at, sel, byId, nodeW, nodeH, lw, lh]);
 
-  // A node the keyboard focuses is panned into view. It does not count as the person moving the canvas (an untouched
-  // key still re-fits), but the shift itself is kept: without it, the next redraw of an untouched key would take the
-  // opening view again and undo the scroll-into-view, dropping the focused node out of the visible area.
   // A node the keyboard focuses is panned into view. It does not count as the person moving the canvas (an untouched
   // key still re-fits), but the shift itself is kept: without it, the next redraw of an untouched key would take the
   // opening view again and undo the scroll-into-view, dropping the focused node out of the visible area.
@@ -685,7 +828,9 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
             pressable={pressable}
             onPress={onPress}
             onReveal={reveal}
-            selected={id === sel}
+            rich={isRichNode(n)}
+            onInspect={inspect}
+            selected={id === activeSelectedId}
             fade={fadeOf(id)}
             fold={needsFold ? <FoldControl id={id} w={nodeW} h={nodeH} gap={down ? pitchY - nodeH : pitchX - nodeW} down={down} folded={folded} hidden={hidden} onToggle={toggle} /> : undefined}
           />
@@ -744,12 +889,295 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
             </div>
           );
         })}
-        {sel && (() => {
-          const [x, y] = at(sel);
+        {activeSelectedId && (() => {
+          const [x, y] = at(activeSelectedId);
           return <span aria-hidden data-graph-selected="" className="pointer-events-none absolute z-[1] rounded-[calc(var(--radius-card)+2px)] shadow-[0_0_0_2px_var(--accent)]" style={{ left: x - 2, top: y - 2, width: nodeW + 4, height: nodeH + 4 }} />;
         })()}
         {nodes}
       </div>
+    </div>
+  );
+
+  // ── the outline: the reading order as a navigable list, with j / k / arrows / Enter / Escape ──
+  const outlineKey = (e: React.KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey || target?.closest?.("input, textarea, select, [contenteditable='true']")) return;
+    const order = laid.order;
+    if (!order.length) return;
+    // Walk from the row the person is on when they are on one, else from the pick (so j / k after a focus starts where
+    // the focus is, not where an older selection was — the e2e focuses the first row before pressing).
+    const focusedRow = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null)?.getAttribute?.("data-graph-outline-node") : null;
+    const current = focusedRow && order.includes(focusedRow) ? order.indexOf(focusedRow) : activeSelectedId ? order.indexOf(activeSelectedId) : -1;
+    const pick = (id: string) => {
+      setSelectedNodeId(id);
+      focusNode(id);
+      if (isRichNode(byId[id])) setInspectorOpen(true);
+      const row = [...(outlineRef.current?.querySelectorAll<HTMLElement>("[data-graph-outline-node]") ?? [])].find((el) => el.dataset.graphOutlineNode === id);
+      row?.focus();
+    };
+    if (e.key === "j" || e.key === "ArrowDown") {
+      e.preventDefault();
+      pick(order[Math.min(order.length - 1, current + 1)]);
+    } else if (e.key === "k" || e.key === "ArrowUp") {
+      e.preventDefault();
+      pick(order[Math.max(0, current - 1)]);
+    } else if (e.key === "Escape") {
+      if (activeId !== null || activeInspectorNode) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeInspector();
+      }
+    } else if (e.key === "Enter") {
+      const targetId = focusedRow && Object.hasOwn(laid.at, focusedRow) && byId[focusedRow] ? focusedRow : activeId;
+      const cur = targetId ? byId[targetId] : undefined;
+      if (!cur) return;
+      e.preventDefault();
+      setSelectedNodeId(targetId);
+      if (isRichNode(cur)) setInspectorOpen(true);
+      if (cur.links?.length) {
+        if (full && opensInApp(cur.links[0].url)) setFull(false);
+        openLink(cur.links[0].url, cur.links[0].title, linkManager);
+      } else if (cur.action && (canPress ? canPress(cur.action) : true)) {
+        onPress(cur.action);
+      }
+    }
+  };
+
+  const outline = (
+    <aside className="hidden w-[208px] shrink-0 flex-col border-r border-line bg-surface md:flex md:h-full">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-meta font-semibold text-ink">{t("extensions-viewbody.graph_outline")}</span>
+        <span className="shrink-0 text-submeta text-ink-3 tabular-nums">{laid.order.length}</span>
+        <button
+          type="button"
+          data-graph-outline-toggle=""
+          aria-expanded={true}
+          aria-label={t("extensions-viewbody.graph_outline")}
+          title={t("extensions-viewbody.graph_outline")}
+          onClick={() => setOutlineOpen(false)}
+          className="touch-hit flex size-6 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+        >
+          <Icon name="chevronLeft" size={13} />
+        </button>
+      </div>
+      <div ref={outlineRef} data-graph-outline="" tabIndex={0} onKeyDown={outlineKey} className="min-h-0 flex-1 overflow-y-auto py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent">
+        {laid.order.map((id, i) => {
+          const n = byId[id] as UIGraphNode;
+          const previous = i > 0 ? byId[laid.order[i - 1]] : undefined;
+          const group = n.group && n.group !== previous?.group ? n.group : undefined;
+          const color = nodeColor(n);
+          return (
+            <div key={id}>
+              {group && <div className="px-3 pt-2 pb-0.5 text-submeta font-medium text-ink-3">{group}</div>}
+              <button
+                type="button"
+                data-graph-outline-node={id}
+                onClick={() => {
+                  focusNode(id);
+                  setSelectedNodeId(id);
+                  if (isRichNode(n)) setInspectorOpen(true);
+                  else if (n.action && (canPress ? canPress(n.action) : true)) onPress(n.action);
+                }}
+                className={cx(
+                  "flex w-full items-center gap-1.5 py-1 pr-2 text-left transition-colors hover:bg-hover",
+                  id === activeSelectedId && "bg-hover",
+                )}
+                style={{ paddingLeft: 12 + Math.min(laid.depth[id] ?? 0, 4) * 10 }}
+              >
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: color ?? "var(--ink-3)" }} />
+                <span className={cx("min-w-0 flex-1 truncate text-submeta text-ink", id === activeSelectedId && "font-medium")} title={n.title}>{n.title}</span>
+                {n.badge && <Badge badge={n.badge} />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+
+  // ── the in-place inspector: the picked node's readings, summary, links and action ──
+  const inspector = activeInspectorNode && (
+    <aside
+      ref={inspectorRef}
+      data-graph-inspector=""
+      aria-label={t("extensions-viewbody.graph_inspector")}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeInspector();
+      }}
+      className="flex max-h-56 shrink-0 flex-col overflow-y-auto border-t border-line bg-surface md:h-full md:max-h-full md:w-[284px] md:border-t-0 md:border-l"
+    >
+      <div className="sticky top-0 flex items-start gap-1.5 border-b border-line bg-surface px-3 py-2">
+        <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full" style={{ background: nodeColor(activeInspectorNode) ?? "var(--ink-3)" }} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 flex-1 text-meta font-semibold break-words text-ink">{activeInspectorNode.title}</span>
+            {activeInspectorNode.badge && <Badge badge={activeInspectorNode.badge} />}
+          </div>
+          {activeInspectorNode.subtitle && <span className="text-submeta break-words text-ink-3">{activeInspectorNode.subtitle}</span>}
+        </div>
+        <button
+          type="button"
+          data-graph-inspector-close=""
+          aria-label={t("extensions-viewbody.graph_close")}
+          title={t("extensions-viewbody.graph_close")}
+          onClick={closeInspector}
+          className="touch-hit flex size-6 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+        >
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+      {(activeInspectorNode.facts?.length || activeInspectorNode.started_at !== undefined) && (
+        <div className="grid grid-cols-2 gap-1.5 px-3 py-2">
+          {activeInspectorNode.facts?.map((f, i) => {
+            const fg = glyphOf(f.icon, ROW_ICON);
+            return (
+              <div key={i} className="min-w-0 rounded-lg bg-inset px-2.5 py-1.5">
+                {f.label && (
+                  <div className="flex items-center gap-1 truncate text-submeta text-ink-3">
+                    {fg && <Icon name={fg} size={11} className="shrink-0" />}
+                    <span className="truncate">{f.label}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1 text-submeta font-medium break-words text-ink tabular-nums">
+                  {!f.label && fg && <Icon name={fg} size={11} className="shrink-0 text-ink-3" />}
+                  <span className="break-words">{f.value}</span>
+                </div>
+              </div>
+            );
+          })}
+          {activeInspectorNode.started_at !== undefined && (
+            <div className="min-w-0 rounded-lg bg-inset px-2.5 py-1.5">
+              <div className="truncate text-submeta text-ink-3">{t(activeInspectorNode.ended_at === undefined ? "extensions-viewbody.graph_running" : "extensions-viewbody.graph_timeline")}</div>
+              <div className="text-submeta font-medium break-words text-ink tabular-nums">{formatDuration((activeInspectorNode.ended_at ?? Math.max(nowSec, activeInspectorNode.started_at)) - activeInspectorNode.started_at)}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {activeInspectorNode.detail && (
+        <p className="mx-3 my-2 rounded-card bg-inset px-3 py-2 text-submeta leading-relaxed break-words whitespace-pre-wrap text-ink-2 select-text">{activeInspectorNode.detail}</p>
+      )}
+      {!!activeInspectorNode.links?.length && (
+        <div className="flex min-w-0 flex-col gap-0.5 px-3 py-2">
+          <span className="text-submeta font-medium text-ink-3">{t("extensions-viewbody.graph_links")}</span>
+          {activeInspectorNode.links.map((l) => (
+            <a
+              key={`${l.title}\u0000${l.url}`}
+              data-graph-inspector-link=""
+              href={linkHref(l.url)}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={l.url}
+              onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+                e.preventDefault();
+                if (full && opensInApp(l.url)) setFull(false);
+                openLink(l.url, l.title, linkManager);
+              }}
+              className="flex min-w-0 items-center gap-1 rounded-control px-1.5 py-1 text-submeta font-medium text-accent-ink transition-colors hover:bg-hover"
+            >
+              <span className="min-w-0 flex-1 truncate">{l.title}</span>
+              <Icon name="external" size={12} className="shrink-0" />
+            </a>
+          ))}
+        </div>
+      )}
+      {activeInspectorNode.action && (
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            data-graph-inspector-action=""
+            disabled={(!!busy && busy !== activeInspectorNode.action.id) || !(canPress ? canPress(activeInspectorNode.action) : true)}
+            aria-busy={busy === activeInspectorNode.action.id || undefined}
+            onClick={() => onPress(activeInspectorNode.action!)}
+            className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-control bg-ink px-3 text-label font-medium text-surface transition-colors enabled:hover:opacity-90 disabled:opacity-45"
+          >
+            {busy === activeInspectorNode.action.id && <Spinner size={12} />}
+            {t("extensions-viewbody.graph_open_action")}
+          </button>
+        </div>
+      )}
+    </aside>
+  );
+
+  // ── the timeline: each timed node a bar against the real clock ──
+  const starts = timedNodes.map((n) => n.started_at!);
+  const minStart = timedNodes.length ? Math.min(...starts) : 0;
+  const maxEnd = timedNodes.length ? Math.max(...timedNodes.map((n) => Math.max(n.started_at!, n.ended_at ?? Math.max(nowSec, n.started_at!)))) : 1;
+  const span = Math.max(1, maxEnd - minStart);
+  const perTick = Math.max(2, Math.floor(trackW / 84));
+  const step = STEPS.find((s) => span / s <= perTick) ?? Math.max(STEPS[STEPS.length - 1], Math.ceil(span / perTick));
+  const ticks: number[] = [];
+  for (let tick = Math.ceil(minStart / step) * step; tick <= maxEnd && ticks.length < perTick + 4; tick += step) ticks.push(tick);
+  if (!ticks.length) ticks.push(minStart, maxEnd);
+
+  const timeline = timedNodes.length > 0 && (
+    <div data-graph-timeline="" className="shrink-0 border-t border-line bg-surface">
+      <button
+        type="button"
+        data-graph-timeline-toggle=""
+        aria-expanded={timelineOpen}
+        onClick={() => setTimelineOpen((open) => !open)}
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left"
+      >
+        <Icon name="chevron" size={12} className={cx("shrink-0 text-ink-3 transition-transform", !timelineOpen && "-rotate-90")} />
+        <span className="text-submeta font-medium text-ink-2">{t("extensions-viewbody.graph_timeline")}</span>
+        <span className="ml-auto text-submeta text-ink-3 tabular-nums">{`${timedNodes.length} · ${formatDuration(span)}`}</span>
+      </button>
+      {timelineOpen && (
+        <div className="max-h-40 overflow-y-auto pb-1">
+          <div className="flex items-end gap-1.5 px-3">
+            <span className="w-[148px] shrink-0" />
+            <div ref={trackRef} className="relative h-5 flex-1">
+              {ticks.map((tick, i) => (
+                <span
+                  key={i}
+                  data-graph-timeline-tick=""
+                  className="absolute bottom-0 -translate-x-1/2 text-submeta text-ink-3 tabular-nums"
+                  style={{ left: `${((tick - minStart) / span) * 100}%` }}
+                >
+                  {clockAt(tick, step)}
+                </span>
+              ))}
+            </div>
+          </div>
+          {timedNodes.map((n) => {
+            const start = n.started_at!;
+            const end = n.ended_at ?? Math.max(nowSec, start);
+            const color = nodeColor(n) ?? (n.badge?.color ? hue(n.badge.color) : n.badge?.tone ? hue(TONE_HUE[toneOf(n.badge.tone)]) : "var(--accent)");
+            return (
+              <button
+                key={n.id}
+                type="button"
+                data-graph-timeline-row={n.id}
+                onClick={() => {
+                  focusNode(n.id);
+                  setSelectedNodeId(n.id);
+                  setInspectorOpen(true);
+                }}
+                className={cx("flex w-full items-center gap-1.5 px-3 text-left transition-colors hover:bg-hover", activeId === n.id && "bg-hover")}
+              >
+                <span className="flex w-[148px] shrink-0 items-center gap-1.5">
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
+                  <span className="min-w-0 flex-1 truncate text-submeta text-ink" title={n.title}>{n.title}</span>
+                </span>
+                <span className="relative h-6 flex-1">
+                  {ticks.map((tick, i) => (
+                    <span key={i} aria-hidden className="absolute inset-y-0 border-l border-line" style={{ left: `${((tick - minStart) / span) * 100}%` }} />
+                  ))}
+                  <span
+                    data-graph-timeline-bar={n.id}
+                    className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-xs"
+                    style={{ left: `${((start - minStart) / span) * 100}%`, width: `max(4px, ${((end - start) / span) * 100}%)`, background: color }}
+                  />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 
@@ -759,6 +1187,46 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       <IconButton icon="plus" label={t("extensions-viewbody.graph_zoom_in")} size={32} onClick={() => controls.current?.zoom(STEP)} />
       <IconButton icon="fit" label={t("extensions-viewbody.graph_fit")} size={32} onClick={() => controls.current?.fit()} />
       {!full && <IconButton icon="expand" label={t("extensions-viewbody.graph_full_screen")} size={32} buttonRef={opener} onClick={() => setFull(true)} />}
+    </div>
+  );
+
+  // The page and Full screen share the control room: the outline | canvas | inspector workspace above the timeline.
+  // When an open timeline sits below the page canvas, the upper workspace yields part of the viewport height so the
+  // outline, canvas, inspector and timeline all fit above the fold on a desktop screen without scrolling.
+  const canvasBandClass = full ? "min-h-[180px] md:h-full" : timedNodes.length > 0 && timelineOpen ? "graph-canvas-timed" : "graph-canvas";
+  const room = (
+    <div
+      className={cx(full ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-card border border-line bg-surface" : "graph-shell relative flex w-full flex-col")}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || !activeInspectorNode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeInspector();
+      }}
+    >
+      <div className={cx("flex w-full flex-col md:flex-row", full ? "min-h-0 flex-1" : timedNodes.length > 0 && timelineOpen ? "md:graph-canvas-timed" : "md:graph-canvas")}>
+        {outlineOpen && laid.order.length >= 2 && <div className="contents">{outline}</div>}
+        {/* on the inline page the band keeps its own height in the stacked (column) layout; in Full screen flex-1 shares the modal */}
+        <div className={cx("relative min-w-0 w-full flex-1", !full && "max-md:flex-none", canvasBandClass)}>
+          {canvas}
+          {!outlineOpen && laid.order.length >= 2 && (
+            <button
+              type="button"
+              data-graph-outline-toggle=""
+              aria-expanded={false}
+              aria-label={t("extensions-viewbody.graph_outline")}
+              title={t("extensions-viewbody.graph_outline")}
+              onClick={() => setOutlineOpen(true)}
+              className="touch-hit absolute top-3 left-3 z-[2] hidden size-8 items-center justify-center rounded-full border border-line bg-surface/90 text-ink-3 shadow-card backdrop-blur transition-colors hover:text-ink md:flex"
+            >
+              <Icon name="list" size={14} />
+            </button>
+          )}
+          {buttons}
+        </div>
+        {inspectorOpen && inspector}
+      </div>
+      {timeline}
     </div>
   );
 
@@ -783,10 +1251,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
             <div className="flex shrink-0 justify-end">
               <IconButton icon="x" label={t("extensions-viewbody.graph_close")} size={36} onClick={() => setFull(false)} />
             </div>
-            <div className="relative min-h-0 flex-1">
-              {canvas}
-              {buttons}
-            </div>
+            <div className="relative min-h-0 flex-1">{room}</div>
           </div>,
           document.body,
         )}
@@ -809,10 +1274,5 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       </div>
     );
   }
-  return (
-    <div className="graph-canvas relative w-full">
-      {canvas}
-      {buttons}
-    </div>
-  );
+  return room;
 }

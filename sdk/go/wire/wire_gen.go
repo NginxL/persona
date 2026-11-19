@@ -1889,7 +1889,7 @@ var ComponentTypes = []string{"text", "metric", "progress", "row", "button", "li
 var ComponentSince = map[string]int{"text": 1, "metric": 1, "progress": 1, "row": 1, "button": 1, "link": 1, "field": 1, "divider": 1, "chart": 2, "stat_grid": 2, "segmented": 2, "markdown": 3, "table": 3, "empty": 3, "loading": 3, "html": 4, "header": 4, "breadcrumb": 4, "file_tree": 4, "code": 4, "diff": 4, "comment_thread": 4, "composer": 4, "image": 6, "grid": 6, "carousel": 6, "graph": 10}
 
 // GraphNode: one node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress
-// bar, in tone's role color or color's named color (never both).
+// bar, in tone's role color or color's named color (never both), with optional timing and inspector details.
 type GraphNode struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
@@ -1904,6 +1904,22 @@ type GraphNode struct {
 	// task tried several ways).
 	Group  string  `json:"group,omitempty"`
 	Action *Action `json:"action,omitempty"`
+	// Unix timestamp in seconds when this node started.
+	StartedAt *float64 `json:"started_at,omitempty"`
+	// Unix timestamp in seconds when this node ended; omitted while still running.
+	EndedAt *float64 `json:"ended_at,omitempty"`
+	// Short label/value readings shown in the node inspector.
+	Facts []Fact `json:"facts,omitempty"`
+	// Plain-text summary, verifier feedback or error shown in the node inspector.
+	Detail string `json:"detail,omitempty"`
+	// HTTPS links shown in the node inspector (for example work and verifier sessions across attempts).
+	Links []GraphNodeLink `json:"links,omitempty"`
+}
+
+// GraphNodeLink: an https link shown in a graph node's inspector (UI version 10).
+type GraphNodeLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
 }
 
 // GraphEdge: an edge from one node to another (UI version 10): from is the parent, to the child.
@@ -4507,6 +4523,16 @@ type ChannelMessage struct {
 	// The chat app's id of the message: the same message delivered again is taken once.
 	ID   string `json:"id"`
 	Text string `json:"text,omitempty"`
+	// The chat where the owner invoked a mention channel, as display context rather than an instruction.
+	Chat string `json:"chat,omitempty"`
+	// The topic or thread within chat, when the request came from one.
+	Topic string `json:"topic,omitempty"`
+	// Context the extension gathered for this request, such as nearby chat history. It is data, not owner-authored
+	// instructions.
+	Context string `json:"context,omitempty"`
+	// The extension's attestation that this is the owner's own request. A mention channel must send true; false or
+	// omitted is refused. Optional for an im channel's older messages.
+	Owner *bool `json:"owner,omitempty"`
 	// At most 4 are kept.
 	Images []ChannelBlob `json:"images,omitempty"`
 	Files  []ChannelBlob `json:"files,omitempty"`
@@ -6520,6 +6546,7 @@ var newDef = map[string]func() any{
 	"Section":                       func() any { return new(Section) },
 	"Component":                     func() any { return new(Component) },
 	"GraphNode":                     func() any { return new(GraphNode) },
+	"GraphNodeLink":                 func() any { return new(GraphNodeLink) },
 	"GraphEdge":                     func() any { return new(GraphEdge) },
 	"ImageSource":                   func() any { return new(ImageSource) },
 	"RowControl":                    func() any { return new(RowControl) },

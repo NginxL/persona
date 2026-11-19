@@ -166,10 +166,22 @@ async function flyoutOf(page, panel, sel, tag) {
   const row = panel.locator(sel);
   await row.scrollIntoViewIfNeeded();
   await row.hover();
+  // Sample in the browser before Playwright's click and visibility checks return: a short opening transition can finish by then.
+  await page.evaluate(() => {
+    window.firstFlyoutPosition = new Promise((resolve) => {
+      function firstVisibleFrame() {
+        const fly = document.querySelector("[data-model-flyout]");
+        if (!fly || getComputedStyle(fly).visibility === "hidden") return requestAnimationFrame(firstVisibleFrame);
+        resolve({ top: fly.getBoundingClientRect().top, target: parseFloat(fly.style.top) });
+      }
+      requestAnimationFrame(firstVisibleFrame);
+    });
+  });
   await row.locator("[data-row-customize]").click();
   const fly = page.locator("[data-model-flyout]");
   await expectVisible(fly, `${tag}: the flyout of ${sel}`);
-  await page.waitForTimeout(250);
+  const { top, target } = await page.evaluate(() => window.firstFlyoutPosition);
+  if (!Number.isFinite(target) || Math.abs(top - target) > 1) fail(`${tag}: flyout opens at ${top}, expected ${target} on its first visible frame`);
   return fly;
 }
 

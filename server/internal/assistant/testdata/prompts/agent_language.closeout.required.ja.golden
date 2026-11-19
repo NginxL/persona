@@ -1,0 +1,18 @@
+このターンでファイルを変更するかコマンドを実行しましたが、最後の返答に終了記録がないため、停止を一時的に保留しています。記録を補うために新しい作業やpush・merge・デプロイ・他者への連絡をしないでください。結論を変えずに最後の返答を書き直し、末尾に下の形式の記録を追加して停止することだけを行ってください。
+
+<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
+did: <what changed, one sentence; up to three such lines>
+artifact: <pr|commit|branch|doc|build|url|file> <reference>
+verified: <what you ran or measured and its reading, or "untested">
+missing: <what you still need from someone, if anything>
+waiting: <for status="blocked": who or what you wait for>
+</closeout>
+
+記入ルール：
+- status：このターンの作業を完了して届けたらdone、停止したが未完了ならnot_done、誰かや何かを待つ必要があるならblockedとし、waitingに誰・何を待つか書きます。
+- merged / deployed：事実だけを書きます。この変更がマージ済み・本番で稼働中の場合だけyes、そうでなければno、該当しなければn/aです。後で照合されるため、誤ったyesはnoより悪い結果になります。
+- did：変更したことを平易な一文で一行ずつ、最大三行。変更がなければ省略します。
+- artifact：ブランチ、PR、コミット、文書、ビルド、リンクを一行に一つ。なければ省略します。
+- verified：実際に実行・測定した検証と数値。未検証はuntestedとし、推測を実測として書きません。
+- missing：ユーザーや他者からまだ必要なもの。なければ行を省略します。
+- 属性名、行頭の語、statusの値は原文どおりで翻訳しません。コロン以降の内容は日本語にします。

@@ -582,6 +582,9 @@ section[data-segment] { contain-intrinsic-block-size: auto var(--seg-est, 0px); 
    and at most 900 px (docs/extensions/extensions.md "Drawing, on every app"); in a card, a still preview fitted into
    200 px (graph-preview, views/extensions/ViewBody10.tsx). */
 @utility graph-canvas { height: clamp(320px, 70dvh, 900px); }
+@utility graph-canvas-timed { height: clamp(320px, 46dvh, 460px); }
+/* The graph page's shell: the canvas band keeps that height, and the mobile inspector and timeline stack below it. */
+@utility graph-shell { min-height: clamp(320px, 70dvh, 900px); }
 @utility graph-preview { height: 200px; }
 /* iOS zooms the page into any focused field under 16px: on touch screens none is. Unlayered on purpose, so it wins
    over the text-[13px] utilities. */

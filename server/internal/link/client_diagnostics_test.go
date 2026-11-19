@@ -356,3 +356,34 @@ func TestDiagnosticDialKeepsFirstTLSMeasurement(t *testing.T) {
 	}
 	requireDiagnostic(t, logs, "phase=upgrade outcome=error")
 }
+
+func TestDiagnosticDialThroughHTTPSProxy(t *testing.T) {
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+	hub, _ := fakeHub(t, func(c *websocket.Conn) { _, _, _ = c.Read(context.Background()) })
+	cert, roots := selfSigned(t, "127.0.0.1")
+	proxy := newConnectProxy(t, hub.Listener.Addr().String(), &cert)
+	t.Cleanup(UseRootsForTesting(roots))
+	cfg := &Config{Token: "jd_x", FP: pinOf(hub), Proxy: proxy.url,
+		Endpoints: []Endpoint{{URL: unroutable, Kind: "ipv4"}}}
+
+	logs := &diagnosticLines{}
+	ctx := diagnosticContext(context.Background(), logs)
+	conn, err := dialProxy(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.closeNow()
+	requireDiagnostic(t, logs, "role=control candidate=1 kind=proxy phase=upgrade outcome=success")
+
+	cfg.FP = "different-pin"
+	if _, err := dialProxy(ctx, cfg); !errors.Is(err, errPin) {
+		t.Fatalf("wrong hub key through a trusted proxy: %v", err)
+	}
+	requireDiagnostic(t, logs, "role=control candidate=1 kind=proxy phase=tls outcome=error")
+	for _, private := range []string{"192.0.2.1", proxyUser, proxySecret, cfg.Token, cfg.FP} {
+		if strings.Contains(logs.text(), private) {
+			t.Fatalf("diagnostics exposed %q: %s", private, logs.text())
+		}
+	}
+}

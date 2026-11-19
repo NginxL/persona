@@ -279,8 +279,9 @@ class PerfTestCase: XCTestCase {
     /// The largest scroll view on screen: a chat's list, a List (collection view), a web or text view's scroller.
     @MainActor func mainScroller() -> XCUIElement {
         let window = app.windows.firstMatch.frame
-        let candidates = app.collectionViews.allElementsBoundByIndex + app.scrollViews.allElementsBoundByIndex
-            + app.tables.allElementsBoundByIndex
+        // Scrolling can hide the header and change the transcript's index among the scroll views (#9167).
+        let candidates = app.collectionViews.allElementsBoundByAccessibilityElement + app.scrollViews.allElementsBoundByAccessibilityElement
+            + app.tables.allElementsBoundByAccessibilityElement
         let big = candidates.filter { $0.exists && $0.frame.height > window.height * 0.4 }
             .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
         return big ?? app.scrollViews.firstMatch

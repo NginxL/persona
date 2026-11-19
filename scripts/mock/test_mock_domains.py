@@ -7,6 +7,9 @@ consults it at its central points (HTTP methods, WebSocket messages and close, f
 The end-to-end class starts the mock with one extra probe domain on a free port the kernel picks, and stops it.
 """
 import base64
+import contextlib
+import http.client
+import io
 import json
 import os
 from pathlib import Path
@@ -30,13 +33,18 @@ OPENER = build_opener(ProxyHandler({}))  # loopback, never through a proxy in th
 
 
 class FakeHandler:
-    """What a route handler is given by mock_hub.py, enough for the registry: path and send_json."""
+    """What a route handler is given by mock_hub.py, enough for the registry: path, send_json and bad_network (True:
+    the hub is "down"; each call counted)."""
 
-    def __init__(self, path):
-        self.path, self.sent = path, []
+    def __init__(self, path, down=False):
+        self.path, self.sent, self.down, self.network_checks = path, [], down, 0
 
     def send_json(self, obj, status=200):
         self.sent.append((status, obj))
+
+    def bad_network(self):
+        self.network_checks += 1
+        return self.down
 
 
 def registry(namespace=None):
@@ -77,6 +85,46 @@ class RegistryTests(unittest.TestCase):
         d2.route("GET", "/x", lambda h, req: False)
         self.assertFalse(r2.http(FakeHandler("/x"), "GET", "/x"))  # to mock_hub.py's own routes
         self.assertEqual(mock_domains.Request("GET", "/x", {}, None, b"").json(), {})
+
+    def test_a_route_outside_mock_gets_the_network_faults_first(self):
+        # As mock_hub.py's own /api routes: /mock/down closes the connection unanswered, /mock/delay waits (#11250).
+        r, d = registry()
+        seen = []
+        d.route("GET", "/api/v1/x", lambda h, req: seen.append("x"))
+        d.route(["GET", "POST"], "/api/v1/pass", lambda h, req: seen.append("pass") or False)
+        d.route("GET", "/api/v1/pass", lambda h, req: seen.append("pass again") or False)
+        d.route("GET", "/mock/x", lambda h, req: seen.append("mock"))
+        h = FakeHandler("/api/v1/x")
+        self.assertTrue(r.http(h, "GET", "/api/v1/x"))
+        self.assertEqual((seen, h.network_checks), (["x"], 1))
+        h = FakeHandler("/api/v1/x", down=True)
+        self.assertTrue(r.http(h, "GET", "/api/v1/x"))  # answered by closing: nothing else may answer it
+        self.assertEqual((seen, h.network_checks), (["x"], 1))
+        h = FakeHandler("/api/v1/pass")
+        self.assertFalse(r.http(h, "GET", "/api/v1/pass"))  # handed on to mock_hub.py, checked once on the way
+        self.assertEqual((seen[1:], h.network_checks), (["pass", "pass again"], 1))
+        for path in ("/mock/x", "/api/v1/none"):  # a test's control, and a path no domain has
+            with self.subTest(path=path):
+                h = FakeHandler(path, down=True)
+                r.http(h, "GET", path)
+                self.assertEqual(h.network_checks, 0)
+        self.assertEqual(seen[-1], "mock")
+
+    def test_a_close_handler_that_raises_does_not_stop_the_others(self):
+        r = mock_domains.Registry({})
+        closed = []
+
+        def broken(ws):
+            raise RuntimeError("broken on purpose")
+
+        mock_domains.Domain(r, "first").on_ws_close(broken)
+        mock_domains.Domain(r, "second").on_ws_close(lambda ws: closed.append(ws.connection))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            r.ws_closed(r.socket("conn", lambda obj: None, {"role": "full"}, []))
+        self.assertEqual(closed, ["conn"])
+        self.assertIn("mock: domain first: its WebSocket close handler failed", err.getvalue())
+        self.assertIn("RuntimeError: broken on purpose", err.getvalue())
 
     def test_websocket_messages_and_close(self):
         r, d = registry()
@@ -144,9 +192,12 @@ class RegistryTests(unittest.TestCase):
 PROBE = textwrap.dedent('''
     """A domain that records what reaches it, for test_mock_domains.py."""
     SEEN = {"closed": 0, "resets": 0, "machines": 0}
+    HUB = None
 
 
     def register(d):
+        global HUB
+        HUB = d.hub
         d.help("MOCK_PROBE=1  the test's probe domain")
         d.feature("probe_feature")
         d.drop_feature("machine_rename")
@@ -157,6 +208,7 @@ PROBE = textwrap.dedent('''
                 lambda h, req: h.send_json({"method": req.method, "id": req.match["id"], "body": req.json()}, 201))
         d.ws("probe", lambda ws, msg: ws.send({"type": "probe_ack", "n": msg.get("n"), "role": ws.client.get("role")}))
         d.ws("ping", lambda ws, msg: False)  # seen, then the hub's own pong
+        d.on_ws_close(broken)  # logged; the next one still runs
         d.on_ws_close(closed)
         d.on_reset(reset)
 
@@ -166,12 +218,17 @@ PROBE = textwrap.dedent('''
         return False  # mock_hub.py answers it
 
 
+    def broken(ws):
+        raise RuntimeError("the probe's broken close handler")
+
+
     def closed(ws):
         SEEN["closed"] += 1
 
 
     def reset():
         SEEN["resets"] += 1
+        HUB.LN["on"] = True  # a fixture the built-in reset sets back: the hook runs after it, so this stays
 ''')
 
 LAUNCH = textwrap.dedent('''
@@ -279,8 +336,43 @@ class EndToEndTests(unittest.TestCase):
 
     def test_reset_hook(self):
         before = self.get("/mock/probe")["resets"]
-        self.assertEqual(self.get("/mock/reset"), {"ok": True})
-        self.assertEqual(self.get("/mock/probe")["resets"], before + 1)
+        try:
+            self.assertEqual(self.get("/mock/reset"), {"ok": True})
+            self.assertEqual(self.get("/mock/probe")["resets"], before + 1)
+            # The built-in reset turns low-distraction mode off; the hook runs after it and turns it back on (#11250).
+            self.assertTrue(self.get("/mock/ln")["on"])
+        finally:
+            self.get("/mock/ln?on=0")
+
+    def timed(self, *request):
+        start = time.monotonic()
+        answer = self.call(*request) if len(request) == 3 else self.get(*request)
+        return time.monotonic() - start, answer
+
+    def test_simulated_faults_reach_the_domain_routes(self):
+        # /mock/delay and /mock/down apply to a domain's /api route as to the built-in ones, once a request even when
+        # the domain hands it on to mock_hub.py; its /mock/ routes, like the built-in ones, never see them (#11250).
+        delay = 1.5
+        try:
+            self.get("/mock/delay?s=%s" % delay)
+            took, answer = self.timed("POST", "/api/v1/probe/p1", {"n": 1})
+            self.assertEqual(answer[0], 201)
+            self.assertGreaterEqual(took, delay)
+            took, machines = self.timed("/api/v1/machines")  # the probe hands it on to the built-in route
+            self.assertTrue(machines["machines"])
+            self.assertGreaterEqual(took, delay)
+            self.assertLess(took, 2 * delay - 0.3)  # waited once, not again in the built-in route
+            took, _ = self.timed("/mock/probe")
+            self.assertLess(took, delay)
+            self.get("/mock/delay?s=0")
+            self.get("/mock/down?s=30")
+            with self.assertRaises((URLError, OSError, http.client.HTTPException)):
+                self.call("POST", "/api/v1/probe/p1", {"n": 1})
+            self.assertIn("resets", self.get("/mock/probe"))
+        finally:
+            self.get("/mock/delay?s=0")
+            self.get("/mock/down?s=0")
+        self.assertEqual(self.call("POST", "/api/v1/probe/p1", {"n": 1})[0], 201)
 
     def test_websocket_messages_and_close(self):
         before = self.get("/mock/probe")["closed"]

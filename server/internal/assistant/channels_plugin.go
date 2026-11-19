@@ -206,10 +206,14 @@ func (s *Service) channelStatusText(ctx context.Context, id string) string {
 
 // channelTarget is where channel id's messages go now.
 func (s *Service) channelTarget(ctx context.Context, id string) (resolvedTarget, error) {
+	v, plugin := s.pluginChannel(ctx, id)
 	c := &s.chans
 	c.mu.Lock()
 	s.loadChannelsLocked(ctx)
 	t := channel.Target{Kind: channel.TargetMain}
+	if plugin && v.Kind == channel.KindMention {
+		t.Kind = channel.TargetNew
+	}
 	if p := s.channelPrefLocked(id); p.Target != nil {
 		t = *p.Target
 	}
@@ -244,13 +248,17 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 	if !ok {
 		return fmt.Errorf("no channel %s", id)
 	}
+	if v.Kind == channel.KindMention && m.Owner == nil {
+		return errors.New(i18n.T(s.botLang(ctx), "assistant-channels_plugin.mention_owner_required"))
+	}
 	caps := v.Capabilities.Normalized()
 	rt, err := s.channelTarget(ctx, id)
 	if err != nil {
 		return err
 	}
 	in := prompts.ChannelMessage{Persona: true, Name: v.Name, Owner: s.owner(ctx), Plain: caps.Format == channel.FormatPlain,
-		Asks: caps.Asks != channel.AsksNone, Text: strings.TrimSpace(m.Text), Quote: m.Quote, Forward: m.Forward,
+		Asks: caps.Asks != channel.AsksNone, Public: v.Kind == channel.KindMention, Language: answerLanguage(s.hello(ctx).Locale),
+		Chat: m.Chat, Topic: m.Topic, Context: m.Context, Text: strings.TrimSpace(m.Text), Quote: m.Quote, Forward: m.Forward,
 		Unsupported: slices.Clone(m.Unsupported)}
 	var images []proto.Image
 	for _, img := range m.Images {
@@ -280,10 +288,14 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		return nil
 	}
 	text := prompts.RenderChannelMessage(in)
-	run := &channel.Run{ID: id + "_" + m.ID, Channel: id, ReplyTo: m.ID, TargetKind: channel.TargetConversation, Label: rt.label,
+	var ext map[string]string
+	if v.Kind == channel.KindMention {
+		ext = map[string]string{"chat": m.Chat, "thread": m.Topic, "public": "1"}
+	}
+	run := &channel.Run{ID: id + "_" + m.ID, Channel: id, ReplyTo: m.ID, TargetKind: channel.TargetConversation, Label: rt.label, Ext: ext,
 		Started: time.Now().UTC(), Probe: channel.Probe(in.Text, append(slices.Clone(in.Files), in.Forward, in.Quote)...)}
 	if rt.isNew {
-		sess, err := s.Start(ctx, StartParams{Text: text, Images: images, Main: rt.main, Origin: OriginChannel, OriginRef: id})
+		sess, err := s.Start(ctx, StartParams{Text: text, Images: images, Main: rt.main, Origin: OriginChannel, OriginRef: id, Public: v.Kind == channel.KindMention})
 		if err != nil {
 			return fmt.Errorf("%s%w", i18n.T(s.botLang(ctx), "assistant-channels_plugin.not_started"), err)
 		}
@@ -303,6 +315,9 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		cid := channel.ClientMsgID(id, m.ID)
 		run.MsgIDs = []string{cid}
 		p := map[string]any{"session_id": sid, "text": text, "client_msg_id": cid}
+		if v.Kind == channel.KindMention {
+			p["public"] = true
+		}
 		if len(images) > 0 {
 			p["images"] = images
 		}
@@ -372,8 +387,8 @@ func (s *Service) uploadBytesInto(ctx context.Context, machine, name string, dat
 
 // --- what is asked, in text (asks: text) ---
 
-// textChannels are the plugin channels that are connected, with their settings: what asks, pushes and the mirror go
-// to.
+// textChannels are the connected IM plugin channels with their settings: what asks, pushes and the mirror go to.
+// Mention channels stay out of this proactive fan-out; only their own request/answer run uses the unified pipeline.
 func (s *Service) textChannels(ctx context.Context) []channel.View {
 	list, err := s.channelsNow(ctx)
 	if err != nil {

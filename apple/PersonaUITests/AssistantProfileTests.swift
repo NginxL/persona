@@ -203,7 +203,7 @@ final class AssistantProfileTests: XCTestCase {
         let patrol = app.descendants(matching: .any)["task-fu_patrol"].firstMatch
         XCTAssertTrue(patrol.waitForExistence(timeout: 5), "the patrol is not on the page:\n\(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["每 30 分钟"].exists, "its rule is not in words")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "自动 · 思考低")).firstMatch.exists,
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "自动审批 · 思考低")).firstMatch.exists,
                       "what it runs with is not on its row")
         shot(app, "tasks")
         let oneOffs = app.staticTexts["一次性跟进"]
@@ -218,14 +218,14 @@ final class AssistantProfileTests: XCTestCase {
         XCTAssertTrue(mode.waitForExistence(timeout: 5), "no permission mode on the task's page:\n\(app.debugDescription)")
         shot(app, "task")
         mode.tap()
-        let bypass = app.buttons["全部放行"].firstMatch
-        XCTAssertTrue(bypass.waitForExistence(timeout: 3), "no 全部放行 among the modes:\n\(app.debugDescription)")
+        let bypass = app.buttons["完全访问"].firstMatch
+        XCTAssertTrue(bypass.waitForExistence(timeout: 3), "no 完全访问 among the modes:\n\(app.debugDescription)")
         bypass.tap()
-        let alert = app.alerts["全部放行？"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 3), "全部放行 did not ask first")
+        let alert = app.alerts["完全访问？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3), "完全访问 did not ask first")
         shot(app, "bypass-alert")
-        alert.buttons["全部放行"].tap()
-        let warning = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "全部放行：")).firstMatch
+        alert.buttons["完全访问"].tap()
+        let warning = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "完全访问：")).firstMatch
         for _ in 0..<3 where !(warning.exists && warning.isHittable) { app.swipeUp() }
         XCTAssertTrue(warning.waitForExistence(timeout: 3), "no warning under the picker:\n\(app.debugDescription)")
         shot(app, "task-bypass")
@@ -235,8 +235,8 @@ final class AssistantProfileTests: XCTestCase {
         func saved() throws -> Bool { try tasks().first { $0["id"] as? String == "fu_patrol" }?["permission_mode"] as? String == "bypassPermissions" }
         while try !saved(), Date() < deadline { usleep(200_000) }
         XCTAssertTrue(try saved(), "the mode did not reach the hub")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "全部放行")).firstMatch.waitForExistence(timeout: 5),
-                      "the row doesn't say it now runs with 全部放行")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "完全访问")).firstMatch.waitForExistence(timeout: 5),
+                      "the row doesn't say it now runs with 完全访问")
         shot(app, "tasks-bypass")
     }
 }

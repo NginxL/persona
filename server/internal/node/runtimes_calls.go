@@ -143,7 +143,9 @@ type runtimeCallParams struct {
 	Text           string        `json:"text"`
 	Images         []proto.Image `json:"images"`
 	SinceSeq       int           `json:"since_seq"`
+	History        string        `json:"history"`
 	FoldWork       bool          `json:"fold_work"`
+	BeforeSeq      int           `json:"before_seq"`
 	LazyImages     bool          `json:"lazy_images"`
 	UserInputs     bool          `json:"user_inputs"`
 	AfterSeq       *int          `json:"after_seq"`
@@ -218,15 +220,24 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		if json.Unmarshal(page["items"], &items) != nil {
 			return out, nil, true
 		}
-		folded, _ := json.Marshal(nonNil(transcript.FoldWork(items)))
+		if p.BeforeSeq == 0 {
+			items = transcript.FoldWorkLatest(items)
+		} else {
+			items = transcript.FoldWork(items)
+		}
+		folded, _ := json.Marshal(nonNil(items))
 		page["items"] = folded
 		return page, nil, true
 	case "session.image", "session.item", "session.visualization":
 		out, err := call(method, params)
 		return out, err, true
 	case "session.watch":
-		attempt := n.runtimes.watch(h, p.SessionID, p.SinceSeq, rpc.ConnContext(ctx))
-		_, err := call("session.watch", map[string]any{"session_id": p.SessionID, "since_seq": p.SinceSeq})
+		attempt := n.runtimes.watch(h, p.SessionID, p.SinceSeq, p.History, rpc.ConnContext(ctx))
+		params := map[string]any{"session_id": p.SessionID, "since_seq": p.SinceSeq}
+		if p.History != "" {
+			params["history"] = p.History
+		}
+		_, err := call("session.watch", params)
 		if err != nil {
 			n.runtimes.watchFailed(h, p.SessionID, attempt.token)
 		}

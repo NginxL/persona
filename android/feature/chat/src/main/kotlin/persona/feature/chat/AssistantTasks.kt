@@ -421,13 +421,20 @@ internal fun permissionLabel(mode: String?): String = when (mode ?: "default") {
 }
 
 /**
- * What a planned task runs on, as its chip says it: the model, else its launcher, by the short name the Agents rows and the
- * composer's pill use ("Opus 4.8", `modelShortName`; iOS writes the raw string), else "Default model". The Edit sheet's field
- * keeps the raw value: it is what the task starts with.
+ * What a planned task runs on: its explicit model's short name wins; otherwise its Agent preset, with its launcher when
+ * present; otherwise the existing launcher / default label. The Edit sheet's model field keeps the raw value and leaves
+ * the task's tier data untouched.
  */
 @Composable
-internal fun planModelLabel(task: persona.core.contracts.PlanTask): String =
-    persona.core.domain.modelShortName(task.model?.takeIf(String::isNotBlank) ?: task.launcher).ifEmpty { stringResource(R.string.chat_tasks_default_model) }
+internal fun planModelLabel(task: persona.core.contracts.PlanTask): String {
+    task.model?.takeIf(String::isNotBlank)?.let { return persona.core.domain.modelShortName(it) }
+    task.tier?.takeIf(String::isNotBlank)?.let { tier ->
+        val preset = stringResource(R.string.chat_tasks_preset, tier)
+        val launcher = task.launcher?.takeIf(String::isNotBlank)?.let { persona.core.domain.modelShortName(it) }.orEmpty()
+        return if (launcher.isEmpty()) preset else stringResource(R.string.chat_tasks_launcher_preset, launcher, preset)
+    }
+    return persona.core.domain.modelShortName(task.launcher).ifEmpty { stringResource(R.string.chat_tasks_default_model) }
+}
 
 /**
  * A plan as the conversation or a sheet draws it: the store's latest of it ([given] until it knows the plan), so a card left

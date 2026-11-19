@@ -177,7 +177,7 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 		return proto.UndeliveredMessage{}, err
 	}
 	params := map[string]any{}
-	for _, k := range []string{"text", "images", "launcher", "model", "effort", "client_msg_id"} {
+	for _, k := range []string{"text", "images", "launcher", "model", "effort", "client_msg_id", "public"} {
 		if v, ok := p.Params[k]; ok {
 			params[k] = v
 		}

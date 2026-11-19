@@ -24,3 +24,10 @@ func TestModesActor(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerModeActorIsAssistant(t *testing.T) {
+	got := modesActor(withCaller(context.Background(), "assistant-example"))
+	if got == nil || got.Kind != "assistant" || got.DeviceName != "Persona" {
+		t.Fatalf("actor: %+v", got)
+	}
+}

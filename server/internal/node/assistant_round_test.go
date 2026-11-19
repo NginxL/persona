@@ -166,7 +166,7 @@ func roundTestHub(t *testing.T, lines *roundLines, failRound bool) (n *Node, arg
 	n = kindTestNode(t)
 	hub = withFakeHub(t, n)
 	lines.write(t, filepath.Join(n.home, ".claude", "projects", "-assistant", roundConversation+".jsonl"))
-	n.state.put(roundConversation, sessionState{Launcher: "claude", Cwd: t.TempDir()})
+	n.state.put(roundConversation, sessionState{Launcher: "claude", Cwd: t.TempDir(), OriginKnown: true})
 	t.Cleanup(func() { n.stopAssistant(roundConversation) })
 	return n, argv, input, hub
 }

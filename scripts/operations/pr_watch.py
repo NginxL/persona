@@ -9,6 +9,7 @@ import fcntl
 import json
 import os
 import queue
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import tempfile
 import threading
@@ -79,12 +80,13 @@ def load_config(path):
     reviewer = dict(reviewer)
     reviewer.setdefault("timeout_seconds", 3600)
     reviewer.setdefault("repair_timeout_seconds", 3600)
+    concurrency = reviewer.pop("concurrency", 16)
     webhook = raw.get("webhook", {})
     if not isinstance(webhook, dict):
         raise WatchError("webhook config must be an object")
     repository_policy = [{key: value for key, value in item.items() if key != "reviewer"}
                          for item in raw["repositories"]]
-    return {"repositories": repos, "reviewer": reviewer, "webhook": webhook,
+    return {"repositories": repos, "reviewer": reviewer, "reviewer_concurrency": concurrency, "webhook": webhook,
             "repository_policy": repository_policy,
             "poll_seconds": int(raw.get("poll_seconds", 60)), "workers": int(raw.get("workers", 2)),
             "state": raw.get("state", str(Path(path).parent / "state.json"))}
@@ -181,6 +183,8 @@ class Watcher:
         self.instance = None
         self.events = None
         self.workers = []
+        self.review_executor = None
+        self.review_executor_lock = threading.Lock()
 
     def log(self, message):
         if not self.verbose:
@@ -309,10 +313,9 @@ class Watcher:
                         continue
                     self.enqueue(repo, item["number"], item["headRefOid"], "poll")
         except WatchError as error:
-            self.log("discovery failed: " + str(error))
-            self.fatal = error
-            self.wake.set()
-            raise
+            # A transient discovery outage must not tear down active reviewers.
+            # Keep their exact-head work alive and retry at the normal poll.
+            self.log("discovery failed; retaining workers for the next poll: " + str(error))
 
     def queue_priority(self, repo, number, sha):
         """Prioritize only a migration that process() will actually attempt."""
@@ -1018,6 +1021,22 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
         self.notify(config, number, pr["headRefOid"], "stale_closed")
         return True
 
+    def semantic_review(self, repo, pr, worktree):
+        """Only actual model calls consume the dedicated reviewer pool.
+
+        PR reads, checkout preparation, publication and merging remain on the
+        lifecycle workers and never consume a reviewer slot. Submitting to the
+        unbounded ready queue refills a slot as soon as a reviewer returns.
+        """
+        if self.review_executor is None:
+            with self.review_executor_lock:
+                if self.review_executor is None:
+                    self.review_executor = ThreadPoolExecutor(
+                        max_workers=self.config.get("reviewer_concurrency", 16),
+                        thread_name_prefix="semantic-reviewer")
+        return self.review_executor.submit(
+            semantic_review, repo, pr, worktree, self.config["reviewer"]).result()
+
     def process(self, repo, number):
         config = self.repositories[repo]
         key = (repo, number)
@@ -1420,7 +1439,7 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
                 findings = None
                 for attempt in range(INFRASTRUCTURE_ATTEMPT_LIMIT - review_attempts):
                     try:
-                        findings = semantic_review(repo, pr, str(worktree), self.config["reviewer"])
+                        findings = self.semantic_review(repo, pr, str(worktree))
                         break
                     except WatchError as error:
                         attempt_number = review_attempts + attempt + 1
@@ -1674,6 +1693,11 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
         if not 1 <= count <= 20:
             raise WatchError("workers must be between 1 and 20")
         self.workers = [threading.Thread(target=self.worker, daemon=True) for _ in range(count)]
+        concurrency = self.config.get("reviewer_concurrency", 16)
+        if not 1 <= concurrency <= 20:
+            raise WatchError("reviewer concurrency must be between 1 and 20")
+        self.review_executor = ThreadPoolExecutor(
+            max_workers=concurrency, thread_name_prefix="semantic-reviewer")
         for worker in self.workers:
             worker.start()
 
@@ -1708,6 +1732,8 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
                 self.tasks.put((2, -1, ("", 0)))
             for worker in self.workers:
                 worker.join(timeout=30)
+            if self.review_executor is not None:
+                self.review_executor.shutdown(wait=True, cancel_futures=True)
             if self.events:
                 self.events.close()
             if self.instance:

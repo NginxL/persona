@@ -141,6 +141,23 @@ describe("main conversation first-screen cache", () => {
     expect(readFeedCache(scope)?.items.map((row) => row.id)).toEqual(["question", "fold", "answer", "later"]);
   });
 
+  it("preserves fetched history, exhausted pagination and a manually expanded fold on a newest-page replay", async () => {
+    writeFeedCache(scope, saved());
+    render();
+    await answer({ items: saved().items, history: "v1", has_more: true, to_seq: 11 });
+    act(() => { void shown.loadEarlier(); });
+    await answer({ items: [item("old", 1, "Old turn", "user")], history: "v1", has_more: false });
+    const fold: Item = { id: "fold", seq: 15, role: "assistant", kind: "fold", fold: { through_seq: 16, items: 1, tools: 1, thoughts: 0 } };
+    const newest = [item("u2", 12, "Next", "user"), item("a2", 13), item("u3", 14, "Last", "user"), fold, item("a3", 17)];
+    push({ items: newest, history: "v1", from_seq: 11, to_seq: 17 });
+    act(() => { void shown.expandFold(fold); });
+    await answer({ items: [{ ...item("tool", 16), kind: "tool_use", tool_name: "Read" }] });
+    push({ items: newest, history: "v1", has_more: true, to_seq: 17 });
+    expect(ids()).toEqual(["old", "question", "answer", "u2", "a2", "u3", "tool", "a3"]);
+    expect(shown.hasMore).toBe(false);
+    expect(readFeedCache(scope)?.items.map(i => i.id)).toContain("fold");
+  });
+
   it("does not hydrate or write a non-main conversation", async () => {
     writeFeedCache(scope, saved());
     const before = readFeedCache(scope);
@@ -200,21 +217,80 @@ describe("main conversation first-screen cache", () => {
       listener!.items!({ machine_id: "m", session_id: "main", items: [], history: "v2" });
       calls.shift()!.resolve({ items: saved().items, history: "v1" });
     });
-    expect(shown.items).toEqual([]);
+    expect(ids()).toEqual(["question", "answer"]);
+    expect(shown.loading).toBe(false);
     expect(readFeedCache(scope)).toBeNull();
     await answer({ items: [item("new-history", 1)], history: "v2" });
     expect(ids()).toEqual(["new-history"]);
   });
 
-  it("discards rewritten history before reloading, including when that reload fails", async () => {
+  it("keeps the visible page on rewrite and read failure without caching stale history", async () => {
     writeFeedCache(scope, saved());
     render();
     await answer({ items: saved().items, history: "v1", has_more: true });
     push({ items: [item("new-history", 1)], history: "v2" });
-    expect(shown.items).toEqual([]);
+    expect(ids()).toEqual(["question", "answer"]);
+    expect(shown.loading).toBe(false);
     expect(readFeedCache(scope)).toBeNull();
+    push({ items: [item("during-read", 2)], history: "v2", to_seq: 2 });
     await fail();
-    expect(shown.items).toEqual([]);
+    expect(ids()).toEqual(["question", "answer"]);
+    act(() => shown.reload());
+    await answer({ items: [item("new-history", 1)], history: "v2", to_seq: 1 });
+    expect(ids()).toEqual(["new-history", "during-read"]);
+    expect(shown.history).toBe("v2");
+  });
+
+  it("buffers replacement pushes across reconnect and ignores superseded histories and earlier HTTP replies", async () => {
+    render();
+    await answer({ items: saved().items, history: "v1", has_more: true, to_seq: 11 });
+    push({ items: [item("v2", 20)], history: "v2", to_seq: 20 });
+    const obsolete = calls.shift()!;
+    push({ items: [], history: "v3" });
+    push({ items: [item("later", 3)], history: "v3", to_seq: 3 });
+    push({ items: [item("backlog", 1)], history: "v3", to_seq: 1, has_more: false });
+    expect(ids()).toEqual(["question", "answer"]);
+    await act(async () => obsolete.resolve({ items: [item("obsolete", 6)], history: "v2" }));
+    expect(ids()).toEqual(["question", "answer"]);
+    await answer({ items: [item("backlog", 1), item("second", 2)], history: "v3", to_seq: 2 });
+    expect(ids()).toEqual(["backlog", "second", "later"]);
+  });
+
+  it("resolves a first-read history conflict without retrying indefinitely or merging the wrong push", async () => {
+    render();
+    push({ items: [item("unconfirmed", 8)], history: "v1", to_seq: 8 });
+    await answer({ items: [item("new-file", 1)], history: "v2", to_seq: 1 });
+    expect(calls).toHaveLength(1);
+    await answer({ items: [item("new-file", 1)], history: "v2", to_seq: 1 });
+    expect(ids()).toEqual(["new-file"]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("checks the newest page on reconnect even if the rewritten file has no lines beyond the old cursor", async () => {
+    render();
+    await answer({ items: saved().items, history: "v1", to_seq: 11 });
+    act(() => listener!.reconnected!());
+    expect(ids()).toEqual(["question", "answer"]);
+    expect(calls[0].path).toContain("turns=2");
+    await answer({ items: [item("short-file", 1)], history: "v2", to_seq: 1 });
+    expect(ids()).toEqual(["short-file"]);
+    expect(listener!.watchCursor?.()).toBe(1);
+  });
+
+  it("recovers a failed replacement from a newest-page replay and isolates a later session switch", async () => {
+    render();
+    await answer({ items: saved().items, history: "v1", to_seq: 11 });
+    push({ items: [], history: "v2" });
+    await fail();
+    expect(ids()).toEqual(["question", "answer"]);
+    push({ items: [item("replacement", 1)], history: "v2", has_more: false, to_seq: 1 });
+    expect(ids()).toEqual(["replacement"]);
+    push({ items: [], history: "v3" });
+    render({ sid: "other" });
+    await answer({ items: [item("late-old", 1)], history: "v3" });
+    expect(ids()).toEqual([]);
+    await answer({ items: [item("other-session", 1)] });
+    expect(ids()).toEqual(["other-session"]);
   });
 
   it("drops an older page that resolves after a rewrite push but before effect cleanup", async () => {
@@ -227,7 +303,7 @@ describe("main conversation first-screen cache", () => {
 
     await act(async () => {
       listener!.items!({ machine_id: "m", session_id: "main", items: [], history: "v2" });
-      expect(calls).toHaveLength(0); // the replacement effect has not run
+      expect(calls).toHaveLength(1); // the same socket is already collecting replacement history
       older.resolve({ items: [item("stale-older", 5)], history: "v1", has_more: true });
       expect(await read).toBeUndefined();
     });
@@ -238,17 +314,19 @@ describe("main conversation first-screen cache", () => {
     expect(shown.loadingEarlier).toBe(false);
   });
 
-  it("discards a rewrite reported by an older page before the replacement read fails", async () => {
+  it("retains the visible page when an older read finds a rewrite and the replacement fails", async () => {
     writeFeedCache(scope, saved());
     render();
     await answer({ items: saved().items, history: "v1", has_more: true });
     act(() => { void shown.loadEarlier(); });
     expect(calls[0].path).toContain("before_seq=10");
     await answer({ items: [item("older-v2", 1)], history: "v2", has_more: true });
-    expect(shown.items).toEqual([]);
+    expect(ids()).toEqual(["question", "answer"]);
+    expect(shown.loading).toBe(false);
     expect(readFeedCache(scope)).toBeNull();
     await fail();
-    expect(shown.items).toEqual([]);
+    expect(ids()).toEqual(["question", "answer"]);
+    expect(shown.loading).toBe(false);
     expect(readFeedCache(scope)).toBeNull();
   });
 

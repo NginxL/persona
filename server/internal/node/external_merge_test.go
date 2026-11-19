@@ -20,7 +20,7 @@ func externalMergeParams(launcher string, execution modelExecution, text string)
 	params := map[string]any{
 		"session_id": execution.External.SessionID, "launcher": launcher, "text": text,
 		"model": execution.Model, "effort": execution.Effort, "model_fingerprint": execution.Fingerprint,
-		"runtime": execution.Runtime, "external": execution.External, "is_main": execution.IsMain,
+		"runtime": execution.Runtime, "external": execution.External, "is_main": execution.IsMain, "origin_known": true,
 	}
 	if execution.ConfigDir != "" {
 		params["config_dir"] = execution.ConfigDir

@@ -137,7 +137,7 @@ var (
 	codexQuestionRE = lazyre.New(`^\s*Question (\d+)/(\d+)\b`)
 	codexColumnsRE  = lazyre.New(`^(.*?\S)\s{2,}(\S.*)$`)
 	codexNumberedRE = lazyre.New(`^›\s*\d+\.\s`)
-	codexStatusRE   = lazyre.New(`^\s{2,}\S.*\s·\s(?:~[/\\]|/|[A-Za-z]:[/\\])`)
+	codexStatusRE   = lazyre.New(`^\s{2,}\S.*\s·\s(?:~(?:[/\\]|\s|$)|/|[A-Za-z]:[/\\])`)
 	codexWarningRE  = lazyre.New(`\s⚠\s+\d+\s+warnings?\s+·\s+f2 to view$`)
 )
 

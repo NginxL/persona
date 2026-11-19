@@ -229,12 +229,12 @@ One state at 144 px Ã— 24 frames is about 2 MB decoded; a whole pack is about 1â
 The built-in Mochi drawing doesn't use bitmaps; `AssistantAvatar` draws the same five states:
 
 - Idle blinks every 3.6 seconds: a periodic TimelineView plus a short phase animation, with no redraws between blinks.
-- Thinking, working, and needs you animate at 15 fps.
+- Thinking, working, and needs you request a 15 fps Core Animation cadence. On iOS and visionOS their static pieces are drawn once and their transforms and opacities move in the render server, sampled from the same motion functions and aligned to wall-clock phase; the app does not redraw Mochi every frame. `VisibleWork` still owns eligibility, and leaving the screen, Reduce Motion, Low Power Mode or a held call returns to the original still renderer. The Mac keeps its existing timeline.
 - Offline is gray and still.
 - Mochi's five states: idle looks like the icon and blinks every 3.6 seconds; thinking raises its eyes to a thought bubble at the top right (three orange dots, motion lines tucked away);
-  working scans its eyes side to side, bounces gently, lights its motion lines in turn, and an orange arc runs along the circular edge; needs you has a breathing red ring around the outside and sways side to side (waving);
+  working scans its eyes side to side, bounces gently, lights its motion lines in turn, and an orange arc runs along the circular edge; needs you has a breathing blue ring around the outside and sways side to side (waving);
   offline turns gray, closes its eyes, and has no motion lines. Frame 0 of each state is recognizable on its own.
-- Drawing is in `Shared/Design/PersonaFace.swift` (one frame at a given moment); `AssistantAvatar` only provides the clock.
+- Drawing is in `Shared/Design/PersonaFace.swift` (one frame at a given moment); `AssistantAvatar` chooses between that still renderer and the app-only `PersonaFaceMotion` compositor host. Widgets and the Live Activity use the shared still drawing directly.
 - On a call's screen (#9887, `docs/apple/calls.md` "The avatar") the avatar shows the call's states with these same five
   pictures (a package's frames for each, its idle ones for a state it lacks), plus two call-only parameters of Mochi's
   drawing: `mouth` (moving with the voice while the assistant speaks) and `eyesShut` (on hold). Their defaults draw

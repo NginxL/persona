@@ -25,8 +25,8 @@ struct AgentSettingOptionsTests {
         #expect(AgentSettingOptions.name("xhigh", key: "effortLevel") == "很高")
         #expect(AgentSettingOptions.name("ultra", key: "model_reasoning_effort") == "极高")
         #expect(AgentSettingOptions.name("latest", key: "autoUpdatesChannel") == "最新版")
-        #expect(AgentSettingOptions.name("auto", key: "permissions.defaultMode") == "自动")
-        #expect(AgentSettingOptions.name("default", key: "permissions.defaultMode") == "手动确认")
+        #expect(AgentSettingOptions.name("auto", key: "permissions.defaultMode") == "自动审批")
+        #expect(AgentSettingOptions.name("default", key: "permissions.defaultMode") == "默认权限")
         #expect(AgentSettingOptions.name("on-request", key: "approval_policy") == "它觉得需要时问")
         #expect(AgentSettingOptions.name("danger-full-access", key: "sandbox_mode") == "不设限（危险）")
     }

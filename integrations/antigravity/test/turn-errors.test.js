@@ -66,6 +66,7 @@ async function fixture(t, options = {}) {
   const nativeFile = join(home, 'trajectory.json')
   const snapshot = {
     lazyService: true,
+    holdErrors: options.holdErrors,
     status: 'CASCADE_RUN_STATUS_IDLE',
     trajectory: { cascadeId: RAW, steps: [
       { type: 'CORTEX_STEP_TYPE_USER_INPUT', metadata: { source: 'CORTEX_STEP_SOURCE_USER_EXPLICIT' }, userInput: { items: [{ text: input.content }] } },
@@ -78,7 +79,7 @@ async function fixture(t, options = {}) {
   const db = new DatabaseSync(join(config, 'conversation_summaries.db'))
   db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
   db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, 0, 0, ?, ?, ?, ?)')
-    .run(RAW, 'CASCADE_RUN_STATUS_IDLE', snapshot.trajectory.steps.length, 'Error example', JSON.stringify([`file://${home}`]), new Date().toISOString())
+    .run(RAW, 'CASCADE_RUN_STATUS_IDLE', options.initialCount ?? snapshot.trajectory.steps.length, 'Error example', JSON.stringify([`file://${home}`]), new Date().toISOString())
   const state = (count) => db.prepare('UPDATE conversation_summaries SET step_count = ?, last_modified_time = ? WHERE conversation_id = ?').run(count, new Date().toISOString(), RAW)
   const binary = join(home, 'agy')
   writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' '${home}' "$@"\n`)
@@ -168,4 +169,30 @@ test('a rejected ACP prompt publishes its failure through the normal session row
   state(2)
   await refresh()
   assert.equal(row().turn_error, undefined)
+})
+
+
+test('listing idle sessions does not start native error probes', async (t) => {
+  const { calls, refresh } = await fixture(t)
+  await refresh()
+  assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectorySteps').length, 0)
+})
+
+test('a pending native error probe does not hold a completed prompt active', async (t) => {
+  const { node, row, calls, items, state, refresh, nativeFile } = await fixture(t, { holdErrors: true, initialCount: 1 })
+  const release = () => {
+    const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+    snapshot.holdErrors = false
+    writeFileSync(nativeFile, JSON.stringify(snapshot))
+  }
+  state(2)
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.' })
+  await until('completion probes the native tail', () => calls().some((call) => call.method === 'GetCascadeTrajectorySteps'))
+  try {
+    await refresh()
+    assert.notEqual(row().status, 'working', 'native error reads must not hold a completed prompt active')
+  } finally {
+    release()
+  }
+  await items()
 })

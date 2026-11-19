@@ -53,7 +53,7 @@ func TestAgentListsFoldOnlyHelpersWithListedParents(t *testing.T) {
 				}
 
 				ctx := context.Background()
-				needs, unread, awaiting, waiting, done, muted, working, _ := s.snapshotAgents(ctx, s.devices(ctx), "")
+				needs, unread, awaiting, waiting, done, muted, working := s.snapshotAgents(ctx, s.devices(ctx), "")
 				got := working
 				switch state {
 				case proto.StateNeedsYou:

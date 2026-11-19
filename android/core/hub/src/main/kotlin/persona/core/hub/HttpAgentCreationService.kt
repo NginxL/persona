@@ -47,10 +47,15 @@ class HttpAgentCreationService(
     override suspend fun launchers(machineId: String): List<AgentLauncher> = launcherList(machineId).launchers
     override suspend fun launcherList(machineId: String): AssistantLaunchers {
         val body = read(request("api", "v1", "machines", machineId, "launchers").build())
-        // What New Agent lists off there (#8109) adds to the answer: a list this client can't read costs none of the launchers.
+        // Additions to New Agent's answer are independently optional: an unreadable one costs none of the launchers.
         val unavailable = try { JsonCodec.decodeFromJsonElement<List<UnavailableLauncher>>(body["unavailable"] ?: JsonArray(emptyList())) }
             catch (_: IllegalArgumentException) { emptyList() }
-        return AssistantLaunchers(JsonCodec.decodeFromJsonElement(body["launchers"] ?: JsonArray(emptyList())), unavailable = unavailable)
+        val tiers = try { JsonCodec.decodeFromJsonElement<List<PickerTier>>(body["tiers"] ?: JsonArray(emptyList())) }
+            catch (_: IllegalArgumentException) { emptyList() }
+        val profile = try { JsonCodec.decodeFromJsonElement<PickerTierProfile?>(body["tiers_profile"] ?: JsonNull) }
+            catch (_: IllegalArgumentException) { null }
+        return AssistantLaunchers(JsonCodec.decodeFromJsonElement(body["launchers"] ?: JsonArray(emptyList())),
+            unavailable = unavailable, tiers = tiers, tiersProfile = profile)
     }
     override suspend fun directories(machineId: String, path: String): AgentDirectories = JsonCodec.decodeFromJsonElement(read(
         request("api", "v1", "machines", machineId, "dirs")

@@ -51,6 +51,8 @@
   "route_agents_stopped": "Every agent of this task has stopped, so nothing was sent. A message on the task starts a new agent for it.",
   "route_agents_exited": "Every agent of this task has stopped already, so there’s nothing to exit. Nothing was sent.",
   "route_starting": "A new agent for this task is still starting, so this message wasn't sent. Send it again in a moment.",
+  "route_start_unconfirmed": "The message may have reached a new agent for this task. Check the task’s agents before sending again. {reason}",
+  "route_waited_unconfirmed": "The earlier message may have reached a new agent for this task. This request sent no further message. Check the task’s agents before sending again.",
   "route_offline": "That computer is offline",
   "route_not_kept": "Couldn’t save that this message reopens the task, so it wasn’t sent. Try again.",
   "earlier_phase_outcome": "Earlier phase outcome",

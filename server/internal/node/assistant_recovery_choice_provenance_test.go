@@ -49,9 +49,18 @@ func recoveryChoiceClassify(n *Node, launcher string, asked modelExecution) mode
 	return n.applyModelRecoveryReturn(context.Background(), recoveryChoiceProvenanceID, asked.Model, execution, expired)
 }
 
+func recoveryChoiceFailure(p *assistantProc) string {
+	p.replyModel = p.model.Model
+	if p.replyModel == "" {
+		p.replyModel = "primary-model"
+	}
+	p.repliedAt = time.Now()
+	return "There is an issue with the selected model (primary-model). It may not exist or you may not have access to it."
+}
+
 func recoveryChoiceFail(t *testing.T, n *Node, sent chan modelExecution, p *assistantProc) modelExecution {
 	t.Helper()
-	if !n.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available", "", assistantRecordKind) {
+	if !n.recoverAssistantResult(p, true, recoveryChoiceFailure(p), "", assistantRecordKind) {
 		t.Fatal("the model failure did not enter recovery")
 	}
 	return waitRecoverySend(t, sent)
@@ -515,7 +524,7 @@ done
 			t.Fatalf("the newer send replaced the older busy process or rewrote its execution: %+v", got)
 		}
 
-		if !f.n.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available", "", assistantRecordKind) {
+		if !f.n.recoverAssistantResult(p, true, recoveryChoiceFailure(p), "", assistantRecordKind) {
 			t.Fatal("the older fallback failure did not enter recovery")
 		}
 		var unexpected *modelExecution

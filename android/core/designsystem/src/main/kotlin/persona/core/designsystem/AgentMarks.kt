@@ -17,14 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import persona.core.designsystem.icons.PhIcons
 
@@ -88,11 +87,13 @@ fun JAgentMark(spec: AgentMarkSpec, modifier: Modifier = Modifier, size: Dp = Ma
             )
         } else {
             val tile = size * TileShare
+            // The initial is the mark artwork, so it fits its tile even at maximum text size.
+            val letterSize = with(LocalDensity.current) { (tile * LetterScale).toSp() }
             Box(Modifier.size(tile).clip(RoundedCornerShape(BadgeCorner)).background(palette.surfaceStrong), contentAlignment = Alignment.Center) {
                 Text(
                     spec.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?", color = palette.ink2, maxLines = 1,
                     style = PersonaTheme.type.label.copy(fontWeight = FontWeight.SemiBold,
-                        fontSize = TextUnit(tile.value * LetterScale, TextUnitType.Sp), lineHeight = TextUnit(tile.value * LetterScale, TextUnitType.Sp)),
+                        fontSize = letterSize, lineHeight = letterSize),
                 )
             }
         }

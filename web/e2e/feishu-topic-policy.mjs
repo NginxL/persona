@@ -11,7 +11,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   for (const width of [1280, 390]) for (const theme of ['light', 'dark']) for (const textSize of ['standard', 'large']) {
     const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce' });
-    let status = { enabled:true,app_id:'cli_example',domain:'https://open.feishu.cn',has_secret:true,from_config:false,connected:true,bot_name:'Example bot',owner:{name:'Example owner',paired_at:1},features:{main:true,cards:true,all_cards:false,pushes:false,sync:false,agents:false,reports:true},topic_chats:[{chat_id:'oc_example',name:'Example group',require_owner_mention:true}] };
+    let status = { enabled:true,app_id:'cli_example',domain:'https://open.feishu.cn',has_secret:true,from_config:false,connected:true,bot_name:'Example bot',owner:{name:'Example owner',paired_at:1},features:{main:true,cards:true,all_cards:false,pushes:false,sync:false,agents:false,reports:true,topic_cot:true},topic_chats:[{chat_id:'oc_example',name:'Example group',require_owner_mention:true}] };
     let failNext = false;
     const edits = [];
     await context.addInitScript(({theme,textSize}) => {
@@ -74,6 +74,17 @@ try {
     await page.getByRole('combobox',{name:'Home topic group',exact:true}).selectOption('');
     await page.waitForFunction(()=>document.querySelector('select[aria-label="Home topic group"]')?.value==='');
     assert.equal(edits.at(-1).topic_chats[0].home,false);
+    const nativeProcess=page.getByRole('switch',{name:'Native process in topics',exact:true});
+    await nativeProcess.scrollIntoViewIfNeeded();
+    assert.equal(await nativeProcess.getAttribute('aria-checked'),'true');
+    await nativeProcess.click();
+    await page.waitForFunction(()=>document.querySelector('[role="switch"][aria-label="Native process in topics"]')?.getAttribute('aria-checked')==='false');
+    assert.deepEqual(edits.at(-1),{features:{topic_cot:false}});
+    await nativeProcess.click();
+    await page.waitForFunction(()=>document.querySelector('[role="switch"][aria-label="Native process in topics"]')?.getAttribute('aria-checked')==='true');
+    assert.deepEqual(edits.at(-1),{features:{topic_cot:true}});
+    await settle();
+    await page.screenshot({path:join(shots,`${width}-${theme}-${textSize}-native.png`)});
     if (textSize === 'large') {
       await page.getByRole('button', { name: 'Add group', exact: true }).click();
       await page.getByLabel('Group ID', { exact: true }).fill('oc_isolated');
@@ -87,7 +98,7 @@ try {
     await page.screenshot({ path: join(shots, `${width}-${theme}-enroll.png`) });
       await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     }
-    console.log(`PASS ${width} ${theme} ${textSize}: failure retained policy, reverse, reload, separate home`);
+    console.log(`PASS ${width} ${theme} ${textSize}: failure retained policy, reverse, reload, separate home, native process off/on`);
     await context.close();
   }
 } finally { await browser.close(); }

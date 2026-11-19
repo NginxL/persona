@@ -142,6 +142,7 @@ Exclusions are case-insensitive. Directory paths are relative to the configured 
     meta.json               # Name, type (short requirement / long mission), status, members, related chats / docs / meetings / Agent directories
     summary.md              # Goal, current state, next steps, risks, my role
     log.md                  # Timeline: append an entry for each update (date · source · one line)
+    memory.jsonl            # Structured worker outcomes: conclusion, links, decision and reason (not searched)
     .topics.json            # How far the knowledge points curation read the timeline ("Topics"; bookkeeping, not searched; a chat has one too)
   topics/<slug>/            # One directory per topic of knowledge points ("Topics" below, #3783)
     meta.json               # Name, one line, aliases, how many points, the projects and chats they came from, tags
@@ -223,13 +224,13 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
 1. **Archive**: every 2 minutes (5 seconds after a Lark live event), inspect the 100 recently active chats in Lark's Messages list, reading only when the list timestamp is newer than the last archive.
    Fetch incrementally by cursor (`afterPosition`); a newly seen chat starts with its latest 100 messages. Append to that day's `messages/*.md` (dates and times in the user's timezone, see "Time zones" below).
    Download images / files / rich-text images to `attachments/<date>/` (up to 20 MB each), leaving `[附件](相对路径)` ("attachment; relative path") in the line; record Lark document links in `docs/`.
-   Topic groups read only the newest topic page. Every 6 minutes, read each email account's Inbox messages with UID above the last one (40 per page, at most 5 pages per round; with multiple pages, take the newest first, then fill the middle page by page and continue next time if unfinished),
-   reading at most 10 full bodies per round (summaries for the rest), into `mail-<account>-<other address>` chats. Cursors are in `cursors/mail.json` (per-account UIDs, plus `<account>#v` for UIDVALIDITY,
+   Topic groups read only the newest topic page. Every 6 minutes, read new messages in each account's INBOX and eligible folders (the same selection as the assistant Inbox; 40 per page, at most 5 pages per folder per round; with multiple pages, take the newest first, then fill the middle page by page and continue next time if unfinished),
+   reading at most 10 full bodies per round (summaries for the rest), into `mail-<account>-<other address>` chats. Cursors are in `cursors/mail.json` (per-mailbox UIDs, plus `<key>#v` for UIDVALIDITY,
    `#t` for the latest archived message time, `#f` / `#h` for unfilled gaps; on UIDVALIDITY change, restart from the newest page and only take messages later than `#t`; before 2026-11-03 it was `mail-cursors.json`, used as fallback when the new file is absent).
-   The existing decimal receipt IDs remain in use until a change between two known, nonzero validity values is observed.
-   After that, `<account>#e` records an identity epoch, and IDs include the epoch, last known validity and UID.
+   INBOX keeps its account-only cursor key and its existing decimal receipt IDs until a change between two known, nonzero validity values is observed. Other folders use the account plus `:m:` and the unpadded base64url of the exact folder name as the cursor key. Their receipt IDs include that key, so one correspondent can have messages with the same UID in different folders.
+   After that, `<key>#e` records an identity epoch, and IDs include the epoch, last known validity and UID.
    A retry keeps the same identity if ingestion succeeded before checkpoint publication; a further known change before publication gets a different identity.
-   Each account's inbox has its own cursor and epoch. An absent prior validity or a zero response cannot establish that a change occurred, so it does not start an epoch or reset the cursor.
+   Each folder has its own cursor and epoch. An absent prior validity or a zero response cannot establish that a change occurred, so it does not start an epoch or reset the cursor.
    A cursor already advanced by an older version cannot reconstruct mail previously skipped by a UID collision. A rollback to an older writer is not identity-safe: it ignores the epoch and emits decimal IDs, and may advance the validity without recording the change. Do not run mixed-version archive writers against the same data.
    The existing later-than-`#t` filter and newest-page restart still limit recovery: same-second or older messages and an oversized renumbered tail are not guaranteed to be archived.
    Connectors (`docs/plans/plan-connectors.md`, implementing `connector.Archive`) read chats with new messages "since last time" by cursor every 10 minutes,

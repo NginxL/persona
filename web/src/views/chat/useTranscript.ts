@@ -68,6 +68,8 @@ export interface Transcript {
   /** The reply as it is written, before the transcript has it: the headless assistant's, or an agent's as Claude shows it
    *  (a Claude session Persona started; docs/integrations/claude-integration.md "Live replies"). "" for none. */
   streaming: string;
+  /** The stream ended while its final transcript item is still on the way. */
+  streamEnded?: boolean;
   /** The stream keeps losing items (the page got them by asking): say so, with a reload. */
   notLive: boolean;
   reload: () => void;
@@ -110,10 +112,13 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [earlierPage, setEarlierPage] = useState<symbol>();
   const [streaming, setStreaming] = useState("");
-  const [nonce, setNonce] = useState(0);
+  const [streamEnded, setStreamEnded] = useState(false);
+  const reread = useRef<() => void>(() => {});
+  const replacing = useRef(false);
   const [notLive, setNotLive] = useState(false);
   const cacheScope = opts.cache?.scope;
   const cacheManager = opts.cache?.manager ?? "";
+  const memoryScope = cacheScope ? null : feedCacheScope();
   // This is only the latest page and its live additions, never older pages or expanded folds.
   const snapshot = useRef<{ scope: string; page: FeedCache } | null>(initial && cacheScope ? { scope: cacheScope, page: initial } : null);
   const updatedAt = useRef(opts.updatedAt);
@@ -130,7 +135,8 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   // fold asked for before that is dropped when it lands, so it never merges into the conversation shown by then.
   const generation = useRef(0);
   const earlierInFlight = useRef<EarlierRead | null>(null);
-  const rewrite = useRef<() => void>(() => {}); // the effect's cache invalidation, shared with older-page reads below
+  const expanded = useRef(new Map<string, Item["fold"]>());
+  const rewrite = useRef<(history?: string) => void>(() => {}); // the effect's cache invalidation, shared with older-page reads below
   // The back-off after a failed older page: when loadEarlier may ask again, and how long the last wait was.
   const earlierRetryAt = useRef(0);
   const earlierWait = useRef(0);
@@ -152,6 +158,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
 
   const invalidateHistoryReads = useCallback(() => {
     generation.current++;
+    expanded.current.clear();
     const earlier = earlierInFlight.current;
     earlierInFlight.current = null;
     earlier?.controller.abort();
@@ -164,8 +171,15 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     if (earlierPage && earlierInFlight.current?.page === earlierPage) earlierInFlight.current = null;
   }, [earlierPage]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let dead = false;
+    let pageRequest = 0;
+    let subscribed = false;
+    let replacementReplay: ItemsEvent | undefined;
+    let pendingDelta: string | undefined;
+    let pendingEnd = false;
+    let handoffTimer: number | undefined;
+    replacing.current = false;
     const ctl = new AbortController();
     // Older pages and folds still on their way were asked for from what is shown now: they must not land on what replaces it.
     const disownReads = () => {
@@ -176,6 +190,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     const offDeleted = onConversationDeleted((machine, session) => {
       if (machine !== mid || session !== sid) return;
       dead = true;
+      clearTimeout(handoffTimer);
       ctl.abort();
       disownReads();
       snapshot.current = null;
@@ -193,6 +208,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     setFirstRead(false);
     setError("");
     updateHasMore(cached?.hasMore ?? false);
+    setStreamEnded(false);
     deltas.current.flush("");
     liveRaw.current = liveShown.current = "";
     covered.current = 0;
@@ -200,7 +216,8 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     setNotLive(false);
     let tally: StaleTally = FRESH_TALLY;
     let lastArrival = Date.now();
-    let ready = false; // the first page is in
+    let ready = false; // the newest read has settled
+    let authoritative = false; // a newest page was actually received for this history
     let pulling = false;
     let checkedFor: string | undefined;
     // Starts from the rev the first read below covers: a move heard while that read is on its way is asked about.
@@ -223,7 +240,6 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       setLoading(false);
       setFirstRead(true);
     };
-    const memoryScope = cacheScope ? null : feedCacheScope();
     // The newest page may start after everything the cached one holds, with turns missing between them: showing both
     // would hide that hole, so the page takes over and older history loads on scroll.
     const skipsCached = (page: Item[]) => page.length > 0 && page[0].seq > (cached?.items.at(-1)?.seq ?? Infinity);
@@ -246,47 +262,94 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       latest = mergeItems(latest, batch);
       if (ready && !gap) save(); // a page with a hole is not kept: the fill saves once it is closed
     };
-    const rewritten = () => {
-      dead = true;
-      disownReads(); // invalidate in-flight reads before React runs the next effect
+    // Keep this session's last committed view on screen while the new history is read. Old answers to
+    // page, fold and gap reads cannot join it. The socket keeps collecting pushes for the replacement.
+    const rewritten = (nextHistory = "") => {
+      disownReads();
+      replacing.current = true;
+      authoritative = false;
+      ready = false;
+      covered.current = 0;
+      latest = [];
+      pendingItems = [];
+      pendingHistory = nextHistory;
+      replacementReplay = undefined;
+      pendingDelta = undefined;
+      pendingEnd = false;
+      clearTimeout(gapTimer.current);
+      gapTimer.current = undefined;
       if (cacheScope) discardFeedCache(cacheScope);
       else discardMemoryPage(memoryScope, mid, sid);
       snapshot.current = null;
-      setNonce((x) => x + 1);
+      void readPage();
     };
     rewrite.current = rewritten;
 
     // The live text against the newest items, after they changed (`batch`) or a delta came: the assistant's ends at
     // its reply's item; an agent's shows what of its message the latest one does not hold (lib/live-text.ts).
+    const endLive = () => {
+      clearTimeout(handoffTimer);
+      handoffTimer = undefined;
+      liveRaw.current = liveShown.current = "";
+      deltas.current.flush("");
+      setStreamEnded(false);
+    };
     const showLive = (batch?: Item[]) => {
+      if (liveRaw.current && liveThrough && batch?.some((i) => i.role === "user" && i.kind === "text" && !i.queued && i.seq > liveThrough)) return endLive();
       if (assistant) {
-        if (batch?.some((i) => i.role === "assistant" && i.kind === "text")) deltas.current.flush("");
+        if (batch?.some((i) => i.role === "assistant" && i.kind === "text" && i.seq >= liveThrough)) endLive();
         return;
       }
       const want = liveRaw.current && unlandedLive(liveRaw.current, latest);
-      if (!want) liveRaw.current = "";
+      if (!want && liveRaw.current) return endLive();
       if (want === liveShown.current) return;
       liveShown.current = want;
-      if (!want || batch) deltas.current.flush(want); // the end, and what items took off, at once
+      if (batch) deltas.current.flush(want);
       else deltas.current.push(want);
     };
+    let liveThrough = 0;
     const onDelta = (text: string) => {
-      if (assistant) return applyDelta(deltas.current, text);
+      if (dead) return;
+      if (replacing.current) {
+        if (text) pendingDelta = text;
+        pendingEnd = !text;
+        return;
+      }
+      if (!text) {
+        if (!liveRaw.current || handoffTimer !== undefined) return;
+        // The end marker and saved words travel separately. If a run ended without an item, release its preview.
+        setStreamEnded(true);
+        deltas.current.flush(liveShown.current);
+        handoffTimer = window.setTimeout(endLive, READ_TIMEOUT_MS);
+        return;
+      }
+      clearTimeout(handoffTimer);
+      handoffTimer = undefined;
+      setStreamEnded(false);
+      liveThrough = covered.current;
       liveRaw.current = text;
-      showLive();
+      if (assistant) {
+        liveShown.current = text;
+        applyDelta(deltas.current, text);
+      } else showLive();
     };
 
-    const subscribe = () => !conversationDeleted(mid, sid) && send({ type: "subscribe", machine_id: mid, session_id: sid, since_seq: covered.current || undefined, lazy_images: true, fold_work: true });
+    const subscribe = () => {
+      if (dead || conversationDeleted(mid, sid)) return;
+      send({ type: "subscribe", machine_id: mid, session_id: sid, since_seq: covered.current || undefined, lazy_images: true, fold_work: true });
+      subscribed = true;
+    };
 
     // Items after what we have, a page at a time (past 8 the newest page is cheaper); how many of them were new.
     const pull = async (): Promise<number> => {
+      const version = pageRequest;
       const sent = revs.sending();
       let fresh = 0;
       for (let n = 0; n < 8 && !dead; n++) {
         const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?after_seq=${covered.current}&lazy_images=1`, { signal: ctl.signal });
-        if (dead) return fresh;
+        if (dead || version !== pageRequest) return fresh;
         if (p.history && history.current && p.history !== history.current) {
-          rewritten(); // the file was rewritten: start over
+          rewritten(p.history);
           return fresh;
         }
         const got = p.items ?? [];
@@ -302,15 +365,25 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
           return fresh;
         }
       }
-      if (!dead) setNonce((x) => x + 1);
+      if (!dead && version === pageRequest) rewritten(history.current);
       return fresh;
     };
-    const fillGap = async () => void (await pull());
+    const queueGapFill = () => {
+      // Schedule once per gap so frequent pushes cannot postpone the fill.
+      gapTimer.current ??= window.setTimeout(() => {
+        gapTimer.current = undefined;
+        void pull().catch(() => {});
+      }, 1500);
+    };
+    const keepExpanded = (batch: Item[]) => batch.filter(i => {
+      const open = expanded.current.get(i.id);
+      return !open || !i.fold || open.through_seq !== i.fold.through_seq || open.through_id !== i.fold.through_id;
+    });
 
     // The safety net (lib/stale-page.ts): the list says the transcript grew past what we hold and no push came. Not while
     // a refused first read waits for the backlog: that read is the one asked for, and the runtime refuses this one too.
     const checkStale = () => {
-      if (dead || !ready || refused) return;
+      if (dead || !ready || refused || replacing.current) return;
       const now = Date.now();
       const asked = updatedAt.current;
       if (!shouldPull({
@@ -337,25 +410,39 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
 
     const onItems = (e: ItemsEvent) => {
       if (dead) return;
-      if (e.history && history.current && e.history !== history.current) {
-        rewritten(); // the file was rewritten: start over
+      const known = replacing.current ? pendingHistory : history.current;
+      if (e.history && known && e.history !== known) rewritten(e.history);
+      if (replacing.current) {
+        if (e.history) pendingHistory = e.history;
+        pendingItems = mergeItems(pendingItems, e.items ?? []);
+        if (e.has_more !== undefined) replacementReplay = e;
+        if (ready && replacementReplay) {
+          // A failed/refused GET may recover from the authoritative newest page on the socket.
+          commitPage(replacementReplay);
+          endRefused();
+        }
         return;
       }
       if (e.history) history.current = e.history;
       if (!ready && e.history) pendingHistory = e.history;
       if (refused) endRefused(); // the watch brings the chat its first read could not
+      const batch = e.items ?? [];
+      let visible = batch;
+      const replay = e.has_more !== undefined && authoritative;
       if (e.has_more !== undefined) {
-        // The replay of a subscribe without since_seq (the first read failed or was refused) stands in for that read.
         latestMore = e.has_more;
-        updateHasMore(latestMore);
         setError("");
-        const fresh = e.items ?? [];
-        const skips = skipsCached(fresh);
+        // The first replay can stand in for a failed read. Later replays describe only the newest two turns.
+        const skips = !replay && skipsCached(batch);
+        if (!replay) updateHasMore(latestMore);
         if (skips) disownReads();
-        latest = skips ? [] : withoutFolded(latest, fresh);
-        setItems((have) => (skips ? [] : withoutFolded(have, fresh)));
+        latest = skips ? [] : withoutFolded(latest, batch);
+        if (replay) visible = keepExpanded(batch);
+        authoritative = true;
+        const folds = visible;
+        setItems(have => skips ? [] : withoutFolded(have, folds));
       }
-      const gap = e.from_seq !== undefined && covered.current > 0 && e.from_seq > covered.current;
+      const gap = covered.current > 0 && ((e.from_seq ?? covered.current) > covered.current || (replay && batch.length > 0 && batch[0].seq > covered.current + 1));
       remember(e.items ?? [], gap);
       showLive(e.items ?? []);
       lastArrival = Date.now();
@@ -363,24 +450,9 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         tally = afterPush(tally); // the stream works
         setNotLive(false);
       }
-      if (gap) {
-        apply(e.items ?? []);
-        // Started once per gap: a busy turn pushes every second or so, and restarting it on each push put the fill
-        // off until the agent paused (#5355). The fill reads everything after `covered`, so later pushes need no timer.
-        gapTimer.current ??= window.setTimeout(() => {
-          gapTimer.current = undefined;
-          void fillGap().catch(() => {});
-        }, 1500);
-        return;
-      }
-      apply(e.items ?? []);
-      if (e.to_seq) covered.current = Math.max(covered.current, e.to_seq);
-      if (e.more_after) {
-        gapTimer.current ??= window.setTimeout(() => {
-          gapTimer.current = undefined;
-          void fillGap().catch(() => {});
-        }, 1500);
-      }
+      apply(visible);
+      if (!gap && e.to_seq) covered.current = Math.max(covered.current, e.to_seq);
+      if (gap || e.more_after) queueGapFill();
     };
 
     const off = listenSession(mid, sid, {
@@ -392,50 +464,90 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       // Every hello (the first one too) resubscribes from what the chat has. Before the first page is in that is
       // nothing: a subscribe without since_seq has the hub read and send that whole page again, while the read
       // below is on its way (a page load opens the socket and reads at once). The read subscribes when it is done.
+      watchCursor: () => subscribed && !dead ? covered.current : undefined,
       reconnected: () => {
-        if (ready) subscribe();
+        if (ready || replacing.current) {
+          subscribe();
+          // A shorter, rewritten file may have no rows after our old cursor.
+          if (ready) void readPage(false);
+        }
       },
     });
 
-    (async () => {
+    function commitPage(p: ItemsPage) {
+      const batch = p.items ?? [];
+      const changed = Boolean(p.history && history.current && p.history !== history.current);
+      const active = authoritative && !replacing.current && !changed;
+      const replace = replacing.current || changed || !batch.length || (!active && skipsCached(batch));
+      const gap = active && !replace && batch[0].seq > covered.current + 1;
+      if (replace) disownReads();
+      const pushes = changed && !replacing.current && pendingHistory !== p.history ? [] : pendingItems;
+      const refreshed = (have: Item[], page: Item[]) => mergeItems(mergeItems(replace ? [] : withoutFolded(have, page), page), withoutFolded(pushes, page));
+      const visible = active ? keepExpanded(batch) : batch;
+      setItems(have => refreshed(have, visible));
+      latest = refreshed(latest, batch);
+      latestMore = Boolean(p.has_more);
+      if (replace || !active) updateHasMore(latestMore);
+      history.current = p.history || pendingHistory || history.current;
+      if (replacing.current || changed) endLive();
+      replacing.current = false;
+      authoritative = true;
+      replacementReplay = undefined;
+      pendingItems = [];
+      pendingHistory = "";
+      if (gap) queueGapFill();
+      else {
+        save();
+        covered.current = Math.max(replace ? 0 : covered.current, p.to_seq ?? Math.max(0, ...batch.map((i) => i.seq)));
+      }
+      showLive(batch);
+      if (pendingDelta) {
+        onDelta(pendingDelta);
+        if (pendingEnd) onDelta("");
+      }
+      pendingDelta = undefined;
+      pendingEnd = false;
+    }
+
+    async function readPage(openWatch = true) {
+      const before = history.current;
+      const version = ++pageRequest;
+      ready = false;
+      if (!itemsRef.current.length && !liveRaw.current) setLoading(true);
+      clearTimeout(refused);
+      refused = undefined;
+      setError("");
       try {
         const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}`, { signal: ctl.signal });
-        if (dead) return;
+        if (dead || version !== pageRequest) return;
         if (pendingHistory && p.history && pendingHistory !== p.history) {
-          rewritten(); // a push already belongs to a newer transcript than this response
+          rewritten(); // Take a fresh snapshot after both conflicting observations.
           return;
         }
-        const batch = p.items ?? [];
-        const replace = !batch.length || skipsCached(batch) || Boolean(p.history && history.current && p.history !== history.current);
-        if (replace) disownReads();
-        const refreshed = (have: Item[]) => mergeItems(mergeItems(replace ? [] : withoutFolded(have, batch), batch), withoutFolded(pendingItems, batch));
-        setItems(refreshed);
-        latest = refreshed(latest);
-        latestMore = Boolean(p.has_more);
-        updateHasMore(latestMore);
-        if (p.history) history.current = p.history;
-        save();
-        showLive(batch);
-        covered.current = Math.max(covered.current, p.to_seq ?? Math.max(0, ...batch.map((i) => i.seq)));
+        commitPage(p);
       } catch (e) {
-        if (dead) return;
+        if (dead || version !== pageRequest) return;
         if (e instanceof ApiError && e.code === "conversation_deleted") { markConversationDeleted(mid, sid); return; }
-        // a session that is still starting has no transcript yet
-        if (!opts.starting) {
+        // A subscribe may already have supplied the page while the HTTP read was pending.
+        if (replacing.current && replacementReplay) {
+          commitPage(replacementReplay);
+          endRefused();
+        } else if (!opts.starting) {
           const text = sessionLoadError(errorText(e));
           if (isNotLoaded(e)) refused = window.setTimeout(() => endRefused(text), READ_TIMEOUT_MS);
           else setError(text);
         }
       } finally {
-        if (!dead && !refused) {
-          setLoading(false);
-          setFirstRead(true);
+        if (!dead && version === pageRequest) {
+          if (!refused) { setLoading(false); setFirstRead(true); }
+          lastArrival = Date.now();
+          ready = true;
         }
-        lastArrival = Date.now();
-        ready = true;
       }
-      if (!dead) subscribe();
-    })();
+      if (!dead && version === pageRequest && (openWatch || before !== history.current)) subscribe();
+    }
+    reread.current = () => { void readPage(); };
+    void readPage();
 
     return () => {
       dead = true;
@@ -444,6 +556,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       offDeleted();
       off();
       clearTimeout(refused);
+      clearTimeout(handoffTimer);
       deltas.current.cancel();
       clearTimeout(gapTimer.current);
       gapTimer.current = undefined; // the next session's first gap starts its own
@@ -453,7 +566,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, sid, nonce, cacheScope, cacheManager, assistant, invalidateHistoryReads, updateHasMore]);
+  }, [mid, sid, cacheScope, memoryScope, cacheManager, assistant, invalidateHistoryReads, updateHasMore]);
 
   // After the effect above, which starts each conversation's watch from the rev it has then.
   useEffect(() => {
@@ -461,7 +574,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   }, [opts.rev]);
 
   const loadEarlier = useCallback<Transcript["loadEarlier"]>((options) => {
-    if (conversationDeleted(mid, sid)) return Promise.resolve(undefined);
+    if (replacing.current || conversationDeleted(mid, sid)) return Promise.resolve(undefined);
     if (earlierInFlight.current) return earlierInFlight.current.promise;
     const delay = earlierRetryAt.current - Date.now();
     if (!itemsRef.current.length || !hasMoreRef.current || (delay > 0 && !options?.waitForRetry)) return Promise.resolve(undefined);
@@ -479,7 +592,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}&before_seq=${first.seq}`, { signal });
         if (!current()) return;
         if (p.history && history.current && p.history !== history.current) {
-          rewrite.current();
+          rewrite.current(p.history);
           return;
         }
         apply(p.items ?? []);
@@ -510,6 +623,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
 
   const expandFold = useCallback(
     async (fold: Item): Promise<boolean> => {
+      if (replacing.current) return false;
       if (!fold.fold) return true;
       const gen = generation.current;
       let from = fold.seq;
@@ -526,6 +640,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         }
         from = batch[batch.length - 1].seq + 1;
       }
+      if (complete) expanded.current.set(fold.id, fold.fold);
       apply(out);
       // The closeout's evidence reader needs to know a capped or superseded read; existing fold UI keeps the partial steps.
       return complete;
@@ -533,5 +648,5 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     [mid, sid, apply],
   );
 
-  return { items, history: history.current, loading, firstRead, error, hasMore, loadingEarlier, earlierPage, loadEarlier, expandFold, streaming, notLive, reload: () => setNonce((x) => x + 1) };
+  return { items, history: history.current, loading, firstRead, error, hasMore, loadingEarlier, earlierPage, loadEarlier, expandFold, streaming, streamEnded, notLive, reload: () => reread.current() };
 }

@@ -6,13 +6,13 @@ import UIKit
 @testable import Persona
 import PersonaWire
 
-/// A planned task's permission on its card and in Edit (#3026): Auto, which the hub may settle an unset task to from
-/// Claude Code's default mode, has its own name instead of reading as "Ask every step".
+/// A planned task's permission on its card and in Edit (#3026): Auto-review, which the hub may settle an unset task to from
+/// Claude Code's default mode, has its own name instead of reading as "Default permissions".
 @MainActor struct PlanPermissionTests {
     @Test func autoHasItsOwnName() {
         #expect(PlanTaskRow.permissions.contains("auto"))
-        #expect(PlanTaskRow.permissionLabel("auto") == "自动判断")
-        #expect(PlanTaskRow.permissionLabel("default") == "每步都问")
+        #expect(PlanTaskRow.permissionLabel("auto") == "自动审批")
+        #expect(PlanTaskRow.permissionLabel("default") == "默认权限")
         #expect(Set(PlanTaskRow.permissions.map(PlanTaskRow.permissionLabel)).count == PlanTaskRow.permissions.count)
     }
 

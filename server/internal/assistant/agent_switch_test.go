@@ -100,7 +100,7 @@ func TestAgentSwitchMovesAUsageLimitedAgent(t *testing.T) {
 		t.Errorf("pick: %v", p)
 	}
 	p := callParams(t, calls[1])
-	if p["switch_now"] != true || p["apply_switch"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue()) {
+	if p["switch_now"] != true || p["apply_switch"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue("")) {
 		t.Errorf("send: %v", p)
 	}
 }

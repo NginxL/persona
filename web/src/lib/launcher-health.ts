@@ -2,6 +2,7 @@
 // blocked record does (the decision in #1643: gray out with the reason, never hide): failing and repairing ones are still
 // the hub's to retry. Choosing a grayed-out launcher shows how to fix it; "Try anyway" there picks it after all, as a
 // start with it that works clears the record. Pure: the dialog and the menus draw it.
+import { stripAnsi } from "./ansi";
 import { t } from "../i18n";
 import type { Launcher } from "./types";
 
@@ -44,7 +45,7 @@ export function launcherBlock(l: Pick<Launcher, "health"> | undefined): Launcher
   const h = l?.health;
   if (!h || h.state !== "blocked") return null;
   const kind = h.kind ?? "";
-  const detail = h.error?.trim();
+  const detail = stripAnsi(h.error ?? "").trim(); // an older hub still sends the terminal's escapes
   const notInTerminal = kind === NOT_IN_TERMINAL;
   return {
     kind,

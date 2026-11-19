@@ -23,10 +23,10 @@ const NO_LIST: ModelList = {};
 /** One launcher's list as read, drawn again only when that list changes (the pill and the form need one or two lists,
  *  not the panel's every one); "" for either: nothing. Here rather than in lib/session-models.ts, which the first
  *  screen loads: a list's entry is replaced on every change, so it is its own snapshot. */
-export function useModelList(mid: string, launcher: string): ModelList {
+export function useModelList(mid: string, launcher: string, host?: string): ModelList {
   const read = () => {
     if (!mid || !launcher) return NO_LIST;
-    const e = modelList(mid, launcher);
+    const e = modelList(mid, launcher, undefined, host);
     return e.list !== undefined || e.loading || e.error ? e : NO_LIST;
   };
   return useSyncExternalStore(subscribeModelLists, read, () => NO_LIST);
@@ -34,6 +34,7 @@ export function useModelList(mid: string, launcher: string): ModelList {
 
 export interface NewAgentModelProps {
   mid: string;
+  host?: string;
   launchers: Launcher[];
   /** This computer's launchers are read (the panel opens only then). */
   ready: boolean;
@@ -65,7 +66,7 @@ export interface NewAgentModelProps {
 }
 
 export function NewAgentModel(props: NewAgentModelProps) {
-  const { mid, launchers, ready, onRetry, choice, runs, configured, fallback, ultracodeOn } = props;
+  const { mid, host, launchers, ready, onRetry, choice, runs, configured, fallback, ultracodeOn } = props;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const close = useCallback(() => setAnchor(null), []);
   // a different computer closes it (its providers are another computer's)
@@ -75,7 +76,7 @@ export function NewAgentModel(props: NewAgentModelProps) {
     opened.current = mid;
   }, [mid]);
   // the pill follows the one list it names; the panel, mounted only while open, follows every launcher's
-  const pill = newAgentPill({ launchers, runs, list: useModelList(mid, runs), choice, configured, fallback });
+  const pill = newAgentPill({ launchers, runs, list: useModelList(mid, runs, host), choice, configured, fallback });
   // no launchers read: no model to name, only that it failed ("Model loading failed" after the warning)
   return (
     <>
@@ -96,16 +97,16 @@ export function NewAgentModel(props: NewAgentModelProps) {
 /** The panel while it is open: the computer's launchers with their lists, read again behind the ones shown once per
  *  opening (the one that runs first; not the ones that can't start here, whose rows are off anyway; at most three at a
  *  time, as each may start its agent's CLI on the computer). */
-function NewAgentPanel({ mid, launchers, choice, runs, configured, tiers, unavailable, follow, ultracode, onChoice, onPreset, onFollow, onHelp, onConfigure, anchor, onClose }: NewAgentModelProps & { anchor: HTMLElement; onClose: () => void }) {
+function NewAgentPanel({ mid, host, launchers, choice, runs, configured, tiers, unavailable, follow, ultracode, onChoice, onPreset, onFollow, onHelp, onConfigure, anchor, onClose }: NewAgentModelProps & { anchor: HTMLElement; onClose: () => void }) {
   const version = useModelLists();
   useEffect(() => {
-    for (const l of launchers) if (l.name === runs || !launcherBlock(l)) void readModels(mid, l.name, { again: true, first: l.name === runs });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening, for the computer it opened on
-  }, []);
+    for (const l of launchers) if (l.name === runs || !launcherBlock(l)) void readModels(mid, l.name, { again: true, first: l.name === runs, host });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh on opening or when the selected host changes
+  }, [host]);
   const { providers, state, presets } = useMemo(
-    () => newAgentPanel({ launchers, listOf: (name) => modelList(mid, name), choice, configured, runs, tiers, unavailable }),
+    () => newAgentPanel({ launchers, listOf: (name) => modelList(mid, name, undefined, host), choice, configured, runs, tiers, unavailable }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` stands for what was read
-    [launchers, mid, choice.launcher, choice.model, choice.effort, configured, runs, tiers, unavailable, version],
+    [launchers, mid, host, choice.launcher, choice.model, choice.effort, configured, runs, tiers, unavailable, version],
   );
 
   const onPick = async (config: PanelConfig) => {
@@ -118,7 +119,7 @@ function NewAgentPanel({ mid, launchers, choice, runs, configured, tiers, unavai
   };
   const onForget = (provider: string, model: string) => {
     if (provider === choice.launcher && model === choice.model) onChoice({ ...choice, model: "" });
-    void forgetModel(mid, provider, model).then((error) => error && toast(error, "error"));
+    void forgetModel(mid, provider, model, undefined, host).then((error) => error && toast(error, "error"));
   };
 
   return (
@@ -130,7 +131,7 @@ function NewAgentPanel({ mid, launchers, choice, runs, configured, tiers, unavai
       scope="agent"
       onPick={onPick}
       onApplyCurrent={onApplyCurrent}
-      onReload={(provider) => void readModels(mid, provider, { again: true, first: provider === runs })}
+      onReload={(provider) => void readModels(mid, provider, { again: true, first: provider === runs, host })}
       onForget={onForget}
       currentExtra={ultracode}
       follow={follow && { ...follow, onFollow: () => (onFollow(), true) }}

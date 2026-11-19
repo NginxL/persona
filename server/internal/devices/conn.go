@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,15 +26,19 @@ var errSwitched = errors.New("moved to a better path")
 
 // nodeConn is one connection to the node, its node.info answered.
 type nodeConn struct {
-	path       *nodePath
-	via        string                   // the transport it took: local | ssh | tailcat | link | service | hub
-	pipeNow    atomic.Pointer[nodePipe] // the transport in use, which a resume replaces (resume.go)
-	ctx        context.Context
-	peer       *rpc.Peer
-	info       proto.NodeInfo
-	served     chan error
-	cancel     context.CancelFunc
-	restarting atomic.Bool // the resident announced exec before ending this connection
+	routeMu      sync.RWMutex // path, via, generation and per-route start move together (resume.go)
+	path         *nodePath
+	via          string // the transport it took: local | ssh | tailcat | link | service | hub
+	routeRev     uint64
+	routeStarted time.Time
+	switching    bool                     // a planned path switch won; a late resume cannot move the route back
+	pipeNow      atomic.Pointer[nodePipe] // the transport in use, which a resume replaces (resume.go)
+	ctx          context.Context
+	peer         *rpc.Peer
+	info         proto.NodeInfo
+	served       chan error
+	cancel       context.CancelFunc
+	restarting   atomic.Bool // the resident announced exec before ending this connection
 	// trigger is why this connection was made, for its "connected" line: the first, a reconnect (after how long and
 	// why the last one ended) or a planned switch of path.
 	trigger string
@@ -47,6 +52,31 @@ func (c *nodeConn) close() {
 
 // pipe is the transport in use.
 func (c *nodeConn) pipe() *nodePipe { return c.pipeNow.Load() }
+
+// route is the path and transport in use: a resume can move both while the connection stays alive.
+func (c *nodeConn) route() (*nodePath, string) {
+	p, via, _, _ := c.routeState()
+	return p, via
+}
+
+// routeState is one route generation and when it started. A callback that began on another generation must not act on
+// this one: unlike a full reconnect, a resume keeps both the peer and its context alive.
+func (c *nodeConn) routeState() (*nodePath, string, uint64, time.Time) {
+	c.routeMu.RLock()
+	defer c.routeMu.RUnlock()
+	return c.path, c.via, c.routeRev, c.routeStarted
+}
+
+// claimRouteExit lets a planned path switch close c only if its route has not moved since the switch or probe began.
+func (c *nodeConn) claimRouteExit(rev uint64) bool {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	if c.switching || c.routeRev != rev || c.ctx.Err() != nil || c.peer.Err() != nil {
+		return false
+	}
+	c.switching = true
+	return true
+}
 
 // run keeps the machine connected through its best path until ctx ends.
 func (m *Machine) run(ctx context.Context) {
@@ -93,19 +123,24 @@ func (m *Machine) run(ctx context.Context) {
 		next := m.takeNext()
 		planned := next != nil
 		lasted := time.Since(start)
-		m.d.logf("[%s] connection ended: via=%s lasted=%s planned=%t restarting=%t reason=%q %s%s", m.cfg.ID, conn.via,
+		connPath, connVia, _, routeStarted := conn.routeState()
+		routeLasted := lasted
+		if !routeStarted.IsZero() {
+			routeLasted = time.Since(routeStarted)
+		}
+		m.d.logf("[%s] connection ended: via=%s lasted=%s planned=%t restarting=%t reason=%q %s%s", m.cfg.ID, connVia,
 			lasted.Round(time.Second), planned, conn.restarting.Load(), dropReason(err), conn.peer.LaneStats(), m.resumeCounts())
 		if errors.Is(err, rpc.ErrFrame) {
 			m.noteFrameFailure(err)
 		}
-		m.d.pathEnded(conn.path, true, err, lasted, planned || conn.restarting.Load())
+		m.d.pathEnded(connPath, true, err, routeLasted, planned || conn.restarting.Load())
 		conn.close()
 		m.eventRetire.Lock()
 		m.detach(err, planned)
 		m.eventRetire.Unlock()
-		dropped = lastDrop{at: time.Now(), reason: dropReason(err), via: conn.via}
+		dropped = lastDrop{at: time.Now(), reason: dropReason(err), via: connVia}
 		if next != nil {
-			next.trigger = fmt.Sprintf("switch from %s", conn.via)
+			next.trigger = fmt.Sprintf("switch from %s", connVia)
 		}
 		conn = next
 	}
@@ -262,7 +297,10 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 	// Every event goes on to the hub, the forwarded ports' bytes among them (the hub is their end, ports.go there).
 	c := &nodeConn{path: p, via: via, ctx: cctx, peer: peer, served: make(chan error, 1), cancel: cancel}
 	c.pipeNow.Store(l)
-	peer.OnClose = func(err error, inflight []string) { m.logCutOff(via, err, inflight) }
+	peer.OnClose = func(err error, inflight []string) {
+		_, currentVia := c.route()
+		m.logCutOff(currentVia, err, inflight)
+	}
 	peer.OnLost = func(err error) { m.resumeConn(c, err) } // a node that keeps it: resume.go
 	peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		if method == "state.load" {
@@ -361,7 +399,11 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 
 // serve makes c the machine's connection and serves it until it ends (or a better path took over: m.next).
 func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
-	p := c.path
+	c.routeMu.Lock()
+	if c.routeStarted.IsZero() {
+		c.routeStarted = time.Now()
+	}
+	p, via, rev := c.path, c.via, c.routeRev
 	m.d.pathConnected(p)
 	listed := make(chan struct{})
 	m.mu.Lock()
@@ -373,12 +415,12 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	m.forgetOpenedLocked()     // a new connection has nothing of the hub's open yet
 	m.herdrAsked = time.Time{} // node.info just said; this node may answer herdr.server.status where the last did not
 	m.endWarmLocked()
-	m.via, m.path = c.via, ""
-	m.active, m.transport, m.uid = p, c.via, c.info.MachineUID
-	if c.via == "ssh" && p.src == m {
+	m.via, m.path = via, ""
+	m.active, m.transport, m.uid = p, via, c.info.MachineUID
+	m.routeRev = rev
+	if via == "ssh" && p.src == m {
 		m.directFailed = time.Time{}
 	}
-	onlineAt := time.Now()
 	rewatch := map[string]int{}
 	updates := false // a queued update and a build check follow a list, or an incompatible node's update-only connection
 	for id := range m.watched {
@@ -394,15 +436,16 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	}
 	connectedAt := m.connectedAt
 	m.mu.Unlock()
-	if c.via == "ssh" && p.src != nil && p.src != m {
+	c.routeMu.Unlock()
+	if via == "ssh" && p.src != nil && p.src != m {
 		p.src.mu.Lock()
 		p.src.directFailed = time.Time{}
 		p.src.mu.Unlock()
 	}
 	info := c.info
 	m.d.onSystem(m.cfg.ID, info.System) // what it is, for when it is offline (metrics.go)
-	where := c.via
-	if c.via == viaHub {
+	where := via
+	if via == viaHub {
 		where = "hub " + m.d.hubNameOf(p.hub)
 	}
 	trigger := c.trigger
@@ -423,7 +466,7 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	m.d.learnUID(p, info.MachineUID) // the paths reaching the same computer become one machine (paths_group.go)
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
-	if c.via == "tailcat" && p.src == m {
+	if via == "tailcat" && p.src == m {
 		go m.watchTailcat(sctx, c)
 	}
 	if c.pipe().activity != nil {
@@ -505,10 +548,11 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
-	if c.via == "ssh" && p.src != nil && time.Since(onlineAt) > 10*time.Minute { // ssh held: going back to it worked
-		p.src.mu.Lock()
-		p.src.flaps, p.src.switchedBack = 0, time.Time{}
-		p.src.mu.Unlock()
+	endPath, endVia, _, endStarted := c.routeState()
+	if endVia == "ssh" && endPath.src != nil && time.Since(endStarted) > 10*time.Minute { // ssh held: going back to it worked
+		endPath.src.mu.Lock()
+		endPath.src.flaps, endPath.src.switchedBack = 0, time.Time{}
+		endPath.src.mu.Unlock()
 	}
 	if errors.Is(err, io.EOF) {
 		if msg := c.pipe().lastErr(); msg != "" {
@@ -586,18 +630,19 @@ func (m *Machine) watchPaths(ctx, runCtx context.Context, c *nodeConn) {
 		if ctx.Err() != nil {
 			return
 		}
-		if why := m.d.parkReason(m); why != "" || !m.hasPath(c.path) {
+		p, _, rev, _ := c.routeState()
+		if why := m.d.parkReason(m); why != "" || !m.hasPath(p) {
 			if why == "" {
 				why = "这条路通向的是另一台电脑"
 			}
 			c.peer.Close(errors.New(why))
 			return
 		}
-		q := m.d.betterPath(m, c.path, since)
+		q := m.d.betterPath(m, p, since)
 		if q == nil {
 			continue
 		}
-		m.d.logf("[%s] trying a better path: %s instead of %s", m.cfg.ID, pathName(m.d, q), pathName(m.d, c.path))
+		m.d.logf("[%s] trying a better path: %s instead of %s", m.cfg.ID, pathName(m.d, q), pathName(m.d, p))
 		// Given up if c ends while connecting; once connected, the new connection outlives c.
 		ectx, cancel := context.WithCancel(runCtx)
 		stop := context.AfterFunc(ctx, cancel)
@@ -615,6 +660,13 @@ func (m *Machine) watchPaths(ctx, runCtx context.Context, c *nodeConn) {
 		}
 		inner := next.cancel
 		next.cancel = func() { inner(); cancel() } // ectx goes when the new connection does
+		if !c.claimRouteExit(rev) {
+			next.close()
+			if ctx.Err() != nil {
+				return
+			}
+			continue // a resume moved the route while this replacement was connecting
+		}
 		m.mu.Lock()
 		if ctx.Err() != nil { // c ended meanwhile and run looked for m.next already (serve returns before takeNext)
 			m.mu.Unlock()
@@ -820,12 +872,24 @@ func (m *Machine) nodeUID() string {
 
 // tellLinks says on the links of this computer's persona-links (its own entry's and those of entries with the same
 // computer) whether the hub got through to the resident node.
-func (m *Machine) tellLinks(online bool, err string) {
+func (m *Machine) tellLinks(online bool, err string) { m.tellLinksIf(online, err, nil) }
+
+// tellLinksIf is tellLinks, each link taking the state only if still says it holds then (tellNode).
+func (m *Machine) tellLinksIf(online bool, err string, still func() bool) {
 	for _, p := range m.d.pathsOf(m) {
 		if p.src != nil && p.src.cfg.Kind == kindLink {
-			p.src.tellLink(online, err)
+			p.src.tellLink(online, err, still)
 		}
 	}
+}
+
+// nodeConnected: the manager is through to the resident node now (on peer, when not nil): a connection served, not
+// one whose transport went and that waits to be resumed.
+func (m *Machine) nodeConnected(peer *rpc.Peer) bool {
+	m.mu.Lock()
+	cur, online := m.peer, m.online
+	m.mu.Unlock()
+	return online && cur != nil && (peer == nil || cur == peer) && !cur.Lost()
 }
 
 // reachableHere: this hub can try its hub.json entry's way to the node now as far as it knows, and its last round

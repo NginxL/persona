@@ -5,6 +5,7 @@
 // shared synthetic one (schema/configuration/all-types.json).
 import { describe, expect, it, vi } from "vitest";
 import shared from "../../../../schema/configuration/all-types.json";
+import type { ChangeRule, ConfigurationGuidance } from "./guidance";
 import { ConfigurationController } from "./controller";
 import { ConfigurationError, type ConfigurationSource, type ConfigurationUpdate } from "./contract";
 import { httpConfigurationSource, type ConfigurationRequest } from "./http";
@@ -59,8 +60,8 @@ function commit(doc: Doc, u: ConfigurationUpdate): Doc {
   return next;
 }
 
-async function ready(m = manual(), doc: Doc = example) {
-  const ctl = new ConfigurationController(m.source);
+async function ready(m = manual(), doc: Doc = example, guidance?: ConfigurationGuidance) {
+  const ctl = new ConfigurationController(m.source, guidance);
   ctl.start();
   m.reads[0].resolve(doc);
   await flush();
@@ -746,5 +747,165 @@ describe("the HTTP source", () => {
     await flush();
     expect(ctl.snapshot().blocked).toEqual({ code: "unconfirmed" });
     expect(ctl.snapshot().doc?.id).toBe("example-preferences");
+  });
+});
+
+describe("optional module guidance", () => {
+  const copy = { title: "Try the new layout?", body: "Cards will be smaller.", scope: "This browser", impact: "More cards per row", activation: "New views", confirmLabel: "Save and try" };
+  const rule: ChangeRule = { when: { action: "change", from: "comfortable", to: "dense" }, confirm: copy, afterSave: "Saved for new views." };
+  const guided = (id: string, ...rules: ChangeRule[]) => ready(manual(), example, { fields: { [id]: { rules } } });
+
+  it("asks only on the declared transition and consumes the exact update once", async () => {
+    const { ctl, m } = await guided("layout", rule);
+    ctl.choose("layout", "dense");
+    const first = ctl.snapshot().confirmation!;
+    expect(first.copy).toEqual(copy);
+    expect(ctl.snapshot().fields.layout?.pending).toBeUndefined();
+    expect(m.updates).toHaveLength(0);
+    ctl.cancel(first);
+    ctl.choose("layout", "dense");
+    const second = ctl.snapshot().confirmation!;
+    ctl.confirm(first);
+    ctl.cancel(first);
+    expect(m.updates).toHaveLength(0);
+    ctl.confirm(second);
+    ctl.confirm(second);
+    expect(m.updates).toHaveLength(1);
+    expect(m.updates[0].body).toBe(second.update);
+    expect(ctl.snapshot().fields.layout.saved).toBeUndefined();
+    m.updates[0].resolve(commit(example, second.update));
+    await flush();
+    expect(ctl.snapshot().fields.layout.saved).toBe(rule.afterSave);
+    ctl.choose("layout", "comfortable");
+    expect(ctl.snapshot().confirmation).toBeNull();
+    expect(m.updates).toHaveLength(2);
+  });
+
+  it("matches resets against the default and sends a reset", async () => {
+    const { ctl, m } = await guided("layout", { when: { action: "reset", to: "comfortable" }, confirm: copy });
+    ctl.reset("layout");
+    ctl.confirm(ctl.snapshot().confirmation!);
+    expect(m.updates[0].body).toEqual({ schema_version: 1, revision: example.revision, id: example.id, reset: ["layout"] });
+  });
+
+  it("checks typed drafts before asking and invalidates the question on another edit", async () => {
+    const { ctl, m } = await guided("interval", { when: { action: "change", to: 10 }, confirm: copy });
+    ctl.setDraft("interval", "bad");
+    ctl.saveDraft("interval");
+    expect(ctl.snapshot().confirmation).toBeNull();
+    ctl.setDraft("interval", "10");
+    ctl.saveDraft("interval");
+    const request = ctl.snapshot().confirmation!;
+    ctl.cancel(request);
+    expect(ctl.snapshot().fields.interval.draft).toBe("10");
+    ctl.saveDraft("interval");
+    const replacement = ctl.snapshot().confirmation!;
+    ctl.setDraft("interval", "15");
+    ctl.confirm(replacement);
+    expect(m.updates).toHaveLength(0);
+    expect(ctl.snapshot().fields.interval.draft).toBe("15");
+  });
+
+  it("invalidates on a resource notification before the permissions read returns", async () => {
+    const { ctl, m } = await guided("layout", rule);
+    ctl.choose("layout", "dense");
+    const request = ctl.snapshot().confirmation!;
+    m.change();
+    ctl.confirm(request);
+    ctl.choose("layout", "dense");
+    expect(ctl.snapshot().confirmation).toBeNull();
+    const denied = clone(example);
+    denied.revision += "+";
+    denied.groups.flatMap(g => g.fields).find(f => f.id === "layout")!.read_only = true;
+    m.reads[1].resolve(denied);
+    await flush();
+    expect(ctl.canWrite("layout")).toBe(false);
+    expect(m.updates).toHaveLength(0);
+  });
+
+  it("invalidates a replaced module's question and keeps an edited selection through an uncertain write", async () => {
+    const to = ["activity", "files"];
+    const { ctl, m } = await guided("sections", { when: { action: "change", to }, confirm: copy });
+    ctl.setSelection("sections", [...to].reverse());
+    ctl.saveDraft("sections");
+    const request = ctl.snapshot().confirmation!;
+    ctl.setGuidance({ fields: { sections: { rules: [{ when: { action: "change", to }, afterSave: "Saved for new views." }] } } });
+    ctl.confirm(request);
+    expect(m.updates).toHaveLength(0);
+    ctl.saveDraft("sections");
+    expect(m.updates).toHaveLength(1);
+    m.updates[0].reject(new TypeError("offline"));
+    await flush();
+    m.change();
+    m.reads[1].resolve(example);
+    await flush();
+    expect(ctl.snapshot().fields.sections).toEqual({ selection: [...to].reverse() });
+    expect(ctl.canWrite("sections")).toBe(false);
+  });
+
+  it("keeps other fields writable when a rule has an invalid selector", async () => {
+    const { ctl, m } = await guided("layout", { ...rule, when: { action: "change", to: true } });
+    expect(ctl.editable("layout")).toBe(false);
+    ctl.choose("layout", "dense");
+    ctl.choose("compact", true);
+    expect(m.updates.map(u => u.body.changes)).toEqual([{ compact: true }]);
+  });
+
+  it.each([[{ ...rule, confirm: { ...copy, title: " " } }], [rule, rule]])("refuses an incomplete or ambiguous confirmation", async (...rules) => {
+    const { ctl, m } = await guided("layout", ...rules);
+    ctl.choose("layout", "dense");
+    expect(ctl.snapshot().fields.layout.error?.code).toBe("invalid_guidance");
+    ctl.reset("layout");
+    expect(m.updates.map(u => u.body.reset)).toEqual([["layout"]]);
+  });
+
+
+  it.each([
+    { notes: false, confirm: false, receipt: false },
+    { notes: true, confirm: false, receipt: false },
+    { notes: false, confirm: true, receipt: false },
+    { notes: true, confirm: true, receipt: false },
+    { notes: false, confirm: false, receipt: true },
+    { notes: true, confirm: false, receipt: true },
+    { notes: false, confirm: true, receipt: true },
+    { notes: true, confirm: true, receipt: true },
+  ])("composes independently: notes=$notes, confirmation=$confirm, receipt=$receipt", async ({ notes, confirm, receipt }) => {
+    const rules: ChangeRule[] = [{
+      when: { action: "change", to: true },
+      ...(confirm ? { confirm: copy } : {}),
+      ...(receipt ? { afterSave: "Saved for new views." } : {}),
+    }];
+    const { ctl, m } = await ready(manual(), example, {
+      notes: notes ? [{ kind: "warning", text: "Shorter previews" }] : undefined,
+      fields: { compact: { rules: confirm || receipt ? rules : undefined } },
+    });
+    ctl.choose("compact", true);
+    expect(m.updates).toHaveLength(confirm ? 0 : 1);
+    if (confirm) ctl.confirm(ctl.snapshot().confirmation!);
+    expect(m.updates).toHaveLength(1);
+    m.updates[0].resolve(commit(example, m.updates[0].body));
+    await flush();
+    expect(ctl.snapshot().fields.compact.saved).toBe(receipt ? "Saved for new views." : true);
+  });
+
+  it("refreshes permissions after a confirmed write is refused", async () => {
+    const { ctl, m } = await guided("layout", rule);
+    ctl.choose("layout", "dense");
+    ctl.confirm(ctl.snapshot().confirmation!);
+    m.updates[0].reject(new ConfigurationError("configuration_forbidden"));
+    await flush();
+    expect(m.reads).toHaveLength(2);
+    expect(ctl.snapshot().blocked?.code).toBe("configuration_forbidden");
+    expect(ctl.snapshot().fields.layout?.saved).toBeUndefined();
+    expect(ctl.canWrite("layout")).toBe(false);
+  });
+
+  it("cannot confirm a disposed resource", async () => {
+    const { ctl, m } = await guided("layout", rule);
+    ctl.choose("layout", "dense");
+    const request = ctl.snapshot().confirmation!;
+    ctl.dispose();
+    ctl.confirm(request);
+    expect(m.updates).toHaveLength(0);
   });
 });

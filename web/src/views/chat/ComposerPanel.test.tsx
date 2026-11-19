@@ -105,8 +105,23 @@ describe("the + (#5324)", () => {
     expect(texts.slice(2).join("|")).toContain("Composer.tsx");
     expect(texts.join("|")).toContain("src/");
     expect(texts.join("|")).toContain("Fix the login page");
-    // cindy's 44 px resource rows
-    expect(option("Composer.tsx").className).toContain("h-[44px]");
+    // Compact pointer rows keep a full touch target.
+    expect(option("Composer.tsx").className).toContain("[@media(pointer:coarse)]:h-11");
+  });
+
+  it("closes on a touch outside it, not only a mouse press (#11237)", async () => {
+    render();
+    click(plus());
+    await settle();
+    expect(panel()).not.toBeNull();
+    // inside it, or on the + (which toggles it), it stays
+    act(() => void panel()!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })));
+    expect(panel()).not.toBeNull();
+    const outside = document.createElement("div");
+    document.body.append(outside);
+    act(() => void outside.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })));
+    expect(panel()).toBeNull();
+    outside.remove();
   });
 
   it("filters as the search is typed, and Backspace in an empty search or Esc closes it, the caret back in the box", async () => {

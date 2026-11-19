@@ -1,10 +1,18 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- Moving temporary model outages to a durable manager retry must not swallow the node's other bounded recovery paths (#10444). Keep unavailable-model chains, recent transient 404s, safeguards refusals and tool-search resends on their existing contracts; only the outage classes owned by the new scheduler change. Tests of node-internal recovery can use a recoverable missing-model failure, while scheduled failure-fallback tests need a permanent error such as 401. Run the combined recovery tests after merging newer origin-attestation and delivery changes. Exercise the real hub interrupt and owner-message paths too: a direct `UserStopped` test misses a hub that notifies only Assistant, and `/exit` or `/quit` starts no turn that could cancel the wake.
+- Negotiate external runtime supervision policy explicitly, and isolate per-session rule layers outside `~/.persona/assistant` (#11173). Hardcoding `SourceKind == SourceRuntime` as unsupported blocks capable runtimes like Antigravity CLI, while dropping the guard or concatenating `supervision_instructions` into user message text weakens compaction durability and role isolation (#10338, #11121). Gate policy delivery on explicit `caps.supervision_policy` / `capabilities.supervision_policy` (defaulting absent or unknown to unsupported so DSH and older runtimes keep exact fail-closed behavior). On `agy acp`, verify append vs. replace semantics empirically before choosing a channel: `_meta.antigravity.systemPrompt.append` accumulates across `session/resume` calls and cannot be cleared on demotion, whereas per-session managed directories under `<agyDir>/persona-supervision/<rawId>` passed via `additionalDirectories` load into `<user_rules>` on every turn, reflect atomic edits and deletions on the next turn, leave shared `~/.persona/assistant/AGENTS.md` untouched, keep concurrent ordinary chats isolated, and fail closed with `assistant_supervision_runtime` when ACP lacks `additionalDirectories`, disk writes fail, or policy exceeds the two-file 48,000-byte (`AGENTS.md` + `GEMINI.md`) cap.
+
 - Recover an untold completion by native turn identity, not transcript revision (#10686). Trailing transcript bookkeeping must not suppress an already judged signal. Revalidate the complete current ledger entry under its lock and enqueue without rewriting it, so an older recovery snapshot cannot replace a newer turn or judgment. Exercise both PostgreSQL-backed manager restart and stale-snapshot rejection, with replay disabled as a negative control.
 
 - A rendered prompt used as a source-snapshot fingerprint must compare with the call's captured language (#6272). Re-reading the current language while committing a valid model answer makes a preference change look like a concurrent source edit. Freeze the wrapper language, keep the source comparison, and test both a locale-only change and real source changes. Audit natural-language parsers too: a conservative Chinese uncertainty check must recognize uncertainty in newly supported English and Japanese outputs. Shared recording inputs must keep their recording-language contract rather than inheriting a non-recording wrapper accidentally.
 - Persist a complete delivery round before its first external send (#10393). Saving only when the call returns handles a returned error but loses the result if the manager exits inside the call, after task acceptance has committed. Keep the original timestamp/key and acceptance metadata on disk while retaining an in-memory claim to block overlapping sends. Every other book save must preserve that prepared record too; retry must not send from memory when its preparation could not be saved. Use a child-process exit at the real provider boundary and a fresh manager on the same disposable database to prove recovery, with the returned-error case as a control.
 - A review wake is not a completion verdict (#8373). PR events and judged-done candidates share the same signal. Keep its wording neutral, preserve the actual reason and criterion evidence, and leave acceptance gates and display grouping unchanged.
+
+- Detect missing final replies on the settled exchange (#10427). A session preview can carry the previous answer
+  through a tool-only turn. Check the current transcript and verified input provenance, then test that a follow-up
+  cannot pass the send guard after newer input or an explicit stop. Keep its attempt identity and visible failure
+  notice tied to the original input.
 
 - Snapshot display projections must not initialize the knowledge base (#10108). Publication already holds
   `pubMu`; read an already-open engine and retain the canonical cached project-name fallback rather than calling
@@ -281,7 +289,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 
 - **Model listing and saving must agree on online launcher selection** (#1840). A cached provider's first machine can be offline even when another machine successfully lists its models. For a purpose without a bound machine, reuse `pickMachine` for model validation; if no reported candidate is online, allow saving without a live check. Keep known bound-machine validation and managed-launcher behavior intact. Cover the HTTP save and profile-apply paths, including effort-only edits, rejected online models, exact RPC destinations, and unchanged storage after rejection.
 
-- A successful provider probe does not establish runtime compatibility (#2252). Direct-API calls resolve through `apiConfig`, while launcher tests also support transport settings that the node can honor. Refuse unsupported direct-API fields on saves, effective stored/preset probes, and runtime resolution; validate retained sealed headers without decrypting or rewriting the record, and allow explicit clearing. Preserve legacy anonymous Messages probes and real launcher settings: protocol alone does not distinguish a Messages launcher from a direct-API provider. Count synthetic upstream requests to prove rejected probes and runtime calls stop before sending.
+- A successful provider probe does not establish runtime compatibility (#2252, #11075). Direct-API calls resolve through `apiConfig`, while launcher tests can use transport settings that the selected runtime cannot honor. Carry validated custom headers through every direct protocol's save, test, discovery and inference, including launcher HTTP fallback and Send Through, and preserve the no-header defaults. Refuse unsupported proxy fields and runtime/model combinations before network I/O, while keeping Codex's real `env_http_headers` channel and Antigravity's limitation explicit. Seal values, return only header names, redact errors and diagnostics, retain headers on same-origin redirects and drop them after cross-origin hops; probes still never follow redirects. Protocol alone does not distinguish a Messages launcher from a direct-API provider.
 
 - **A goroutine asleep through a delay costs a stack per event; keep only the fields that are read** (#2472). The finished push, a task's receipt, the launcher's usage-limit mark and the triage each started a goroutine per turn end that slept through its window (60 s by default): with a few turn ends a second the manager held about 900 sleepers, roughly 16 KB of stack each (StackInuse 6 to 21 MB in a soak). Schedule the unchanged body with `time.AfterFunc` (`afterSettle`, `notifyFinished`), reading the delay when the turn ends as before; keep the synchronous function for its callers and tests. The same goes for memory kept between lists: a `proto.Session` is about 1.5 KB, so a by-value copy of every machine's list kept for a few fields (the previous list's turn fields, the reply reminders' rows, the herdr marks' four fields) is megabytes at a few thousand sessions. Keep a struct of what is read (`turnPrev`, `tokenRow`), or only the rows a reader can pick, and decorate one row (`decoratedSession`) rather than a machine's list to read one. A test of such a change compares against the full path's row (`TestDecoratedSessionIsTheListsRow`) and counts goroutines in a `synctest` bubble rather than sleeping.
 - **A hub deployed with new prompts does not reach a running assistant by itself** (#3235; #3068's ring cards kept coming out
@@ -749,6 +757,19 @@ unknown-risk write. Stable read shortcuts are listed in `larkCLIKnownReads`, whi
 nothing, so lark-cli's own answer still wins. When a card names a read as a write, check the lookup in the node's
 environment first, before changing the classifier. A literal `cd` before a command variable (`cd /tmp; L=/abs/lark-cli; $L …`)
 now resolves only absolute values: a relative one is looked up from the new directory.
+The short list was not enough (#11193): `calendar +agenda` still went to the phone as "建 / 改日程". When the lookup gives
+nothing, a command named as a read also counts as one (`larkCLINamedRead`): a shortcut whose name is, ends in or (get /
+list only) starts with fetch, agenda, search, list, get or mget, and a generated method named list, get, search, mget or
+batch_get. Every other name, sends, replies, reactions, create and update included, stays a write.
+
+## One `$?` in a literal loop made its lark-cli reads writes (#11193)
+
+`literalLarkLoopCommands` binds a literal `for` list into each lark-cli call so a variable path such as
+`documents/$d/raw_content` can be read. It gave up on the whole loop at any other parameter, and `echo "$d exit=$?"` was
+enough to leave `lark-cli api GET …/$d/…` unbound, unclassifiable and carded as a write. `$?` is now kept as inert text:
+it is always a number the shell sets, so it can neither name a program nor become a lark-cli word the classifier trusts
+(a path holding it is still unknown). When a loop of reads is carded, check every parameter in its body, not only the
+loop variable.
 
 ## A rejected answer must not consume Don't handle (#7907)
 
@@ -812,3 +833,9 @@ slash-only message on its own, leaves the snapshot unsent for the next message, 
 snapshot the conversation has seen (`TestAssistantOnARuntimeSendsASlashCommandOnItsOwn`). The chat bubble showed the
 doubled text because the chat is drawn from the agent's own transcript: when a user bubble looks wrong, compare it with
 the hub's record of what was sent before looking at the client.
+
+## Permanent conversation errors outrank silent-turn hints (#10399)
+
+When merging no-output turn handling, keep account-sealed compaction ahead of `no_output` / `stopped` handling in triage
+and clients. A generic kind must not restore Continue for a permanent error; ordinary silent turns keep their own text
+and Continue. Test both paths together, including the clients' independent invalid and plain-text flags.

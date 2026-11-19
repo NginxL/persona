@@ -31,6 +31,26 @@ class LarkAvatarTest {
         // The same picture rebuilt is equal (rows stay equal across refreshes); another pairing's is not.
         assertEquals(a, larkAvatar("/api/v1/lark/media/k", "hub/a") { byteArrayOf() })
         assertNotEquals(a, larkAvatar("/api/v1/lark/media/k", "hub/b") { byteArrayOf() })
+        val sized = a.atPixelSize(168)
+        assertEquals("hub/a:/api/v1/lark/media/k?size=168#168", sized.cacheKey)
+        assertEquals(sized, larkAvatar("/api/v1/lark/media/k", "hub/a", 168) { byteArrayOf() })
+        assertNotEquals(a, sized)
+        assertNotEquals(sized, a.atPixelSize(192))
+        val cdn = larkAvatar("https://example.com/a.png", "hub/a") { byteArrayOf() }!!
+        assertEquals("hub/a:https://example.com/a.png#192", cdn.atPixelSize(192).cacheKey)
+    }
+
+    @Test fun aFailureAtOneDrawnSizeDoesNotHoldBackAnother() = runTest {
+        val refs = mutableListOf<String>()
+        val image = larkAvatar("/api/v1/lark/media/k", "hub/a") { sized ->
+            refs += sized
+            if ("size=168" in sized) byteArrayOf(1) else throw IOException("offline")
+        }!!
+        val loads = LarkAvatarLoads<String>(backgroundScope, now = { 0 })
+        assertNull(loads.get(image.atPixelSize(120), 0) { null })
+        assertNull(loads.get(image.atPixelSize(120), 0) { null })
+        assertEquals("decoded", loads.get(image.atPixelSize(168), 0) { "decoded" })
+        assertEquals(listOf("/api/v1/lark/media/k?size=120", "/api/v1/lark/media/k?size=168"), refs)
     }
 
     @Test fun rowsShowingTheSamePictureShareOneRead() = runTest {

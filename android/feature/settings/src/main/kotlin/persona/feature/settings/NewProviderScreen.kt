@@ -62,6 +62,10 @@ internal fun NewProviderPage(
     machines: List<Machine> = emptyList(),
     /** Opens straight on "Computers" (the provider page's row): back from it leaves, and it saves by itself. */
     startAtComputers: Boolean = false,
+    /** A provider import link opened from outside (#5428); read through the hub after the form loads. */
+    importLink: String? = null,
+    /** Identifies each external open, including the same link opened again while this page is active. */
+    importGeneration: Long = 0,
 ) {
     val model = remember(providers, readiness, existing) {
         NewProviderModel(providers, readiness?.let { source -> suspend { if (source.available.first()) source.readiness(false) else null } })
@@ -79,7 +83,7 @@ internal fun NewProviderPage(
     var sub by rememberSaveable { mutableStateOf(if (startAtComputers) ProviderSub.Computers else null) }
     var discarding by remember { mutableStateOf(false) }
     var foundImport by remember { mutableStateOf<FoundAlias?>(null) }
-    LaunchedEffect(model) {
+    LaunchedEffect(model, importLink, importGeneration) {
         if (existing != null) { model.prepare(existing, existing.hasScope, machines); return@LaunchedEffect }
         // "Computers" needs the computers to choose from: opened where none are known (Model configuration), it waits
         // for the provider's page, and the hub's defaults apply meanwhile.
@@ -88,6 +92,7 @@ internal fun NewProviderPage(
         val importParse = providers.launcherImportParse.first()
         if (hubNames) launch { model.loadReadiness() }
         model.load(preferPreset, hubNames, importParse)
+        if (importLink != null) model.openImportLink(importLink)
     }
     LaunchedEffect(model, machines) { model.setMachines(machines) }
     LaunchedEffect(state.saved) {
@@ -103,7 +108,7 @@ internal fun NewProviderPage(
     }
     // A pasted configuration is read at once; typed changes settle for the same 0.7 s as the web wizard.
     LaunchedEffect(model, state.step, state.paste.text, state.paste.readImmediately) {
-        if (state.step == WizardStep.Paste && state.paste.answerText != state.paste.text) {
+        if (state.step == WizardStep.Paste && !state.paste.fromLink && state.paste.answerText != state.paste.text) {
             delay(if (state.paste.readImmediately || state.paste.text.isBlank()) 0 else AutoTestMillis)
             model.parsePaste()
         }
@@ -141,6 +146,7 @@ internal fun NewProviderPage(
     }
     BackHandler {
         when {
+            state.step == WizardStep.Paste && state.paste.fromLink -> onBack()
             state.step == WizardStep.Paste -> model.leavePaste()
             state.pasteContinued && state.step == WizardStep.Form -> model.backToPaste()
             state.editing -> leave()
@@ -157,6 +163,7 @@ internal fun NewProviderPage(
         else -> stringResource(R.string.settings_src_provider_new)
     }
     val pageBack: () -> Unit = when {
+        state.step == WizardStep.Paste && state.paste.fromLink -> onBack
         state.step == WizardStep.Paste -> model::leavePaste
         state.pasteContinued && state.step == WizardStep.Form -> model::backToPaste
         state.editing -> leave
@@ -192,7 +199,7 @@ internal fun NewProviderPage(
         when (state.step) {
             WizardStep.Pick -> if (state.loaded) pickStep(res, state, model::choose, onPaste = model::openPaste, onAlias = { foundImport = it })
             WizardStep.Paste -> pasteStep(state, model::editPaste, onRetry = { scope.launch { model.parsePaste() } },
-                onDraft = model::choosePasteDraft, onAction = model::choosePasteAction)
+                onSomethingElse = model::pasteSomethingElse, onDraft = model::choosePasteDraft, onAction = model::choosePasteAction)
             WizardStep.Key -> if (preset != null) keyStep(state, preset, editable, model::editKey, model::setAssign,
                 onRetest = { scope.launch { model.testKey() } }, onModel = { choosingModel = true }, more = more, onMore = { more = !more },
                 onComputers = openComputers)

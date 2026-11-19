@@ -1,4 +1,6 @@
 {
   "cleanup_failed": "Could not stop the abandoned Codex start in pane {pane}. No new tab will be opened until it can be closed: {reason}",
-  "no_box_here": "Codex started in the pane you picked, but its input box didn’t appear within {seconds} seconds. The pane is left as it is."
+  "no_box_here": "Codex started in the pane you picked, but its input box didn’t appear within {seconds} seconds. The pane is left as it is.",
+  "paste_unconfirmed": "The first message was not confirmed in Codex’s input box ({view}); Enter was not pressed.",
+  "session_cleanup_failed": "The failed launch pane was closed, but its session could not be archived: {reason}"
 }

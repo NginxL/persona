@@ -235,3 +235,102 @@ test('an answered card still selects the matching agy option', async (t) => {
   await n.peer.call('session.interrupt', { session_id: pid })
   await until('the turn ends', () => status(pid) === 'done', SLOW)
 })
+
+test('interrupt cancels every queued follow-up without applying its options', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('first prompt running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  await n.peer.call('session.send', { session_id: pid, text: 'Queued one', model: 'queued-model' })
+  await n.peer.call('session.send', { session_id: pid, text: 'Queued two' })
+  assert.deepEqual(await n.peer.call('session.interrupt', { session_id: pid }), { ok: true, settled: true })
+  await until('queue no longer working', () => status(pid) !== 'working', SLOW)
+  assert.equal(received(record).filter((m) => m.method === 'session/prompt').length, 1)
+  assert.equal(received(record).some((m) => m.params?.modelId === 'queued-model'), false)
+})
+
+test('permission cards use the runtime, session, kind and tool call key', async (t) => {
+  const { n, start } = await agyRuntime(t)
+  const pid = await start('ask')
+  await until('permission card', () => n.asked.length > 0, SLOW)
+  const { interactionId } = await import('../../runtime-sdk/index.js')
+  assert.equal(n.asked[0].id, interactionId('agy', pid, 'permission', 'call-1'))
+})
+
+
+test('cancelling before a prompt starts does not poison the next permission request', async (t) => {
+  const { n, record, start } = await agyRuntime(t)
+  const pid = await start()
+  n.resolve = () => ({ allow: true })
+  const [, interrupted] = await Promise.all([
+    n.peer.call('session.send', { session_id: pid, text: 'hold' }),
+    n.peer.call('session.interrupt', { session_id: pid }),
+  ])
+  assert.equal(interrupted.settled, true)
+  assert.equal(received(record).some((call) => call.method === 'session/prompt'), false)
+  await n.peer.call('session.send', { session_id: pid, text: 'ask' })
+  await until('next permission answered', () => permissionAnswers(record).length > 0, SLOW)
+  assert.equal(n.asked.length, 1)
+  assert.deepEqual(permissionAnswers(record)[0].result, { outcome: { outcome: 'selected', optionId: 'allow' } })
+  await n.peer.call('session.interrupt', { session_id: pid })
+})
+
+test('interrupt does not report settled while a later send is running', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('first prompt running', () => received(record).some((call) => call.method === 'session/prompt'), SLOW)
+  let release, entered = false
+  const gate = new Promise((resolve) => { release = resolve })
+  const original = AgyAcpClient.prototype.cancel
+  const mocked = t.mock.method(AgyAcpClient.prototype, 'cancel', async function (...args) {
+    await original.apply(this, args)
+    entered = true
+    await gate
+  })
+  const interrupted = n.peer.call('session.interrupt', { session_id: pid })
+  try {
+    await until('old turn ended during cancel', () => entered && received(record).some((call) => call.ended === SESSION) && status(pid) !== 'working', SLOW)
+    await n.peer.call('session.send', { session_id: pid, text: 'hold' })
+    await until('later prompt running', () => received(record).filter((call) => call.method === 'session/prompt').length === 2, SLOW)
+  } finally {
+    release()
+    mocked.mock.restore()
+  }
+  assert.notEqual((await interrupted).settled, true)
+  await n.peer.call('session.interrupt', { session_id: pid })
+})
+
+test('an uncancelled successor clears cancellation left by a preparing turn', async (t) => {
+  const { n, record, start } = await agyRuntime(t)
+  const pid = await start()
+  n.resolve = () => ({ allow: true })
+  let release, entered = false, hold = true
+  const gate = new Promise((resolve) => { release = resolve })
+  const original = AgyAcpClient.prototype.ensureSessionLoaded
+  const mocked = t.mock.method(AgyAcpClient.prototype, 'ensureSessionLoaded', async function (...args) {
+    if (hold) {
+      hold = false
+      entered = true
+      await gate
+    }
+    return original.apply(this, args)
+  })
+  const first = n.peer.call('session.send', { session_id: pid, text: 'hold' })
+  let interrupted
+  try {
+    await until('first turn preparing', () => entered, SLOW)
+    interrupted = n.peer.call('session.interrupt', { session_id: pid })
+    await until('preparing turn cancelled', () => received(record).some((call) => call.method === 'session/cancel'), SLOW)
+    assert.equal((await n.peer.call('session.send', { session_id: pid, text: 'ask' })).queued, true)
+    assert.equal(received(record).some((call) => call.method === 'session/prompt'), false)
+  } finally {
+    release()
+    mocked.mock.restore()
+    await first
+    await interrupted
+  }
+  await until('successor permission answered', () => permissionAnswers(record).length === 1, SLOW)
+  assert.equal(received(record).filter((call) => call.method === 'session/prompt').length, 1)
+  assert.equal(n.asked.length, 1)
+  assert.deepEqual(permissionAnswers(record)[0].result, { outcome: { outcome: 'selected', optionId: 'allow' } })
+  await n.peer.call('session.interrupt', { session_id: pid })
+})

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -61,6 +62,26 @@ func (n *Node) startRuntimeIn(ctx context.Context, name string) (*runtimeConn, s
 		}
 	}
 	return n.startRuntime(name)
+}
+
+// usesAgyPane keeps explicitly targeted herdr starts in their pane. With herdr as the default, a
+// discovered agy CLI also takes precedence over the companion for Agent starts and model discovery.
+func (n *Node) usesAgyPane(ctx context.Context, name, agentType string) bool {
+	kind := n.startKind(ctx)
+	if assistantLauncherPurpose(ctx) || (kind != proto.EngineHerdr && kind != proto.EngineHerdrCore) ||
+		n.agentKindOf(name, agentType) != agyAgent {
+		return false
+	}
+	if host, _ := ctx.Value(startHostKey{}).(string); host != "" {
+		return true
+	}
+	list, err := n.launchers(ctx)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(list, func(l proto.Launcher) bool {
+		return l.Name == name || (l.Name == agyAgent && l.Agent == agyAgent)
+	})
 }
 
 // runtimeLauncherModelsIn is runtimeLauncherModels for a start in ctx (runtimeOfIn): the advertisement of the runtime

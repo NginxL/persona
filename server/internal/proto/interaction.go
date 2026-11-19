@@ -232,6 +232,8 @@ func PlanAfterMode(mode string) string {
 }
 
 type Resolution struct {
+	// ModeActor is manager-authenticated display provenance for a plan mode change; callers cannot set it.
+	ModeActor *ModeActor `json:"mode_actor,omitempty"`
 	// Cancel discards only this question, without supplying answers or interrupting the task.
 	Cancel   bool              `json:"cancel,omitempty"`
 	Action   string            `json:"action,omitempty"`

@@ -13,5 +13,10 @@
   "no_match_in_folder": "Nothing matches in this folder",
   "skills_loading": "Loading skills for this assistant and execution environment…",
   "skills_error": "Skills unavailable here. Ordinary chat and other references still work.",
-  "skills_partial": "Verified local skills only. This runtime may have additional skills."
+  "skills_partial": "Verified local skills only. This runtime may have additional skills.",
+  "skills": "Skills",
+  "files": "Files and folders",
+  "sessions": "Sessions",
+  "workspaces": "Workspaces",
+  "search_skills": "Search skills, files and sessions"
 }

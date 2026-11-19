@@ -629,6 +629,13 @@ nonisolated struct APIClient: Sendable {
         var launchers: [Launcher]
         var `default`: LauncherDefault?
         var unavailable: [UnavailableLauncher]?
+        /// New Agent's presets from the model profile in use; nil from an older hub or when none apply here.
+        var tiers: [AgentPreset]? = nil
+        var tiersProfile: AgentPresetProfile? = nil
+        enum CodingKeys: String, CodingKey {
+            case launchers, `default`, unavailable, tiers
+            case tiersProfile = "tiers_profile"
+        }
     }
 
     /// The body of PUT /api/v1/assistant/conversations/{id}/model (#5033): the pick kept for one conversation.
@@ -1158,21 +1165,27 @@ nonisolated struct APIClient: Sendable {
 
     /// `send`, with the whole answer (`SendReply`).
     func sendReply(_ k: SessionKey, text: String, images: [ImagePayload] = [], launcher: String? = nil, model: String? = nil,
-                   clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil) async throws -> SendReply {
+                   clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil, holdsAgentMessages: Bool = false) async throws -> SendReply {
         let data = try await post(sp(k) + "/messages", body: SendBody(text: HubNaming.outbound(text, canonical: personaNaming), images: images.isEmpty ? nil : images, launcher: launcher,
                                                                       model: model, clientMsgID: clientMsgID, clearDraft: clearDraft, todoID: todoID, via: via),
-                                  timeout: 100, opID: opID)
+                                  timeout: 100, opID: opID, extraHeaders: holdsAgentMessages ? ["X-Persona-Features": UndeliveredMessage.agentHoldFeature] : [:])
         return (try? JSON.decoder.decode(SendReply.self, from: data)) ?? SendReply()
     }
 
-    /// Retry on a kept message that gave up (#10194): the assistant tries it again from now.
-    func retryUndelivered(conversation: String, id: String) async throws {
-        try await post("/api/v1/assistant/conversations/\(Self.pathPart(conversation))/undelivered/\(Self.pathPart(id))/retry", body: [String: String]())
+    private func keptPath(_ key: SessionKey, _ message: UndeliveredMessage) -> String {
+        let sid = Self.pathPart(key.sessionID), id = Self.pathPart(message.id)
+        if message.heldForComputer { return "/api/v1/sessions/\(Self.pathPart(key.machineID))/\(sid)/held/\(id)" }
+        return "/api/v1/assistant/conversations/\(sid)/undelivered/\(id)"
     }
 
-    /// Delete on a kept message (#10194): it is never sent.
-    func deleteUndelivered(conversation: String, id: String) async throws {
-        try await delete("/api/v1/assistant/conversations/\(Self.pathPart(conversation))/undelivered/\(Self.pathPart(id))")
+    /// Retry on a kept message that gave up.
+    func retryUndelivered(_ key: SessionKey, _ message: UndeliveredMessage) async throws {
+        try await post(keptPath(key, message) + "/retry", body: [String: String]())
+    }
+
+    /// Removes the kept copy and stops any further attempt.
+    func deleteUndelivered(_ key: SessionKey, _ message: UndeliveredMessage) async throws {
+        try await delete(keptPath(key, message))
     }
 
     private nonisolated static func pathPart(_ s: String) -> String {

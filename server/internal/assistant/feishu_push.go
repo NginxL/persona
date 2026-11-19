@@ -334,6 +334,13 @@ func (s *Service) feishuAgentDone(machine string, sess proto.Session, head, text
 	if strings.HasPrefix(head, "⚠️") || strings.HasPrefix(head, "⏳") { // a failed/cut-off turn or blocked work left
 		color = feishubot.Orange
 	}
+	if t, ok := s.taskOf(ctx, s.canonical(machine), session); ok {
+		label := s.feishuDirection(ctx, t, s.feishuDirections(ctx)) + clip(oneLine(t.Title), 70)
+		if head != t.Title {
+			label += " · " + head
+		}
+		head = label
+	}
 	note := func(clipped bool) string {
 		n := i18n.T(l, "assistant-feishu_cards.agent_done_note", i18n.Args{"place": place})
 		if clipped {

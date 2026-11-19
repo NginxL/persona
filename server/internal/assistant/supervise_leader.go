@@ -82,16 +82,16 @@ func (s *Service) planTaskSupervisor(ctx context.Context, conversation string, t
 	if supervisor == cfg.Main {
 		machine = cfg.mainRouteMachine()
 	}
-	if !s.runtimeConversation(ctx, machine, supervisor) {
+	if !s.runtimeWithoutSupervisionPolicy(ctx, machine, supervisor) {
 		return supervisor, nil
 	}
 	if cfg.Main == "" {
 		return "", planInvalid{i18n.Err("assistant-conversations.supervision_reviewer_required")}
 	}
-	if supervisor != cfg.Main && !s.runtimeConversation(ctx, cfg.mainRouteMachine(), cfg.Main) {
+	if supervisor != cfg.Main && !s.runtimeWithoutSupervisionPolicy(ctx, cfg.mainRouteMachine(), cfg.Main) {
 		return cfg.Main, nil
 	}
-	if background := s.ownSupervisor(cfg); background != cfg.Main && !s.runtimeConversation(ctx, cfg.MachineID, background) {
+	if background := s.ownSupervisor(cfg); background != cfg.Main && !s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, background) {
 		return cfg.Main, nil
 	}
 	return "", planInvalid{i18n.Err("assistant-conversations.supervision_reviewer_required")}
@@ -134,13 +134,14 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 	return lead
 }
 
-// digestTarget is digestTo, except that a conversation hosted by an external runtime is never the target: it has no
-// separate policy channel, so a supervision message to it would be refused (CodeSupervisionRuntime) and only end in a
-// "did not send" notice. What it supervises from before its tasks went to the main conversation's route (planTaskSupervisor)
-// is followed up by that route now: the background supervisor while it is on, else the main conversation (ownSupervisor).
+// digestTarget is digestTo, except that a conversation hosted by a runtime without supervision_policy is never the
+// target: it has no separate policy channel, so a supervision message to it would be refused (CodeSupervisionRuntime)
+// and only end in a "did not send" notice. What it supervises from before its tasks went to the main conversation's
+// route (planTaskSupervisor) is followed up by that route now: the background supervisor while it is on, else the main
+// conversation (ownSupervisor).
 func (s *Service) digestTarget(ctx context.Context, cfg Settings, g superviseSignal) string {
 	to := s.digestTo(cfg, g)
-	if to == "" || to == cfg.Main || to == cfg.BackgroundSupervisor || !s.runtimeConversation(ctx, cfg.MachineID, to) {
+	if to == "" || to == cfg.Main || to == cfg.BackgroundSupervisor || !s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, to) {
 		return to
 	}
 	own := s.ownSupervisor(cfg)

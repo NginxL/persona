@@ -20,8 +20,9 @@ type NodeSession struct {
 	Model            string          `json:"model,omitempty"`
 	ModelFingerprint string          `json:"model_fingerprint,omitempty"`
 	ModelEffort      string          `json:"model_effort,omitempty"`
-	Origin           string          `json:"origin,omitempty"`     // manager-recorded conversation source, for model-call authorization
-	ConfigDir        string          `json:"config_dir,omitempty"` // the assistant's explicit Claude profile
+	Origin           string          `json:"origin,omitempty"`       // manager-recorded conversation source, for model-call authorization
+	OriginKnown      bool            `json:"origin_known,omitempty"` // explicit manager decision; false on pre-upgrade records
+	ConfigDir        string          `json:"config_dir,omitempty"`   // the assistant's explicit Claude profile
 	Pane             string          `json:"pane,omitempty"`
 	Launcher         string          `json:"launcher"`
 	Cwd              string          `json:"cwd"`
@@ -94,7 +95,8 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb,
 			'model_recovery', $23::jsonb, 'follows_setting', $24::boolean,
 			'stop_cause', $25::text, 'stop_cause_at', $26::bigint,
-			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb, 'origin', $29::text), now() FROM saved
+			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb, 'origin', $29::text,
+			'origin_known', $30::boolean), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = CASE
 			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
 				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
@@ -104,7 +106,7 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			ELSE EXCLUDED.value END, updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
-		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction), s.Origin)
+		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction), s.Origin, s.OriginKnown)
 	return err
 }
 
@@ -124,6 +126,7 @@ type nodeModel struct {
 	ModelFingerprint string `json:"model_fingerprint"`
 	ModelEffort      string `json:"model_effort"`
 	Origin           string `json:"origin"`
+	OriginKnown      bool   `json:"origin_known"`
 	AppMode          string `json:"app_mode"`
 	AppEffort        string `json:"app_effort"`
 	ConfigDir        string `json:"config_dir"`
@@ -171,6 +174,7 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		}
 		s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort = m.Model, m.ModelFingerprint, m.ModelEffort, m.AppMode, m.AppEffort
 		s.Origin = m.Origin
+		s.OriginKnown = m.OriginKnown
 		s.Guest, s.GuestKind = m.Guest, m.GuestKind
 		s.ConfigDir = m.ConfigDir
 		s.UltracodeProcess, s.PendingSwitch, s.EngineHistory = jsonOrNil(m.UltracodeProcess), jsonOrNil(m.PendingSwitch), jsonOrNil(m.EngineHistory)

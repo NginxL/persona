@@ -22,6 +22,11 @@ func TestContextWindowOf(t *testing.T) {
 		{"codex records its window", "gpt-5", 475_000, 26_279, 475_000},
 		{"recorded beats the id", "claude-opus-5-5", 123_000, 1_000, 123_000},
 		{"gateway model is unknown", "some-gateway-model", 0, 5_000, 0},
+		// A gateway routes a Claude model under a prefix: the model after the last "/" is the one that answers.
+		{"a routed Claude 1M model", "passthrough/claude-opus-5-5", 0, 61_000, 1_000_000},
+		{"a routed 200k Claude model", "passthrough/claude-opus-4-6", 0, 61_000, 200_000},
+		{"a routed Claude model over 200k", "passthrough/claude-sonnet-4-6", 0, 340_000, 1_000_000},
+		{"a vendor path that is not Claude", "meta/llama-3", 0, 5_000, 0},
 		{"synthetic is unknown", "<synthetic>", 0, 5_000, 0},
 		{"empty is unknown", "", 0, 5_000, 0},
 	} {

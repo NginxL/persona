@@ -43,6 +43,9 @@ func (n *Node) startAgentType(launcher, declared string) string {
 	if l, ok := n.managedLauncher(launcher); ok && l.AgentType() == traexAgent {
 		return traexAgent
 	}
+	if n.agentKindOf(launcher, "") == agyAgent {
+		return agyAgent
+	}
 	return launcherAgentType(launcher)
 }
 

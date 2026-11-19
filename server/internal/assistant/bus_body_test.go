@@ -43,7 +43,7 @@ func (e *echoDevices) Handler(http.Handler) http.Handler {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"method": r.Method, "path": r.URL.EscapedPath(), "query": r.URL.RawQuery,
 			"header": r.Header, "content_length": r.ContentLength, "size": len(body), "sum": hex.EncodeToString(sum[:]),
-			"human": assistantwire.HumanStartOf(r.Context()), "approver": approver, "caller": devicewire.CallerOf(r.Context())})
+			"mode_actor": devicewire.ModeActorOf(r.Context()), "human": assistantwire.HumanStartOf(r.Context()), "approver": approver, "caller": devicewire.CallerOf(r.Context())})
 	})
 }
 
@@ -95,6 +95,7 @@ func TestStreamedRequestIsTheInlineOne(t *testing.T) {
 		Header:          map[string][]string{"Content-Type": {"application/json"}, assistantwire.RoleHeader: {"full"}, "X-Test": {"one", "two"}},
 		Caller:          &devicewire.Caller{Kind: "device", CredentialID: "cred-1"},
 		HandoffApprover: &assistantwire.HandoffApprover{DeviceID: "device-1", DeviceName: "Phone"},
+		ModeActor:       &devicewire.Actor{Kind: "device", DeviceID: "device-1", DeviceName: "Phone"},
 		Human:           true, Body: body}
 	call := func(method string, r assistantwire.HTTPRequest) (assistantwire.HTTPResponse, error) {
 		t.Helper()
@@ -128,11 +129,12 @@ func TestStreamedRequestIsTheInlineOne(t *testing.T) {
 		t.Fatalf("streamed answer differs:\n%s\ninline:\n%s", got.Body, inline.Body)
 	}
 	var seen struct {
-		Size  int    `json:"size"`
-		Human bool   `json:"human"`
-		Sum   string `json:"sum"`
+		Actor *devicewire.Actor `json:"mode_actor"`
+		Size  int               `json:"size"`
+		Human bool              `json:"human"`
+		Sum   string            `json:"sum"`
 	}
-	if err := json.Unmarshal(got.Body, &seen); err != nil || seen.Size != len(body) || !seen.Human {
+	if err := json.Unmarshal(got.Body, &seen); err != nil || seen.Size != len(body) || !seen.Human || seen.Actor == nil || seen.Actor.DeviceID != "device-1" {
 		t.Fatalf("what the route saw: %v %s", err, got.Body)
 	}
 

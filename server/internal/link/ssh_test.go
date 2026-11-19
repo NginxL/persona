@@ -30,7 +30,10 @@ import (
 	"github.com/nwverse/persona/server/internal/osproc"
 )
 
-const standInSSHDirEnv = "PERSONA_TEST_STANDIN_SSH_DIR"
+const (
+	standInSSHDirEnv           = "PERSONA_TEST_STANDIN_SSH_DIR"
+	standInSSHAbortiveCloseEnv = "PERSONA_TEST_STANDIN_SSH_ABORTIVE_CLOSE"
+)
 
 func TestMain(m *testing.M) {
 	if os.Getenv(standInSSHDirEnv) != "" && len(os.Args) > 2 && os.Args[1] == "-o" && os.Args[2] == "BatchMode=yes" {
@@ -145,6 +148,16 @@ func pipeForwardConn(local net.Conn, targetAddr string) {
 		fmt.Fprintf(os.Stderr, "channel 2: open failed: connect failed: %v\n", err)
 		_ = local.Close()
 		return
+	}
+	if os.Getenv(standInSSHAbortiveCloseEnv) != "" {
+		if tc, ok := remote.(*net.TCPConn); ok {
+			if err := tc.SetLinger(0); err != nil {
+				fmt.Fprintf(os.Stderr, "set abortive close: %v\n", err)
+				_ = local.Close()
+				_ = remote.Close()
+				return
+			}
+		}
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -268,6 +281,9 @@ type sshTestHub struct {
 	pin     string
 	links   chan sshHubConn
 	streams chan *websocket.Conn
+
+	connections         atomic.Int32
+	beforeInitialWrites func(connection int)
 }
 
 func newSSHTestHub(t *testing.T, prefix string) *sshTestHub {
@@ -301,6 +317,10 @@ func newSSHTestHub(t *testing.T, prefix string) *sshTestHub {
 			var hello Message
 			if _, b, err := c.Read(r.Context()); err != nil || json.Unmarshal(b, &hello) != nil || hello.Type != "hello" {
 				return
+			}
+			connection := int(h.connections.Add(1))
+			if h.beforeInitialWrites != nil {
+				h.beforeInitialWrites(connection)
 			}
 			sendJSON(t, c, `{"type":"endpoints","hub_name":"home"}`)
 			sendJSON(t, c, `{"type":"node","online":true}`)
@@ -519,8 +539,15 @@ func TestSSHPairLinkAndStreamsShareOneSSHProcess(t *testing.T) {
 }
 
 func TestSSHReconnectsWhenKilledAndLeavesNoProcessOnModeSwitchOrUnpair(t *testing.T) {
+	testSSHReconnectLifecycle(t, nil, nil)
+}
+
+func testSSHReconnectLifecycle(t *testing.T, beforeInitialWrites func(*sshHarness, int), onStatus func(Status)) {
 	ssh := newSSHHarness(t)
 	hub := newSSHTestHub(t, "")
+	if beforeInitialWrites != nil {
+		hub.beforeInitialWrites = func(connection int) { beforeInitialWrites(ssh, connection) }
+	}
 	path := filepath.Join(t.TempDir(), "link.json")
 	if err := Update(path, func(c *Config) error {
 		*c = Config{
@@ -550,12 +577,15 @@ func TestSSHReconnectsWhenKilledAndLeavesNoProcessOnModeSwitchOrUnpair(t *testin
 				case ch <- s:
 				default:
 				}
+				if onStatus != nil {
+					onStatus(s)
+				}
 			},
 		})
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 
-	st1 := waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH })
+	st1 := waitForSSHReady(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH })
 	runs1 := ssh.runs()
 	if len(runs1) != 1 {
 		t.Fatalf("expected 1 ssh process, got %d", len(runs1))
@@ -566,7 +596,7 @@ func TestSSHReconnectsWhenKilledAndLeavesNoProcessOnModeSwitchOrUnpair(t *testin
 	if err := osproc.Kill(pid1); err != nil {
 		t.Fatal(err)
 	}
-	st2 := waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH && s.Conn > st1.Conn })
+	st2 := waitForSSHReady(t, ch, func(s Status) bool { return s.State == "connected" && s.Kind == KindSSH && s.Conn > st1.Conn })
 	runs2 := ssh.runs()
 	if len(runs2) < 2 {
 		t.Fatalf("expected a new ssh process after kill, got %d", len(runs2))
@@ -587,7 +617,7 @@ func TestSSHReconnectsWhenKilledAndLeavesNoProcessOnModeSwitchOrUnpair(t *testin
 	if _, err := SetMode(path, ModeActive, ""); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, ch, func(s Status) bool {
+	waitForSSHReady(t, ch, func(s Status) bool {
 		return s.Mode == ModeActive && s.State == "connected" && s.Kind == KindSSH && s.Conn > st2.Conn
 	})
 	runs3 := ssh.runs()

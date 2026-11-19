@@ -264,6 +264,9 @@ func (w *keyWriter) caps(c *proto.SessionCapabilities) {
 	if c.PluginInput {
 		w.b.WriteString(" plugin_input=true")
 	}
+	if c.SupervisionPolicy {
+		w.b.WriteString(" supervision_policy=true")
+	}
 	w.b.WriteByte('}')
 }
 

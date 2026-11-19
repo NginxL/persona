@@ -26,7 +26,7 @@ import type { MenuAt } from "../ui/menu-model";
 import type { TermSpace } from "../lib/terminals";
 import { useFolded } from "../lib/use-folded";
 import { sameValue } from "../lib/stable-lines";
-import { stateCount } from "../lib/state-labels";
+import { stateCount, type WaitReason } from "../lib/state-labels";
 import { neverConnected } from "../lib/add-computer";
 import { type GoFn, GroupCount, holdsRow, type NodeMenuFn, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup } from "./SidebarParts";
 import { NavRow, SessionRow } from "./SidebarRows";
@@ -42,9 +42,11 @@ export type MachineLabel = (machineId: string) => string;
 const TREE_TONE: Record<TreeState, string> = { needs_you: "text-attention", working: "text-orange", bg_waiting: "text-status-waiting", waiting: "text-ink-2", done: "text-ink-3" };
 
 /** "Needs you" / "Working" / "Done" at the end of a tree node's line; `label`: a to-do's own word for it (the To-dos
- *  page's, #6458), in the color of the state it ranks as. */
-const TreeStateText = memo(function TreeStateText({ state, label }: { state: TreeState; label?: string }) {
-  return <span className={cx("shrink-0 text-[11px] font-semibold whitespace-nowrap", TREE_TONE[state])}>{label ?? treeStateLabel(state)}</span>;
+ *  page's, #6458), in the color of the state it ranks as, but for a waiting to-do's (`wait`, #11090): Needs you's
+ *  attention when it waits on the owner, the neutral one otherwise. */
+const TreeStateText = memo(function TreeStateText({ state, label, wait }: { state: TreeState; label?: string; wait?: WaitReason }) {
+  const tone = wait ? (wait === "owner" ? TREE_TONE.needs_you : TREE_TONE.waiting) : TREE_TONE[state];
+  return <span className={cx("shrink-0 text-[11px] font-semibold whitespace-nowrap", tone)} data-tree-state={wait}>{label ?? treeStateLabel(state)}</span>;
 });
 
 // The tree's rows are memoized, and a push hands them the nodes it did not change as the same objects (shareTree), so
@@ -226,7 +228,7 @@ export const TreeTodoRows = memo(function TreeTodoRows({ td, top, ...p }: { td: 
   ) : td.status === "usage_limit" ? (
     <span className="shrink-0 text-[11px] font-semibold whitespace-nowrap text-orange">{t("lib-usage-limit.short")}</span>
   ) : (
-    <TreeStateText state={td.state} label={td.statusLabel} />
+    <TreeStateText state={td.state} label={td.statusLabel} wait={td.wait} />
   );
   return (
     <TreeBranch

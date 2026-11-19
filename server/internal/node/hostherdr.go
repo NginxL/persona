@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 )
 
@@ -208,9 +210,47 @@ func herdrUnnamedKey(k string) (string, bool) {
 
 // Prompt is agent.prompt; herdr answers *_not_found for a pane whose agent it does not detect (a compatible CLI).
 func (h *herdrHost) Prompt(ctx context.Context, pane host.PaneRef, text string) error {
+	return h.prompt(ctx, pane, text, runtime.GOOS == "windows")
+}
+
+// On Windows, do not delegate multiline input to agent.prompt: the terminal's
+// input path may interpret each newline as Enter. Keep the paste and submit
+// separate, including for a fresh Claude or a compatible runtime.
+func (h *herdrHost) prompt(ctx context.Context, pane host.PaneRef, text string, windows bool) error {
 	t, err := h.target(ctx, pane.ID)
 	if err != nil {
 		return err
+	}
+	if windows {
+		before, err := t.c.AgentGet(ctx, t.id)
+		if err != nil {
+			if herdr.IsNotFound(err) {
+				return host.Mark(err, host.ErrNoAgent)
+			}
+			return err
+		}
+		if before == nil || before.Agent == "" {
+			return host.ErrNoAgent
+		}
+		if before.AgentStatus == "blocked" {
+			return host.ErrAgentBlocked
+		}
+		if err := t.c.PaneSendText(ctx, t.id, pasteStart+inertControls(text)+pasteEnd); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err() // pasted, but not submitted: delivery is unknown
+		case <-time.After(orcaPasteGap(text)):
+		}
+		after, err := t.c.AgentGet(ctx, t.id)
+		if err != nil {
+			return errors.New(i18n.T(i18n.Default, "node-terminal-input.unverified_after_paste", i18n.Args{"reason": err.Error()}))
+		}
+		if after == nil || after.Agent != before.Agent || after.SessionID() != before.SessionID() || after.AgentStatus == "blocked" {
+			return errors.New(i18n.T(i18n.Default, "node-terminal-input.changed_after_paste"))
+		}
+		return t.c.PaneSendKeys(ctx, t.id, "enter")
 	}
 	err = t.c.AgentPrompt(ctx, t.id, text)
 	if herdr.IsNotFound(err) {

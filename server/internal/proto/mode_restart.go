@@ -35,3 +35,21 @@ const (
 
 // EventModeRestart is the node's event that carries a ModeRestartEvent.
 const EventModeRestart = "session.mode_restart"
+
+// ModeActor is display-only provenance, never permission to perform a change.
+type ModeActor struct {
+	Kind       string `json:"kind"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
+	Extension  string `json:"extension,omitempty"`
+}
+
+// ModeSetEvent records the mode a plan hook returned to its runtime, not a runtime acknowledgement.
+type ModeSetEvent struct {
+	SessionID string     `json:"session_id"`
+	From      string     `json:"from,omitempty"`
+	To        string     `json:"to"`
+	Actor     *ModeActor `json:"actor,omitempty"`
+}
+
+const EventModeSet = "session.mode_set"

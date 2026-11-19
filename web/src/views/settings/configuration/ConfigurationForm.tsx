@@ -12,11 +12,12 @@
 // option replaces the old one locally (the wire value stays an array), so a replacement never shows two chosen or a
 // too-many error. Drafts stay through any failure or conflict. One write at a time, and a conflict or an uncertain write
 // needs Reload first.
-import { useEffect, useId, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { formatList, t } from "../../../i18n";
 import { ConfigurationController, draftValue, type FieldState, type FormState, type Problem } from "../../../lib/configuration/controller";
 import { ERROR_CODES, fieldValue, sameValue, scalarLength, type ConfigurationField, type ConfigurationSource, type FieldValue, type KnownField } from "../../../lib/configuration/contract";
-import { Button, Loading, Spinner } from "../../../ui/atoms";
+import { invalidConditions, type ConfigurationGuidance, type GuidanceNote } from "../../../lib/configuration/guidance";
+import { Button, Dialog, Loading, Spinner } from "../../../ui/atoms";
 import { CheckMark } from "../../../ui/CheckMark";
 import { inputClass, Segmented, textareaClass } from "../../assistant/parts";
 import { ChoiceRows } from "../ProviderFields";
@@ -25,21 +26,23 @@ import { Group, RowFailed, settingsInputClass, Switch } from "../SettingsParts";
 /** What went wrong, in this client's words for a code it knows, else the source's own (localized) message, else a
  *  generic line. */
 export function problemText(p: Problem): string {
+  if (p.code === "invalid_guidance") return t("settings-configuration.invalid_guidance");
   if ((ERROR_CODES as readonly string[]).includes(p.code)) return t(`settings-configuration.error_${p.code}`);
   return p.message || t("settings-configuration.error_failed");
 }
 
 /** The form for `source`. A source with another `key` is another resource: the form starts over for it. */
-export function ConfigurationForm({ source }: { source: ConfigurationSource }) {
+export function ConfigurationForm({ source, guidance }: { source: ConfigurationSource; guidance?: ConfigurationGuidance }) {
   const [ctl, setCtl] = useState<ConfigurationController | null>(null);
   useEffect(() => {
-    const c = new ConfigurationController(source);
+    const c = new ConfigurationController(source, guidance);
     setCtl(c);
     c.start();
     return () => c.dispose();
     // one controller per resource: the same key is the same resource
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source.key]);
+  useLayoutEffect(() => ctl?.setGuidance(guidance), [ctl, guidance]);
   if (!ctl || ctl.source.key !== source.key) return <FormLoading />;
   return <Form ctl={ctl} />;
 }
@@ -56,6 +59,16 @@ function FormLoading() {
 
 function Form({ ctl }: { ctl: ConfigurationController }) {
   const s = useSyncExternalStore(ctl.subscribe, ctl.snapshot);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const previouslyConfirming = useRef(false);
+  const request = s.confirmation;
+  const descriptionId = useId();
+  useEffect(() => {
+    if (!request && previouslyConfirming.current && document.activeElement === document.body) {
+      heading.current?.focus({ preventScroll: true });
+    }
+    previouslyConfirming.current = !!request;
+  }, [request]);
   if (s.phase === "loading" || !s.doc) {
     if (s.phase !== "failed") return <FormLoading />;
     return (
@@ -68,8 +81,9 @@ function Form({ ctl }: { ctl: ConfigurationController }) {
   return (
     <section aria-label={doc.title} data-configuration={doc.id}>
       <div className="mb-1.5 px-1">
-        <h2 className="text-label font-medium text-ink-3">{doc.title}</h2>
+        <h2 ref={heading} tabIndex={-1} className="text-label font-medium text-ink-3">{doc.title}</h2>
         {doc.description && <p className="mt-0.5 text-submeta leading-relaxed text-ink-3">{doc.description}</p>}
+        <Notes notes={ctl.guidance?.notes} />
       </div>
       {!s.writable && <Banner tone="caution">{t("settings-configuration.unsupported_version")}</Banner>}
       {s.blocked && (
@@ -90,6 +104,22 @@ function Form({ ctl }: { ctl: ConfigurationController }) {
           ))}
         </Group>
       ))}
+      {request && (
+        <Dialog open title={request.copy.title} describedBy={descriptionId} onClose={() => ctl.cancel(request)}
+          footer={<div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
+            <Button onClick={() => ctl.cancel(request)}>{t("settings-configuration.cancel")}</Button>
+            <Button tone="primary" className="max-w-full" onClick={() => ctl.confirm(request)}>
+              <span className="truncate">{request.copy.confirmLabel}</span>
+            </Button>
+          </div>}>
+          <p id={descriptionId} className="text-meta leading-relaxed text-ink">{request.copy.body}</p>
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-submeta leading-relaxed">
+            <Detail term={t("settings-labs.scope")}>{request.copy.scope}</Detail>
+            <Detail term={t("settings-labs.impact")}>{request.copy.impact}</Detail>
+            <Detail term={t("settings-labs.activation")}>{request.copy.activation}</Detail>
+          </dl>
+        </Dialog>
+      )}
     </section>
   );
 }
@@ -134,7 +164,8 @@ function FieldRow({ ctl, s, field }: { ctl: ConfigurationController; s: FormStat
   const value = known ? fieldValue(doc, known) : undefined;
   const can = known ? ctl.canWrite(field.id) : false;
   // typing and checking stay possible while another field is being written (a draft is local); only Save waits
-  const editable = !!known && s.writable && !known.read_only && !known.disabled_reason;
+  const guidance = ctl.guidance?.fields?.[field.id];
+  const editable = ctl.editable(field.id);
   // a multiselect's unsaved checks are what it shows; its pending write once committed
   const checked = known?.kind === "multiselect" && fs.selection !== undefined ? (fs.selection as FieldValue) : undefined;
   const shown = fs.pending ?? checked ?? value;
@@ -147,7 +178,7 @@ function FieldRow({ ctl, s, field }: { ctl: ConfigurationController; s: FormStat
   const count = known?.kind === "text" && known.text.max_length !== undefined ? t("settings-configuration.count", { n: scalarLength(text), max: known.text.max_length }) : undefined;
   const invalid = !!known && value === undefined;
   const described = [field.description ? descId : undefined, count !== undefined ? countId : undefined, invalid ? invalidId : undefined].filter(Boolean).join(" ") || undefined;
-  const resettable = !!known && s.writable && !known.read_only && !known.disabled_reason && !selectionDirty && (value === undefined || !sameValue(value, known.default));
+  const resettable = !!known && editable && !selectionDirty && (value === undefined || !sameValue(value, known.default));
 
   return (
     <div data-settings-row={`configuration-${doc.id}-${field.id}`} data-configuration-field={field.id} data-kind={field.kind} className="px-4 py-2.5">
@@ -164,6 +195,8 @@ function FieldRow({ ctl, s, field }: { ctl: ConfigurationController; s: FormStat
         </div>
       )}
       {fs.error && <p role="alert" className="mt-1.5 text-submeta leading-snug text-red">{problemText(fs.error)}</p>}
+      <Notes notes={guidance?.notes} />
+      {known && invalidConditions(known, guidance?.rules) && <Note tone="caution">{t("settings-configuration.invalid_guidance")}</Note>}
       {notice && <Note tone={notice.kind === "warning" ? "caution" : undefined}>{notice.message}</Note>}
       {field.kind === "unsupported" && <Note tone="caution">{field.reason === "kind" ? t("settings-configuration.unsupported_kind") : t("settings-configuration.unsupported_definition")}</Note>}
       {invalid && <Note id={invalidId} tone="caution">{t("settings-configuration.invalid_value")}</Note>}
@@ -178,7 +211,7 @@ function FieldRow({ ctl, s, field }: { ctl: ConfigurationController; s: FormStat
           {field.details.map((d, i) => <Detail key={i} term={d.title}>{d.description}</Detail>)}
         </dl>
       ) : null}
-      {known && <FieldFooter ctl={ctl} field={known} can={can} resettable={resettable} dirty={typedDirty || selectionDirty} count={count} countId={countId} busy={s.busy === field.id} saved={!!fs.saved} />}
+      {known && <FieldFooter ctl={ctl} field={known} can={can} resettable={resettable} dirty={typedDirty || selectionDirty} count={count} countId={countId} busy={s.busy === field.id} saved={fs.saved} />}
     </div>
   );
 }
@@ -193,7 +226,7 @@ function FieldFooter({ ctl, field, can, resettable, dirty, count, countId, busy,
   count?: string;
   countId: string;
   busy: boolean;
-  saved: boolean;
+  saved?: FieldState["saved"];
 }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -202,10 +235,10 @@ function FieldFooter({ ctl, field, can, resettable, dirty, count, countId, busy,
       </span>
       {count !== undefined && <span id={countId} className="text-submeta text-ink-3 tabular-nums">{count}</span>}
       {/* Reserve the small buttons' height even when there is only text on this line. */}
-      <span className="ml-auto flex min-h-7 shrink-0 items-center gap-1.5">
+      <span className={typeof saved === "string" ? "ml-auto flex min-h-7 max-w-full flex-wrap items-center justify-end gap-1.5" : "ml-auto flex min-h-7 shrink-0 items-center gap-1.5"}>
         <span aria-live="polite" className={busy || saved ? "flex items-center gap-1.5 text-submeta leading-snug" : "sr-only"}>
           {busy && <><Spinner />{t("settings-configuration.saving")}</>}
-          {saved && <span className="text-green">{t("settings-configuration.saved")}</span>}
+          {saved && <span className="text-green">{saved === true ? t("settings-configuration.saved") : saved}</span>}
         </span>
         {resettable && (
           <Button size="sm" tone="quiet" icon="undo" disabled={!can} onClick={() => ctl.reset(field.id)}>{t("settings-configuration.reset")}</Button>
@@ -228,6 +261,12 @@ function Detail({ term, children }: { term: string; children: React.ReactNode })
       <dd className="min-w-0 text-ink-2">{children}</dd>
     </>
   );
+}
+
+function Notes({ notes }: { notes?: readonly GuidanceNote[] }) {
+  return notes?.map((note, i) => note?.text?.trim() && (
+    <Note key={i} tone={note.kind === "warning" ? "caution" : undefined}>{note.text}</Note>
+  ));
 }
 
 function Note({ tone, id, children }: { tone?: "caution"; id?: string; children: React.ReactNode }) {

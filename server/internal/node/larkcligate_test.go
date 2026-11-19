@@ -137,11 +137,15 @@ func TestLarkCLIGate(t *testing.T) {
 }
 
 // Without a way to ask lark-cli (no lark.cli in the hub's config), every lark-cli command that is not one of its own
-// printing commands is confirmed.
+// printing commands or named as a read (#11193) is confirmed.
 func TestLarkCLIGateWithoutRisk(t *testing.T) {
-	v := classifyLark(`lark-cli im +chat-list`, nil, "", nil)
+	v := classifyLark(`lark-cli im +chat-create --name x`, nil, "", nil)
 	if len(v.calls) != 1 || larkDecision(proto.AssistantLark{}, v.calls[0]) != "confirm" {
 		t.Fatalf("unknown risk should be confirmed: %+v", v)
+	}
+	v = classifyLark(`lark-cli im +chat-list`, nil, "", nil)
+	if len(v.calls) != 1 || larkDecision(proto.AssistantLark{}, v.calls[0]) != "allow" {
+		t.Fatalf("a list shortcut only reads: %+v", v)
 	}
 	v = classifyLark(`lark-cli skills list`, nil, "", nil)
 	if len(v.calls) != 1 || larkDecision(proto.AssistantLark{}, v.calls[0]) != "allow" {

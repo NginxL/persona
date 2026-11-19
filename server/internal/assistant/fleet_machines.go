@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"path/filepath"
 
 	"github.com/nwverse/persona/server/internal/identity"
@@ -69,6 +70,9 @@ func (s *Service) nodeCall(ctx context.Context, machine, method string, params, 
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return err
+	}
+	if method == DeviceSessionModes && devicewire.ModeActorOf(ctx) == nil {
+		ctx = devicewire.WithModeActor(ctx, devicewire.AssistantModeActor())
 	}
 	res, err := s.devs.CallNode(ctx, machine, method, raw)
 	if err != nil || out == nil || len(res) == 0 {

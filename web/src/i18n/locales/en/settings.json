@@ -109,6 +109,7 @@
   "kind_cli": "Other (web / command line)",
   "kind_web": "Web",
   "role_answer": "Answer only",
+  "role_scoped": "Scoped access",
   "revoked_ago": "revoked {time}",
   "used_ago": "used {time}",
   "added_ago": "added {time}",
@@ -180,5 +181,10 @@
   "search_key_words": "API key, secret key",
   "device_tokens": "Device tokens",
   "pi_too": "pi too",
-  "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json"
+  "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json",
+  "show_botmux": "Show botmux sessions in Agents",
+  "show_botmux_hint": "Syncs across devices on this hub. Hiding sessions here keeps them available for tasks.",
+  "show_botmux_inventory": "A computer’s “Also show botmux sessions” switch controls which sessions reach the hub.",
+  "show_botmux_computers": "Open Computers",
+  "botmux_saving": "Saving…"
 }

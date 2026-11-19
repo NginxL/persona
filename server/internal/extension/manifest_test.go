@@ -716,6 +716,17 @@ func TestChannelPoint(t *testing.T) {
 			t.Errorf("%s: parsed", name)
 		}
 	}
+
+	// The raw manifest exercises the public contribution contract rather than constructing an Item in Go (#11130).
+	mention, err := Parse(with(t, func(m map[string]any) {
+		m["contributes"] = map[string]any{"connectors": conn, "channel": []any{ch(map[string]any{"kind": "mention"})}}
+	}))
+	if err != nil {
+		t.Fatalf("a mention channel contribution: %v", err)
+	}
+	if got := mention.Channels(); len(got) != 1 || got[0].Kind != "mention" {
+		t.Fatalf("mention contribution decoded as %+v", got)
+	}
 }
 
 func mustParse(t *testing.T) func(b []byte) *Manifest {

@@ -1,6 +1,10 @@
 package assistantwire
 
-import "time"
+import (
+	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
+)
 
 // ---- the todos (the assistant's, docs/assistant/todos.md) ----
 
@@ -39,12 +43,13 @@ type TodoHandoff struct {
 // decisions in effect before it (as it was without any, or when they could not be read). Status and Error, when set,
 // say the hand-off may not go (404: no such todo, 409: it is done); the hub answers the app with them as they are.
 type TodoHandoffResult struct {
-	Found  bool       `json:"found"`
-	Title  string     `json:"title,omitempty"`
-	DoneAt *time.Time `json:"done_at,omitempty"`
-	Text   string     `json:"text,omitempty"`
-	Status int        `json:"status,omitempty"`
-	Error  string     `json:"error,omitempty"`
+	Found  bool          `json:"found"`
+	Title  string        `json:"title,omitempty"`
+	DoneAt *time.Time    `json:"done_at,omitempty"`
+	Text   string        `json:"text,omitempty"`
+	Images []proto.Image `json:"images,omitempty"`
+	Status int           `json:"status,omitempty"`
+	Error  string        `json:"error,omitempty"`
 }
 
 // TodoLinkParams is assistant.todo_link's params: the agent handed work for a todo works for it from now on (a link

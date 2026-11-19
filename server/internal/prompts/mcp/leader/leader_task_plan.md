@@ -52,7 +52,12 @@ Hand part of your own task to workers: each task you give this starts a new codi
           },
           "tier": {
             "type": "string",
-            "description": "an Agent preset (a tier of the model profile in use); explicit launcher, model and effort override it"
+            "description": "an Agent preset (a tier of the model profile in use); explicit launcher, model, effort and speed override it"
+          },
+          "speed": {
+            "type": "string",
+            "enum": ["standard", "fast", "ultrafast"],
+            "description": "new-start speed; explicit choice overrides the tier. standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
           },
           "effort": {
             "type": "string",

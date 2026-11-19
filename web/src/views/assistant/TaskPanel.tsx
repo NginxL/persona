@@ -5,7 +5,8 @@
 // the question a failed start's tab stopped on, answered here (#10365): only for such a failure
 const ShellQuestion = lazy(() => import("../ShellQuestionCard"));
 import { lazy, Suspense, useState } from "react";
-import { isRemovable, openAsk, TODO_STATUS_INFO } from "../../lib/todos";
+import { isRemovable, openAsk } from "../../lib/todos";
+import { statusWord } from "../../lib/todo-wait-reason";
 import { TodoAskLine } from "../TodoAsk";
 import { reportText } from "../../lib/supervision";
 import { LatestReport } from "./Supervision";
@@ -47,12 +48,11 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
   const agents = (todo.agents ?? []).filter((a) => !a.released_at);
   const lead = st.lead;
   const chosen = agents.find((a) => `${a.machine_id}/${a.session_id}` === picked) ?? (lead ? agents.find((a) => a.session_id === lead.session_id) : agents[0]);
-  const info = TODO_STATUS_INFO[st.status];
   const starting = st.status === "not_started" && startInFlight(todo, plans);
   // the header also stands for the agent shown: after ⌄ picks another, its machine and project, not the lead's
   const shown = chosen ? (sessions[chosen.machine_id] ?? []).find((x) => x.session_id === chosen.session_id) : undefined;
   // The chat header prepends the usage-limit line of the agent it shows, so the status word is not said twice.
-  const head = st.status === "usage_limit" && usageLimitLabel(shown ?? lead) ? "" : starting ? t("assistant-tasks.status_starting") : info.label;
+  const head = st.status === "usage_limit" && usageLimitLabel(shown ?? lead) ? "" : starting ? t("assistant-tasks.status_starting") : statusWord(st.status, st.wait);
   const subtitle = [head, chosen ? place({ ...todo, agents: [chosen] }, shown ?? lead) : place(todo, lead)].filter(Boolean).join(" · ");
   const taskItems: MenuItem[] = [
     openInWindow(chosen ? { name: "session", mid: chosen.machine_id, sid: chosen.session_id } : { name: "todos", id: todo.id }),

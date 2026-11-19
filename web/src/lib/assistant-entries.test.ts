@@ -16,11 +16,13 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
       // the web lists every task waiting for its supervisor's review under Persona reviewing (#8678), out of the two
       // entries the other clients put it in: the rest of the split is theirs
       const review = (c.expected as { web_review?: string[] }).web_review ?? [];
-      const shared = (keys: string[]) => keys.filter((key) => !review.includes(key));
+      const parked = (c.expected as { web_parked?: string[] }).web_parked ?? [];
+      const shared = (keys: string[]) => keys.filter((key) => !review.includes(key) && !parked.includes(key));
       expect(got.needsYou.map((item) => item.key)).toEqual(shared(c.expected.needs_you));
       expect(got.running.map((item) => item.key)).toEqual(shared(c.expected.running));
       expect(got.shelved.map((item) => item.key)).toEqual(shared(c.expected.shelved));
       expect(got.review.map((item) => item.key)).toEqual(review);
+      expect(got.parked.map((item) => item.key)).toEqual(parked);
       // Finished (#10922): what the conversation handed out that finished in the last 24 hours, newest first, and which
       // of them nobody has opened since (drawn as new)
       const finished = c.expected as { finished?: string[]; finished_new?: string[] };

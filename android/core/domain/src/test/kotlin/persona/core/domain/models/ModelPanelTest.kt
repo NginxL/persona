@@ -108,6 +108,21 @@ class ModelPanelTest {
         assertEquals(PanelReason.Busy, ModelPanel.rowBlock(claude, waiting.copy(busy = PanelReason.Busy), current = true))
     }
 
+    @Test fun aModelOrProviderListedTwiceIsOneRow() {
+        // Claude Code lists `default` twice when its settings say "model": "default" (#9998): two rows with one key
+        // close the app as the panel opens
+        val default = PanelModel("default", "Default (recommended)", resolved = "claude-opus-5-5", providerDefault = true)
+        val twice = claude.copy(models = listOf(default, opus, sonnet, default.copy(name = "Default")))
+        for (s in listOf(state, state.copy(current = PanelConfig("claude", "default")), state.copy(recommended = emptyList()), state.copy(starting = true)))
+            for (view in listOf(PanelView.All, PanelView.Provider("claude"))) {
+                val all = ModelPanel.sections(listOf(twice, twice), s, view, "", PanelPrefs())
+                val keys = all.flatMap { listOf("h:" + it.key) + it.rows.map(PanelRow::key) }
+                assertEquals(keys.distinct(), keys)
+                assertEquals("the first of them stays", listOf("Default (recommended)"),
+                    all.flatMap { it.rows }.filter { it.model.id == "default" }.map { it.model.name })
+            }
+    }
+
     @Test fun aListBeingReadShowsItsSpinner() {
         val all = ModelPanel.sections(listOf(claude, work.copy(models = null, loading = true)), state, PanelView.All, "", PanelPrefs())
         assertTrue(all.last().loading)

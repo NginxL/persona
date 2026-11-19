@@ -152,7 +152,9 @@ func TestLarkCLIMissingCommandHasNoCard(t *testing.T) {
 			{"real read", `lark-cli im messages read_status --params '{"message_id":"om_x"}' --as user`, 0, 1, false},
 			{"real method without a risk level", `lark-cli im messages read_users --params '{"message_id":"om_x"}' --as user`, 1, 2, false},
 			{"Usage that names another command", `lark-cli im messages get om_x --as user`, 1, 2, false},
-			{"lark-cli cannot run", missing, 1, 0, true},
+			{"lark-cli cannot run", `lark-cli im messages read_users --params '{"message_id":"om_x"}' --as user`, 1, 0, true},
+			// Named as a read, a method still runs without a card when lark-cli cannot be asked (#11193).
+			{"read-named method when lark-cli cannot run", missing, 0, 0, true},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				bin, calls := fakeLarkCLI(t, helps, 0)

@@ -78,6 +78,8 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         ApiBadRequest("Request rejected: something is wrong with its parameters or context"),
         ApiUnavailable("The model service is unavailable for now"),
         ApiFailed("The model request failed"),
+        ApiConversationInvalid("Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue."),
+        ApiConversationInvalidLabel("Invalid conversation"),
         TaskNeedsYou("Needs you"),
         TaskInterrupted("Interrupted"),
         TaskWorking("Working"),

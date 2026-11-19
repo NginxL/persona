@@ -17,7 +17,7 @@ vi.mock("./api", () => {
     constructor(readonly status: number, message: string, readonly body: Record<string, unknown> = {}) { super(message); }
     get code() { return typeof this.body.code === "string" ? this.body.code : undefined; }
   }
-  return { api: fixture.api, credentialOwner: () => fixture.owner, ApiError, errorText: (e: unknown) => (e instanceof Error ? e.message : String(e)) };
+  return { api: fixture.api, onCredentialChange: () => () => {}, credentialOwner: () => fixture.owner, ApiError, errorText: (e: unknown) => (e instanceof Error ? e.message : String(e)) };
 });
 vi.mock("./store", async () => {
   const { useSyncExternalStore } = await import("react");

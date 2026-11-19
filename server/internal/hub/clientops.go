@@ -155,10 +155,10 @@ type clientOpForgetter interface {
 // clientOpRetry: an inbox reply or hand-off the manager never got (assistant_offline) or that was cut off on the way
 // to it (assistant_in_doubt) keeps no receipt: the same request asked again goes to the manager, whose send id has it
 // sent once (extmgr inbox_reply.go sendInboxOnce, a hand-off's session.send_once), instead of the stored refusal
-// coming back for good. A notification choice and a conversation's start only release a definitely offline receipt;
+// coming back for good. A notification choice, a conversation's start and a to-do create release only a definitely offline receipt;
 // uncertain delivery stays recorded.
 func clientOpRetry(kind string, body []byte) bool {
-	if kind == meetingJustMeOp || kind == meetingFollowupOp || kind == todoAnswerOp || kind == todoRouteOp { // never reached the manager: the same call runs again
+	if kind == meetingJustMeOp || kind == meetingFollowupOp || kind == todoAnswerOp || kind == todoRouteOp || kind == todoCreateOp { // never reached the manager: the same call runs again
 		var res struct {
 			Code string `json:"code"`
 		}
@@ -281,7 +281,7 @@ func (h *Hub) waitClientOp(w http.ResponseWriter, r *http.Request, op *db.Client
 			// follow-up call, and an answer or a message to a to-do, replay what they answered, a definite failure
 			// too (meeting_receipts.go, todo_receipts.go).
 			if op.Kind == "start" || op.Kind == "assistant_start" || op.Kind == "worktree_create" || op.Kind == "lark_send" || op.Kind == "inbox_reply" || op.Kind == "inbox_handoff" || op.Kind == "lark_thread_reply" ||
-				op.Kind == meetingJustMeOp || op.Kind == meetingFollowupOp || op.Kind == todoAnswerOp || op.Kind == todoRouteOp {
+				op.Kind == meetingJustMeOp || op.Kind == meetingFollowupOp || op.Kind == todoAnswerOp || op.Kind == todoRouteOp || op.Kind == todoCreateOp {
 				var result clientOpResult
 				if json.Unmarshal(op.Result, &result) == nil && result.Status >= 200 && result.Status <= 599 {
 					writeClientOpResult(w, result)

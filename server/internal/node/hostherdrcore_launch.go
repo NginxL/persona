@@ -306,7 +306,7 @@ func (h *herdrCoreHost) openShell(ctx context.Context, cwd string, labels map[st
 	if err != nil {
 		return nil, hcErr(err)
 	}
-	if len(t.Argv) == 0 || !shellProgram(t.Argv[0]) {
+	if len(t.Argv) == 0 || !hcShell(t.Argv[0]) {
 		err := host.Mark(fmt.Errorf("herdr-core: %s did not report its shell", t.Address), host.ErrNotDelivered)
 		return nil, h.failedTerminal(ctx, t, err)
 	}
@@ -329,7 +329,7 @@ func errNoAppSpace(space string) error {
 // Run submits command to the shell in the pane (terminal.send: a paste, then enter). It is refused, with nothing
 // typed, unless the shell is what runs there: anything else in front would take the command as its input.
 func (h *herdrCoreHost) Run(ctx context.Context, pane host.PaneRef, command string) error {
-	t, err := h.c.Get(ctx, pane.ID)
+	t, err := h.get(ctx, pane.ID)
 	if err != nil {
 		return inputErr(err)
 	}

@@ -3,7 +3,7 @@ package persona.core.contracts.api
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** The four token kinds the hub reports for a day, an hour, or a computer. */
+/** The four token kinds the hub reports for a day, an hour, a computer, or an agent. */
 interface UsageTokenValues {
     val input: Long
     val cacheWrite: Long
@@ -63,6 +63,17 @@ data class UsageMachineShare(
     @SerialName("req") val requests: Int = 0,
 ) : UsageTokenValues
 
+/** The empty agent is usage from before the hub tracked agents separately. */
+@Serializable
+data class UsageAgentShare(
+    val agent: String = "",
+    @SerialName("in") override val input: Long = 0,
+    @SerialName("cache_write") override val cacheWrite: Long = 0,
+    @SerialName("cache_read") override val cacheRead: Long = 0,
+    @SerialName("out") override val output: Long = 0,
+    @SerialName("req") val requests: Int = 0,
+) : UsageTokenValues
+
 @Serializable
 data class UsageHours(
     val zone: String = "",
@@ -70,6 +81,7 @@ data class UsageHours(
     val machines: List<UsageMachineShare> = emptyList(),
     val total: UsageTokens = UsageTokens(),
     val stored: Boolean = false,
+    val agents: List<UsageAgentShare> = emptyList(),
 )
 
 /** Token history for the selected assistant's manager. */

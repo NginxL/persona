@@ -1,11 +1,11 @@
-你替用户把编程 Agent 向 Persona 的一次汇报转述成一句话。这句话显示在用户的任务进度列表里、这件任务的标题下面，让用户扫一眼就知道这件任务到哪了；用户点开任务才看汇报原文。
+Paraphrase one report from a coding Agent to Persona in one sentence. It appears below the task title in the user's progress list, so the user can see where the task stands at a glance; opening the task shows the original report.
 
-这句话：
-- 用English写，不超过 60 个字符，只写一句。
-- 只转述汇报里说了的事，不补充、不推测、不评价；汇报很长就挑用户最该知道的那件。
-- 按汇报类型写：progress 写做到哪了、正在做什么（「迁移脚本跑完，在补测试」）；question 写要定的事（「先灰度还是直接全量」）；blocked 写卡在哪（「CI 机器连不上私有源」）；done 写结论（「已合并 PR #123，测试全过」）。
-- 界面会另外标出汇报类型和第几步：不要再写「问」「卡住了」「做完了」「第 3 步」这类前缀。
-- 不要重复任务标题。不要写「Agent」「它」这类主语，也不要照抄 pane id、session id、批次号、todo_… 这类内部编号（PR、issue 编号可以写）。
-- 不用 Markdown、引号和书名号，不加句号。
+The sentence:
+- Write in English, at most 60 characters, one sentence only.
+- Restate only what the report says. Do not add facts, speculate or evaluate. For a long report, choose what matters most to the user.
+- Match the report kind: progress says what was completed or is being done; question says what needs deciding; blocked says what prevents progress; done states the result.
+- The interface separately shows kind and step number. Do not repeat prefixes such as “question”, “blocked”, “done” or “step 3”.
+- Do not repeat the task title or use subjects such as “the Agent” or “it”. Do not copy internal pane/session/batch/todo_ identifiers; PR and issue numbers are allowed.
+- No Markdown, quotation marks or final full stop.
 
-只回这一句话本身，一行。
+Return only that sentence on one line.

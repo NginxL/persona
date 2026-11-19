@@ -372,9 +372,12 @@ func TestAgyPaneWatchConversationIsolation(t *testing.T) {
 	}
 }
 
-func assertAgyResumeReport(t *testing.T, f *fakeHerdr, index int, model, conversation string) {
+func assertAgyResumeReport(t *testing.T, f *fakeHerdr, index int, model, effort, conversation string) {
 	t.Helper()
 	wantID, wantCommand := agyTestRow, "agy --model "+model
+	if effort != "" {
+		wantCommand += " --effort " + effort
+	}
 	if conversation != "" {
 		wantID = conversation
 		wantCommand += " --conversation " + conversation
@@ -392,8 +395,8 @@ func TestAgyPaneResumeAndTerminalControls(t *testing.T) {
 	without := agyTestAgent(agyTestPane, home, "")
 	seedAgents(t, n, f, without)
 	const model = "test-model"
-	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model)
-	assertAgyResumeReport(t, f, 0, model, "")
+	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model, "")
+	assertAgyResumeReport(t, f, 0, model, "", "")
 	agyTestCall(t, n, "session.send", agyTestRow, map[string]any{"text": "first\nsecond"})
 	agyTestCall(t, n, "session.interrupt", agyTestRow, nil)
 	assertTrace(t, f.trace("agent.prompt", "pane.send_keys", "pane.send_input"), []string{
@@ -402,7 +405,7 @@ func TestAgyPaneResumeAndTerminalControls(t *testing.T) {
 	})
 	f.reply("session.snapshot", snapshot(nil, nil, []any{agyTestAgent(agyTestPane, home, agyTestID)}, nil))
 	listSessions(t, n)
-	assertAgyResumeReport(t, f, 1, model, agyTestID)
+	assertAgyResumeReport(t, f, 1, model, "", agyTestID)
 }
 
 func TestAgyPaneResumeBackfillTracksConversation(t *testing.T) {
@@ -410,8 +413,9 @@ func TestAgyPaneResumeBackfillTracksConversation(t *testing.T) {
 	first := agyTestAgent(agyTestPane, home, agyTestID)
 	seedAgents(t, n, f, first)
 	const model = "test-model"
-	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model)
-	assertAgyResumeReport(t, f, 0, model, agyTestID)
+	const effort = "high"
+	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model, effort)
+	assertAgyResumeReport(t, f, 0, model, effort, agyTestID)
 	n.mu.Lock()
 	kept := n.launches[agyTestPane].AgyConversation
 	n.mu.Unlock()
@@ -422,12 +426,12 @@ func TestAgyPaneResumeBackfillTracksConversation(t *testing.T) {
 	second := agyTestAgent(agyTestPane, home, agyOtherTestID)
 	f.reply("session.snapshot", snapshot(nil, nil, []any{second}, nil))
 	listSessions(t, n)
-	assertAgyResumeReport(t, f, 1, model, agyOtherTestID)
+	assertAgyResumeReport(t, f, 1, model, effort, agyOtherTestID)
 
 	duplicate := agyTestAgent("w1:p2", home, agyOtherTestID)
 	f.reply("session.snapshot", snapshot(nil, nil, []any{second, duplicate}, nil))
 	listSessions(t, n)
-	assertAgyResumeReport(t, f, 2, model, "")
+	assertAgyResumeReport(t, f, 2, model, effort, "")
 }
 
 func TestAgyPaneResumeRejectsAmbiguousReports(t *testing.T) {
@@ -439,8 +443,8 @@ func TestAgyPaneResumeRejectsAmbiguousReports(t *testing.T) {
 			n, f, home := herdrNode(t)
 			seedAgents(t, n, f, agyTestAgent(agyTestPane, home, agyTestID), agyTestAgent(tc.pane, home, tc.id))
 			const model = "test-model"
-			n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model)
-			assertAgyResumeReport(t, f, 0, model, "")
+			n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model, "")
+			assertAgyResumeReport(t, f, 0, model, "", "")
 		})
 	}
 }

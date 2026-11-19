@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
+import { refreshAgentsDisplay, resetAgentsDisplay, saveAgentsDisplay } from "../../lib/agents-display";
 import type { Session } from "../../lib/types";
 import { HistoryBrowser } from "./HistoryBrowser";
 import { resumeInTerminal } from "../../lib/agent-resume";
@@ -23,7 +24,7 @@ beforeEach(() => {
   localStorage.clear(); env.features = []; env.state = { ...env.state, query: "", hits: [], hasMore: false }; vi.clearAllMocks();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); resetAgentsDisplay(); vi.unstubAllGlobals(); });
 const ids = () => [...host.querySelectorAll("[data-history-row]")].map(el => el.getAttribute("data-history-row"));
 describe("HistoryBrowser", () => {
   it("opens on stopped rows, counts only filtered rows, and preserves read-only navigation", async () => {
@@ -46,10 +47,17 @@ describe("HistoryBrowser", () => {
     expect(host.textContent).toContain(t("paged-agents.more"));
     env.rows = env.rows.map(s => s.session_id === "resume" ? { ...s, state: "idle", status: "idle" } : s); await render(); expect(ids()).toEqual([]);
   });
-  it("follows the sidebar's botmux visibility while History stays open", async () => {
+  it("follows the acknowledged hub preference while History stays open", async () => {
     env.rows = [row("bot", { pane_id: "botmux:example/topic" }), row("ordinary")];
-    await render(); expect(ids()).toHaveLength(2);
-    await act(async () => { localStorage.setItem("persona.agentHideBotmux", "1"); window.dispatchEvent(new Event("persona-botmux-visibility")); });
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const showBotmux = init?.method === "PUT" ? JSON.parse(String(init.body)).show_botmux : true;
+      return Response.json({ show_botmux: showBotmux, configured: true });
+    }));
+    await render();
+    expect(ids()).toEqual(["ordinary"]);
+    await act(async () => { await refreshAgentsDisplay(); });
+    expect(ids()).toHaveLength(2);
+    await act(async () => { await saveAgentsDisplay(false); });
     expect(ids()).toEqual(["ordinary"]);
   });
   it("drops removed identities from an older search window", async () => {

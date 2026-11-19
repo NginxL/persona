@@ -359,8 +359,12 @@ printf 'catalog placeholders preserved in all languages\n'
                 self.assertIn(current + '-linux-amd64.gz', names)
             for arch in ('amd64', 'arm64'):
                 self.assertIn(f'persona-link-windows-{arch}.exe.gz', names)
-            self.assertIn('for t in windows/amd64 windows/arm64; do', publisher)
-            self.assertIn('persona-link-${t%/*}-${t#*/}.exe', publisher)
+            # Persona Link is still built for both Windows architectures, by the loop over the Windows programs.
+            windows = publisher[publisher.index('for t in windows/amd64 windows/arm64; do'):]
+            windows = windows[:windows.index('\n  done\ndone\n')]
+            programs = windows.splitlines()[1].strip()
+            self.assertTrue(programs.startswith('for p in ') and 'persona-link' in programs.split(), programs)
+            self.assertIn('-o "../$OUT/bin/$p-${t%/*}-${t#*/}.exe" "./cmd/$p"', windows)
             for digest, name in sums:
                 self.assertEqual(hashlib.sha256((binaries / name).read_bytes()).hexdigest(), digest)
 

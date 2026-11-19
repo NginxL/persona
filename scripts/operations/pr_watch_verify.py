@@ -214,15 +214,21 @@ def scoped_test_checks(worktree, base, head, names):
     return commands
 
 
-def persona_checks(worktree, pr, timeout, config):
-    """Use trusted watcher/base path mapping, never import PR-controlled Python."""
-    base, head = pr["baseRefOid"], pr["headRefOid"]
-    names = checked(["git", "diff", "--name-only", "--no-renames", base + "..." + head], cwd=worktree).splitlines()
-    selected = load_paths(Path(__file__).resolve().parents[2]).select(names)
-    commands = []
-    focused = scoped_test_checks(worktree, base, head, names) if test_or_fix(pr, names) else None
-    if focused is not None:
-        commands.extend(focused)
+# The CI lanes the watcher runs, each as scripts/ci/<lane>.sh. CI's image lane builds the release image, and the
+# apple lane needs a Mac (persona_checks records a policy line for it instead).
+WATCHER_LANES = ("server", "web", "android", "runtimes", "scripts", "core", "desktop")
+
+
+def watcher_lanes(selected, names, focused=False):
+    """The CI lanes the watcher runs for a PR's changed paths, in WATCHER_LANES order.
+
+    selected is CI's own lane selection (scripts/ci/paths.py select). A test-only test/fix PR (focused) runs its
+    changed tests instead of the web, scripts and, with a server file, server lanes. Otherwise CI's wildcard scripts
+    lane runs only for a change under scripts/ or .github/. scripts/ci/affected_drift.py compares the result with CI
+    and check-fast (#11026).
+    """
+    selected = dict(selected)
+    if focused:
         selected["web"] = False
         selected["scripts"] = False
         if any(name.startswith("server/") for name in names):
@@ -232,9 +238,20 @@ def persona_checks(worktree, pr, timeout, config):
         # reason to run every Python suite for an unrelated production file.
         # Keep repository/privacy gates, but do not multiply that cost per PR.
         selected["scripts"] = any(name.startswith(("scripts/", ".github/")) for name in names)
-    for lane in ("server", "web", "android", "runtimes", "scripts", "core", "desktop"):
-        if selected.get(lane):
-            commands.append(("CI " + lane, ["bash", "scripts/ci/" + lane + ".sh"]))
+    return [lane for lane in WATCHER_LANES if selected.get(lane)]
+
+
+def persona_checks(worktree, pr, timeout, config):
+    """Use trusted watcher/base path mapping, never import PR-controlled Python."""
+    base, head = pr["baseRefOid"], pr["headRefOid"]
+    names = checked(["git", "diff", "--name-only", "--no-renames", base + "..." + head], cwd=worktree).splitlines()
+    selected = load_paths(Path(__file__).resolve().parents[2]).select(names)
+    commands = []
+    focused = scoped_test_checks(worktree, base, head, names) if test_or_fix(pr, names) else None
+    if focused is not None:
+        commands.extend(focused)
+    for lane in watcher_lanes(selected, names, focused is not None):
+        commands.append(("CI " + lane, ["bash", "scripts/ci/" + lane + ".sh"]))
     if focused is None:
         scanner = Path(__file__).resolve().parents[2] / "scripts/privacy_check.py"
         commands.append(("Exact-head privacy scan", ["python3", "-I", str(scanner),

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/osproc"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 const assistantIdleTimeout = 20 * time.Minute
@@ -17,6 +18,7 @@ const assistantTaskMaxIdle = 12 * time.Hour
 // assistantInterrupt stops the current turn. claude -p has no interrupt over stdin, so the process is killed;
 // the next message resumes the conversation from its transcript. Codex has turn/interrupt: the process stays.
 func (n *Node) assistantInterrupt(id string) error {
+	n.state.stopped(id, proto.StopUser)
 	// An explicit Stop wins over any queued same-model or fallback continuation: cancelled before the session lock, a
 	// recovery send that has not started gives up at once instead of holding Stop behind it (#3495).
 	n.cancelExternalStartups(id)

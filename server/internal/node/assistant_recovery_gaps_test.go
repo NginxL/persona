@@ -38,8 +38,8 @@ while IFS= read -r line; do
       count=$((count+1))
       echo "$count" > "$CLI_FAKE_DIR/attempts"
       printf '{"type":"stream_event","event":{"type":"message_start","message":{"model":"%s","usage":{"input_tokens":5}}},"parent_tool_use_id":null}\n' "$model"
-      if [ "$count" -le 2 ]; then
-        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream account is currently available"}'
+      if [ "$count" -le 1 ]; then
+        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: safeguards flagged"}'
       else
         echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"answered by fallback"}},"parent_tool_use_id":null}'
         echo '{"type":"result","subtype":"success","is_error":false,"result":"answered by fallback"}'
@@ -60,7 +60,7 @@ func TestAssistantFallbackAsksClaudeForItsTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliWait(t, "the second refusal to resume on the next launcher model", func() bool {
-		return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 3
+		return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 2
 	})
 	f.idle(t, id)
 	if p := f.proc(id); p == nil || p.model.Model != "fallback-model" {
@@ -265,7 +265,7 @@ func TestAssistantFirstFailureInTheHandoverGapIsCarried(t *testing.T) {
 	p := keptProc(t, a, id, "claude")
 	p.launcher, p.model, p.busy = "claude", modelExecution{Model: "primary-model"}, true
 	a.handOverAssistants()
-	if !a.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available") {
+	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the first failure in the handover gap was published as final")
 	}
 	send := assistantRecoverySend
@@ -281,8 +281,8 @@ func TestAssistantFirstFailureInTheHandoverGapIsCarried(t *testing.T) {
 	b.resumeAdoptedFailures(true)
 	select {
 	case got := <-selected:
-		if got != "primary-model" {
-			t.Fatalf("the carried first failure did not retry on its own model: %q", got)
+		if got == "primary-model" || got == "" {
+			t.Fatalf("the carried safeguards failure did not select a fallback: %q", got)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the carried first failure did not resume on the new Node")

@@ -278,6 +278,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	params := map[string]any{"cwd": cwd, "launcher": p.Launcher, "text": p.Text, "images": p.Images, "permission_mode": p.PermissionMode,
 		"effort": p.Effort, "is_main": main}
+	if p.Public {
+		params["public"] = true
+	}
 	if p.Origin != "" {
 		params["origin"] = p.Origin // the node enforces the origin from the process's first tool call, before start answers
 	}
@@ -375,6 +378,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if strings.TrimSpace(p.Text) == "" && len(p.Images) == 0 {
 		sess.Status, sess.State = proto.StatusIdle, proto.StateIdle
 	}
+	if p.Human && (p.Origin == "" || p.Origin == OriginUser) && strings.TrimSpace(p.Text) != "" {
+		s.humanSent.noteForReply(sess.SessionID, firstReplySendID, p.Text)
+	}
 	sess.Model, _ = params["model"].(string) // what it was started with ("": the launcher's default)
 	return sess, nil
 }
@@ -459,8 +465,8 @@ func (s *Service) Start(ctx context.Context, p StartParams) (proto.Session, erro
 		p.Text = prompts.ProtectUserMessage(p.Text)
 	}
 	// The first message gets no client_msg_id of the manager's own (#5200): the node would tag its line with it, and the
-	// iPhone app, which matches its pending bubble by the id a line carries, would show the message twice. So it is not
-	// a message the hub vouched for, and an Always rule does not cover the turn it starts (the card is shown).
+	// iPhone app, which matches its pending bubble by the id a line carries, would show the message twice. An Always
+	// rule still needs a vouched client_msg_id. Missing-reply recovery can also use the vouched start in startOn.
 	sess, err := s.start(ctx, p)
 	if err != nil {
 		return proto.Session{}, err
@@ -932,7 +938,8 @@ func (s *Service) startRoutes() {
 		ctx, note := withLauncherNote(ctx)
 		sess, err := s.Start(ctx, StartParams{Text: in.Prompt, Images: in.Images, Launcher: in.Launcher, Model: in.Model, PermissionMode: in.PermissionMode,
 			Effort: in.Effort, ServiceTier: in.ServiceTier, Purpose: in.Purpose, MachineID: in.MachineID, Main: in.Main, Space: in.Space, Origin: origin, OriginRef: ref,
-			OpenedBy: requestOpener(r), GuestTools: guestTools, Human: own && in.Via == "" && assistantwire.HumanStartOf(r.Context())})
+			OpenedBy: requestOpener(r), GuestTools: guestTools,
+			Human: own && in.Via == "" && (assistantwire.HumanStartOf(r.Context()) || assistantwire.ReplyInputOf(r.Context()))})
 		var refused *pickError
 		switch {
 		case errors.As(err, &refused):
@@ -1082,12 +1089,14 @@ func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (
 		err = s.validateSkillSelections(ctx, p.MachineID, p.SessionID, params)
 	}
 	switch {
-	case !p.Human || !own || marked: // anyone else's id, a person's carrying another's words (a mail handed on, the
+	case (!p.Human && !p.ReplyInput) || !own || marked: // anyone else's id, a person's carrying another's words (a mail handed on, the
 		// old main conversation's) or sent by Siri or the share sheet, never counts, nor does a person's id once
 		// another sent it (secret_handoff.go)
 		s.humanSent.voidSend(p.SessionID, id)
-	case err == nil: // the hub's word: a person's own app sent it (handoffUserTurn)
+	case err == nil && p.Human: // a paired device can also vouch for handoffUserTurn
 		s.humanSent.note(p.SessionID, id, sent)
+	case err == nil:
+		s.humanSent.noteForReply(p.SessionID, id, sent)
 	}
 	if err == nil && said && owner {
 		s.ownerInterjects(p.SessionID, params)
@@ -1126,11 +1135,16 @@ func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]a
 	}
 	// Keep the raw value until external admission checks it; ordinary conversations ignore it, even on an early return.
 	defer delete(params, "runtime")
-	delete(params, "origin") // only the manager's origin book may attest an Inbox conversation
-	if s.isInboxModelCall(ctx, p.MachineID, p.SessionID, "") {
+	delete(params, "origin") // only the manager's origin book may attest an existing conversation
+	delete(params, "origin_known")
+	origin, originKnown := s.managerOriginDecision(ctx, p.MachineID, p.SessionID, "", false)
+	if originKnown {
+		params["origin_known"] = true // an empty origin is an explicit ordinary decision, including on assistant.model
+	}
+	if origin != "" {
 		// A node reload does not restore the node's in-memory origin field. Re-attest it on every later send so the
 		// first resumed process is clamped to non-bypass default and its Lark gate cannot fall back to an ordinary conversation.
-		params["origin"] = OriginInbox
+		params["origin"] = origin
 	}
 	text, _ := params["text"].(string)
 	own := !contextTagRe.MatchString(text)
@@ -1166,7 +1180,7 @@ func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]a
 		}
 		return nil, false, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id is the app's user's to read
 	}
-	if text, ok := params["text"].(string); ok {
+	if text, ok := params["text"].(string); ok && !p.VerbatimText {
 		text, own = s.fillWorkspaces(ctx, text) // an @-mentioned workspace: where it is and what worked there (workspace_mention.go)
 		if main {
 			left := s.handoffFor(ctx, p.SessionID, text)
@@ -1302,10 +1316,16 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 			s.logf("[%s] %s: its launcher can't run it any more, using %s", machine, short(sid), l)
 			p["launcher"] = l
 			delete(p, "model")
-		case model != "" && !picked && !s.launcherHasModel(ctx, machine, l, model):
-			s.logf("[%s] %s: model %s is not in %s's list any more, using its default", machine, short(sid), model, l)
-			delete(p, "model")
-			leaveLauncherNote(ctx, i18n.T(lang, "assistant-start.model_missing", i18n.Args{"model": model, "launcher": l}))
+		case model != "" && !picked:
+			resolved, ok := s.resolveLauncherModel(ctx, machine, l, model)
+			if !ok {
+				s.logf("[%s] %s: model %s is not in %s's list any more, using its default", machine, short(sid), model, l)
+				delete(p, "model")
+				leaveLauncherNote(ctx, i18n.T(lang, "assistant-start.model_missing", i18n.Args{"model": model, "launcher": l}))
+			} else if resolved != "" && resolved != model {
+				// The gateway echoed a routed name for an older node's row: send the launcher's clean declared id.
+				p["model"] = resolved
+			}
 		}
 	}
 	pickedLauncher := l != ""

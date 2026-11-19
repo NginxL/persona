@@ -3,6 +3,7 @@ package node
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -218,6 +219,48 @@ func shellDirQ(p string, q func(string) string) string {
 }
 
 const openCodeSessionEnv = "PERSONA_OPENCODE_SESSION"
+const codexHeaderBindingsEnv = "PERSONA_CODEX_HEADER_BINDINGS"
+
+// withCodexHeaders carries provider header values in generated environment variables. The separate bindings value
+// contains only header and variable names; codexProviderArgs turns it into Codex's env_http_headers configuration.
+func withCodexHeaders(env []string, raw string) []string {
+	headers := piHeaders(raw)
+	if len(headers) == 0 {
+		return env
+	}
+	used := make(map[string]bool, len(env))
+	for _, name := range envNames(env) {
+		used[name] = true
+	}
+	env = slices.DeleteFunc(env, func(kv string) bool { return strings.HasPrefix(kv, codexHeaderBindingsEnv+"=") })
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	bindings := make([]string, 0, len(names))
+	for _, name := range names {
+		sum := sha256.Sum256([]byte(strings.ToLower(name)))
+		variable := fmt.Sprintf("PERSONA_CODEX_HEADER_%x", sum)
+		for used[variable] {
+			variable += "X"
+		}
+		used[variable] = true
+		env = append(env, variable+"="+headers[name])
+		bindings = append(bindings, name+"\t"+variable)
+	}
+	return append(env, codexHeaderBindingsEnv+"="+strings.Join(bindings, "\n"))
+}
+
+func codexHeaderBindings(env []string) map[string]string {
+	bindings := map[string]string{}
+	for _, line := range strings.Split(envValue(env, codexHeaderBindingsEnv), "\n") {
+		if name, variable, ok := strings.Cut(line, "\t"); ok && name != "" && variable != "" {
+			bindings[name] = variable
+		}
+	}
+	return bindings
+}
 
 func managedEnv(l proto.ManagedLauncher) []string {
 	switch l.AgentType() {
@@ -230,6 +273,7 @@ func managedEnv(l proto.ManagedLauncher) []string {
 			env = append(env, "OPENAI_API_KEY="+l.APIKey)
 		}
 		env = withLauncherEnv(env, l.Env)
+		env = withCodexHeaders(env, l.Headers)
 		if effectiveBase := envValue(env, "OPENAI_BASE_URL"); modelhttp.OpenCodeGo(effectiveBase) && envValue(env, openCodeSessionEnv) == "" {
 			session := cmp.Or(modelhttp.OpenCodeSessionHeaderValue(l.Headers), modelhttp.OpenCodeSessionID("launcher:"+cmp.Or(l.Name, effectiveBase)))
 			env = append(env, openCodeSessionEnv+"="+session)
@@ -547,6 +591,11 @@ func gatewayModelArgs(args, env []string, warn func(string)) []string {
 // Launch leaves it out for a session model the gateway says takes none (launchEffort, #8798).
 // codexCatalog is the model catalog URL of a Codex provider's gateway, "" for none (codexProviderArgs).
 func launchArgv(agent string, args, respArgs []string, respEffort, respModel string, respEnv []string, codexCatalog string) []string {
+	if agent == agyAgent && slices.Equal(args, []string{"models"}) {
+		// Discovery needs the same provider settings as a start, with no model selected.
+		respArgs = withoutModelArgs(respArgs)
+		respModel = ""
+	}
 	hasModelArg := false
 	hasSettingsArg := false
 	hasEffortArg := false
@@ -628,8 +677,30 @@ func codexProviderArgs(args, env []string, catalog string) []string {
 			provider += ",model_catalog_url=" + q(catalog)
 		}
 	}
+	bindings := codexHeaderBindings(env)
 	if modelhttp.OpenCodeGo(base) && envValue(env, openCodeSessionEnv) != "" {
-		provider += `,env_http_headers={` + q(modelhttp.OpenCodeSessionHeader) + `=` + q(openCodeSessionEnv) + `}`
+		explicit := false
+		for name := range bindings {
+			if strings.EqualFold(name, modelhttp.OpenCodeSessionHeader) {
+				explicit = true
+				break
+			}
+		}
+		if !explicit {
+			bindings[modelhttp.OpenCodeSessionHeader] = openCodeSessionEnv
+		}
+	}
+	if len(bindings) > 0 {
+		names := make([]string, 0, len(bindings))
+		for name := range bindings {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		entries := make([]string, 0, len(names))
+		for _, name := range names {
+			entries = append(entries, q(name)+"="+q(bindings[name]))
+		}
+		provider += `,env_http_headers={` + strings.Join(entries, ",") + `}`
 	}
 	return []string{"-c", `model_provider="persona-launcher"`, "-c", "model_providers.persona-launcher=" + provider + "}"}
 }
@@ -712,6 +783,9 @@ func (n *Node) launcherEnv(name string) map[string]any {
 		if l, _ = n.managedLauncher(name); l.Withheld {
 			return map[string]any{"error": errManagerAway(name).Error()}
 		}
+	}
+	if strings.TrimSpace(l.Headers) != "" && !l.CustomHeadersSupported() {
+		return map[string]any{"error": "custom_headers_unsupported: this runtime cannot send provider headers on the selected model path; clear them in Settings › Model Providers"}
 	}
 	out := map[string]any{"env": managedEnv(l), "clear": envClearFor(l), "args": l.Args, "agent": l.AgentType(), "model": l.Model}
 	if effort := launcherDefaultEffort(l); effort != "" {

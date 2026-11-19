@@ -95,6 +95,8 @@ export interface PanelConfig {
 export interface PanelState {
   /** What runs now; null while unknown. */
   current: PanelConfig | null;
+  /** The Model settings effort is display only for all picks or for AGY picks. */
+  currentEffortDisplayOnly?: "all" | "agy";
   /** A switch accepted for the next message (#5035, #5033). */
   pending?: PanelConfig | null;
   /** Providers whose models switch without a restart: the Recommended group is the current model, then their other models. */
@@ -207,12 +209,15 @@ const takes = (model: Pick<PanelModel, "efforts">, effort: string | undefined) =
  * The setup a model's row stands for, and what picking it sends. The model that runs now shows what runs, never a
  * browser override for an unknown session value. An Agent not started yet keeps only supported form values. Any
  * other: its override's effort, else the effort running now when this model takes it, else none (the model's own
- * default); Fast only from its override, and only where the model has it.
+ * default). New agy starts use their native effort unless the user picks one. Fast comes from the override when offered.
  */
-export function rowSetup(provider: Pick<PanelProvider, "id" | "models">, model: PanelModel, state: Pick<PanelState, "current" | "starting">, override?: PanelOverride): PanelConfig {
+export function rowSetup(provider: Pick<PanelProvider, "id" | "models"> & { engine?: string }, model: PanelModel, state: Pick<PanelState, "current" | "currentEffortDisplayOnly" | "starting">, override?: PanelOverride): PanelConfig {
   const current = state.current;
   const now = runsNow(provider, model, current);
-  const effort = now ? (state.starting ? takes(model, current?.effort) : current?.effort) : (takes(model, override?.effort) ?? takes(model, current?.effort));
+  const displayOnly = state.currentEffortDisplayOnly === "all" || (state.currentEffortDisplayOnly === "agy" && provider.engine === "agy");
+  const currentEffort = displayOnly ? undefined : current?.effort;
+  const inherited = takes(model, currentEffort);
+  const effort = now ? (state.starting ? takes(model, currentEffort) : currentEffort) : (takes(model, override?.effort) ?? inherited);
   // what runs is what runs: an unset Fast on the running model is Standard, not "unknown, take the override"
   const fast = model.fast ? (now ? current?.fast : override?.fast) : undefined;
   return cleanSetup({ provider: provider.id, model: model.id, effort, fast });

@@ -50,10 +50,11 @@ internal class NotificationActionExecutor(
         expiresAt: String? = null,
         onProgress: (PendingStatus) -> Unit = {},
     ): NotificationActionResult {
-        if (RequestExpiry.expired(expiresAt, now())) return NotificationActionResult.Expired
-        center.pending.value.firstOrNull { it.id == id }?.let { cached ->
-            onInteraction(cached)
-        }
+        val cached = center.pending.value.firstOrNull { it.id == id }
+        // A prepared card may have a newer server deadline than the notification's stale timestamp. The mandatory
+        // refresh below still decides its actual expiry; an old-hub or uncached action keeps the fail-closed shortcut.
+        if (cached?.canClarify != true && RequestExpiry.expired(expiresAt, now())) return NotificationActionResult.Expired
+        cached?.let { onInteraction(it) }
         onProgress(PendingStatus.Verifying)
         // Always query the hub: a locally pending request may already be handled elsewhere. Its own hub group, since another
         // group answering would leave this one's stale card to be claimed (#5697).

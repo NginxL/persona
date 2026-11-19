@@ -427,8 +427,8 @@ function NativeItem({ item: it, compact, values, setValue, busy, onPress, onChoo
     // what a key keeps.
     case "graph":
       return (
-        <div className={compact ? "" : "graph-canvas"}>
-          <Suspense fallback={<div className={compact ? "px-4 py-3" : "h-full w-full"} aria-hidden>{compact && <div className="graph-preview" />}</div>}>
+        <div className={compact ? "" : "graph-shell"}>
+          <Suspense fallback={<div className={compact ? "px-4 py-3" : "graph-canvas w-full"} aria-hidden>{compact && <div className="graph-preview" />}</div>}>
             <GraphCanvas item={it} compact={compact} busy={busy} onPress={onPress} canPress={canPress} />
           </Suspense>
         </div>

@@ -91,9 +91,10 @@ redirects / cookies need no rewriting. No DNS changes, no new ports: it uses the
 
 - `…/connect` checks first, then upgrades: the port must be in the `ports` of some session on that machine, or the user must have `POST …/open`ed it within 24 hours; otherwise 403.
   Then it registers a stream and asks the node to `port.dial`. If that fails it returns 404 (not yet upgraded, so the App gets the status code); only on success does it upgrade to WebSocket.
-- A stream is just `stream.data / stream.ack / stream.close` events on the hub↔node JSON-RPC connection (`docs/protocol/protocol.md`). Each direction allows at most 512 KB
+- A stream uses `stream.data`, `stream.ack` and `stream.close` events on the hub↔node JSON-RPC connection (`docs/protocol/protocol.md`). Each direction allows at most 512 KB
   unacknowledged; at that point the sender waits. A large file from a page can't fill the connection and starve other RPCs, and a slow reader can't make the other end buffer without limit.
   Event handling (`Mux.Event`) never blocks, because it runs in the RPC read loop.
+- TCP endpoints that negotiate stream version 1 can send `stream.eof` to half-close one direction. The App's binary WebSocket path uses full close.
 - At most 64 streams per machine at once (a page typically uses about 6); when a machine disconnects all its streams are closed.
 - The slow-request log skips `…/connect` (it is long by nature).
 

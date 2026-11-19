@@ -80,7 +80,7 @@ struct OpenSessionIntent: OpenIntent {
         await MainActor.run {
             // As a notification opens it: a Persona conversation on Assistant, an Agent's on Agents.
             let model = AppModel.shared
-            model.open(model.resolve(path: key.path) ?? key)
+            model.openExternal(machineID: key.machineID, sessionID: key.sessionID, group: key.hubGroup)
         }
         return .result()
     }

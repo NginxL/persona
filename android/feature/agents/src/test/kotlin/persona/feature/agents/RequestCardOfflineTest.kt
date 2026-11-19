@@ -68,6 +68,25 @@ class RequestCardOfflineTest {
         assertEquals("$it", 0, count(offline))
     }
 
+    private fun prepared(expiresAt: java.time.Instant) = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+        """{"id":"ix_prepared","machine_id":"macbook","session_id":"tests","session_title":"Run the test suite",""" +
+            """"kind":"permission","tool_name":"Bash","expires_at":"$expiresAt","can_clarify":true}""",
+    )
+
+    @Test fun aPreparedCardStaysAnswerableUnderItsExtendedDeadline() =
+        show(online = true, request = prepared(now.plusSeconds(3_600))) {
+            assertEquals("$it Allow", true, enabled("Allow"))
+            assertEquals("$it Deny", true, enabled("Deny"))
+            assertEquals("$it", 0, count(offline))
+        }
+
+    @Test fun aPreparedCardAtItsActualDeadlineStillCannotExecute() =
+        show(online = true, request = prepared(now.minusSeconds(1))) {
+            assertEquals("$it Allow", false, enabled("Allow"))
+            assertEquals("$it Deny", false, enabled("Deny"))
+            assertEquals("$it", 0, count(offline))
+        }
+
     @Test fun aCardThePhoneCannotApproveSaysThatInstead() = show(online = false, approvable = false) {
         assertEquals("$it", 0, count(offline))
         assertEquals("$it", 1, count(computer))

@@ -7,6 +7,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import persona.core.contracts.*
 import persona.core.contracts.api.HubPreferences
+import persona.core.contracts.api.AgentsDisplayHub
+import persona.core.contracts.api.AgentsDisplayHubs
 import persona.core.domain.sort.*
 import persona.core.domain.answer.requestSourceLabel
 import persona.core.domain.answer.RequestExpiry
@@ -14,9 +16,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,19 +42,24 @@ private fun hubPreferences(raw: String): AgentPreferences {
     return AgentPreferences(strings("spaces"), strings("sessions"), strings("allowed").toSet())
 }
 
-/** Display settings stay local; pins, mutes and read receipts belong to the paired hub. */
+/** Row presentation stays local; each paired hub owns its botmux display setting, pins and read receipts. */
 @Singleton
-class AgentsPreferences @Inject constructor(private val store: DataStore<Preferences>, private val hub: HubPreferences) :
-    AgentListDisplaySettings {
+class AgentsPreferences @Inject constructor(
+    private val store: DataStore<Preferences>, private val hub: HubPreferences,
+    private val displayHubs: AgentsDisplayHubs = AgentsDisplayHubs { flowOf(emptyList()) },
+) : AgentListDisplaySettings {
+    private val displayLocks = ConcurrentHashMap<String, Mutex>()
     val snapshots: Flow<AgentsPreferencesSnapshot> get() = snapshots("")
-    fun snapshots(scope: String): Flow<AgentsPreferencesSnapshot> = combine(store.data, hub.preferences) { p, remote ->
+    fun snapshots(scope: String): Flow<AgentsPreferencesSnapshot> = combine(store.data, hub.preferences, displayHubs.paired()) { p, remote, hubs ->
         AgentsPreferencesSnapshot(
             range = AgentRange.entries.firstOrNull { it.name == p[agentRangeKey(scope)] } ?: AgentRange.Running,
             grouping = AgentGrouping.fromPreference(p[stringPreferencesKey("grouping")]),
             compact = p[compactKey] ?: false,
             rowStyle = AgentRowStyle.fromPreference(p[rowStyleKey]),
             sort = AgentSort.fromPreference(p[stringPreferencesKey("sort")]),
-            hideBotmux = p[booleanPreferencesKey("hide-botmux")] ?: false,
+            hiddenBotmuxHubs = hubs.filter { pair ->
+                p[showBotmuxKey(pair.scope)]?.let { !it } ?: (p[legacyHideBotmux] == true && p.ownsLegacy(pair))
+            }.mapTo(mutableSetOf()) { it.namespace },
             foldedTabs = p[foldedTabsKey].orEmpty(),
             folds = AgentGrouping.entries.associateWith { p[foldsKey(it)].orEmpty() },
             pins = AgentPreferences(remote.pins.spaces, remote.pins.sessions, remote.pins.allowed),
@@ -69,7 +84,39 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
     }
     suspend fun grouping(value: AgentGrouping) { store.edit { it[stringPreferencesKey("grouping")] = value.name } }
     suspend fun sort(value: AgentSort) { store.edit { it[stringPreferencesKey("sort")] = value.name } }
-    suspend fun hideBotmux(value: Boolean) { store.edit { it[booleanPreferencesKey("hide-botmux")] = value } }
+    internal suspend fun watchDisplaySettings(refresh: Flow<Int>) = displayHubs.paired().collectLatest { hubs ->
+        coroutineScope {
+            for (pair in hubs) launch {
+                combine(pair.hello, refresh) { hello, _ -> hello }.collectLatest { hello ->
+                    if (hello != null) try { refreshDisplay(pair) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Offline and older hubs keep the last value and pending migration. */ }
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshDisplay(pair: AgentsDisplayHub) = displayLocks.getOrPut(pair.scope) { Mutex() }.withLock {
+        // Bind the old phone-wide key to one pairing before network I/O. A failed request must not migrate it elsewhere.
+        val local = store.data.first().let { p ->
+            if (p[legacyHideBotmux] != null && p[migrationScope] == null && pair.selected) store.edit {
+                if (it[legacyHideBotmux] != null && it[migrationScope] == null) it[migrationScope] = pair.scope
+            } else p
+        }
+        val legacy = local[legacyHideBotmux].takeIf { local[migrationScope] == pair.scope }
+        var acknowledged = pair.api.read()
+        if (legacy == true && !acknowledged.configured) {
+            acknowledged = pair.api.migrateHidden()
+            check(acknowledged.configured)
+        }
+        store.edit {
+            it[showBotmuxKey(pair.scope)] = acknowledged.showBotmux
+            if (it[migrationScope] == pair.scope) {
+                it.remove(legacyHideBotmux)
+                it.remove(migrationScope)
+            }
+        }
+    }
     suspend fun range(scope: String, value: AgentRange) { store.edit { it[agentRangeKey(scope)] = value.name } }
     suspend fun compact(value: Boolean) { store.edit { it[compactKey] = value } }
     /**
@@ -103,6 +150,10 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
 private val foldedTabsKey = stringSetPreferencesKey("folded-tabs")
 private val compactKey = booleanPreferencesKey("compact")
 private val rowStyleKey = stringPreferencesKey("row-style")
+private val legacyHideBotmux = booleanPreferencesKey("hide-botmux")
+private val migrationScope = stringPreferencesKey("hide-botmux-migration-scope")
+private fun showBotmuxKey(scope: String) = booleanPreferencesKey("agents-show-botmux:$scope")
+private fun Preferences.ownsLegacy(pair: AgentsDisplayHub) = this[migrationScope]?.let { it == pair.scope } ?: pair.selected
 private fun foldsKey(grouping: AgentGrouping) = stringSetPreferencesKey("folds-${grouping.name}")
 
 data class AgentsPreferencesSnapshot(
@@ -112,8 +163,8 @@ data class AgentsPreferencesSnapshot(
     /** The row style Glass draws while the list is not compact ([AgentsPreferences.display]). */
     val rowStyle: AgentRowStyle = AgentRowStyle.Default,
     val sort: AgentSort = AgentSort.State,
-    /** botmux's sessions hidden from the list on this phone (web #2786). */
-    val hideBotmux: Boolean = false,
+    /** Hub namespaces whose sessions from botmux are hidden in the merged Agents list. */
+    val hiddenBotmuxHubs: Set<String?> = emptySet(),
     /** The herdr tabs whose agents the list folds to the tab's row ([AgentTab.foldKey]); every other tab is open. */
     val foldedTabs: Set<String> = emptySet(),
     /** Each grouping's folded sections and computers ([AgentsPreferences.folds]). */
@@ -123,6 +174,7 @@ data class AgentsPreferencesSnapshot(
     val seen: Map<String, String> = emptyMap(),
     val range: AgentRange = AgentRange.Running,
 ) {
+    internal fun hides(session: Session) = session.isBotmux && GroupKeys.namespaceOf(session.machineId) in hiddenBotmuxHubs
     /** What Glass draws the agents as (iOS `AgentListDisplay`); Brief and Board read [compact] alone. */
     val display: AgentListDisplay get() = AgentListDisplay.of(rowStyle, compact)
 }

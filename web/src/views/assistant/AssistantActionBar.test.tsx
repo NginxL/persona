@@ -233,6 +233,20 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(status().className).toContain("text-ink-2");
   });
 
+  it("names what a waiting task waits on in its status column, in the neutral color (#11090)", () => {
+    act(() => entry("running").click());
+    const status = () => host.querySelector("[data-task-slot]")!.querySelector<HTMLElement>("[data-task-status]")!;
+    const worker: Session = { machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", status: "idle", state: "idle", updated_at: at };
+    act(() => upsertSession({ ...worker, work: { phase: "blocked", on: "external", wait: "CI on main", line: "Wait for CI on main" } }));
+    expect(status().dataset.taskStatus).toBe("waiting");
+    expect(status().dataset.taskWait).toBe("external");
+    expect(status().textContent).toBe(t("lib-state-labels.waits_external"));
+    expect(status().className).toContain("text-ink-2");
+    expect(status().className).not.toContain("text-attention");
+    act(() => upsertSession({ ...worker, work: { phase: "blocked", on: "agent", wait: "the other Agent's merge", line: "Wait for the other Agent" } }));
+    expect(status().textContent).toBe(t("lib-state-labels.waits_prerequisite"));
+  });
+
   it("says Starting, not Not started, on a task whose Agent is not up yet", async () => {
     todo.agents = [];
     await act(async () => {

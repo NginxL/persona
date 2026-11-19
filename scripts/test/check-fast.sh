@@ -9,6 +9,12 @@
 #                                         # including every scripts/**/test_*.py suite CI's Scripts tests job runs
 #                                         # (a test_*.py that never mentions unittest is a SKIP line, as in
 #                                         # scripts/ci/python-tests.py; diff mode skips it too)
+#   scripts/check-fast.sh --dry-run       # print the plan (the queued checks and the SKIP / INFO notes), run nothing
+#   scripts/check-fast.sh --dry-run --changed-from <file|->
+#                                         # the plan for the paths listed in the file (one per line), not the diff
+#   scripts/check-fast.sh --dry-run --changed-from <file|-> --each
+#                                         # the plan of each listed path on its own, after a "== <path>" line;
+#                                         # scripts/ci/affected_drift.py compares them with the CI lanes (#11026)
 #   scripts/check-fast.sh -h|--help
 #
 # Path mapping (diff mode):
@@ -47,9 +53,13 @@
 #                              fall, never rise; comments, strings and a // sleep-ok: reason line do not count; a new
 #                              file starts at zero; --update only lowers). A rename out of those trees counts too.
 #                              --all runs it when the script is present.
-#   spec/fixtures/**, schema/extension/**, schema/wire/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
+#   spec/fixtures/**, schema/<dir>/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
 #                              also go test on each server package whose _test.go names that input (server-test.yml's
 #                              path filter), found at run time with git grep (comment lines are ignored)
+#   apple/**, android/**       also go test on each server package whose _test.go names the file whole, in quotes
+#                              (internal/proto's Swift and Kotlin contract checks, #11026)
+#   spec/**, schema/**         also the tests of each integrations/<pkg> and of sdk/ts whose files name the path or a
+#                              directory it is in (CI's runtimes lane runs for all of them), found at run time
 #   android/**                 scripts/app/android_i18n_check.py plus the android checkers' own unittests (no gradle)
 #   .github/**                 scripts/test/pr_needs_issue_test.mjs
 #   schema/**                  the extension-schema py, the sdk bundle py, and sdk/go go test (mirrors CI's job)
@@ -66,7 +76,9 @@
 #                              ambiguous (a case "*" matches slashes, so scripts/* covers nested paths too); plus
 #                              each changed scripts/<dir>/test_*.py and the test_<name>.py of each changed script
 #                              <name>.py / <name>.sh (- read as _; db.sh's is test_db_sh.py), run from its
-#                              directory as CI does (#3968). scripts/hooks/** also runs
+#                              directory as CI does (#3968), and every scripts/**/test_*.py that imports a changed
+#                              <name>.py from its own directory or from one it names, found at run time (a suite a
+#                              dedicated check runs schedules that check; #11026). scripts/hooks/** also runs
 #                              scripts/test/test_privacy_check.py and test_check_deno_adapter_sh.py (they run the
 #                              hooks; the latter also for scripts/gen/deno_adapter.sh); scripts/privacy_check.py also
 #                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check);
@@ -74,10 +86,18 @@
 #                              test_release_debug_guard.py and scripts/test/test_apple_release_switch_names.py;
 #                              scripts/test/go_trimpath.sh also scripts/ci/test_ci.py and
 #                              scripts/test/test_check_fast_inputs.py (they run server.sh and check-fast.sh with it);
-#                              scripts/heavy_slot.py also scripts/test/test_check_fast_inputs.py (it runs check-fast.sh
-#                              with it); check-fast.sh (either path) and scripts/test/test_check_fast.py also
+#                              scripts/heavy_slot.py also scripts/test/test_check_fast_inputs.py and test_android_sh.py
+#                              (they run check-fast.sh and android.sh with it); check-fast.sh (either path) and
+#                              scripts/test/test_check_fast.py also
 #                              scripts/test/test_check_fast_guards.py and test_check_fast_inputs.py (the rest of
-#                              check-fast.sh's tests, which import test_check_fast.py's fixtures)
+#                              check-fast.sh's tests, which import test_check_fast.py's fixtures); scripts/ci/paths.py
+#                              also test_ci.py, test_check_fast_inputs.py and scripts/ci/test_affected_drift.py, this
+#                              script and scripts/operations/pr_watch_verify.py also test_affected_drift.py, and each
+#                              scripts/operations/pr_watch_*.py also scripts/operations/test_pr_watch.py
+#   .github/workflows/*.yml, scripts/ci/*.{sh,py}, scripts/operations/*.py, *watch*.{json,service} there,
+#   .claude/skills/{pr-review-merge-loop,main-verify-fix-loop}/**
+#                              also scripts/test/test_heavy_slot.py: a CI lane or watcher step that names a script
+#                              taking a slot must set PERSONA_HEAVY_SLOTS=0 (#11026)
 #   docs/**, any *.md          scripts/test/test_doc_paths.py and test_doc_go_paths.py (paths quoted in the docs, the
 #                              CLAUDE.md doc index), test_doc_sections.py (section names quoted after a doc path),
 #                              test_doc_wire.py (the wire lists in protocol.md, extensions.md)
@@ -89,15 +109,20 @@
 #                              test_apple_no_callkit.py (no CallKit import or link setting, #9290; also for
 #                              scripts/persona_config.py, whose xcconfig it reads); the iOS/macOS builds and tests
 #                              are skipped with a note (they need a Mac)
-#   apple/project.yml, apple/{lean-dev-build,watch-and-share}.yml, scripts/app/{sim,ui-test}.sh,
-#   scripts/release/release.sh, scripts/ci/apple.sh
-#                              also scripts/test/test_apple_dev_build.py (the development build's switch and stamp, #10713)
+#   apple/project.yml, apple/{app-entitlements,watch-and-share,lean-dev-build,siri-calls}.yml,
+#   scripts/app/{sim,ui-test,perf-test,share-from-apps,lean-build-note,island_peer}.sh,
+#   scripts/diag/stream-scroll/run-ios.sh, scripts/release/release.sh, scripts/ci/apple.sh,
+#   native/iphone-bridge/build.sh
+#                              also scripts/test/test_apple_dev_build.py (the development build's switch and stamp, the
+#                              scripts that generate a project or build the Rust core, the lean build's note; #10713)
 #   native/app-core/scripts/build-apple.sh
 #                              scripts/test/test_app_core_apple_build.py (the shared XCFramework cache, #10713)
 #   deploy/docker/**, docs/operations/docker.md, Dockerfile
 #                              scripts/test/test_docker_entrypoint.py (it also reads the root Dockerfile)
 #                              These Linux suites run in CI's Scripts tests job; they run from scripts/test as there.
 # scripts/privacy_check.py runs on every invocation that has changes (it is a seconds-long local scan, no network).
+# The plan ends with an INFO line naming the CI lanes the change selects (python3 scripts/ci/paths.py --lanes-for, the
+# selection CI and the PR watcher read) that it runs no part of, such as android, core or desktop (#11026).
 #
 # Independent checks run in parallel; each command gets a GNU timeout (override with the CHECK_FAST_TIMEOUT_*
 # variables below). The go test / go build and vitest commands first take a machine-wide slot of their kind
@@ -120,7 +145,13 @@
 # the Android gradle build (scripts/app/android.sh), or the full server suite against real Postgres
 # (scripts/test/test-server.sh).
 set -uo pipefail
+# A caller that closed stderr (2>&-) would make every redirection that copies it fail: each job subshell's 4>&2, so no
+# check could report and every one would end "no status" (#11250). Open it on /dev/null instead: the checks run, only
+# the live slot lines are lost, and no pipe or file opened later can take the free fd 2 (bash leaves a process
+# substitution's pipe there). Copying fd 2 fails only when it is closed, and the error message then goes nowhere.
+: 9>&2 || exec 2>/dev/null
 
+CALLER_DIR=$PWD  # a relative --changed-from file is read from here
 cd "$(dirname "$0")/../.."
 
 # Per-command timeouts in seconds (CLAUDE.md: every background step carries a timeout). Override for slow machines.
@@ -135,6 +166,9 @@ usage() {
 
 ALL=0
 BASE_REF=""
+DRY_RUN=0
+CHANGED_FROM=""
+EACH=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --all) ALL=1 ;;
@@ -145,11 +179,31 @@ while [ $# -gt 0 ]; do
     --base=*)
       BASE_REF=${1#*=}
       [ -n "$BASE_REF" ] || { echo "check-fast: --base needs a git ref" >&2; exit 2; } ;;
+    --dry-run) DRY_RUN=1 ;;
+    --changed-from)
+      [ $# -ge 2 ] && [ -n "$2" ] || { echo "check-fast: --changed-from needs a file (- for stdin)" >&2; exit 2; }
+      CHANGED_FROM=$2; shift ;;
+    --changed-from=*)
+      CHANGED_FROM=${1#*=}
+      [ -n "$CHANGED_FROM" ] || { echo "check-fast: --changed-from needs a file (- for stdin)" >&2; exit 2; } ;;
+    --each) EACH=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "check-fast: unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
+# A listed set of paths has no merge-base for the checks that compare with one (frozen migrations, fixed sleeps), so
+# it only plans; --each plans one listed path at a time.
+if [ -n "$CHANGED_FROM" ] && { [ "$DRY_RUN" -eq 0 ] || [ "$ALL" -eq 1 ] || [ -n "$BASE_REF" ]; }; then
+  echo "check-fast: --changed-from goes with --dry-run, without --all or --base" >&2; exit 2
+fi
+if [ "$EACH" -eq 1 ] && [ -z "$CHANGED_FROM" ]; then
+  echo "check-fast: --each needs --dry-run --changed-from <file>" >&2; exit 2
+fi
+case "$CHANGED_FROM" in ""|-|/*) ;; *) CHANGED_FROM="$CALLER_DIR/$CHANGED_FROM" ;; esac
+if [ -n "$CHANGED_FROM" ] && [ "$CHANGED_FROM" != "-" ] && [ ! -f "$CHANGED_FROM" ]; then
+  echo "check-fast: --changed-from: no such file: $CHANGED_FROM" >&2; exit 2
+fi
 
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN=timeout
@@ -609,6 +663,7 @@ migration_freeze_wanted() {
       server/internal/db/migrations/*|scripts/ci/migration_freeze.py) return 0 ;;
     esac
   done <<< "$CHANGED"
+  [ -n "$CHANGED_FROM" ] && return 1  # a listed set of paths is the whole change: no renames to look for
   while IFS= read -r -d '' status; do
     IFS= read -r -d '' path || return 1
     case "$status" in
@@ -638,6 +693,7 @@ sleep_ratchet_wanted() {
       server/*_test.go|sdk/go/*_test.go|scripts/ci/sleep_ratchet.py|scripts/ci/sleep_baseline.json) return 0 ;;
     esac
   done <<< "$CHANGED"
+  [ -n "$CHANGED_FROM" ] && return 1  # a listed set of paths is the whole change: no renames to look for
   while IFS= read -r -d '' status; do
     IFS= read -r -d '' path || return 1
     case "$status" in
@@ -667,12 +723,17 @@ job_extension_schema() {
 
 # --- plan -----------------------------------------------------------------
 
-CORE_FAIL=0
+# plan_reset empties the plan, so --each can plan one listed path after another.
+plan_reset() {
+  CORE_FAIL=0
+  WEB=0; SDKTS=0; ANDROID=0; PRNEEDS=0; EXTSCHEMA=0; SERVER_BUILD=0; APPLE=0; UNMAPPED=0; GO_GUARDS=0
+  SITE=0; SDKGO=0; EXTREFS=0; SDKBUNDLE=0
+  INTEG=(); GO_GROUPS=(); UNMAPPED_FILES=(); SCRIPT_TESTS=()
+  CORE_MISSING=(); INFO=()
+  JOB_NAME=(); JOB_FN=(); JOB_ARG=(); JOB_LOG=(); JOB_STATUS=()
+}
+plan_reset
 CHANGED=""
-WEB=0; SDKTS=0; ANDROID=0; PRNEEDS=0; EXTSCHEMA=0; SERVER_BUILD=0; APPLE=0; UNMAPPED=0; GO_GUARDS=0
-SITE=0; SDKGO=0; EXTREFS=0; SDKBUNDLE=0
-INTEG=(); GO_GROUPS=(); UNMAPPED_FILES=(); SCRIPT_TESTS=()
-CORE_MISSING=()
 
 core_missing() {  # --all treats a missing core toolchain as a failure; diff mode records a skip.
   if [ "$ALL" -eq 1 ]; then
@@ -685,13 +746,13 @@ core_missing() {  # --all treats a missing core toolchain as a failure; diff mod
 
 if [ "$ALL" -eq 1 ]; then
   echo "check-fast: --all, running every local fast check (iOS/macOS and Postgres suites excluded)"
-  WEB=1; SDKTS=1; ANDROID=1; PRNEEDS=1; EXTSCHEMA=1; SITE=1; SDKGO=1; EXTREFS=1; SDKBUNDLE=1
-  for _d in integrations/*/; do
-    if [ -f "$_d/package.json" ]; then
-      _p=$(basename "$_d")
-      arr_has "$_p" "${INTEG[@]:-}" || INTEG+=("$_p")
-    fi
-  done
+elif [ -n "$CHANGED_FROM" ]; then
+  if [ "$CHANGED_FROM" = - ]; then CHANGED=$(sed '/^$/d' | sort -u); else CHANGED=$(sed '/^$/d' "$CHANGED_FROM" | sort -u); fi
+  if [ -z "$CHANGED" ]; then
+    echo "check-fast: no paths listed in $CHANGED_FROM; nothing to check."
+    exit 0
+  fi
+  [ "$EACH" -eq 1 ] || echo "check-fast: $(printf '%s\n' "$CHANGED" | wc -l | tr -d ' ') listed file(s) from $CHANGED_FROM"
 else
   # Without --base: the clone's default branch, from local refs only so the script works offline. origin/HEAD is
   # set at clone time and can name a branch that is gone since, so it counts only if it resolves to a commit. Its
@@ -727,6 +788,68 @@ else
     exit 0
   fi
   echo "check-fast: $(printf '%s\n' "$CHANGED" | wc -l | tr -d ' ') changed file(s) against $(git rev-parse --short "$MB") (merge-base with $BASE_REF)"
+fi
+
+# web_plan prints the web check's plan for $CHANGED (paths.py --web-plan, below). --each reads the next line of the
+# plans paths.py --web-plan-each made for every listed path at once (fd 6): one scan of web/ takes about a second.
+web_plan() {
+  if [ "$EACH" -eq 1 ]; then
+    local _line
+    IFS= read -r _line <&6 || return 1
+    printf '%s\n' "$_line"
+    return 0
+  fi
+  printf '%s\n' "$CHANGED" | "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 scripts/ci/paths.py --web-plan
+}
+
+# readers_of points READERS_FILE at server_readers' lines for the regex $1 (server_readers is below), kept per regex:
+# under --each many listed paths share one (spec/fixtures/*). runtime_named's lines are read once per run too.
+READER_CACHE=()
+RUNTIME_NAMED=""; RUNTIME_NAMED_READ=0
+readers_of() {
+  local _i=0
+  while [ "$_i" -lt "${#READER_CACHE[@]}" ]; do
+    if [ "${READER_CACHE[$_i]}" = "$1" ]; then READERS_FILE="$WORK/readers.$_i"; return 0; fi
+    _i=$((_i + 1))
+  done
+  READERS_FILE="$WORK/readers.$_i"
+  server_readers "$1" > "$READERS_FILE"
+  READER_CACHE+=("$1")
+}
+
+# plan_notes prints what a plan leaves for the summary: the missing core toolchains and the SKIP / INFO lines.
+plan_notes() {
+  local _msg
+  for _msg in "${CORE_MISSING[@]:-}"; do [ -n "$_msg" ] && echo "FAIL     core toolchain: $_msg"; done
+  for _msg in "${INFO[@]:-}"; do [ -n "$_msg" ] && echo "$_msg"; done
+  return 0
+}
+
+# plan_changes picks the checks for $CHANGED (every check with --all) and schedules them. Its body keeps the
+# indentation it had at the top level.
+plan_changes() {
+# The CI lanes the change selects (paths.py --lanes-for, the selection CI and the PR watcher read), asked in the
+# background while the plan is made; the lanes check-fast runs no part of are named at the end. --each reads the next
+# line of the lanes paths.py --lanes-for-each listed for every path at once (fd 7).
+LANES_PID=""; LANES_READ=0
+if [ "$ALL" -eq 0 ] && [ "$HAVE_PY" -eq 1 ] && [ -f scripts/ci/paths.py ]; then
+  if [ "$EACH" -eq 1 ]; then
+    IFS= read -r _lanes <&7 && printf '%s\n' "$_lanes" > "$WORK/lanes.txt" && LANES_READ=1
+  else
+    printf '%s\n' "$CHANGED" | "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 scripts/ci/paths.py --lanes-for \
+      > "$WORK/lanes.txt" 2> /dev/null &
+    LANES_PID=$!
+  fi
+fi
+if [ "$ALL" -eq 1 ]; then
+  WEB=1; SDKTS=1; ANDROID=1; PRNEEDS=1; EXTSCHEMA=1; SITE=1; SDKGO=1; EXTREFS=1; SDKBUNDLE=1
+  for _d in integrations/*/; do
+    if [ -f "$_d/package.json" ]; then
+      _p=$(basename "$_d")
+      arr_has "$_p" "${INTEG[@]:-}" || INTEG+=("$_p")
+    fi
+  done
+else
   while IFS= read -r f; do
     # Files outside web/ that web/src and its tests read also run the web check, on top of their own mapping below:
     # the web plan after this loop finds them.
@@ -764,7 +887,7 @@ else
         # Mirror CI's extension-schema job: the conformance py, the sdk bundle py, and the Go wire round-trip.
         EXTSCHEMA=1; SDKBUNDLE=1; SDKGO=1 ;;
       scripts/app/*android*)
-        # The i18n/token checkers and their own test_android_* unittests all belong to the android check job.
+        # The i18n/token checkers and four of their test_android_* unittests belong to the android check job.
         ANDROID=1 ;;
       scripts/test/test_external_service_refs.py) EXTREFS=1 ;;
       scripts/gen/sdk_bundle.py|scripts/test/test_sdk_bundle.py) SDKBUNDLE=1 ;;
@@ -774,9 +897,10 @@ else
         # also covers nested paths such as scripts/hooks/foo.sh, not only files directly under scripts/.
         PRNEEDS=1; EXTSCHEMA=1 ;;
       apple/*) APPLE=1 ;;
-      # The suites guarding docs, markdown and deploy/docker (and the root Dockerfile) are added with the scripts/
-      # unittests below.
+      # The suites guarding docs, markdown and deploy/docker (and the root Dockerfile), and the suites of two native/
+      # build scripts, are added with the scripts/ unittests below.
       docs/*|deploy/docker/*|Dockerfile|*.md) ;;
+      native/app-core/scripts/build-apple.sh|native/iphone-bridge/build.sh) ;;  # their suites, below too
       *) UNMAPPED=1; UNMAPPED_FILES+=("$f") ;;
     esac
   done <<< "$CHANGED"
@@ -788,8 +912,7 @@ fi
 WEB_MODE=full; WEB_REASON=""; WEB_PLAN="$WORK/web-plan.txt"
 if [ "$ALL" -eq 0 ]; then
   if [ "$HAVE_PY" -eq 1 ] && [ -f scripts/ci/paths.py ]; then
-    if printf '%s\n' "$CHANGED" | "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 scripts/ci/paths.py --web-plan \
-        > "$WEB_PLAN" 2> "$WORK/web-plan.err"; then
+    if web_plan > "$WEB_PLAN" 2> "$WORK/web-plan.err"; then
       read -r WEB_MODE WEB_REASON < "$WEB_PLAN"
       case "$WEB_MODE" in
         full|related) WEB=1 ;;
@@ -824,36 +947,124 @@ if [ "$ALL" -eq 0 ]; then
   done <<< "$CHANGED"
 fi
 
+# search <what> <output file> <git grep arguments...> runs git grep into the file; no match leaves it empty. Any other
+# failure stops the plan (exit 2): the checks the search would have found are not run otherwise, and nothing would
+# say so. One alternation of every changed client path once grew past what git grep compiles on a large apple/ diff,
+# and every Go reader of those files was dropped without a word (#11250).
+search() {
+  local _what=$1 _out=$2 _rc
+  shift 2
+  git grep "$@" > "$_out" 2> "$WORK/search.err"
+  _rc=$?
+  [ "$_rc" -le 1 ] && return 0
+  echo "check-fast: searching $_what failed (git grep exit $_rc): $(head -c 300 "$WORK/search.err" | tr '\n' ' ')" >&2
+  echo "check-fast: no plan made; the checks that read the changed files cannot be picked" >&2
+  exit 2
+}
+
 # server_readers prints the package directory (relative to server/) of each server _test.go that matches the extended regex $1
 # outside a // comment line. Finding them at run time keeps a new reader mapped without an edit here.
 server_readers() {
-  git grep -nE "$1" -- 'server/*_test.go' 2>/dev/null \
-    | grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' | cut -d: -f1 | sort -u \
+  search "the server tests for $1" "$WORK/search.out" -nE "$1" -- 'server/*_test.go'
+  LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' "$WORK/search.out" | cut -d: -f1 | sort -u \
     | while IFS= read -r _file; do _dir=$(dirname "$_file"); printf '%s\n' "${_dir#server/}"; done | sort -u
+}
+
+# client_named writes CLIENT_NAMED once a run: "<path><tab><package dir>" for each whole "apple/…" or "android/…"
+# string in a server _test.go outside a // comment line, the text between its quotes, so a longer string that only
+# mentions a file ("apple/Shared/Models.swift: Fold") names that longer string. A plan matches the changed client paths
+# against it, so a diff of thousands of client files still costs one search.
+CLIENT_NAMED=""; CLIENT_NAMED_READ=0
+client_named() {
+  [ "$CLIENT_NAMED_READ" -eq 1 ] && return 0
+  CLIENT_NAMED="$WORK/client-named.txt"
+  search "the server tests for the client sources they name" "$WORK/client-grep.txt" \
+    -nE '"(apple|android)/[^"]*"' -- 'server/*_test.go'
+  LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' "$WORK/client-grep.txt" | LC_ALL=C awk '
+    {
+      file = $0; sub(/:.*/, "", file)
+      dir = file; sub(/\/[^\/]*$/, "", dir); sub(/^server\//, "", dir)
+      text = $0; sub(/^[^:]*:[0-9]+:/, "", text)
+      while (match(text, /"(apple|android)\/[^"]*"/)) {
+        print substr(text, RSTART + 1, RLENGTH - 2) "\t" dir
+        text = substr(text, RSTART + RLENGTH)
+      }
+    }' | LC_ALL=C sort -u > "$CLIENT_NAMED"
+  CLIENT_NAMED_READ=1
 }
 
 # Repository inputs that server tests read (the extra paths in server-test.yml's filter): a change to one also runs go
 # test on the packages that read it. Each regex matches the input as a path string or as filepath.Join elements.
 if [ "$ALL" -eq 0 ]; then
-  READER_RES=()
+  READER_RES=(); _client=0
   while IFS= read -r f; do
     _re=""
     case "$f" in
       spec/fixtures/*) _re='spec/fixtures|"spec", *"fixtures"' ;;
-      schema/extension/*) _re='schema/extension|"schema", *"extension"' ;;
-      schema/wire/*) _re='schema/wire|"schema", *"wire"' ;;
+      # Each schema family (extension, wire, configuration, ...): internal/configuration reads schema/configuration.
+      schema/*/*) _s=${f#schema/}; _s=${_s%%/*}; _re="schema/$_s|\"schema\", *\"$_s\"" ;;
       integrations/*/*) _re='integrations/|"integrations"' ;;
       scripts/test/server_test_env.py) _re='server_test_env\.py' ;;
       docs/*) _re=$(printf '%s' "$f" | sed 's/[][\.^$*+?(){}|]/\\&/g') ;;  # docs/example-guide.md -> docs/example-guide\.md
+      apple/*|android/*) _client=1 ;;  # below
     esac
     [ -n "$_re" ] && { arr_has "$_re" "${READER_RES[@]:-}" || READER_RES+=("$_re"); }
   done <<< "$CHANGED"
   for _re in "${READER_RES[@]:-}"; do
     [ -n "$_re" ] || continue
+    readers_of "$_re"
     while IFS= read -r _g; do
       [ -n "$_g" ] && { arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g"); }
-    done < <(server_readers "$_re")
+    done < "$READERS_FILE"
   done
+  # Client sources the Go contract tests read (internal/proto reads "apple/Shared/Models.swift"): only a test that names
+  # the whole path in quotes counts, not a longer string that mentions it (client_named).
+  if [ "$_client" -eq 1 ]; then
+    client_named
+    printf '%s\n' "$CHANGED" | LC_ALL=C grep -E '^(apple|android)/' > "$WORK/client-changed.txt"
+    while IFS= read -r _g; do
+      [ -n "$_g" ] && { arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g"); }
+    done < <(LC_ALL=C awk -F '\t' 'NR == FNR { changed[$0] = 1; next } $1 in changed { print $2 }' \
+               "$WORK/client-changed.txt" "$CLIENT_NAMED" | LC_ALL=C sort -u)
+  fi
+fi
+
+# runtime_named prints "<package> <path>" for each shared fixture or schema path (spec/..., schema/...) a file of an
+# integrations/<pkg> package or of sdk/ts names outside a comment line, as a path relative to itself
+# (../../../spec/fixtures/input-clip/cases.json, ../../../schema/extension/examples/). CI's runtimes lane runs for all
+# of spec/ and schema/; check-fast runs the packages that read the changed path.
+runtime_named() {
+  search "the runtime packages for the fixtures and schemas they name" "$WORK/runtime-grep.txt" \
+    -nE '(spec|schema)/[A-Za-z0-9_.-]' -- 'integrations/*' 'sdk/ts/*'
+  LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*(//|\*|#)' "$WORK/runtime-grep.txt" \
+    | while IFS= read -r _line; do
+        case "$_line" in
+          integrations/*/*) _pkg=${_line#integrations/}; _pkg="integrations/${_pkg%%/*}" ;;
+          sdk/ts/*) _pkg=sdk/ts ;;
+          *) continue ;;
+        esac
+        printf '%s\n' "${_line#*:*:}" | grep -oE '(spec|schema)/[A-Za-z0-9_./-]*' | sed "s|^|$_pkg |"
+      done | sort -u
+}
+
+# A changed spec/ or schema/ path also runs the runtime packages that read it: the path itself, or a directory it is in.
+if [ "$ALL" -eq 0 ] && printf '%s\n' "$CHANGED" | grep -qE '^(spec|schema)/'; then
+  # Not in $( ): a failed search must stop this shell, not a subshell.
+  if [ "$RUNTIME_NAMED_READ" -eq 0 ]; then
+    runtime_named > "$WORK/runtime-named.txt"
+    RUNTIME_NAMED=$(cat "$WORK/runtime-named.txt"); RUNTIME_NAMED_READ=1
+  fi
+  while IFS= read -r f; do
+    case "$f" in spec/*|schema/*) ;; *) continue ;; esac
+    while read -r _pkg _path; do
+      [ -n "$_path" ] || continue
+      case "$f" in "$_path"|"${_path%/}"/*) ;; *) continue ;; esac
+      case "$_pkg" in
+        sdk/ts) SDKTS=1 ;;
+        *) _pkg=${_pkg#integrations/}; arr_has "$_pkg" "${INTEG[@]:-}" || INTEG+=("$_pkg") ;;
+      esac
+    done <<< "$RUNTIME_NAMED"
+  done <<< "$CHANGED"
 fi
 
 # The trusted Deno adapter (server/internal/extension/denohost/adapter.mjs) is generated from adapter.ts, which bundles
@@ -867,21 +1078,27 @@ if [ "$ALL" -eq 0 ] && printf '%s\n' "$CHANGED" | grep -q '^sdk/ts/src/'; then
   fi
 fi
 
-# script_test_add adds a scripts/<dir>/test_*.py that exists (a deleted one is not run) and that no dedicated job above
-# already runs (refs, bundle, extension schema, the android checkers). A file that never mentions unittest is a SKIP
-# line instead, the rule of is_suite in scripts/ci/python-tests.py: python -m unittest runs no tests in such a
-# verification script and exits 5 ("NO TESTS RAN") on Python 3.12 and later.
+# script_test_add adds a scripts/<dir>/test_*.py that exists (a deleted one is not run); for one a dedicated job runs
+# (refs, bundle, extension schema, the android checkers) it schedules that job instead. A file that never mentions
+# unittest is a SKIP line instead, the rule of is_suite in scripts/ci/python-tests.py: python -m unittest runs no tests
+# in such a verification script and exits 5 ("NO TESTS RAN") on Python 3.12 and later.
 script_test_add() {
+  # job_i18n runs four of the scripts/app/test_android_* suites; the others run here (#11026).
   case "$1" in
-    scripts/test/test_external_service_refs.py|scripts/test/test_sdk_bundle.py|scripts/test/test_extension_schema.py) return 0 ;;
-    scripts/app/test_android_*) return 0 ;;
+    scripts/test/test_external_service_refs.py) EXTREFS=1; return 0 ;;
+    scripts/test/test_sdk_bundle.py) SDKBUNDLE=1; return 0 ;;
+    scripts/test/test_extension_schema.py) EXTSCHEMA=1; return 0 ;;
+    scripts/app/test_android_i18n_check.py|scripts/app/test_android_token_baseline.py|\
+    scripts/app/test_android_motion_baseline.py|scripts/app/test_android_slot_order.py) ANDROID=1; return 0 ;;
   esac
+  # Already added: every file of a large diff adds the same few suites again, and the grep below is a process each.
+  arr_has "$1" "${SCRIPT_TESTS[@]:-}" && return 0
   [ -f "$1" ] || return 0
   if ! grep -q unittest "$1"; then
     arr_has "SKIP  $1 (not a unittest suite)" "${INFO[@]:-}" || INFO+=("SKIP  $1 (not a unittest suite)")
     return 0
   fi
-  arr_has "$1" "${SCRIPT_TESTS[@]:-}" || SCRIPT_TESTS+=("$1")
+  SCRIPT_TESTS+=("$1")
 }
 
 # The scripts/ unittests a change needs (#3968): each changed scripts/<dir>/test_*.py, and for each changed script
@@ -890,7 +1107,28 @@ script_test_add() {
 # Changes to docs, markdown, apple/, deploy/docker/ and the root Dockerfile add the scripts/test suites that guard them.
 # --all runs every scripts/**/test_*.py suite, the same find as CI's Scripts tests job, minus the few script_test_add
 # skips because a dedicated check above runs them; renaming or dropping one of those checks must update that skip list.
-# test_check_fast.py compares this selection with python-tests.py's.
+# test_check_fast.py compares the --all selection with python-tests.py's.
+
+# script_importers prints the scripts/**/test_*.py suites that import the module scripts/<dir>/<name>.py ($1) with
+# "import <name>" or "from <name> import" at the start of a line: from their own directory, or from one they name (a
+# suite puts scripts/<dir> on sys.path to import from it). Found at run time, so a new importer needs no edit here;
+# scripts/ci/affected_drift.py works the same suites out on its own and compares (#11026).
+script_importers() {
+  local _dir _mod _t
+  _dir=$(dirname "$1"); _mod=$(basename "$1" .py)
+  case "$_mod" in ""|*[!A-Za-z0-9_]*) return 0 ;; esac  # android-shards.py cannot be imported by name
+  search "the scripts suites that import $1" "$WORK/importers-grep.txt" \
+    -lE "^[[:space:]]*(from[[:space:]]+$_mod[[:space:]]+import|import[[:space:]]+([A-Za-z0-9_]+[[:space:]]*,[[:space:]]*)*$_mod([[:space:],]|\$))" \
+    -- 'scripts/*test_*.py'
+  while IFS= read -r _t; do
+    case "${_t##*/}" in test_*.py) ;; *) continue ;; esac
+    [ "$_t" != "$1" ] || continue
+    if [ "$(dirname "$_t")" = "$_dir" ] || grep -qF "$_dir" "$_t" || grep -qE "/[[:space:]]*\"${_dir##*/}\"" "$_t"; then
+      printf '%s\n' "$_t"
+    fi
+  done < "$WORK/importers-grep.txt"
+}
+
 if [ "$ALL" -eq 1 ]; then
   while IFS= read -r f; do
     script_test_add "$f"
@@ -904,6 +1142,13 @@ else
         _name=$(printf '%s' "$_name" | tr '-' '_')
         for _t in scripts/*/"test_$_name.py"; do script_test_add "$_t"; done
         case "$f" in *.sh) for _t in scripts/*/"test_${_name}_sh.py"; do script_test_add "$_t"; done ;; esac ;;
+    esac
+    # The suites that import a changed module, wherever they are (script_importers).
+    # Through a file, not < <( ): a failed search must stop this shell, not a subshell.
+    case "$f" in
+      scripts/*.py)
+        script_importers "$f" > "$WORK/importers.txt"
+        while IFS= read -r _t; do script_test_add "$_t"; done < "$WORK/importers.txt" ;;
     esac
     # The Linux suites in CI's Scripts tests job that guard files outside scripts/; a file can need several.
     case "$f" in
@@ -924,9 +1169,16 @@ else
     case "$f" in apple/*|scripts/persona_config.py) script_test_add scripts/test/test_apple_no_callkit.py ;; esac
     # The development build (#10713): the switch that leaves the watch app and the share extension out, who sets it,
     # the Release-only commit stamp; and the Rust core's XCFramework cache shared between worktrees.
+    # test_apple_dev_build.py reads the project and the includes its xcodegen dumps turn on, every script that
+    # generates a project or builds the Rust core it names, and the note a lean build prints (#11250). Its two searches
+    # of the whole tree (who sets the switch, who runs xcodegen generate) also see a new caller; that one is not mapped.
     case "$f" in
-      apple/project.yml|apple/lean-dev-build.yml|apple/watch-and-share.yml|scripts/app/sim.sh|scripts/app/ui-test.sh|\
-      scripts/release/release.sh|scripts/ci/apple.sh) script_test_add scripts/test/test_apple_dev_build.py ;;
+      apple/project.yml|apple/app-entitlements.yml|apple/watch-and-share.yml|apple/lean-dev-build.yml|\
+      apple/siri-calls.yml|scripts/app/sim.sh|scripts/app/ui-test.sh|scripts/app/perf-test.sh|\
+      scripts/app/share-from-apps.sh|scripts/app/lean-build-note.sh|scripts/app/island_peer.sh|\
+      scripts/diag/stream-scroll/run-ios.sh|scripts/release/release.sh|scripts/ci/apple.sh|\
+      native/iphone-bridge/build.sh)
+        script_test_add scripts/test/test_apple_dev_build.py ;;
       native/app-core/scripts/build-apple.sh) script_test_add scripts/test/test_app_core_apple_build.py ;;
     esac
     # test_gen_tokens.py checks the token sources against the iOS values and the committed Android Tokens.kt (#4209).
@@ -958,9 +1210,34 @@ else
         script_test_add scripts/ci/test_changed_ratchets.py; script_test_add scripts/test/test_merge_pr_sh.py ;;
       scripts/test/go_trimpath.sh)
         script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast_inputs.py ;;
-      scripts/heavy_slot.py) script_test_add scripts/test/test_check_fast_inputs.py ;;
+      # test_android_sh.py runs android.sh with the helper (#11250).
+      scripts/heavy_slot.py)
+        script_test_add scripts/test/test_check_fast_inputs.py; script_test_add scripts/test/test_android_sh.py ;;
       scripts/check-fast.sh|scripts/test/check-fast.sh|scripts/test/test_check_fast.py)
         script_test_add scripts/test/test_check_fast_guards.py; script_test_add scripts/test/test_check_fast_inputs.py ;;
+    esac
+    # test_heavy_slot.py reads CI's lanes, the operations scripts (the watchers among them), their example configs and
+    # services, and both watcher skills: one that names a script taking a slot must set PERSONA_HEAVY_SLOTS=0
+    # (docs/operations/testing.md "Heavy build slots"). A new lane script once broke it unseen (#11026). It skips
+    # test_* files, as this does.
+    case "${f##*/}:$f" in
+      test_*) ;;
+      *:.github/workflows/*.yml|*:scripts/ci/*.sh|*:scripts/ci/*.py|*:scripts/operations/*.py|\
+      *:scripts/operations/*watch*.json|*:scripts/operations/*watch*.service|*:.claude/skills/pr-review-merge-loop/*|\
+      *:.claude/skills/main-verify-fix-loop/*)
+        script_test_add scripts/test/test_heavy_slot.py ;;
+    esac
+    # The three selections of what a change affects (#11026): CI's lanes (paths.py, tested in test_ci.py and, for the
+    # web plan and the lanes a plan names, test_check_fast_inputs.py), this script and the watcher's lanes;
+    # test_affected_drift.py compares them.
+    case "$f" in
+      scripts/ci/paths.py)
+        script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast_inputs.py
+        script_test_add scripts/ci/test_affected_drift.py ;;
+      scripts/test/check-fast.sh) script_test_add scripts/ci/test_affected_drift.py ;;
+      scripts/operations/pr_watch_*.py)
+        script_test_add scripts/operations/test_pr_watch.py
+        case "$f" in scripts/operations/pr_watch_verify.py) script_test_add scripts/ci/test_affected_drift.py ;; esac ;;
     esac
     # The Release binary's DEBUG checks (#10616, #10654): a list that matches no script name, whose union merges can
     # leave it out of order, the checker test_apple_release_switch_names.py imports, and release.sh, which runs it.
@@ -985,7 +1262,7 @@ else
   done <<< "$CHANGED"
 fi
 
-echo "check-fast: logs in $WORK"
+[ "$DRY_RUN" -eq 1 ] || echo "check-fast: logs in $WORK"
 
 # All jobs, privacy included, launch together in launch_all below; privacy is scheduled first so it is the first
 # line in the summary.
@@ -1107,6 +1384,51 @@ fi
 if [ "$UNMAPPED" -eq 1 ]; then
   INFO+=("INFO  no fast check maps to: ${UNMAPPED_FILES[*]} (privacy scan still ran; full suites in docs/operations/testing.md)")
 fi
+if [ "$LANES_READ" -eq 1 ] || { [ -n "$LANES_PID" ] && wait "$LANES_PID"; }; then
+  _not_run=""
+  for _lane in $(cat "$WORK/lanes.txt"); do
+    case "$_lane" in
+      scripts) continue ;;  # CI's "**": the privacy scan and the scripts suites above are its fast part
+      web) [ "$WEB" -eq 1 ] && continue ;;
+      server)
+        { [ "${#GO_GROUPS[@]}" -gt 0 ] || [ "$SERVER_BUILD" -eq 1 ] || [ "$GO_GUARDS" -eq 1 ] || [ "$SDKGO" -eq 1 ]; } \
+          && continue ;;
+      runtimes) { [ "${#INTEG[@]}" -gt 0 ] || [ "$SDKTS" -eq 1 ]; } && continue ;;
+      apple) [ "$APPLE" -eq 1 ] && continue ;;  # its own SKIP line names it
+    esac
+    _not_run="${_not_run:+$_not_run, }$_lane"
+  done
+  [ -n "$_not_run" ] && INFO+=("INFO  CI lanes this change selects that check-fast does not run: $_not_run (bash scripts/ci/<lane>.sh)")
+fi
+}
+
+# --each: plan every listed path on its own. paths.py plans the web check of all of them in one scan (web_plan) and
+# lists the CI lanes of each in one run (plan_changes).
+if [ "$EACH" -eq 1 ]; then
+  printf '%s\n' "$CHANGED" > "$WORK/each.txt"
+  if [ "$HAVE_PY" -eq 1 ] && [ -f scripts/ci/paths.py ]; then
+    "$TIMEOUT_BIN" -k 5s 900 python3 scripts/ci/paths.py --web-plan-each < "$WORK/each.txt" > "$WORK/web-plans.txt" \
+      || { echo "check-fast: python3 scripts/ci/paths.py --web-plan-each failed" >&2; exit 2; }
+    "$TIMEOUT_BIN" -k 5s 900 python3 scripts/ci/paths.py --lanes-for-each < "$WORK/each.txt" > "$WORK/lanes-each.txt" \
+      || { echo "check-fast: python3 scripts/ci/paths.py --lanes-for-each failed" >&2; exit 2; }
+    exec 6< "$WORK/web-plans.txt" 7< "$WORK/lanes-each.txt"
+  fi
+  while IFS= read -r _each <&5; do
+    plan_reset
+    CHANGED=$_each
+    echo "== $_each"
+    plan_changes
+    plan_notes
+  done 5< "$WORK/each.txt"
+  exit 0
+fi
+
+plan_changes
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "check-fast: dry run, ${#JOB_NAME[@]} check(s) planned; nothing ran."
+  plan_notes
+  exit 0
+fi
 
 if [ ${#JOB_NAME[@]} -eq 0 ] && [ "$CORE_FAIL" -eq 0 ]; then
   echo "check-fast: no related checks to run."
@@ -1140,16 +1462,18 @@ for _i in "${!JOB_NAME[@]}"; do
       fi
     fi
   fi
+  # The log's tail is a command's output, which need not be UTF-8: macOS sed stops at the first byte that is not
+  # ("illegal byte sequence") in a UTF-8 locale, so it runs with LC_ALL=C.
   case "$_kind" in
     PASS) echo "PASS     ${JOB_NAME[$_i]} (${_seconds}s$_waited)"; N_PASS=$((N_PASS+1)) ;;
     SKIP) echo "SKIP     ${JOB_NAME[$_i]}: $_detail"; N_SKIP=$((N_SKIP+1)) ;;
     FAIL)
       echo "FAIL     ${JOB_NAME[$_i]} (${_seconds}s$_waited, $_detail); log: ${JOB_LOG[$_i]}"
-      sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
+      LC_ALL=C sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
       N_FAIL=$((N_FAIL+1)) ;;
     TIMEOUT)
       echo "TIMEOUT  ${JOB_NAME[$_i]} (${_seconds}s$_waited, $_detail); log: ${JOB_LOG[$_i]}"
-      sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
+      LC_ALL=C sed 's/^/         /' "${JOB_LOG[$_i]}" | tail -n 25
       N_TIMEOUT=$((N_TIMEOUT+1)) ;;
   esac
 done

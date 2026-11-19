@@ -123,7 +123,7 @@ func (n *Node) runtimeTranscriptCall(ctx context.Context, h *runtimeConn, method
 			return nil, err, true
 		}
 		if !sub {
-			attempt := n.runtimes.watch(h, p.SessionID, 0, connCtx)
+			attempt := n.runtimes.watch(h, p.SessionID, 0, "", connCtx)
 			if _, err := call("session.watch", map[string]any{"session_id": p.SessionID, "since_seq": 0, "transcript": true}); err != nil {
 				n.logf("runtime %s: watch %s: %v", h.id(), p.SessionID, err)
 				n.runtimes.watchFailed(h, p.SessionID, attempt.token)
@@ -174,7 +174,7 @@ func (n *Node) transcriptMoved(h *runtimeConn, id string) {
 			n.logf("runtime %s: watch %s's transcript: %v", h.id(), id, err)
 		}
 	}
-	attempt := n.runtimes.watch(h, id, 0, parent)
+	attempt := n.runtimes.watch(h, id, 0, "", parent)
 	go func() {
 		if err := n.runtimeWatch(h, id, attempt.since); err != nil {
 			n.runtimes.watchFailed(h, id, attempt.token)

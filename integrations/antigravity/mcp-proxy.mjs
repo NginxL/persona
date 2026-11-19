@@ -31,12 +31,34 @@ const DISPATCH_SIZE = size(DISPATCH_TOOL)
 
 const [command, ...args] = process.argv.slice(2)
 const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'] })
+let closing = false
+let exitCode = 0
+let killTimer
+function shutdown(signal = 'SIGTERM', code = 0) {
+  if (closing) return
+  closing = true
+  exitCode = code
+  process.stdin.pause()
+  child.stdin.end()
+  child.kill(signal)
+  killTimer = setTimeout(() => child.kill('SIGKILL'), 3000)
+  killTimer.unref()
+}
 child.on('error', (err) => {
   process.stderr.write(`persona mcp proxy: ${err.message}\n`)
-  process.exit(1)
+  if (!child.pid) process.exit(1)
+  shutdown('SIGTERM', 1)
 })
-child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)))
-process.stdin.on('end', () => child.stdin.end())
+child.on('exit', (code, signal) => {
+  clearTimeout(killTimer)
+  process.exit(closing ? exitCode : code ?? (signal ? 1 : 0))
+})
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => shutdown(signal))
+process.stdin.on('end', () => shutdown())
+process.stdin.on('close', () => shutdown())
+process.stdin.on('error', () => shutdown('SIGTERM', 1))
+child.stdin.on('error', () => shutdown('SIGTERM', 1))
+process.stdout.on('error', () => shutdown('SIGTERM', 1))
 
 let names = null // the server's tools, from its last tools/list
 let hidden = [] // those not declared to agy (smaller than persona_call), with their arguments, for the no-name listing
@@ -44,6 +66,7 @@ const pendingLists = new Set()
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n')
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+  if (closing) return
   const msg = parse(line)
   if (msg?.method && Object.hasOwn(msg, 'id')) {
     if (msg.method === 'tools/list') pendingLists.add(msg.id)
@@ -63,6 +86,7 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line)
 })
 
 createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => {
+  if (closing) return
   const msg = parse(line)
   if (msg && !Object.hasOwn(msg, 'method') && Object.hasOwn(msg, 'id')
     && (Object.hasOwn(msg, 'result') || Object.hasOwn(msg, 'error')) && pendingLists.delete(msg.id)) {

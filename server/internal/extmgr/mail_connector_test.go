@@ -17,7 +17,7 @@ import (
 // pagedMail is one account's inbox, paged by before_uid like the IMAP listing: newest first, NextBeforeUID the
 // lowest UID of the page whenever there is more.
 type pagedMail struct {
-	Mail
+	inboxOnlyMail
 	validity uint32
 	msgs     []mail.MailSummary // ascending UID
 	failOld  bool               // pages below the newest fail, as a slow server's would time out

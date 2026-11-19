@@ -275,6 +275,7 @@ Apply in order; on a match, do not call the model:
 
 - The `session_work` table ("Storage" below), sent with the session list as `work`;
 - When done: add `完成：<结论>` ("Completed: <conclusion>") to the knowledge-base project timeline for this directory (`kbAgentDone` used to record the last words of every turn; now it records the conclusion when available);
+- A supervised worker's `report_to_supervisor(kind=done)` and the committed `WorkDone` also share one structured outcome writer. It appends the conclusion, existing links, and any model-extracted decision and reason to the project's `memory.jsonl`, deduplicated by todo, agent, turn and transcript item. The todo's explicit project wins over `ProjectsForWork(machine, cwd)`; without either, nothing is written and a title is never treated as ownership. If the model is unavailable, the original short conclusion and links are kept with decision and reason empty. A failed append logs a warning and remains retryable. This M1 record does not change the existing `log.md` conclusion or inject memory into later dispatches;
 - Replace the "Completed" push body with the conclusion; the main chat's live snapshot adds "Done" and "Waiting" sections ("What Persona knows" below).
 
 ## Closeout
@@ -329,17 +330,24 @@ later without sending.
 
 ### Transient errors: automatic continuation
 
+- An unrecoverable conversation error overrides a runtime's generic transient kind and any upstream status.
+  Account-sealed native compaction is `turn_error_code: compaction_sealed`, `turn_error_kind: unrecoverable`:
+  the context belongs to another account, so the conversation is invalid. Clients explain the reason and direct
+  the owner to a new conversation instead of offering Continue. The manager neither schedules another retry nor
+  sends a retry queued before the cause was recognized. Adding permanent causes extends
+  `proto.UnrecoverableTurnErrorCode` and the clients' error parsers, with positive and negative regression cases.
+- An old interrupted participant does not override another participant that is working or waiting to resume.
+  Interrupted task rows stay out of Needs you when the task is parked or closed. Archive visibility still follows
+  new activity; it is not a substitute for the task-state filter.
 - On by default and independent of the main switch (`transient_retry`, #3208): it is a rule, with no triage model call. With the main switch off, only
   turns that a transient error ended are followed (`workActive`), and the lists show only the continuation on its way (`transientPending`); everything else stays as without triage.
-- Exponential backoff (`retryBackoff`): `retry_base_seconds` (default 15) doubled for each attempt, so 15 s, 30 s, 60 s, 120 s, 240 s; a rate limit (429, "rate limit",
-  "too many requests") waits four times as long (60 s … 960 s); never more than 30 minutes. Up to 5 consecutive attempts (`agents.triage.max_retries`).
-  A turn that ends otherwise (normally, or on an error that is not transient) starts the count again.
-- If all fail: the session keeps its error and the apps' "Retry", as before. With the main switch and `decide` on, also a `blocked · user` card,
-  "The model service keeps failing after 5 automatic retries: <original text>", with options "Try Again" / "Leave it for now".
-- Send exactly `继续` ("Continue"), the same text sent by "Retry" on the App's error card (`continueText`).
-- The manager logs each step: `work <machine>/<session>: auto-continue: transient model error, attempt <n>/<max> in <backoff>: <error>` when it schedules one,
-  `work <machine>/<session>: auto-continue: sending "继续" after a transient model error (attempt <n>/<max>)` and `work <machine>/<session>: continued (<n>)` when it sends,
-  and `work <machine>/<session>: auto-continue: transient model error persists after <n> automatic continues, left to the user: <error>` at the cap.
+- Assistant conversations and managed Agents share the manager's durable due-wake scheduler (Refs #10444). Temporary network failures, timeouts, throttling and recoverable server errors continue indefinitely until cancelled, with no attempt budget. Authentication, permissions, invalid requests, missing models, usage limits, user decisions and repeated-tool-loop stops never enter this outage retry loop. Existing bounded unavailable-model, safeguards-refusal and tool-search recovery keeps its own behavior.
+- Exponential backoff uses a 15-second base (`retry_base_seconds`), doubled per failed continuation; throttling starts at four times the base. Equal jitter selects between half of the exponential ceiling and that ceiling, capped at 30 minutes. The legacy `max_retries` configuration remains readable but no longer limits temporary model failures. A productive turn resets the count.
+- Send `继续` ("Continue") into the existing session history, without resubmitting the original task or its completed tool calls. Due timestamps persist in `session_work`; waiting uses the existing manager tick, without a waiting execution subprocess. Old pending retries survive database loading and pruning.
+- Stop and a bare `/exit` or `/quit` retire the pending wake durably. The hub reports every known session's interrupt to the manager, and node guards reject known stop causes that forbid supervisor resume. New input, changed turns, queued input and pending interactions prevent automatic continuation. Concurrent ticks share a session claim. A stable `client_msg_id` and restored transcript receipt prevent repeating a delivered continuation; runtime tool history remains the authority for completed side effects.
+- Retry IDs normalize turn timestamps to PostgreSQL microsecond precision before the first send. A manager crash after delivery but before acknowledgement therefore reuses the same ID after loading the pending row. Hub receipts in `sending` or `unknown` remain blocked across restarts; the scheduler retains the pending wake, but cannot infer delivery or automatically resolve an uncertain receipt.
+- `TestModelRetryProcessRestart` uses a disposable PostgreSQL database and separate test processes for Assistant and managed Agents: pending sends, delivery before acknowledgement, unknown delivery, process exit during sending, repeated concurrent due events and Stop followed by restart. `TestSendOnceProcessRestart` separately exercises production hub send guards with a fake RPC node. These probes do not exercise a real model provider or app UI.
+- The manager logs the attempt and delay when scheduling and sending. An attempt count is diagnostic only, never a reason to ask the user to continue.
 
 ### Usage limits: continue at the reset
 
@@ -574,7 +582,7 @@ Users enable them under **Settings › Session Triage**. The switches are stored
 - Subswitches work only when the main switch is on (but `reply_reminder` and `transient_retry`). Disabling a switch takes effect immediately: Persona-created cards are removed, and queued retries / wakeups / status questions are not sent.
 - `GET / PUT /api/v1/agents/triage` (`{enabled, auto_continue, wake, decide, tool_loop, closeout, closeout_ask, reply_reminder, reply_reminder_minutes, transient_retry}`, forwarded by the hub to the manager); changes broadcast `{"type":"agents.triage"}`. A PUT without `tool_loop`, `closeout`, `closeout_ask`, `reply_reminder`, `reply_reminder_minutes` (or with minutes 0) or `transient_retry` keeps their values for older apps; negative minutes go back to the default 30. While the saved switches cannot be read, such a PUT saves their defaults.
 - A `GET` whose first read of the database fails answers `503` with an `error` in the request's language (Chinese, English or Japanese) saying why, instead of returning the defaults as if they were the saved switches (#4553). Failures are not cached: the next request reads again. Switches once read or saved stay cached in memory; `manager.json`'s initial values apply only when the database really has no setting. Triage itself still falls back to the defaults when its own read fails, and `PUT` saves as before.
-- `agents.triage` in the manager's `manager.json` (`docs/operations/config.md` ("manager.json"); in hub.json before 2026-11-06) now retains limits (`max_retries` default 5, `retry_base_seconds` default 15, `max_wakes` default 6, `settle_seconds` default 15, `just_finished_hours` default 3);
+- `agents.triage` in the manager's `manager.json` (`docs/operations/config.md` ("manager.json"); in hub.json before 2026-11-06) now retains limits (legacy `max_retries` retained but unused for temporary failures, `retry_base_seconds` default 15, `max_wakes` default 6, `settle_seconds` default 15, `just_finished_hours` default 3);
   its triage switches are initial values only when settings have never been saved in the App (omitted means off). The manager reads this section itself and lays it over the hub's handshake reply (`assistantwire.Hello.Agents`); the hub no longer reads or sends it.
 
 ## Storage
@@ -590,7 +598,7 @@ A process can be redeployed and cleared at any time, so triage results, retry co
 The main chat's live snapshot (`prompts/assistant/snapshot*.md`):
 
 - Each Agent under "Needs you" includes what it is waiting for;
-- Adds "Waiting" (Persona is waiting for it: retrying, deployment, another Agent). "Done (within 24 hours)" and "Muted" carry only counts; `agents_list state=done` / `state=muted` returns their names, session ids and conclusions when the assistant needs them;
+- Adds "Waiting" (Persona is waiting for it: retrying, deployment, another Agent). Working agents render only their count in the Agents heading (#11261), and "Done (within 24 hours)" and "Muted" carry only counts; `agents_list` returns working agents' names, session ids and running workflows (`state=working`) and done or muted agents' conclusions (`state=done` / `state=muted`) when the assistant needs them;
 - "Unread" contains only sessions not yet successfully triaged, and those whose closeout says the turn is not finished, with that line ("Closeout");
 - An Agent's line ends with what its closeout claims of merging and deploying, and the hub's finding where it differs.
 

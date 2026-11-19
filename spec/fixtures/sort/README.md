@@ -13,7 +13,7 @@
 | hub 遇到待处理交互或 blocked 优先产生 needs_you，其余按宿主状态派生。 | `server/internal/assistant/fleet.go` 的 `agentState`；`docs/protocol/agent-states.md`「Unified states」 | `hub_blocked`、`hub_pending_offline`、`hub_working_seen`、`hub_idle`、`hub_offline`、`hub_unknown` |
 | hub 对 done 使用 `seen_at >= updated_at - 2 秒` 的已看容差，未看过则 unread。 | `agentState`；`docs/protocol/agent-states.md`「Seen」 | `hub_done_unseen`、`hub_done_seen_before_tolerance`、`hub_done_seen_at_tolerance`、`hub_done_seen_equal`、`hub_done_seen_after` |
 | idle 或 unknown 才算空闲，空闲会话有循环、后台任务或运行中的子代理时算待唤醒。 | Models 的 `isQuiet`；ChatsView 的 `Session.isWaiting` | `waiting_requires_quiet_state` |
-| 行优先级是需要你、完成未看、待你回复、工作中、后台等待中、待唤醒、已屏蔽、已看（按状态的八个分段），屏蔽不降低需要你的优先级。 | ChatsView 的 `rank` | `rank_all_states_and_mutes` |
+| 行优先级是需要你、完成未看、待你回复、工作中、后台等待中、刚做完待看、待唤醒、已屏蔽、已看（按状态的九个分段），屏蔽不降低需要你的优先级；待唤醒优先于刚做完待看，屏蔽的刚做完待看只是普通已看。 | ChatsView 的 `rank`；`web/src/lib/agent-groups.ts` 的 `justFinished` | `rank_all_states_and_mutes`、`just_finished_rank_and_precedence` |
 | 工作中用 `state_since`，缺失时用 `updated_at`，其余状态用 `updated_at`，时间缺失排最后，同时间按 `session_id` 升序。 | Models 的 `sortDate`；ChatsView 的 `ordered`；`CLAUDE.md`「Most common pitfalls」 | `working_since_then_id`、`working_since_then_id_reversed` |
 | 本任务在排序键和 session_id 都相等时追加完整 id 比较，确保跨机器次序确定。 | `CLAUDE.md`；ChatsView 的 `ordered` | `cross_machine_same_session_id`、`cross_machine_same_session_id_reversed` |
 | 快速筛选中的组内排序跳过 rank，只比较排序时间和 session_id。 | ChatsView 的 `ordered` | `quick_filter_ignores_rank` |
@@ -58,6 +58,7 @@
 - `settings.grouping` 为 `state`、`space` 或 `machine`，其中 space 对应界面的「按项目」，并非按 cwd 汇总。
 - `settings.quick` 为 `all`、`needsYou`、`unread`、`working` 或 `backgroundWaiting`；`machine_filter` 和 `query` 为空字符串时不限。
 - `search_scope` is `all`, `title`, `conversation`, `user`, `assistant` or `errors`; `search_as_code` enables the raw-query heuristics. `machine_title_filter`, `harness_filter`, `project_filter`, `model_filter` and `pinned_only` are the dedicated settings appended to the parsed inline query, exactly as on iOS.
+- Android's Kotlin list has none of those settings: its `AgentListFixtureTest` skips a case that sets a scope other than `all`, `search_as_code`, or a dedicated setting, and reads `native_sessions` where a case has them (it builds the subtask forest itself, as the Swift oracle does).
 - `kept` 是这一帧已经保留的完整会话 id；用例成对给出看过后和重新选择筛选后的快照，不要求测试驱动模拟 SwiftUI 回调。
 - `folded` 使用 `state/needs` 等状态段 id（`!state/idle` 表示默认折叠的「已看」已打开）、`machine/机器标识` 或 `机器标识/空间标识`。
 - `expanded_idle` 使用活跃空间 id 或 `machine-机器标识`；`expanded_quiet` 使用空闲空间 id；二者和显式 folded 分开。
@@ -88,7 +89,7 @@
 
 ## 对照验证
 
-本目录有 73 个用例，其中客户端 62 个、hub 11 个；连同收件箱共 101 个用例。The `agents_list` corpus has 60 cases: the 27 scoped-search/filter cases added for #9110 were hand-derived from current `AgentSearchPlan`, `AgentListProjection` and `CodexTasks`, and every older expected object is unchanged. `held.json` 的 3 个 held 用例按当前 `apple/Persona/Views/Chats/AgentListOrder.swift` 与 `AppModel.swift` 手工推导，不是由 Rust 或 Kotlin 生成。没有仅依赖人工阅读单测断言而未执行对照的客户端用例，但 `from_test` 只标明迁移的原始断言，扩展的分组输出仍通过下面的实现对照。
+本目录有 74 个用例，其中客户端 63 个、hub 11 个；连同收件箱共 102 个用例。The `agents_list` corpus has 61 cases: the 27 scoped-search/filter cases added for #9110 were hand-derived from current `AgentSearchPlan`, `AgentListProjection` and `CodexTasks`, and every older expected object is unchanged. The just-finished ordering case is included once alongside them. `held.json` 的 3 个 held 用例按当前 `apple/Persona/Views/Chats/AgentListOrder.swift` 与 `AppModel.swift` 手工推导，不是由 Rust 或 Kotlin 生成。没有仅依赖人工阅读单测断言而未执行对照的客户端用例，但 `from_test` 只标明迁移的原始断言，扩展的分组输出仍通过下面的实现对照。
 
 Swift 验证没有启动 App，也没有执行 SwiftUI 布局。`JSONValue.swift` 作为原文件传给 swiftc；其余需要的声明与方法按平衡花括号从只读源码原文提取到 `/tmp`，不改方法体。探针把 SwiftUI 的分段条件翻成数组输出，测试的是列表数据投影。原始源文件没有任何修改。
 

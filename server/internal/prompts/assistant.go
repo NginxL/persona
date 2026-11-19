@@ -281,11 +281,10 @@ type SnapshotReport struct {
 // SnapshotWorkflow is a Claude Code workflow run still running in an agent's background (#2935): the agent's turn
 // ended to wait for its result, which wakes it.
 type SnapshotWorkflow struct {
-	Agent, Machine, Session string // whose run: its label, machine and short session id (left empty inside a task)
-	Name, Phase             string
-	PhaseIndex, Phases      int    // Phase's 1-based place among the script's phases; 0 when not known
-	Done, Started           int    // its agents that returned, and started so far
-	For                     string // how long it has run ("12 minutes"), "" under a minute
+	Name, Phase        string
+	PhaseIndex, Phases int    // Phase's 1-based place among the script's phases; 0 when not known
+	Done, Started      int    // its agents that returned, and started so far
+	For                string // how long it has run ("12 minutes"), "" under a minute
 }
 
 // SnapshotProfile is the model profile in use (docs/assistant/model-profiles.md) with its tiers, the Agent presets
@@ -300,7 +299,7 @@ type SnapshotProfile struct {
 // SnapshotTier is one tier of the profile in use: what an Agent started on it runs on ("" model or effort: the
 // launcher's), and when to use it.
 type SnapshotTier struct {
-	Name, Launcher, Model, Effort, Description string
+	Name, Launcher, Model, Effort, Speed, Description string
 }
 
 // Snapshot is the live context a starting assistant gets in its system prompt.
@@ -318,9 +317,10 @@ type Snapshot struct {
 	Awaiting []SnapshotAgent
 	// Muted: agents (or their spaces) the user turned notifications off for that would be in one of the above; in
 	// none of them, as the Live Activity and the Agents badge count none of them (#4562).
-	Muted           []SnapshotAgent
+	Muted []SnapshotAgent
+	// Working: running agents; the snapshot renders only their count in the Agents heading, leaving details to
+	// agents_list (#11261).
 	Working         []SnapshotAgent
-	Workflows       []SnapshotWorkflow // background workflow runs still running, newest first
 	PhoneOnline     bool
 	NoPhone         bool               // leaves the iPhone line out: the background supervisor's (assistant/context.go backgroundSnapshot)
 	Apps            []SnapshotApp      // one per kind of device, the user's own before a simulator
@@ -366,7 +366,7 @@ type Snapshot struct {
 // and count with where to see the rows (a tool, or the App for Inbox follow-ups), never as empty: the node sends only
 // what changed, so a section that went missing would read as gone, and one rendered without its items as "none".
 type SnapshotOmit struct {
-	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
+	Waiting, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
 }
 
 // SnapshotCut is the line a snapshot cut short ends with (assistant/snapshot_cut).

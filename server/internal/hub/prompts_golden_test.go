@@ -248,6 +248,44 @@ func TestGoldenChannelMessage(t *testing.T) {
 		Asks: true, Unsupported: []string{"一段没有转写的语音"}}))
 }
 
+// A mention is public even when its turn runs in the owner's main conversation. Its origin and gathered context are
+// data, and the caution not to disclose private context follows the caller's language (#11130). Decode the fixture as
+// JSON so a host without the new fields fails by losing behavior, rather than by failing to compile this test.
+func TestChannelMentionMessageCarriesOriginAndLocalizedPublicCaution(t *testing.T) {
+	for _, tc := range []struct {
+		name, language string
+		caution        []string
+	}{
+		{"zh-Hans", "", []string{"其他对话", "其他会话", "邮件", "健康", "明确"}},
+		{"en", "English", []string{"other chats", "sessions", "mail", "health", "explicitly"}},
+		{"ja", "日本語", []string{"チャット", "セッション", "メール", "健康", "明示"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, _ := json.Marshal(map[string]any{
+				"Persona": true, "Name": "Example Chat", "Language": tc.language, "Public": true,
+				"Chat": "Release chat", "Topic": "Release 1.3", "Quote": "We ship on Friday.",
+				"Context": "Alice: The migration is done.", "Text": "What changed?",
+			})
+			var in prompts.ChannelMessage
+			if err := json.Unmarshal(fixture, &in); err != nil {
+				t.Fatal(err)
+			}
+			got := prompts.RenderChannelMessage(in)
+			golden(t, "channel_mention_message."+tc.name, got)
+			for _, want := range []string{"Release chat", "Release 1.3", "We ship on Friday.", "The migration is done.", "What changed?"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("origin/context lost %q:\n%s", want, got)
+				}
+			}
+			for _, want := range tc.caution {
+				if !strings.Contains(got, want) {
+					t.Errorf("public caution lost %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 // Closing a finished task (docs/assistant/todos.md "Automatic completion"): the judge's system prompt and its input, with and without hints.
 func TestGoldenTaskDone(t *testing.T) {
 	golden(t, "task_done", prompts.RenderTaskDone(prompts.TaskDone{Owner: "示例用户"}))

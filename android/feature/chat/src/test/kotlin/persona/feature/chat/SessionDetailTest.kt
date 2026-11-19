@@ -39,6 +39,15 @@ class SessionDetailTest {
         assertEquals(held.queued, merged.queued)
         assertEquals(held.efforts, merged.efforts)
     }
+    @Test fun summaryKeepsUndeliveredUntilACompleteRowClearsIt() {
+        val kept = UndeliveredMessage("kept", "words", at = "2026-11-17T10:00:00Z", state = "waiting")
+        val held = Session("demo", "task", undelivered = listOf(kept))
+        val summary = Session("demo", "task", waiting = false)
+        assertEquals(listOf(kept), sessionWithDetail(summary, held, null).undelivered)
+        val complete = Session("demo", "task")
+        assertTrue(sessionWithDetail(summary, held, null, complete).undelivered.isNullOrEmpty())
+    }
+
     @Test fun infoHydratesOneSummaryAndDoesNotCrossSessionKeys() {
         val summary = Session("demo", "task", waiting = false)
         val old = Session("demo", "different", queued = listOf("unrelated"))

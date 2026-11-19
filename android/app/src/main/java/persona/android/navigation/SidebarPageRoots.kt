@@ -5,13 +5,20 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.Scene
+import persona.core.contracts.SessionKey
+import persona.core.navigation.AppTab
 import persona.core.navigation.AssistantRoute
+import persona.core.navigation.ChatRoute
+import persona.core.navigation.ConversationKind
 import persona.core.navigation.ExtensionUiRoute
 import persona.core.navigation.InboxRoute
+import persona.core.navigation.InteractionRoute
 import persona.core.navigation.MachinesRoute
+import persona.core.navigation.TerminalRoute
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
 import persona.feature.assistant.AssistantSidebarShade
+import persona.feature.knowledge.KnowledgeKindRoute
 import persona.feature.knowledge.KnowledgeRoute
 
 /**
@@ -99,12 +106,14 @@ internal class SidebarPageRoots {
  */
 internal fun retainsSidebarComposition(root: NavKey): Boolean = when (root) {
     AssistantRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute -> true
+    is KnowledgeKindRoute -> true
     else -> false
 }
 
 /** A sidebar place that is its own root at regular width. A pushed extension page (`depth > 0`) is a drill-down. */
 internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
     InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute -> true
+    is KnowledgeKindRoute -> true
     is TodoDetailRoute -> true
     is ExtensionUiRoute -> key.depth == 0
     else -> false
@@ -112,16 +121,41 @@ internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
 
 /**
  * The shaded row for [root] (iOS `UnifiedSidebar.shownPlace`, UnifiedSidebar.swift:39–44).
- * [AssistantSidebarShade.None] is a root with no place row (a to-do opened as its own root).
+ * [AssistantSidebarShade.None] is a root with no sidebar row (a to-do opened as its own root).
  */
 internal fun sidebarShadeKey(root: NavKey): String = when (root) {
     AssistantRoute -> AssistantSidebarShade.Conversation
     InboxRoute -> AssistantSidebarShade.Inbox
     TodosRoute -> AssistantSidebarShade.Todos
     KnowledgeRoute -> AssistantSidebarShade.Knowledge
+    is KnowledgeKindRoute -> AssistantSidebarShade.Knowledge
     MachinesRoute -> AssistantSidebarShade.Machines
+    is ChatRoute -> if (root.kind == ConversationKind.Assistant) {
+        AssistantSidebarShade.Conversation
+    } else {
+        AssistantSidebarShade.agent(SessionKey(root.machineId, root.sessionId))
+    }
+    is InteractionRoute -> sidebarShadeKey(root.chat)
+    is TerminalRoute -> AssistantSidebarShade.agent(SessionKey(root.machineId, root.sessionId))
     is ExtensionUiRoute -> if (root.depth == 0) extensionSidebarKey(root.extensionId, root.uiId) else AssistantSidebarShade.None
     else -> AssistantSidebarShade.None
+}
+
+/**
+ * The one shade for the visible page. An Agent opened from inside Persona is a drill-down and keeps Persona's root;
+ * a direct Agents destination has its own key. Compact Persona keeps its existing conversation shading.
+ */
+internal fun visibleSidebarShade(
+    regular: Boolean,
+    selected: AppTab,
+    personaRoot: NavKey,
+    visible: NavKey?,
+    visibleSource: AppTab?,
+): String? = when {
+    selected == AppTab.Agents && visibleSource == AppTab.Persona -> sidebarShadeKey(personaRoot)
+    selected == AppTab.Agents -> visible?.let(::sidebarShadeKey) ?: AssistantSidebarShade.None
+    regular -> sidebarShadeKey(personaRoot)
+    else -> null
 }
 
 /** The same key the sidebar's extension row uses (`Root.extensionRailKey`). */
@@ -195,6 +229,7 @@ internal fun placeRootFor(key: NavKey): NavKey? = when {
     isInboxDestination(key) -> InboxRoute
     key == TodosRoute -> TodosRoute
     key == KnowledgeRoute -> KnowledgeRoute
+    key is KnowledgeKindRoute -> key
     key == MachinesRoute -> MachinesRoute
     else -> null
 }
@@ -205,6 +240,7 @@ internal fun sidebarHostId(root: NavKey): String = when (root) {
     InboxRoute -> "inbox"
     TodosRoute -> "todos"
     KnowledgeRoute -> "knowledge"
+    is KnowledgeKindRoute -> "knowledge:${root.kind.wire}"
     MachinesRoute -> "machines"
     is TodoDetailRoute -> "todo:${root.todoId}"
     is ExtensionUiRoute -> "extension:${root.extensionId}/${root.uiId}"

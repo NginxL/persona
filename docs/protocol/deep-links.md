@@ -43,11 +43,11 @@ Query keys not listed for a row are dropped (not passed on, not acted on). Fragm
 | To-dos | `/todos` | `view`, `mode`, `date` | To-dos | in place | native |
 | A to-do | `/todos/<id>` | | native | in place | native |
 | Knowledge | `/kb`, `/kb/<kind>` | | Knowledge | in place | native |
-| A knowledge entry | `/kb/<kind>/<id>` | | native | in place | (#9932) |
+| A knowledge entry | `/kb/<kind>/<id>` | | native | in place | native |
 | Computers | `/machines` | | Computers | in place | native |
 | A computer | `/machines/<id>` | `range` | native | in place | native |
 | Settings | `/settings` | `tab`, the tab's item key, `manager` | the matching page | in place | native |
-| An extension's page | `/extension/<extension>/<ui>` | `state` | native | in place | (#9932) |
+| An extension's page | `/extension/<extension>/<ui>` | `state` | native | in place | native |
 
 - `<kind>` is one of `projects`, `topics`, `chats`, `people`, `docs`, `meetings`, `events`, `recordings`; a meeting is
   `/kb/meetings/<id>` and a recording `/kb/recordings/<id>`. An id that holds `/` is one escaped segment (`%2F`).
@@ -136,7 +136,9 @@ checks; none of them is ever written by the hub's link builder.
 - **Desktop**: the packaged app registers `persona://`. An app link's path is handed to the web app in the window,
   which applies the table; the desktop app itself only refuses malformed links and drops query keys no row lists, in
   both app-link forms (`persona://open<path>` and `persona://open?route=`; #9931, #10281).
-- **Android**: `core/navigation` `HubLinks` reads paired hubs' web links; app links and the rows it lacks are #9932.
+- **Android**: `core/navigation` `HubLinks` reads paired hubs' web links, canonical and older app links, and every
+  route-table row. Cold starts and links in messages use the same native destinations. An app link's `hub` selects its
+  paired group; the page opens after that group's session is ready. Action links keep their own parsers (#9932).
 - **The hub**: one builder writes every path in the table, and the web link from `public_url` (#9927). Push payloads
   keep their typed keys (`machine_id`, `session_id`, `todo`, …), which each app maps to the same pages.
 

@@ -3,7 +3,7 @@ import { assistantSearchPaths } from './compat.js'
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request } from 'node:http'
@@ -19,9 +19,10 @@ export class AgyAcpClient extends EventEmitter {
     this.readyPromise = null
     this.nextId = 1
     this.pending = new Map()
-    this.loadedSessions = new Map() // sessionId -> boolean (hasMcp)
+    this.loadedSessions = new Map() // sessionId -> { mcp: boolean, extraDirsKey: string }
     this.availableModels = null
     this.agentVersion = ''
+    this.supportsAdditionalDirectories = false
     // Counts the agy processes started: a model list read from one carries its generation (#10368).
     this.generation = 0
     this.closed = false
@@ -105,6 +106,10 @@ export class AgyAcpClient extends EventEmitter {
       throw err
     }
     this.agentVersion = init?.agentInfo?.version || ''
+    this.supportsAdditionalDirectories = Boolean(
+      init?.agentCapabilities?.sessionCapabilities?.additionalDirectories ||
+      init?.agentCapabilities?.session_capabilities?.additionalDirectories
+    )
     return init
   }
 
@@ -119,6 +124,7 @@ export class AgyAcpClient extends EventEmitter {
     this.loadedSessions.clear()
     this.availableModels = null
     this.agentVersion = ''
+    this.supportsAdditionalDirectories = false
     const pending = [...this.pending.values()]
     this.pending.clear()
     for (const p of pending) p.reject(err)
@@ -213,10 +219,19 @@ export class AgyAcpClient extends EventEmitter {
 
   async call(method, params, timeoutMs = 60_000) {
     await this.ensureStarted()
-    return this._rawCall(method, params, timeoutMs)
+    try {
+      return await this._rawCall(method, params, timeoutMs)
+    } catch (error) {
+      if (params?.sessionId && /session[ _-]?not[ _-]?found|invalid[ _-]?session/i.test(`${error.code ?? ''} ${error.message} ${JSON.stringify(error.data ?? '')}`)) {
+        this.loadedSessions.delete(params.sessionId)
+        error.invalidSession = true
+      }
+      throw error
+    }
   }
 
   _onMessage(msg, child) {
+    if (child !== this.proc) return
     if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
       const entry = this.pending.get(msg.id)
       if (!entry) return
@@ -287,11 +302,17 @@ export class AgyAcpClient extends EventEmitter {
   async nativeRequest(method, params) {
     await this.ensureStarted()
     const child = this.proc
-    const file = this.nativeLogs.get(child)?.file
-    const portOf = () => file && Number(/random port at (\d+) for HTTP(?:\r?\n|$)/m.exec(readFileSync(file, 'utf8'))?.[1])
+    const state = this.nativeLogs.get(child)
+    const portOf = () => {
+      if (!state?.port && state?.file) {
+        const port = Number(/random port at (\d+) for HTTP(?:\r?\n|$)/m.exec(readFileSync(state.file, 'utf8'))?.[1])
+        if (port > 0 && port <= 65535) state.port = port
+      }
+      return state?.port
+    }
     // Initialize alone leaves the native service unopened. Listing sessions opens it without resuming one.
     if (!portOf()) {
-      const state = this.nativeLogs.get(child)
+      if (!state) throw new Error('Antigravity did not expose its native conversation service')
       state.ready ??= this._rawCall('session/list', {}, 20_000).catch((error) => {
         delete state.ready
         throw error
@@ -324,22 +345,33 @@ export class AgyAcpClient extends EventEmitter {
     })
   }
 
-  async newSession({ cwd, mcpServers = [] }) {
-    const res = await this.call('session/new', { cwd, mcpServers }, 30_000)
+  async newSession({ cwd, mcpServers = [], additionalDirectories = [] }) {
+    const extraDirs = Array.isArray(additionalDirectories) ? additionalDirectories.filter(Boolean) : []
+    const params = { cwd, mcpServers, ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}) }
+    const res = await this.call('session/new', params, 30_000)
     if (res?.sessionId) {
-      this.loadedSessions.set(res.sessionId, mcpServers.length > 0)
+      this.loadedSessions.set(res.sessionId, { mcp: mcpServers.length > 0, extraDirsKey: JSON.stringify(extraDirs) })
       if (res.models?.availableModels) this.availableModels = res.models.availableModels
     }
     return res
   }
 
-  async ensureSessionLoaded(sessionId, cwd, mcpServers = []) {
+  async ensureSessionLoaded(sessionId, cwd, mcpServers = [], additionalDirectories = []) {
     await this.ensureStarted()
-    if (this.loadedSessions.has(sessionId) && (mcpServers.length === 0 || this.loadedSessions.get(sessionId))) {
+    const extraDirs = Array.isArray(additionalDirectories) ? additionalDirectories.filter(Boolean) : []
+    const extraDirsKey = JSON.stringify(extraDirs)
+    const loaded = this.loadedSessions.get(sessionId)
+    if (loaded && (mcpServers.length === 0 || loaded.mcp) && loaded.extraDirsKey === extraDirsKey) {
       return
     }
-    const res = await this.call('session/resume', { sessionId, cwd: cwd || process.env.HOME || '/tmp', mcpServers }, 30_000)
-    this.loadedSessions.set(sessionId, mcpServers.length > 0)
+    const params = {
+      sessionId,
+      cwd: cwd && existsSync(cwd) ? cwd : process.env.HOME || '/tmp',
+      mcpServers,
+      ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
+    }
+    const res = await this.call('session/resume', params, 30_000)
+    this.loadedSessions.set(sessionId, { mcp: mcpServers.length > 0, extraDirsKey })
     if (res?.models?.availableModels) this.availableModels = res.models.availableModels
     return res
   }

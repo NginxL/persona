@@ -308,6 +308,30 @@ func TestParseLinkRecognized(t *testing.T) {
 	}
 }
 
+// persona://provider/import is the apps' own scheme for the same link (#5428): the same payload gives the same draft
+// as cindy://, in any case, and a refused persona link carries the same note as cindy's.
+func TestParseLinkPersonaScheme(t *testing.T) {
+	data := base64.RawURLEncoding.EncodeToString([]byte(linkTestPayload))
+	cindy := parsePaste("cindy://provider/import?v=1&data=" + data)
+	if len(cindy.Drafts) == 0 {
+		t.Fatalf("the cindy link gives no draft: %+v", cindy)
+	}
+	cj, _ := json.Marshal(cindy.Drafts)
+	for _, text := range []string{
+		"persona://provider/import?v=1&data=" + data,
+		"PERSONA://provider/import?v=1&data=" + data,
+	} {
+		res := parsePaste(text)
+		pj, _ := json.Marshal(res.Drafts)
+		if res.Format != "link" || string(pj) != string(cj) {
+			t.Errorf("%.45s…: format %q, drafts %s, want the cindy link's %s", text, res.Format, pj, cj)
+		}
+	}
+	if res := parsePaste("persona://provider/import?v=2&data=" + data); linkNotes(res) != `[{"code":"link_version","name":"2"}]` {
+		t.Errorf("a bad persona version: %s", linkNotes(res))
+	}
+}
+
 // An endpoint's own request path is noted on the draft, never named: Persona calls the API's usual one.
 func TestParseCindyRequestPath(t *testing.T) {
 	payload := `{"kind":"custom","name":"Example","auth":{"method":"apiKey","apiKey":"FAKE-KEY"},"endpoints":[` +

@@ -825,10 +825,11 @@ func (s *Service) successorOpens(ctx context.Context, t Todo, started proto.Sess
 		s.logf("task %s: reopen for the owner's message: %v", t.ID, err)
 		return
 	}
-	s.logf("task %s: reopened: the owner's message started a new agent for it", t.ID)
 	if started.SessionID == "" {
+		s.logf("task %s: reopened: the owner's message may have started a new agent for it", t.ID)
 		return
 	}
+	s.logf("task %s: reopened: the owner's message started a new agent for it", t.ID)
 	if cur, ok := s.taskOf(ctx, started.MachineID, started.SessionID); ok && cur.ID == t.ID {
 		s.taskWorks(ctx, cur)
 	}
@@ -928,10 +929,11 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_exited")
 		}
 		started, err := s.startTaskSuccessor(ctx, t, last, text)
-		if hubClosedTask(&t) && (err == nil || sendUnknown(err)) { // a start that never went out asked for nothing
+		_, st.uncertain = errors.AsType[*uncertainTaskStart](err)
+		if hubClosedTask(&t) && (err == nil || st.uncertain) { // a start that never went out asked for nothing
 			s.successorOpens(ctx, t, started) // before a message that waited for the start goes to its agent
 		}
-		s.endTaskStart(todoID, st, started) // empty when it failed: a message that waited for it starts one itself
+		s.endTaskStart(todoID, st, started)
 		if err != nil {
 			return FeedItem{}, err
 		}
@@ -944,8 +946,8 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 	return s.sendToTaskAgent(ctx, conversation, todoID, pickTaskAgent(live), text, relay, guard)
 }
 
-// routeAfterStart waits for task todoID's agent start st, then sends text to the new agent it started; a start that
-// started none (it failed, or was not a new agent's) has the message routed again, which may start one. The wait goes
+// routeAfterStart waits for task todoID's agent start st, then sends text to the new agent it started. Only a start
+// known to have started none lets the message route again, which may start one. The wait goes
 // on when the app stops waiting, as the start does, so the text is not lost; it is bounded by taskStartWait.
 func (s *Service) routeAfterStart(ctx context.Context, conversation, todoID, text string, guard func(Todo) bool, st *taskStart) (FeedItem, error) {
 	timer := time.NewTimer(taskStartWait())
@@ -954,6 +956,9 @@ func (s *Service) routeAfterStart(ctx context.Context, conversation, todoID, tex
 	case <-st.done:
 	case <-timer.C:
 		return FeedItem{}, i18n.Err("assistant-tasks.route_starting")
+	}
+	if st.uncertain {
+		return FeedItem{}, i18n.Err("assistant-tasks.route_waited_unconfirmed")
 	}
 	s.tasks.mu.Lock()
 	c := st.agent

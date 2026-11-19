@@ -20,6 +20,8 @@ internal data class ProviderPasteUiState(
     val action: ProviderPasteAction? = null,
     val reading: Boolean = false,
     val readImmediately: Boolean = false,
+    /** Opened from a link: hide the key-bearing text and offer "Paste something else" (#5428). */
+    val fromLink: Boolean = false,
     val error: ResText? = null,
 ) {
     /** An answer belongs only to the exact text it was read from. */

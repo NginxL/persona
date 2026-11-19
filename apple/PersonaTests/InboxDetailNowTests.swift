@@ -51,4 +51,23 @@ struct InboxDetailNowTests {
         it.where = ""
         #expect(InboxEventPage.from(it) == "Team chat · A matter")
     }
+
+    @Test func mailNamesItsSourceFolderInTheRowAndDetail() throws {
+        var it = item()
+        it.source = "mail"
+        it.kind = "mail"
+        it.sender = "Alex"
+        it.mail = .init(accountID: "demo", mailbox: "Projects/通知", uids: [7])
+        #expect(InboxNow.meta(it, lang: "en") == "Projects/通知 · Alex: Latest line")
+        #expect(InboxNow.meta(it, lang: "en", translatedPreview: "Translated") == "Projects/通知 · Alex: Translated")
+        #expect(InboxEventPage.from(it).contains("Projects/通知"))
+        it.mail?.mailbox = " INBOX "
+        #expect(InboxNow.meta(it, lang: "en") == " INBOX  · Alex: Latest line")
+        it.mail = try JSONDecoder().decode(InboxItem.Mail.self, from: Data(#"{"account_id":"demo","uids":[7]}"#.utf8))
+        #expect(InboxNow.meta(it, lang: "en") == nil)
+        for folder in ["INBOX", "InBoX", ""] {
+            it.mail?.mailbox = folder
+            #expect(InboxNow.meta(it, lang: "en") == nil)
+        }
+    }
 }

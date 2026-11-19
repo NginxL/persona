@@ -271,7 +271,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// (runtimeworkspaces.go).
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
-			features = append(features, "leader_tools")
+			features = append(features, "leader_tools", "supervision_policy")
 		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
 			"features": features}
@@ -446,7 +446,7 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 				}
 			}()
 		}
-		n.publish(n.sessionList(context.Background(), false))
+		n.publishSessionsSoon()
 		return
 	}
 	if n != nil {

@@ -99,7 +99,7 @@ internal fun ConnectorThreadScreen(repository: InboxRepository, connectors: Conn
         }
         page == null -> ConnectorThreadUnread(record, state.failure, navigator)
         !page.chat.isChat -> InboxItemDetailScreen(repository, InboxItemDetailRoute(route.itemId), navigator)
-        else -> ConnectorChat(record, model, state, navigator)
+        else -> ConnectorChat(record, model, state, navigator, inbox.contentSource?.transport?.replyImages)
     }
 }
 
@@ -120,7 +120,8 @@ private fun ConnectorThreadUnread(record: InboxRecord, failure: Throwable?, navi
 }
 
 @Composable
-private fun ConnectorChat(record: InboxRecord, model: ConnectorThreadModel, state: ConnectorThreadState, navigator: Navigator) {
+private fun ConnectorChat(record: InboxRecord, model: ConnectorThreadModel, state: ConnectorThreadState, navigator: Navigator,
+    imageSource: persona.core.contracts.api.ReplyImageSource?) {
     val page = state.page ?: return
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
@@ -183,7 +184,7 @@ private fun ConnectorChat(record: InboxRecord, model: ConnectorThreadModel, stat
                 }
             }
             items(page.messages, key = { it.id }) { message ->
-                ConnectorMessageRow(message, lit = message.id == lit, canReply = !page.chat.reply.isNullOrBlank(),
+                ConnectorMessageRow(message, imageSource, lit = message.id == lit, canReply = !page.chat.reply.isNullOrBlank(),
                     onQuote = { id -> jump(id) }, onReply = { replyTo = message })
             }
         }
@@ -206,6 +207,7 @@ private fun chatHeadline(chat: ConnectorThreadChat): String? {
 @Composable
 private fun ConnectorMessageRow(
     message: ConnectorThreadMessage,
+    imageSource: persona.core.contracts.api.ReplyImageSource?,
     lit: Boolean,
     canReply: Boolean,
     onQuote: (String) -> Unit,
@@ -230,7 +232,9 @@ private fun ConnectorMessageRow(
             Spacer(Modifier.height(Tokens.Space.s))
         }
         message.media.forEach { MediaPlaceholder(it) }
-        message.text?.takeIf { it.isNotBlank() }?.let { Text(it, style = PersonaTheme.type.body, color = palette.ink) }
+        message.text?.takeIf { it.isNotBlank() }?.let { text ->
+            InboxPictureText(text, imageSource)
+        }
     }
     val highlight = if (lit) Modifier.background(palette.statusSurface) else Modifier
     Box(highlight.padding(horizontal = Tokens.Space.l)) {

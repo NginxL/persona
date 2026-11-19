@@ -85,7 +85,7 @@ type inboxBook struct {
 	// answer since, and when the next may go out (retryRuled). Memory only, under mu.
 	ruledFails   int
 	ruledRetryAt time.Time
-	// mailBaselines: by mail account id, the newest UID when the inbox first read it (inbox_mail.go mailBaseline),
+	// mailBaselines: by mail folder key, the baseline, UIDVALIDITY and generation (inbox_mail.go mailBaseline),
 	// stored (inboxMailBaselinesKey) when dirty. Under mu.
 	mailBaselines      map[string]uint32
 	mailBaselinesDirty bool

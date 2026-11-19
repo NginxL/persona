@@ -732,11 +732,18 @@ func (d *Devices) downloadPackage(ctx context.Context, p nodePackage, bin, entry
 	}
 	ctx, cancel := context.WithTimeout(ctx, packageDownload)
 	defer cancel()
-	got, err := update.Download(ctx, client, p.base+"/"+url.PathEscape(p.dir), p.file, stage) // size, sha256, binary_sha256
-	if p.flat && update.IsNotFound(err) {
-		// No dl/<version>/ there (a GitHub release base): the release's own tag on GitHub, else the file beside
-		// latest.json, checked against the same manifest; a release published since the lookup is said as such (#9263).
+	var got string
+	if p.flat && update.ReleaseBase(p.base, p.Version) != "" {
+		// GitHub's moving base would redirect the legacy <version>/<file> path to a duplicate-version URL.
+		// Go straight to the release's own tag, retaining DownloadRelease's missing-tag fallback.
 		got, err = update.DownloadRelease(ctx, client, p.base, &update.Manifest{Version: p.Version, Build: p.build}, p.file, stage)
+	} else {
+		got, err = update.Download(ctx, client, p.base+"/"+url.PathEscape(p.dir), p.file, stage) // size, sha256, binary_sha256
+		if p.flat && update.IsNotFound(err) {
+			// No dl/<version>/ there: the file beside latest.json, checked against the same manifest; a release
+			// published since the lookup is said as such (#9263).
+			got, err = update.DownloadRelease(ctx, client, p.base, &update.Manifest{Version: p.Version, Build: p.build}, p.file, stage)
+		}
 	}
 	if err != nil {
 		var local *fs.PathError

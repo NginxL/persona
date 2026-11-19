@@ -38,6 +38,16 @@ class NotificationRequestLinkTest {
         assertEquals(ChatRoute("machine", "session", ConversationKind.Agent), Router().open(notificationRoute(link.uri())!!)!!.key)
     }
 
+    @Test fun canonicalPageQueriesAreNotNotificationTabs() {
+        val persona = "persona://open/settings?tab=persona"
+        val agents = "persona://open/settings?tab=agents"
+        assertEquals(null, notificationRoute(Uri.parse(persona)))
+        assertEquals(null, notificationRoute(Uri.parse(agents)))
+        assertEquals(SettingsPageRoute(SettingsPage.Persona), Router().parse(RouteInput.DeepLink(persona))?.key)
+        assertEquals(SettingsPageRoute(SettingsPage.AgentSettings), Router().parse(RouteInput.DeepLink(agents))?.key)
+        assertEquals(null, notificationRoute(Uri.parse("persona://open/todos/t-19?tab=agents")))
+    }
+
     @Test fun untabbedLinkNamesItsRequestOnceMetadataArrives() {
         val untabbed = NotificationRoute(null, ChatRoute("machine", "session"), "second").uri().toString()
         assertEquals(InteractionRoute(ChatRoute("machine", "session", ConversationKind.Agent), "second"),

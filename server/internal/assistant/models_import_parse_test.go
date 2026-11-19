@@ -281,13 +281,16 @@ func TestParsePasteCurl(t *testing.T) {
 			}}},
 		},
 		{
-			name: "Chat Completions: Bearer, a direct API takes no headers or proxy",
+			name: "Chat Completions: Bearer and custom headers, proxy options noted",
 			text: "KEY=1 curl -sSL https://api.example.com/v1/chat/completions -H \"Authorization: Bearer " + pasteKeyB + "\" -H \"X-Team: blue\" " +
 				"-x http://proxy.example.com:1 --noproxy localhost --json '{\"model\":\"gpt-x\"}'\necho done\n",
 			want: pasteResult{Format: "curl", Notes: notes(pasteNote{Code: noteLineUnused, Line: 2}), Drafts: []pasteDraft{{
-				Provider:       withModels(pastedProvider{Kind: "api", API: "chat", BaseURL: "https://api.example.com/v1", Auth: "bearer", APIKey: pasteKeyB}, "gpt-x"),
-				SkippedHeaders: []skippedHeader{{Name: "X-Team", Reason: "unsupported"}},
-				Notes:          notes(pasteNote{Code: noteCurlOption, Name: "-x"}, pasteNote{Code: noteCurlOption, Name: "--noproxy"}),
+				Provider: func() pastedProvider {
+					p := withModels(pastedProvider{Kind: "api", API: "chat", BaseURL: "https://api.example.com/v1", Auth: "bearer", APIKey: pasteKeyB}, "gpt-x")
+					p.Headers = "X-Team: blue"
+					return p
+				}(),
+				Notes: notes(pasteNote{Code: noteCurlOption, Name: "-x"}, pasteNote{Code: noteCurlOption, Name: "--noproxy"}),
 			}}},
 		},
 		{
@@ -391,11 +394,10 @@ func TestParsePasteCindy(t *testing.T) {
 				{"protocol": "openai-chat", "baseUrl": "http://127.0.0.1:4000/v1", "headers": {"X-Tenant": "example", "X-Api-Key": "sk-example-h",
 					"Content-Type": "application/json", "X-Count": 3}}]}`,
 			want: pasteResult{Format: "cindy", Notes: []pasteNote{}, Drafts: []pasteDraft{{
-				Label:    "C",
-				Provider: pastedProvider{Kind: "api", API: "chat", DisplayName: "C", BaseURL: "http://127.0.0.1:4000/v1"},
-				SkippedHeaders: []skippedHeader{{Name: "Content-Type", Reason: "protocol"}, {Name: "X-Api-Key", Reason: "credential"},
-					{Name: "X-Tenant", Reason: "unsupported"}},
-				Notes: notes(pasteNote{Code: noteCindyAuth, Name: "none"}, pasteNote{Code: noteCindyEndpoint, Name: "google-generative-ai"}),
+				Label:          "C",
+				Provider:       pastedProvider{Kind: "api", API: "chat", DisplayName: "C", BaseURL: "http://127.0.0.1:4000/v1", Headers: "X-Tenant: example"},
+				SkippedHeaders: []skippedHeader{{Name: "Content-Type", Reason: "protocol"}, {Name: "X-Api-Key", Reason: "credential"}},
+				Notes:          notes(pasteNote{Code: noteCindyAuth, Name: "none"}, pasteNote{Code: noteCindyEndpoint, Name: "google-generative-ai"}),
 			}}},
 		},
 		{

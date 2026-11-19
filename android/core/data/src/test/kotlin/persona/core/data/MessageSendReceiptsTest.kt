@@ -37,6 +37,17 @@ class MessageSendReceiptsTest {
         assertTrue(state.receipts.value.single().processing)
     }
 
+    @Test fun keptReceiptIsTerminalWithoutProcessingOrDelivery() {
+        val state = reducer()
+        state.sessions(listOf(row))
+        state.event(event("kept"))
+        val kept = state.receipts.value.single()
+        assertEquals("kept", kept.state)
+        assertFalse(kept.processing)
+        state.sessions(listOf(row.copy(status = "working", state = "working")))
+        assertTrue(state.receipts.value.isEmpty())
+    }
+
     @Test fun anEchoBeforeHttpKeepsReceiptWithoutRestoringTheOutboxBubble() = runTest {
         val connection = FakeConnection().apply {
             lastHello = Hello(hubId = "hub", features = listOf("message_send_state"), messageSendState = 1)

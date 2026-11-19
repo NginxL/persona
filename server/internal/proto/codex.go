@@ -37,6 +37,10 @@ type SessionCapabilities struct {
 	PermissionModes PermissionModeSet `json:"permission_modes,omitempty"`
 	// StopCause qualifies stopped-session recovery; absent/unknown never permits a supervisor resume.
 	StopCause StopCause `json:"stop_cause,omitempty"`
+	// SupervisionPolicy reports that a runtime-hosted session accepts manager-owned supervision_instructions
+	// on its own policy channel (separate from user messages) and fails closed if it cannot apply them.
+	// Absent/false keeps the conservative non-capable runtime routing and refusal behavior (#10338, #11121).
+	SupervisionPolicy bool `json:"supervision_policy,omitempty"`
 	// Close is independent of terminal access. Absent on older nodes, where clients retain terminal-only closing.
 	Close *bool `json:"close,omitempty"`
 	// Rename permits session.rename's title without a terminal (a runtime's session, #6294). Absent on older nodes,

@@ -81,6 +81,11 @@
     <string name="app_share_queueing">正在加入发送队列…</string>
     <string name="app_share_queued_offline">已加入发送队列，联网后自动发送</string>
     <string name="app_share_queue_failed">没能放进发送队列。内容还在，再试一次</string>
+    <string name="app_diagnostics_title">把诊断信息发给 Agent</string>
+    <string name="app_diagnostics_archive">诊断信息压缩包</string>
+    <string name="app_diagnostics_note">这是这台 Android 设备的诊断信息。请查看附件，帮我找出问题。</string>
+    <string name="app_diagnostics_open_chat">打开对话</string>
+    <string name="app_diagnostics_prepare_failed">无法准备诊断信息草稿。请检查连接后重试；尚未发送任何内容。</string>
     <string name="app_capsule_open_and_handle">查看并处理</string>
     <string name="app_capsule_main_prompt">想让 Persona 做什么？</string>
     <string name="app_capsule_main_section">主对话</string>

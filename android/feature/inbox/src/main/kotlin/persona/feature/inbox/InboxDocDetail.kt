@@ -152,7 +152,7 @@ fun InboxItemDetailScreen(repository: InboxRepository, route: InboxItemDetailRou
                 InboxItemLookupResult.Missing -> item("item-missing") { StatusText(stringResource(R.string.inbox_item_missing)) }
                 is InboxItemLookupResult.Found -> Unit
             }
-        } else inboxItemBody(record, assistantContext) { url -> open?.invoke(url, inbox.contentSource) }
+        } else inboxItemBody(record, assistantContext, inbox.contentSource?.transport?.replyImages) { url -> open?.invoke(url, inbox.contentSource) }
     }
 }
 
@@ -170,7 +170,8 @@ private fun InboxRecord.additionalAssistantText(text: String, loadedContext: Boo
     return trimmed.afterSummary() ?: text
 }
 
-internal fun LazyListScope.inboxItemBody(record: InboxRecord, context: String? = null, onOpen: (String) -> Unit) {
+internal fun LazyListScope.inboxItemBody(record: InboxRecord, context: String? = null,
+    images: persona.core.contracts.api.ReplyImageSource? = null, onOpen: (String) -> Unit) {
     val doc = record.doc
     if (doc == null) {
         if (record.isAssistantRow) {
@@ -186,14 +187,14 @@ internal fun LazyListScope.inboxItemBody(record: InboxRecord, context: String? =
                     val content = record.additionalAssistantText(text, loadedContext != null)
                     if (content.isNotBlank()) {
                         item("assistant-content-header") { JSectionHeader(stringResource(R.string.inbox_content)) }
-                        item("item-preview") { Text(content, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink) }
+                        item("item-preview") { InboxPictureText(content, images) }
                     }
                 }
             }
             return
         }
         record.item.preview.takeIf { it.isNotBlank() }?.let { text ->
-            item("item-preview") { Text(text, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink) }
+            item("item-preview") { InboxPictureText(text, images) }
         }
         return
     }

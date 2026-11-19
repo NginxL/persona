@@ -75,6 +75,7 @@ class GroupRuntime internal constructor(
     private var reconciliationJob: Job? = null
     /** Installed by this group's repositories before exposing its chat services. */
     internal var adoptSession: (suspend (SessionKey, Session) -> Unit)? = null
+    internal var heldActions: ((SessionKey) -> HeldAgentActions)? = null
     private val mutableEndpointSettings = MutableStateFlow<HubEndpointSettings?>(null)
     val endpointSettings = mutableEndpointSettings.asStateFlow()
     /** The compatibility handle the shell and platform services use while this group is selected. */
@@ -248,6 +249,7 @@ class GroupRuntime internal constructor(
         hub = null
         live?.close()
         live = null
+        heldActions = null
         adoptSession = null
         job.cancel()
         mutableTunnel.value = null

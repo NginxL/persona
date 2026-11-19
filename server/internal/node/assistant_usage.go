@@ -37,8 +37,14 @@ import (
 // reporting nonsense, or a conversation that really is too long, does not loop).
 const usageRetryEvery = 10 * time.Minute
 
-// usageResend replaces assistantSend for sending the message again (tests); nil: assistantSend.
+// usageResend replaces sendAssistantUsageRetry for sending the message again (tests); nil: sendAssistantUsageRetry.
 var usageResend func(ctx context.Context, n *Node, id, cwd, launcher, text string, execution modelExecution) error
+
+func sendAssistantUsageRetry(ctx context.Context, n *Node, id, cwd, launcher, text string, execution modelExecution) error {
+	execution.OriginDecisionRequired = true
+	_, err := n.assistantSend(ctx, id, cwd, launcher, text, nil, "", "", execution)
+	return err
+}
 
 // usageKeyRe is a usage count in a line ("input_tokens": 1706464): a key not inside a string (a quote inside a JSON
 // string is escaped), and its digits (group 1).
@@ -293,10 +299,7 @@ func (n *Node) checkTurnUsage(p *assistantProc, tooLong bool) {
 	defer cancel()
 	send := usageResend
 	if send == nil {
-		send = func(ctx context.Context, n *Node, id, cwd, launcher, text string, execution modelExecution) error {
-			_, err := n.assistantSend(ctx, id, cwd, launcher, text, nil, "", "", execution)
-			return err
-		}
+		send = sendAssistantUsageRetry
 	}
 	if err := send(ctx, n, p.id, cwd, launcher, prompts.RenderUsageRetry(), execution); err != nil {
 		n.logger.Printf("assistant %s: send the refused message again: %v", p.id[:8], err)

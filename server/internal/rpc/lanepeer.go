@@ -234,11 +234,10 @@ func (p *Peer) writeFramed(ctx context.Context, lw *laneWriter, b []byte, r rout
 		return observation, NotSent(err)
 	}
 	l := &outLine{b: b, lane: r.lane, credit: r.credit, queued: time.Now(), done: make(chan error, 1)}
-	delayed, err := lw.enqueue(l)
+	observation, err := lw.enqueue(l)
 	if err != nil {
 		return observation, NotSent(err)
 	}
-	observation.delayed = delayed
 	select {
 	case err = <-l.done:
 	case <-ctx.Done():

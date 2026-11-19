@@ -4,11 +4,12 @@ package assistantwire
 // and go to that machine's node as they are). The manager that connects the computers (internal/devices) calls the
 // nodes itself and sends the hub only these.
 var HubDeviceMethods = map[string]bool{
-	DeviceDevicesList:      true,
-	DeviceInteractionsList: true,
-	DeviceSessionsList:     true,
-	DeviceSessionGet:       true,
-	DeviceSessionFollow:    true,
-	DeviceSessionUnfollow:  true,
-	DeviceSessionSendOnce:  true,
+	DeviceDevicesList:          true,
+	DeviceInteractionsList:     true,
+	DeviceSessionsList:         true,
+	DeviceSessionGet:           true,
+	DeviceSessionFollow:        true,
+	DeviceSessionUnfollow:      true,
+	DeviceSessionSendOnce:      true,
+	DeviceAssistantAnswerAgain: true,
 }

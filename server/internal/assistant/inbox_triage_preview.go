@@ -29,6 +29,8 @@ func (s *Service) InboxTriagePreview(ctx context.Context, p assistantwire.InboxT
 	if source == "" {
 		source = "-preview" // no source has it: its kinds come with the request
 	}
+	hello := s.hello(ctx)
+	language := answerLanguage(hello.Locale)
 	b := &s.inbox
 	out := make([]assistantwire.InboxTriageVerdict, len(things))
 	var wg sync.WaitGroup
@@ -36,17 +38,14 @@ func (s *Service) InboxTriagePreview(ctx context.Context, p assistantwire.InboxT
 		it := &InboxItem{ID: "preview", Source: source}
 		fillConnectorItem(it, t)
 		b.mu.Lock()
-		item := b.promptItem(it)
+		item := b.triagePromptItem(it, language)
 		b.mu.Unlock()
-		if source == "larkcli" && it.Kind == KindDM {
-			item.Latest = it.Preview
-		}
 		if item.Described == "" {
 			item.Described = p.Kinds[it.Kind]
 		}
 		input := prompts.RenderInboxItem(item)
 		wg.Go(func() {
-			v := s.triageModel(ctx, input, it.Rules, triagePreviewWait)
+			v := s.triageModelIn(ctx, input, it.Rules, triagePreviewWait, hello)
 			out[i] = assistantwire.InboxTriageVerdict{Tier: v.tier, Summary: v.summary, Reason: v.reason, Urgent: v.urgent,
 				State: v.state, Why: v.why}
 		})

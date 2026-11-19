@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -142,6 +144,17 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 		return
 	}
 	sid := r.PathValue("sid")
+	if caller := principalOf(r.Context()); caller.Role == roleScoped {
+		row, exists := m.session(sid)
+		if !exists || healthSession(&row) {
+			writeErr(w, http.StatusNotFound, errors.New("no such session"))
+			return
+		}
+		if !slices.Contains(caller.Scopes, extwire.ScopeAgentsPermissionMode) && scopedSendNeedsPermissionMode(row, p) {
+			scopedPermissionDenied(w, extwire.ScopeAgentsPermissionMode)
+			return
+		}
+	}
 	if todoID, _ := p["todo_id"].(string); todoID != "" && principalOf(r.Context()).Role != roleFull {
 		writeErr(w, http.StatusForbidden, errors.New("read-only role cannot modify todos"))
 		return
@@ -259,16 +272,23 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		if fresh {
 			hand.New, hand.MachineID, hand.Cwd = true, m.cfg.ID, start.cwd
 		}
-		decided, ok := h.todoHandoff(r.Context(), w, hand)
+		decided, images, ok := h.todoHandoff(r.Context(), w, hand)
 		if !ok {
 			return
 		}
 		if isText {
 			p["text"] = decided
+			if strings.TrimSpace(decided) != "" {
+				mergeTodoImages(p, images)
+			}
 		}
 	} else if fresh {
-		p["text"] = h.todoStartText(r.Context(), assistantwire.TodoHandoff{TodoID: start.todoID, Text: text, New: true,
+		decided, images := h.todoStartText(r.Context(), assistantwire.TodoHandoff{TodoID: start.todoID, Text: text, New: true,
 			MachineID: m.cfg.ID, Cwd: start.cwd})
+		p["text"] = decided
+		if strings.TrimSpace(decided) != "" {
+			mergeTodoImages(p, images)
+		}
 	}
 	if s, ok := m.session(sid); ok && (m.isAssistant(s) || isText && strings.TrimSpace(text) != "") {
 		// The manager also observes owner messages to Agents before delivery, so a task's decision default can pause.

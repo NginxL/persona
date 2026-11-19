@@ -5,7 +5,7 @@ vi.mock("./router", async (importOriginal) => {
   const router = await importOriginal<typeof import("./router")>();
   return { parse: router.parse, routePath: router.routePath, navigate: vi.fn(), routeAt: () => null };
 });
-vi.mock("./api", () => ({ api: vi.fn(), enc: encodeURIComponent, getToken: () => "tok", ApiError: class extends Error {} }));
+vi.mock("./api", () => ({ api: vi.fn(), enc: encodeURIComponent, onCredentialChange: () => () => {}, credentialOwner: () => "test-owner", getToken: () => "tok", ApiError: class extends Error {} }));
 
 import { api } from "./api";
 import { parseUserText } from "./turns";

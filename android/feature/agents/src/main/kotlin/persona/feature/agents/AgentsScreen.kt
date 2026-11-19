@@ -80,7 +80,7 @@ internal fun AgentsScreen(
     val window = androidx.compose.ui.platform.LocalConfiguration.current
     // The pill counts what the Needs You section of a page would draw, from the requests the screen shows for that page.
     val feed = rememberAgentsFeed(latestPage, { p ->
-        agentsFeedNeedsYou(p, shownRequests(everyRequest, group, assistant, p.sessions)) { key -> model.operationState.value.sessions[key]?.closed == true }
+        agentsFeedNeedsYou(p, shownRequests(everyRequest, group, assistant, p.sessions, p.hiddenSessions)) { key -> model.operationState.value.sessions[key]?.closed == true }
     }, listOf(group?.namespace, assistant.id, assistant.group, latestPage.settings, latestPage.preferences, PersonaTheme.style,
         window.screenWidthDp, window.screenHeightDp), listState)
     val page = feed.page
@@ -91,7 +91,9 @@ internal fun AgentsScreen(
     LaunchedEffect(model) { model.listSettings.map { it.machineFilter }.distinctUntilChanged().collect { machineSelected(it) } }
     val everySession by model.everySession.collectAsStateWithLifecycle()
     val everyMachine by model.everyMachine.collectAsStateWithLifecycle()
-    val pending = remember(everyRequest, group, assistant, page.sessions) { shownRequests(everyRequest, group, assistant, page.sessions) }
+    val pending = remember(everyRequest, group, assistant, page.sessions, page.hiddenSessions) {
+        shownRequests(everyRequest, group, assistant, page.sessions, page.hiddenSessions)
+    }
     val outbox by model.sender.outbox.collectAsStateWithLifecycle()
     val delivery by model.delivery.collectAsStateWithLifecycle()
     val requestHistory by model.requestHistory.collectAsStateWithLifecycle()
@@ -100,8 +102,6 @@ internal fun AgentsScreen(
     val hubNotice by model.hubNotice.collectAsStateWithLifecycle()
     val herdrStates by (model.herdr?.states ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap<String, HerdrState>())).collectAsStateWithLifecycle()
     val startingHerdr by (model.herdr?.starting ?: kotlinx.coroutines.flow.MutableStateFlow(emptySet<String>())).collectAsStateWithLifecycle()
-    val botmuxHide = stringResource(R.string.agents_botmux_hide)
-    val botmuxShow = stringResource(R.string.agents_botmux_show)
     val herdrFailures by (model.herdr?.failures ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap<String, HerdrFailure>())).collectAsStateWithLifecycle()
     val operations by model.operationState.collectAsStateWithLifecycle()
     val archives = model.archives
@@ -352,7 +352,7 @@ internal fun AgentsScreen(
     val restoring = RestoreAgentReadingPosition(listState, tree, paginationFooter, page.loaded)
     KeepAgentReadingPosition(listState, tree, paginationFooter,
         scope = listOf(group?.namespace, assistant.id, assistant.group, controls.grouping, controls.sort,
-            controls.quick, controls.machineFilter, controls.query, controls.hideBotmux,
+            controls.quick, controls.machineFilter, controls.query, page.preferences.hiddenBotmuxHubs,
             controls.folded, controls.expandedIdle, controls.expandedQuiet, controls.expandedAll, page.preferences.foldedTabs, expandedTasks,
             page.preferences.range, page.preferences.display, PersonaTheme.style),
         restoring = restoring)
@@ -434,7 +434,7 @@ internal fun AgentsScreen(
                 MachineFilterRow(chips, page.machineTotal, page.settings.machineFilter, { id -> model.machine(id); onMachineSelected(id) })
             }
             item("quick-filters") {
-                // "Lark groups" / "Terminal" (#2526) only while they have agents (or are chosen), as iOS and the web.
+                // The Lark filter disappears when the visible list has no Lark sessions.
                 val shown = AgentQuickFilter.shown(page.settings.quick, quickCounts)
                 val bays = shown.map { filter ->
                     Bay(filter.label, if (filter == AgentQuickFilter.All) page.allCount else quickCounts[filter] ?: 0, filter.state?.designStatus,
@@ -459,14 +459,6 @@ internal fun AgentsScreen(
                         selected = true, onClick = { clearMachine() },
                         role = Role.Button, trailingIcon = persona.core.designsystem.icons.PersonaIcons.clear)
                 }
-            }
-            // "botmux" (web #2786): show or hide botmux's sessions in this list, kept on this phone.
-            if (page.botmuxCount > 0 || page.preferences.hideBotmux) item("botmux") {
-                val shownBotmux = !page.settings.hideBotmux
-                JChip(stringResource(R.string.agents_botmux), Modifier.padding(bottom = Tokens.Space.s).semantics {
-                    contentDescription = if (shownBotmux) botmuxHide else botmuxShow
-                }, selected = shownBotmux, onClick = model::toggleBotmux, icon = PhIcons.Eye,
-                    count = page.botmuxCount.takeIf { it > 0 })
             }
             val currentNotice = hubNotice
             if (currentNotice != null && page.settings.query.isEmpty() && page.preferences.range != AgentRange.History) {
@@ -1006,10 +998,10 @@ internal fun persona.core.contracts.api.CurrentAssistant.todosFor(todos: List<pe
 }
 
 internal fun shownRequests(requests: List<Interaction>, group: GroupFilter?, assistant: persona.core.contracts.api.CurrentAssistant,
-    sessions: List<Session>): List<Interaction> {
+    sessions: List<Session>, hidden: Set<SessionKey> = emptySet()): List<Interaction> {
     val managers = sessions.associate { it.key to it.manager }
     return requests.filter { request ->
-        (group == null || group.admits(request.machineId)) && assistant.ownsOn(request.machineId, request.manager ?: managers[request.sessionKey])
+        request.sessionKey !in hidden && (group == null || group.admits(request.machineId)) && assistant.ownsOn(request.machineId, request.manager ?: managers[request.sessionKey])
     }
 }
 

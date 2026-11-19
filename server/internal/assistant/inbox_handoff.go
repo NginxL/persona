@@ -145,7 +145,7 @@ func (s *Service) handOff(ctx context.Context, id string, in handoffReq) (InboxI
 	title := clip(oneLine(it.Title), 80)
 	source := suggestionReplyTarget(it) // captured before I/O: a newer incoming message was not part of this request
 	b.mu.Unlock()
-	to, err := s.sendHandoff(ctx, prompts.RenderInboxHandoff(prompts.InboxHandoff{ID: id, Title: title, Text: text}), op)
+	to, err := s.sendHandoff(ctx, prompts.RenderInboxHandoff(prompts.InboxHandoff{Language: answerLanguage(s.hello(ctx).Locale), ID: id, Title: title, Text: text}), op)
 	if err != nil {
 		return InboxItem{}, SessionRef{}, err
 	}
@@ -334,12 +334,16 @@ func clearDraft(it *InboxItem) {
 
 // renderHandoffNote is a handling note for a conversation the item was handed to, wrapped to name the item.
 func renderHandoffNote(n inboxNote, owner, id, title string) string {
+	return renderHandoffNoteIn(n, owner, id, title, "")
+}
+
+func renderHandoffNoteIn(n inboxNote, owner, id, title, language string) string {
 	if title == "" { // the head the hub recognizes needs a title (prompts.ParseInjected)
 		title = id
 	}
-	note := prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited,
+	note := prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Language: language, Owner: owner, Text: n.Text, Edited: n.Edited,
 		Context: n.Context, Machine: n.Machine, Session: n.Session, Handoff: true})
-	return prompts.RenderInboxHandoffNote(prompts.InboxHandoffNote{ID: id, Title: title, Note: note})
+	return prompts.RenderInboxHandoffNote(prompts.InboxHandoffNote{Language: language, ID: id, Title: title, Note: note})
 }
 
 // tellHandoff tells the conversation a suggestion came from what the user did with it, in the background (a request
@@ -354,7 +358,8 @@ func (s *Service) tellHandoff(ctx context.Context, id, title string, to SessionR
 		}
 		cctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
-		text := renderHandoffNote(n, s.owner(cctx), id, title)
+		hello := s.hello(cctx)
+		text := renderHandoffNoteIn(n, inboxPromptOwner(hello), id, title, answerLanguage(hello.Locale))
 		params, err := s.sendParams(cctx, SendParams{MachineID: to.MachineID, SessionID: to.SessionID,
 			Params: map[string]any{"session_id": to.SessionID, "text": text}})
 		if err == nil {

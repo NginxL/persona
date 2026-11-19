@@ -21,6 +21,7 @@ export interface RunSpec {
   inlinePrompt?: boolean;
   model?: string;
   effort?: string;
+  launcherDefaultEffort?: boolean;
   permissionMode?: string;
   host?: string;
   ultracode?: boolean;
@@ -82,6 +83,7 @@ function readSpec(v: unknown): RunSpec | null {
     if (x) spec[k] = x;
   }
   if (s.inlinePrompt === true) spec.inlinePrompt = true;
+  if (s.launcherDefaultEffort === true) spec.launcherDefaultEffort = true;
   if (s.ultracode === true) spec.ultracode = true;
   return spec;
 }

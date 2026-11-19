@@ -51,6 +51,8 @@
   "route_agents_stopped": "这个任务的 Agent 都已经停了，这次没有发送。在任务上发一条消息会为它开一个新的 Agent。",
   "route_agents_exited": "这个任务的 Agent 都已经停了，没有可以退出的，这次没有发送。",
   "route_starting": "这个任务的新 Agent 还在启动，这条消息没有发送。请稍后再发一次。",
+  "route_start_unconfirmed": "消息可能已送达此任务的新 Agent。请先查看任务的 Agent，再决定是否重发。{reason}",
+  "route_waited_unconfirmed": "上一条消息可能已送达此任务的新 Agent。本次没有再发消息，请先查看任务的 Agent，再决定是否重发。",
   "route_offline": "那台电脑不在线",
   "route_not_kept": "没能记下这条消息会重新打开这个任务，所以没有发送：请再试一次。",
   "earlier_phase_outcome": "先前阶段的结论",

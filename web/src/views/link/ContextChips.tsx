@@ -16,12 +16,12 @@ export function ContextChips({ draftKey }: { draftKey: string }) {
         const whole = r.text === WHOLE;
         const workspace = r.kind === "workspace";
         const skill = r.kind === "skill";
-        const label = skill ? `${r.title} · ${r.text.split("\n")[0]}` : workspace ? r.title : whole ? r.title || r.url : r.text.replace(/\s+/g, " ");
+        const label = skill ? `${r.title} · ${r.text.split(/\n| · /, 1)[0]}` : workspace ? r.title : whole ? r.title || r.url : r.text.replace(/\s+/g, " ");
         const kindLabel = skill ? t("link-contextchips.skill") : r.kind === "edit" ? t("link-contextchips.edit") : workspace ? t("link-contextchips.workspace") : t("link-contextchips.context");
         return (
           <span
             key={r.id}
-            title={`${r.kind === "edit" ? t("link-contextchips.edit_title") : kindLabel} · ${r.title}\n${whole ? r.url : r.text}`}
+            title={skill ? label : `${r.kind === "edit" ? t("link-contextchips.edit_title") : kindLabel} · ${r.title}\n${whole ? r.url : r.text}`}
             className={`flex ${skill ? "min-h-11 max-w-full" : "h-7 max-w-[280px]"} min-w-0 items-center gap-1.5 rounded-full bg-accent-tint pr-1 pl-2.5 text-accent-ink`}
             style={{ animation: `pop-in 180ms ${EASE} both` }}
           >

@@ -25,6 +25,7 @@
   ],
   "reviewer": {
     "command": "claude",
+    "concurrency": 16,
     "timeout_seconds": 3600,
     "repair_timeout_seconds": 3600
   },

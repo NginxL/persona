@@ -18,12 +18,13 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/ai"
+	"github.com/nwverse/persona/server/internal/mcptoolgolden"
 )
 
 // Behaviour cases for supervision events (#6879, step P0 of docs/design/proposals/assistant-instructions.md). Each
 // case hands a model the text a supervising conversation reads, taken from the goldens so a prompt change is tested
 // as soon as its goldens are regenerated: the instructions (a CLAUDE.md golden) as the system prompt, the assistant's
-// tool list (hub's mcp_tools.assistant golden, plus a Bash tool standing in for the shell) and a supervision event
+// tool list (rebuilt from hub's mcp_tools goldens, plus a Bash tool standing in for the shell) and a supervision event
 // golden as the message. Tool calls get the case's canned results, and the calls are checked, not the wording.
 //
 // TestSupervisionBehaviourCasesAreWellFormed runs with the other tests and needs no model. TestSupervisionBehaviourLive
@@ -96,7 +97,7 @@ func behaviourGolden(t *testing.T, name string) string {
 // behaviourTools is the assistant's tool list as the hub offers it, plus Bash.
 func behaviourTools(t *testing.T) []map[string]any {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "hub", "testdata", "prompts", "mcp_tools.assistant.golden"))
+	b, err := mcptoolgolden.Load(filepath.Join("..", "hub", mcptoolgolden.Dir), "assistant")
 	if err != nil {
 		t.Fatal(err)
 	}

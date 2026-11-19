@@ -18,7 +18,7 @@ nonisolated struct AnswerLine: Hashable, Sendable {
 nonisolated enum Answered {
     static var modeLabels: [String: String] {
         [
-            "acceptEdits": String(localized: "Auto-Accept Edits"),
+            "acceptEdits": String(localized: "Auto-Edit"),
             "bypassPermissions": String(localized: "Allow Everything"),
             "default": String(localized: "Confirm each step")
         ]

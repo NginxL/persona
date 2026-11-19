@@ -304,7 +304,9 @@ struct WorkspaceAgentRow: View {
     }
 
     @ViewBuilder private var title: some View {
-        if session.state == .unread || session.state == .idle {
+        if session.showsJustFinished(muted: muted) {
+            StatusDot(state: .idle, size: Theme.Size.dotS, justFinished: true)
+        } else if session.state == .unread || session.state == .idle {
             ThemedIcon(Theme.Icon.success).font(Theme.WorkspaceSidebar.meta).foregroundStyle(Theme.WorkspaceSidebar.success)
         } else { StatusDot(state: session.state, size: Theme.Size.dotS) }
         AgentMark(session, side: Theme.Size.markXS)
@@ -314,6 +316,9 @@ struct WorkspaceAgentRow: View {
     }
 
     @ViewBuilder private var metadata: some View {
+        if session.showsJustFinished(muted: muted) {
+            Text(StateName.justFinished.text).font(Theme.WorkspaceSidebar.meta).foregroundStyle(StatusPalette.unread.text)
+        }
         Text(session.model.flatMap { $0.isEmpty ? nil : $0 } ?? session.agentLabel)
             .font(Theme.WorkspaceSidebar.meta.monospaced()).foregroundStyle(Theme.WorkspaceSidebar.muted).lineLimit(1)
             .scaledWidthCap(Theme.WorkspaceSidebar.projectBadgeWidth).fixedSize(horizontal: true, vertical: false)

@@ -11,5 +11,6 @@
   "someday_closed": "只有未完成的待办才能放到「以后再做」",
   "someday_until": "请选一个之后的时间，最晚到 9999 年",
   "not_found": "这个待办已不存在",
-  "round_not_found": "待办对话里的这一段已经不在了"
+  "round_not_found": "待办对话里的这一段已经不在了",
+  "images_forbidden": "此设备无法读取待办图片"
 }

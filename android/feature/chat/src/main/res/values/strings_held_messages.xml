@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_held_composer">%1$s is offline. Sends when it’s back.</string>
+    <string name="chat_held_computer_offline">%1$s is offline.</string>
+    <string name="chat_held_waiting">Will send when %1$s is back</string>
+    <string name="chat_held_unconfirmed">Delivery wasn’t confirmed</string>
+    <string name="chat_held_remove_title">Remove this message from the queue?</string>
+    <string name="chat_held_remove_detail">This removes the held copy from all your devices. Any copy already delivered stays in the chat.</string>
+    <plurals name="chat_held_images">
+        <item quantity="one">%1$d image</item>
+        <item quantity="other">%1$d images</item>
+    </plurals>
+</resources>

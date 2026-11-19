@@ -35,7 +35,11 @@ sealed interface RouteSource {
     val side: Boolean = false,
 ) : NavKey
 
-@Serializable @SerialName("persona.core.navigation.InboxItemRoute") data class InboxItemRoute(val itemId: String) : NavKey
+@Serializable @SerialName("persona.core.navigation.InboxItemRoute") data class InboxItemRoute(
+    val itemId: String,
+    /** The assistant whose item this is; null keeps the current assistant and the route's old saved form. */
+    val manager: String? = null,
+) : NavKey
 
 /**
  * An inbox item drawn by the extension of the connector it comes from (its `inbox_item` UI, docs/extensions/extensions.md "UI slots"):

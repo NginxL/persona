@@ -2,7 +2,7 @@
 - 现在：{{.Now.Format "2006-01-02"}} 周{{if eq $w 0}}日{{else if eq $w 1}}一{{else if eq $w 2}}二{{else if eq $w 3}}三{{else if eq $w 4}}四{{else if eq $w 5}}五{{else}}六{{end}} {{.Now.Format "15:04"}}（{{.Zone}}）
 {{if .OpenTodosLoaded}}- 开放待办：共 {{.OpenTodosTotal}} 件（完整列表用 todo_list）
 {{end -}}
-- 模型档位：{{with .ModelProfile}}{{if .Unreadable}}unavailable (model_profiles_list to retry){{else if .Gone}}{{.ID}}，已被删除（没有 Agent 预设；model_profile_switch 换一个）{{else}}{{ctx (or .Name .ID)}} ({{.ID}}){{with .Tiers}}；Agent 预设（agent_start / task_plan 的 tier）：{{range $i, $t := .}}{{if $i}}；{{end}}{{$t.Name}} = {{ctx $t.Launcher}} · {{if $t.Model}}{{ctx $t.Model}}{{else}}默认模型{{end}}{{with $t.Effort}} · {{.}}{{end}}{{with $t.Description}}（{{ctx .}}）{{end}}{{end}}{{else}}；没有 Agent 预设{{end}}{{end}}{{else}}未设置（model_profiles_list 查看，model_profile_switch 切换）{{end}}
+- 模型档位：{{with .ModelProfile}}{{if .Unreadable}}unavailable (model_profiles_list to retry){{else if .Gone}}{{.ID}}，已被删除（没有 Agent 预设；model_profile_switch 换一个）{{else}}{{ctx (or .Name .ID)}} ({{.ID}}){{with .Tiers}}；Agent 预设（agent_start / task_plan 的 tier）：{{range $i, $t := .}}{{if $i}}；{{end}}{{$t.Name}} = {{ctx $t.Launcher}} · {{if $t.Model}}{{ctx $t.Model}}{{else}}默认模型{{end}}{{with $t.Effort}} · {{.}}{{end}}{{with $t.Speed}} · {{.}}{{end}}{{with $t.Description}}（{{ctx .}}）{{end}}{{end}}{{else}}；没有 Agent 预设{{end}}{{end}}{{else}}未设置（model_profiles_list 查看，model_profile_switch 切换）{{end}}
 - 在线的电脑：{{range $i, $m := .Up}}{{if $i}}、{{end}}{{$m.Name}}（{{$m.ID}}）{{end}}{{with .Down}}；离线：{{range $i, $m := .}}{{if $i}}、{{end}}{{$m.Name}}（{{$m.ID}}）{{end}}{{end}}
 - Agents：需要你 {{len .Needs}} 个，完成未看 {{len .Unread}} 个，工作中 {{len .Working}} 个（详情用 agents_list）
 {{with .Needs}}  - 需要你：{{template "assistant/snapshot_agents" .}}
@@ -11,8 +11,6 @@
 {{end}}{{with .Waiting}}  - 在等的（hub 到时会叫醒它们，不用管）：{{if $.Omit.Waiting}}{{len .}} 个，{{template "assistant/snapshot_omitted" "agents_list"}}{{else}}{{template "assistant/snapshot_agents" .}}{{end}}
 {{end}}{{with .Done}}  - 做完的（24 小时内）：{{len .}} 个，agents_list state=done 查
 {{end}}{{with .Muted}}  - 已屏蔽（用户关了它们的通知，上面的数不算它们；别主动提，问到再说）：{{len .}} 个，agents_list state=muted 查
-{{end}}{{with .Working}}  - 工作中：{{if $.Omit.Working}}{{len .}} 个，{{template "assistant/snapshot_omitted" "agents_list"}}{{else}}{{range $i, $a := first 8 .}}{{if $i}}；{{end}}{{$a.Label}}{{with $a.Ultracode}}〔ultracode={{.}}{{if eq . "on"}}：每个实质任务都会跑多 Agent workflow，等结果时别催{{end}}〕{{end}}{{with $a.Plan}}（{{template "assistant/snapshot_plan" .}}）{{end}}{{end}}{{if gt (len .) 8}} 等 {{len .}} 个{{end}}{{end}}
-{{end}}{{with .Workflows}}  - 后台 workflow 在跑（这些 Agent 这一轮停着是在等结果，不是做完了，结果回来会叫醒它们；别关它们）：{{range $i, $w := first 6 .}}{{if $i}}；{{end}}{{$w.Agent}}（{{$w.Machine}}，session_id={{$w.Session}}）的{{template "assistant/snapshot_workflow" $w}}{{end}}{{if gt (len .) 6}} 等 {{len .}} 个{{end}}
 {{end}}{{if .Scoped}}{{template "assistant/snapshot_own_tasks" .}}{{else}}{{if .OpenTodosTotal}}- 开放待办索引（{{if $.Omit.OpenTodos}}仅列 ID{{else}}列出 ID 和标题{{end}}）：{{range $i, $t := .OpenTodos}}{{if $i}}；{{end}}{{$t.ID}}{{if not $.Omit.OpenTodos}}「{{$t.Title}}」{{with $t.Link}}（{{.}}）{{end}}{{end}}{{if $t.Failed}}（没开起来）{{end}}{{end}}{{if gt .OpenTodosTotal (len .OpenTodos)}}；其余用 todo_list 查{{end}}
 {{end}}{{with .Tasks}}- 优先显示的开放任务详情（含个人待办；最近结束的对话任务也会列出；task_plan；问已有结果看这里，不够用 agent_read 读它的对话；要它新查、新做或改方向才用 agent_send）：{{if $.Omit.Tasks}}{{len .}} 个，{{template "assistant/snapshot_omitted" "todo_list"}}
 {{else}}

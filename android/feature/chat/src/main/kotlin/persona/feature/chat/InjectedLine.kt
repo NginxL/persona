@@ -78,7 +78,7 @@ internal fun SourceMessage(item: Item, source: MessageSource, showLabel: Boolean
         AttachedFileCards(model.attached, alignEnd = false)
         // A task's run without its one line: the label alone says which task ran.
         if (!prompt || body.isNotBlank()) {
-            if (expanded) ChatMarkdown(keepLineBreaks(body), "source/${item.id}")
+            if (expanded) ReplyMarkdown(keepLineBreaks(body), "source/${item.id}", ownReply = false, selectable = true)
             else Text(messageLinkAnnotations(body), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2,
                 maxLines = ContentTokens.sourcePreviewLines, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { clipped = it.hasVisualOverflow })

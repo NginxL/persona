@@ -172,9 +172,11 @@ export function PersonaAssistant({ sid, fresh, routed, at, onToggleSidebar }: { 
     }
     // the main conversation is the phone's assistant page: "Assistant | Agents" in its top bar (ChatView's `topCenter`, narrow only)
     const topCenter = id === main ? <ShellSwitch page="assistant" /> : undefined;
+    // keyed by the conversation, not its computer: the cached first view's computer giving way to the hub's answer is the
+    // same chat, and a new key would take the typing person's words, pictures and focus with the old page (#11237)
     return (
       <ChatView
-        key={`${scope}/${manager}/${machine}/${id}`}
+        key={`${scope}/${manager}/${id}`}
         mid={machine}
         sid={id}
         assistant

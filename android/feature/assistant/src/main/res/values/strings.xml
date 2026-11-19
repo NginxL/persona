@@ -172,10 +172,10 @@
     <string name="assistant_settings_target">Assistant</string>
     <string name="assistant_settings_permission">New conversation permissions</string>
     <string name="assistant_settings_permission_hint">Applies to new conversations without an explicit permission choice. Existing conversations keep their permissions.</string>
-    <string name="assistant_settings_permission_default">Default</string>
-    <string name="assistant_settings_permission_edits">Allow edits</string>
-    <string name="assistant_settings_permission_plan">Plan only</string>
-    <string name="assistant_settings_permission_auto">Auto</string>
+    <string name="assistant_settings_permission_default">Default permissions</string>
+    <string name="assistant_settings_permission_edits">Auto accept edits</string>
+    <string name="assistant_settings_permission_plan">Plan mode</string>
+    <string name="assistant_settings_permission_auto">Auto-review</string>
     <string name="assistant_settings_permission_full">Full access</string>
     <string name="assistant_settings_permission_failed">Could not save the permission default</string>
     <string name="assistant_settings_permission_unavailable">Unavailable until this assistant can confirm support for permission defaults. Other settings remain available.</string>
@@ -217,7 +217,7 @@
     <string name="assistant_usage_last_30_label">Last 30 days</string>
     <string name="assistant_usage_today_label">Today</string>
     <string name="assistant_usage_day">%1$s · %2$s tokens</string>
-    <string name="assistant_usage_day_description">%1$s, %2$s tokens</string>
+    <string name="assistant_usage_token_description">%1$s, %2$s tokens</string>
     <string name="assistant_usage_hour_description">%1$s at %2$s, %3$s tokens</string>
     <string name="assistant_usage_input">Input</string>
     <string name="assistant_usage_output">Output</string>
@@ -225,6 +225,8 @@
     <string name="assistant_usage_cache_read">Cache read</string>
     <string name="assistant_usage_by_hour">Last 7 days by hour</string>
     <string name="assistant_usage_by_computer">By computer</string>
+    <string name="assistant_usage_by_agent">By Agent · Last 7 Days</string>
+    <string name="assistant_usage_before_agent_split">Not split (before the update)</string>
     <string name="assistant_usage_by_kind">By kind</string>
     <string name="assistant_usage_less">Less</string>
     <string name="assistant_usage_more">More</string>

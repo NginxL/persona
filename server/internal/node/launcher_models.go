@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/sync/singleflight"
 
@@ -26,9 +27,9 @@ import (
 // list its own /model menu shows. That list is in no config file — settings.json and config.toml hold the default
 // model and the gateway; the CLI makes the list from its aliases and what the gateway's /models answers — so the node
 // asks the CLI itself, run the way the launcher runs it: Claude Code answers its initialize control request (headless,
-// stream-json) with `models`, Codex's app-server answers model/list. Nothing is sent to a model. A managed provider's
-// gateway models are read by the node as well (launcher_gateway_models.go): the CLI's answer has them only when its one
-// discovery cache was that gateway's.
+// stream-json) with `models`, Codex's app-server answers model/list, and Antigravity prints its catalog with `agy models`.
+// Nothing is sent to a model. The node also reads a managed provider's gateway models (launcher_gateway_models.go):
+// the CLI's answer has them only when its discovery cache was that gateway's.
 
 // launcherModelsTTL: a list is kept this long per launcher (and managed launcher's settings); refresh skips it.
 const launcherModelsTTL = 10 * time.Minute
@@ -71,17 +72,21 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	}
 	// A runtime's launcher, as a start in ctx's host runs it (where that host's engine runs only its own launchers, its
 	// provider of the name, #8140): static advertisement or native discovery.
-	if h := n.runtimeOfIn(ctx, name); h != nil {
-		res, _ := launcherModelsOf(h, name)
-		return n.liveRuntimeModels(ctx, h, name, refresh, res)
-	}
-	if m, ok := n.managedLauncher(name); ok && m.AgentType() == "agy" {
-		if res, ok := n.agyRuntimeModels(); ok {
-			return n.liveRuntimeModels(ctx, n.runtimes.launcherRuntime("agy"), "agy", refresh, res)
+	h, runtimeName := n.runtimeOfIn(ctx, name), name
+	if h == nil {
+		if m, ok := n.managedLauncher(name); ok && m.AgentType() == agyAgent {
+			h, runtimeName = n.runtimes.launcherRuntime(agyAgent), agyAgent
 		}
-		return proto.LauncherModels{Agent: "agy", Models: []proto.AgentModel{}}, nil
+	}
+	if h != nil && !n.usesAgyPane(ctx, name, agentType) {
+		res, _ := launcherModelsOf(h, runtimeName)
+		return n.liveRuntimeModels(ctx, h, runtimeName, refresh, res)
 	}
 	agent := n.launcherModelsAgent(ctx, name, agentType)
+	if agent == agyAgent && (assistantLauncherPurpose(ctx) || n.startKind(ctx) == agyAgent) {
+		// The companion is unavailable on this path. Its catalog must stay separate from the pane's cached list.
+		return proto.LauncherModels{Agent: agyAgent, Models: []proto.AgentModel{}}, nil
+	}
 	key := n.home + "\x00" + name + "\x00" + agent + "\x00" + n.executionFingerprint(name, modelExecution{})
 	launcherModelsCache.Lock()
 	at, ok := launcherModelsCache.at[key]
@@ -89,7 +94,7 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	launcherModelsCache.Unlock()
 	ask := func() (any, error) {
 		res := proto.LauncherModels{Agent: agent, Models: []proto.AgentModel{}}
-		if agent != "claude" && agent != "codex" {
+		if agent != "claude" && agent != "codex" && agent != agyAgent {
 			return res, nil
 		}
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), launcherModelsTimeout)
@@ -113,8 +118,10 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 		}
 		// Whether a picked model reaches the agent at all: a launcher that fixes its own --model would start with
 		// that one whatever is picked (the start refuses it).
-		if _, err := n.launcherModelCheck(ctx, name, modelCheckProbe); err != nil {
-			res.Locked = err.Error()
+		if agent != agyAgent {
+			if _, err := n.launcherModelCheck(ctx, name, modelCheckProbe); err != nil {
+				res.Locked = err.Error()
+			}
 		}
 		wg.Wait()
 		if listErr != nil {
@@ -205,6 +212,9 @@ func (n *Node) launcherModelsAgent(ctx context.Context, name, agentType string) 
 	if m, ok := n.managedLauncher(name); ok {
 		return m.AgentType()
 	}
+	if n.agentKindOf(name, "") == agyAgent {
+		return agyAgent
+	}
 	if _, ok := n.codexLauncher(ctx, name); ok {
 		return "codex"
 	}
@@ -227,7 +237,10 @@ func (n *Node) launcherModelsAgent(ctx context.Context, name, agentType string) 
 // agentModelsCommand is the command listAgentModels runs in shell to ask launcher name's agent for its models, in dir.
 func (n *Node) agentModelsCommand(ctx context.Context, shell, name, agent, dir string) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
-	if agent == "codex" {
+	switch agent {
+	case agyAgent:
+		cmd = exec.CommandContext(ctx, shell, "-ic", n.launcherForScript(name)+" models", "persona")
+	case "codex":
 		launcher := n.launcherForScript(name)
 		if _, managed := n.managedLauncher(name); managed {
 			// `personad launch` runs codex itself, not the shell's codex codexShell wraps: without the subcommand
@@ -235,7 +248,7 @@ func (n *Node) agentModelsCommand(ctx context.Context, shell, name, agent, dir s
 			launcher += " app-server"
 		}
 		cmd = exec.CommandContext(ctx, shell, "-ic", codexShell(launcher), "persona")
-	} else {
+	default:
 		// No hooks: this claude is no session of the user's (Persona's own, or a hook of theirs, would see one start).
 		ours := filepath.Join(dir, "settings.json")
 		if err := os.WriteFile(ours, []byte(`{"disableAllHooks":true}`), 0o600); err != nil {
@@ -265,6 +278,9 @@ func (n *Node) listAgentModels(ctx context.Context, name, agent string) ([]proto
 		return nil, err
 	}
 	killGroupOnCancel(cmd)
+	if agent == agyAgent {
+		return discoverAgyModels(ctx, cmd, name)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -313,6 +329,78 @@ func (n *Node) listAgentModels(ctx context.Context, name, agent string) ([]proto
 	}
 }
 
+// discoverAgyModels waits for the catalog command to exit so a failed discovery cannot cache a partial list.
+func discoverAgyModels(ctx context.Context, cmd *exec.Cmd, name string) ([]proto.AgentModel, error) {
+	var stderr, stdoutTail tailBuffer
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start %s models: %w", name, err)
+	}
+	stopReading := context.AfterFunc(ctx, func() { _ = stdout.Close() })
+	defer stopReading()
+	models, parseErr := agyModelList(io.TeeReader(stdout, &stdoutTail))
+	if parseErr != nil && ctx.Err() == nil {
+		_ = cmd.Cancel()
+	}
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%s models: %w", name, ctx.Err())
+	}
+	if err := errors.Join(parseErr, waitErr); err != nil {
+		stderrText := clipText(strings.TrimSpace(redactSecrets(lastLines(stderr.String(), 4))), 150)
+		stdoutText := clipText(strings.TrimSpace(redactSecrets(lastLines(stdoutTail.String(), 4))), 150)
+		detail := strings.TrimSpace(stderrText + "\n" + stdoutText)
+		if detail != "" {
+			return nil, fmt.Errorf("%s models failed: %w (%s)", name, err, detail)
+		}
+		return nil, fmt.Errorf("%s models failed: %w", name, err)
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("%s models returned no models", name)
+	}
+	return models, nil
+}
+
+// agyModelList reads the same tab-separated catalog as the Antigravity companion, retaining the first row per ID.
+// Effort suffixes identify variants of the same model and advertise the levels present in the catalog.
+func agyModelList(r io.Reader) ([]proto.AgentModel, error) {
+	var models []proto.AgentModel
+	seen := map[string]bool{}
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		id, rest, ok := strings.Cut(strings.TrimSpace(scanner.Text()), "\t")
+		if !ok || id == "" || strings.IndexFunc(id, unicode.IsSpace) >= 0 || seen[id] {
+			continue
+		}
+		name, _, _ := strings.Cut(strings.TrimLeft(rest, "\t"), "\t")
+		if name == "" {
+			name = id
+		}
+		seen[id] = true
+		models = append(models, proto.AgentModel{ID: id, Name: name})
+	}
+	for i := range models {
+		model := &models[i]
+		base := model.ID
+		for _, level := range proto.EffortLevels {
+			if prefix, ok := strings.CutSuffix(base, "-"+level); ok {
+				model.DefaultEffort, base = level, prefix
+				break
+			}
+		}
+		for _, level := range proto.EffortLevels {
+			if seen[base+"-"+level] {
+				model.Efforts = append(model.Efforts, level)
+			}
+		}
+	}
+	return models, scanner.Err()
+}
+
 // claudeModelList asks a headless claude (stream-json both ways) for the models of its /model menu.
 func claudeModelList(w io.Writer, r io.Reader) ([]proto.AgentModel, error) {
 	req := `{"type":"control_request","request_id":"persona-models","request":{"subtype":"initialize"}}` + "\n"
@@ -358,10 +446,14 @@ func claudeModelList(w io.Writer, r io.Reader) ([]proto.AgentModel, error) {
 		return nil, err
 	}
 	out := make([]proto.AgentModel, 0, len(models))
+	seen := map[string]bool{}
 	for _, m := range models {
-		if m.Value == "" {
+		// An id listed again is left out, the first stays: Claude Code lists "default" twice when its settings say
+		// "model": "default", and the Android panel closed on two rows of one model (#9998).
+		if m.Value == "" || seen[m.Value] {
 			continue
 		}
+		seen[m.Value] = true
 		a := proto.AgentModel{ID: m.Value, Name: m.DisplayName, Description: m.Description, Default: m.Value == "default"}
 		if m.ResolvedModel != m.Value {
 			a.Resolved = m.ResolvedModel

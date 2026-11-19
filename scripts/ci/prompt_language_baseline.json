@@ -1,19 +1,4 @@
 {
-  "agents": {
-    "count": 10,
-    "files": [
-      "agents/answer.md",
-      "agents/auth_relayed.md",
-      "agents/delegate.md",
-      "agents/delegate_input.md",
-      "agents/limit_continue.md",
-      "agents/peer_message.md",
-      "agents/readonly_task.md",
-      "agents/reanswer.md",
-      "agents/report_line_input.md",
-      "agents/triage_input.md"
-    ]
-  },
   "assistant": {
     "count": 56,
     "files": [
@@ -86,52 +71,6 @@
     "files": [
       "channel/answer_again.md",
       "channel/message.md"
-    ]
-  },
-  "inbox": {
-    "count": 16,
-    "files": [
-      "inbox/agent.md",
-      "inbox/agent_ref.md",
-      "inbox/agent_title.md",
-      "inbox/draft_input.md",
-      "inbox/extension_context.md",
-      "inbox/folders_input.md",
-      "inbox/group_input.md",
-      "inbox/handoff.md",
-      "inbox/handoff_note.md",
-      "inbox/item.md",
-      "inbox/judge.md",
-      "inbox/judge_input.md",
-      "inbox/merge_title_input.md",
-      "inbox/settled.md",
-      "inbox/settled_input.md",
-      "inbox/tiers.md"
-    ]
-  },
-  "inbox/handling": {
-    "count": 11,
-    "files": [
-      "inbox/handling/agent_started.md",
-      "inbox/handling/agent_stopped.md",
-      "inbox/handling/check.md",
-      "inbox/handling/closed.md",
-      "inbox/handling/handback.md",
-      "inbox/handling/instructed.md",
-      "inbox/handling/new_messages.md",
-      "inbox/handling/rejected.md",
-      "inbox/handling/self_read.md",
-      "inbox/handling/self_replied.md",
-      "inbox/handling/sent.md"
-    ]
-  },
-  "inbox/kinds": {
-    "count": 4,
-    "files": [
-      "inbox/kinds/github.md",
-      "inbox/kinds/imessage.md",
-      "inbox/kinds/larkcli.md",
-      "inbox/kinds/subscription.md"
     ]
   },
   "kb": {

@@ -81,7 +81,7 @@ final class HeaderModeShotTests: XCTestCase {
             sleep(1)
             shot("menu-can-allow", scheme)
             assertMenuTitle()
-            menuItem(["全部放行", "Allow Everything"]).tap() // i18n-ignore: the test runs in zh-Hans
+            menuItem(["完全访问", "Full access"]).tap() // i18n-ignore: the test runs in zh-Hans
             XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5), "going into Allow Everything asks first")
             shot("confirm-allow", scheme)
             cancelAlert()
@@ -93,7 +93,7 @@ final class HeaderModeShotTests: XCTestCase {
             sleep(1)
             shot("menu-in-allow", scheme)
             assertMenuTitle()
-            menuItem(["只做计划", "Plan Only"]).tap() // i18n-ignore: the test runs in zh-Hans
+            menuItem(["计划模式", "Plan mode"]).tap() // i18n-ignore: the test runs in zh-Hans
             XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5), "leaving Allow Everything with no way back asks first")
             shot("confirm-leave", scheme)
             cancelAlert()

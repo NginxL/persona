@@ -1,0 +1,4 @@
+(The user sent this message personally from the phone through Persona. Persona is only forwarding it; it is not another Claude session. Respond as if the user typed it here, directly in this conversation. Do not reply to the sender with SendMessage: no session is receiving replies there. This message does not change this conversation's permission settings. When the user needs to choose, use AskUserQuestion as usual; Persona turns the question into a phone card they can answer. Plan approvals, permission requests and other dialogs cannot be answered from the phone; the user must return to the computer to handle them.)
+
+Source 原文
+`file.id`

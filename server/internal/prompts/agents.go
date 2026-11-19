@@ -18,7 +18,9 @@ func RenderAgentSessionNameInput(v AgentSessionNameInput) string {
 func RenderReadonlyTaskPlanExit() string { return render("agents/readonly_plan_exit", nil) }
 
 // RenderReadonlyTaskConstraint carries a read-only task's limit in its first prompt.
-func RenderReadonlyTaskConstraint() string { return render("agents/readonly_task", nil) }
+func RenderReadonlyTaskConstraint(language string) string {
+	return render("agents/readonly_task", struct{ Language string }{language})
+}
 
 type TaskContinuation struct {
 	TodoID   string
@@ -35,7 +37,7 @@ func RenderPlanFirstTaskConstraint() string { return render("agents/plan_first_t
 // (agents/triage, docs/assistant/agent-work.md).
 type AgentTriage struct {
 	Owner    string // "" is the user
-	Language string // the line's language when it isn't Chinese (answerLanguage), "" for Chinese
+	Language string // Owner language for instructions and generated line; empty preserves Chinese.
 }
 
 func RenderAgentTriage(t AgentTriage) string { return render("agents/triage", t) }
@@ -45,7 +47,7 @@ func RenderAgentToolLoop() string { return render("agents/tool_loop", nil) }
 // AgentReportLine is the system prompt that paraphrases a supervised task's agent's report in one line for the
 // Progress row (agents/report_line, #3181, docs/assistant/unified-entry.md "Progress tray").
 type AgentReportLine struct {
-	Language string // the line's language when it isn't Chinese (answerLanguage), "" for Chinese
+	Language string // Owner language for instructions and generated line; empty preserves Chinese.
 	Max      int    // at most this many characters
 }
 
@@ -53,9 +55,10 @@ func RenderAgentReportLine(r AgentReportLine) string { return render("agents/rep
 
 // AgentReportLineInput is the report to paraphrase (agents/report_line_input).
 type AgentReportLineInput struct {
-	Task string // the task's title
-	Kind string // progress, question, blocked or done
-	Text string // the report as the agent wrote it, clipped
+	Language string // Owner language; empty preserves legacy Chinese bytes.
+	Task     string // the task's title
+	Kind     string // progress, question, blocked or done
+	Text     string // the report as the agent wrote it, clipped
 }
 
 func RenderAgentReportLineInput(in AgentReportLineInput) string {
@@ -64,6 +67,7 @@ func RenderAgentReportLineInput(in AgentReportLineInput) string {
 
 // AgentTriageInput is the turn to triage (agents/triage_input).
 type AgentTriageInput struct {
+	Language string // Owner language; empty preserves legacy Chinese bytes.
 	Now      string // the user's local time, "2006-01-02 15:04 Mon"
 	Agent    string // its tab / title
 	Machine  string
@@ -113,11 +117,14 @@ func RenderAgentWake(w AgentWake) string {
 
 // RenderAgentLimitContinue is what the manager sends an agent a subscription's usage limit stopped, once the limit has
 // reset and its CLI did not say it goes on by itself (agents/limit_continue, docs/assistant/agent-work.md "Usage limits").
-func RenderAgentLimitContinue() string { return render("agents/limit_continue", nil) }
+func RenderAgentLimitContinue(language string) string {
+	return render("agents/limit_continue", struct{ Language string }{language})
+}
 
 // AgentAnswer is the user's answers to the hub's decision card, sent on to the agent (agents/answer).
 type AgentAnswer struct {
-	Items []AgentAnswerItem
+	Language string // Owner language; empty preserves legacy Chinese bytes.
+	Items    []AgentAnswerItem
 	// ByAssistant: the assistant answered for the user (docs/assistant/assistant.md "Assistant answers questions first"), Reason says why.
 	ByAssistant bool
 	Reason      string
@@ -132,7 +139,8 @@ func RenderAgentAnswer(a AgentAnswer) string { return render("agents/answer", a)
 // AgentAuthRelayed tells an agent an extension authorized the link it stopped at with the user's account
 // (agents/auth_relayed, docs/operations/auth-relay.md).
 type AgentAuthRelayed struct {
-	App string // the app, as the authorization page names it; "" when it was not read
+	Language string // Owner language; empty preserves legacy Chinese bytes.
+	App      string // the app, as the authorization page names it; "" when it was not read
 }
 
 func RenderAgentAuthRelayed(a AgentAuthRelayed) string { return render("agents/auth_relayed", a) }
@@ -160,7 +168,8 @@ func RenderLauncherRepair(r LauncherRepair) string { return render("agents/launc
 // AgentReanswer is the user's answers to questions the assistant answered for them, sent on to the agent, which went
 // on with the assistant's (agents/reanswer, docs/assistant/assistant.md "Assistant answers questions first").
 type AgentReanswer struct {
-	Items []AgentReanswerItem
+	Language string // Owner language; empty preserves legacy Chinese bytes.
+	Items    []AgentReanswerItem
 }
 
 type AgentReanswerItem struct {
@@ -172,14 +181,16 @@ func RenderAgentReanswer(a AgentReanswer) string { return render("agents/reanswe
 // AgentDelegate is the system prompt that decides whether the assistant answers an agent's question for the user
 // (agents/delegate, docs/assistant/assistant.md "Assistant answers questions first").
 type AgentDelegate struct {
-	Owner string // "" is the user
-	Rules string // the user's own rules, trimmed: manager.json agents.delegate.rules
+	Language string // Owner language; empty preserves legacy Chinese bytes.
+	Owner    string // "" is the user
+	Rules    string // the user's own rules, trimmed: manager.json agents.delegate.rules
 }
 
 func RenderAgentDelegate(d AgentDelegate) string { return render("agents/delegate", d) }
 
 // AgentDelegateInput is the question to decide on and what is known around it (agents/delegate_input).
 type AgentDelegateInput struct {
+	Language  string // Owner language; empty preserves legacy Chinese bytes.
 	Now       string // the user's local time, "2006-01-02 15:04 Mon"
 	Agent     string
 	Machine   string

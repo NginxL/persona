@@ -4,7 +4,7 @@ When repository identity needs resolving, consult repositories_list, and reposit
 
 Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-change"}} names its branch; {"existing":"<cwd or workspace_id>"} selects one; "none" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/<todo id>. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.
 
-Optional `wait_seconds` observes this launch or input for at most 50 seconds after dispatch. The receipt is retained, followed by an `Inline observation` JSON record: `completed` with `reply`, `question` with `interaction_id`, or `timeout`, `cancelled`, `unavailable`, `interrupted` or `failed`. The record includes the input and session references when known. It never answers a question, accepts a task or resends input. Older nodes without input echo support may time out instead of returning an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately. Continue to follow the normal supervision and `task_review` requirements.
+`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.
 
 ```json
 {
@@ -16,11 +16,11 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
     "wait_seconds": {
       "type": "integer",
       "minimum": 0,
-      "description": "Optional inline observation after dispatch, capped at 50 seconds; omit or 0 for the current receipt. Returns this input's completed reply or pending question reference. Timeout never resends or cancels work; normal supervision and task_review still apply."
+      "description": "0/omitted: normal receipt"
     },
     "supervisor": {
       "type": "string",
-      "description": "optional, main conversation only: the id of the leader conversation (assistant.leaders) whose direction this work belongs to; it supervises the tasks. Leave it out for work of no direction or of your own"
+      "description": "main only: leader conversation id (assistant.leaders); it supervises; omit for no direction or your own work"
     },
     "tasks": {
       "type": "array",
@@ -53,7 +53,7 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
           "machine_policy": {
             "type": "string",
             "enum": ["fixed", "flexible"],
-            "description": "fixed (default): keep this machine through preview, dispatch and retries; fail there if unavailable. flexible: explicitly permit health-based placement on another computer, only for work that is portable"
+            "description": "fixed (default): keep this machine; flexible: permit health-based moves only for portable work"
           },
           "cwd": {
             "type": "string",
@@ -61,7 +61,7 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
           },
           "workspace": {
             "type": ["string", "object"],
-            "description": "Task workspace policy, as the description says; omit for the default. existing takes an absolute/~/ path or a workspace id on that machine. No custom worktree root.",
+            "description": "workspace policy; omit for default; existing: absolute/~/path or workspace id on that machine; no custom root",
             "oneOf": [
               { "type": "string", "enum": ["new", "none"] },
               { "type": "object", "required": ["existing"], "additionalProperties": false, "properties": { "existing": { "type": "string", "minLength": 1 } } },
@@ -70,11 +70,11 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
           },
           "launcher": {
             "type": "string",
-            "description": "launcher name, one that machine has (a name it lacks is refused, listing the ones it has): a Claude Code launcher, or pi, cursor or agy to start that agent in herdr; empty: the default, or one the machine has when it lacks the default (claude first; the why says so)"
+            "description": "listed launcher (Claude Code, pi, cursor or agy in herdr); unknown names refused with choices; empty: default/fallback, claude first, why says which"
           },
           "model": {
             "type": "string",
-            "description": "model id the agent takes (an alias such as opus, a gateway's own id, or a provider/model such as ag-chat/cursor/grok-4.7 for pi; letters, digits and . _ - / : @ [ ] only, or a leading ~ as in ~vendor/model-latest); empty: the launcher's default"
+            "description": "model id or alias the agent takes; empty: the launcher's default"
           },
           "permission": {
             "type": "string",
@@ -85,16 +85,16 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
               "auto",
               "bypassPermissions"
             ],
-            "description": "permission mode; empty: the default for writable tasks. Set an explicit writable mode (for example bypassPermissions) with readonly=false when a replacement Agent must implement fixes on the same todo. Read-only modes: see the description. traex and omp take none"
+            "description": "mode; empty: writable default; readonly/replacement/Codex rules: see description; traex and omp take none"
           },
           "role": {
             "type": "string",
             "enum": ["leader"],
-            "description": "optional: leader makes this task's agent a task leader that may hand direct workers to its own task (any conversation may give it); leave it out for an ordinary worker task"
+            "description": "leader (any conversation): may hand direct workers to its own task; omit for an ordinary worker"
           },
           "ultracode": {
             "type": "boolean",
-            "description": "true for a large task (many files, checks from several angles): Claude Code runs every substantial step as a multi-agent workflow, slower and costlier; false for small or quick work. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it. Never put the word in the prompt or title instead"
+            "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows for substantial steps, slower/costlier; small tasks: false; Claude Code 2.1.284+ only, otherwise starts without it; never put it in prompt/title"
           },
           "readonly": {
             "type": "boolean",
@@ -150,7 +150,7 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
             "items": {
               "type": "string"
             },
-            "description": "pictures and files the user gave you for it, by their absolute paths on your computer: a picture they sent (the path Claude Code gives it), a file the app put in their message. They are copied to the agent's computer and listed at the end of its message, and the text's mentions of them name the copies. Only those the user gave you in this conversation are accepted"
+            "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
           },
           "expect_minutes": {
             "type": "integer",
@@ -182,11 +182,16 @@ Optional `wait_seconds` observes this launch or input for at most 50 seconds aft
           },
           "tier": {
             "type": "string",
-            "description": "An Agent preset: one of the tiers the snapshot's 模型档位 line lists for the profile in use, each with what it is for; pick the one whose description fits the work. Resolved when the task actually starts, with the profile in use then. Explicit launcher/model/effort override its values."
+            "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved at task start with its profile; explicit launcher/model/effort/speed overrides"
+          },
+          "speed": {
+            "type": "string",
+            "enum": ["standard", "fast", "ultrafast"],
+            "description": "new-start speed; explicit choice overrides the tier. standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
           },
           "effort": {
             "type": "string",
-            "description": "Explicit effort override; omit to use the tier or purpose default."
+            "description": "Explicit effort; omit for tier/purpose default."
           }
         }
       }

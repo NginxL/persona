@@ -67,9 +67,22 @@ class ConfigTests(unittest.TestCase):
                   "extra_lanes": ["runtimes"], "timeout_seconds": 60}
         resolved = commands(config, self.root)
         self.assertEqual(resolved[0][1], ["check", str(self.root)])
-        self.assertEqual(resolved[1][1], ["bash", str(Path(main_watch.__file__).resolve().parents[2] / "scripts/ci/runtimes.sh")])
+        self.assertEqual(resolved[1][1], ["bash", str(self.root / "scripts/ci/runtimes.sh")])
         with self.assertRaisesRegex(WatchError, "unsupported"):
             commands(dict(config, extra_lanes=["unknown"]), self.root)
+
+    def test_exact_main_checkers_follow_the_tested_commit(self):
+        resolved = dict((name, argv) for name, argv, _ in commands({"profile": "persona"}, self.checkout))
+        for lane, script in (("Repository guards", "guards.sh"), ("Script and documentation guards", "scripts.sh")):
+            with self.subTest(lane=lane):
+                self.assertEqual(resolved[lane], ["bash", str(self.checkout / "scripts/ci" / script)])
+
+    def test_repair_checkers_stay_in_the_frozen_main_checkout(self):
+        frozen = self.root / "frozen-main"
+        config = {"profile": "persona", "trusted_checkout": str(frozen)}
+        resolved = dict((name, argv) for name, argv, _ in commands(config, self.checkout))
+        self.assertEqual(resolved["Repository guards"], ["bash", str(frozen / "scripts/ci/guards.sh")])
+        self.assertEqual(resolved["Script and documentation guards"], ["bash", str(frozen / "scripts/ci/scripts.sh")])
 
 
 class MainWatchTests(unittest.TestCase):

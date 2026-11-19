@@ -939,13 +939,15 @@ apps (`docs/apple/ios.md` "Suggested standing rule and held decisions") and the 
 
 #### Asks go to the supervisor first (#3589)
 
-Only with leaders configured (`assistant.leaders` not empty); without them every card goes to the user as above.
-The background supervisor does not change that: it alone routes no card, since asking a supervisor first is a switch
-the owner turns on by making a leader. Code: `server/internal/assistant/ask_route.go`.
+With leaders configured (`assistant.leaders` not empty), a supervised task's questions, permissions and plans go to its
+supervisor first. Without leaders these go directly to the owner. A parsed terminal question on a supervised task goes
+to its supervising conversation in either configuration (#11195). Code: `server/internal/assistant/ask_route.go`.
 
 - **What goes up**: a card raised by an agent of a supervised task (not waiting for the user, not closed): a question
-  (not `ask_user`, not a form or a password card), a tool permission or a plan. Terminal dialogs read off the screen
-  and the conversations' own cards stay the user's. The card is shown on the apps marked `delegating` (an answer given
+  (not `ask_user`, not a form or a password card), a tool permission or a plan. For a terminal choice, the supervisor
+  receives the agent, machine, question and option labels. Only an explicit `ask_escalate` rings the owner about that
+  terminal choice. The supervisor cannot press its keys. Unparsed screens, password or private input, command approvals
+  and dialogs with warnings or deadlines keep their existing owner route. The conversations' own cards stay the user's. The card is shown on the apps marked `delegating` (an answer given
   there still wins) and rings nothing: no push, no bot card, no Persona Link notification.
 - **Who gets it**: the task's supervisor as an `ask` entry in its "📋 督办" message (its leader; for a task no leader
   supervises the background supervisor, or the main chat while `main_supervises_own_tasks` is on or there is no
@@ -995,7 +997,7 @@ the owner turns on by making a leader. Code: `server/internal/assistant/ask_rout
   now. A Codex card listed again once its node reconnected is on the apps
   without a push too; the supervisor still hears of it through the task's `needs_you` signal, and `ask_escalate` takes
   it. A card the assistant is deciding on for the user (agents.delegate) is not escalated: that decision tells the
-  user itself. `ask_escalate` refuses without leaders. Cards raised after an escalation go to the supervisor again
+  user itself. Without leaders `ask_escalate` can hand the owner a supervised terminal question. Cards raised after an escalation go to the supervisor again
   rather than joining the escalated push.
 
 **Directions and reports up (#3484, #3485).** Each leader has a record, `assistant.directions` (`directions.go`): the kb

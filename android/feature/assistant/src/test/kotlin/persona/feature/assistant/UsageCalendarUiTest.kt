@@ -15,6 +15,9 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -22,10 +25,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -39,6 +43,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.Machine
+import persona.core.contracts.api.UsageAgentShare
 import persona.core.contracts.api.UsageDay
 import persona.core.contracts.api.UsageDays
 import persona.core.contracts.api.UsageHistoryApi
@@ -186,11 +191,40 @@ class UsageCalendarUiTest {
         rule.onNodeWithText("Last 7 days by hour", substring = true).assertExists()
         rule.onNodeWithText("By computer", substring = true).assertExists()
         rule.onNodeWithText("Office").assertExists()
+        rule.onNodeWithText("By Agent · Last 7 Days").assertDoesNotExist()
         rule.onNodeWithText("By kind", substring = true).assertExists()
         rule.onNodeWithText("Input", substring = true).assertExists()
         rule.onNodeWithText("Cache write", substring = true).assertExists()
         rule.onNodeWithText("Cache read", substring = true).assertExists()
         rule.onNodeWithText("Output", substring = true).assertExists()
+    }
+
+    @Test fun agentSharesShowLocalizedTotalsAndKeepHistorySeparateFromLiveAgents() {
+        val shares = listOf(
+            UsageAgentShare("claude", input = 8_000, cacheWrite = 2_000, cacheRead = 1_500, output = 500, requests = 18_000),
+            UsageAgentShare("", cacheRead = 500),
+            UsageAgentShare("Custom-CLI", output = 250),
+            UsageAgentShare("request-only", requests = 100),
+        )
+        val hub = Hub(days, hours.copy(agents = shares))
+        rule.setContent { PersonaTheme(reduceMotion = true) { UsageCalendarPage(hub, onBack = {}) } }
+        val list = rule.onNode(hasScrollToIndexAction())
+        list.performScrollToNode(hasText("By Agent · Last 7 Days"))
+        listOf("Claude Code, 12,000 tokens", "Not split (before the update), 500 tokens", "Custom-CLI, 250 tokens").forEach {
+            list.performScrollToNode(hasContentDescription(it))
+            rule.onNodeWithContentDescription(it).assertExists()
+        }
+        rule.onNodeWithText("12K", useUnmergedTree = true).assertExists()
+        rule.onNodeWithContentDescription("request-only", substring = true).assertDoesNotExist()
+        list.performScrollToNode(hasText("By kind"))
+    }
+
+    @Test fun aRequestOnlyWeekHidesTheEntireAgentSection() {
+        val hub = Hub(days, hours.copy(agents = listOf(UsageAgentShare("codex", requests = 25))))
+        rule.setContent { PersonaTheme(reduceMotion = true) { UsageCalendarPage(hub, onBack = {}) } }
+        rule.onNodeWithText("By computer").assertExists()
+        rule.onNodeWithText("By kind").assertExists()
+        rule.onNodeWithText("By Agent · Last 7 Days").assertDoesNotExist()
     }
 
     @Test fun blankComputerIdsDoNotCollide() = computersWithIdsStayVisible("", "")

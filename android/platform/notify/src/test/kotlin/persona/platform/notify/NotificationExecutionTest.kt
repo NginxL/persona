@@ -355,6 +355,102 @@ class NotificationExecutionTest {
         assertEquals(listOf(null, null), deliveryPreferences)
     }
 
+    private fun prepared(expiresAt: String, id: String = "request") = JsonCodec.decodeFromString<Interaction>(
+        """{"id":"$id","machine_id":"machine","session_id":"session","kind":"permission",""" +
+            """"expires_at":"$expiresAt","can_clarify":true}""",
+    )
+
+    @Test fun aPreparedNotificationActionUsesTheHubsExtendedDeadline() = runBlocking {
+        val current = prepared(now.plusSeconds(3_600).toString())
+        val center = Center(current)
+        val executor = NotificationActionExecutor(center, { true }, { now })
+        assertEquals(NotificationActionResult.Submitted, executor.execute(current.id, "allow", null, { false },
+            expiresAt = now.minusSeconds(1).toString()))
+        assertEquals(1, center.refreshes)
+        assertEquals(1, center.writes)
+        assertEquals(true, center.last?.allow)
+    }
+
+    @Test fun aPreparedActionStillChecksActualExpiryAndWhetherTheCardIsGone() = runBlocking {
+        val delivered = prepared(now.plusSeconds(60).toString())
+        val expiredCenter = Center(delivered).apply { remote = prepared(now.toString()) }
+        val goneCenter = Center(delivered).apply { remote = null }
+        var claims = 0
+        fun executor(center: Center) = NotificationActionExecutor(center, { claims++; true }, { now })
+        val results = listOf(expiredCenter, goneCenter).map { center ->
+            executor(center).execute(delivered.id, "allow", null, { false },
+                expiresAt = now.minusSeconds(1).toString())
+        }
+        assertEquals(listOf(NotificationActionResult.Expired, NotificationActionResult.Gone), results)
+        assertEquals(listOf(1, 1), listOf(expiredCenter.refreshes, goneCenter.refreshes))
+        assertEquals(0, claims)
+        assertEquals(0, expiredCenter.writes + goneCenter.writes)
+    }
+
+    @Test fun theServerStillRejectsAStalePreparedExecution() = runBlocking {
+        val current = prepared(now.plusSeconds(3_600).toString())
+        val center = Center(current).apply { onResolve = { throw InteractionGoneException("stale") } }
+        val executor = NotificationActionExecutor(center, { true }, { now })
+        assertEquals(NotificationActionResult.Gone, executor.execute(current.id, "allow", null, { false },
+            expiresAt = now.minusSeconds(1).toString()))
+        assertEquals(1, center.refreshes)
+        assertEquals(1, center.writes)
+    }
+
+    @Test fun anOldHubNotificationDeadlineStillFailsClosedBeforeARefresh() = runBlocking {
+        val center = Center(request.copy(expiresAt = now.plusSeconds(3_600).toString()))
+        val executor = NotificationActionExecutor(center, { error("An old expired action must not be claimed") }, { now })
+        assertEquals(NotificationActionResult.Expired, executor.execute(request.id, "allow", null, { false },
+            expiresAt = now.minusSeconds(1).toString()))
+        assertEquals(0, center.refreshes)
+        assertEquals(0, center.writes)
+    }
+
+    @Test fun anUpdatedPreparedCardRedrawsOnlyItsDeliveredNotification() = runBlocking {
+        val original = prepared(now.plusSeconds(60).toString())
+        val updated = prepared(now.plusSeconds(3_600).toString())
+        val center = Center(original)
+        val sessions = object : SessionsRepository {
+            override val machines = MutableStateFlow<List<Machine>>(emptyList())
+            override val sessions = MutableStateFlow(listOf(Session(machineId = "machine", sessionId = "session")))
+            override suspend fun refresh() = Unit
+        }
+        val notified = mutableSetOf<String>()
+        val posted = mutableListOf<Interaction>()
+        val retracted = mutableListOf<String>()
+        val delivery = NotificationDelivery(center, sessions, { false },
+            { ix, _, _ -> posted += ix; notified += ix.id }, { fail("Not an alert") }, { retracted += it },
+            notified = { notified })
+        val notice = NotifyEvent("interaction", "machine", "session", interactionId = original.id)
+        delivery.accept(notice)
+        center.remote = updated
+        delivery.accept(InteractionEvent(updated))
+        // An interaction update is not a new push for a card this device never delivered.
+        center.remote = prepared(now.plusSeconds(7_200).toString(), id = "unseen")
+        delivery.accept(InteractionEvent(center.remote!!))
+        delivery.accept(InteractionResolvedEvent(original.id))
+        assertEquals(listOf(original, updated), posted)
+        assertEquals(listOf(original.id), retracted)
+    }
+
+    @Test fun interactionSnapshotsNeverRepostDismissedOrOrdinaryCards() = runBlocking {
+        val delivered = prepared(now.plusSeconds(3_600).toString())
+        for (current in listOf(request, delivered)) {
+            val center = Center(current)
+            val sessions = object : SessionsRepository {
+                override val machines = MutableStateFlow<List<Machine>>(emptyList())
+                override val sessions = MutableStateFlow(listOf(Session(machineId = "machine", sessionId = "session")))
+                override suspend fun refresh() = Unit
+            }
+            val posted = mutableListOf<Interaction>()
+            val delivery = NotificationDelivery(center, sessions, { false },
+                { ix, _, _ -> posted += ix }, { fail("Not an alert") }, {},
+                notified = { setOf(current.id) }, showing = { emptySet() })
+            delivery.accept(InteractionEvent(current))
+            assertEquals(emptyList<Interaction>(), posted)
+        }
+    }
+
     private class Center(request: Interaction) : InteractionCenter {
         override val pending = MutableStateFlow(listOf(request))
         var remote: Interaction? = request

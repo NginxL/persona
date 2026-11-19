@@ -105,10 +105,9 @@ export function leavesOnScrollbarDrag(m: { dragging: boolean; delta: number }): 
   return m.dragging && m.delta < -SCROLLBAR_DEAD_ZONE;
 }
 
-/** Whether a scroll event while not following brings following back: at the end, or scrolling down near it. (While
+/** Whether a scroll event while not following brings following back: the reader scrolls down near the end. (While
  *  following, a scroll event changes nothing: only the intents above leave.) */
 export function followsAgain(m: { gap: number; delta: number }): boolean {
-  if (m.gap <= REPIN_AT_BOTTOM) return true;
   return m.gap < REPIN_NEAR && m.delta > 0;
 }
 

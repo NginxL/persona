@@ -16,7 +16,68 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/i18n"
 )
+
+// preflightLinuxAgentForReal uses the same full-profile probe as a real start before a test invokes bwrap itself.
+// Production stays fail closed when the alias cannot be mounted; only that specific missing capability skips the test.
+func preflightLinuxAgentForReal(t *testing.T, plan AgentPlan) {
+	t.Helper()
+	_, _, st := WrapAgent(plan, []string{"/bin/true"}, nil)
+	requireLinuxAgentForReal(t, st)
+}
+
+func requireLinuxAgentForReal(t *testing.T, st AgentStatus) {
+	t.Helper()
+	if st.State == AgentActive {
+		return
+	}
+	if linuxAgentAliasOpenTreeUnavailable(st) {
+		t.Skip("no Linux agent alias mount here: " + st.Why)
+	}
+	t.Fatalf("WrapAgent did not wrap: %+v", st)
+}
+
+func linuxAgentAliasOpenTreeUnavailable(st AgentStatus) bool {
+	if st.State != AgentUnavailable || st.Reason == nil || st.Reason.Key != "extension-status.sandbox_bwrap_start" {
+		return false
+	}
+	err, _ := st.Reason.Args["err"].(string)
+	return strings.HasPrefix(err, "agent sandbox alias ") && strings.HasSuffix(err, " open_tree: operation not permitted")
+}
+
+func TestLinuxAgentAliasOpenTreeUnavailable(t *testing.T) {
+	const (
+		startReason = "extension-status.sandbox_bwrap_start"
+		aliasEPERM  = `agent sandbox alias "/tmp/pas-1/.state-link" open_tree: operation not permitted`
+	)
+	status := func(state, key string, err any) AgentStatus {
+		return agentStatusReason(state, key, i18n.Args{"err": err})
+	}
+	tests := []struct {
+		name string
+		st   AgentStatus
+		want bool
+	}{
+		{name: "alias open_tree EPERM", st: status(AgentUnavailable, startReason, aliasEPERM), want: true},
+		{name: "active", st: status(AgentActive, startReason, aliasEPERM)},
+		{name: "different reason", st: status(AgentUnavailable, "extension-sandbox.agent_profile_refused", aliasEPERM)},
+		{name: "move_mount EPERM", st: status(AgentUnavailable, startReason, `agent sandbox alias "/tmp/pas-1/.state-link" move_mount: operation not permitted`)},
+		{name: "different open_tree error", st: status(AgentUnavailable, startReason, `agent sandbox alias "/tmp/pas-1/.state-link" open_tree: permission denied`)},
+		{name: "unrelated EPERM", st: status(AgentUnavailable, startReason, "bwrap: operation not permitted")},
+		{name: "extra diagnostic", st: status(AgentUnavailable, startReason, aliasEPERM+"\nother failure")},
+		{name: "non-string error", st: status(AgentUnavailable, startReason, 1)},
+		{name: "missing structured reason", st: AgentStatus{State: AgentUnavailable, Why: aliasEPERM}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := linuxAgentAliasOpenTreeUnavailable(tt.st); got != tt.want {
+				t.Fatalf("linuxAgentAliasOpenTreeUnavailable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 // TestLinuxAgentSandboxForReal runs the Darwin must-fail / must-work contract under real bubblewrap 0.8.x. The data
 // directory and its explicit alias are masked views; the control uses the same user/mount namespace with no views, so
@@ -124,6 +185,7 @@ func TestLinuxAgentSandboxForReal(t *testing.T) {
 	plan := f.plan()
 	plan.Cwd = work
 	plan.LauncherSettings = append(plan.LauncherSettings, filepath.Join(D, "launcher-settings", "link-settings.json"))
+	preflightLinuxAgentForReal(t, plan)
 	prefix, err := LinuxAgent(sup.Bwrap, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -261,9 +323,7 @@ func TestLinuxAgentSandboxForReal(t *testing.T) {
 	// WrapAgent's real preflight leaves bwrap as the direct supervisor of the agent in the same host pid namespace:
 	// the node-started pid remains the agent's PPID, and no hidden pid translation or extra intermediary is involved.
 	wrapped, env, st := WrapAgent(plan, []string{"/bin/sh", "-c", `printf "%s %s" "$$" "$PPID"`}, withoutKey(os.Environ(), AgentEnv))
-	if st.State != AgentActive {
-		t.Fatalf("WrapAgent did not wrap: %+v", st)
-	}
+	requireLinuxAgentForReal(t, st)
 	cmd := exec.Command(wrapped[0], wrapped[1:]...)
 	cmd.Dir = work
 	cmd.Env = env
@@ -357,9 +417,7 @@ func TestLinuxAgentSandboxRelativePathForReal(t *testing.T) {
 	env := withoutKey(withoutKey(os.Environ(), AgentEnv), "PATH")
 	env = append(env, "PATH=."+string(os.PathListSeparator)+os.Getenv("PATH"))
 	wrapped, env, st := WrapAgent(plan, []string{"relative-agent"}, env)
-	if st.State != AgentActive {
-		t.Fatalf("WrapAgent did not wrap: %+v", st)
-	}
+	requireLinuxAgentForReal(t, st)
 	cmd := exec.Command(wrapped[0], wrapped[1:]...)
 	cmd.Dir = work
 	cmd.Env = env
@@ -477,6 +535,7 @@ func TestLinuxAgentSandboxSnapshotForReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	preflightLinuxAgentForReal(t, plan)
 
 	script := "set -e; " + shellQuote(self) + " agent-socket-read " + shellQuote(nodeSock) + "; printf '\\nready\\n'; " +
 		"IFS= read -r _; " + shellQuote(self) + " agent-socket-read " + shellQuote(nodeSock) + "; printf '\\n'; " +
@@ -595,6 +654,7 @@ func TestLinuxAgentSandboxNamespaceBoundariesForReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	preflightLinuxAgentForReal(t, plan)
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = work

@@ -11,6 +11,8 @@ export const PREFIX = 'agy-'
 
 // Kept off native JSON: an appended replacement branch is a new logical step even when its timestamp repeats.
 const STEP_IDENTITY = Symbol('persona.agy.stepIdentity')
+// Kept off native JSON: live ACP tool calls and results pair explicitly even when parallel calls complete out of order.
+export const LIVE_TOOL_USE_ID = Symbol('persona.agy.liveToolUseId')
 
 function stepIdentity(step, branch = '') {
   const birth = typeof step.created_at === 'string' ? step.created_at : ''
@@ -206,9 +208,10 @@ export function stepsToItems(steps, opts = {}) {
         for (let k = 0; k < calls.length; k++) {
           const tc = calls[k]
           if (!tc || typeof tc !== 'object') continue
-          const callId = `call_${line}_${k}`
+          const explicitCallId = typeof tc[LIVE_TOOL_USE_ID] === 'string' && tc[LIVE_TOOL_USE_ID] ? tc[LIVE_TOOL_USE_ID] : ''
+          const callId = explicitCallId || `call_${line}_${k}`
           const { toolName, toolInput } = mapToolCall(tc.name || 'tool', tc.args)
-          pendingCalls.push({ callId, idx })
+          if (!explicitCallId) pendingCalls.push({ callId, idx })
           const item = {
             id: `${line}#${sub++}`,
             seq,
@@ -225,8 +228,9 @@ export function stepsToItems(steps, opts = {}) {
       }
       case 'GENERIC': {
         afterWork = true
-        const paired = pendingCalls.shift()
-        const callId = paired ? paired.callId : `call_${line}_0`
+        const explicitCallId = typeof step[LIVE_TOOL_USE_ID] === 'string' && step[LIVE_TOOL_USE_ID] ? step[LIVE_TOOL_USE_ID] : ''
+        const paired = explicitCallId ? undefined : pendingCalls.shift()
+        const callId = explicitCallId || (paired ? paired.callId : `call_${line}_0`)
         let rawOut = step.error || step.content || ''
         if (opts.full && opts.brainDir && Array.isArray(step.truncated_fields) && step.truncated_fields.includes('content')) {
           const outFile = join(opts.brainDir, '.system_generated', 'steps', String(idx), 'output.txt')
@@ -249,21 +253,8 @@ export function stepsToItems(steps, opts = {}) {
           ts,
         }
         items.push(opts.full ? resItem : light(resItem))
-        if (Array.isArray(step.media)) {
-          step.media.forEach((m, mi) => {
-            if (m && typeof m.mime_type === 'string' && m.mime_type.startsWith('image/')) {
-              items.push({
-                id: `${line}#img${mi}`,
-                seq,
-                role: 'user',
-                kind: 'image',
-                mime: m.mime_type,
-                lazy: true,
-                ts,
-              })
-            }
-          })
-        }
+        // Omit tool-result step.media: Antigravity runtimes have no session.image handler (matching agytranscript.go),
+        // and Read/view_file image thumbnails are already resolved from tool_input.file_path via ViewedImages.
         break
       }
       case 'ERROR_MESSAGE': {
@@ -284,7 +275,7 @@ export function stepsToItems(steps, opts = {}) {
 
 const transcriptCache = new Map()
 const transcriptRevisions = new Map()
-const MAX_CACHED_TRANSCRIPTS = 16
+const MAX_CACHED_TRANSCRIPTS = 128
 const MAX_TRANSCRIPT_REVISIONS = 256
 const MAX_TRANSCRIPT_CACHE_BYTES = 64 * 1024 * 1024
 let transcriptCacheBytes = 0
@@ -404,17 +395,21 @@ export function transcriptStatus(steps, summary) {
   return 'unknown'
 }
 
-export function workspacePathOf(summary, fallbackCwd = '') {
+export function workspacePathOf(summary, fallbackCwd = '', skip = null) {
   if (Array.isArray(summary?.WorkspaceURIs) && summary.WorkspaceURIs.length > 0) {
-    const u = String(summary.WorkspaceURIs[0])
-    if (u.startsWith('file://')) {
-      try {
-        return decodeURIComponent(new URL(u).pathname)
-      } catch {
-        return u.slice('file://'.length)
+    for (const raw of summary.WorkspaceURIs) {
+      const u = String(raw)
+      let p = u
+      if (u.startsWith('file://')) {
+        try {
+          p = decodeURIComponent(new URL(u).pathname)
+        } catch {
+          p = u.slice('file://'.length)
+        }
       }
+      if (skip && skip(p)) continue
+      return p
     }
-    return u
   }
   return fallbackCwd
 }

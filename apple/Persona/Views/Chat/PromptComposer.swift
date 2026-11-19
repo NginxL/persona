@@ -218,8 +218,10 @@ enum PromptItems {
 
     /// Persona' quick messages under short "/" words (picking one types its message, sent with send), then Claude
     /// Code's own commands.
-    static func commands(clear: Bool, loop: Bool = false) -> [PromptCommand] {
+    static func commands(clear: Bool, loop: Bool = false, permissions: Bool = false) -> [PromptCommand] {
         var out = SlashCommand.commands(loop: loop).map { PromptCommand($0.word, detail: $0.detail, insert: $0.text) }
+        // Persona's own (#6513): the composer opens the mode list for it (`onCommand`), nothing is typed or sent.
+        if permissions { out.append(PromptCommand(SessionModes.permissionsCommand, detail: String(localized: "Switch permission mode"))) }
         if clear { out.append(PromptCommand("/clear", detail: String(localized: "Clear context and start a new session"))) }
         return out
     }

@@ -37,7 +37,11 @@ type inboxNote struct {
 }
 
 func renderNote(n inboxNote, owner string) string {
-	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited, Failed: n.Failed,
+	return renderNoteIn(n, owner, "")
+}
+
+func renderNoteIn(n inboxNote, owner, language string) string {
+	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Language: language, Owner: owner, Text: n.Text, Edited: n.Edited, Failed: n.Failed,
 		Context: n.Context, Machine: n.Machine, Session: n.Session, Who: n.Who, Next: n.Next, Checks: n.Checks})
 }
 
@@ -385,7 +389,8 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 	mu.Lock()
 	defer mu.Unlock()
 	enabled := s.inboxConfig(ctx).Agent.Enabled
-	owner := s.owner(ctx)
+	hello := s.hello(ctx)
+	owner, language := inboxPromptOwner(hello), answerLanguage(hello.Locale)
 	b.mu.Lock()
 	if cur := b.items[it.ID]; cur != it {
 		// Forgotten (drop) while this was on its way: nothing goes, and the lock this may have put back goes again. One
@@ -442,7 +447,7 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 	}
 	texts := make([]string, len(notes))
 	for i, n := range notes {
-		texts[i] = renderNote(n, owner)
+		texts[i] = renderNoteIn(n, owner, language)
 	}
 	err := s.sendToSession(ctx, machine, sid, inboxProcessingPrompt(turn, strings.Join(texts, "\n\n---\n\n")))
 	gone := false
@@ -575,10 +580,12 @@ func (s *Service) judgeInboxTask(ctx context.Context, it *InboxItem, tasks []pro
 	if tasks = s.scopeInboxTasks(sc, tasks); len(tasks) == 0 {
 		return "", nil
 	}
+	hello := s.hello(ctx)
+	language := answerLanguage(hello.Locale)
 	b.mu.Lock()
-	input := prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Summary: it.Summary, Item: b.promptItem(it), Tasks: tasks})
+	input := prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Language: language, Summary: it.Summary, Item: b.promptItemIn(it, language), Tasks: tasks})
 	b.mu.Unlock()
-	system := prompts.RenderInboxJudge(prompts.InboxJudge{Owner: s.owner(ctx), Rules: s.inboxConfig(ctx).AgentRules})
+	system := prompts.RenderInboxJudge(prompts.InboxJudge{Language: language, Owner: inboxPromptOwner(hello), Rules: s.inboxConfig(ctx).AgentRules})
 	var out struct {
 		TaskID   string `json:"task_id"`
 		Evidence string `json:"evidence"`

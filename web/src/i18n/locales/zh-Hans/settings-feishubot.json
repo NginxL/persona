@@ -109,6 +109,8 @@
   "larkcli_profile_fixed": "{name}（由配置文件指定）",
   "feature_answer_new_card_title": "回复发成新卡片",
   "feature_answer_new_card_detail": "一轮结束时，回复作为新卡片发在对话最下面，飞书会提醒你，进度卡原地折叠。关闭时回复写进原来的进度卡",
+  "feature_topic_cot_title": "话题里显示智能体过程",
+  "feature_topic_cot_detail": "在飞书原生的可折叠智能体消息里显示话题这一轮的思考和工具调用，同时保留进度卡。关闭后过程仍放在卡片的折叠面板里",
   "source_report_full_title": "回传完整最终答复",
   "source_report_full_detail": "原群里的所有人都能看到这份最终答复。关闭时，机器人只回简短结论。",
   "topic_groups": "话题群",

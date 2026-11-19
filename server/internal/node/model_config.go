@@ -16,8 +16,12 @@ import (
 type modelExecution struct {
 	Model  string
 	Effort string
-	// ServiceTier is a one-shot native speed request for a new Codex conversation. It is consumed before the first turn,
-	// never kept as process state or included in the execution fingerprint.
+	// Speed is a one-shot Agent start choice, resolved only against the actual terminal dispatch. FastMode is the
+	// Claude Code form. Neither is kept as process state or included in the execution fingerprint.
+	Speed    string `json:"-"`
+	FastMode bool   `json:"-"`
+	// ServiceTier is a one-shot native speed request for a new Codex conversation or Agent start. It is consumed before
+	// the first turn, never kept as process state or included in the execution fingerprint.
 	ServiceTier string `json:"-"`
 	UseEffort   bool
 	Fingerprint string
@@ -44,9 +48,19 @@ type modelExecution struct {
 	// It changes the execution fingerprint so a role change resumes in a fresh process.
 	SupervisionInstructions string `json:",omitempty"`
 	SupervisionResolved     bool   `json:"-"`
-	// Origin is the conversation's manager-recorded source. It is authorization metadata, not a model choice, so it
-	// never changes the execution fingerprint; the node carries it into session state and model tool calls.
-	Origin string `json:"-"`
+	// Origin is the conversation's manager-recorded source. It is authorization metadata, not a model choice, but its
+	// Inbox/ordinary class changes Claude's built-in tool list. The fingerprint uses that class so a real policy change
+	// gets a new process while ordinary aliases (for example user and empty) do not restart an identical tool policy.
+	Origin string `json:",omitempty"`
+	// OriginKnown distinguishes a manager's explicit ordinary (empty-origin) decision from a pre-upgrade record whose
+	// origin is unknown. It is likewise authorization metadata and never changes the execution fingerprint.
+	OriginKnown bool `json:"-"`
+	// OriginDecisionRequired marks the RPC and autonomous-resume entries that must fail closed on a legacy unknown
+	// origin. Trusted in-process model plumbing may carry an existing execution without setting this per-entry gate.
+	OriginDecisionRequired bool `json:"-"`
+	// Public: this message answers in someone else's chat. Per message, never persisted or included in the execution
+	// fingerprint; assistantSend leaves the owner's live snapshot out of this input.
+	Public bool `json:"-"`
 	// Interject: a message this one carries, sent while the conversation answers, moves its foreground work to the
 	// background (assistant_interject.go). Per message, never part of the fingerprint.
 	Interject bool `json:"-"`
@@ -113,9 +127,19 @@ func (m modelExecution) checkModel() error {
 	return nil
 }
 
+// assistantOriginToolPolicy is the only origin distinction that changes a process's built-in tools. Other origin values
+// remain useful audit metadata, but user, channel, spawned and an explicitly ordinary empty origin all run the same tools.
+func assistantOriginToolPolicy(origin string) string {
+	if origin == originInbox {
+		return originInbox
+	}
+	return ""
+}
+
 // executionFingerprint also detects a managed provider changed before the next turn (any of its fields, the #2455 ones
 // included): another process, resumed on the same conversation.
 func (n *Node) executionFingerprint(launcher string, m modelExecution) string {
+	m.Origin = assistantOriginToolPolicy(m.Origin)
 	raw, _ := json.Marshal(m)
 	if l, ok := n.managedCatalog(launcher); ok { // as named: the same before and after a withheld one's pull (its Rev)
 		v, _ := json.Marshal(l)
@@ -140,11 +164,17 @@ func (m modelExecution) withSupervision(policy *string) modelExecution {
 }
 
 // assistantModel is the launcher and model the hub runs conversation id's next message on (as a message from the phone
-// would be), for a message the node sends it by itself (recoverAssistantTasks). Started on the model it last ran, the
-// conversation's next message from the phone would need another process (#1554). Nothing when the hub can't say (an
-// older hub): the conversation's own then. The manager also re-attests origin here, so a pre-upgrade node session
-// with no persisted origin still recovers under its Inbox policy.
+// would be), for a message the node sends it by itself. Started on the model it last ran, the conversation's next message
+// from the phone would need another process (#1554). Nothing when the hub can't say (an older hub): the conversation's own.
 func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExecution) {
+	launcher, execution, _ := n.assistantModelDecision(ctx, id)
+	return launcher, execution
+}
+
+// assistantModelDecision also re-attests origin for background-task recovery. Its boolean says whether the hub answered
+// at all. Only the manager's explicit origin_known attests an ordinary empty origin: a successful empty response, an older
+// hub and an unavailable answer all leave a pre-upgrade record unknown and must not start it with ordinary tools.
+func (n *Node) assistantModelDecision(ctx context.Context, id string) (string, modelExecution, bool) {
 	var res struct {
 		Launcher                string                   `json:"launcher"`
 		Model                   string                   `json:"model"`
@@ -155,11 +185,12 @@ func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExec
 		MainCompact             int                      `json:"main_compact_window"`
 		External                *proto.ExternalExecution `json:"external"`
 		Origin                  string                   `json:"origin"`
+		OriginKnown             bool                     `json:"origin_known"`
 		SupervisionInstructions *string                  `json:"supervision_instructions"`
 		ClaudeInteractive       bool                     `json:"claude_interactive"` // #10058: a send's own flag, here for starts no send makes
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
-		return "", modelExecution{}
+		return "", modelExecution{}, false
 	}
-	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Origin: res.Origin, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions)
+	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Origin: res.Origin, OriginKnown: res.OriginKnown, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions), true
 }

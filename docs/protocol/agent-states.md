@@ -95,9 +95,8 @@ session therefore carries `work.just_finished` (`state` is unchanged; older apps
   meeting or a stretch of focused work; the setting changes it.
 - **Not counted**: no push, badge, Needs you count, Live Activity or widget count changes, and the assistant's snapshot
   still lists these turns under "Done (within 24 hours)".
-- **Clients** (#9751): the web, and Android (#9786, `docs/android/android-design.md` 2.4), whose open chat keeps its row in
-  this place until it is left, as it keeps an Unread one. The shared Rust sort core with HarmonyOS and iOS / Mac follow
-  in their own issues; until then they show these rows as Seen, as before.
+- **Clients** (#9751): the web, Android (#9786), iOS and Mac (#9787) and the shared Rust sort core use this rank.
+  Android and Apple keep an open chat's row in its original place until the chat is left.
 
 ### Codex (#4865)
 

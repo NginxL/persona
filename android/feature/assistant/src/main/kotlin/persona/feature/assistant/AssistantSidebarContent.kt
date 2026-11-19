@@ -29,6 +29,8 @@ object AssistantSidebarShade {
     const val Knowledge = "knowledge"
     const val Machines = "machines"
     const val None = "none"
+
+    fun agent(key: SessionKey) = "agent:${key.path}"
 }
 
 /** The real shared history remains available even while a secondary page hides the Assistant root. */
@@ -64,9 +66,9 @@ fun AssistantSidebarContent(
      */
     fullWindowSearch: Boolean = false,
     /**
-     * Which place row stays shaded at regular width, including while drilled in
+     * Which row stays shaded for the visible root, including while drilled in and for an Agent on either tab
      * (iOS `UnifiedSidebar.shownPlace`, UnifiedSidebar.swift:39–44).
-     * Null keeps the phone drawer's conversation shading.
+     * Null keeps the compact Persona drawer's conversation shading.
      */
     shadedPlace: String? = null,
     /** When the sidebar is a column beside the page, folds the column from its own header; null in a drawer or overlay. */

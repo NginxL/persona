@@ -105,7 +105,7 @@ type LauncherView struct {
 	Stale []string `json:"stale,omitempty"`
 	// Versions (builtin): Claude Code's version on each machine that said.
 	Versions map[string]string `json:"versions,omitempty"`
-	// Managed only (#2455, proto.ManagedLauncher's fields): never the headers themselves, only has_headers.
+	// Managed only (#2455, proto.ManagedLauncher's fields): never header values, only has_headers and header_names.
 	Models        []proto.ProviderModel `json:"models,omitempty"`
 	OpusModel     string                `json:"opus_model,omitempty"`
 	SonnetModel   string                `json:"sonnet_model,omitempty"`
@@ -113,13 +113,15 @@ type LauncherView struct {
 	FableModel    string                `json:"fable_model,omitempty"`
 	SubagentForce bool                  `json:"subagent_force,omitempty"`
 	HasHeaders    bool                  `json:"has_headers,omitempty"`
-	HasEnv        bool                  `json:"has_env,omitempty"` // never the environment itself
-	Proxy         string                `json:"proxy,omitempty"`
-	NoProxy       string                `json:"no_proxy,omitempty"`
-	TimeoutMS     int                   `json:"timeout_ms,omitempty"`
-	CompactWindow int                   `json:"compact_window,omitempty"`
-	MaxContext    int                   `json:"max_context,omitempty"`
-	Effort        string                `json:"effort,omitempty"`
+	// HeaderNames identifies configured fields without returning their secret values.
+	HeaderNames   []string `json:"header_names,omitempty"`
+	HasEnv        bool     `json:"has_env,omitempty"` // never the environment itself
+	Proxy         string   `json:"proxy,omitempty"`
+	NoProxy       string   `json:"no_proxy,omitempty"`
+	TimeoutMS     int      `json:"timeout_ms,omitempty"`
+	CompactWindow int      `json:"compact_window,omitempty"`
+	MaxContext    int      `json:"max_context,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
 	// Origin is ManagedLauncher.Source ("" made by hand, "zshrc:<alias>@<machine>", "preset:<id>"); "source" is taken.
 	Origin string `json:"origin,omitempty"`
 	// Managed only: the device scope (docs/integrations/launchers.md "Device scope and on-demand delivery"). LegacyScope:
@@ -156,6 +158,20 @@ func launcherView(l storedLauncher) LauncherView {
 		CompactWindow: l.CompactWindow, MaxContext: l.MaxContext, Effort: l.Effort, Origin: l.Source,
 		Share: l.share(), ScopeMachines: l.ScopeMachines, Delivery: l.delivery(), OwnService: l.ownService(), LegacyScope: l.Share == "",
 		Pi: l.PiAPI() != "" && l.share() != shareNone, ViaMachine: l.ViaMachine, keySealed: l.KeySealed}
+}
+
+// launcherView adds the only header metadata safe to reopen in an editor: field names, never their values. An
+// unreadable sealed record keeps HasHeaders so the owner can replace or clear it without a value being exposed.
+func (s *Service) launcherView(l storedLauncher) LauncherView {
+	v := launcherView(l)
+	if v.HasHeaders {
+		if raw, err := s.openKey(l.HeadersSealed); err == nil {
+			for _, header := range parseHeaders(raw) {
+				v.HeaderNames = append(v.HeaderNames, header[0])
+			}
+		}
+	}
+	return v
 }
 
 var managedLauncherName = lazyre.New(`^[A-Za-z_][A-Za-z0-9_-]*$`)

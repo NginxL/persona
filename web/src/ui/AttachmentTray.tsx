@@ -2,11 +2,13 @@ import { cx, EASE } from "./atoms";
 import { Icon } from "./icons";
 import { t } from "../i18n";
 
-export function AttachmentTray({ attachments, onRemove, onOpen }: {
+export function AttachmentTray({ attachments, onRemove, onOpen, openLabel }: {
   attachments: { id: string; name: string; url?: string }[];
   onRemove?: (id: string) => void;
   /** Click a picture to open it (the composer marks it up before sending). */
   onOpen?: (id: string) => void;
+  /** A read-only opener's spoken label; without it, opening retains the composer's Edit wording. */
+  openLabel?: (name: string) => string;
 }) {
   if (!attachments.length) return null;
   return (
@@ -15,7 +17,7 @@ export function AttachmentTray({ attachments, onRemove, onOpen }: {
         <span key={a.id} title={a.name} className={cx("group/att relative rounded-[8px] bg-field shadow-hairline", a.url ? "size-14" : "flex h-14 max-w-full items-center gap-2 px-3 pr-7")} style={{ animation: `pop-in 200ms ${EASE} both` }}>
           {a.url ? (
             onOpen ? (
-              <button type="button" aria-label={t("ui-attachmenttray.edit", { name: a.name })} title={t("ui-attachmenttray.edit_hint")} onClick={() => onOpen(a.id)} className="block size-full cursor-pointer overflow-hidden rounded-[8px]">
+              <button type="button" aria-label={openLabel?.(a.name) ?? t("ui-attachmenttray.edit", { name: a.name })} title={openLabel?.(a.name) ?? t("ui-attachmenttray.edit_hint")} onClick={() => onOpen(a.id)} className="block size-full cursor-pointer overflow-hidden rounded-[8px]">
                 <img src={a.url} alt={a.name} className="size-full object-cover" />
               </button>
             ) : (

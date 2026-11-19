@@ -9,6 +9,7 @@ struct StatusDot: View {
     var size: CGFloat = 9
     /// It only waits in the background (`Session.waitsInBackground`).
     var waiting = false
+    var justFinished = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The needs-you ring: one breath every `breath` seconds, out to `1 + breathScale` times the dot as it fades.
@@ -50,11 +51,11 @@ struct StatusDot: View {
                         #endif
                     }
             } else {
-                Circle().fill(state.color)
+                Circle().fill(justFinished ? StatusPalette.unread.dot : state.color)
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel(state == .working && waiting ? String(localized: "Waiting in the background") : state.label)
+        .accessibilityLabel(justFinished ? StateName.justFinished.text : (state == .working && waiting ? String(localized: "Waiting in the background") : state.label))
     }
 }
 
@@ -140,6 +141,7 @@ struct AgentStateBadge: View {
     var state: AgentState
     /// It only waits in the background (`Session.waitsInBackground`).
     var waiting = false
+    var justFinished = false
     private static let attention = BUIGlyph("M12 6v8M12 18.5v.01")
 
     var body: some View {
@@ -153,6 +155,7 @@ struct AgentStateBadge: View {
                 .accessibilityLabel(String(localized: "Waiting in the background"))
         case .working: BUISpinner(size: Theme.Size.badge, lineWidth: Theme.Size.rule)
         case .unread: badge(Theme.positive, .check)
+        case .idle where justFinished: StatusDot(state: .idle, size: Theme.Size.dotXL, justFinished: true)
         case .idle: Circle().strokeBorder(Theme.cardStroke, lineWidth: Theme.Size.rule).frame(width: Theme.Size.badge, height: Theme.Size.badge)
         case .offline, .unknown: StatusDot(state: state, size: 9)
         }

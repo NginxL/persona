@@ -1,4 +1,5 @@
 {
+  "impact": "Impact",
   "intro": "Try features that are still being finished, or switch between the stable way of doing something and a new one. If something doesn't work well, come back here and choose the default.",
   "scope_note": "Each item here explains where it applies and when it takes effect.",
   "area_agents": "Agents",

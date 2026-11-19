@@ -105,6 +105,29 @@ import PersonaWire
         #expect(AgentSortComparable.differences(native: native, core: core) == [])
     }
 
+    @Test func holdingASeenJustFinishedRowKeepsItsRankThroughTheRealCABI() throws {
+        let fixture = try #require(ProjectionFixture.cases(in: "sort", operation: "agents_list")
+            .first { $0.name == "just_finished_rank_and_precedence" })
+        var input = try nativeInput(fixture)
+        let i = try #require(input.sessions.firstIndex { $0.sessionID == "finished" })
+        let sharedGroups = try #require(fixture.expected["groups"]?.array)
+        let original = AgentSortComparable(native: input)
+        #expect(original.groups.map(\.id) == sharedGroups.compactMap { $0.text("id") })
+        #expect(original.groups.map(\.rows) == sharedGroups.map { $0["rows"]?.array?.compactMap(\.string) ?? [] })
+        input.settings.held = input.sessions[i].key
+        input.settings.heldJustFinished = true
+        input.sessions[i].markLocallySeen()
+        for held in [true, false] {
+            if !held { input.settings.held = nil; input.settings.heldJustFinished = false }
+            let native = AgentSortComparable(native: input)
+            let output = try PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input))
+            let core = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(output.utf8)), input: input)
+            #expect(AgentSortComparable.differences(native: native, core: core).isEmpty)
+            #expect(native.groups.contains { $0.id == "state/just_finished" } == held)
+            #expect(native.unread.isEmpty)
+        }
+    }
+
     @Test func adapterKeepsSwiftOutputIdentical() throws {
         let fixture = try ProjectionFixture.require(try ProjectionFixture.cases(in: "sort", operation: "agents_list").first, "fixture")
         let input = try nativeInput(fixture)

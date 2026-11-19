@@ -146,7 +146,7 @@ class ForwardShotsTest {
                                     }
                                     if (scene == Scene.Menu) MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {},
                                         onForward = {}, onNotice = {})
-                                    else ForwardSheet(draft, forwarding, complete = { forward }, onDismiss = {}, onPicked = { _, _ -> })
+                                    else ForwardSheet(draft, forwarding, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = {}, onPicked = { _, _ -> })
                                 }
                                 Scene.Composer -> Column(Modifier.testTag("shot").fillMaxSize()) {
                                     Column(Modifier.fillMaxWidth().padding(Tokens.Space.l)) {
@@ -258,7 +258,7 @@ class ForwardShotsTest {
                 val shown = remember(sameHub) { ChatForwarding(forwarding.agents, forwarding.machines, forwarding.assistant, { sameHub },
                     forwarding.conversationTitle, forwarding.memory, forwarding.openChat, forwarding.openPersonaHome, forwarding.openNewAgent) }
                 androidx.compose.runtime.key(sameHub) {
-                    ForwardSheet(draft, shown, complete = { forward }, onDismiss = {}, onPicked = { _, _ -> })
+                    ForwardSheet(draft, shown, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = {}, onPicked = { _, _ -> })
                 }
             }
         }
@@ -272,19 +272,19 @@ class ForwardShotsTest {
 
     /** A tap on a target reads the forward, remembers the target and hands both on; the chat it came from is never offered. */
     @Test fun pickingATargetRemembersItAndHandsItOn() {
-        var picked: Pair<ForwardTarget, ChatLinkContext>? = null
+        var picked: Pair<ForwardTarget, ForwardCompletion>? = null
         var gone = false
         rule.setContent {
             CompositionLocalProvider(LocalRippleConfiguration provides null) {
                 PersonaTheme(reduceMotion = true) {
-                    if (!gone) ForwardSheet(draft, forwarding, complete = { forward }, onDismiss = { gone = true }, onPicked = { t, r -> picked = t to r })
+                    if (!gone) ForwardSheet(draft, forwarding, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = { gone = true }, onPicked = { t, r -> picked = t to r })
                 }
             }
         }
         settle()
         rule.onNodeWithTag("forward-session-login", useUnmergedTree = true).performClick()
         settle()
-        assertEquals(ForwardTarget.Chat(SessionKey("studio", "login")) to forward, picked)
+        assertEquals(ForwardTarget.Chat(SessionKey("studio", "login")) to ForwardCompletion(forward, RestoredPhotos()), picked)
         assertTrue(gone)
         assertEquals("session:studio/login", memory.list.first())
         assertTrue(rule.onAllNodesWithText("博客迁移到 Astro", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())

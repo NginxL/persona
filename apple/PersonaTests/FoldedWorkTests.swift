@@ -233,7 +233,10 @@ struct FoldedWorkTests {
         notify.toolName = "notify_user"
         var receipt = item(3, .toolResult, role: "user", text: "failed", tool: "notify")
         receipt.isError = true
-        s.merge([receipt, item(6, .text, text: "Fictional answer")])
+        // Narration, not a finished reply, which would show the round after a failed delivery (#10440).
+        var narration = item(6, .text, text: "Fictional answer")
+        narration.narration = true
+        s.merge([receipt, narration])
         s.merge([item(1, .text, role: "user", text: "Fictional input"), notify])
         #expect(!Supervision.visible(s.items, results: ["notify": receipt], live: false))
         receipt.isError = false

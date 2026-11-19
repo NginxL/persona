@@ -102,9 +102,12 @@ type BotFeatures struct {
 	// the progress card is folded, instead of the answer being written into the progress card (#5396). Off by default,
 	// and for settings saved before it: they have no such key.
 	AnswerNewCard bool `json:"answer_new_card"`
+	// TopicCot: a topic run also shows its thinking and tools in a native agent message, beside the progress card.
+	// On by default, including settings saved before it; off keeps the card's folded process panel.
+	TopicCot bool `json:"topic_cot"`
 }
 
-var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true}
+var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true, TopicCot: true}
 
 // BotOwner is the paired user: the only one the bot answers, and where pushes go.
 type BotOwner struct {

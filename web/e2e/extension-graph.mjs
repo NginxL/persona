@@ -20,6 +20,7 @@ const watchdog = setTimeout(() => {
 }, 180_000);
 const root = base.replace(/\/$/, "");
 const PAGE = "/extension/example-work/work";
+const CONTROL_ROOM = "/extension/example-work/control-room";
 const results = [];
 const check = (name, ok, detail) => {
   results.push({ name, ok: Boolean(ok), detail });
@@ -39,7 +40,7 @@ async function page({ width, height, theme, at = PAGE }) {
   await p.goto(`${root}/?token=mock`);
   await p.waitForFunction(() => localStorage.getItem("persona.token"));
   await p.goto(root + at);
-  if (at === PAGE) await p.locator("[data-graph-stage]").waitFor({ timeout: 30_000 });
+  if (at !== "/overview") await p.locator("[data-graph-stage]").waitFor({ state: "attached", timeout: 30_000 });
   // the nodes' fade-in comes to rest (the app's busy loops go on, and are not waited for)
   await p.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity));
   return p;
@@ -65,7 +66,7 @@ const measure = (p) =>
       transform: layer.style.transform,
       lw: layer.offsetWidth,
       lh: layer.offsetHeight,
-      zoomButtons: [...document.querySelectorAll("button[aria-label]")].slice(-4).map((b) => b.getAttribute("aria-label")),
+      zoomButtons: ["Zoom out", "Zoom in", "Fit", "Full screen"].filter((label) => document.querySelector(`button[aria-label="${label}"]`)),
     };
   });
 
@@ -124,8 +125,10 @@ try {
     const panM = await measure(p);
     const inView = panM.nodes.find((n) =>
       n.box.x >= m.stage.x && n.box.y >= m.stage.y && n.box.x + n.box.w <= m.stage.x + m.stage.w && n.box.y + n.box.h <= m.stage.y + m.stage.h);
+    // a real press moves the layer under the pointer (the node is panned into reach), so the click's down and up
+    // can land on different elements; the node's own click is dispatched directly
     const pressed = inView
-      ? (await p.locator(`[data-graph-node="${inView.id}"]`).click({ timeout: 10_000 }).then(() => true, () => false))
+      ? (await p.locator(`[data-graph-node="${inView.id}"]`).evaluate((e) => { e.click(); return true; }, null).catch(() => false))
       : false;
     const pushed2 = pressed && (await p.waitForFunction(() => document.body.textContent.includes("stands for a node"), null, { timeout: 15_000 }).then(() => true, () => false));
     check(`1440 ${theme}: a node in reach presses after the pan`, pushed2, inView);
@@ -251,6 +254,88 @@ try {
     }
     await p.screenshot({ path: join(shots, "card-1440-light.png") });
     await p.context().close();
+  }
+  // the control room: thirty-eight parallel nodes with timing, facts, a detail and links. At 1440 the outline, the
+  // in-place inspector beside the canvas and the wall-clock timeline beneath it are all there; a wide fit opens at a
+  // readable scale instead of a quarter, the fan-out packs several leaves to a column, and the keyboard and the
+  // timeline select and inspect a node in place, while Fit still shows all thirty-eight.
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    for (const theme of ["light", "dark"]) {
+      const p = await page({ width, height, theme, at: CONTROL_ROOM });
+      const m = await measure(p);
+      const tr = transform(m);
+      check(`control ${width} ${theme}: all 38 nodes`, m.nodes.length === 38, m.nodes.length);
+      check(`control ${width} ${theme}: opens at a readable scale >= 0.75`, tr && tr[2] >= 0.75, tr);
+      // the wide fan-out packs leaves into several columns, none drawn over another
+      const columns = new Set(m.nodes.map((n) => n.box.x));
+      const overlaps = m.nodes.filter((a) => m.nodes.some((b) => a !== b && Math.abs(a.box.x - b.box.x) < 4 && Math.abs(a.box.y - b.box.y) < a.box.h - 2));
+      check(`control ${width} ${theme}: packed into readable columns`, columns.size >= (width > 500 ? 3 : 2) && overlaps.length === 0, { columns: columns.size, overlaps: overlaps.length });
+      const stage = m.stage;
+      check(`control ${width} ${theme}: the canvas within the viewport`, stage.w > 0 && stage.w <= width && stage.h > 0, stage);
+      check(`control ${width} ${theme}: the canvas 320-900 tall`, stage.h >= 320 && stage.h <= 900, stage.h);
+      if (width > 500) {
+        const outline = await p.locator("[data-graph-outline]").first().waitFor({ timeout: 15_000 }).then(() => true, () => false);
+        check(`control ${width} ${theme}: the outline is visible`, outline);
+        // the inspector beside the canvas, with the selected node's facts, detail and links
+        const box = async (sel) => p.locator(sel).first().evaluate((e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }).catch(() => null);
+        const inspector = await box("[data-graph-inspector]");
+        check(`control ${width} ${theme}: the inspector is visible`, await p.locator("[data-graph-inspector]").isVisible());
+        check(`control ${width} ${theme}: the inspector in place beside the canvas`, inspector && inspector.w > 0 && inspector.y < stage.y + stage.h && inspector.y + inspector.h > stage.y && (inspector.x >= stage.x + stage.w - 2 || inspector.x + inspector.w <= stage.x + 2), { inspector, stage });
+        const inspectorText = await p.locator("[data-graph-inspector]").first().evaluate((e) => e.textContent ?? "").catch(() => "");
+        check(`control ${width} ${theme}: the inspector shows the verifier's feedback`, /retry storm/i.test(inspectorText) && /wait/i.test(inspectorText), inspectorText.slice(0, 120));
+        const links = await p.locator("[data-graph-inspector-link]").count();
+        check(`control ${width} ${theme}: the inspector's facts and links`, /Attempt 1/.test(inspectorText) && /Verdict/.test(inspectorText) && links === 3, { links, text: inspectorText.slice(0, 120) });
+        check(`control ${width} ${theme}: the inspector links name the attempts`, (await p.locator("[data-graph-inspector-link]").first().evaluate((e) => e.textContent ?? "")) .includes("Attempt 1"));
+        // the wall-clock timeline beneath the canvas, with clock ticks and a bar per timed node
+        const timeline = await box("[data-graph-timeline]");
+        check(`control ${width} ${theme}: the timeline is visible`, await p.locator("[data-graph-timeline]").isVisible());
+        check(`control ${width} ${theme}: the timeline beneath the canvas`, timeline && timeline.w > 0 && timeline.y >= stage.y + stage.h - 2, { timeline, stage });
+        const ticks = await p.locator("[data-graph-timeline-tick]").count();
+        const bars = await p.locator("[data-graph-timeline-bar]").count();
+        check(`control ${width} ${theme}: timeline clock ticks and bars`, ticks >= 2 && bars >= 30, { ticks, bars });
+      }
+      await p.screenshot({ path: join(shots, `control-room-${width}-${theme}.png`) });
+      if (width > 500) {
+        // Fit shows everything, all thirty-eight nodes inside the stage
+        await p.getByRole("button", { name: "Fit" }).click();
+        const fit = await measure(p);
+        const fitTr = transform(fit);
+        // the packing is wider than the narrow canvas at 25%, so Fit may sit at its floor with a node or two still
+        // clipped; either everything is inside, or the scale is the 25% floor
+        const inside = fit.nodes.every((n) => n.box.x >= fit.stage.x - 2 && n.box.x + n.box.w <= fit.stage.x + fit.stage.w + 2 && n.box.y >= fit.stage.y - 2 && n.box.y + n.box.h <= fit.stage.y + fit.stage.h + 2);
+        const floor = fitTr && Math.abs(fitTr[2] - 0.25) < 0.001;
+        check(`control ${width} ${theme}: Fit shows all 38 nodes`, fit.nodes.length === 38 && (inside || floor) && fitTr && fitTr[2] <= tr[2], { nodes: fit.nodes.length, inside, floor, fit: fitTr });
+        await p.screenshot({ path: join(shots, `control-room-${width}-${theme}-fit.png`) });
+        if (theme === "light") {
+          // j / k walk the outline and select in place; Escape closes the inspector and the toggle collapses the outline
+          await p.locator("[data-graph-outline] [data-graph-outline-node]").first().focus().catch(() => p.locator("[data-graph-outline]").focus());
+          const active = () => p.evaluate(() => document.activeElement?.getAttribute("data-graph-outline-node") ?? document.activeElement?.textContent ?? "");
+          const first = await active();
+          await p.keyboard.press("j");
+          const next = await active();
+          await p.keyboard.press("k");
+          const backRow = await active();
+          check("control: j / k walk the outline", first && next && first !== next && backRow === first, { first, next, backRow });
+          check("control: walking the outline inspects in place", await p.locator("[data-graph-inspector]").isVisible(), await p.locator("[data-graph-inspector]").textContent());
+          await p.keyboard.press("Escape");
+          const closed = await p.locator("[data-graph-inspector]").waitFor({ state: "detached", timeout: 5_000 }).then(() => true, () => false);
+          check("control: Escape closes the inspector", closed);
+          await p.locator("[data-graph-outline-toggle]").first().click();
+          const collapsed = await p.locator("[data-graph-outline]").waitFor({ state: "detached", timeout: 5_000 }).then(() => true, () => false);
+          check("control: the toggle collapses the outline", collapsed);
+          // a timeline row selects and inspects its node without leaving the page
+          const row = p.locator("[data-graph-timeline-row]").nth(10);
+          const id = await row.getAttribute("data-graph-timeline-row");
+          const label = (m.nodes.find((n) => n.id === id) ?? {}).label ?? "";
+          await row.click();
+          const after = await measure(p);
+          const list = await p.locator("[data-graph-inspector]").first().evaluate((e) => e.textContent ?? "");
+          const here = new URL(p.url()).pathname.endsWith("control-room");
+          check("control: a timeline row selects and inspects in place", after.selected && label && list.includes(label.split(",")[0]) && here, { id, label, here });
+        }
+      }
+      await p.context().close();
+    }
   }
 } catch (e) {
   failed = true;

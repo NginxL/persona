@@ -446,7 +446,7 @@ func atomOf(it *InboxItem) string {
 	case it.Connector != nil:
 		return it.Source + "\x00" + it.Connector.Thread
 	case it.Mail != nil:
-		return "mail\x00" + it.Mail.AccountID + "\x00" + it.Mail.Thread
+		return "mail\x00" + it.Mail.folderKey() + "\x00" + it.Mail.Thread
 	}
 	return it.Source + "\x00" + migratedThread(it)
 }

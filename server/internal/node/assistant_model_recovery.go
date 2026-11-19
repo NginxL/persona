@@ -458,15 +458,13 @@ func probeGateway(ctx context.Context, base, key, model, headers string) bool {
 	if err != nil {
 		return false
 	}
+	for name, value := range piHeaders(headers) {
+		req.Header.Set(name, value)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
-	for _, line := range strings.Split(headers, "\n") {
-		if name, value, ok := strings.Cut(strings.TrimSpace(line), ":"); ok && strings.EqualFold(strings.TrimSpace(name), "User-Agent") {
-			req.Header.Set("User-Agent", strings.TrimSpace(value))
-		}
-	}
 	modelhttp.SetDefaultUserAgent(req.Header)
 	modelhttp.SetOpenCodeSession(req.Header, req.URL.String(), modelhttp.OpenCodeSessionHeaderValue(headers))
 	resp, err := modelProbeHTTPClient.Do(req)

@@ -10,6 +10,8 @@ import persona.core.contracts.JsonCodec
 import persona.core.contracts.contextBody
 import kotlinx.serialization.encodeToString
 import persona.core.contracts.parseTime
+import persona.core.navigation.HubLinks
+import persona.core.navigation.HubPage
 import java.net.URI
 import java.net.URLDecoder
 import java.time.Duration
@@ -32,7 +34,9 @@ enum class ChatLinkKind { Web, App, External, Refused }
  * `persona://pair` (replacing the hub) is not navigation: tapped in a conversation it is ignored.
  */
 sealed interface ChatAppLink {
-    data class Session(val machineId: String, val sessionId: String) : ChatAppLink
+    data class Session(val machineId: String, val sessionId: String, val itemId: String? = null) : ChatAppLink
+    /** A route-table page. [hub] is authorized by the shell; [source] survives deferred hub selection. */
+    data class Page(val page: HubPage, val hub: String? = null, val source: String = "") : ChatAppLink
     /** `persona` (also `assistant`), `agents` or `inbox`. */
     data class Tab(val tab: String) : ChatAppLink
 }
@@ -91,7 +95,11 @@ internal object ChatLinks {
     fun toPreload(items: List<Item>, now: Instant): List<String> {
         val cutoff = now.minus(Duration.ofMinutes(15))
         return items.asReversed().asSequence().take(40)
-            .filter { it.role == "assistant" && it.kind == "text" && (parseTime(it.ts) ?: Instant.EPOCH).isAfter(cutoff) }
+            .filter { it.role == "assistant" && it.kind == "text" && it.source == null && it.from.isNullOrBlank() &&
+                (parseTime(it.ts) ?: Instant.EPOCH).isAfter(cutoff) }
+            // WebView preloads go directly to the site. A picture-bearing reply, even one still arriving or
+            // using a reference-style image, only retrieves its pictures through the reply image reader.
+            .filterNot { "![" in it.text.orEmpty() }
             .flatMap { item -> matches(item.text.orEmpty()).asSequence().map { it.url } }
             .filter { url -> runCatching { URI(url).host }.getOrNull()?.contains('.') == true }
             .distinct().take(3).toList()
@@ -110,18 +118,38 @@ internal object ChatLinks {
     }
 
     fun appLink(url: String): ChatAppLink? {
-        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
+        val trimmed = url.trim()
+        val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
         if (uri.scheme?.lowercase() !in ProtocolCompatibility.appSchemes) return null
-        val path = uri.rawPath.orEmpty().split('/').filter { it.isNotEmpty() }.map { URLDecoder.decode(it, "UTF-8") }
-        return when (uri.host?.lowercase()) {
-            "session" -> if (path.size >= 2 && path[0].isNotBlank() && path[1].isNotBlank()) ChatAppLink.Session(path[0], path[1]) else null
-            "assistant" -> ChatAppLink.Tab("persona")
-            "inbox" -> ChatAppLink.Tab("inbox")
-            "tab" -> ProtocolCompatibility.canonicalTab(path.firstOrNull()?.lowercase())?.let { if (it == "assistant") "persona" else it }
+        val path = runCatching {
+            uri.rawPath.orEmpty().split('/').filter { it.isNotEmpty() }.map { URLDecoder.decode(it, "UTF-8") }
+        }.getOrNull() ?: return null
+        when (uri.host?.lowercase()) {
+            "assistant" -> return ChatAppLink.Tab("persona")
+            "inbox" -> return ChatAppLink.Tab("inbox")
+            "tab" -> return ProtocolCompatibility.canonicalTab(path.firstOrNull()?.lowercase())
+                ?.let { if (it == "assistant") "persona" else it }
                 ?.takeIf { it in setOf("persona", "agents", "inbox") }?.let { ChatAppLink.Tab(it) }
-            else -> null // pair, open and anything else: not from a tapped link
         }
+        // Chat has no paired-hub registry. Carry an explicit hub to the shell, which alone can authorize it.
+        val hub = firstQueryValue(uri, "hub")
+        val profiles = listOfNotNull(hub?.let { HubLinks.Hub(it, emptyList()) })
+        val result = HubLinks.parse(trimmed, profiles) as? HubLinks.Result.Page ?: return null
+        val page = result.page
+        return if (page is HubPage.Agent && result.hub == null && page.view != "term") {
+            ChatAppLink.Session(page.machineId, page.sessionId, page.itemId)
+        } else ChatAppLink.Page(page, result.hub, trimmed)
     }
+
+    /** The same first, form-decoded query value HubLinks reads; this names a profile for parsing, not an authorized hub. */
+    private fun firstQueryValue(uri: URI, name: String): String? = runCatching {
+        for (part in uri.rawQuery.orEmpty().split('&').filter { it.isNotEmpty() }) {
+            if (URLDecoder.decode(part.substringBefore('='), "UTF-8") == name) {
+                return@runCatching URLDecoder.decode(part.substringAfter('=', ""), "UTF-8").takeIf { it.isNotEmpty() }
+            }
+        }
+        null
+    }.getOrNull()
 
     /**
      * Whether an intent built from an external link may start: never with data the app's own (`persona:`), another

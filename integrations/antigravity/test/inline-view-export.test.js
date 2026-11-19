@@ -178,14 +178,14 @@ test('unwatched settled turn clears unexportedTurns and publishes updated rev on
 })
 
 test('compact-to-full transcript transition at the same step_index pushes final item id', { timeout: 20_000 }, async (t) => {
-  const { node, directory, update } = await fixture(t)
+  const { node, directory } = await fixture(t)
   await node.peer.call('session.watch', { session_id: SESSION })
+  await until('initial session is listed', () => node.last('runtime.sessions')?.sessions.some((session) => session.session_id === SESSION))
   const compact = [
     { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-01-01T00:00:00Z', content: 'Show card.' },
     { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-01-01T00:00:01Z', content: CARD_REPLY },
   ]
   writeTranscriptFile(directory, 'transcript.jsonl', compact)
-  update({ sessionUpdate: 'tool_call', toolCallId: 'sync-compact', title: 'Read' })
 
   await until('compact transcript pushed', () => {
     const batch = node.last('session.items')

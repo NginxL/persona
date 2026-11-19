@@ -13,5 +13,10 @@
   "no_match_in_folder": "这个文件夹里没有对得上的",
   "skills_loading": "正在读取当前助手执行环境的技能…",
   "skills_error": "此环境的技能暂不可用，仍可正常聊天和引用其他内容。",
-  "skills_partial": "仅显示已核实的本地技能，此运行时可能还有其他技能。"
+  "skills_partial": "仅显示已核实的本地技能，此运行时可能还有其他技能。",
+  "skills": "技能",
+  "files": "文件与文件夹",
+  "sessions": "会话",
+  "workspaces": "工作区",
+  "search_skills": "搜索技能、文件和会话"
 }

@@ -261,6 +261,12 @@ func (s *Service) probeTarget(ctx context.Context, in probeInput) (probeTarget, 
 	if err := checkHeaders(t.headers); err != nil {
 		return t, err
 	}
+	if t.kind != "api" && strings.TrimSpace(t.headers) != "" {
+		l := proto.ManagedLauncher{Agent: t.agent, API: t.api, BaseURL: t.base}
+		if !l.CustomHeadersSupported() {
+			return t, errRuntimeHeaders
+		}
+	}
 	if t.api == "chat" || t.api == "responses" {
 		t.base = proto.APIBaseURL(t.base, t.api)
 	} else {
@@ -415,7 +421,7 @@ func (t probeTarget) redact(s string) string {
 		secrets = append(secrets, hd[1])
 	}
 	for _, v := range secrets {
-		if len(v) >= 4 {
+		if v != "" {
 			s = strings.ReplaceAll(s, v, "***")
 		}
 	}

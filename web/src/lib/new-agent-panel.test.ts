@@ -4,7 +4,7 @@
 // group, the row lit shows the form's setup, engine choices).
 import { describe, expect, it } from "vitest";
 import type { LauncherModels, PickerTier } from "./launcher-models";
-import { engineChoices, engineSetup, panelSections, type PanelProvider, type SectionsInput } from "./model-panel";
+import { engineChoices, engineSetup, panelSections, shownEffort, type PanelProvider, type SectionsInput } from "./model-panel";
 import { choiceCarries, formChoice, newAgentPanel, newAgentPill, type ModelChoice } from "./new-agent-panel";
 import type { ModelList } from "./session-models";
 import type { Launcher } from "./types";
@@ -161,10 +161,56 @@ describe("the panel's providers", () => {
 describe("the row lit and the state", () => {
   it("following the model settings: their launcher's Default row, with their effort; no Recommended group", () => {
     const p = panel();
-    expect(p.state).toEqual({ current: { provider: "claude", model: "default", effort: "high" }, recommended: [], starting: true });
+    expect(p.state).toEqual({ current: { provider: "claude", model: "default", effort: "high" }, currentEffortDisplayOnly: "agy", recommended: [], starting: true });
     const sections = panelSections({ providers: p.providers, state: p.state, view: { kind: "all" }, query: "", favorites: [], recent: [], overrides: {}, presets: p.presets });
     expect(sections.map((s) => s.kind)).not.toContain("recommended");
     expect(sections.find((s) => s.provider?.id === "claude")?.rows.find((r) => r.current)?.model.id).toBe("default");
+  });
+
+  it.each([
+    { launcher: "", effort: "", currentEffort: "xhigh", defaultEffort: "xhigh", shown: "xhigh" },
+    { launcher: "agy", effort: "", currentEffort: undefined, defaultEffort: "low", shown: "low" },
+    { launcher: "agy", effort: "high", currentEffort: "high", defaultEffort: "low", shown: "high" },
+  ])("shows agy effort for launcher=$launcher and effort=$effort without inheriting it in picks", ({ launcher, effort, currentEffort, defaultEffort, shown }) => {
+    const agyList: LauncherModels = { agent: "agy", models: [{ id: "example", name: "Example", default: true, default_effort: "low", efforts: EFFORTS }] };
+    const p = panel({
+      launchers: [{ name: "agy", agent: "agy" }],
+      listOf: () => ({ list: agyList }),
+      configured: { provider: "launcher.agy", model: "example", effort: "xhigh" },
+      choice: { ...none, launcher, effort },
+      runs: "agy",
+    });
+    const sections = panelSections({ providers: p.providers, state: p.state, view: { kind: "all" }, query: "", favorites: [], recent: [], overrides: {} });
+    const row = sections.flatMap((s) => s.rows).find((r) => r.current)!;
+    expect(p.state.current?.effort).toBe(currentEffort);
+    expect(row.model.defaultEffort).toBe(defaultEffort);
+    expect(shownEffort(row.setup, row.model)).toBe(shown);
+    expect(formChoice(row.setup)).toEqual({ launcher: "agy", model: "", effort });
+  });
+
+  it.each([
+    { source: "Model settings", choice: none, effort: "" },
+    { source: "an explicit pick", choice: { launcher: "agy", model: "example", effort: "xhigh" }, effort: "xhigh" },
+  ])("picks another agy model with the correct effort from $source", ({ choice, effort }) => {
+    const agyList: LauncherModels = {
+      agent: "agy",
+      models: [
+        { id: "example", name: "Example", efforts: ["high", "xhigh"] },
+        { id: "other", name: "Other", efforts: ["high", "xhigh"] },
+        { id: "limited", name: "Limited", efforts: ["high"] },
+      ],
+    };
+    const p = panel({
+      launchers: [{ name: "agy", agent: "agy" }],
+      listOf: () => ({ list: agyList }),
+      configured: { provider: "launcher.agy", model: "example", effort: "xhigh" },
+      choice,
+      runs: "agy",
+    });
+    const sections = panelSections({ providers: p.providers, state: p.state, view: { kind: "all" }, query: "", favorites: [], recent: [], overrides: {} });
+    const rows = sections.flatMap((s) => s.rows);
+    expect(formChoice(rows.find((r) => r.model.id === "other")!.setup)).toEqual({ launcher: "agy", model: "other", effort });
+    expect(formChoice(rows.find((r) => r.model.id === "limited")!.setup)).toEqual({ launcher: "agy", model: "limited", effort: "" });
   });
 
   it("a model picked: its row, with the effort picked", () => {

@@ -73,8 +73,13 @@ class PersonaApp : Application() {
         AppText.install(resources)
     }
 
+    /** Device-local diagnostics, independent of the selected hub. */
+    internal val developingPersona by lazy { persona.android.dev.DevelopingPersona(this, scope) }
+
     /** Crashes and ANRs for the hub's `error_reports` (docs/android/android.md "Error reports"). */
-    private val errorReporting by lazy { persona.android.errors.ErrorReporting(this) }
+    private val errorReporting by lazy {
+        persona.android.errors.ErrorReporting(this, developingPersona::recordError, developingPersona::recordExit)
+    }
 
     override fun onCreate() {
         // Before Hilt builds the graph, so a crash there is written too.
@@ -83,6 +88,7 @@ class PersonaApp : Application() {
         agentListAdapter
         persona.core.domain.answer.AnswerAdapters.install(AnswerSelection.choose(this))
         super.onCreate()
+        developingPersona.start()
         // The core modules' words (errors, the data repositories' state) in the shown language (docs/protocol/i18n.md).
         persona.core.contracts.CoreText.words = { it.resolve(this) }
         pairings = PairingStore(this)

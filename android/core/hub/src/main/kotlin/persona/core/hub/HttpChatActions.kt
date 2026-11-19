@@ -106,6 +106,21 @@ class HttpChatActions internal constructor(
         }
     }
 
+    override suspend fun retryUndelivered(session: Session, messageId: String) {
+        require(session.sessionId.isNotBlank() && messageId.isNotBlank())
+        val body = buildJsonObject { }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        request(api("assistant", "conversations", session.sessionId, "undelivered", messageId, "retry"), "POST", body).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
+        }
+    }
+
+    override suspend fun deleteUndelivered(session: Session, messageId: String) {
+        require(session.sessionId.isNotBlank() && messageId.isNotBlank())
+        request(api("assistant", "conversations", session.sessionId, "undelivered", messageId), "DELETE", null).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
+        }
+    }
+
     override suspend fun fork(session: Session, atItemId: String): String {
         val body = buildJsonObject { put("at_item_id", atItemId) }
         return request(api("sessions", session.machineId, session.sessionId, "fork"), "POST",
@@ -303,7 +318,10 @@ internal fun modesApplied(current: Session, action: ChatAction.Modes): Boolean {
         return current.pendingSwitch?.launcher == action.launcher || current.launcher == action.launcher
     return (action.launcher == null || current.pendingSwitch == null) &&
         (action.model == null || current.model.equals(action.model, ignoreCase = true)) &&
-        (action.permissionMode == null || current.permissionMode == action.permissionMode) &&
+        // a queued bypass restart keeps the running mode with bypassPending; cancelling it clears bypassPending
+        (action.permissionMode == null ||
+            (action.permissionMode == "bypassPermissions" && current.bypassPending) ||
+            (current.permissionMode == action.permissionMode && !current.bypassPending)) &&
         (action.effort == null || current.effort == action.effort) &&
         // a queued switch went through too: the node applies it after the turn
         (action.ultracode == null || current.ultracode == action.ultracode || current.ultracodePending) &&

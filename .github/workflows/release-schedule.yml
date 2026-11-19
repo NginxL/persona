@@ -1,0 +1,122 @@
+name: release-schedule
+
+# The scheduler opens or refreshes a release PR; it never creates a tag or publishes a binary itself.
+on:
+  schedule:
+    # Stable at 12:00 in the operator's configured UTC+08:00 zone (04:00 UTC). Beta every two hours,
+    # not every two minutes. Do not duplicate this workflow with a local publisher.
+    - cron: '0 4 * * *'
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Create a stable release PR or an independent beta release PR'
+        type: choice
+        options: [release, beta]
+        default: beta
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-schedule-${{ inputs.channel || 'automatic' }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.actor == 'chyroc' && github.triggering_actor == 'chyroc'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: persona-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Choose only a new main source and an unused immutable version
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ inputs.channel || (github.event.schedule == '0 4 * * *' && 'release' || 'beta') }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; no release PR or branch was created' >&2; exit 1; }
+          test "$CHANNEL" = release || test "$CHANNEL" = beta
+          commit="$(git rev-parse HEAD)"
+          stable="$(gh release view --repo "$REPOSITORY" --json tagName --jq .tagName)"
+          previous="$(git rev-parse "$stable^{commit}")"
+          git log --format=%s "$stable..$commit" --no-merges > release-subjects.txt
+          if [[ "$CHANNEL" = beta ]]; then
+            current="$(gh release download beta-channel --repo "$REPOSITORY" --pattern latest.json --output - 2>/dev/null || true)"
+            if [[ -n "$current" ]]; then
+              previous="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["commit"])' <<< "$current")"
+            fi
+          fi
+          version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" schedule-version --stable-tag "$stable" --commit "$commit" --previous-commit "$previous" --subjects release-subjects.txt)"
+          if [[ "$CHANNEL" = beta ]] && gh release view "v$version" --repo "$REPOSITORY" --json tagName >/dev/null 2>&1; then
+            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable")"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || exit 0
+          branch="release/$version"
+          title="release: v$version"
+          if [[ "$(gh pr list --repo "$REPOSITORY" --state open --head "$branch" --json number --jq length)" -gt 0 ]]; then
+            echo "Release PR already exists for $version; do not duplicate it."
+            exit 0
+          fi
+          if git ls-remote --exit-code "https://github.com/$REPOSITORY.git" "refs/heads/$branch" >/dev/null 2>&1; then
+            # A previous failed scheduler owns this version. Never overwrite its different source: allocate the next one.
+            echo "$branch has no open PR; preserve its failed source and select a new immutable version."
+            git ls-remote --heads "https://github.com/$REPOSITORY.git" 'refs/heads/release/*' | cut -f2 | sed 's#refs/heads/release/##' > release-reserved.txt
+            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable" --reserved $(tr '\n' ' ' < release-reserved.txt))"
+            branch="release/$version"
+            title="release: v$version"
+          fi
+          if git ls-remote --exit-code "https://github.com/$REPOSITORY.git" "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "Version tag v$version already exists; do not reuse it." >&2
+            exit 1
+          fi
+          {
+            printf 'version=%s\n' "$version"
+            printf 'branch=%s\n' "$branch"
+            printf 'title=%s\n' "$title"
+            printf 'commit=%s\n' "$commit"
+          } >> "$GITHUB_OUTPUT"
+      - name: Create the explicit release PR for the fixed main commit
+        if: steps.select.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ steps.select.outputs.branch }}
+          TITLE: ${{ steps.select.outputs.title }}
+          VERSION: ${{ steps.select.outputs.version }}
+          COMMIT: ${{ steps.select.outputs.commit }}
+          CHANNEL: ${{ inputs.channel || (github.event.schedule == '0 4 * * *' && 'release' || 'beta') }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git switch -c "$BRANCH" 2>/dev/null || git switch "$BRANCH"
+          mkdir -p .github/release-prs
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          data={'version':os.environ['VERSION'],'commit':os.environ['COMMIT'],'channel':os.environ['CHANNEL']}
+          Path('.github/release-prs/'+os.environ['VERSION']+'.json').write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          git add ".github/release-prs/$VERSION.json"
+          git diff --cached --quiet || git commit -m "$TITLE"
+          # Reuse the same release-PR branch on a bounded retry. Do not rewrite a release-PR source or move a tag.
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push "https://github.com/$REPOSITORY.git" "refs/heads/$BRANCH"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          body=(f'Refs #9765.\n\nVerify this exact merge result on all available signed platforms before merging. '
+                f'The protected publication workflow consumes the verified artifacts from this release PR; no other commit or unsigned substitute is published.\n\n'
+                f'Source: {os.environ["COMMIT"]}\nChannel: {os.environ["CHANNEL"]}')
+          Path(os.environ['RUNNER_TEMP']+'/release-pr-body.md').write_text(body)
+          PY
+          python3 scripts/operations/create_release_pr.py --repository "$REPOSITORY" --title "$TITLE" --branch "$BRANCH" --body-file "$RUNNER_TEMP/release-pr-body.md"

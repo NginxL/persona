@@ -21,10 +21,15 @@ func healthSession(s *proto.Session) bool {
 // extensionToken: r carries an extension's token.
 func extensionToken(r *http.Request) bool { return principalOf(r.Context()).Role == roleExtension }
 
+func restrictedAgentData(r *http.Request) bool {
+	role := principalOf(r.Context()).Role
+	return role == roleExtension || role == roleScoped
+}
+
 // withoutHealthSessions drops the health space's conversations from list for an extension's token (list itself
 // otherwise, and when none is dropped). list is never changed.
 func withoutHealthSessions(r *http.Request, list []proto.Session) []proto.Session {
-	if !extensionToken(r) {
+	if !restrictedAgentData(r) {
 		return list
 	}
 	for i := range list {
@@ -63,7 +68,7 @@ func (h *Hub) hiddenFromExtensions(ix proto.Interaction) bool {
 // unknown machine (the route's own 404), go on to next.
 func (h *Hub) extensionReadable(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if extensionToken(r) {
+		if restrictedAgentData(r) {
 			if m := h.localMachine(r.PathValue("mid")); m != nil {
 				if s, ok := m.session(r.PathValue("sid")); !ok || healthSession(&s) {
 					writeErr(w, http.StatusNotFound, errDeleteUnknown) // "No such session"

@@ -107,6 +107,7 @@
   "kind_cli": "其他（网页 / 命令行）",
   "kind_web": "网页",
   "role_answer": "只能回答",
+  "role_scoped": "受限访问",
   "revoked_ago": "{time}撤销",
   "used_ago": "{time}用过",
   "added_ago": "{time}添加",
@@ -177,5 +178,10 @@
   "search_key_words": "API Key、密钥",
   "device_tokens": "设备 token",
   "pi_too": "pi 也能用",
-  "pi_too_title": "范围内电脑上的 pi 也能用这个供应商，不需要 models.json"
+  "pi_too_title": "范围内电脑上的 pi 也能用这个供应商，不需要 models.json",
+  "show_botmux": "在 Agents 中显示 botmux 会话",
+  "show_botmux_hint": "在此 Hub 的设备间同步。仅隐藏列表，不影响任务使用这些会话。",
+  "show_botmux_inventory": "电脑上的“同时显示 botmux 会话”开关决定哪些会话会传到 Hub。",
+  "show_botmux_computers": "打开电脑",
+  "botmux_saving": "保存中…"
 }

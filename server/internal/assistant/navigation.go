@@ -8,11 +8,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
-// The user's navigation choices (#9071, docs/protocol/protocol.md "Navigation"): the page the apps open on and how the
-// sidebar's pages are arranged (their order, the ones put away, the groups). The default
+// The user's navigation choices (#9071, docs/protocol/protocol.md "Navigation"): the page the apps open on, how the
+// sidebar's pages are arranged (their order, the ones put away, the groups) and how Overview's extension cards are
+// (their order, the ones hidden, their widths: #9745). The default
 // manager keeps them for the hub, and a hub has one owner, so they are the user's: every device of theirs follows. Kept
 // in the settings table under navigationKey (a key of its own: no migration). A field never stored is left out of the
 // answer, so an app tells "never chosen" from "the default chosen" (an empty start) and may hand over a choice it kept
@@ -26,6 +28,46 @@ type navigation struct {
 	Start *string `json:"start,omitempty"`
 	// Pages is the sidebar's arrangement, as the web keeps it (web/src/lib/sidebar-pages.ts): a page's key as for Start.
 	Pages *sidebarPages `json:"pages,omitempty"`
+	// Overview is Overview's extension cards as the user arranged them, as the web keeps it (web/src/lib/overview-cards.ts).
+	// An empty list is the default chosen (every card in the hub's order, half a row), not "never chosen".
+	Overview *[]overviewPlace `json:"overview,omitempty"`
+}
+
+// overviewPlace is one of Overview's cards (an extension's overview_card, docs/extensions/extensions.md "UI slots") as
+// the user placed it: the extension's id and the card's, whether it is hidden, and its width: half a row ("" or "half",
+// the default) or the whole row ("full"). Which cards there are is the apps' business: one the list names that is not
+// there now is passed over, and one it does not name comes after the named ones.
+type overviewPlace struct {
+	Extension string `json:"extension"`
+	ID        string `json:"id"`
+	Hidden    bool   `json:"hidden,omitempty"`
+	Span      string `json:"span,omitempty"`
+}
+
+// overviewCardsMost: cards in the list, as many as the sidebar's pages.
+const overviewCardsMost = sidebarPagesMost
+
+// checkOverview says what in cards is not of the shape the apps write: ids as an extension's and a UI contribution's
+// (extension.ValidID), each card once, and a width of "half" or "full".
+func checkOverview(cards []overviewPlace) error {
+	if len(cards) > overviewCardsMost {
+		return fmt.Errorf("overview: at most %d cards", overviewCardsMost)
+	}
+	seen := make(map[string]bool, len(cards))
+	for _, c := range cards {
+		if !extension.ValidID(c.Extension) || !extension.ValidID(c.ID) {
+			return fmt.Errorf("overview: %q / %q is not an extension's card", c.Extension, c.ID)
+		}
+		if c.Span != "" && c.Span != "half" && c.Span != "full" {
+			return fmt.Errorf("overview: a card's span is half or full, not %q", c.Span)
+		}
+		k := c.Extension + "/" + c.ID
+		if seen[k] {
+			return fmt.Errorf("overview: %s more than once", k)
+		}
+		seen[k] = true
+	}
+	return nil
 }
 
 // sidebarPages: the pages in the user's order; those switched into the list or put under More; the groups in their
@@ -122,8 +164,8 @@ func (s *Service) putNavigation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body navigation
-	if err := decodeBody(w, r, &body, 64<<10); err != nil || (body.Start == nil && body.Pages == nil) {
-		writeBodyErr(w, err, errors.New("start or pages is required"))
+	if err := decodeBody(w, r, &body, 64<<10); err != nil || (body.Start == nil && body.Pages == nil && body.Overview == nil) {
+		writeBodyErr(w, err, errors.New("start, pages or overview is required"))
 		return
 	}
 	if body.Start != nil && !validStartPage(*body.Start) {
@@ -132,6 +174,12 @@ func (s *Service) putNavigation(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Pages != nil {
 		if err := body.Pages.check(); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if body.Overview != nil {
+		if err := checkOverview(*body.Overview); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
@@ -157,12 +205,16 @@ func (s *Service) putNavigation(w http.ResponseWriter, r *http.Request) {
 		n.Pages = body.Pages
 		ev["pages"] = n.Pages
 	}
+	if body.Overview != nil {
+		n.Overview = body.Overview
+		ev["overview"] = *n.Overview
+	}
 	if err := st.PutSetting(r.Context(), navigationKey, n); err != nil {
 		apierr.Write(w, http.StatusServiceUnavailable, err)
 		return
 	}
-	// every app follows at once: its copy decides the next opening and draws the sidebar before the hub answers. Only
-	// what changed goes out, so an app holding a change of the other field it has not sent yet keeps it.
+	// every app follows at once: its copy decides the next opening and draws the sidebar and Overview before the hub
+	// answers. Only what changed goes out, so an app holding a change of another field it has not sent yet keeps it.
 	s.event(r.Context(), ev)
 	apierr.WriteJSON(w, n)
 }

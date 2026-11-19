@@ -21,7 +21,8 @@ const GROUPINGS: string[] = ['state', 'machine', 'space'];
 const GROUP_LABELS: Record<string, string> = {'state': 'agent_group_state', 'machine': 'agent_filter_machine', 'space': 'agent_group_space'};
 const STATE_LABELS: Record<string, string> = {'pinned': 'agent_group_pinned', 'state/needs': 'needs_you',
   'state/unread': 'agent_group_unread', 'state/awaiting': 'agent_group_awaiting', 'state/working': 'working',
-  'state/background': 'agent_group_background', 'state/waiting': 'agent_group_waiting', 'state/muted': 'agent_group_muted',
+  'state/background': 'agent_group_background', 'state/just_finished': 'agent_group_just_finished',
+  'state/waiting': 'agent_group_waiting', 'state/muted': 'agent_group_muted',
   'state/idle': 'agent_group_idle'};
 
 @ObservedV2

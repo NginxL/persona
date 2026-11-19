@@ -32,6 +32,8 @@ data class PlanTask(
     val why: String? = null,
     @SerialName("todo_id") val todoId: String? = null,
     val error: String? = null,
+    /** The Agent preset to resolve when this planned task starts; null on an older hub. */
+    val tier: String? = null,
 ) {
     /** The directory's last part: how the user names a project. */
     val project get() = cwd.trimEnd('/').substringAfterLast('/')

@@ -105,6 +105,8 @@
     <string name="knowledge_linked_recordings">Related recordings</string>
     <string name="knowledge_recorded">Recorded %1$s</string>
     <string name="knowledge_recording_info">Recording</string>
+    <string name="knowledge_imported_lark">Lark Meeting Notes</string>
+    <string name="knowledge_imported_original">Original Meeting Notes</string>
     <string name="knowledge_recording_started">Started</string>
     <string name="knowledge_recording_duration">Length</string>
     <string name="knowledge_recording_device">Recorded on</string>

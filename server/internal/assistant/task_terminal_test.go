@@ -75,15 +75,16 @@ func dispatchTerminalTaskOn(t *testing.T, store Store, optIn, receipt bool) (*Se
 
 func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 	for _, scenario := range []struct {
-		name         string
-		optIn        bool
-		noReceipt    bool
-		withdraw     bool
-		outcome      string
-		userCheck    bool
-		change       func(*proto.Session)
-		shouldClose  bool
-		disconnected bool
+		name        string
+		optIn       bool
+		noReceipt   bool
+		withdraw    bool
+		outcome     string
+		userCheck   bool
+		change      func(*proto.Session)
+		shouldClose bool
+		closeErr    error
+		unreadable  bool
 	}{
 		{name: "accepted", optIn: true, shouldClose: true},
 		{name: "clean profile"},
@@ -96,7 +97,10 @@ func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 		{name: "interaction", optIn: true, change: func(s *proto.Session) { s.PendingInteractions = 1 }},
 		{name: "working", optIn: true, change: func(s *proto.Session) { s.Status = proto.StatusWorking }},
 		{name: "replaced pane", optIn: true, change: func(s *proto.Session) { s.PaneID = "replacement" }},
-		{name: "disconnect after dispatch", optIn: true, shouldClose: true, disconnected: true},
+		{name: "disconnect after dispatch", optIn: true, shouldClose: true, closeErr: rpc.ErrClosed},
+		{name: "deadline across the bus", optIn: true, shouldClose: true, closeErr: relayedDeadline},
+		{name: "node failed after close", optIn: true, shouldClose: true, closeErr: nodeAfterWrite},
+		{name: "unreadable close receipt", optIn: true, shouldClose: true, unreadable: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			s, f, task := dispatchTerminalTask(t, scenario.optIn, !scenario.noReceipt)
@@ -141,8 +145,11 @@ func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 					t.Errorf("authorization = %t, repeated = %t", authorized, repeated)
 				}
 				f.sessions["box"] = nil
-				if scenario.disconnected {
-					return nil, rpc.ErrClosed
+				if scenario.closeErr != nil {
+					return nil, scenario.closeErr
+				}
+				if scenario.unreadable {
+					return 42, nil
 				}
 				return map[string]string{"status": devicewire.TaskTerminalClosed}, nil
 			}
@@ -152,7 +159,7 @@ func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 			if scenario.shouldClose {
 				want = devicewire.TaskTerminalClosed
 			}
-			if scenario.disconnected {
+			if scenario.closeErr != nil || scenario.unreadable {
 				want = devicewire.TaskTerminalPending
 			}
 			review := func() {
@@ -160,6 +167,9 @@ func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 				res, err := runJSON(t, s, "conv1", "task_review", args)
 				if err != nil || !strings.Contains(res, "Terminal cleanup: "+want) {
 					t.Fatalf("review = %q, %v, want %s", res, err, want)
+				}
+				if want == devicewire.TaskTerminalPending && !strings.Contains(res, "may have reached the node") {
+					t.Errorf("the review did not explain why terminal cleanup is pending: %s", res)
 				}
 			}
 			review()

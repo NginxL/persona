@@ -203,7 +203,7 @@ class NewAgentRecentShotsTest {
             rule.waitForIdle()
             when (sc) {
                 Scene.Cards -> {
-                    listOf("persona", "notes-app", "data-pipeline", "全部放行", "离线", "跟随模型配置").forEach {
+                    listOf("persona", "notes-app", "data-pipeline", "完全访问", "离线", "跟随模型配置").forEach {
                         assertTrue("$s ${if (d) "dark" else "light"} shows $it",
                             rule.onAllNodesWithText(it, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
                     }
@@ -227,7 +227,7 @@ class NewAgentRecentShotsTest {
                 }
                 Scene.HandOff -> {
                     rule.onNodeWithText("/code/persona", useUnmergedTree = true).assertExists()
-                    rule.onNodeWithText("只做计划 (plan)", useUnmergedTree = true).assertExists()
+                    rule.onNodeWithText("计划模式 (plan)", useUnmergedTree = true).assertExists()
                 }
             }
             val node = if (sc == Scene.Menu || sc == Scene.HandOff) rule.onNode(isDialog()) else rule.onNodeWithTag("shot")
@@ -254,7 +254,7 @@ class NewAgentRecentShotsTest {
             }
         }
         rule.waitForIdle()
-        listOf("Recent", "Allow everything", "Offline", "Follow model settings").forEach {
+        listOf("Recent", "Full access", "Offline", "Follow model settings").forEach {
             assertTrue("shows $it", rule.onAllNodesWithText(it, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         }
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()

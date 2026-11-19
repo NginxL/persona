@@ -172,7 +172,7 @@ func peerSendAt(ctx context.Context, p claudePeer, sessionID, text, priority str
 		}
 		token = "" // auth is optional on this platform: an inbox whose key file is missing takes the line without it
 	}
-	msg, err := peerMessageAt(sessionID, text, priority, p.fromMode)
+	msg, err := peerMessageIn(sessionID, text, priority, p.fromMode, agentPromptLanguage(ctx))
 	if err != nil {
 		return &errPeer{code: peerUnsupported, msg: peerNoInboxMsg, cause: err}
 	}
@@ -214,12 +214,16 @@ func peerMessage(sessionID, text string) ([]byte, error) {
 
 // peerMessageAt is peerMessage at priority, stating fromMode in the envelope ("" for none).
 func peerMessageAt(sessionID, text, priority, fromMode string) ([]byte, error) {
+	return peerMessageIn(sessionID, text, priority, fromMode, "")
+}
+
+func peerMessageIn(sessionID, text, priority, fromMode, language string) ([]byte, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("empty message")
 	}
 	return marshalNoEscape(map[string]any{
 		"type":       "user",
-		"message":    map[string]string{"role": "user", "content": peerEnvelope(prompts.RenderPeerMessage(prompts.PeerMessage{Text: text}), fromMode)},
+		"message":    map[string]string{"role": "user", "content": peerEnvelope(prompts.RenderPeerMessage(prompts.PeerMessage{Language: language, Text: text}), fromMode)},
 		"priority":   priority,
 		"msgV":       1,
 		"msg_id":     peerMsgID(),

@@ -11,6 +11,9 @@ type Config struct {
 	APIKeyFile string `json:"api_key_file"`
 	// APIKey is an in-memory credential supplied by the hub's encrypted provider store.
 	APIKey string `json:"-"`
+	// Headers contains provider-specific HTTP fields in memory. Values are credentials too: never serialize them, and
+	// drop them on any redirect chain that leaves the original origin.
+	Headers map[string]string `json:"-"`
 	// UserAgent overrides the HTTP default when non-nil, including when it points to an empty string.
 	UserAgent *string `json:"-"`
 	Model     string  `json:"model"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -58,6 +59,11 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 		Session proto.Session `json:"session"`
 	}
 	if err := s.call(sctx, m.ID, DeviceSessionStart, params, &res); err != nil {
+		if sendUnknown(err) {
+			return proto.Session{}, &uncertainTaskStart{Message: i18n.Message{
+				Key: "assistant-tasks.route_start_unconfirmed", Args: i18n.Args{"reason": err},
+			}, cause: err}
+		}
 		return proto.Session{}, err
 	}
 	c := res.Session
@@ -76,12 +82,22 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 	return c, nil
 }
 
+// Keep the node's original result available to callers while giving the owner a localized explanation.
+type uncertainTaskStart struct {
+	i18n.Message
+	cause error
+}
+
+func (e *uncertainTaskStart) Unwrap() error { return e.cause }
+
 // taskStart is a start of a task's agent on its way (tasksState.retrying).
 type taskStart struct {
 	done chan struct{} // closed when it ended
 	// agent is the new agent a start after stopped ones brought up (startTaskSuccessor), set before done closes; empty
 	// for other starts and for one that failed.
 	agent proto.Session
+	// Written by the starter before done closes. A waiter must not start a second agent when the first may exist.
+	uncertain bool
 }
 
 // claimTaskStart marks task id's agent as starting. ok is false when a start is on its way already: cur is that one.

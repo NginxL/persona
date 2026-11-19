@@ -22,31 +22,51 @@ import (
 // todoHandoff asks the manager about handing p.Text to an agent for p.TodoID (assistant.todo_handoff): the text to
 // hand over (the todo's decisions before it, and for a new agent its project's background), or false after writing
 // the app the manager's refusal (404 no such todo, 409 a done one) or 503 assistant_offline while it is not connected.
-func (h *Hub) todoHandoff(ctx context.Context, w http.ResponseWriter, p assistantwire.TodoHandoff) (string, bool) {
+func (h *Hub) todoHandoff(ctx context.Context, w http.ResponseWriter, p assistantwire.TodoHandoff) (string, []proto.Image, bool) {
 	res, err := h.asst().TodoHandoff(ctx, p)
 	if err != nil {
 		writeAssistantErr(w, err)
-		return "", false
+		return "", nil, false
 	}
 	if res.Status != 0 {
 		writeErr(w, res.Status, errors.New(res.Error))
-		return "", false
+		return "", nil, false
 	}
-	return res.Text, true
+	return res.Text, res.Images, true
+}
+
+// mergeTodoImages appends a handoff's stored pictures to the client's own array instead of replacing it. HTTP JSON
+// decoding produces []any; the []proto.Image case keeps direct internal callers intact too.
+func mergeTodoImages(p map[string]any, images []proto.Image) {
+	if len(images) == 0 {
+		return
+	}
+	switch existing := p["images"].(type) {
+	case nil:
+		p["images"] = images
+	case []any:
+		for _, img := range images {
+			existing = append(existing, img)
+		}
+		p["images"] = existing
+	case []proto.Image:
+		p["images"] = append(existing, images...)
+	}
 }
 
 // todoStartText is the first message of an agent started for a todo without a prompt, as the manager hands it over
-// (its project's background and the todo's decisions first); text as it is when the manager could not say.
-func (h *Hub) todoStartText(ctx context.Context, p assistantwire.TodoHandoff) string {
+// (its project's background and the todo's decisions first), with its stored pictures. Text as it is when the manager
+// could not say carries no pictures, so a fresh start never sends images without actual text.
+func (h *Hub) todoStartText(ctx context.Context, p assistantwire.TodoHandoff) (string, []proto.Image) {
 	res, err := h.asst().TodoHandoff(ctx, p)
 	if err != nil {
 		h.logf("todo start: todo %s: %v", p.TodoID, err)
-		return p.Text
+		return p.Text, nil
 	}
 	if !res.Found || res.Text == "" {
-		return p.Text
+		return p.Text, nil
 	}
-	return res.Text
+	return res.Text, res.Images
 }
 
 // todoLinks is the manager's last TodoReport's links (the task notices on the items the apps get name their task,

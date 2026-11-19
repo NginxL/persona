@@ -344,7 +344,7 @@ private fun MailDetail(
                                 )
                             }
                         }
-                        MailHtml(mail.html, allowImages = allowImages) { url ->
+                        MailHtml(mail.html, allowImages = allowImages, images = inbox.contentSource?.transport?.replyImages) { url ->
                             handleLink(url)
                         }
                     }

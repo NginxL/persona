@@ -358,9 +358,10 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 			}
 			return svc.NodeRequest(ctx, machine, method, params) // the interactions, the MCP tools (fleet_events.go)
 		},
-		Event:    func(machine, event string, params json.RawMessage) bool { return svc.NodeEvent(machine, event, params) },
-		Detached: func(machine string) { svc.NodeDetached(machine) },
-		Location: func() *time.Location { return svc.location(context.Background()) },
+		Event:          func(machine, event string, params json.RawMessage) bool { return svc.NodeEvent(machine, event, params) },
+		Detached:       func(machine string) { svc.NodeDetached(machine) },
+		Location:       func() *time.Location { return svc.location(context.Background()) },
+		PromptLanguage: func() string { return answerLanguage(svc.hello(context.Background()).Locale) },
 		// The extensions' part of a node's connection and its events (internal/extmgr).
 		Own:         func(ctx context.Context, machine string) map[string]json.RawMessage { return ext.Own(ctx, machine) },
 		OnConnected: func(machine string) { ext.NodeConnected(machine) },

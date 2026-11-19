@@ -82,7 +82,7 @@ func (s *Service) relayAuth(ctx context.Context, machine string, c proto.Session
 		authorized() // it went on while the page was being authorized: nothing to tell it
 		return true, ""
 	}
-	if err := s.sendToSession(ctx, machine, c.SessionID, renderAuthRelayed(res.App)); err != nil {
+	if err := s.sendToSession(ctx, machine, c.SessionID, renderAuthRelayed(res.App, answerLanguage(s.hello(ctx).Locale))); err != nil {
 		// Authorized, but it did not hear so: the card, whose "Authorized, go on" tells it.
 		s.logf("auth relay %s/%s: authorized, the agent was not told: %v", machine, short(c.SessionID), err)
 		return false, workT(l, "relay_why_done")

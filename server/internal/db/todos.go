@@ -10,9 +10,23 @@ import (
 )
 
 var (
-	ErrTodoNotFound  = errors.New("todo not found")
-	ErrTodoCompleted = errors.New("todo is already completed")
+	ErrTodoNotFound      = errors.New("todo not found")
+	ErrTodoCompleted     = errors.New("todo is already completed")
+	ErrTodoImageNotFound = errors.New("todo image not found")
 )
+
+// TodoImage is one picture attached to a to-do. Data is present when it is being created or explicitly read as
+// content; ListTodos fills only the metadata and Size, so listing to-dos never reads every image's bytes.
+type TodoImage struct {
+	TodoID string `json:"-"`
+	ID     string `json:"id"`
+	Mime   string `json:"mime"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Name   string `json:"name,omitempty"`
+	Size   int    `json:"size,omitempty"`
+	Data   []byte `json:"-"`
+}
 
 type TodoRow struct {
 	ID        string     `json:"id"`
@@ -64,6 +78,9 @@ type TodoRow struct {
 	// SomedayUntil is when a to-do the owner put off to Someday comes back (#10226), SomedayNoDate for Someday with no
 	// date; nil while it is not put off. SetTodoSomeday writes it; reopening (TodoEdit.Apply) and RetryTodo clear it.
 	SomedayUntil *time.Time `json:"someday_until"`
+	// Images are the to-do's pictures, in the order the client supplied them. CreateTodo stores Data atomically with
+	// the row; ListTodos reconstructs only their metadata.
+	Images []TodoImage `json:"images,omitempty"`
 }
 
 // SomedayNoDate is the someday_until of a to-do put off to Someday with no date to come back on: a far date, so that
@@ -130,22 +147,43 @@ func todoDest(r *TodoRow) []any {
 		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After, &r.RestoredAt, &r.SomedayUntil, &r.RequireAcceptedAfter}
 }
 
-// ListTodos returns all todos ordered by created_at DESC.
+// ListTodos returns all todos ordered by created_at DESC, with image metadata but without image bytes.
 func (d *DB) ListTodos(ctx context.Context) ([]TodoRow, error) {
 	rows, err := d.pool.Query(ctx, `SELECT `+todoColumns+` FROM todos ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []TodoRow
+	byID := map[string]int{}
 	for rows.Next() {
 		var r TodoRow
 		if err := rows.Scan(todoDest(&r)...); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		byID[r.ID] = len(out)
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	images, err := d.pool.Query(ctx, `SELECT todo_id, id, mime, width, height, name, octet_length(data)
+		FROM todo_images ORDER BY todo_id, position`)
+	if err != nil {
+		return nil, err
+	}
+	defer images.Close()
+	for images.Next() {
+		var img TodoImage
+		if err := images.Scan(&img.TodoID, &img.ID, &img.Mime, &img.Width, &img.Height, &img.Name, &img.Size); err != nil {
+			return nil, err
+		}
+		if i, ok := byID[img.TodoID]; ok {
+			out[i].Images = append(out[i].Images, img)
+		}
+	}
+	return out, images.Err()
 }
 
 // ListAllTodoSpaces returns all space links.
@@ -198,12 +236,48 @@ func (d *DB) GetTodo(ctx context.Context, id string) (*TodoRow, error) {
 	return &r, nil
 }
 
-// CreateTodo inserts a new todo.
-func (d *DB) CreateTodo(ctx context.Context, t TodoRow) error {
-	return createTodo(ctx, d.pool, t)
+// TodoImageContent reads one to-do image's exact stored bytes. It is deliberately separate from ListTodos.
+func (d *DB) TodoImageContent(ctx context.Context, todoID, imageID string) (TodoImage, error) {
+	var img TodoImage
+	err := d.pool.QueryRow(ctx, `SELECT todo_id, id, mime, width, height, name, data FROM todo_images
+		WHERE todo_id = $1 AND id = $2`, todoID, imageID).
+		Scan(&img.TodoID, &img.ID, &img.Mime, &img.Width, &img.Height, &img.Name, &img.Data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TodoImage{}, ErrTodoImageNotFound
+	}
+	if err != nil {
+		return TodoImage{}, err
+	}
+	img.Size = len(img.Data)
+	return img, nil
 }
 
-// CreateTodoTx inserts a new todo in a caller's transaction.
+// TodoImageContents reads all of a to-do's image bytes in their display order for an Agent handoff.
+func (d *DB) TodoImageContents(ctx context.Context, todoID string) ([]TodoImage, error) {
+	rows, err := d.pool.Query(ctx, `SELECT todo_id, id, mime, width, height, name, data FROM todo_images
+		WHERE todo_id = $1 ORDER BY position`, todoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TodoImage
+	for rows.Next() {
+		var img TodoImage
+		if err := rows.Scan(&img.TodoID, &img.ID, &img.Mime, &img.Width, &img.Height, &img.Name, &img.Data); err != nil {
+			return nil, err
+		}
+		img.Size = len(img.Data)
+		out = append(out, img)
+	}
+	return out, rows.Err()
+}
+
+// CreateTodo inserts a new todo and all of its images atomically.
+func (d *DB) CreateTodo(ctx context.Context, t TodoRow) error {
+	return d.Transaction(ctx, func(tx pgx.Tx) error { return CreateTodoTx(ctx, tx, t) })
+}
+
+// CreateTodoTx inserts a new todo and its images in a caller's transaction.
 func CreateTodoTx(ctx context.Context, tx pgx.Tx, t TodoRow) error {
 	return createTodo(ctx, tx, t)
 }
@@ -216,7 +290,16 @@ func createTodo(ctx context.Context, executor interface {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
 		t.ID, t.Title, t.Notes, t.DoneAt, t.CreatedAt, t.UpdatedAt, t.Origin, t.PlanID, t.StartError, t.DoneBy, t.DoneReason, t.ReopenedAt, t.Quiet,
 		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem, t.PartOf, nonNilIDs(t.After), t.RequireAcceptedAfter)
-	return err
+	if err != nil {
+		return err
+	}
+	for i, img := range t.Images {
+		if _, err := executor.Exec(ctx, `INSERT INTO todo_images (todo_id, id, position, mime, width, height, name, data)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, t.ID, img.ID, i, img.Mime, img.Width, img.Height, img.Name, img.Data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateTodo updates only the fields that are non-nil.

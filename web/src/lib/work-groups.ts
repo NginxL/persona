@@ -159,7 +159,7 @@ function timeline(work: Step[], answer: Step | undefined, turnStart: number | nu
  *  A streamed text segment supersedes the persisted text, but the persisted words remain inspectable in the summary. */
 function groupTurn(items: Step[], turnStart: number | null, live: boolean, streaming: boolean, identity?: string): WorkNode[] {
   let latest = -1;
-  if (!streaming) items.forEach((s, i) => isAnswer(s) && (latest = i));
+  items.forEach((s, i) => isAnswer(s) && (latest = i));
   // a visualization after the words is the response itself, not work that came after it
   const interleaved = latest >= 0 && items.slice(latest + 1).some((s) => s.kind !== "text" && !isVisualizationStep(s));
   const work: Step[] = [];
@@ -171,11 +171,12 @@ function groupTurn(items: Step[], turnStart: number | null, live: boolean, strea
     else work.push(s);
   }
   const answer = latest >= 0 ? items[latest] : undefined;
-  const group = work.length ? createGroup(work, answer, live, turnStart) : undefined;
+  const retired = streaming && !interleaved ? answer : undefined;
+  const group = work.length ? createGroup(work, answer, live, turnStart) : retired ? createGroup([retired], undefined, live, turnStart) : undefined;
   if (group) {
     // the latest text ends the last run when nothing but words came after it
     const answered = interleaved ? undefined : answer;
-    const children = timeline(work, answered, turnStart, live, answer);
+    const children = timeline(work, answered, turnStart, live, streaming ? undefined : answer);
     if (identity) group.id = `work-turn-${identity}`;
     if (children) {
       group.children = children;
@@ -185,6 +186,8 @@ function groupTurn(items: Step[], turnStart: number | null, live: boolean, strea
       for (const c of children) if (c.kind === "group" && c.id === group.id) c.id = c.id.replace(/^work-/, "work-run-");
     }
   }
+  // New live words retire the previous text into this same summary. Its existing work rows keep their shape.
+  if (group && retired && work.length) group.children.push({ kind: "step", step: retired });
   // The time runs to the latest end of every step of the exchange, its answer included (#5119): the span the live
   // clock was counting, so it carries on from what that showed (iOS ChatLines.workEnd counts the same). A text written
   // before the last tool result is still the newest text, not where the time stops.
@@ -192,7 +195,7 @@ function groupTurn(items: Step[], turnStart: number | null, live: boolean, strea
     const end = items.reduce((latest, s) => Math.max(latest, stepEnd(s) ?? latest), group.startedAt);
     group.durationMs = Math.max(0, end - group.startedAt);
   }
-  return [...(group ? [group] : []), ...kept, ...(answer ? [{ kind: "step" as const, step: answer }] : [])];
+  return [...(group ? [group] : []), ...kept, ...(answer && !streaming ? [{ kind: "step" as const, step: answer }] : [])];
 }
 
 /** A thought without words (Claude Code writes most of them so) says nothing: it is no step of the work, as in cindy
@@ -207,7 +210,7 @@ export function workBlocks(steps: Step[], opts: WorkGroupOptions): WorkNode[] {
   let prevEnd = turnStart;
   const flush = (activeTail: boolean) => {
     if (!turn.length) return;
-    out.push(...groupTurn(turn, turnStart, activeTail && opts.live, activeTail && opts.live && Boolean(opts.streaming), activeTail ? opts.identity : undefined));
+    out.push(...groupTurn(turn, turnStart, activeTail && opts.live, activeTail && Boolean(opts.streaming), activeTail ? opts.identity : undefined));
     turn = [];
   };
   for (const s of steps) {

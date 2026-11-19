@@ -490,9 +490,16 @@ nonisolated private enum AgentSortCoreInput {
                        settings: AgentListProjection.Settings? = nil,
                        presentation: AgentSortPresentation = .init(),
                        now: Date? = nil, projection: AgentListProjection? = nil) throws -> String {
+        let settings = settings ?? input.settings
         let nativeProjection = projection ?? AgentListProjection.build(input, now: now)
         func encoded(_ session: Session) throws -> [String: Any] {
             var object = try JSONSerialization.jsonObject(with: JSON.encoder.encode(session)) as? [String: Any] ?? [:]
+            // The core's held key means Unread. Preserve the other held rank in its presentation input.
+            if settings.heldJustFinished, settings.held == session.key, session.state == .idle {
+                var work = object["work"] as? [String: Any] ?? [:]
+                work["just_finished"] = true
+                object["work"] = work
+            }
             object["state"] = ChildSessions.foldedState(session).rawValue
             object["agent_label"] = session.agentLabel
             if session.listWaiting != nil {
@@ -521,7 +528,6 @@ nonisolated private enum AgentSortCoreInput {
             if !descendants.isEmpty { object["search_subtasks"] = descendants }
             return object
         }
-        let settings = settings ?? input.settings
         let groups = Array(Set(settings.preferences.keys).union(input.sessions.map(\.group)).union(input.machines.map(\.group))).sorted()
         let preferences = Dictionary(uniqueKeysWithValues: groups.map { group in
             let value = settings.preferences[group] ?? .init()
@@ -551,7 +557,7 @@ nonisolated private enum AgentSortCoreInput {
                 "expanded_idle": presentation.expandedIdle.sorted(), "expanded_quiet": presentation.expandedQuiet.sorted(),
                 "compact": presentation.compact, "presentation_rows": presentation.compact,
                 "inventory": true,
-                "held": settings.held?.path as Any, "now": referenceTime.map(AgentSortProjectionAdapter.coreTimestamp) as Any,
+                "held": (settings.heldJustFinished ? nil : settings.held?.path) as Any, "now": referenceTime.map(AgentSortProjectionAdapter.coreTimestamp) as Any,
             ],
         ]
         let data = try JSONSerialization.data(withJSONObject: object)

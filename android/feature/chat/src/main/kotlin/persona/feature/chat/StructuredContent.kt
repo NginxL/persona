@@ -74,7 +74,7 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
             SelectableWords(target) {
                 Column(Modifier.fillMaxWidth()) {
                     MessageParts(model.parts, user, item.id, boxed = boxed, streaming = update?.streaming == true,
-                        ancillaryCards = ancillary?.cards)
+                        ancillaryCards = ancillary?.cards, ownReply = item.role == "assistant" && item.from.isNullOrBlank() && item.source == null)
                 }
             }
         }
@@ -100,7 +100,7 @@ private fun StreamingCursor() {
 
 @Composable
 private fun MessageParts(parts: List<MessagePart>, user: Boolean, id: String, onLastLine: ((Int) -> Unit)? = null, boxed: Boolean = false,
-    streaming: Boolean? = null, ancillaryCards: List<persona.core.domain.views.AssistantFence>? = null) {
+    streaming: Boolean? = null, ancillaryCards: List<persona.core.domain.views.AssistantFence>? = null, ownReply: Boolean = false) {
     // Bubble padding below the last text line, so the reported extent reaches the bottom of the row.
     val bottomPadding = with(LocalDensity.current) { Tokens.Space.m.roundToPx() }
     // A reply's ```persona-view blocks are numbered across the whole text item: `<item id>/<n>`, the hub's key.
@@ -123,14 +123,14 @@ private fun MessageParts(parts: List<MessagePart>, user: Boolean, id: String, on
                         onLastLine?.invoke((layout.size.height - layout.getLineTop(layout.lineCount - 1)).toInt() + bottomPadding)
                 })
                 else AssistantAnswerFrame(boxed) {
-                    ChatMarkdown(part.text, "$id/$index", selectable = false,
+                    ReplyMarkdown(part.text, "$id/$index", ownReply,
                         viewKeys = { n -> persona.core.domain.views.AssistantFences.key(id, firstCard[index] + n) }, streaming = streaming)
                 }
             is MessagePart.Source -> JGroupItem(GroupPosition.Single) {
                 Column(Modifier.fillMaxWidth().padding(10.dp.dense)) {
                     Text(stringResource(R.string.chat_content_from, part.name.ifBlank { stringResource(R.string.chat_content_other_session) }), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
                     // Markdown like an answer: agents write Markdown, and the hub turns a teammate's JSON notes into it.
-                    if (part.text.isNotBlank()) ChatMarkdown(keepLineBreaks(part.text), "$id/$index", selectable = false)
+                    if (part.text.isNotBlank()) ReplyMarkdown(keepLineBreaks(part.text), "$id/$index", ownReply = false)
                 }
             }
         }

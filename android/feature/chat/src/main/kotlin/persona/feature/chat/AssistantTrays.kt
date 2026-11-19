@@ -51,6 +51,7 @@ import persona.core.domain.tasks.NeedsYouGroup
 import persona.core.domain.tasks.needsYouGroups
 import persona.core.domain.tasks.RunningEntry
 import persona.core.domain.tasks.TaskState
+import persona.core.domain.tasks.Interruption
 import persona.core.domain.tasks.notDoneReason
 import persona.core.domain.tasks.orphanedLine
 import persona.core.domain.tasks.TasksStore
@@ -747,14 +748,17 @@ private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, e
     val todo = entry.todo
     val failed = entry.status == TriageStatus.Failed
     val lead = host.tasks.lead(todo, host.sessions)
+    val cut = Interruption.of(lead)
     val why = if (failed) startFailureRowLine(todo.startError.orEmpty()) else interruptedWhy(lead?.turnError)
     val retrying = TasksStore.retryKey(todo.id) in taskBusy
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.danger.tint)
         .testTag(if (failed) "assistant-tray-failed" else "assistant-tray-interrupted")) {
-        JRow(todo.title, subtitle = why.takeIf { it.isNotBlank() }, onClick = { openTask(host, todo) },
+        JRow(todo.title, subtitle = why.takeIf { it.isNotBlank() }, subtitleLines = if (cut?.invalid == true) Int.MAX_VALUE else 2,
+            onClick = { openTask(host, todo) },
             leading = { JIcon(PhIcons.WarningCircle, decorative = true, size = Tokens.Size.iconXS, tint = palette.danger.dot) },
             trailing = {
-                Text((if (failed) TaskState.Failed else TaskState.Interrupted).label.text(),
+                Text((if (cut?.invalid == true) CoreText.of(CoreText.Key.ApiConversationInvalidLabel)
+                    else (if (failed) TaskState.Failed else TaskState.Interrupted).label).text(),
                     style = PersonaTheme.type.micro, color = palette.ink, maxLines = 1)
             })
         Row(Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.s, bottom = Tokens.Space.s),
@@ -765,7 +769,7 @@ private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, e
                 JButton(stringResource(R.string.chat_tasks_remove), { host.tasks.removeTask(todo, host.onError) },
                     kind = JButtonKind.Destructive, size = JButtonSize.Small, enabled = enabled,
                     modifier = Modifier.testTag("assistant-tray-remove"))
-            } else {
+            } else if (cut?.canContinue != false) {
                 JButton(stringResource(R.string.chat_tasks_continue), { host.tasks.retryTask(todo, host.onError) },
                     size = JButtonSize.Small, enabled = enabled, loading = retrying, modifier = Modifier.testTag("assistant-tray-continue"))
             }

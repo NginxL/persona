@@ -231,6 +231,31 @@ export interface UIStat {
 
 // ── UI version 10: a graph ───────────────────────────────
 
+/** One label/value reading of a node's inspector (UI version 10). */
+export interface UIFact {
+  label?: string;
+  value: string;
+  icon?: string;
+}
+
+/** One https link of a node's inspector (UI version 10): a title and a credential-free https url. */
+export interface UIGraphNodeLink {
+  title: string;
+  url: string;
+}
+
+/** Only a credential-free https url opens from a node's inspector. Unlike isHttps it also refuses a url carrying
+ *  username and password, which would otherwise be shown in the page and leaked to the site. */
+export function isGraphLink(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.hostname !== "" && u.username === "" && u.password === "";
+  } catch {
+    return false;
+  }
+}
+
 /** One node of a graph (UI version 10, #9727): a box with a title, a state line, a badge, an icon and a progress bar. */
 export interface UIGraphNode {
   id: string;
@@ -246,6 +271,15 @@ export interface UIGraphNode {
   progress?: number;
   group?: string;
   action?: UIAction;
+  /** Unix seconds when the node started and ended; ended is omitted while it is still running. */
+  started_at?: number;
+  ended_at?: number;
+  /** Short label/value readings shown in the node's inspector. */
+  facts?: UIFact[];
+  /** A plain-text summary, verifier feedback or an error, shown in the node's inspector. */
+  detail?: string;
+  /** Session and verifier links shown in the node's inspector. */
+  links?: UIGraphNodeLink[];
 }
 
 /** A graph component (UI version 10): nodes joined by edges, laid out by the app (lib/graph-layout.ts). */
@@ -794,6 +828,34 @@ export function readGraph(raw: unknown): UIGraph | undefined {
     if (typeof n.icon === "string") node.icon = n.icon;
     if (typeof n.progress === "number" && Number.isFinite(n.progress)) node.progress = n.progress;
     if (typeof n.group === "string" && n.group) node.group = n.group;
+    // UI version 10's inspector fields: the timing, the readings, the summary and the links, each as it reads.
+    // Character bounds count Unicode code points (Array.from), matching the hub's utf8.RuneCountInString.
+    const runeLen = (s: string) => Array.from(s).length;
+    const runeSlice = (s: string, max: number) => Array.from(s).slice(0, max).join("");
+    if (typeof n.started_at === "number" && Number.isFinite(n.started_at) && n.started_at >= 0) node.started_at = n.started_at;
+    if (typeof n.ended_at === "number" && Number.isFinite(n.ended_at) && n.ended_at >= 0 && (node.started_at === undefined || n.ended_at >= node.started_at)) node.ended_at = n.ended_at;
+    if (Array.isArray(n.facts)) {
+      const facts = n.facts
+        .filter((f): f is Record<string, unknown> => isObject(f) && typeof f.value === "string" && !!f.value && runeLen(f.value) <= 2000)
+        .slice(0, 8)
+        .map((f) => ({
+          ...(typeof f.label === "string" && runeLen(f.label) <= 200 ? { label: f.label } : {}),
+          value: f.value as string,
+          ...(typeof f.icon === "string" ? { icon: f.icon } : {}),
+        }));
+      if (facts.length) node.facts = facts;
+    }
+    if (typeof n.detail === "string" && n.detail.length > 0) node.detail = runeSlice(n.detail, 2000);
+    if (Array.isArray(n.links)) {
+      const links = n.links
+        .filter(
+          (l): l is Record<string, unknown> =>
+            isObject(l) && typeof l.title === "string" && !!l.title && runeLen(l.title) <= 80 && typeof l.url === "string" && runeLen(l.url) <= 2000 && isGraphLink(l.url),
+        )
+        .slice(0, 8)
+        .map((l) => ({ title: l.title as string, url: l.url as string }));
+      if (links.length) node.links = links;
+    }
     const action = readAction(n.action);
     if (action) node.action = action;
     byId.set(node.id, node);

@@ -38,7 +38,7 @@ func (l *replyLedger) SentAsUsersForArchive(_ context.Context, connector string,
 }
 
 const (
-	replyChat   = "feed-ops"   // the chat the tests' conversations write into
+	replyChat      = "feed-ops"   // the chat the tests' conversations write into
 	replyOtherChat = "feed-other" // another chat
 )
 
@@ -182,11 +182,17 @@ func TestChatReplyOnlyWhereAndWhenItWrote(t *testing.T) {
 		told  bool
 	}{
 		{name: "it wrote there", told: true,
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "a direct chat", batch: replyBatch(replyChat, KindDM, reply, "m1"), told: true,
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "another account's chat", batch: replyBatch("2:"+replyChat, KindGroup, reply, "m1"), told: true,
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "a connector's send that names the chat", told: true,
 			setup: func(t *testing.T, h *chatReplyHarness) {
 				h.add(db.SentAsUser{At: now.Add(-time.Hour), Connector: connector.Lark, Action: "send",
@@ -194,11 +200,17 @@ func TestChatReplyOnlyWhereAndWhenItWrote(t *testing.T) {
 					Origin: replyJSON(t, map[string]string{"machine_id": "server", "session_id": "conv-a"})})
 			}},
 		{name: "the wrong chat",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyOtherChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyOtherChat, now.Add(-time.Hour))
+			}},
 		{name: "a send older than a day",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-25*time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-25*time.Hour))
+			}},
 		{name: "an answer older than the send",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-30*time.Second)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-30*time.Second))
+			}},
 		{name: "a recalled send",
 			setup: func(t *testing.T, h *chatReplyHarness) {
 				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)).RecalledAt = &now
@@ -216,9 +228,13 @@ func TestChatReplyOnlyWhereAndWhenItWrote(t *testing.T) {
 					Origin: replyJSON(t, map[string]string{"machine_id": "server", "session_id": "conv-a"})})
 			}},
 		{name: "a conversation of another machine",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "laptop", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "laptop", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "a conversation the node does not list",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-gone", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-gone", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "an archived conversation",
 			setup: func(t *testing.T, h *chatReplyHarness) {
 				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
@@ -232,9 +248,13 @@ func TestChatReplyOnlyWhereAndWhenItWrote(t *testing.T) {
 				h.s.originSet(context.Background(), "server", "conv-a", OriginInbox, "", "")
 			}},
 		{name: "a bot's chat", batch: replyBatch(replyChat, KindBot, reply, "m1"),
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 		{name: "another connector", src: "example-chat",
-			setup: func(t *testing.T, h *chatReplyHarness) { h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour)) }},
+			setup: func(t *testing.T, h *chatReplyHarness) {
+				h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+			}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newChatReplyHarness(t, replyConv("conv-a"))

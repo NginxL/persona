@@ -143,22 +143,25 @@ func (n *Node) answerCodexStartDialog(ctx context.Context, pane, text string) bo
 	return false
 }
 
-// codexSkipUpdateKeys are the keys that skip Codex's update offer ("✨ Update available! …", "› 1. Update now (runs
-// …)", "2. Skip", "3. Skip until next version", "Press enter to continue"), nil when the screen does not show it. Its
-// number picks an option at once (Codex 0.153.4, 2026-11-12: "2" closed the offer); a list whose Skip would need enter
-// is left alone.
+// Codex's own update offer has these three choices. Escape skips it independently
+// of the highlighted choice or whether this CLI requires Enter after a number.
+// Never type Enter here: the default choice runs the installer. Other dialogs,
+// or an update offer quoted inside a composer, do not authorize any key.
 func codexSkipUpdateKeys(text string) []string {
-	if !strings.Contains(text, "Update available") {
+	plain := screen.Plain(text)
+	view := screen.ReadCodex(text).View
+	if !strings.Contains(plain, "Update available") ||
+		(view != screen.CodexDialog && !(view == "" && strings.Contains(plain, "esc skip"))) {
 		return nil
 	}
 	d := screen.ParseDialog(text)
-	if d == nil {
+	if d == nil || len(d.Options) != 3 {
 		return nil
 	}
-	for _, o := range d.Options {
-		if o.Label == "Skip" && len(o.Keys) > 0 && !strings.Contains(strings.Join(o.Keys, " "), "enter") {
-			return o.Keys
-		}
+	first := d.Options[0].Label
+	if (first == "Update now" || strings.HasPrefix(first, "Update now (")) &&
+		d.Options[1].Label == "Skip" && d.Options[2].Label == "Skip until next version" {
+		return []string{"escape"}
 	}
 	return nil
 }
@@ -691,7 +694,7 @@ func (n *Node) sendFirstCodex(ctx context.Context, w *codexWait, text string, im
 	}
 	text = inertControls(text) // as typed: the thread's first message is matched against it
 	sent := time.Now()
-	if err := n.codexType(ctx, w.pane, text, func(draft string) bool { return sameText(draft, text) || pastedRE.MatchString(draft) }); err != nil {
+	if err := n.typeCodexFirst(ctx, w.pane, text); err != nil {
 		return nil, err
 	}
 	n.typing.typed(w.pane, text)

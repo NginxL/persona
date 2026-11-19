@@ -31,4 +31,11 @@
     <string name="chat_outbox_resend">再送信</string>
     <string name="chat_outbox_waiting_spoken">ネットワーク待ち。接続後に自動で送信します</string>
     <string name="chat_outbox_failed_spoken">送信に失敗しました。再送信または削除してください</string>
+    <string name="chat_undelivered_waiting">未送信：%1$s。復旧すると自動で送信されます。</string>
+    <string name="chat_undelivered_failed">未送信：%1$s</string>
+    <string name="chat_undelivered_default_reason">アシスタントを起動できませんでした</string>
+    <string name="chat_undelivered_images">画像：%1$d 枚</string>
+    <string name="chat_undelivered_action_failed">うまくいきませんでした：%1$s</string>
+    <string name="chat_undelivered_waiting_spoken">未送信です。復旧すると自動で送信されます。</string>
+    <string name="chat_undelivered_failed_spoken">未送信です。再試行または削除してください。</string>
 </resources>

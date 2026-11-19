@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { formatDate, t } from "../../i18n";
 import { credentialOwner } from "../../lib/api";
-import { BOTMUX_HIDDEN_KEY, withoutBotmux } from "../../lib/agent-filter";
-import { storedValue } from "../../lib/compatibility";
+import { withoutBotmux } from "../../lib/agent-filter";
+import { useBotmuxHidden } from "../../lib/agents-display";
 import { agentId, sessionAgent, sessionAgentName } from "../../lib/agent-kind";
 import { terminalResume, resumeInTerminal, useResume } from "../../lib/agent-resume";
 import { useScope, useScoped, useScopedMachines } from "../../lib/current-assistant";
@@ -20,12 +20,6 @@ import { SearchField } from "../../ui/SearchField";
 import { WindowedRows } from "../WindowedRows";
 import { WorkSessionRow } from "./WorkSessionBrowser";
 
-const botmuxHidden = () => storedValue(BOTMUX_HIDDEN_KEY) === "1";
-const watchBotmux = (changed: () => void) => {
-  window.addEventListener("storage", changed);
-  window.addEventListener("persona-botmux-visibility", changed);
-  return () => { window.removeEventListener("storage", changed); window.removeEventListener("persona-botmux-visibility", changed); };
-};
 const copy = (key: string) => t(`session-history.${key}`);
 const selectClass = "min-h-8 min-w-0 flex-1 rounded-control bg-inset px-2 py-1 text-xs text-ink shadow-hairline focus-visible:outline-accent [@media(pointer:coarse)]:min-h-11";
 
@@ -50,7 +44,7 @@ function HistoryRow({ session, machines, active, now }: { session: Session; mach
 export function HistoryBrowser({ activeSession }: { activeSession?: { machineId: string; sessionId: string } }) {
   const full = useFullAgentSessions();
   const scoped = useScoped(full.sessions);
-  const hideBotmux = useSyncExternalStore(watchBotmux, botmuxHidden, () => false);
+  const hideBotmux = useBotmuxHidden();
   const machines = useScopedMachines();
   const scope = useScope();
   const features = useStore(s => s.features);

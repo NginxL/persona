@@ -49,6 +49,7 @@ import persona.core.designsystem.LocalPersonaDesign
 import persona.core.designsystem.dense
 import persona.core.designsystem.keepAmbientLightMoving
 import persona.core.navigation.*
+import persona.feature.settings.ProviderImportRequests
 import persona.feature.settings.SettingsServices
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -271,6 +272,12 @@ class MainActivity : ComponentActivity() {
             pendingPairLink.value = uri.toString()
             return
         }
+        if (uri.scheme == "persona" && uri.host == "provider" && uri.path == "/import") {
+            // A gateway's or a shared provider import link (#5428): the providers page reads it through the hub.
+            ProviderImportRequests.pending.value = uri.toString()
+            openNavigation.value = focusing { router -> router.parse(RouteInput.Internal(SettingsPageRoute(SettingsPage.Providers))) }
+            return
+        }
         val link = uri.toString()
         val notification = notificationRoute(uri)
         val terminal = terminalLink(link)
@@ -296,6 +303,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_SESSION = "session"
         const val EXTRA_CAPSULE_URL = "persona.capsule.url"
         val pendingCapsuleUrl = mutableStateOf<String?>(null)
+        /** A message link waiting for its hub group and replacement session; survives the shell's identity change. */
+        val pendingHubLink = mutableStateOf<String?>(null)
         /** A pairing link the activity was opened with, for the pairing screen to confirm. */
         val pendingPairLink = mutableStateOf<String?>(null)
     }

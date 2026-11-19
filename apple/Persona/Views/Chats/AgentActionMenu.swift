@@ -130,7 +130,7 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
         if showsSpace, session.spaceID != nil { add(.space) }
         if session.canAttach { add(.attach) }
         if session.state.isLive, session.canInterrupt { add(.interrupt) }
-        if session.state == .unread { add(.markSeen) }
+        if session.needsSeen(muted: muted) { add(.markSeen) }
         if phone {
             if offersTakeover { add(.takeover) }
             if offersContinuation { add(.continueInNewSession) }

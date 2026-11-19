@@ -144,7 +144,7 @@ struct TokenCalendarTests {
         #expect(agents.map(\.agent) == ["claude", "", "opencode"] && agents.first?.tokens.total == 100)
         #expect(AgentKind(usageAgent: "claude")?.name == "Claude Code" && AgentKind(usageAgent: "claude")?.brand == Theme.Brand.claude)
         #expect(AgentKind(usageAgent: "codex")?.brand == Theme.Brand.openAI && AgentKind(usageAgent: "omp")?.name == "Oh My Pi")
-        #expect(AgentKind(usageAgent: "opencode")?.name == "opencode" && AgentKind(usageAgent: "opencode")?.brand == nil)
+        #expect(AgentKind(usageAgent: "opencode")?.name == "opencode" && AgentKind(usageAgent: "opencode")?.brand == Theme.Brand.opencode)
         #expect(AgentKind(usageAgent: "") == nil)
     }
 

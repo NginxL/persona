@@ -29,4 +29,6 @@
     <string name="chat_forward_recent">Recent</string>
     <string name="chat_forward_no_match">No matching chats</string>
     <string name="chat_forward_failed">Couldn\'t forward it: %1$s</string>
+    <string name="chat_forward_photos_lost_one">1 photo couldn\'t go with the forward</string>
+    <string name="chat_forward_photos_lost_other">%1$d photos couldn\'t go with the forward</string>
 </resources>

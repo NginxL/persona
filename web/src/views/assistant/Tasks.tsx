@@ -92,7 +92,8 @@ import { machineStartBlocked, ULTRACODE_FEATURE } from "../../lib/ultracode";
 import { UltracodeChip } from "../chat/Ultracode";
 import { byTime } from "../../lib/times";
 import { requestHome } from "../../lib/child-sessions";
-import { stateName } from "../../lib/state-labels";
+import { stateName, type WaitReason } from "../../lib/state-labels";
+import { statusWord, waitOf } from "../../lib/todo-wait-reason";
 import { EDITABLE } from "../../lib/shortcuts";
 
 // ── what a task is now ──
@@ -113,13 +114,17 @@ export function useTaskLookup() {
 // shallow compare skips the render. A push about its own agent, card or machine still draws it again.
 
 /** What a task is now, from the store: its status and its lead agent. */
-function taskNowIn(s: State, todo: Todo, plans: Record<string, TaskPlan>): { status: TodoStatus; lead?: Session } {
+function taskNowIn(s: State, todo: Todo, plans: Record<string, TaskPlan>): TaskNow {
   const lookup = answeredLookup(taskSessionLookup(s), s.interactions, s.answered);
-  return { status: statusOf(todo, lookup, plans), lead: mostUrgentAgent(todo, lookup)?.session };
+  const status = statusOf(todo, lookup, plans);
+  return { status, lead: mostUrgentAgent(todo, lookup)?.session, wait: waitOf(todo, status, lookup) };
 }
 
+/** A task's status, lead agent and, while it waits, what it waits on (#11090, lib/todo-wait-reason.ts waitOf). */
+type TaskNow = { status: TodoStatus; lead?: Session; wait?: WaitReason };
+
 /** A task's status and lead agent (undefined without the task). */
-function useTaskNow(todo: Todo | undefined): { status: TodoStatus; lead?: Session } | undefined {
+function useTaskNow(todo: Todo | undefined): TaskNow | undefined {
   const plans = useFeed((s) => s.plans);
   return useStore((s) => (todo ? taskNowIn(s, todo, plans) : undefined));
 }
@@ -846,8 +851,8 @@ export function ProgressTaskRow({ card, conversation, activity, countsOpen, supe
       </div>
       {/* the status in its own right-aligned column (the rows' states scan down it), then the row's end: › where it opens
           something, ✓ once finished, ⓘ for a usage limit (#5569) */}
-      <span data-task-status={isNew ? "just_finished" : rowIsFinished ? "done" : reviewing ? "review" : agentKey} className={cx("max-w-[40%] shrink-0 truncate text-right text-xs", isNew ? "text-green" : rowIsFinished || reviewing ? "text-ink-2" : agentRowTone(agentKey))}>
-        {isNew ? stateName("just_finished") : rowIsFinished ? (accepted ? t("assistant-tasks.review_accepted") : TODO_STATUS_INFO.done.label) : reviewing ? t("assistant-tasks.review_supervisor") : agentRowLabel(agentKey)}
+      <span data-task-status={isNew ? "just_finished" : rowIsFinished ? "done" : reviewing ? "review" : agentKey} data-task-wait={!isNew && agentKey === "waiting" ? task?.wait ?? "unknown" : undefined} className={cx("max-w-[40%] shrink-0 truncate text-right text-xs", isNew ? "text-green" : rowIsFinished || reviewing ? "text-ink-2" : agentRowTone(agentKey, task?.wait))}>
+        {isNew ? stateName("just_finished") : rowIsFinished ? (accepted ? t("assistant-tasks.review_accepted") : TODO_STATUS_INFO.done.label) : reviewing ? t("assistant-tasks.review_supervisor") : agentRowLabel(agentKey, task?.wait)}
       </span>
       <span className="flex w-4 shrink-0 justify-center">
         {finished ? <Icon name="check" className="text-green" /> : state === "usage_limit" ? <Icon name="info" className="text-orange" /> : <Icon name="chevronRight" className="text-ink-3" />}
@@ -882,11 +887,12 @@ function TaskProgressMeter({ value, total, blocked, title }: { value: number; to
   );
 }
 
-/** The task's line in Needs you when no card of its agent stands for it: what it waits for. */
-export function waitsLabel(todo: Todo, status: TodoStatus): string {
+/** The task's line in Needs you when no card of its agent stands for it: what it waits for (a waiting one's, `wait`,
+ *  #11090). */
+export function waitsLabel(todo: Todo, status: TodoStatus, wait?: WaitReason): string {
   if (todo.supervision?.state === "pending_review") return t("assistant-tasks.review_pending");
   if (todo.supervision?.state === "needs_user") return t("assistant-tasks.review_needs_user");
-  return TODO_STATUS_INFO[status]?.label ?? t("assistant-tasks.review_needs_user");
+  return TODO_STATUS_INFO[status] ? statusWord(status, wait) : t("assistant-tasks.review_needs_user");
 }
 
 /** One row of Needs you (lib/assistant-entries): a task or an Agent with the cards it asks, a plan to start, a task to
@@ -1060,9 +1066,9 @@ function WaitingTaskRow({ rowKey, todo, status, countsOpenAttr }: { rowKey?: str
       <div className="flex min-w-0 items-center gap-2">
         <Icon name={cutOff ? "info" : "hand"} className={cx("shrink-0", cutOff ? "text-red" : "text-attention")} />
         <button type="button" onClick={() => openTask(todo.id)} className="min-w-0 flex-1 truncate text-left hover:underline">{todo.title}</button>
-        <span className={cx("shrink-0 text-xs", cutOff ? "text-ink" : "text-ink-2")}>{waitsLabel(todo, status)}</span>
+        <span className={cx("shrink-0 text-xs", cutOff ? "text-ink" : "text-ink-2")}>{cut?.invalid ? t("lib-api-errors.invalid_label") : waitsLabel(todo, status, task?.status === status ? task.wait : undefined)}</span>
       </div>
-      {line && <div className={cx("truncate pl-6 text-xs", cutOff ? "text-ink" : "text-ink-2")}>{line}</div>}
+      {line && <div className={cx("pl-6 text-xs", cut && !cut.canContinue ? "whitespace-normal" : "truncate", cutOff ? "text-ink" : "text-ink-2")}>{line}</div>}
       {canContinue && (
         <div className={ROW_ACTIONS}>
           <button type="button" data-continue-task={todo.id} disabled={retrying} onClick={() => retryTaskNow(todo, "continue")} className="touch-hit inline-flex items-center gap-1 whitespace-nowrap font-semibold text-ink hover:underline disabled:opacity-50 disabled:hover:no-underline">
@@ -1430,7 +1436,7 @@ export function DayLine({ date }: { date: Date }) {
 }
 
 /** A task's state for other views (the side panel's header). */
-export function useTaskState(todo?: Todo): { status: TodoStatus; lead?: Session; failure?: string } | undefined {
+export function useTaskState(todo?: Todo): (TaskNow & { failure?: string }) | undefined {
   const now = useTaskNow(todo);
   const plans = useFeed((s) => s.plans);
   if (!todo || !now) return undefined;

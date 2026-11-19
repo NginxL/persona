@@ -107,7 +107,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		}
 	}
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
-	s.pruneGoneQuiet(machine) // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
+	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.fleetKeep(machine, list, connected, unsure)
 	for _, ref := range inlineUpdates {
 		s.inOrder(func() { go s.registerInlineTurn(context.Background(), ref) })
@@ -541,6 +541,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		decorateLimit(&list[i]) // a subscription's usage limit and when it resets (usage_limit.go)
 		list[i].TurnErrorCode = sessionTurnErrorCode(list[i])
 		if list[i].TurnError != "" {
+			if proto.UnrecoverableTurnErrorCode(list[i].TurnError) != "" {
+				list[i].TurnErrorKind = proto.TurnErrorUnrecoverable
+			}
 			if list[i].TurnErrorCode == proto.TurnErrorModelFallbackUnavailable {
 				list[i].TurnErrorKind = proto.TurnErrorUser
 			}

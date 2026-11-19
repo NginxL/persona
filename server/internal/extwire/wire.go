@@ -222,6 +222,9 @@ const (
 	// HubSettingsTool: {machine_id, session_id, arguments} → {text}: persona_settings on one of them (the card is the
 	// hub's: the manager asks HubWaitInteraction).
 	HubSettingsTool = "settings.tool"
+	// HubClarificationTake: {proof} → ClarificationProof: consume a one-time,
+	// card/text/conversation-bound channel clarification proof before session.send_once.
+	HubClarificationTake = "approval_clarification.take"
 	// HubKBArchives, … see the routes.
 	// HubAudit: Audit → {}: a request of an extension's token the hub refused, for that extension's audit in its manager
 	// (plugin_audit). The manager takes the actions below only.

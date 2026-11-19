@@ -118,10 +118,11 @@ type Machine struct {
 	unsettled map[string]bool
 	kick      chan struct{}
 	// deploying: the manager is sending this machine the hub's node build (deploy.go); deployErr: why the last try
-	// failed.
+	// failed. deployRun ties each waiter to one run's outcome, including one the card does not retain.
 	deploying       bool
 	deployErr       string
 	deployPhase     string
+	deployRun       *deployRun
 	deployPreflight *nodeDeployPreflight
 	// via is how the connection runs (local | ssh | tailcat | link | service | hub), path how tailcat's packets go.
 	via, path                  string
@@ -181,6 +182,7 @@ type Machine struct {
 	derived   bool
 	active    *nodePath
 	transport string
+	routeRev  uint64 // the serving connection's route generation, for late probes and callbacks
 	uid       string
 	next      *nodeConn
 	parked    string
@@ -577,6 +579,17 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-ultracode.node_outdated")}
 		}
 	}
+	if devicewire.IsSessionStart(method) && !nodeHas(info, nodeproto.SessionStartSpeed) {
+		raw, _ := json.Marshal(params)
+		var fields struct {
+			Speed string `json:"speed"`
+		}
+		_ = json.Unmarshal(raw, &fields)
+		if proto.FasterSpeed(strings.TrimSpace(fields.Speed)) {
+			// An older node would drop the explicit, billable choice and start at the launcher's own speed.
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_session_start_speed")}
+		}
+	}
 	if devicewire.IsSessionStart(method) && !nodeHas(info, nodeproto.StartGoal) {
 		raw, _ := json.Marshal(params)
 		var fields struct {
@@ -679,6 +692,9 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 	}
 	if nodeHas(info, nodeproto.OwnerControls) {
 		method = ownerControlMethod(ctx, method)
+	}
+	if dial, ok := params.(devicewire.PortDial); method == devicewire.MethodPortDial && ok && dial.ID != "" {
+		return m.callPortDial(ctx, p, dial, out)
 	}
 	return p.Call(ctx, method, params, out)
 }
@@ -908,6 +924,9 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", "store_unavailable")
 		}
 		return // the manager's alone
+	case proto.EventModeSet:
+		m.onModeSet(params)
+		return // the manager keeps the record; no app broadcast
 	case proto.EventModeRestart: // what became of a queued restart into a mode (mode_changes.go)
 		m.onModeRestart(params)
 		return // the manager's alone

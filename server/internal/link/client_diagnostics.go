@@ -28,7 +28,7 @@ func diagnosticDial(ctx context.Context, url string, options *websocket.DialOpti
 		return websocket.Dial(ctx, url, options)
 	}
 	switch kind {
-	case "lan", "ipv6", "ipv4", "name", KindSSH:
+	case "lan", "ipv6", "ipv4", "name", KindSSH, KindProxy:
 	default:
 		kind = "other"
 	}

@@ -51,7 +51,7 @@ func (n *Node) startRuntime(name string) (h *runtimeConn, model string) {
 // whose engine runtime runs only its own launchers, that runtime for every name it offers); false when none does.
 func (n *Node) runtimeStart(ctx context.Context, p runtimeStartParams) (*proto.Session, *proto.StartInstead, error, bool) {
 	h, model := n.startRuntimeIn(ctx, p.Launcher)
-	if h == nil {
+	if h == nil || n.usesAgyPane(ctx, p.Launcher, p.AgentType) {
 		return nil, nil, nil, false
 	}
 	if p.Model == "" {

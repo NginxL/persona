@@ -49,5 +49,6 @@
   "continue_failed": "Not sent: {why}",
   "continue_label": "(“{title}”)",
   "continue_placeholder_to": "What should {agent} do next?",
-  "continue_failed_plain": "Not sent. Open the chat to see why."
+  "continue_failed_plain": "Not sent. Open the chat to see why.",
+  "arrange_cards": "Arrange cards"
 }

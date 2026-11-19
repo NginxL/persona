@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -75,6 +76,9 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 			return map[string]any{"ok": true}, nil
 		case "session.close":
 			n.sends = append(n.sends, map[string]any{"close": p["session_id"]})
+			return map[string]any{"ok": true}, nil
+		case assistantwire.DeviceAssistantAnswerAgain:
+			n.sends = append(n.sends, map[string]any{"answer_again": p})
 			return map[string]any{"ok": true}, nil
 		case "assistant.send":
 			n.sends = append(n.sends, p)

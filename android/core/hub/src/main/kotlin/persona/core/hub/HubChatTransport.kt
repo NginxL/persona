@@ -80,6 +80,7 @@ class HubChatTransport internal constructor(
             filter.group?.let { addQueryParameter("group", it) }
             filter.source?.let { addQueryParameter("source", it) }
             filter.provider?.let { addQueryParameter("provider", it) }
+            if (null in filter.hiddenBotmuxHubs) addQueryParameter("exclude_pane_source", "feishu")
             if (filter.query.isNotEmpty()) addQueryParameter("q", filter.query)
             cursor?.let { addQueryParameter("cursor", it) }
             since?.let { addQueryParameter("since", it) }

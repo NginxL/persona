@@ -214,11 +214,11 @@ func (f *File) openWindow(fh *os.File, size int64) (fresh []proto.Item, ok bool,
 		return nil, false, err
 	}
 	w.start, w.starts = b, starts[:b]
-	meta := f.seeded(fh, w, b, lastNL, data)
-	w.ids = map[string]bool{}
-	for _, m := range taskIDRe.FindAllSubmatch(data, -1) {
-		w.ids[string(m[1])] = true
-	}
+	// The tasks the seed read the earlier lines of, notifications and messages (senderTaskId) alike: a new line naming
+	// one of them does not read those lines again (seeNotifications), which would start its agent over as running
+	// and then drop the notification that ended it as one already shown.
+	w.ids = seedTaskIDs(data)
+	meta := f.seeded(fh, w, b, lastNL, w.ids)
 	var kept []proto.Item
 	f.cut = nil
 	f.tree = f.freshTree()
@@ -341,11 +341,11 @@ func (f *File) startsTurn(_ int, line []byte, _ bool) bool {
 	return bytes.Contains(line, []byte(`"type":"task_started"`))
 }
 
-// seeded is the parser state for a window starting at line b whose bytes are window: what the earlier lines leave
+// seeded is the parser state for a window starting at line b naming the tasks ids: what the earlier lines leave
 // behind that changes what later lines turn into. Notifications already shown (a repeat is dropped), the calls
 // they name and the reports handed back: only the earlier lines for a task the window mentions are read. The pending "! cmd": the last earlier line that is a "! cmd"
 // input or output decides it. The request whose usage items already carry: the lines just before (seedUsage).
-func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) Meta {
+func (f *File) seeded(fh *os.File, w *window, b int, end int64, ids map[string]bool) Meta {
 	readLine := func(n int) []byte {
 		line := make([]byte, w.lineStart(n+1, end)-w.starts[n-1])
 		if _, err := fh.ReadAt(line, w.starts[n-1]); err != nil && err != io.EOF {
@@ -353,7 +353,6 @@ func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) M
 		}
 		return bytes.TrimRight(line, "\n")
 	}
-	ids := seedTaskIDs(window)
 	scratch := Meta{Sidechain: f.meta.Sidechain, Codex: w.codex}
 	last := 0
 	for _, s := range w.notif {
@@ -588,7 +587,7 @@ func (f *File) loadOlder() int64 {
 	if _, err := fh.ReadAt(data, w.starts[b-1]); err != nil && err != io.EOF {
 		return 0
 	}
-	meta := f.seeded(fh, w, b, end, data)
+	meta := f.seeded(fh, w, b, end, seedTaskIDs(data))
 	var older []proto.Item
 	pre := &branchTree{}
 	f.parseLines(data, w.starts[b-1], b, &meta, pre, &older, nil)

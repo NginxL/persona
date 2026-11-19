@@ -269,6 +269,7 @@ isolating the four issues in "Why not combine by default":
 - Socket location follows `hc` rules: `$HC_SOCKET`, otherwise top-level `socket` in `$XDG_CONFIG_HOME/herdr-core/config.toml`, otherwise `<session>.sock` in the runtime directory
   (`$XDG_RUNTIME_DIR/herdr-core`, or `/run/user/<uid>/herdr-core` if it exists), otherwise state directory
   `$XDG_STATE_HOME/herdr-core/<session>/<session>.sock` (usually `~/.local/state/herdr-core/default/default.sock` on macOS). Session name is `$HC_SESSION`, default `default`.
+  On Windows herdr-core has no socket file: it serves the named pipe `\\.\pipe\herdr-core-<user>-<session>.sock` (`%USERNAME%`, then the session; the holder beside it is `…-<session>.holder.<id>.sock`), which the node checks and dials instead (#11189); `$HC_SOCKET` and `config.toml` are not read there unless `$HC_SOCKET` is already a pipe name.
 - Protocol: JSON-RPC 2.0, one message per line. Ordinary calls open a fresh connection; `terminal.list` and `doc.get` have 2-second limits (every refresh), sending 20 seconds
   (`terminal.send` waits for 3 seconds without typing on the computer), keys 8 seconds, others 5 seconds. Errors carry stable `data.kind` (`not_found`, `blocked`, etc.).
 - `events.subscribe` does not use framed mode: after its response, the ordinary connection sends only notifications (`event`, `heartbeat` every 15 seconds, `missed` plus a new snapshot when behind).

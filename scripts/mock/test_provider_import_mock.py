@@ -329,6 +329,12 @@ class ProviderLinkMockTests(unittest.TestCase):
                         seen["notes"] = got["notes"]
                     self.assertEqual(seen, want)
 
+    def test_persona_scheme_matches_cindy(self):
+        cases = json.loads(LINK_CASES.read_text())["links"]
+        case = next(c for c in cases if c["text"].startswith("cindy://") and c["drafts"])
+        persona = case["text"].replace("cindy://", "persona://", 1)
+        self.assertEqual(self.parse(persona), self.parse(case["text"]))
+
     def test_sizes(self):
         head = "cindy://provider/import?v=1&data="
         most = (32 << 10) - len(head) + len("cindy://")  # data filling the 32 KiB after cindy://

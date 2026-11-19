@@ -1,5 +1,8 @@
 package persona.feature.inbox
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import persona.core.contracts.api.ReplyImageSource
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
@@ -12,6 +15,18 @@ import persona.core.navigation.Navigator
 import persona.core.contracts.api.ManagerPins
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/** The shell supplies the chat Markdown renderer and its existing image viewer for external thread pictures. */
+typealias InboxPictureMarkdown = @Composable (String, ReplyImageSource, Modifier) -> Unit
+internal val LocalInboxPictureMarkdown = staticCompositionLocalOf<InboxPictureMarkdown?> { null }
+
+@Composable
+internal fun InboxPictureText(text: String, source: ReplyImageSource?) {
+    val pictures = LocalInboxPictureMarkdown.current
+    if ("![" in text && source != null && pictures != null) pictures(text, source, Modifier)
+    else androidx.compose.material3.Text(text, style = persona.core.designsystem.PersonaTheme.type.body,
+        color = persona.core.designsystem.PersonaTheme.palette.ink)
+}
 
 val LocalInboxRepository = staticCompositionLocalOf<InboxRepository?> { null }
 internal val LocalInboxNavigator = staticCompositionLocalOf<Navigator?> { null }
@@ -29,6 +44,7 @@ fun EntryProviderScope<NavKey>.inboxEntries(
     onMailOpenLink: ((String) -> Unit)? = null,
     /** Opens a request card outside any session on Agents (#5610). */
     onOpenCard: ((persona.core.navigation.RequestRef) -> Unit)? = null,
+    pictureMarkdown: InboxPictureMarkdown? = null,
 ) {
     entry<InboxRoute> {
         val source = repository ?: LocalInboxRepository.current ?: injectedInboxRepository()
@@ -49,19 +65,19 @@ fun EntryProviderScope<NavKey>.inboxEntries(
     }
     entry<LarkRoute> { route ->
         val source = pinnedForItem(repository ?: LocalInboxRepository.current ?: injectedInboxRepository(), route.itemId)
-        CompositionLocalProvider(LocalInboxNavigator provides navigator) {
+        CompositionLocalProvider(LocalInboxNavigator provides navigator, LocalInboxPictureMarkdown provides pictureMarkdown) {
             LarkScreen(source, route, navigator)
         }
     }
     entry<InboxItemDetailRoute> { route ->
         val source = pinnedForItem(repository ?: LocalInboxRepository.current ?: injectedInboxRepository(), route.itemId)
-        CompositionLocalProvider(LocalInboxNavigator provides navigator) {
+        CompositionLocalProvider(LocalInboxNavigator provides navigator, LocalInboxPictureMarkdown provides pictureMarkdown) {
             LarkLinkHost(source, itemManager(source, route.itemId)) { InboxItemDetailScreen(source, route, navigator) }
         }
     }
     entry<InboxEventRoute> { route ->
         val source = pinnedForItem(repository ?: LocalInboxRepository.current ?: injectedInboxRepository(), route.itemId)
-        CompositionLocalProvider(LocalInboxNavigator provides navigator) {
+        CompositionLocalProvider(LocalInboxNavigator provides navigator, LocalInboxPictureMarkdown provides pictureMarkdown) {
             LarkLinkHost(source, itemManager(source, route.itemId)) { InboxEventScreen(source, route, navigator) }
         }
     }
@@ -69,7 +85,7 @@ fun EntryProviderScope<NavKey>.inboxEntries(
         val shared = repository ?: LocalInboxRepository.current ?: injectedInboxRepository()
         val pins = itemPins(shared, route.itemId)
         val source = remember(shared, pins) { shared.pinned(pins) }
-        CompositionLocalProvider(LocalInboxNavigator provides navigator) {
+        CompositionLocalProvider(LocalInboxNavigator provides navigator, LocalInboxPictureMarkdown provides pictureMarkdown) {
             LarkLinkHost(source, itemManager(source, route.itemId)) {
                 if (connectors == null) InboxItemDetailScreen(source, InboxItemDetailRoute(route.itemId), navigator)
                 else ConnectorThreadScreen(source, connectors, route, navigator, pins)
@@ -78,7 +94,7 @@ fun EntryProviderScope<NavKey>.inboxEntries(
     }
     entry<LarkMomentRoute> { route ->
         val source = pinnedForItem(repository ?: LocalInboxRepository.current ?: injectedInboxRepository(), route.itemId)
-        CompositionLocalProvider(LocalInboxNavigator provides navigator) {
+        CompositionLocalProvider(LocalInboxNavigator provides navigator, LocalInboxPictureMarkdown provides pictureMarkdown) {
             LarkMomentsScreen(source, route, navigator)
         }
     }

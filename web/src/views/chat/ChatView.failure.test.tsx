@@ -981,6 +981,67 @@ describe("sending in order, and with no row yet", () => {
     }
   });
 
+  it("keeps a Retry on the page for a gone chat, and it reads the chat once more (#11237)", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle" } as Session;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(json(String(input).includes("/sessions?") ? { sessions: [], remove: [], has_more: false, revision: "r", total: 0 } : {}))));
+    const lookups = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("/sessions?")).length;
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      // the box says why nothing goes and looks as it did; the notice above it has the way on
+      expect(captured.composer?.blocked).toEqual({ label: t("chat-chatview.session_gone") });
+      const retry = [...host.querySelectorAll("button")].find((b) => b.textContent === t("sidebar.retry"));
+      expect(retry).toBeTruthy();
+      const before = lookups();
+      act(() => retry!.click());
+      await flush();
+      expect(lookups()).toBe(before + 1);
+    } finally {
+      captured.features = [];
+    }
+  });
+
+  it("keeps a runtime's list row typeable while its full detail loads, and holds Send until it answers (#11237)", async () => {
+    const summary = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle", state: "idle", source_kind: "antigravity" } as Session;
+    captured.session = summary;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    let answer!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/sessions?") ? new Promise<Response>((r) => (answer = r)) : Promise.resolve(json({}))));
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: false, blocked: { label: t("chat-chatview.connecting") } });
+      let sent: boolean | undefined;
+      await act(async () => void (sent = await captured.onSend!({ text: "too early", images: [] })));
+      expect(sent).toBe(false);
+      expect(bodies).toEqual([]);
+      // the full row says what it can do: Send is open
+      const full = { ...summary, capabilities: { read: true, send: true } };
+      captured.session = full;
+      await act(async () => answer(json({ sessions: [full], remove: [], has_more: false, revision: "r", total: 1 })));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: false });
+      expect(captured.composer?.blocked).toBeUndefined();
+    } finally {
+      captured.features = [];
+    }
+  });
+
+  it("holds a runtime's box to its full row once that row says it takes no messages", async () => {
+    const full = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle", state: "idle", source_kind: "antigravity", capabilities: { read: true } } as Session;
+    captured.session = full;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(json(String(input).includes("/sessions?") ? { sessions: [full], remove: [], has_more: false, revision: "r", total: 1 } : {}))));
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: true });
+    } finally {
+      captured.features = [];
+    }
+  });
+
   it.each([false, true])("calls a chat the hub has no such conversation for, with nothing of it here, not found, never by its id (assistant=%s)", async (assistant) => {
     captured.session = undefined;
     captured.features = [SESSIONS_LOOKUP_FEATURE];

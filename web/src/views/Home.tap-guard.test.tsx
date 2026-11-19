@@ -41,7 +41,7 @@ vi.mock("../lib/current-assistant", () => ({
   useScopedAgentListStatus: () => ({ status: "loaded", whole: true }),
   useScopedTodos: () => [],
 }));
-vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null }));
+vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null, OverviewArrangeButton: () => null }));
 
 const { Home, resetOverviewTapGuardForTest } = await import("./Home");
 const { getState } = await import("../lib/store");

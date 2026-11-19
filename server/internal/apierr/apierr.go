@@ -269,6 +269,10 @@ var rpcFailureKeys = map[string]string{
 	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
+	"agent_speed_unsupported":            "rpc-errors.agent_speed_unsupported",
+	"agent_speed_start_only":             "rpc-errors.agent_speed_start_only",
+	"agent_speed_model":                  "rpc-errors.agent_speed_model",
+	"agent_speed_invalid":                "rpc-errors.agent_speed_invalid",
 	"readonly_unsupported":               "rpc-errors.readonly_unsupported",
 	// a start whose engine runs only its own launchers and has none of the launcher's kind (#8140); the engine's own
 	// words, naming the launcher, stay in detail

@@ -62,15 +62,25 @@ func TestLarkCLIDMTriageSeparatesLatestMessageFromResolvedHistory(t *testing.T) 
 					t.Fatal("the new message was not triaged")
 				}
 				call := onlyCall(t, calls())
-				latest := "本次新消息：" + tc.latest
-				context := "会话上下文（含较早消息）：\n" + history
+				labels := map[string][3]string{
+					"zh-Hans": {"本次新消息：", "会话上下文（含较早消息）：", "另一方是人"},
+					"en":      {"Newest message: ", "Conversation context (including earlier messages):", "the other party is a person"},
+					"ja":      {"最新のメッセージ：", "会話の文脈（以前のメッセージを含む）：", "相手は人"},
+				}[locale]
+				latest := labels[0] + tc.latest
+				context := labels[1] + "\n" + history
 				if !strings.Contains(call.User, latest+"\n\n"+context) {
 					t.Fatalf("the newest message is not separated from resolved history:\n%s", call.User)
 				}
-				if !strings.Contains(call.User, "另一方是人") || !strings.Contains(call.User, "（@了我）") {
+				if !strings.Contains(call.User, labels[2]) || !strings.Contains(call.User, "（@了我）") {
 					t.Fatalf("the DM or owner-mention identity was lost:\n%s", call.User)
 				}
-				for _, rule := range []string{"较早的回复不能证明同一事项后来出现的新请求已解决", "[Image: ...] 只是未读取的图片占位"} {
+				rules := map[string][]string{
+					"zh-Hans": {"较早的回复不能证明同一事项后来出现的新请求已解决", "[Image: ...] 只是未读取的图片占位"},
+					"en":      {"An earlier reply does not resolve a request raised later in the same event", "[Image: ...] is a placeholder for an unread image"},
+					"ja":      {"古い返信は、同じ案件で後から出た新しい依頼の解決を示さない", "[Image: ...] は未確認の画像を示すプレースホルダー"},
+				}[locale]
+				for _, rule := range rules {
 					if !strings.Contains(call.System, rule) {
 						t.Fatalf("the triage criteria lost %q:\n%s", rule, call.System)
 					}
@@ -109,7 +119,7 @@ func TestOnlyLarkDMTriageNamesLatestPreview(t *testing.T) {
 			if tc.connector {
 				it.Connector = &InboxConnector{}
 			}
-			got := h.inbox.triageInput(it)
+			got := prompts.RenderInboxItem(h.inbox.triagePromptItem(it, ""))
 			if strings.Contains(got, "本次新消息："+it.Preview) != tc.want || !strings.HasSuffix(strings.TrimSpace(got), it.Context) {
 				t.Fatalf("triage input names the newest preview incorrectly:\n%s", got)
 			}
@@ -131,7 +141,7 @@ func TestLarkDMLatestPreviewDoesNotChangeNonTriageInputs(t *testing.T) {
 				Connector: &InboxConnector{Thread: "larkcli:chat:oc_example", CanReply: true},
 				Agent:     &InboxAgent{State: AgentQueued, Task: "Check the screenshot"}}
 			h.inbox.items[it.ID] = it
-			plain := prompts.InboxItem{Source: it.Source, Kind: it.Kind, Context: it.Context,
+			plain := prompts.InboxItem{Language: answerLanguage(locale), Source: it.Source, Kind: it.Kind, Context: it.Context,
 				Described: h.inbox.kindWords(it.Source, it.Kind)}
 
 			model, calls := captureModel(t, "I will check.")
@@ -139,7 +149,7 @@ func TestLarkDMLatestPreviewDoesNotChangeNonTriageInputs(t *testing.T) {
 			if _, err := h.draftReply(ctx, it.ID, "Keep it short"); err != nil {
 				t.Fatal(err)
 			}
-			want := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Item: plain, Instruction: "Keep it short"})
+			want := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Language: plain.Language, Item: plain, Instruction: "Keep it short"})
 			if got := onlyCall(t, calls()).User; got != want {
 				t.Errorf("the draft input gained triage-only content:\n%s", got)
 			}
@@ -150,7 +160,7 @@ func TestLarkDMLatestPreviewDoesNotChangeNonTriageInputs(t *testing.T) {
 			if _, err := h.judgeInboxTask(ctx, it, tasks); err != nil {
 				t.Fatal(err)
 			}
-			want = prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Summary: it.Summary, Item: plain, Tasks: tasks})
+			want = prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Language: plain.Language, Summary: it.Summary, Item: plain, Tasks: tasks})
 			if got := onlyCall(t, calls()).User; got != want {
 				t.Errorf("the judge input gained triage-only content:\n%s", got)
 			}

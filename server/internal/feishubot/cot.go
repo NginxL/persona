@@ -71,12 +71,15 @@ func CotFinish(threadID, runID, last string) []CotEvent {
 	}
 }
 
-// CotCreate starts an agent message in a chat, under the message replyTo answers (when given); it returns the
-// message's cot id and message id.
-func (c *Client) CotCreate(ctx context.Context, chatID, replyTo string) (cotID, messageID string, err error) {
+// CotCreate starts an agent message in a chat, under the message replyTo answers (when given), in that
+// message's topic when inThread is set; it returns the message's cot id and message id.
+func (c *Client) CotCreate(ctx context.Context, chatID, replyTo string, inThread bool) (cotID, messageID string, err error) {
 	in := map[string]any{"receive_id": chatID}
 	if replyTo != "" {
 		in["origin_message_id"] = replyTo
+		if inThread {
+			in["reply_in_thread"] = true
+		}
 	}
 	var out struct {
 		CotID     string `json:"cot_id"`

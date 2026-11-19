@@ -85,6 +85,23 @@ describe("an agent's live text", () => {
     expect(tr.streaming).toBe("");
   });
 
+  it("keeps the final delta visible across the empty end marker until its transcript item lands", async () => {
+    await delta("Closing words.");
+    await delta("");
+    expect(tr.streaming).toBe("Closing words.");
+    expect(tr.streamEnded).toBe(true);
+    items([said(6, "Closing words.")], 5);
+    expect(tr.streaming).toBe("");
+    expect(tr.items.at(-1)?.text).toBe("Closing words.");
+  });
+
+  it("drops an ended preview when a new exchange opens", async () => {
+    await delta("Unpersisted.");
+    await delta("");
+    items([{ ...prompt, id: "u6", seq: 6 }], 5);
+    expect(tr.streaming).toBe("");
+  });
+
   it("does not show again what the reply's item already holds", async () => {
     items([said(6, "Mountain 1: peaks.\nMountain 2: snow.")], 5);
     await delta("Mountain 1: peaks.\n"); // late: the transcript was first

@@ -388,3 +388,16 @@ import Observation
         return rows.filter { seen.insert(id($0)).inserted }
     }
 }
+
+extension SessionListModel where Row == Session {
+    /// Apply pending local receipts to this window without changing its cursor, revision, row order or counts.
+    func keepSeen(where marked: (SessionKey) -> Bool) {
+        var visible = rows
+        var changed = false
+        for i in visible.indices where visible[i].needsSeen() && marked(visible[i].key) {
+            visible[i].markLocallySeen()
+            changed = true
+        }
+        if changed { rows = visible }
+    }
+}

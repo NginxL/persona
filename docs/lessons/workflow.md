@@ -2,6 +2,10 @@
 
 Pitfalls, odd behavior and the trade-offs made at the time (formerly in `CLAUDE.md`; index in `docs/lessons/README.md`). Put new lessons in the matching section; if none fits, start a new one.
 
+- Permission-mode audits must observe each actual writer (#10308): assistant calls can bypass the hub, and plan
+  hooks return `setMode` directly with a recorded `plan_then` fallback. Preserve authenticated actor metadata outside
+  client bodies, and distinguish a returned hook decision from runtime confirmation.
+
 - Disposable Postgres containers need `docker rm -fv`, not only `docker rm -f` (#8832): the image creates an anonymous
   data volume even without a mount argument. Remove only the current fixture's container; never prune historical
   volumes or change persistent database cleanup to repair a test fixture leak.

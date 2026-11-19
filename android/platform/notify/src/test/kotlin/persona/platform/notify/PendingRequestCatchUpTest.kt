@@ -124,6 +124,24 @@ class PendingRequestCatchUpTest {
         assertEquals(2, fixture.center.refreshes)
     }
 
+    private fun prepared(id: String, expiresAt: String) = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+        """{"id":"$id","machine_id":"machine","session_id":"session","kind":"permission",""" +
+            """"expires_at":"$expiresAt","can_clarify":true}""",
+    )
+
+    @Test fun catchUpUsesTheCurrentRetainedDeadlineWithoutASecondPush() = runBlocking {
+        val retained = prepared("retained", now.plusSeconds(3_600).toString())
+        val alreadyDelivered = prepared("already", now.plusSeconds(7_200).toString())
+        val genuinelyExpired = prepared("expired", now.toString())
+        val fixture = Fixture(listOf(retained, alreadyDelivered, genuinelyExpired), emptyList(),
+            notified = mutableSetOf(alreadyDelivered.id))
+        fixture.delivery.catchUp()
+        assertEquals(listOf(retained.id), fixture.posted.map { it.first.id })
+        assertEquals(listOf(genuinelyExpired.id), fixture.retracted)
+        fixture.delivery.catchUp()
+        assertEquals(listOf(retained.id), fixture.posted.map { it.first.id })
+    }
+
     @Test fun desktopMuteUsesTheRequestsOwnHubGroup() = runBlocking {
         val settings = DeviceNotificationPreferences(muteWhileDesktop = true)
         val fixture = Fixture(listOf(request, otherRequest()), emptyList(),

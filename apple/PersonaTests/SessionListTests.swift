@@ -15,6 +15,66 @@ import PersonaWire
                          fetch: fetch, counts: { _ in counts() })
     }
 
+    @Test(arguments: [false, true]) func markingOfflineUpdatesTheVisibleAgentsList(complete: Bool) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let model = AppModel(stateFolder: folder)
+        let hub = FakeHub()
+        let group = UUID().uuidString
+        model.registry = HubRegistry(hubs: [PairedHub(config: hub.client.config, group: group)])
+        model.buildLinks()
+        let link = try #require(model.link(group))
+        link.transportForTests = hub.client.transport
+        link.received(HubHello(features: ["sessions_list"]))
+        var newerTurn = false
+        hub.on("GET", "/api/v1/sessions") { request in
+            if request.query["counts"] == "1" {
+                return Data(#"{"total":8000,"machine":{},"group":{},"project":{},"state":{},"revision":"r0"}"#.utf8)
+            }
+            let time = newerTurn ? "2026-03-02T00:00:00Z" : "2026-03-01T00:00:00Z"
+            let first = #"{"machine_id":"m","session_id":"s1","state":"idle","rev":17,"updated_at":"\#(time)","work":{"phase":"done","line":"Merged","just_finished":true}}"#
+            let second = #"{"machine_id":"m","session_id":"s2","state":"idle","awaits_reply":true,"work":{"phase":"done","just_finished":true}}"#
+            let third = #"{"machine_id":"m","session_id":"s3","state":"unread"}"#
+            let extra = complete ? #""has_more":false,"total":3"# : #""has_more":true,"next_cursor":"frozen","total":8000"#
+            let revision = newerTurn ? "r1" : "r0"
+            return Data(#"{"sessions":[\#(first),\#(second),\#(third)],"remove":[],\#(extra),"revision":"\#(revision)"}"#.utf8)
+        }
+        var query = SessionListQuery()
+        query.legacy = complete
+        let page = model.sessionLists.list(link, model: model)
+        await page.select(query)
+        let key = SessionKey(group: group, machineID: "m", sessionID: "s1")
+        let visible = { model.sessionLists.sessions }
+        #expect(page.paged != complete && page.complete == complete)
+        try #require(visible().map(\.sessionID) == ["s1", "s2", "s3"])
+        #expect(visible()[0].needsSeen() && visible()[1].awaitsYourReply(muted: false))
+        model.visibleSession = key
+        model.markSeen(key)
+        model.markSeen([SessionKey(group: group, machineID: "m", sessionID: "s3")])
+        #expect(model.latest(key)?.needsSeen() == false)
+        #expect(visible().map { $0.needsSeen() } == [false, true, false])
+        #expect(visible()[0].rev == 17 && visible()[0].work?.line == "Merged")
+        #expect(visible()[1].awaitsYourReply(muted: false) && model.heldInList == key)
+        await page.reload() // the same frozen rows arrive while neither local mark has an acknowledgement
+        #expect(visible().map { $0.needsSeen() } == [false, true, false])
+        #expect(page.total == (complete ? 3 : 8000) && page.hasMore != complete && page.revision == "r0")
+        newerTurn = true
+        await page.reload()
+        #expect(visible().map { $0.needsSeen() } == [true, true, false])
+        #expect(visible().map(\.sessionID) == ["s1", "s2", "s3"] && page.revision == "r1")
+
+        if !complete {
+            let scope = RuntimeSessionLists.Scope(hub: group, query: SessionListQuery(machine: "m"))
+            await model.sessionLists.expand(scope)
+            let section = try #require(model.sessionLists.sections[scope])
+            #expect(section.rows.map { $0.needsSeen() } == [true, true, false])
+            model.markSeen([key])
+            #expect(section.rows.map { $0.needsSeen() } == [false, true, false])
+            await page.next()
+            #expect(hub.sent("GET", "/api/v1/sessions").contains { $0.query["cursor"] == "frozen" })
+        }
+    }
+
     @Test func fetchedPagesDoNotBecomeUrgentOnlyInsertions() throws {
         let first = try [row(0), row(1)]
         let next = try first + [row(2), row(3)]

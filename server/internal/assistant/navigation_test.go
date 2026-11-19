@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -194,5 +195,98 @@ func TestNavigationSidebarPages(t *testing.T) {
 	}
 	if sent := hub.take(); len(sent) != 0 {
 		t.Fatalf("refused arrangements told the apps %v", sent)
+	}
+}
+
+// Overview's extension cards (#9745) are kept beside the start page and the sidebar's pages: a PUT of one leaves the
+// others, the apps are told only what changed, an empty list is kept as the default chosen (not left out as never
+// chosen), and a list of another shape changes nothing and tells no one.
+func TestNavigationOverview(t *testing.T) {
+	s, hub := navigationService(t, newSettingsBoardStore())
+	navigationCall(t, s, "PUT", `{"start":"home","pages":{"order":["home"],"shown":[],"hidden":[]}}`, roleFull)
+	hub.take()
+	overview := `[{"extension":"example-quota","id":"left","span":"full"},{"extension":"example-gateway","id":"today"},` +
+		`{"extension":"example-today","id":"agenda","hidden":true,"span":"half"}]`
+	code, got := navigationCall(t, s, "PUT", `{"overview":`+overview+`}`, roleFull)
+	cards, _ := got["overview"].([]any)
+	if code != http.StatusOK || got["start"] != "home" || got["pages"] == nil || len(cards) != 3 {
+		t.Fatalf("PUT overview: %d %v", code, got)
+	}
+	sent := hub.take()
+	if len(sent) != 1 || sent[0]["type"] != "navigation" || len(sent[0]["overview"].([]any)) != 3 {
+		t.Fatalf("told %v", sent)
+	}
+	for _, other := range []string{"start", "pages"} {
+		if _, has := sent[0][other]; has {
+			t.Fatalf("a change of the cards told %s again: %v", other, sent[0])
+		}
+	}
+	first, _ := cards[0].(map[string]any)
+	third, _ := cards[2].(map[string]any)
+	if first["extension"] != "example-quota" || first["id"] != "left" || first["span"] != "full" || first["hidden"] != nil ||
+		third["hidden"] != true || third["span"] != "half" {
+		t.Fatalf("the cards came back as %v", cards)
+	}
+
+	// a PUT of another field leaves the cards alone, and tells nothing of them
+	navigationCall(t, s, "PUT", `{"start":"kb"}`, roleFull)
+	navigationCall(t, s, "PUT", `{"pages":{"order":[],"shown":[],"hidden":["kb"]}}`, roleFull)
+	if _, got = navigationCall(t, s, "GET", "", roleAnswer); len(got["overview"].([]any)) != 3 || got["start"] != "kb" {
+		t.Fatalf("other changes moved the cards: %v", got)
+	}
+	for _, m := range hub.take() {
+		if _, has := m["overview"]; has {
+			t.Fatalf("a change of another field told the cards: %v", m)
+		}
+	}
+
+	// the default chosen (Reset) is an empty list that is there, so another browser's older copy is not handed over again
+	if code, got = navigationCall(t, s, "PUT", `{"overview":[]}`, roleFull); code != http.StatusOK {
+		t.Fatalf("PUT []: %d %v", code, got)
+	}
+	if sent := hub.take(); len(sent) != 1 || sent[0]["overview"] == nil || len(sent[0]["overview"].([]any)) != 0 {
+		t.Fatalf("PUT [] told %v", sent)
+	}
+	if _, got = navigationCall(t, s, "GET", "", roleFull); got["overview"] == nil || len(got["overview"].([]any)) != 0 {
+		t.Fatalf("the default chosen reads %v, want an empty list that is there", got)
+	}
+
+	navigationCall(t, s, "PUT", `{"overview":`+overview+`}`, roleFull)
+	hub.take()
+	var many []string
+	for i := 0; i <= overviewCardsMost; i++ {
+		many = append(many, fmt.Sprintf(`{"extension":"example-%d","id":"card"}`, i))
+	}
+	for _, bad := range []string{
+		`{"overview":null}`,
+		`{"overview":{}}`,
+		`{"overview":[1]}`,
+		`{"overview":"example-quota/left"}`,
+		`{"overview":[{"extension":"","id":"left"}]}`,
+		`{"overview":[{"extension":"example-quota"}]}`,
+		`{"overview":[{"extension":"Example","id":"left"}]}`,
+		`{"overview":[{"extension":"example/quota","id":"left"}]}`,
+		`{"overview":[{"extension":"example-quota","id":"` + strings.Repeat("x", 33) + `"}]}`,
+		`{"overview":[{"extension":"example-quota","id":"left","span":"wide"}]}`,
+		`{"overview":[{"extension":"example-quota","id":"left","hidden":"yes"}]}`,
+		`{"overview":[{"extension":"example-quota","id":"left"},{"extension":"example-quota","id":"left","span":"full"}]}`,
+		`{"overview":[` + strings.Join(many, ",") + `]}`,
+	} {
+		if code, _ := navigationCall(t, s, "PUT", bad, roleFull); code != http.StatusBadRequest {
+			t.Fatalf("PUT %.80s: %d, want 400", bad, code)
+		}
+	}
+	if code, _ := navigationCall(t, s, "PUT", `{"overview":[]}`, roleAnswer); code != http.StatusForbidden {
+		t.Fatalf("an answer-only device: %d, want 403", code)
+	}
+	if _, got = navigationCall(t, s, "GET", "", roleFull); len(got["overview"].([]any)) != 3 {
+		t.Fatalf("refused changes moved the cards: %v", got)
+	}
+	if sent := hub.take(); len(sent) != 0 {
+		t.Fatalf("refused changes told the apps %v", sent)
+	}
+	// the most cards there may be is taken
+	if code, _ := navigationCall(t, s, "PUT", `{"overview":[`+strings.Join(many[:overviewCardsMost], ",")+`]}`, roleFull); code != http.StatusOK {
+		t.Fatalf("PUT %d cards: %d, want 200", overviewCardsMost, code)
 	}
 }

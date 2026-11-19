@@ -511,16 +511,18 @@ func (h *handedTask) sent(ctx context.Context, s *Service, text string) string {
 }
 
 // sendFailed: the send did not go, so a task made for it is taken back (deleted, its link with it: a closed task's
-// agent would be closed after a while, tasks_close.go); err as the tool's error. When the machine only did not answer
-// in time (startResultUnknown: a resume can go on after the wait), the text may still arrive, so the task stays and
-// gets its card.
+// agent would be closed after a while, tasks_close.go). When it may have gone through, keep its task and tell the
+// caller to check the agent before sending the same words again.
 func (h *handedTask) sendFailed(ctx context.Context, s *Service, err error) error {
+	if sendUnknown(err) {
+		if h != nil && h.made {
+			s.taskCard(ctx, h.self, h.todo.ID, h.wake)
+			return fmt.Errorf("%w (task %s stays: the message may have arrived or may still arrive; check with agent_read before sending again)", err, h.todo.ID)
+		}
+		return fmt.Errorf("%w (the message may have arrived or may still arrive; check with agent_read before sending again)", err)
+	}
 	if h == nil || !h.made {
 		return err
-	}
-	if startResultUnknown(err) {
-		s.taskCard(ctx, h.self, h.todo.ID, h.wake)
-		return fmt.Errorf("%w (it may still arrive: task %s stays; check with agent_read before sending again)", err, h.todo.ID)
 	}
 	if rerr := s.removeTodo(context.WithoutCancel(ctx), h.todo.ID); rerr != nil {
 		s.logf("agent_send: take back task %s: %v", h.todo.ID, rerr)
@@ -839,6 +841,9 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 		}
 	}
 	s.logf("task %s: %s reports %s", t.ID, short(session), kind)
+	if kind == upReportDone {
+		s.goRecordWorkerReport(ctx, t, machine, session, text, evidence, now)
+	}
 	if kind == upReportProgress {
 		return "Noted for your supervisor: it reads it with its next supervision message. Go on with the work.", nil
 	}

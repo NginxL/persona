@@ -48,6 +48,7 @@ type Mail interface {
 	// CallJSON is a read tool's answer as JSON for subscriptions (connector.ReadJSON); ok is false for a tool without one.
 	CallJSON(ctx context.Context, name string, args json.RawMessage) (out json.RawMessage, ok bool, err error)
 	ListAccounts() ([]mail.MailAccount, error)
+	IntakeMailboxes(ctx context.Context, accountID string) ([]string, error)
 	ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error)
 	GetMessage(ctx context.Context, accountID string, uid uint32, mailbox string) (*mail.MailMessage, error)
 	// SeenFlags is, for each of uids still in mailbox, whether it is seen; one it no longer has is not in the map.

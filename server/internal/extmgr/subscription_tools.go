@@ -852,7 +852,10 @@ func (h *Manager) askSubscriptionCard(ctx context.Context, by asker, label, acti
 		},
 	})
 	if err != nil {
-		return nil, err
+		if errors.Is(err, approval.ErrStale) || errors.Is(err, approval.ErrNotApplied) {
+			return nil, fmt.Errorf("%w; nothing was applied; correct the request or ask for a fresh approval before retrying", err)
+		}
+		return nil, fmt.Errorf("the subscription change's execution outcome is uncertain: %w; check the current state before retrying; do not assume it applied or that nothing changed", err)
 	}
 	if outcome.Clarifying {
 		return outcome.Text, nil

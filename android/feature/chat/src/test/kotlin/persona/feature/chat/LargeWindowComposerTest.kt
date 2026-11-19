@@ -1,5 +1,13 @@
 package persona.feature.chat
 
+import android.Manifest
+import android.app.Application
+import android.os.Bundle
+import android.speech.SpeechRecognizer
+import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.onNodeWithContentDescription
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowSpeechRecognizer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -42,6 +50,7 @@ class LargeWindowComposerTest {
         enabled: Boolean = true,
         extraContent: Boolean = false,
         blockedLabel: String? = null,
+        onPermissions: (() -> Unit)? = null,
         onSend: () -> Unit,
     ) {
         rule.setContent {
@@ -49,7 +58,8 @@ class LargeWindowComposerTest {
                 PersonaTheme(darkTheme = false, reduceMotion = true) {
                     LargeWindowComposer(SessionKey("box", "s1"), state, working = false, sending = sending,
                         canClear = false, service = null, onSend = onSend, onCommand = {}, onNotice = {},
-                        enabled = enabled, extraContent = extraContent, blockedLabel = blockedLabel)
+                        enabled = enabled, extraContent = extraContent, blockedLabel = blockedLabel,
+                        onPermissions = onPermissions)
                 }
             }
         }
@@ -91,6 +101,25 @@ class LargeWindowComposerTest {
             withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) }
         }
         assertEquals("extra content alone remains sendable", 1, sent)
+    }
+
+    @Test fun hardwareSendWaitsForFinalOnlyDictationAndThenUsesTheCompletedDraft() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        val state = ChatComposerState().apply { value = TextFieldValue("Original", TextRange(8)) }
+        val sent = mutableListOf<String>()
+        show(state) { sent += state.value.text }
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        val recognition = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        fun shortcut(key: Key) = rule.onNode(hasSetTextAction() and isFocused()).performKeyInput { withKeyDown(key) { pressKey(Key.Enter) } }
+        shortcut(Key.CtrlLeft)
+        rule.onNodeWithContentDescription("Stop dictation").performClick()
+        shortcut(Key.MetaLeft)
+        assertTrue("Neither listening nor finishing may send", sent.isEmpty())
+        val words = Bundle().apply { putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf("final words")) }
+        rule.runOnIdle { recognition.triggerOnResults(words) }
+        shortcut(Key.CtrlLeft)
+        assertEquals(listOf("Original final words"), sent)
     }
 
     @Test fun emptySendingAndBlockedDraftsDoNotSend() {
@@ -175,6 +204,25 @@ class LargeWindowComposerTest {
         rule.onNodeWithTag("keyboard-shortcuts").assertExists()
     }
 
+    @Test fun openingTheFullEditorStopsCaptureAndSendsOnlyAfterTheRecognizerFinal() {
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        val text = (1..9).joinToString("\n") { "Typed line $it" }
+        val state = ChatComposerState().apply { value = TextFieldValue(text) }
+        val sent = mutableListOf<String>()
+        show(state) { sent += state.value.text }
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        val recognition = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        rule.onNodeWithTag("composer-expand").performClick()
+        fun send() = rule.onNodeWithTag("composer-expanded-input").performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        send()
+        assertTrue(sent.isEmpty())
+        val words = Bundle().apply { putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf("finished")) }
+        rule.runOnIdle { recognition.triggerOnResults(words) }
+        send()
+        assertEquals(listOf("$text finished"), sent)
+    }
+
     @Test fun expandedEditorSendsOnceAndEscapeOnlyCollapses() {
         val long = (1..9).joinToString("\n") { "line $it with enough words to wrap in the editor" }
         val state = ChatComposerState().apply { value = TextFieldValue(long, TextRange(12)) }
@@ -215,5 +263,30 @@ class LargeWindowComposerTest {
             withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) }
         }
         assertEquals(0, sent)
+    }
+
+    @Test fun hardwareSendInterceptsBarePermissionsInsteadOfSending() {
+        val state = ChatComposerState().apply { value = TextFieldValue(" /permissions ", TextRange(14)) }
+        var sent = 0
+        var opened = 0
+        show(state, onPermissions = { opened++ }) { sent++ }
+        rule.onNode(hasSetTextAction() and isFocused()).performKeyInput {
+            withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) }
+        }
+        assertEquals(1, opened)
+        assertEquals(0, sent)
+        assertEquals("", state.value.text)
+    }
+
+    @Test fun hardwareSendWithExtraContentKeepsPermissionsAsMessage() {
+        val state = ChatComposerState().apply { value = TextFieldValue("/permissions", TextRange(12)) }
+        var sent = 0
+        var opened = 0
+        show(state, extraContent = true, onPermissions = { opened++ }) { sent++ }
+        rule.onNode(hasSetTextAction() and isFocused()).performKeyInput {
+            withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) }
+        }
+        assertEquals(0, opened)
+        assertEquals(1, sent)
     }
 }

@@ -128,6 +128,20 @@
       "exact": true
     },
     {
+      "name": "close_ack_video",
+      "description": "The phone processed video channel 2's close at final offset 4096; this is repeated for a duplicate close.",
+      "source": "server/internal/screenlink/wire.go (frame, chanOffset, offsets); apple/Packages/PersonaScreenKit/Sources/PersonaScreenKit/ScreenLinkWire.swift (ScreenLinkMessage); docs/extensions/computer-use.md \"Live screen routes (#6398)\"",
+      "input": {
+        "frame_hex": "0000000a0e020000000000001000"
+      },
+      "expected": {
+        "type": "close_ack",
+        "channel": 2,
+        "offset": 4096
+      },
+      "exact": true
+    },
+    {
       "name": "reset_video",
       "description": "Video channel 2 goes on at 4096, a message boundary.",
       "source": "server/internal/screenlink/wire.go (frame, chanOffset, offsets); apple/Packages/PersonaScreenKit/Sources/PersonaScreenKit/ScreenLinkWire.swift (ScreenLinkMessage); docs/extensions/computer-use.md \"Live screen routes (#6398)\"",

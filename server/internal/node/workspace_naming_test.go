@@ -117,7 +117,7 @@ func TestWorkspaceNamingMissingPrivateStateBehindSymlink(t *testing.T) {
 		for _, level := range []string{"base", "task", "repository"} {
 			for _, target := range []string{"state", "descendant", "sibling-prefix"} {
 				t.Run(link+"/"+level+"/"+target, func(t *testing.T) {
-					home, physical := t.TempDir(), t.TempDir()
+					home, physical := t.TempDir(), physicalTempDir(t)
 					physicalState := filepath.Join(physical, "missing", "private-state")
 					alias := filepath.Join(home, "state-alias")
 					state, to := alias, physicalState

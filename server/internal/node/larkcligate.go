@@ -40,10 +40,17 @@ var (
 	// unknown risk falls back here: what lark-cli reports wins. Each is "Risk: read" in lark-cli 1.0.54.
 	larkCLIKnownReads = map[string]bool{"docs/+fetch": true, "im/+chat-messages-list": true, "im/+messages-search": true,
 		"im/+messages-mget": true, "im/+threads-messages-list": true, "im/+chat-search": true}
-	larkCLIRead      = map[string]bool{"schema": true, "skills": true, "whoami": true, "doctor": true, "help": true, "completion": true}
-	larkCLIAuthRead  = map[string]bool{"status": true, "check": true, "scopes": true, "list": true}
-	larkCLIEventRead = map[string]bool{"list": true, "schema": true, "status": true}
-	larkRiskRe       = lazyre.New(`(?m)^\s*Risk:\s*([a-z-]+)`)
+	// larkCLIReadVerbs name what a command does when lark-cli cannot be asked (#11193): a shortcut (`calendar +agenda`,
+	// `task +get-my-tasks`, `im +chat-messages-list`) or a generated method (`calendar events list`) named by one of them
+	// only reads. A shortcut may carry the verb as its whole name or after its last "-"; only get and list also lead a
+	// name. Any other name, a send / reply / create / update / delete included, stays a write.
+	larkCLIReadVerbs      = map[string]bool{"fetch": true, "agenda": true, "search": true, "list": true, "get": true, "mget": true}
+	larkCLILeadReadVerbs  = map[string]bool{"get": true, "list": true}
+	larkCLIMethodReadVerb = map[string]bool{"list": true, "get": true, "search": true, "mget": true, "batch_get": true}
+	larkCLIRead           = map[string]bool{"schema": true, "skills": true, "whoami": true, "doctor": true, "help": true, "completion": true}
+	larkCLIAuthRead       = map[string]bool{"status": true, "check": true, "scopes": true, "list": true}
+	larkCLIEventRead      = map[string]bool{"list": true, "schema": true, "status": true}
+	larkRiskRe            = lazyre.New(`(?m)^\s*Risk:\s*([a-z-]+)`)
 	// larkCLIRe: a lark-cli call anywhere in a command the gate cannot parse.
 	larkCLIRe = lazyre.New("(^|[\\s;&|(\"'`])(\\S*/)?lark-cli(\\s|[\"']|$)")
 	// larkCLINamed: lark-cli as a word of its own anywhere in a command, a variable's value (`L=lark-cli; $L …`)
@@ -145,11 +152,33 @@ func parseLarkCLI(args []string, risk larkRisk) (c larkCall, deny string, ok boo
 		if risk != nil {
 			c.Risk = risk(words)
 		}
-		if c.Risk == "" && larkCLIKnownReads[strings.Join(words, "/")] {
+		if c.Risk == "" && (larkCLIKnownReads[strings.Join(words, "/")] || larkCLINamedRead(words)) {
 			c.Risk = "read"
 		}
 	}
 	return c, "", true
+}
+
+// larkCLINamedRead says a lark-cli command's name marks it a read (larkCLIReadVerbs), for when lark-cli gives no risk
+// level: `<service> +<shortcut>` or `<service> <resource…> <method>`. Only the fallback: what lark-cli reports wins.
+func larkCLINamedRead(words []string) bool {
+	if len(words) < 2 {
+		return false
+	}
+	last := words[len(words)-1]
+	if name, shortcut := strings.CutPrefix(last, "+"); shortcut {
+		if len(words) != 2 || name == "" {
+			return false
+		}
+		parts := strings.Split(name, "-")
+		return larkCLIReadVerbs[parts[len(parts)-1]] || len(parts) > 1 && larkCLILeadReadVerbs[parts[0]]
+	}
+	for _, w := range words {
+		if strings.HasPrefix(w, "+") {
+			return false
+		}
+	}
+	return len(words) >= 3 && larkCLIMethodReadVerb[last]
 }
 
 // cliRead: a lark-cli call that only reads (its own risk level, or a GET through `lark-cli api`).

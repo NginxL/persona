@@ -30,6 +30,8 @@ class ResolvedRoute(
     val card: RequestRef? = null,
     /** An explicit secondary parent when a management entry has no stack to infer it from. */
     val parent: NavKey? = null,
+    /** The hub group this page belongs to; the shell selects it before opening when needed. */
+    val hubGroupId: String? = null,
 )
 
 /** The launcher's "Ask Persona": the Persona tab with the cursor in its composer, cold start or not. */
@@ -39,6 +41,8 @@ const val AskPersonaLink = "persona://open?target=tab&tab=persona&focus=composer
 const val NewTodoLink = "persona://open?target=new-todo"
 
 class Router(
+    /** Resolves feature-specific hub pages in the app shell; null uses the destinations core navigation owns. */
+    private val hubLink: ((String) -> ResolvedRoute?)? = null,
     private val conversationKind: (machineId: String, sessionId: String) -> ConversationKind? = { _, _ -> null },
 ) {
     /** Null means invalid input or missing session metadata; retain pending legacy input until metadata arrives. */
@@ -85,6 +89,11 @@ class Router(
     private fun deepLink(url: String): ResolvedRoute? {
         val uri = try { URI(url) } catch (_: IllegalArgumentException) { return null }
             catch (_: java.net.URISyntaxException) { return null }
+        if (uri.scheme?.lowercase() in ProtocolCompatibility.appSchemes && uri.isPageLink()) {
+            if (hubLink != null) return hubLink.invoke(url)
+            val parsed = HubLinks.parse(url, emptyList()) as? HubLinks.Result.Page ?: return null
+            return resolve(parsed.page)
+        }
         if (uri.scheme !in ProtocolCompatibility.appSchemes || uri.rawAuthority !in setOf("open", "pair") ||
             !uri.rawPath.isNullOrEmpty() || uri.rawFragment != null) return null
         if (uri.host == "pair") {
@@ -139,6 +148,43 @@ class Router(
             ResolvedRoute(resolved.tab, resolved.key, resolved.pairingLink, focusComposer = true)
         } else resolved
     }
+
+    private fun resolve(page: HubPage): ResolvedRoute? = when (page) {
+        is HubPage.Agent -> {
+            page.itemId?.let { MessageJumps.request(page.machineId, page.sessionId, it) }
+            if (page.view == "term") ResolvedRoute(AppTab.Agents, TerminalRoute(page.machineId, page.sessionId))
+            else resolve(ChatRoute(page.machineId, page.sessionId, ConversationKind.Agent))
+        }
+        is HubPage.Conversation -> {
+            if (page.sessionId == null) return resolve(AssistantRoute)
+            val machine = page.machineId?.takeIf { it.isNotBlank() } ?: return null
+            page.itemId?.let { MessageJumps.request(machine, page.sessionId, it) }
+            resolve(ChatRoute(machine, page.sessionId, ConversationKind.Assistant))
+        }
+        HubPage.NewConversation -> ResolvedRoute(AppTab.Persona, AssistantRoute, focusComposer = true)
+        is HubPage.Knowledge, is HubPage.KnowledgeEntry -> null // Feature routes are supplied by the app shell.
+        is HubPage.Screen -> resolveLinkedScreen(page.key)
+    }
+
+    /** Additional destinations accepted from a route-table link without changing RouteInput.Internal's old contract. */
+    private fun resolveLinkedScreen(key: NavKey): ResolvedRoute? = when (key) {
+        TodosRoute -> ResolvedRoute(AppTab.Agents, key)
+        is TodoDetailRoute -> key.takeIf { it.todoId.isNotBlank() }?.let { ResolvedRoute(AppTab.Agents, it) }
+        MachinesRoute -> ResolvedRoute(AppTab.Persona, key)
+        is MachineDetailRoute -> key.takeIf { it.machineId.isNotBlank() }?.let { ResolvedRoute(AppTab.Persona, it) }
+        is TerminalRoute -> key.takeIf { it.machineId.isNotBlank() && it.sessionId.isNotBlank() }?.let { ResolvedRoute(AppTab.Agents, it) }
+        is ModelPurposeRoute -> key.takeIf { it.purposeId.isNotBlank() }?.let { ResolvedRoute(AppTab.Persona, it) }
+        is ChannelRoute -> key.takeIf { it.channelId.isNotBlank() }?.let { ResolvedRoute(AppTab.Persona, it) }
+        is ConnectorRoute -> key.takeIf { it.connectorId.isNotBlank() }?.let { ResolvedRoute(AppTab.Persona, it) }
+        is ManagerRoute -> key.takeIf { it.managerId.isNotBlank() }?.let { ResolvedRoute(AppTab.Persona, it) }
+        else -> resolve(key)
+    }
+}
+
+private fun URI.isPageLink(): Boolean = when (host?.lowercase()) {
+    "session", "task", "kb", "settings", "extension" -> true
+    "open" -> !rawPath.isNullOrEmpty() || rawQuery.orEmpty().split('&').any { it.substringBefore('=') == "route" }
+    else -> false
 }
 
 private fun decode(value: String): String = URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")

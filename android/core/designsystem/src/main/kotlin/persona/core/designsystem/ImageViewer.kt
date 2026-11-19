@@ -94,10 +94,12 @@ class ViewerImage(
     val description: String = "",
     val width: Int? = null,
     val height: Int? = null,
+    /** External pages require a tap even if the pager composes them ahead of a swipe. */
+    val askToLoad: Boolean = false,
     val load: suspend () -> ByteArray,
 ) {
     override fun equals(other: Any?): Boolean = other is ViewerImage && other.key == key &&
-        other.description == description && other.width == width && other.height == height
+        other.description == description && other.width == width && other.height == height && other.askToLoad == askToLoad
 
     override fun hashCode(): Int = (key.hashCode() * 31 + description.hashCode()) * 31 + (width ?: 0) * 7 + (height ?: 0)
 }
@@ -383,6 +385,13 @@ private fun ViewerPage(
     pull: () -> Float,
 ) {
     val palette = PersonaTheme.palette
+    var allowed by remember(image.key, image.askToLoad) { mutableStateOf(!image.askToLoad) }
+    if (!allowed && cache[image.key] == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            JButton(stringResource(R.string.designsystem_load_image), { allowed = true }, icon = PhIcons.Image)
+        }
+        return
+    }
     val load by rememberUpdatedState(image.load)
     var attempt by remember(image.key) { mutableIntStateOf(0) }
     val state by produceState<ViewerPicture>(ViewerPicture.Loading, image.key, attempt, maxSide) {

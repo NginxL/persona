@@ -12,6 +12,7 @@
 // Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next push; a
 // reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
 // (QueueStrip.tsx loads it).
+import { COMPOSER_INPUT } from "../../lib/dock-focus";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, errorText, sessionPath } from "../../lib/api";
 import { agentLabel } from "../../lib/mentions";
@@ -152,7 +153,7 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
   const toBox = (always: boolean) => {
     const at = document.activeElement;
     if (!hasFinePointer() || !(always || !at || at === document.body || region.current?.contains(at))) return;
-    region.current?.closest("[data-composer-top]")?.parentElement?.querySelector("textarea")?.focus({ preventScroll: true });
+    region.current?.closest("[data-composer-top]")?.parentElement?.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT)?.focus({ preventScroll: true });
   };
   const act = (row: Row, del: boolean) =>
     void run(row.id, async () => {

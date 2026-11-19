@@ -131,7 +131,7 @@ export function useCountUp(target: number, ms = COUNT_MS): number {
 }
 
 /**
- * One breath (`.status-breath` in ui/stream/stream.css, 1.5 s) each time `value` moves while `on`: a new key replays the
+ * One breath (`.status-breath` in ui/stream/stream.css, 1.5 s) each time `value` moves while `on`: the next cycle replays the
  * one-shot animation. A change during a breath queues one more, so steady output breathes continuously and silence (a
  * long think, a tool) stays still.
  */

@@ -1232,6 +1232,194 @@
         ],
         "unread_shown": []
       }
+    },
+    {
+      "name": "just_finished_rank_and_precedence",
+      "description": "刚做完待看位于后台等待之后、待唤醒之前；待唤醒优先，屏蔽后只是普通已看。",
+      "source": [
+        "web/src/lib/agent-groups.ts: justFinished, isQuiet, buildAgentGroups",
+        "docs/protocol/agent-states.md: Just finished"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "working",
+            "title": "工作中",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "status": "idle",
+            "space_id": "space-working",
+            "space_name": "工作项目",
+            "updated_at": "2026-01-01T00:00:50Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "background",
+            "title": "后台等待",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "status": "idle",
+            "background_waiting": true,
+            "space_id": "space-background",
+            "space_name": "后台项目",
+            "updated_at": "2026-01-01T00:00:45Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "finished",
+            "title": "刚做完",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "done",
+            "work": {
+              "phase": "done",
+              "just_finished": true
+            },
+            "space_id": "space-live",
+            "space_name": "完成项目",
+            "updated_at": "2026-01-01T00:00:40Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "waiting",
+            "title": "待唤醒",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "done",
+            "work": {
+              "phase": "done",
+              "just_finished": true
+            },
+            "loop": {
+              "kind": "cron"
+            },
+            "space_id": "space-waiting",
+            "space_name": "唤醒项目",
+            "updated_at": "2026-01-01T00:00:35Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "muted",
+            "title": "屏蔽完成",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "done",
+            "work": {
+              "phase": "done",
+              "just_finished": true
+            },
+            "space_id": "space-muted",
+            "space_name": "屏蔽项目",
+            "updated_at": "2026-01-01T00:00:30Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "seen",
+            "title": "普通已看",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "done",
+            "space_id": "space-seen",
+            "space_name": "已看项目",
+            "updated_at": "2026-01-01T00:00:20Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "机器甲"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [
+            "machine-a/muted"
+          ],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "state",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 0,
+          "working": 1,
+          "backgroundWaiting": 1
+        },
+        "groups": [
+          {
+            "id": "state/working",
+            "title": "工作中",
+            "rows": [
+              "machine-a/working"
+            ],
+            "visible_rows": [
+              "machine-a/working"
+            ],
+            "folded": false
+          },
+          {
+            "id": "state/background",
+            "title": "后台等待中",
+            "rows": [
+              "machine-a/background"
+            ],
+            "visible_rows": [
+              "machine-a/background"
+            ],
+            "folded": false
+          },
+          {
+            "id": "state/just_finished",
+            "title": "刚做完待看",
+            "rows": [
+              "machine-a/finished"
+            ],
+            "visible_rows": [
+              "machine-a/finished"
+            ],
+            "folded": false
+          },
+          {
+            "id": "state/waiting",
+            "title": "待唤醒",
+            "rows": [
+              "machine-a/waiting"
+            ],
+            "visible_rows": [
+              "machine-a/waiting"
+            ],
+            "folded": false
+          },
+          {
+            "id": "state/idle",
+            "title": "已看",
+            "rows": [
+              "machine-a/muted",
+              "machine-a/seen"
+            ],
+            "visible_rows": [],
+            "folded": true
+          }
+        ],
+        "unread_shown": []
+      },
+      "derived": true
     }
   ]
 }

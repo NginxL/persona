@@ -503,7 +503,7 @@
       "required": ["type", "tiles"]
     },
     "GraphComponent": {
-      "description": "Nodes joined by edges, drawn as a canvas the person can pan, zoom, fit and open full screen (UI version 10): work split into parts, a plan's steps, a family of things. The app lays it out (layout, direction) and draws each node with its own design system; tapping a node does its action, as a row's; a node with children folds them. Each node counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or itself, a repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a card it is a still preview that opens full screen. An older app gets a row per node in reading order, indented.",
+      "description": "Nodes joined by edges, drawn as a canvas the person can pan, zoom, fit and open full screen (UI version 10): work split into parts, a plan's steps, a family of things. The app lays it out (layout, direction) and draws each node with its own design system; tapping a node does its action, as a row's (or opens its in-place inspector first on the web when the node carries facts, detail or links, with the action inside); a node with children folds them. Each node counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or itself, a repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a card it is a still preview that opens full screen. An older app gets a row per node in reading order, indented.",
       "type": "object", "x-since": 10,
       "properties": {
         "type": {"const": "graph"},
@@ -518,7 +518,7 @@
       "required": ["type", "nodes"]
     },
     "GraphNode": {
-      "description": "One node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress bar, in tone's role color or color's named color (never both).",
+      "description": "One node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress bar, in tone's role color or color's named color (never both), with optional timing and inspector details.",
       "type": "object",
       "properties": {
         "id": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -530,9 +530,24 @@
         "icon": {"$ref": "#/$defs/NavIcon"},
         "progress": {"type": "number", "minimum": 0, "maximum": 1, "x-go-pointer": true, "description": "A thin bar along the node's foot, 0 to 1."},
         "group": {"type": "string", "minLength": 1, "maxLength": 60, "description": "Nodes with the same parents and the same group sit next to each other inside one frame titled with it (the same task tried several ways)."},
-        "action": {"$ref": "#/$defs/Action"}
+        "action": {"$ref": "#/$defs/Action"},
+        "started_at": {"type": "number", "minimum": 0, "x-go-pointer": true, "description": "Unix timestamp in seconds when this node started."},
+        "ended_at": {"type": "number", "minimum": 0, "x-go-pointer": true, "description": "Unix timestamp in seconds when this node ended; omitted while still running."},
+        "facts": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/Fact"}, "description": "Short label/value readings shown in the node inspector."},
+        "detail": {"type": "string", "maxLength": 2000, "description": "Plain-text summary, verifier feedback or error shown in the node inspector."},
+        "links": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/GraphNodeLink"}, "description": "HTTPS links shown in the node inspector (for example work and verifier sessions across attempts)."}
       },
       "required": ["id", "title"]
+    },
+    "GraphNodeLink": {
+      "description": "An https link shown in a graph node's inspector (UI version 10).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "url"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+        "url": {"type": "string", "minLength": 1, "maxLength": 2000, "pattern": "^https://[^/?#]+"}
+      }
     },
     "GraphEdge": {
       "description": "An edge from one node to another (UI version 10): from is the parent, to the child.",

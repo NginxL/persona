@@ -14,7 +14,7 @@ import (
 
 // laneWriter writes a framed connection (lanes.go). The peer's writers queue their lines on it and wait; one goroutine
 // (run) cuts them into frames and writes them, each write a batch of up to frameMax bytes: the acknowledgement due
-// first, then frames by lane in strict priority, a frame for each line of a lane in turn. A line once started is
+// first, then control and the other lanes, with a turn for waiting bulk during sustained traffic. A line once started is
 // written to its end, as a line on the one writer was; one not started yet can still be withdrawn (NotSent).
 type laneWriter struct {
 	w      io.Writer
@@ -34,6 +34,10 @@ type laneWriter struct {
 	ackSent uint64
 	win     creditWindow
 	totals  [laneCount]laneTotals
+
+	highFrames     int       // interactive or event frames sent while bulk waits, capped at highFramesBeforeBulk
+	lastUncredited uint64    // latest event or interactive answer put on the transport without waiting for credit
+	ackAdvanced    time.Time // when the peer last acknowledged new data, on any lane
 
 	// Resuming (resume.go): keep says frames are kept until the other side acknowledges them (kept, keptBytes; none
 	// through gapThrough: not kept, so the connection resumes only once those are acknowledged, ackedThrough).
@@ -64,6 +68,9 @@ type keptFrame struct {
 	b   []byte
 	at  time.Time
 }
+
+// A pending bulk frame gets one turn after this many interactive or event frames. Control always goes first.
+const highFramesBeforeBulk = 8
 
 // laneSlots is how many lines of one lane may be in progress at once (laneQueue.slots); a frame's slot says which.
 const laneSlots = 16
@@ -107,21 +114,25 @@ func (lw *laneWriter) poke() {
 // start begins writing: from now on everything this side sends is frames.
 func (lw *laneWriter) start() { go lw.run() }
 
-// enqueue queues l; delayed: something was being written or waiting already.
-func (lw *laneWriter) enqueue(l *outLine) (delayed bool, err error) {
+// enqueue records any wait for the writer and, for a control line, the uncredited traffic already ahead of it.
+func (lw *laneWriter) enqueue(l *outLine) (observation writeObservation, err error) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
 	if lw.err != nil {
-		return false, lw.err
+		return observation, lw.err
 	}
-	delayed = lw.busy
+	observation.delayed = lw.busy
 	for i := range lw.lanes {
-		delayed = delayed || len(lw.lanes[i].lines) > 0
+		observation.delayed = observation.delayed || len(lw.lanes[i].lines) > 0
+	}
+	if l.lane == LaneControl && lw.lastUncredited > lw.ackedThrough {
+		observation.writer = lw
+		observation.acked, observation.ahead = lw.ackedThrough, lw.lastUncredited
 	}
 	q := &lw.lanes[l.lane]
 	q.lines = append(q.lines, l)
 	lw.poke()
-	return delayed, nil
+	return observation, nil
 }
 
 // withdraw takes l back if none of it went out yet.
@@ -192,8 +203,9 @@ func (lw *laneWriter) acked(seq uint64, at uint32) error {
 	if seq > lw.seq {
 		return fmt.Errorf("%w: acknowledges frame %d, %d sent", ErrFrame, seq, lw.seq)
 	}
-	lw.dropKeptLocked(seq)
-	lw.win.acked(seq, at, time.Now())
+	now := time.Now()
+	lw.dropKeptLocked(seq, now)
+	lw.win.acked(seq, at, now)
 	if len(lw.lanes[LaneInteractive].lines)+len(lw.lanes[LaneBulk].lines) > 0 { // what may wait for credit
 		lw.poke()
 	}
@@ -310,6 +322,15 @@ func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Tim
 		lw.keepLocked(lw.seq, batch[at:], now)
 		l.off += n
 		lw.totals[l.lane].frames++
+		switch {
+		case l.lane == LaneBulk || len(lw.lanes[LaneBulk].lines) == 0:
+			lw.highFrames = 0
+		case l.lane != LaneControl && lw.highFrames < highFramesBeforeBulk:
+			lw.highFrames++
+		}
+		if !l.credit && (l.lane == LaneEvents || l.lane == LaneInteractive) {
+			lw.lastUncredited = lw.seq
+		}
 		if l.credit {
 			lw.win.wrote(lw.seq, n, now, n == lw.most(l))
 		}
@@ -329,7 +350,11 @@ func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Tim
 // one writer: taking turns among them would finish every one of them only at the end, each later than its caller can
 // wait (concurrent file chunks, each a minute's worth on a slow link).
 func (lw *laneWriter) pickLocked(room int, first bool, now time.Time) (*outLine, int, bool) {
-	for lane := LaneControl; lane < laneCount; lane++ {
+	order := [laneCount]Lane{LaneControl, LaneInteractive, LaneEvents, LaneBulk}
+	if lw.highFrames >= highFramesBeforeBulk {
+		order = [laneCount]Lane{LaneControl, LaneBulk, LaneInteractive, LaneEvents}
+	}
+	for _, lane := range order {
 		q := &lw.lanes[lane]
 		if len(q.lines) == 0 {
 			continue
@@ -530,8 +555,10 @@ func (lw *laneWriter) keepLocked(seq uint64, b []byte, now time.Time) {
 }
 
 // dropKeptLocked lets go what the other side read, every frame through seq.
-func (lw *laneWriter) dropKeptLocked(seq uint64) {
-	lw.ackedThrough = max(lw.ackedThrough, seq)
+func (lw *laneWriter) dropKeptLocked(seq uint64, now time.Time) {
+	if seq > lw.ackedThrough {
+		lw.ackedThrough, lw.ackAdvanced = seq, now
+	}
 	i := 0
 	for i < len(lw.kept) && lw.kept[i].seq <= seq {
 		lw.keptBytes -= len(lw.kept[i].b)
@@ -592,7 +619,7 @@ func (lw *laneWriter) loseGen(gen uint64) (w io.Writer) {
 func (lw *laneWriter) resume(w io.Writer, gen, peerRead uint64) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
-	lw.dropKeptLocked(peerRead)
+	lw.dropKeptLocked(peerRead, time.Now())
 	lw.w, lw.gen, lw.lost = w, gen, false
 	lw.resend = -1
 	if len(lw.kept) > 0 {

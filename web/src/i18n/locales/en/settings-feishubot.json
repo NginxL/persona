@@ -109,6 +109,8 @@
   "larkcli_profile_fixed": "{name} (set in the config file)",
   "feature_answer_new_card_title": "Answer as a new card",
   "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card",
+  "feature_topic_cot_title": "Native process in topics",
+  "feature_topic_cot_detail": "Show a topic run's thinking and tool calls in Lark's collapsible agent message, alongside the progress card. Off: keep the process in the card's folded panel",
   "source_report_full_title": "Reply with the complete final answer",
   "source_report_full_detail": "Everyone in the original group can see the final answer. When off, the bot sends a short result.",
   "topic_groups": "Topic groups",

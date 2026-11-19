@@ -1,0 +1,5 @@
+Example owner read this matter's latest messages in the source without replying here.
+
+Read its current state. If nothing more is needed, call inbox_suggest with a conclusion; otherwise submit only a suggestion, or recap and follow to keep waiting.
+
+Do not start Agents, send messages or directly perform actions visible to others in this turn. Use read-only investigation tools; the program executes suggestions only after Example owner confirms.

@@ -83,7 +83,7 @@ export interface PagedGrouping {
 /** The complete list's quick filters on the paged list (`sessions_quick_filters`, #6662), in place of its state chips:
  *  what the chosen chip selects, what every read leaves out (hidden botmux), and the chips, drawn from the counts of
  *  the list without the chip (one read for every chip's number). The caller keeps the choice, the complete list's. */
-export interface PagedQuickFilters { select: ListFilters; exclude: ListFilters; bar: (counts: FilterCounts | undefined) => ReactNode }
+export interface PagedQuickFilters { select: ListFilters; exclude: ListFilters; bar: (counts: FilterCounts | undefined) => ReactNode; onCounts?: (counts: FilterCounts | undefined) => void }
 
 const NONE: ListFilters = {};
 /** The keys a chip selects by: the scope its numbers are counted in leaves them out. */
@@ -364,6 +364,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     const by = scopeCounts.state ?? {}, waiting = scopeCounts.background_waiting ?? 0, origin = scopeCounts.pane_source ?? {};
     return { needs: by.needs_you ?? 0, unread: by.unread ?? 0, working: Math.max(0, (by.working ?? 0) - waiting), bg_waiting: waiting, feishu: origin.feishu ?? 0, terminal: origin.terminal ?? 0 };
   }, [scopeCounts]);
+  const onQuickCounts = quick?.onCounts;
+  useEffect(() => { onQuickCounts?.(quickCounts); }, [onQuickCounts, quickCounts]);
   // the most used groups first: the menu lists a bounded number of them, and the picked one whatever its place
   const groups = useMemo(() => {
     const listed = (allGroups ?? []).slice(0, SESSION_LIST_METRICS.groupOptions);

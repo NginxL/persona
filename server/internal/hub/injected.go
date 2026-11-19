@@ -81,6 +81,8 @@ func injectedLine(l i18n.Lang, in *proto.Injected) string {
 		}
 	case proto.InjectedSystem:
 		switch in.State {
+		case "answer_again":
+			return i18n.T(l, "injected.answer_again")
 		case "inbox":
 			return i18n.T(l, "injected.inbox_update", args)
 		case "ask_answered":

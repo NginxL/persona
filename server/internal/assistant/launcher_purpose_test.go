@@ -40,6 +40,36 @@ func TestAssistantLauncherModelsAreScopedAndCachedSeparately(t *testing.T) {
 	}
 }
 
+func TestAgentLauncherModelsPassExplicitHost(t *testing.T) {
+	f := newFakeHub().withMachine()
+	s := newTestService(t, f)
+	f.answerNode(assistantwire.DeviceLaunchersModels, func(_ string, raw json.RawMessage) (any, error) {
+		var params map[string]any
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		model := "companion-model"
+		if params["host"] == proto.EngineHerdr {
+			model = "local-model"
+		}
+		if params["purpose"] == "assistant" && params["host"] != nil {
+			t.Error("assistant catalog has an engine host")
+		}
+		return proto.LauncherModels{Agent: "agy", Models: []proto.AgentModel{{ID: model}}}, nil
+	})
+	for _, tc := range []struct{ query, want string }{
+		{"", "companion-model"},
+		{"?host=herdr", "local-model"},
+		{"", "companion-model"},
+		{"?purpose=assistant&host=herdr", "companion-model"},
+	} {
+		r := request(s, "GET", "/api/v1/machines/server/launchers/agy/models"+tc.query, "")
+		if r.Code != 200 || !strings.Contains(r.Body.String(), tc.want) {
+			t.Fatalf("%q: %d %s, want %s", tc.query, r.Code, r.Body.String(), tc.want)
+		}
+	}
+}
+
 func TestAssistantLauncherCheckPassesPurposeToNode(t *testing.T) {
 	f := newFakeHub().withMachine()
 	s := newTestService(t, f)

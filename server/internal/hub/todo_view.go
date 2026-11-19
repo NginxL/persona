@@ -31,6 +31,9 @@ const (
 	// featureTodoTimeline: GET /api/v1/todos/{id}/timeline answers a to-do's conversation, and GET /api/v1/todos/{id}
 	// carries the rounds the paper shows, its results and what changed since the owner looked (#10465).
 	featureTodoTimeline = assistantwire.CapabilityTodoTimeline
+	// featureTodoImages: POST /api/v1/todos persists images and serves their private bytes (#11084). A hub-wide flag
+	// cannot promise image creation for only some managers, so an older or offline one hides the picker.
+	featureTodoImages = assistantwire.CapabilityTodoImages
 	// todoPlacesRoute is answered by every manager the to-dos list merges, joined (mergeTodoPlaces).
 	todoPlacesRoute = "GET /api/v1/todos/places"
 )
@@ -83,6 +86,20 @@ func (h *Hub) todoTimelineFeatures() []string {
 		}
 	}
 	return []string{featureTodoTimeline}
+}
+
+// todoImageFeatures is todo_images only while every manager whose to-dos the list merges is connected and names it.
+// An older manager would ignore the additive images field and create an image-less to-do, so the Web offers no picker
+// in that case. It does not gate reading metadata or bytes that a capable manager already stored.
+func (h *Hub) todoImageFeatures() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for _, id := range h.listManagers(ctx) {
+		if h.archiveManagerHas(id, assistantwire.CapabilityTodoImages) != http.StatusOK {
+			return nil
+		}
+	}
+	return []string{featureTodoImages}
 }
 
 // todoListSums are the members of a merged to-dos list the hub adds up over its answers (mergeList, before the list's

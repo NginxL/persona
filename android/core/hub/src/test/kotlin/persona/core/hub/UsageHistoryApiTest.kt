@@ -63,6 +63,34 @@ class UsageHistoryApiTest {
         }
     }
 
+    @Test fun hoursKeepAgentIdsAndAllFourTokenKindsInWireOrder() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"usage":{"agents":[
+                {"agent":"claude","in":1,"cache_write":2,"cache_read":4,"out":8,"req":16},
+                {"agent":"","cache_read":11},{"agent":"Acme-CLI","out":3},{"agent":"request-only","req":8}
+            ]}}"""))
+
+            val shares = api.usageHours().agents
+            assertEquals(listOf("claude", "", "Acme-CLI", "request-only"), shares.map { it.agent })
+            assertEquals(listOf(15L, 11L, 3L, 0L), shares.map { it.total })
+            assertEquals(16, shares.first().requests)
+            assertEquals("/api/v1/usage/hours?days=7", server.takeRequest().path)
+        }
+    }
+
+    @Test fun oldAndEmptyHoursAnswersKeepThePageWithoutAgentShares() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            for (payload in listOf("""{"usage":{"total":{"in":7}}}""", """{"usage":{"total":{"in":7},"agents":[]}}""")) {
+                server.enqueue(MockResponse().setBody(payload))
+                val hours = api.usageHours()
+                assertEquals(7L, hours.total.total)
+                assertTrue(hours.agents.isEmpty())
+            }
+        }
+    }
+
     @Test fun invalidRangesFailBeforeAnyNetworkRead() = runBlocking {
         MockWebServer().use { server ->
             val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())

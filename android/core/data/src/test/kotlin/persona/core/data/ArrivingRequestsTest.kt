@@ -35,6 +35,29 @@ class ArrivingRequestsTest {
         assertEquals(listOf("ix1", "ix2"), center.pending.value.map { it.id })
     }
 
+    @Test fun aPreparedCardsDeadlineUpdateReplacesItsSnapshotWithoutAnotherArrival() = runTest {
+        fun prepared(deadline: String) = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix1","machine_id":"mac","session_id":"a","kind":"permission",""" +
+                """"expires_at":"$deadline","can_clarify":true}""",
+        )
+        val original = prepared("2030-01-01T00:00:00Z")
+        val updated = prepared("2030-01-02T00:00:00Z")
+        val connection = Connection()
+        val center = HubInteractionCenter(Transport(listOf(original)), connection, backgroundScope)
+        val arrived = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { center.arrivals.collect { arrived += it.id } }
+        center.refresh()
+        connection.events.emit(InteractionEvent(updated))
+        runCurrent()
+        assertEquals(listOf(updated), center.pending.value)
+        assertEquals(emptyList<String>(), arrived)
+        connection.events.emit(InteractionResolvedEvent(updated.id))
+        runCurrent()
+        assertEquals(emptyList<Interaction>(), center.pending.value)
+        center.refresh()
+        assertEquals(emptyList<Interaction>(), center.pending.value)
+    }
+
     private class Connection : HubConnection {
         override val state = MutableStateFlow(ConnectionState.WaitingForNetwork)
         override val events = MutableSharedFlow<ServerEvent>()

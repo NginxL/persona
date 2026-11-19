@@ -2,7 +2,7 @@
 // "Section bar", #9053), filters by source and kind, search, then the section chosen; under All every section stacked,
 // Needs you (agents waiting on you first), In progress, FYI, Collapsed and Done, each opening / closing from its title.
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { agentDraft, agentWorking, conversationRoute, fromLine, interactionAsk, interactionTitle, isDone, isLark, itemKey, itemRoute, muteItem, sameItem, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS, useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup } from "../../lib/inbox";
+import { agentDraft, agentWorking, conversationRoute, interactionAsk, interactionTitle, isDone, isLark, itemKey, itemRoute, muteItem, sameItem, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS, useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup } from "../../lib/inbox";
 import { lineSummary, markdownInSummary, withoutMarks } from "../../lib/inbox-markdown";
 import { repeatsSummary, interactionAgentTitle, listInboxMutes, muteLine, muteShortName, muteTitle, policyMenuTitle, unmuteInbox, BULK_CONFIRM_AT, bulkScope, bulkScopeName, mailShort } from "../../lib/inbox-page";
 import { nowText, rowMeta } from "../../lib/inbox-now";
@@ -869,8 +869,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   const rows = !done ? it.doc?.rows ?? [] : [];
   const first = rows[0];
   const translated = hubTranslation(it, useTranslatePrefs());
-  // Translated mail keeps the old optional-preview path exactly; mail has no `where`.
-  const meta = translated ? fromLine(it, translated.preview) : rowMeta(it);
+  const meta = rowMeta(it, translated?.preview);
   const from = markdownInSummary(it) ? withoutMarks(meta) : meta; // an older assistant row's line is its Markdown (#9041)
   // a right click: "Done" / "Move back", then what it can be muted by (iOS: the row's long press)
   // (the menu key / Shift+F10 open it next to the row, see ui/context-menu.ts)

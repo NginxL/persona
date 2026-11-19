@@ -29,7 +29,7 @@ vi.mock("../lib/sessions", async (importOriginal) => {
 });
 
 // the extensions' overview cards are not this test's
-vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => <section data-overview-cards="" /> }));
+vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => <section data-overview-cards="" />, OverviewArrangeButton: () => null }));
 // a card's answer stays on its way until the test lets it end
 const op = vi.hoisted(() => ({ finish: (_: unknown) => {} }));
 vi.mock("../lib/ops", async (importOriginal) => ({ ...(await importOriginal<typeof import("../lib/ops")>()), apiOp: () => new Promise((done) => { op.finish = done; }) }));

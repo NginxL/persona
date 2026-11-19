@@ -94,6 +94,7 @@ fn fixture_manifest_has_unique_names_and_projection_shape() {
         "hub_pending_offline",
         "hub_unknown",
         "hub_working_seen",
+        "just_finished_rank_and_precedence",
         "kept_cannot_escape_base",
         "machine_search_before_counts",
         "machine_qualifier_matches_registry_title",
@@ -861,6 +862,42 @@ fn fixture_assertion_catches_a_wrong_sort_comparison() {
         failure.is_err(),
         "reversing the date comparison must fail the shared fixture assertion"
     );
+}
+
+#[test]
+fn just_finished_stays_active_but_its_muted_row_folds_with_seen() {
+    let document: Value =
+        serde_json::from_str(&fs::read_to_string(fixture_dir().join("ordering.json")).expect("ordering"))
+            .expect("JSON");
+    let case = document["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|case| case["name"] == "just_finished_rank_and_precedence")
+        .expect("just finished fixture");
+    let mut input = case["input"].clone();
+    input["sessions"]
+        .as_array_mut()
+        .expect("sessions")
+        .retain(|session| matches!(session["session_id"].as_str(), Some("finished" | "muted")));
+    input["settings"]["grouping"] = Value::String("space".to_owned());
+    input["settings"]["expanded_quiet"] = serde_json::json!(["machine-a/space-muted"]);
+    let input: Input = serde_json::from_value(input).expect("space input");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("space projection");
+
+    assert_eq!(actual["groups"][0]["id"], serde_json::json!("machine-a/space-live"));
+    assert_eq!(actual["groups"][0]["parent"], Value::Null);
+    assert_eq!(
+        actual["groups"][0]["visible_rows"],
+        serde_json::json!(["machine-a/finished"])
+    );
+    assert_eq!(actual["groups"][1]["id"], serde_json::json!("machine-a/space-muted"));
+    assert_eq!(actual["groups"][1]["parent"], serde_json::json!("quiet"));
+    assert_eq!(
+        actual["groups"][1]["visible_rows"],
+        serde_json::json!(["machine-a/muted"])
+    );
+    assert_eq!(actual["quiet_title"], serde_json::json!("空闲的空间"));
 }
 
 fn assert_projection(actual: &Value, expected: &Value, label: &str) {

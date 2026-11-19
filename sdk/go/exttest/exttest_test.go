@@ -111,6 +111,15 @@ func TestCheckView(t *testing.T) {
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a"}, {"id": "b", "title": "b"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}]}]}`, false, "cycle"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a"}, {"id": "a", "title": "b"}]}]}]}`, false, "twice"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "tone": "positive", "color": "green"}]}]}]}`, false, "a tone or a color"},
+		// node inspector links take the same credential-free https check as a top-level link
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "http://hub.example.com/x"}]}]}]}]}`, false, "https"},
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "https://user:pass@hub.example.com/x"}]}]}]}]}`, false, "https"},
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "https://@hub.example.com/x"}]}]}]}]}`, false, "https"},
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "https://hub.example.com/x"}]}]}]}]}`, false, ""},
+		// a node's times and detail are held to the kit's limits
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "started_at": 11, "ended_at": 10}]}]}]}`, false, "ended_at before started_at"},
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "ended_at": -1}]}]}]}`, false, "below 0"},
+		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "detail": "` + strings.Repeat("決", 2001) + `"}]}]}]}`, false, "detail"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [` + strings.Join(nodes, ",") + `]}, {"type": "text", "text": "one more"}]}]}`, false, "300"},
 		// a card draws the graph as one of its 12, however many nodes
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [` + strings.Join(nodes[:13], ",") + `]}]}]}`, true, ""},
@@ -124,7 +133,7 @@ func TestCheckView(t *testing.T) {
 
 // The view examples of the graph pass the kit.
 func TestCheckViewGraphExamples(t *testing.T) {
-	for _, name := range []string{"View.v10-work-tree.json", "View.v10-plan-layered.json"} {
+	for _, name := range []string{"View.v10-work-tree.json", "View.v10-plan-layered.json", "View.v10-graph-control-room.json"} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "schema", "extension", "examples", name))
 		if err != nil {
 			t.Fatal(err)

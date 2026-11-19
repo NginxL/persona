@@ -6,7 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.Interaction
 import persona.core.contracts.Item
+import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.UndeliveredMessage
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.OutboxMessage
 import java.time.Instant
@@ -66,6 +68,35 @@ class ChatTapsTest {
         assertTrue(taps.canTap(second, pending, Instant.parse("2027-01-01T00:00:00Z")))
     }
 
+    private fun prepared(id: String, expiresAt: String) = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+        """{"id":"$id","machine_id":"m1","session_id":"s1","kind":"permission",""" +
+            """"expires_at":"$expiresAt","can_clarify":true}""",
+    )
+
+    @Test fun aPreparedCardUsesItsCurrentDeadlineAndOnlyTheHubsCurrentSnapshot() {
+        val original = prepared("ix1", now.plusSeconds(60).toString())
+        val retained = prepared("ix1", now.plusSeconds(3_600).toString())
+        val afterOriginal = now.plusSeconds(61)
+        val taps = ChatTaps()
+        assertFalse(taps.canTap(original, listOf(retained), afterOriginal))
+        assertTrue(taps.answerable(retained, afterOriginal))
+        assertTrue(taps.canTap(retained, listOf(retained), afterOriginal))
+        assertFalse(taps.canTap(retained, emptyList(), afterOriginal))
+    }
+
+    @Test fun clarificationNeverRevivesGenuinelyExpiredResolvedOrUncertainCards() {
+        val live = prepared("ix1", now.plusSeconds(3_600).toString())
+        val expired = prepared("ix1", now.toString())
+        val taps = ChatTaps()
+        assertFalse(taps.canTap(expired, listOf(expired), now))
+        val resolved = taps.tapped(live.id).answered(live.id, CardAnswer.Withdrawn).idle()
+        assertFalse(resolved.canTap(live, listOf(live), now))
+        val uncertain = taps.tapped(live.id).answered(live.id, CardAnswer.Unconfirmed).idle()
+        assertFalse(uncertain.canTap(live, listOf(live), now))
+        // A hub without the additive capability keeps the original deadline rule.
+        assertFalse(taps.canTap(first, pending, Instant.parse("2026-01-02T05:04:05Z")))
+    }
+
     @Test fun aBubbleGoesOnceTheTranscriptHasItsCopy() {
         val key = SessionKey("m1", "s1")
         val outbox = listOf(
@@ -80,5 +111,17 @@ class ChatTapsTest {
         )
         assertEquals(listOf("c2"), chatBubbles(outbox, key, items).map { it.clientMessageId })
         assertEquals(listOf("c1", "c2", "c3"), chatBubbles(outbox, key, emptyList()).map { it.clientMessageId })
+    }
+
+    @Test fun keptBubblesDoNotDuplicateTranscriptOrLocalIds() {
+        val key = SessionKey("m1", "s1")
+        val waiting = UndeliveredMessage("ABC-kept", "waiting", at = "2026-11-17T10:00:00Z", state = "waiting")
+        val failed = UndeliveredMessage("DEF-kept", "failed", at = "2026-11-17T10:01:00Z", state = "failed")
+        val row = Session("m1", "s1", assistant = true, undelivered = listOf(waiting, failed))
+        assertEquals(listOf(waiting, failed), shownUndelivered(row, emptyList(), emptyList()))
+        val transcript = listOf(Item("line", 1, role = "user", kind = "text", text = "waiting", clientMsgId = "abc-KEPT"))
+        assertEquals(listOf(failed), shownUndelivered(row, transcript, emptyList()))
+        val local = listOf(OutboxMessage("def-KEPT", key, "failed", DeliveryState.Sending))
+        assertEquals(listOf(waiting), shownUndelivered(row, emptyList(), local))
     }
 }

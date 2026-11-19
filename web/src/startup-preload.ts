@@ -445,7 +445,26 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // effortTitle, and home.task_agents_more). 205 B in ja, measured in one environment against main e7a12f7323 (ja
 // 482,497 B to 482,702 B; en 479,378 B to 479,585 B, zh-Hans 480,224 B to 480,422 B). Main had 29 B of room, so the
 // budget is this ja size plus those 29 B.
-export const FIRST_SCREEN_BUDGET = 482_731;
+// #9745: Overview's extension cards drawn as the user arranged them add 749 B in ja, measured in one environment
+// against main 54408eed1b (ja 478,171 B to 478,920 B; en 475,161 B to 475,957 B, zh-Hans 476,023 B to 476,809 B): the
+// arrangement's store, kept per hub and sign-in, with the revision Reset's Undo checks, and the order, hidden cards and
+// widths it draws (lib/overview-cards.ts), Arrange cards in Overview's top bar, and the arrangement to and from the hub
+// with the start page, one change on its way at a time and pushes heard during it settled once the hub pushed it, a
+// read a later hello or another sign-in overtook left alone (lib/start-page.ts). The editor (its heading, each card's
+// controls, the drag and the edits) is a chunk of its own (views/extensions/OverviewArrange.tsx, lib/overview-edit.ts).
+// Main had 4,560 B of room, so the budget is this ja size plus those 4,560 B.
+// #11090: a waiting to-do's label says what it waits on (lib/todo-wait-reason.ts waitReason and todoLook, read on the
+// first screen by Overview's task cards, the main chat's trays and the sidebar's By to-do rows; the seven
+// lib-state-labels waits_* words in place of task_waiting). 621 B in ja, measured in one environment against main
+// 591ad5d369 (ja 480,763 B to 481,384 B; en 477,858 B to 478,422 B, zh-Hans 478,582 B to 479,142 B). Main had 2,717 B
+// of room; the budget stays (merged with #9778 below, those 621 B come out of the room main had).
+// #9778 (#9745's follow-up): what is on its way kept to the sign-in it was made under (a change sent, queued or not
+// taken under an earlier one dropped, its answer changing nothing) and a hello's read a push or another tab's change
+// overtook left alone (lib/start-page.ts, lib/overview-cards.ts), and Arrange cards opening a folded cards' section and
+// scrolling to it, its heading counting the cards shown (views/extensions/ExtensionSlots.tsx). 63 B in ja, measured in
+// one environment against main cacd8d75a6 (ja 480,670 B to 480,733 B; en 477,744 B to 477,807 B, zh-Hans 478,482 B to
+// 478,545 B). Main had 2,810 B of room, so the budget is this ja size plus those 2,810 B.
+export const FIRST_SCREEN_BUDGET = 483_543;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;

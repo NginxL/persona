@@ -55,6 +55,8 @@ data class ChatAppBindings(
     val assistantManagement: AssistantManagement,
     val mainSender: MainConversationSender,
     val draftVersions: (SessionKey) -> Flow<DraftSessionVersion> = { emptyFlow() },
+    /** Resolve the main conversation only when a local handoff needs its upload machine; it never sends a message. */
+    val mainUploadTarget: (suspend () -> SessionKey?)? = null,
     /** Read-only access to the machines (the photos sent with messages load from them); null where there is none. */
     val files: SessionFiles? = null,
     /** The group's machines' ports on the phone (docs/operations/ports.md); null where there is no hub. */

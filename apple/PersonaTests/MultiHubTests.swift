@@ -126,6 +126,60 @@ struct MultiHubTests {
 
     // MARK: Routes
 
+    /// Only the second synthetic hub owns this chat. Neither group has sent a first session frame at launch.
+    @MainActor private func coldChat() throws -> (AppModel, Session) {
+        let model = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: "cold-chat-" + UUID().uuidString))
+        model.linkHooksForTests = (transport: try #require(FakeHub().client.transport), socket: { SyncSocket() })
+        model.registry = HubRegistry(hubs: [Self.hub("a", group: "", hubID: "A", url: "http://127.0.0.1:1"),
+                                           Self.hub("b", group: "g1", hubID: "B", url: "http://127.0.0.1:2")])
+        model.buildLinks()
+        var row = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"mac","session_id":"s1","title":"Owning hub's chat"}"#.utf8))
+        row.group = "g1"
+        return (model, row)
+    }
+
+    @MainActor @Test(arguments: [false, true])
+    func coldUnqualifiedChatFollowsItsOwningHub(frameBeforeAppearance: Bool) throws {
+        let (model, row) = try coldChat()
+        model.openExternal(path: "mac/s1", latestAnswer: true)
+        let first = try #require(model.openChat)
+        #expect(first.group.isEmpty)
+        model.openChat = nil // the navigation stack took the request
+        let page = UUID()
+        if !frameBeforeAppearance { model.show(first, by: page) }
+        model.applySessions([row.machineRef: [row]])
+        if frameBeforeAppearance { model.show(first, by: page) }
+        #expect(model.openChat == row.key)
+        #expect(model.latestAnswerFor == row.key)
+        #expect(model.openChat.flatMap(model.session)?.title == row.title)
+    }
+
+    @MainActor @Test func delayedChatDoesNotOverrideAnExplicitGroupOrReopenAfterBack() throws {
+        let (model, row) = try coldChat()
+        model.openExternal(path: "|mac/s1") // an explicit default group, even though the other hub lists the same ID
+        let first = try #require(model.openChat)
+        model.applySessions([row.machineRef: [row]])
+        #expect(model.openChat == first)
+
+        model.applySessions([row.machineRef: []])
+        model.openExternal(path: "mac/s1")
+        model.openChat = nil
+        let page = UUID()
+        model.show(first, by: page)
+        model.hide(by: page)
+        model.applySessions([row.machineRef: [row]])
+        #expect(model.openChat == nil)
+    }
+
+    @MainActor @Test func aNewerChatWinsWhileTheOldLinksRowIsInFlight() throws {
+        let (model, row) = try coldChat()
+        model.openExternal(path: "mac/s1")
+        let newer = SessionKey(machineID: "mac", sessionID: "other")
+        model.open(newer)
+        model.applySessions([row.machineRef: [row]])
+        #expect(model.openChat == newer)
+    }
+
     @Test func candidatesArePairedHubsThenTheMeshAddresses() {
         var b = Self.hub("b", group: "g1", hubID: "B", url: "http://127.0.0.1:18761")
         b.mesh = [MeshHub(hubID: "B", endpoints: ["http://127.0.0.1:18761"]),

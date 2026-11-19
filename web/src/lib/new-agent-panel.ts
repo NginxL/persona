@@ -26,6 +26,10 @@ export interface ModelChoice {
   effort: string;
 }
 
+function settingsEffort(agent: string, choice: ModelChoice, followed: ModelBinding): string | undefined {
+  return agent === "agy" && choice.launcher ? undefined : followed.effort;
+}
+
 /** The id of a launcher's "Default" row, which sends no model: Claude Code's own name for its default entry, which that
  *  row stands in for. A list whose default entry is a model of its own (Codex's) keeps that model as a row of its own, so
  *  a favorite or a recent setup of it is that model, never "no model". */
@@ -131,7 +135,7 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
     };
     const note = locked || folded?.description;
     if (note) first.description = note;
-    const defaultEffort = followed.effort || d?.default_effort;
+    const defaultEffort = settingsEffort(agent, choice, followed) || d?.default_effort;
     if (defaultEffort) first.defaultEffort = defaultEffort;
     if (folded?.resolved) first.resolved = folded.resolved;
     const models: PanelModel[] = [first];
@@ -166,11 +170,14 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
 
   // the row lit: the model picked, else the launcher's Default row (which says what it runs)
   const followed = followedBinding(runs, configured);
+  const agent = launcherAgent(runs, launchers, listOf(runs).list);
+  const inheritedEffort = settingsEffort(agent, choice, followed);
   const state: PanelState = {
-    current: runs ? cleanSetup({ provider: runs, model: choice.model || DEFAULT_ROW, effort: choice.effort || followed.effort }) : null,
+    current: runs ? cleanSetup({ provider: runs, model: choice.model || DEFAULT_ROW, effort: choice.effort || inheritedEffort }) : null,
     recommended: [],
     starting: true,
   };
+  if (!choice.effort && inheritedEffort) state.currentEffortDisplayOnly = agent === "agy" ? "all" : "agy";
 
   const presets = tiers.map((x): PanelPreset => {
     const list = listOf(x.launcher).list;
@@ -213,7 +220,7 @@ export function newAgentPill(o: { launchers: Launcher[]; runs: string; list: Mod
     failed: list === undefined && Boolean(e.error),
   };
   if (model) out.model = model;
-  const effort = takesEffort(agent, l) ? choice.effort || followed.effort : "";
+  const effort = takesEffort(agent, l) ? choice.effort || settingsEffort(agent, choice, followed) : "";
   if (effort) out.effort = effort;
   return out;
 }

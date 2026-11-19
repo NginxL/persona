@@ -172,7 +172,8 @@ persona-link ── WSS /api/v1/link ──▶ hub TLS port (public.tls_listen)
   ← open {id}                                  hub wants to connect to node
       persona-link connects ~/.persona/node-attach.sock first, then opens WSS /api/v1/link/stream?id=<id>, forwarding bytes unchanged both ways
   → open_failed {id, error}                    Can't open (resident node not running, etc.); hub records the reason as this computer's error
-  ← node {online, error}                       Whether hub connected to node, reported by `persona-link status`
+  ← node {online, error}                       Whether hub connected to node, reported by `persona-link status`: sent when the
+                                               node's connection changes or is resumed, and on connect when it is already up (#11262)
   → rename {id, machine_name}                  Asks the hub to call this computer machine_name ("": its id again); see "The computer's name"
   ← renamed {id, machine_name | code, error}   The hub's answer to that rename: the name it has now, or why not
   ← attention {attention}                      The "Needs you" summary, to a link whose hello asked for it: right after endpoints, then on every change
@@ -242,6 +243,7 @@ Both sides ignore a message type they don't know.
 
 **Reconnect**
 - Exponential backoff: starts at 1 second, doubles up to 1 minute; randomized between half and full delay each time. After a link connected for a full minute disconnects, it starts over.
+- When a normal wait exceeds 3 seconds, Link races eligible direct addresses and outbound proxy targets with an unauthenticated `GET /api/v1/health`, using the same TLS verification as the link. If none returns a 2xx response with `"ok": true` at the start, Link probes every 2 seconds and retries as soon as one does. SSH logins happen only on full connection attempts. SSH-only configurations, including **Always use SSH**, skip these probes, as do credential, replacement and rate-limit waits.
 - Special cases:
 
   | Case | Wait |
@@ -774,7 +776,9 @@ Plain terminal output uses `i18n.Terminal()`: `PERSONA_LANG`, then `LC_ALL`, `LC
   `connected` (hub has a stream open; `address` is the hub's address and `since` the stream start time), `waiting` (unable to listen).
 - Passive mode also includes `listen` (listen address), `addrs` (local addresses usable by the hub, `host:port`, best first), `last_seen` and `from` (time and address of the hub's last visit),
   `code_expires` (expiration of the `pair --listen` code).
-- `node`: `online` / `offline` / `unknown`, reason in `node_error`.
+- `node`: `online` / `offline` / `unknown`, reason in `node_error`. Each link connection starts at `unknown` ("the hub is connecting")
+  until the hub's `node` message; a connection to the node resumed over the new link ([machines.md](../server/machines.md)
+  "A dropped connection that resumes") is `online` once resumed.
 - `pending` (planned, #4655): `true` means the hub is waiting for the user to confirm this computer in the App; absent means confirmed.
 - `waiting` / `refused` include `error` (candidate failures separated by "；", a full-width semicolon) and `retry` (next attempt time); when an SSH tunnel attempt failed, `ssh_error` carries `{code, server, target}` so localized surfaces render the sentence in `en`, `zh-Hans` or `ja`.
 - `ssh`: the active-mode SSH tunnel from `link.json` (`{server, target, always?}`), when configured; while connected through the tunnel, `kind` is `ssh` and `address` is `<server>`.
@@ -975,13 +979,14 @@ including active control candidates, SSH tunnel handshakes, direct recovery prob
 streams. `attempt` is a process-local sequence, not a persistent identifier. `role` distinguishes
 `control` from `stream`; `candidate` is the one-based position in the ranked, deduplicated
 control candidates, the tunnel bind attempt, or 1 for the selected stream route. `kind` is
-`lan`, `ipv6`, `ipv4`, `name`, `ssh` or `other`; unrecognized input is never echoed.
+`lan`, `ipv6`, `ipv4`, `name`, `ssh`, `proxy` or `other`; unrecognized input is never echoed.
 
 `phase` is the last observed boundary (`dial`, `dns`, `tcp`, `tls`, `upgrade`). `outcome` is
 `success`, `error`, `timeout`, `canceled` or `http_refused`. The phase distinguishes a TLS
 stall from an Upgrade stall; an RPC pong fix does not explain either automatically.
 `dns_us`, `tcp_us`, `tls_us`, `upgrade_us` and `total_us` are monotonic elapsed microseconds.
 Zero means no observed work, reuse, or less than a microsecond; a literal IP needs no DNS.
+On a proxy route, TCP time measures the connection to the proxy. TLS time measures the Hub handshake inside CONNECT.
 For SSH, TCP time measures connecting to the local forwarding listener, not a public TCP
 connection or the SSH authentication duration. TCP time sums observed address attempts,
 including overlapping address-family attempts,

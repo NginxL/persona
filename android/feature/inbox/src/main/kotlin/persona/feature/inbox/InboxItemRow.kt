@@ -41,6 +41,8 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
         addAll(muteAndRuleActions(res, record, onMute, onRule))
     })
     val selecting = selection?.selecting == true
+    val rowStatus = when { done -> null; item.isWorking || record.agent?.state in setOf("running", "queued") -> Status.Working
+        item.section == InboxTier.Action.wire -> Status.NeedsYou; else -> null }
     JSwipeActions(end = inboxRowSwipe(doneLabel, done, busy, selecting, onDone)) {
         MessageItem(sender = if (record.isAssistantRow) item.sender.orEmpty().ifBlank { record.sourceLabel }.ifBlank { item.title }
                 else item.sender.orEmpty().ifBlank { item.title }, title = if (groupEvent) record.groupName ?: stringResource(R.string.inbox_kind_group)
@@ -51,7 +53,8 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
             unread = if (record.count > 1) record.count else 0,
             selected = isInboxItemSelected(LocalDetailKey.current, item.id, record.feedId),
             position = position,
-            avatar = rememberLarkAvatar(record.avatar.takeIf { record.doc == null && !record.isAssistantRow }, onlineSince),
+            avatar = rememberLarkAvatar(record.avatar.takeIf { record.doc == null && !record.isAssistantRow }, onlineSince,
+                MessageItemTokens.avatarSize(rowStatus == Status.NeedsYou)),
             avatarIcon = when {
                 record.isAssistantRow -> PersonaIcons.persona
                 record.doc != null -> docIcon(record.doc.type)
@@ -71,8 +74,7 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
             preview = summary,
             meta = MessageItemMeta(metaText, nowText, inboxNowStatus(record.event.now), problem = record.event.now == "failed",
                 key = record.event.now),
-            status = when { done -> null; item.isWorking || record.agent?.state in setOf("running", "queued") -> Status.Working
-                item.section == InboxTier.Action.wire -> Status.NeedsYou; else -> null },
+            status = rowStatus,
             // The kind tag sits beside the title and a count above one is a badge; no separate source/count chip row.
             tags = emptyList(),
             // An extension may draw the page of its connector's items (inbox_item); the rest open their own page.

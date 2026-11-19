@@ -26,6 +26,7 @@ func pair(t *testing.T) (hub, node *Mux, hubPeer *rpc.Peer) {
 type nodeHooks struct {
 	beforeOpen, dialed func()
 	onEvent            func(event string, params json.RawMessage)
+	halfClose          bool
 }
 
 func pairWith(t *testing.T, hooks nodeHooks) (hub, node *Mux, hubPeer *rpc.Peer) {
@@ -60,14 +61,25 @@ func pairWith(t *testing.T, hooks nodeHooks) (hub, node *Mux, hubPeer *rpc.Peer)
 			c.Close()
 			return nil, err
 		}
-		node.Start(p.ID, c)
+		if hooks.halfClose {
+			node.StartHalfClose(p.ID, c.(*net.TCPConn), true)
+		} else {
+			node.Start(p.ID, c)
+		}
 		return map[string]any{}, nil
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); _ = hp.Serve(ctx, b2aR) }()
 	go func() { defer wg.Done(); _ = np.Serve(ctx, a2bR) }()
-	t.Cleanup(func() { cancel(); a2bW.Close(); b2aW.Close(); wg.Wait() })
+	t.Cleanup(func() {
+		cancel()
+		a2bW.Close()
+		b2aW.Close()
+		wg.Wait()
+		hub.CloseAll()
+		node.CloseAll()
+	})
 	return hub, node, hp
 }
 

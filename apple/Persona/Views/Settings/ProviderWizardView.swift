@@ -125,8 +125,8 @@ struct ProviderWizard: View {
         @Bindable var wizard = wizard
         let presetStep = step == .key
         return ProviderComputersPage(scope: $wizard.scope, old: presetStep ? nil : wizard.existing,
-                                     kind: presetStep ? wizard.preset?.kind ?? "launcher" : wizard.existing?.kind ?? "launcher",
-                                     agent: presetStep ? nil : wizard.existing?.agent, assign: presetStep && wizard.preset?.runsClaude != false && wizard.assign)
+                                     kind: presetStep ? wizard.preset?.kind ?? "launcher" : wizard.providerKind,
+                                     agent: presetStep ? nil : wizard.providerAgent, assign: presetStep && wizard.preset?.runsClaude != false && wizard.assign)
     }
 
     private var title: String {
@@ -807,8 +807,8 @@ struct ProviderWizard: View {
             }
             // Where it runs and when its key travels (#2333), the same kind of row; only on a hub that takes scopes.
             if wizard.scopeShown {
-                ProviderComputersRow(scope: $wizard.scope, old: wizard.existing, kind: wizard.existing?.kind ?? "launcher",
-                                     agent: wizard.existing?.agent)
+                ProviderComputersRow(scope: $wizard.scope, old: wizard.existing, kind: wizard.providerKind,
+                                     agent: wizard.providerAgent)
             }
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 TextField(wizard.hasStoredHeaders ? String(localized: "Headers set (hidden; leave empty to keep)") : String(localized: "Headers, one Name: value per line"),

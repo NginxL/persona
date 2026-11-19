@@ -152,6 +152,9 @@ func (s *Service) postInteractionCard(ctx context.Context, ix proto.Interaction)
 		fallback = "📋 " + clip(firstLine(ix.Plan), 100)
 	case proto.IxScreen:
 		fallback = "🖥 " + i18n.T(s.botLang(ctx), "assistant-feishu_cards.screen_summary")
+		if terminalQuestion(ix) {
+			fallback = "🖥 " + s.ixWhere(ctx, ix) + " · " + terminalQuestionText(ix)
+		}
 	}
 	card := s.interactionCard(ctx, ix)
 	if s.interactionEnded(ix.ID) {
@@ -305,6 +308,8 @@ func (s *Service) feishuInteractionEnded(ix proto.Interaction, how string, inCha
 	}
 	if ix.Kind == "" { // the catch-up knows only what was kept of it
 		ix = c.Ix
+	} else if ix.TaskTitle == "" {
+		ix.TaskTitle = c.Ix.TaskTitle
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -478,7 +483,8 @@ func resolutionText(l i18n.Lang, ix proto.Interaction, r proto.Resolution) strin
 // interactionCard is the card asking ix, with the app's choices.
 func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *feishubot.Card {
 	l := s.botLang(ctx)
-	where := feishubot.EscapeMarkdown(s.ixWhere(ctx, ix))
+	place := s.ixWhere(ctx, ix)
+	where := feishubot.EscapeMarkdown(place)
 	val := func(extra map[string]any) map[string]any {
 		v := map[string]any{"a": "ix", "id": ix.ID}
 		for k, x := range extra {
@@ -489,7 +495,7 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 	open := s.openButton(ctx, ix.MachineID, ix.SessionID)
 	switch ix.Kind {
 	case proto.IxQuestion:
-		c := feishubot.NewCard("❓ "+i18n.T(l, "assistant-feishu_cards.question_title", i18n.Args{"where": s.ixWhere(ctx, ix)}), feishubot.Orange, i18n.T(l, "assistant-feishu_cards.question_summary", i18n.Args{"question": firstQuestion(ix)}))
+		c := feishubot.NewCard("❓ "+i18n.T(l, "assistant-feishu_cards.question_title", i18n.Args{"where": place}), feishubot.Orange, i18n.T(l, "assistant-feishu_cards.question_summary", i18n.Args{"question": firstQuestion(ix)}))
 		if len(ix.Questions) == 1 && !ix.Questions[0].MultiSelect && len(ix.Questions[0].Options) <= 4 {
 			q := ix.Questions[0]
 			c.Markdown(questionText(l, q))
@@ -532,7 +538,7 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 		}
 		return safeCard(l, c.Buttons(open, feishubot.Btn(i18n.T(l, "assistant-feishu_cards.dismiss"), feishubot.Default, val(map[string]any{"dismiss": "1"}))), open)
 	case proto.IxPlan:
-		c := feishubot.NewCard("📋 "+i18n.T(l, "assistant-feishu_cards.plan_title", i18n.Args{"where": s.ixWhere(ctx, ix)}), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.plan_summary"))
+		c := feishubot.NewCard("📋 "+i18n.T(l, "assistant-feishu_cards.plan_title", i18n.Args{"where": place}), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.plan_summary"))
 		c.Markdown(feishubot.CardMarkdown(clipPlan(ix.Plan, i18n.T(l, "assistant-feishu_cards.plan_clipped"))))
 		c.Buttons(
 			feishubot.Btn(i18n.T(l, "assistant-feishu_cards.approve_run"), feishubot.Primary, val(map[string]any{"approve": "1", "mode": "bypassPermissions"})),
@@ -542,7 +548,7 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 			feishubot.Submit(i18n.T(l, "assistant-feishu_cards.send_back"), feishubot.Danger, "plan_reject", val(map[string]any{"approve": "0"})))
 		return safeCard(l, c.Buttons(open), open)
 	case proto.IxPermission:
-		c := feishubot.NewCard("🔐 "+i18n.T(l, "assistant-feishu_cards.permission_title", i18n.Args{"where": s.ixWhere(ctx, ix)}), feishubot.Orange, i18n.T(l, "assistant-feishu_cards.permission_summary", i18n.Args{"tool": ixToolName(ix)}))
+		c := feishubot.NewCard("🔐 "+i18n.T(l, "assistant-feishu_cards.permission_title", i18n.Args{"where": place}), feishubot.Orange, i18n.T(l, "assistant-feishu_cards.permission_summary", i18n.Args{"tool": ixToolName(ix)}))
 		var b strings.Builder
 		fmt.Fprintf(&b, "**%s**", feishubot.EscapeMarkdown(ixToolName(ix)))
 		if ix.Reason != "" {
@@ -587,7 +593,11 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 		}
 		return safeCard(l, c.Buttons(bs...).Buttons(open), open)
 	case proto.IxScreen:
-		c := feishubot.NewCard("🖥 "+i18n.T(l, "assistant-feishu_cards.screen_title", i18n.Args{"where": s.ixWhere(ctx, ix)}), feishubot.Orange, i18n.T(l, "assistant-feishu_cards.screen_summary"))
+		summary := i18n.T(l, "assistant-feishu_cards.screen_summary")
+		if terminalQuestion(ix) {
+			summary = ix.Dialog.Question + " · " + place
+		}
+		c := feishubot.NewCard("🖥 "+i18n.T(l, "assistant-feishu_cards.screen_title", i18n.Args{"where": place}), feishubot.Orange, summary)
 		if d := ix.Dialog; d != nil {
 			q := d.Question
 			if d.Detail != "" {
@@ -800,14 +810,29 @@ func (s *Service) answeredCard(ctx context.Context, ix proto.Interaction, how st
 }
 
 func (s *Service) ixWhere(ctx context.Context, ix proto.Interaction) string {
-	where := transcript.Title(ix.SessionTitle)
-	if where == "" {
-		where = "Persona"
+	place := s.feishuAgentPlace(ctx, ix)
+	machine := s.canonical(ix.MachineID)
+	t, ok := s.taskOf(ctx, machine, ix.SessionID)
+	// The card may be closing after the task ended or the session moved on.
+	// Keep the task it was posted for when that name is available.
+	if ix.TaskTitle != "" && (!ok || t.Title != ix.TaskTitle) {
+		t, ok = s.closedTaskOf(ctx, machine, ix.SessionID)
+		if !ok || t.Title != ix.TaskTitle {
+			return clip(oneLine(ix.TaskTitle), 70) + " · " + place
+		}
 	}
-	if d, ok := s.device(ctx, ix.MachineID); ok && where != "Persona" {
-		where += " · " + d.Name
+	if !ok {
+		return place
 	}
-	return where
+	task := clip(oneLine(t.Title), 70)
+	if task == "" {
+		return place
+	}
+	direction := s.feishuDirection(ctx, t, s.feishuDirections(ctx))
+	if transcript.Title(ix.SessionTitle) == t.Title {
+		return direction + place
+	}
+	return direction + task + " · " + place
 }
 
 // openButton opens the conversation in the web app the hub serves; nil (Card.Buttons leaves it out) when the hub has

@@ -181,6 +181,9 @@ func (h *Hub) forwardArchiveList(w http.ResponseWriter, r *http.Request, owner s
 	out := make([]proto.Session, 0, len(rows))
 	deletes := map[string]map[string]time.Time{}
 	for _, row := range rows {
+		if restrictedAgentData(r) && healthSession(&row) {
+			continue
+		}
 		if h.machineOwner(row.MachineID) != owner {
 			continue
 		}

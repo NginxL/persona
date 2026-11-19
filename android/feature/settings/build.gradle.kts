@@ -52,6 +52,7 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("androidx.test.ext:junit:1.3.0")
     implementation(project(":core:contracts"))
+    implementation(project(":core:data"))
     implementation(project(":core:hub"))
     implementation(project(":core:domain"))
     implementation(project(":core:designsystem"))

@@ -81,6 +81,41 @@ class InteractionNotificationPostingTest {
         }
     }
 
+    @Test fun repostingAPreparedCardMovesItsTimeoutAndActionToTheCurrentDeadline() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val sessions = object : SessionsRepository {
+            override val machines = MutableStateFlow<List<Machine>>(emptyList())
+            override val sessions = MutableStateFlow<List<Session>>(emptyList())
+            override suspend fun refresh() = Unit
+        }
+        val preferences = object : NotificationPreferencesSource {
+            override val preferences = MutableStateFlow<DeviceNotificationPreferences?>(DeviceNotificationPreferences())
+            override suspend fun refreshPreferences() = preferences.value
+        }
+        val notifier = Notifier(app, sessions, preferences)
+        fun prepared(deadline: java.time.Instant) = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"prepared","machine_id":"machine","session_id":"session","kind":"permission",""" +
+                """"expires_at":"$deadline","can_clarify":true}""",
+        )
+        fun postAndRead(request: Interaction): Notification {
+            notifier.postInteraction(request)
+            return app.getSystemService(NotificationManager::class.java).activeNotifications
+                .single { it.tag == "interaction:${request.id}" }.notification
+        }
+        val original = prepared(java.time.Instant.now().plusSeconds(60))
+        val updated = prepared(java.time.Instant.now().plusSeconds(7_200))
+        val first = postAndRead(original)
+        val current = postAndRead(updated)
+        assertTrue("the existing notification lives for the server's extended window",
+            current.getTimeoutAfter() > first.getTimeoutAfter() + 1_800_000)
+        val actionIntents = current.actions.orEmpty().map { shadowOf(it.actionIntent).savedIntent }
+        assertEquals(listOf("deny", "allow"), actionIntents.map { it.getStringExtra(ActionReceiver.EXTRA_ACTION) })
+        val allow = actionIntents.single { it.getStringExtra(ActionReceiver.EXTRA_ACTION) == "allow" }
+        assertEquals(updated.expiresAt, allow.getStringExtra(ActionReceiver.EXTRA_EXPIRES_AT))
+        assertEquals(setOf(updated.id), notifier.showingRequests())
+    }
+
     @Test fun catchUpUsesTheOwningGroupPreferencesAndRecordsActualDelivery() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)

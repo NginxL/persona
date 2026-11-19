@@ -12,6 +12,8 @@ nonisolated struct LauncherModelChoice: Equatable {
     var configured = ""
     /// How Default's line names [configured]: Model Settings (New Agent), Inherited (Model Settings itself, where empty inherits).
     var configuredLabel = String(localized: "Model Settings [Launcher Model Picker 8cbcf7]")
+    /// An Agent preset explicitly chose the list's default model: send its id instead of following Model Settings.
+    var presetDefault = false
 
     /// A pick can reach the agent: the launcher does not pass its own --model, and there is a list to pick from or an ID
     /// can be typed (Claude Code, Codex: their list may be empty).
@@ -30,9 +32,10 @@ nonisolated struct LauncherModelChoice: Equatable {
     var selected: AgentModel? { picked.isEmpty ? nil : list.models.first { $0.id == picked } }
 
     /// The `model` a start sends: nil for the default; a typed ID the list lacks goes as it is when the agent takes one.
+    /// `presetDefault` keeps a preset's explicit choice of the default entry explicit too.
     var sent: String? {
         guard list.locked == nil, !picked.isEmpty else { return nil }
-        if let m = selected { return m.isDefault ? nil : picked }
+        if let m = selected { return m.isDefault && !presetDefault ? nil : picked }
         return takesTyped && ModelID.isValid(picked) ? picked : nil
     }
 
@@ -238,10 +241,10 @@ struct LauncherModelPicker: View {
         } label: {
             HStack(spacing: Theme.Space.m) {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    Text(title).font(mono ? Theme.Font.heading.monospaced() : Theme.Font.heading).foregroundStyle(.primary)
+                    Text(title).font(mono ? Theme.Font.heading.monospaced() : Theme.Font.heading).foregroundStyle(Color.primary)
                         .lineLimit(1).truncationMode(mono ? .middle : .tail)
                     if let second {
-                        Text(second).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary)
+                        Text(second).font(Theme.Font.label.monospaced()).foregroundStyle(Color.secondary)
                             .lineLimit(1).truncationMode(.middle)
                     }
                     if let description, !description.isEmpty {
@@ -343,7 +346,7 @@ struct TypedModelSheet: View {
                                 dismiss()
                             } label: {
                                 HStack(spacing: Theme.Space.m) {
-                                    Text(m.displayName).font(Theme.Font.body.monospaced()).foregroundStyle(.primary).lineLimit(1).truncationMode(.middle)
+                                    Text(m.displayName).font(Theme.Font.body.monospaced()).foregroundStyle(Color.primary).lineLimit(1).truncationMode(.middle)
                                     Spacer(minLength: Theme.Space.s)
                                     if m.id == id { ThemedIcon(Theme.Icon.done).foregroundStyle(Theme.accent).fontWeight(.semibold) }
                                 }

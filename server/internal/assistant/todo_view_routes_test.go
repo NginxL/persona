@@ -24,7 +24,7 @@ func TestTodoViewBusHelloCapabilities(t *testing.T) {
 	b := NewBusHub(BusOptions{Hub: "http://127.0.0.1:1", Token: "t"})
 	p, _ := b.client.HelloParams().(map[string]any)
 	caps, _ := p["capabilities"].([]string)
-	for _, c := range []string{assistantwire.CapabilityTodoView, assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoTimeline} {
+	for _, c := range []string{assistantwire.CapabilityTodoView, assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoTimeline, "todo_images"} {
 		if !slices.Contains(caps, c) {
 			t.Errorf("the manager does not name %s: %v", c, caps)
 		}

@@ -36,10 +36,13 @@ func newUUID() string {
 // agentType is the agent the user picked for the launcher (claude, codex, traex, omp, pi, cursor, agy); empty: what
 // the launcher runs.
 func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspaceID, mode, effort, tabName, newID, agentType string, options ...modelExecution) (_ *proto.Session, startErr error) {
+	execution := executionOption(options)
+	if err := checkStartSpeedValue(execution.Speed, resume); err != nil {
+		return nil, err
+	}
 	if proto.IsExternalLauncher(launcher) {
 		return nil, externalRefusal(ctx, "adapter_purpose_unsupported")
 	}
-	execution := executionOption(options)
 	// A start named to a failed start's kept tab holds it from here, sync and async alike: newTab uses it, else it is
 	// kept again when the start returns (startremedy.go).
 	claim, claimErr := n.claimKeptTab(execution.InPane)
@@ -55,6 +58,19 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	kind := n.startAgentType(launcher, agentType)
 	if err := execution.check(kind); err != nil {
 		return nil, err
+	}
+	var argv []string
+	codex := false
+	if proto.FasterSpeed(execution.Speed) {
+		argv, codex = n.codexLauncher(ctx, launcher)
+		if err := execution.applyStartSpeed(launcher, kind, codex); err != nil {
+			return nil, err
+		}
+		if execution.ServiceTier != "" {
+			if err := n.checkCodexStartSpeed(ctx, launcher, execution.Model, execution.ServiceTier); err != nil {
+				return nil, err
+			}
+		}
 	}
 	runs, refused := terminalLauncher(launcher, resume) // the desktop app's launcher runs in no terminal (claudedesktop_new.go)
 	if refused != nil {
@@ -129,7 +145,9 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 			return nil, refusal("not_running", "接着这个 omp 会话后没等到它的会话行，这次没有发送。", nil)
 		}
 	}
-	argv, codex := n.codexLauncher(ctx, launcher)
+	if !proto.FasterSpeed(execution.Speed) {
+		argv, codex = n.codexLauncher(ctx, launcher)
+	}
 	if codex && execution.SecretTicket != "" { // Codex would start without the values (secretenv.go)
 		return nil, refusal(secretEnvAgentCode, secretEnvAgentText, nil)
 	}
@@ -209,9 +227,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if resume != "" {
 			return nil, refusal("work_agent_resume", "这个会话不能用启动器接着：pi 在它原来的标签里继续，cursor 和 agy 请在电脑上恢复。这次没有启动。", nil)
 		}
-		// A permission mode or effort chosen for Claude does not apply: these agents keep their own, and the
-		// start still goes through, so a model configuration's effort does not refuse every one of them.
-		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, prompt, ws, tabName)
+		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, effort, prompt, ws, tabName)
 	}
 	if kind != "claude" { // start_agent.go
 		if mode != "" || effort != "" {
@@ -229,6 +245,18 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if id == "" {
 		id = newUUID()
 	}
+	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
+	settings, hooks := n.claudeStartSettings(ctx, launcher, "claude", cwd)
+	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
+	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
+		Plugins: n.claudeLoadsPlugins(ctx)}
+	lineSpec := spec
+	if execution.FastMode {
+		lineSpec.Settings, err = n.claudeFastModeSettings(ctx, launcher, settings, cwd)
+		if err != nil {
+			return nil, speedRefusal("agent_speed_unsupported", "Claude Code fast mode settings could not be prepared without replacing the launcher's settings; nothing started")
+		}
+	}
 	created, err := n.newTab(ctx, launch, cwd, ws, tabName, id) // retire.go
 	if err != nil {
 		return nil, err
@@ -238,21 +266,21 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		_ = renameSlot(ctx, launch, created.SlotID, name)
 	}
 
+	// A trailing refused turn would be merged into the first new prompt of a resume, so it is cut first: the file's
+	// last turn is then clean again. A session whose only turn was refused loses its file and starts under its id.
+	if resume != "" {
+		n.healClaudeRefusalTranscript(id)
+	}
 	// A session whose first start failed (claude never came up) has no transcript to resume: start it under its id.
 	args := "--session-id " + id
 	if resume != "" && n.transcriptPath(id) != "" {
 		args = "--resume " + id
 	}
 	planThen := planThenOf(mode, execution.PlanThen)
-	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
-	settings, hooks := n.claudeStartSettings(ctx, launcher, "claude", cwd)
-	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
-	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
-		Plugins: n.claudeLoadsPlugins(ctx)}
 	// herdr told it is Claude (hostherdr.go): a launcher that wraps another binary is otherwise not seen as one. The
 	// node's directory in front, the assistant's environment left out (agentenv.go).
 	shells := n.startPaneShells(ctx, launch, created)
-	line := n.claudeCommandLine(spec, args+modeFlags(mode, effort)+planThenFlags(mode, planThen), shellQuote)
+	line := n.claudeCommandLine(lineSpec, args+modeFlags(mode, effort)+planThenFlags(mode, planThen), shellQuote)
 	if execution.SecretTicket != "" { // through personad launch --ticket; the spec herdr resumes with keeps none (secretenv.go)
 		line = n.withSecretTicket(line, launcher, execution.SecretTicket, shellQuote)
 	}

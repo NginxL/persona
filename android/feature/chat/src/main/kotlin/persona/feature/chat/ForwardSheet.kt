@@ -55,9 +55,9 @@ internal const val FORWARD_SHEET_TAG = "forward-sheet"
 internal fun ForwardSheet(
     draft: ForwardDraft,
     forwarding: ChatForwarding,
-    complete: suspend () -> ChatLinkContext,
+    complete: suspend () -> ForwardCompletion,
     onDismiss: () -> Unit,
-    onPicked: (ForwardTarget, ChatLinkContext) -> Unit,
+    onPicked: (ForwardTarget, ForwardCompletion) -> Unit,
 ) {
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -90,7 +90,7 @@ internal fun ForwardSheet(
         busy = target
         error = null
         scope.launch {
-            val ref = try { complete() } catch (cancelled: CancellationException) { throw cancelled }
+            val completed = try { complete() } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) {
                 busy = null
                 error = resources.getString(R.string.chat_forward_failed, operationFeedback(e).text.resolve(resources))
@@ -100,7 +100,7 @@ internal fun ForwardSheet(
                 try { memory?.remember(stored) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
             }
             onDismiss()
-            onPicked(target, ref)
+            onPicked(target, completed)
         }
     }
 

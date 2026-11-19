@@ -42,6 +42,10 @@ var (
 // for a new thread with the file's message appears in ~/.codex (after delay).
 func codexStartHerdr(t *testing.T, delay time.Duration) (*Node, *fakeHerdr, string, *[]string) {
 	t.Helper()
+	// This fixture models argv delivery. Windows paste delivery has its own fixture.
+	oldPaste := codexStartPaste
+	codexStartPaste = false
+	t.Cleanup(func() { codexStartPaste = oldPaste })
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
 	f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})

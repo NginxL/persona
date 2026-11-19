@@ -54,18 +54,53 @@ func TestTheWireMatchesTheSharedCases(t *testing.T) {
 	}
 }
 
-// decodeForTest is a message as the fixture spells it (numbers as float64, as encoding/json reads them).
+// Close confirmation has its own wire type so a final-data ack crossing with close cannot be mistaken for proof that
+// the phone processed that close. Its body follows the existing channel/offset convention. Older nodes skip type 14 as
+// unknown; PersonaScreenKit's ScreenLinkWireTests checks these same bytes.
+func TestCloseConfirmationWire(t *testing.T) {
+	const (
+		closeAckForTest = byte(14)
+		final           = uint64(0x0102030405060708)
+	)
+	want, err := hex.DecodeString("0000000a0e020102030405060708")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := frame(closeAckForTest, chanOffset(FirstVideo, final))
+	if !bytes.Equal(got, want) {
+		t.Fatalf("close confirmation %x, want %x", got, want)
+	}
+	typ, body, err := newReader(bytes.NewReader(want)).next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, off, rest, err := readChanOffset(body)
+	if typ != closeAckForTest || id != FirstVideo || off != final || len(rest) != 0 || err != nil {
+		t.Fatalf("confirmation type %d channel %d offset %d rest %x, err %v", typ, id, off, rest, err)
+	}
+	decoded := decodeForTest(t, typ, body)
+	expected := map[string]any{"type": "close_ack", "channel": float64(FirstVideo), "offset": float64(final)}
+	if !reflect.DeepEqual(decoded, expected) {
+		t.Fatalf("decoded close confirmation %v, want %v", decoded, expected)
+	}
+	closed := frame(TypeClose, chanOffset(FirstVideo, final))
+	if !bytes.Equal(closed[5:], got[5:]) {
+		t.Fatalf("close body %x and confirmation body %x differ", closed[5:], got[5:])
+	}
+}
+
 func decodeForTest(t *testing.T, typ byte, body []byte) map[string]any {
 	t.Helper()
 	named := map[byte]string{TypeData: "data", TypeAck: "ack", TypeClose: "close", TypeReset: "reset", TypeUse: "use",
-		TypeResumed: "resumed", TypePing: "ping", TypePong: "pong", TypeAttached: "attached", TypePaths: "paths", TypeAttach: "attach"}
+		TypeResumed: "resumed", TypePing: "ping", TypePong: "pong", TypeAttached: "attached", TypePaths: "paths", TypeAttach: "attach",
+		closeAckTypeForTest: "close_ack"}
 	name, ok := named[typ]
 	if !ok {
 		return map[string]any{"type": "unknown", "code": float64(typ)}
 	}
 	out := map[string]any{"type": name}
 	switch typ {
-	case TypeData, TypeAck, TypeClose, TypeReset:
+	case TypeData, TypeAck, TypeClose, TypeReset, closeAckTypeForTest:
 		ch, off, rest, err := readChanOffset(body)
 		if err != nil {
 			t.Fatal(err)
@@ -120,6 +155,8 @@ func encodeForTest(t *testing.T, m map[string]any) []byte {
 		return frame(TypeData, chanOffset(byte(num("channel")), num("offset")), b)
 	case "ack":
 		return frame(TypeAck, chanOffset(byte(num("channel")), num("offset")))
+	case "close_ack":
+		return frame(closeAckTypeForTest, chanOffset(byte(num("channel")), num("offset")))
 	case "close":
 		return frame(TypeClose, chanOffset(byte(num("channel")), num("offset")))
 	case "reset":

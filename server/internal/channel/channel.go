@@ -280,8 +280,8 @@ func (it Item) Validate() error {
 		return fmt.Errorf("channel id %q is the hub's own", it.ID)
 	case strings.TrimSpace(it.Name) == "" || utf8.RuneCountInString(it.Name) > 40:
 		return fmt.Errorf("channel %s: name, 1 to 40 characters", it.ID)
-	case it.Kind != KindIM:
-		return fmt.Errorf("channel %s: kind is im (a plugin contributes chat app bots)", it.ID)
+	case it.Kind != KindIM && it.Kind != KindMention:
+		return fmt.Errorf("channel %s: kind is im or mention", it.ID)
 	case it.Connector != "" && !idPattern.MatchString(it.Connector):
 		return fmt.Errorf("channel %s: connector %q is not a connector id", it.ID, it.Connector)
 	case it.Bind != "" && it.Bind != BindQR && it.Bind != BindCode && it.Bind != BindFields:
@@ -345,6 +345,10 @@ const CodeCannotSend = "cannot_send"
 type Message struct {
 	ID          string   `json:"id"`
 	Text        string   `json:"text,omitempty"`
+	Chat        string   `json:"chat,omitempty"`
+	Topic       string   `json:"topic,omitempty"`
+	Context     string   `json:"context,omitempty"`
+	Owner       *bool    `json:"owner,omitempty"`
 	Images      []Blob   `json:"images,omitempty"`
 	Files       []Blob   `json:"files,omitempty"`
 	Quote       string   `json:"quote,omitempty"`
@@ -369,8 +373,8 @@ const (
 
 // Empty says whether m has nothing to send on.
 func (m Message) Empty() bool {
-	return strings.TrimSpace(m.Text) == "" && len(m.Images) == 0 && len(m.Files) == 0 && m.Quote == "" && m.Forward == "" &&
-		len(m.Unsupported) == 0
+	return strings.TrimSpace(m.Text) == "" && strings.TrimSpace(m.Context) == "" && strings.TrimSpace(m.Chat) == "" && strings.TrimSpace(m.Topic) == "" &&
+		len(m.Images) == 0 && len(m.Files) == 0 && m.Quote == "" && m.Forward == "" && len(m.Unsupported) == 0
 }
 
 // Out kinds: what a message the hub sends is.

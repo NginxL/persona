@@ -17,6 +17,9 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 
 @Serializable @SerialName("persona.feature.knowledge.KnowledgeRoute") data object KnowledgeRoute : NavKey
+/** The knowledge list opened at one kind by a deep link; the user can still change the filter in the page. */
+@Serializable @SerialName("persona.feature.knowledge.KnowledgeKindRoute")
+data class KnowledgeKindRoute(val kind: KnowledgeKind) : NavKey
 /**
  * The knowledge map: topics and their points, or projects and their parts, as an outline (iOS `KBTopicsMap`, the web's Knowledge map).
  * Of [manager]'s knowledge base, the assistant current when it was opened (null from a page saved before it was kept: the one
@@ -57,6 +60,13 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
         // a model per assistant, so switching reads the other one's and nothing of the last one's stays.
         val assistant = persona.core.designsystem.currentAssistant().id
         val model = viewModel(key = "knowledge:$assistant") { KnowledgeViewModel(connection) }
+        KnowledgeScreen(model, navigator)
+    }
+    entry<KnowledgeKindRoute> { route ->
+        val assistant = persona.core.designsystem.currentAssistant().id
+        val model = viewModel(key = "knowledge:$assistant:${route.kind.wire}") {
+            KnowledgeViewModel(connection, initialKind = route.kind)
+        }
         KnowledgeScreen(model, navigator)
     }
     entry<KnowledgeMapRoute> { route ->

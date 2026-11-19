@@ -9,6 +9,7 @@
     <string name="chat_mode_change_restart_failed_why">Couldn\'t restart in “%1$s”: %2$s</string>
     <string name="chat_mode_change_restart_dropped">Called off, won\'t restart in “%1$s”</string>
     <string name="chat_mode_change_restart_dropped_why">Called off, won\'t restart in “%1$s”: %2$s</string>
+    <string name="chat_mode_change_why_cancelled">the session stays in its current mode</string>
     <string name="chat_mode_change_why_replaced">another switch took its place</string>
     <string name="chat_mode_change_why_process_exited">the process it was picked for has exited</string>
     <string name="chat_mode_change_why_process_replaced">the session runs in another process now</string>

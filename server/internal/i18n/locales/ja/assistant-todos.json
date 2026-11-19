@@ -11,5 +11,6 @@
   "someday_closed": "未完了のToDoだけを「いつか」に回せます",
   "someday_until": "これより先の日時を選んでください（9999年まで）",
   "not_found": "このToDoはもうありません",
-  "round_not_found": "ToDoの会話のこの部分はもうありません"
+  "round_not_found": "ToDoの会話のこの部分はもうありません",
+  "images_forbidden": "このデバイスではToDoの画像を読み込めません"
 }

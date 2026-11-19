@@ -72,7 +72,7 @@ func startTestManagerWith(t *testing.T, h *Hub, srv *httptest.Server, nodes map[
 // startTestManagerDialing is startTestManagerWith with dial asked for each machine as the manager makes it (nil: the
 // machine's own way, a link's).
 func startTestManagerDialing(t *testing.T, h *Hub, srv *httptest.Server, dial func(id string) func(context.Context) (net.Conn, error),
-	configFile string) *testManager {
+	configFile string, wrap ...func(assistant.Devices) assistant.Devices) *testManager {
 	t.Helper()
 	if h.busStore() == nil {
 		h.bus.idents = &memIdents{}
@@ -123,6 +123,9 @@ func startTestManagerDialing(t *testing.T, h *Hub, srv *httptest.Server, dial fu
 		DialNode:  dial})
 	a := dialAssistant(t, h, srv.URL, false, func(o *assistant.BusOptions) {
 		o.Devices, o.HTTPClient, o.Logf = d, srv.Client(), logf
+		for _, f := range wrap {
+			o.Devices = f(o.Devices)
+		}
 	})
 	tok = a.token
 	svc.Store(a.svc)

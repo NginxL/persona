@@ -147,6 +147,14 @@ func (p *pageCheck) checkV6(e *Component) error {
 			return err
 		}
 	case "header":
+		if len(e.Facts) > 8 {
+			return errors.New("a header has at most 8 facts")
+		}
+		for k := range e.Facts {
+			if err := checkFact(&e.Facts[k]); err != nil {
+				return fmt.Errorf("fact %d: %v", k, err)
+			}
+		}
 		if a := e.Avatar; a != nil {
 			if err := checkPictures(nil, a); err != nil {
 				return err
@@ -231,9 +239,28 @@ func checkPictures(t *Thumbnail, a *Avatar) error {
 	return nil
 }
 
-func checkHTTPS(raw, what string) error {
+// CheckHTTPS holds raw to an https url without credentials (no user or password): what every link and picture's url is.
+func CheckHTTPS(raw, what string) error {
 	if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 		return fmt.Errorf("%s needs an https url", what)
+	}
+	return nil
+}
+
+// checkHTTPS is CheckHTTPS under the name the picture checks use.
+func checkHTTPS(raw, what string) error { return CheckHTTPS(raw, what) }
+
+// checkFact holds a fact's label, value and icon: a label of at most 200 characters, a value of 1 to 2000, an icon among
+// NavIcons.
+func checkFact(f *Fact) error {
+	if utf8.RuneCountInString(f.Label) > 200 {
+		return errors.New("a fact's label has at most 200 characters")
+	}
+	if n := utf8.RuneCountInString(f.Value); n < 1 || n > 2000 {
+		return errors.New("a fact has a value of 1 to 2000 characters")
+	}
+	if f.Icon != "" && !slices.Contains(NavIcons, f.Icon) {
+		return fmt.Errorf("fact: unknown icon %q", f.Icon)
 	}
 	return nil
 }

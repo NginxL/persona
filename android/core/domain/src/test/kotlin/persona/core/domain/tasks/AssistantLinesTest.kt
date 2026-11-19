@@ -164,6 +164,8 @@ class AssistantLinesTest {
         for (kind in listOf("no_output", "stopped")) {
             val quiet = Session(machineId = "m", sessionId = "s", state = "unread", turnError = "随对话一起停下了", turnErrorKind = kind)
             assertEquals(Interruption(CoreText.plain("随对话一起停下了"), true, plain = true), Interruption.of(quiet))
+            val sealed = quiet.copy(turnError = "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account")
+            assertEquals(Interruption(CoreText.of(CoreText.Key.ApiConversationInvalid), false, invalid = true), Interruption.of(sealed))
         }
         fun receipt(body: String) = FeedItem("r", kind = "receipt", body = JsonCodec.parseToJsonElement(body))
         assertEquals("interrupted", (receiptState(receipt("""{"state":"interrupted","summary":"模型服务出错，中断了"}"""))).zhAny())

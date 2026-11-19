@@ -666,29 +666,37 @@ func (it *reportItem) stuck() bool {
 // link (#3218). items are sorted; past goalCardMaxItems a line counts the rest.
 func (s *Service) goalCard(ctx context.Context, items []*reportItem) (*feishubot.Card, string) {
 	l, web := s.botLang(ctx), s.webBase(ctx)
-	title := i18n.T(l, "assistant-reports.goal_stuck_title", i18n.Args{"n": len(items)})
-	c := feishubot.NewCard("🎯 "+title, feishubot.Red, title)
-	var titles []string
-	for i, it := range items {
-		if i == goalCardMaxItems {
-			c.HR()
-			c.Markdown(i18n.T(l, "assistant-reports.goal_more", i18n.Args{"n": len(items) - i}))
-			break
-		}
+	names := s.feishuDirections(ctx)
+	var titles, lines []string
+	for _, it := range items[:min(len(items), goalCardMaxItems)] {
 		t, _ := s.todoNow(it.todo)
+		direction := s.feishuDirection(ctx, t, names)
+		titles = append(titles, direction+clip(oneLine(t.Title), 40))
+		if len(items) == 1 {
+			direction = "" // the header already identifies this row
+		}
+		lines = append(lines, goalLines(l, web, t, it, direction))
+	}
+	status := i18n.T(l, "assistant-reports.goal_stuck_title", i18n.Args{"n": len(items)})
+	title := reportTitle(l, titles, status)
+	c := feishubot.NewCard("🎯 "+title, feishubot.Red, title)
+	for i, line := range lines {
 		if i > 0 {
 			c.HR()
 		}
-		titles = append(titles, clip(oneLine(t.Title), 40))
-		c.Markdown(goalLines(l, web, t, it))
+		c.Markdown(line)
 	}
-	return c, i18n.T(l, "assistant-reports.goal_summary", i18n.Args{"title": title,
+	if len(items) > len(lines) {
+		c.HR()
+		c.Markdown(i18n.T(l, "assistant-reports.goal_more", i18n.Args{"n": len(items) - len(lines)}))
+	}
+	return c, i18n.T(l, "assistant-reports.goal_summary", i18n.Args{"title": status,
 		"tasks": clip(strings.Join(titles, i18n.T(l, "assistant-tasks.list_sep")), reportFallbackMax)})
 }
 
 // goalLines are a stuck task's three lines: its goal, where it is now, and the evidence — the error in a line and a link
 // (the agent's conversation, else the task's page).
-func goalLines(l i18n.Lang, web string, t Todo, it *reportItem) string {
+func goalLines(l i18n.Lang, web string, t Todo, it *reportItem, direction string) string {
 	now := i18n.T(l, "assistant-reports.goal_now_failed")
 	if it.state == reportInterrupted {
 		now = i18n.T(l, "assistant-reports.goal_now_cut", i18n.Args{"n": it.cuts})
@@ -705,7 +713,7 @@ func goalLines(l i18n.Lang, web string, t Todo, it *reportItem) string {
 	if evidence == "" {
 		evidence = i18n.T(l, "assistant-reports.goal_no_evidence")
 	}
-	return i18n.T(l, "assistant-reports.goal_lines", i18n.Args{"goal": feishubot.EscapeMarkdown(clip(oneLine(t.Title), 80)),
+	return i18n.T(l, "assistant-reports.goal_lines", i18n.Args{"goal": feishubot.EscapeMarkdown(direction + clip(oneLine(t.Title), 80)),
 		"now": now, "evidence": evidence})
 }
 
@@ -773,7 +781,7 @@ func (s *Service) botCardOut(id string) bool {
 }
 
 type reportEntry struct {
-	t       Todo
+	title   string
 	md      string
 	buttons []feishubot.Button
 	bytes   int // marshaled JSON length of its Markdown block plus button row
@@ -781,14 +789,20 @@ type reportEntry struct {
 
 func (s *Service) reportCards(ctx context.Context, items []*reportItem) ([]*feishubot.Card, []string) {
 	l, web, stages := s.botLang(ctx), s.webBase(ctx), s.todoStages(ctx)
+	names := s.feishuDirections(ctx)
 	es, needs := make([]reportEntry, len(items)), 0
 	for i, it := range items {
 		if it.state == reportNeeds {
 			needs++
 		}
 		t, _ := s.todoNow(it.todo)
-		md, buttons := s.reportItemView(l, web, stages, t, it)
-		es[i] = reportEntry{t: t, md: md, buttons: buttons}
+		direction := s.feishuDirection(ctx, t, names)
+		title := direction + clip(oneLine(t.Title), 40)
+		if len(items) == 1 {
+			direction = ""
+		}
+		md, buttons := s.reportItemView(l, web, stages, t, it, direction)
+		es[i] = reportEntry{title: title, md: md, buttons: buttons}
 		es[i].bytes = feishuElBytes(func(c *feishubot.Card) {
 			c.Markdown(md)
 			if len(buttons) > 0 {
@@ -820,6 +834,17 @@ func feishuElBytes(add func(*feishubot.Card)) int {
 	return n
 }
 
+// Several tasks may share a report. Name the tasks on this card in delivery
+// order, within a bounded header; the complete entries follow in the body.
+const reportTitleRunes = 140
+
+func reportTitle(l i18n.Lang, titles []string, status string) string {
+	if len(titles) == 0 {
+		return status
+	}
+	return clip(strings.Join(titles, i18n.T(l, "assistant-tasks.list_sep")), reportTitleRunes) + " · " + status
+}
+
 // reportCardHeads measures the first card (longest title, both section labels charged) and the plain later cards.
 func reportCardHeads(l i18n.Lang, needs, total int) (head1, headN int) {
 	part := i18n.T(l, "assistant-reports.part", i18n.Args{"k": total, "n": total})
@@ -833,7 +858,10 @@ func reportCardHeads(l i18n.Lang, needs, total int) (head1, headN int) {
 	plain := i18n.T(l, "assistant-reports.title", i18n.Args{"n": total}) + part
 	cN := feishubot.NewCard("📋 "+plain, feishubot.Blue, plain)         // suffix measured with the longest part too
 	cN.Markdown("**" + i18n.T(l, "assistant-reports.progress") + "**") // a progress label may land past card 1
-	return len(c1.JSON()), len(cN.JSON())
+	// Each escaped rune in the new header and its 60-rune chat preview costs
+	// at most six JSON bytes (e.g. a control character).
+	const titleBudget = (reportTitleRunes + 3 + 60) * 6
+	return len(c1.JSON()) + titleBudget, len(cN.JSON()) + titleBudget
 }
 
 // reportCardSegments packs entries within the budgets; an item is never cut, one always fits on an empty card.
@@ -867,8 +895,12 @@ func reportCardOne(l i18n.Lang, seg []reportEntry, k, n, off, needs, total int) 
 	if n > 1 {
 		title += i18n.T(l, "assistant-reports.part", i18n.Args{"k": k + 1, "n": n})
 	}
-	c := feishubot.NewCard("📋 "+title, template, title)
 	titles := make([]string, len(seg))
+	for i, e := range seg {
+		titles[i] = e.title
+	}
+	header := reportTitle(l, titles, title)
+	c := feishubot.NewCard("📋 "+header, template, header)
 	for i, e := range seg {
 		if i > 0 {
 			c.HR()
@@ -878,7 +910,6 @@ func reportCardOne(l i18n.Lang, seg []reportEntry, k, n, off, needs, total int) 
 		} else if g == needs && needs > 0 {
 			c.Markdown("**" + i18n.T(l, "assistant-reports.progress") + "**")
 		}
-		titles[i] = clip(oneLine(e.t.Title), 40) // same clip as the body, so every visible item fits the fallback
 		c.Markdown(e.md)
 		if len(e.buttons) > 0 {
 			c.Buttons(e.buttons...)
@@ -888,9 +919,9 @@ func reportCardOne(l i18n.Lang, seg []reportEntry, k, n, off, needs, total int) 
 }
 
 // reportItemView renders one item's Markdown body and its link buttons (task page, PR, agent chat).
-func (s *Service) reportItemView(l i18n.Lang, web string, stages map[string]todoStage, t Todo, it *reportItem) (string, []feishubot.Button) {
+func (s *Service) reportItemView(l i18n.Lang, web string, stages map[string]todoStage, t Todo, it *reportItem, direction string) (string, []feishubot.Button) {
 	var md strings.Builder
-	md.WriteString(i18n.T(l, "assistant-reports.state_"+it.state) + " **" + feishubot.EscapeMarkdown(clip(oneLine(t.Title), 40)) + "**")
+	md.WriteString(i18n.T(l, "assistant-reports.state_"+it.state) + " **" + feishubot.EscapeMarkdown(direction+clip(oneLine(t.Title), 40)) + "**")
 	if it.machine != "" {
 		md.WriteString(" · " + feishubot.EscapeMarkdown(it.machine))
 	}

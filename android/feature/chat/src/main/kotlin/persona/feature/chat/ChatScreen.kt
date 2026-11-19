@@ -36,6 +36,7 @@ import persona.core.designsystem.*
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import persona.core.domain.ChatTaps
 import persona.core.domain.chatBubbles
+import persona.core.domain.shownUndelivered
 import persona.core.domain.lines.ChatLine
 import persona.core.domain.models.AgentModelPanel
 import persona.core.domain.lines.isLiveStatus
@@ -74,6 +75,9 @@ import kotlinx.coroutines.withContext
 // Finish the fade in the existing gap below the tab strip, without changing the chat's content padding.
 private val TabbedChatScrollEdgeStyle = ScrollEdgeStyle.Gradient.copy(overlap = Tokens.Space.Standard.s)
 
+/** A successful assistant action shown while the row is unchanged; any newer authoritative value replaces it. */
+private data class UndeliveredEdit(val before: UndeliveredMessage, val shown: UndeliveredMessage?)
+
 /** Guidance supplied by the Assistant host for its main conversation's composer. */
 val LocalMainChatGuidance = androidx.compose.runtime.compositionLocalOf<(@Composable () -> Unit)?> { null }
 
@@ -105,6 +109,7 @@ fun ChatScreen(
     historySession: Session? = null,
     /** The host already knows this is Health; do not briefly route its files as ordinary attachments while the row loads. */
     healthChat: Boolean = false,
+    composerUpload: ComposerAttachmentUpload? = null,
 ) {
     PersonaTheme(darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f) {
         LaunchedEffect(sessionKey, chrome.childSessionId) {
@@ -122,7 +127,7 @@ fun ChatScreen(
             ChatPage(sessionKey, repository, pageSender, interactions, sessions, onBack, onTerminal, onResumeInTerminal, chrome,
                 scopedReadingKey, anchorStore ?: local?.anchors,
                 renderStyle, textUpdates,
-                composerService, composerState ?: rememberChatComposerState(), onDraftChanged, onContextCleared, statusBindings,
+                composerService, composerUpload, composerState ?: rememberChatComposerState(), onDraftChanged, onContextCleared, statusBindings,
                 embedded, showTopBar, historyReadOnly, historyFooter, historySession, healthChat)
         }
     }
@@ -136,7 +141,7 @@ private fun ChatPage(
     onTerminal: ((SessionKey) -> Unit)?, onResumeInTerminal: ((SessionKey) -> Unit)?, chrome: ChatChromeBindings,
     readingKey: ChatReadingKey?, anchorStore: ChatAnchorStore?,
     renderStyle: ChatRenderStyle, textUpdates: Map<String, ChatTextUpdate>,
-    composerService: ChatComposerService?, composer: ChatComposerState,
+    composerService: ChatComposerService?, composerUpload: ComposerAttachmentUpload?, composer: ChatComposerState,
     onDraftChanged: ((ChatComposerDraft) -> Unit)?, onContextCleared: ((SessionKey) -> Unit)?,
     statusBindings: ChatStatusBindings,
     embedded: Boolean, showTopBar: Boolean,
@@ -161,7 +166,7 @@ private fun ChatPage(
     val writtenAt by pageSources.writtenAt
     val sendReceipts = pageSources.sendReceipts
     val pageSession = rememberChatPageSession(key, chrome, renderStyle, historyReadOnly, historyFooter, historySession, res,
-        sessionList, adoptedSessions)
+        sessionList, adoptedSessions, sendReceipts.filter { it.state == "kept" })
     val child = pageSession.child
     val workflowAgent = pageSession.workflowAgent
     val historyOnly = pageSession.historyOnly
@@ -232,29 +237,50 @@ private fun ChatPage(
     val assistantChat = pageRequests.assistantChat
     val taskAsk = pageRequests.taskAsk
     val stackCards = pageRequests.stackCards
-    val messages = pageRequests.messages
+    val heldActions = heldActionsFor(repository, key)
+    val undelivered = session?.undelivered.takeIf { renderStyle != ChatRenderStyle.Assistant && session?.assistant != true }
+    val held = remember(undelivered, snapshot.items, pageRequests.messages) {
+        heldChatMessages(undelivered, snapshot.items, pageRequests.messages)
+    }
+    val messages = held.outbox
+    val keptSession = session.takeIf { renderStyle == ChatRenderStyle.Assistant || session?.assistant == true }
+    var undeliveredEdits by remember(key) { mutableStateOf<Map<String, UndeliveredEdit>>(emptyMap()) }
+    val keptMessages = shownUndelivered(keptSession, snapshot.items, messages).mapNotNull { message ->
+        val edit = undeliveredEdits[message.id]
+        when {
+            edit == null -> message
+            edit.before == message -> edit.shown
+            else -> message
+        }
+    }
+    // A successful action is visible while the row is unchanged; any newer authoritative value replaces it.
+    LaunchedEffect(session?.undelivered) {
+        val current = session?.undelivered.orEmpty()
+        undeliveredEdits = undeliveredEdits.filter { (id, edit) ->
+            current.firstOrNull { it.id == id } == edit.before
+        }
+    }
     val composerDeliveries by pageRequests.composerDeliveries
     var linkContexts by rememberSaveable(stateSaver = ChatLinkContextsSaver) { mutableStateOf(emptyList<ChatLinkContext>()) }
     var conversationLauncher by rememberSaveable(key.path, chrome.assistantManagement) { mutableStateOf<String?>(null) }
     var conversationModel by rememberSaveable(key.path, chrome.assistantManagement) { mutableStateOf<String?>(null) }
     // Forward placements arrive over the composer; the message action and forward-sheet UI lives in ChatMessageActions.
     val placedForwards = ForwardPlacements.waiting(key)
-    LaunchedEffect(placedForwards, readOnly, canSend) {
-        if (placedForwards == null || readOnly || !canSend) return@LaunchedEffect
-        ForwardPlacements.take(key).forEach { linkContexts = withQuote(linkContexts, it) }
-        composer.focusRequest++
-    }
     // /model in the "/" list asked for the "Mode" sheet: a one-off, cleared once the sheet opened (not replayed when the bar returns).
     var openModes by remember { mutableStateOf(false) }
+    // `/permissions` in the "/" list asked for the permission mode menu (#6513): Glass's mode button, the others' "Mode" sheet
+    var openPermissions by remember { mutableStateOf(false) }
     // The host's failure notice whose "Retry" went out: hidden until the list catches up; back if that send failed.
     var hostRetried by rememberSaveable(key.path) { mutableStateOf<String?>(null) }
     val statusSheetState = remember { mutableStateOf(false) }
     var statusSheet by statusSheetState
     // The loop and background work's sheet, from the header's pill (Glass, #4339 C8).
-    var activitySheet by remember { mutableStateOf(false) }
+    val activitySheetState = remember { mutableStateOf(false) }
+    var activitySheet by activitySheetState
     // The shell presents transient notices once; persistent sync errors stay inline.
     val feedback = persona.core.designsystem.LocalAppFeedback.current
     val deliveryActions = remember(sender) { ChatDeliveryActions(sender) }
+    var undeliveredBusy by remember(key) { mutableStateOf(emptySet<String>()) }
     val clearingPaneState = rememberSaveable { mutableStateOf<String?>(null) }
     var clearingPane by clearingPaneState
     val timelineFollow = remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -270,6 +296,38 @@ private fun ChatPage(
     var sendingId by interactionController.sendingId
     fun removed(message: OutboxMessage) = interactionController.removed(message)
     fun deliveryAction(message: OutboxMessage, action: DeliveryAction) = interactionController.deliveryAction(message, action)
+    fun undeliveredAction(message: UndeliveredMessage, action: DeliveryAction) {
+        val service = chrome.actions ?: return
+        val target = session ?: return
+        if (message.id in undeliveredBusy) return
+        val before = undeliveredEdits[message.id]?.before ?: message
+        undeliveredBusy = undeliveredBusy + message.id
+        scope.launch {
+            try {
+                when (action) {
+                    DeliveryAction.Retry -> {
+                        service.retryUndelivered(target, message.id)
+                        undeliveredEdits = undeliveredEdits + (message.id to UndeliveredEdit(before, message.copy(
+                            state = "waiting", attempts = 0, nextAt = null, error = null)))
+                    }
+                    DeliveryAction.Delete -> {
+                        service.deleteUndelivered(target, message.id)
+                        undeliveredEdits = undeliveredEdits + (message.id to UndeliveredEdit(before, null))
+                    }
+                    else -> return@launch
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (feedback?.failure(e) != true)
+                    notice = res.getString(R.string.chat_undelivered_action_failed, operationFeedback(e).text.resolve(res))
+            } finally {
+                // Summary rows omit undelivered. Reload the complete row even when rev and receipts are unchanged.
+                try { pageSession.refreshDetail() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                try { sessions.refresh() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                undeliveredBusy = undeliveredBusy - message.id
+            }
+        }
+    }
     val currentDraftCallback by rememberUpdatedState(onDraftChanged)
     LaunchedEffect(composer) { snapshotFlow { composer.draft }.collect { currentDraftCallback?.invoke(it) } }
     LaunchedEffect(sessionList, clearingPane) {
@@ -294,9 +352,11 @@ private fun ChatPage(
     var taskOverlay by remember { mutableStateOf(false) }
     var stackOverlay by remember { mutableStateOf(false) }
     val overlay = taskOverlay || stackOverlay
-    var terminalHelp by remember { mutableStateOf(false) }
+    val terminalHelpState = remember { mutableStateOf(false) }
+    var terminalHelp by terminalHelpState
     var taskPageVisible by remember { mutableStateOf(false) }
-    var fullText by remember { mutableStateOf<String?>(null) }
+    val fullTextState = remember { mutableStateOf<String?>(null) }
+    var fullText by fullTextState
     var linkVisible by remember { mutableStateOf(false) }
     val pageHeaderFold = rememberChatPageHeaderFold(readingKey, anchorStore, renderStyle, showTopBar, scope)
     val chatList = pageHeaderFold.chatList
@@ -309,6 +369,7 @@ private fun ChatPage(
     val openWork = pageHeaderFold.openWork
     val pageAwait = rememberChatPageAwait(snapshot, sendReceipts, readOnly, session, messages)
     var timelineVersion by pageAwait.timelineVersion
+    val timelineVersionState = pageAwait.timelineVersion
     val timeline = pageAwait.timeline
     val awaiting = pageAwait.awaiting
     val awaitingStatus = pageAwait.awaitingStatus
@@ -345,7 +406,7 @@ private fun ChatPage(
     val taskCardProjection by (tasks?.taskCards ?: remember {
         kotlinx.coroutines.flow.MutableStateFlow(emptyMap<String, List<AssistantTaskCard>>())
     }).collectAsStateWithLifecycle()
-    var backgroundOpen by rememberSaveable(key.path) { mutableStateOf(false) }
+    // The chat jumps to a task's notice through the task host's navigation.
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
     val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
     val modeChangeStore = remember(key, repository, scope) { ModeChangeStore(scope) { repository.modeChanges(it) } }
@@ -401,13 +462,36 @@ private fun ChatPage(
     val openRecap = pageRecap.openRecap
     val pageReader = rememberChatPageReader(key, repository, snapshot, chatList, lines, liveItems)
     var planSheet by pageReader.planSheet
+    val planSheetState = pageReader.planSheet
     var sheetPlan by pageReader.sheetPlan
+    val sheetPlanState = pageReader.sheetPlan
     val currentItems = pageReader.currentItems
     val currentLinesByKey by pageReader.currentLinesByKey
     val list = pageReader.list
     var reportedSeen by pageReader.reportedSeen
     val readThrough = pageReader.readThrough
     val context = pageReader.context
+    LaunchedEffect(placedForwards, readOnly, canSend) {
+        if (placedForwards == null || readOnly || !canSend) return@LaunchedEffect
+        val fresh = mutableListOf<ForwardPlacement>()
+        val duplicates = mutableListOf<RestoredPhotos>()
+        ForwardPlacements.take(key).forEach { placement ->
+            val next = withQuote(linkContexts, placement.ref)
+            if (next.size == linkContexts.size) duplicates += placement.photos
+            else {
+                linkContexts = next
+                fresh += placement
+            }
+        }
+        duplicates.forEach { discardForwardedPhotos(context, it) }
+        val rejected = attachForwardedPhotos(context, composer, fresh.map(ForwardPlacement::photos))
+        val lost = fresh.sumOf { it.photos.lost } + rejected.size
+        if (lost > 0) {
+            val message = forwardedPhotoNotice(res, lost)
+            if (feedback?.notice(message) != true) notice = message
+        }
+        composer.focusRequest++
+    }
     val pairingLoader = pageReader.pairingLoader
     val loader = pageReader.loader
     val markdownCache = pageReader.markdownCache
@@ -572,7 +656,8 @@ private fun ChatPage(
         chrome.childSessionId?.let { subagentFolds.open(persona.core.domain.lines.ChildSessionCards.call(it)) }
     }
     val workflowCards = pageSubagents.workflowCards
-    var viewer by remember { mutableStateOf<ViewerRequest?>(null) }
+    val viewerState = remember { mutableStateOf<ViewerRequest?>(null) }
+    var viewer by viewerState
     val photos = remember(chrome.files, key, session?.cwd) { chrome.files?.let { AttachedPhotos(it, key.machineId, session?.cwd.orEmpty()) } }
     // A "Continue" already on its way counts as working: the card offers no second one.
     // A turn that failed on the refusal fallback's missing model (#2528): "Continue" would go to the same model.
@@ -593,7 +678,9 @@ private fun ChatPage(
     // Stays the same object while the conversation streams: rows read it, and a new one would redraw them all.
     val continueText = stringResource(R.string.chat_screen_continue_message)
     val imageDescription = stringResource(R.string.chat_content_image)
-    val rowActions = remember(key, repository, photos, retryId, exhausted, chrome.onOpenPath != null, pathPresence, chrome.files, session?.cwd) {
+    val replyImages = remember(key, repository) { (repository as? ChatLocalStorage)?.replyImages(key) }
+        ?.collectAsStateWithLifecycle(initialValue = null)?.value
+    val rowActions = remember(key, repository, replyImages, photos, retryId, exhausted, chrome.onOpenPath != null, pathPresence, chrome.files, session?.cwd) {
         ChatRowActions(key, fullText = { item -> repository.fullText(key, item.id) },
             openPath = if (chrome.onOpenPath != null) ({ path, line -> currentOpenPath?.invoke(path, line) }) else null,
             paths = pathPresence,
@@ -603,7 +690,7 @@ private fun ChatPage(
             thumbnails = chrome.files?.let { files ->
                 val cwd = session?.cwd.orEmpty().ifBlank { "~" }
                 ({ path -> "${key.machineId}\n$cwd\n$path" to { pixels: Int -> files.thumbnail(key.machineId, cwd, path, pixels) } })
-            }, viewerImage = { item, description -> chatViewerImage(key, item, repository, description) }, exhausted = exhausted)
+            }, viewerImage = { item, description -> chatViewerImage(key, item, repository, description) }, exhausted = exhausted, replyImages = replyImages)
     }
     val currentMarkdownPaths by rememberUpdatedState(rowActions.paths?.takeIf { rowActions.openPath != null })
     LaunchedEffect(liveItems) {
@@ -623,32 +710,11 @@ private fun ChatPage(
             earlier.forEach { (id, source) -> markdownCache.parse(id, source) }
         }
     }
-    // A task's detail or the dock's "All", open over the conversation; kept across the host being made again.
-    val taskSheet = remember(key) { mutableStateOf<TaskSheet?>(null) }
-    LaunchedEffect(tasks, taskKeys, taskTodos, taskSheet.value) {
-        val selected = (taskSheet.value as? TaskSheet.Task)?.todoId
-        val detailKeys = taskTodos.firstOrNull { it.id == selected }?.activeAgents.orEmpty().map { it.key }
-        tasks?.watchAgents(taskKeys.map(GroupKeys::rawKey).toSet() + detailKeys)
-    }
-    DisposableEffect(tasks, key) { onDispose { tasks?.watchAgents(emptySet()) } }
     // the cards still to answer: one just answered here no longer says what it asked
-    val taskCards = remember(allRequests, taps.resolved) { taps.shown(allRequests) }
-    val taskHost = tasks?.let { store ->
-        val namespace = GroupKeys.namespaceOf(key.machineId)
-        val localSessions = sessionList.filter { GroupKeys.namespaceOf(it.machineId) == namespace }
-            .map { it.copy(machineId = GroupKeys.raw(it.machineId)) }
-            .map { base -> base.copy(plan = listOfNotNull(base.plan, taskAgentSessions[base.key]?.plan)
-                .maxByOrNull { parseTime(it.at) ?: java.time.Instant.MIN }) }
-        AssistantTaskHost(store, key.sessionId, (localSessions + taskAgentSessions.values).distinctBy { it.key },
-            { id -> machines.firstOrNull { it.id == GroupKeys.machine(id, namespace) }?.displayName ?: id },
-            onOpen = { k -> chrome.onOpenSession?.invoke(GroupKeys.key(k, namespace)) }, onError = { notice = operationFeedback(it).text.resolve(res) },
-            say = { text -> scope.launch { runCatching { sender.send(key, text, UUID.randomUUID().toString()) } } },
-            sheet = taskSheet, machines = machines.filter { GroupKeys.namespaceOf(it.id) == namespace }.map { it.copy(id = GroupKeys.raw(it.id)) },
-            pending = taskCards.filter { GroupKeys.namespaceOf(it.machineId) == namespace }.map { it.copy(machineId = GroupKeys.raw(it.machineId)) },
-            manager = session?.manager,
-            backgroundRecords = assistantPresentation.background, onOpenBackground = { backgroundOpen = true },
-            onOpenSetup = chrome.onOpenSetup?.let { open -> { page: persona.core.contracts.BriefSetupPage -> open(page, session?.manager) } })
-    }
+    val taskState = rememberChatPageTaskHost(key, chrome, tasks, taskKeys, taskTodos, taskAgentSessions, sessionList,
+        machines, allRequests, taps, assistantPresentation, session, scope, res, sender, { notice = it })
+    val taskHost = taskState.host
+    var backgroundOpen by taskState.backgroundOpen
     // A task's or an agent's own detail is a sheet on a phone; a wide window pushes the same page into this column, as
     // iOS's `detailPresentation` does on an iPad or an open Duo (#9347). The chat stays composed under it, so Back finds
     // it at the same scroll position; "All" stays a sheet at any width, as iOS's board is.
@@ -702,8 +768,9 @@ private fun ChatPage(
     val turnFix = if (renderStyle == ChatRenderStyle.Assistant) TurnErrorFix.of(session?.turnErrorCode) else null
     val fixModel = chrome.onFixModel?.let { open -> { action: persona.core.designsystem.ReadinessActionId -> open(action, session?.launcher, session?.manager) } }
     // Nothing is up over the page: the header may fold by itself (iOS waits while a sheet or menu is presented).
-    val headerBusy by rememberUpdatedState(chrome.covered || overlay || chromeOverlay || linkVisible || statusSheet || activitySheet ||
-        terminalHelp || taskPageVisible || fullText != null || search.visible || pushedDetail != null)
+    val pageCovered = chrome.covered || overlay || linkVisible || statusSheet || activitySheet || terminalHelp ||
+        taskPageVisible || fullText != null || search.visible || pushedDetail != null
+    val headerBusy by rememberUpdatedState(pageCovered || chromeOverlay)
     LaunchedEffect(headerFold, foldsHeader, reduceMotion) {
         if (!foldsHeader || reduceMotion) return@LaunchedEffect
         while (true) {
@@ -726,9 +793,10 @@ private fun ChatPage(
         else null
     // The list's keys from the bottom (reverse layout): the tail rows, the outbox's bubbles still on their way, that day,
     // then the lines, each with the failed sends written before it just above it (#2769).
-    val listKeys = remember(lines, placed, tailRows, pendingDay != null) {
+    val listKeys = remember(lines, placed, held.rows, tailRows, pendingDay != null) {
         buildList {
             addAll(tailRows)
+            held.rows.asReversed().forEach { add("held-${it.id}") }
             placed.rest.asReversed().forEach { add("outbox-${it.clientMessageId}") }
             if (pendingDay != null) add(PENDING_DAY_ROW)
             for (line in lines) {
@@ -994,30 +1062,34 @@ private fun ChatPage(
                                 // The conversation's own cards under its entries and the route chip, over its queue and the composer,
                                 // as iOS's footer has them: they alone, so "N pending" counts only them (DESIGN_SYSTEM.md 4.8).
                                 if (assistantChat) pendingCards(stackCards, false, keyboard)
-                                // Persona's queue: its own messages, then those relayed from elsewhere, under its entries and right
-                                // above the composer, as iOS's footer has it (every style: it is behaviour; each draws its own strip, #4339 C6).
-                                if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.mainSuggestions(composer.value.text,
-                                        clear = canSend && LocalMainChatClear.current != null, resources = res).isEmpty())
-                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
-                                if (embedded && assistantChat) LocalMainChatGuidance.current?.invoke()
                                 val claudeCommands = session?.canTypeClaudeCommands == true
                                 // Brief and Board's "Mode" sheet: a permission mode, an effort or a model to change (a
                                 // listed model needs the computer's launcher lists), or the modes a provider lists (#8261).
                                 val modeSheet = session != null && (session.canChangeModes || session.canChangeEffortOnly ||
                                     session.canSwitchListedModes || (chrome.worktrees != null && SessionModes.listsModels(session)))
-                                LargeWindowComposer(key, composer, session?.status == "working", sending || submittedDraft != null,
+                                // Persona's queue: its own messages, then those relayed from elsewhere, under its entries and right
+                                // above the composer, as iOS's footer has it (every style: it is behaviour; each draws its own strip, #4339 C6).
+                                if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.mainSuggestions(composer.value.text,
+                                        clear = canSend && LocalMainChatClear.current != null,
+                                        permissions = SessionModes.offersPermissions(session, glass, modeSheet), resources = res).isEmpty())
+                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
+                                if (embedded && assistantChat) LocalMainChatGuidance.current?.invoke()
+                                val offlineHint = if (agentChat) offlineAgentPlaceholder(session, machine, heldActions != null) else null
+                                LargeWindowComposer(key, composer, session?.status == "working" && !(agentChat && machine?.online == false),
+                                    sending || submittedDraft != null,
                                     // /clear and /model type into Claude's pane: Claude in a terminal engine only (positive check).
                                     canClear = clearingPane == null && session?.canTypeClaudeCommands == true,
                                     service = composerService, uploadDestination = if (healthChat || session?.isHealth == true) "health" else null,
+                                    upload = composerUpload,
                                     onSend = { send() }, onCommand = { send(it) }, onNotice = { notice = it },
                                     extraContent = linkContexts.isNotEmpty(),
                                     assistantChat = assistantChat,
-                                    useShellSurface = compactGlassAgent,
-                                    enabled = canSend, placeholder = when {
+                                    useShellSurface = compactGlassAgent, covered = pageCovered,
+                                    enabled = canSend, wrapPlaceholder = offlineHint != null, placeholder = when {
                                         !canSend -> READ_ONLY.text()
                                         // "Ask Persona…", as the assistant's blank page and iOS say (#4339 C18).
                                         !agentChat -> stringResource(R.string.chat_placeholder_ask, persona.core.designsystem.LocalPersonaName.current)
-                                        else -> agentPlaceholder(res, session)
+                                        else -> offlineHint ?: agentPlaceholder(res, session)
                                     },
                                     // Permission mode and effort for Claude's sessions, Persona's included; the model for Claude in a pane;
                                     // the effort alone for a Codex thread on its app-server.
@@ -1025,14 +1097,15 @@ private fun ChatPage(
                                         // Glass: the permission mode in the composer (Q11, iOS and the web): its symbol in its tone and
                                         // its menu; the model and the effort are the pill's.
                                         glass -> if (session != null && SessionModes.showsInComposer(session)) ({
-                                            HeaderModeButton(session, controls, connection == null || connection == ConnectionState.Online) { modeOverlay = it }
+                                            HeaderModeButton(session, controls, connection == null || connection == ConnectionState.Online,
+                                                openRequested = openPermissions, onOpenHandled = { openPermissions = false }) { modeOverlay = it }
                                         }) else null
                                         // Brief and Board: also an agent whose model the node switches itself (a Paseo
                                         // provider's), its launcher's models listed in the sheet (#8143).
                                         modeSheet -> ({
                                             ChatModeBar(session, controls, connection == null || connection == ConnectionState.Online,
                                                 onOverlay = { modeOverlay = it }, onPickModel = { model -> send("/model $model") },
-                                                openRequested = openModes, onOpenHandled = { openModes = false }, creation = chrome.worktrees)
+                                                openRequested = openModes || openPermissions, onOpenHandled = { openModes = false; openPermissions = false }, creation = chrome.worktrees)
                                         })
                                         else -> null
                                     },
@@ -1071,214 +1144,55 @@ private fun ChatPage(
                                     onMentionTask = { id -> tasks?.setRoute(key.sessionId, id) },
                                     // /model opens the "Mode" sheet's model choices; both need Claude in a pane (as the sheet does).
                                     onModel = if (claudeCommands && session?.canChangeModes == true) ({ openModes = true }) else null,
+                                    // /permissions where the composer has the mode picker (Glass's button, the others' "Mode" sheet), the
+                                    // web's `canPickPermissions`: Claude's sessions and Persona's while they can change it (#6513)
+                                    onPermissions = if (SessionModes.offersPermissions(session, glass, modeSheet)) ({ openPermissions = true }) else null,
                                     // (on Glass /model opens the pill's panel, where the model is picked)
                                     loop = claudeCommands)
                             }
                         }
                     },
                 ) { pagePaddingValues ->
-                    val horizontalPadding = pagePadding
-                    // The closeout card takes the room under the top bar; the list then starts right under the card.
-                    val padding = if (closeoutShown != null) PaddingValues(bottom = pagePaddingValues.calculateBottomPadding()) else pagePaddingValues
-                    val closeoutReply = remember(lines, closeoutShown != null) { if (closeoutShown != null) closeoutReplyId(lines) else null }
-                    Column(Modifier.fillMaxSize()) {
-                        if (search.selected != null) ReturnChip { search.returnToOrigin(chatList) }
-                        search.notice?.let { Text(it, Modifier.padding(horizontal = horizontalPadding), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
-                        closeoutShown?.let { closeout ->
-                            CloseoutCard(closeout, closeoutWork?.artifacts.orEmpty(), key.path, Modifier.padding(
-                                start = horizontalPadding, end = horizontalPadding, top = pagePaddingValues.calculateTopPadding() + Tokens.Space.s))
-                        }
-                        val showJump = !chatList.followsEnd
-                        ChatReaderLayout(
-                            Modifier.weight(1f).then(if (foldsHeader) Modifier.nestedScroll(headerScroll) else Modifier),
-                            topInset = padding.calculateTopPadding(),
-                            bottomInset = padding.calculateBottomPadding(),
-                            collapse = {
-                                val topInset = padding.calculateTopPadding()
-                                WorkCollapseControl(lines, list, listKeys, topInset, ::toggle,
-                                    Modifier.padding(horizontal = horizontalPadding)
-                                        .padding(top = topInset + Tokens.Space.s, bottom = Tokens.Space.s))
-                            },
-                            navigation = {
-                                // A plan outside the viewport is still reachable from the conversation's footer.
-                                val anchor = remember(lines, contentPlans, renderStyle) { latestPlanLine(lines, contentPlans) }
-                                val planOut by remember(anchor) { derivedStateOf {
-                                    anchor != null && list.layoutInfo.totalItemsCount > 0 &&
-                                        list.layoutInfo.visibleItemsInfo.none { it.key == anchor.lineId }
-                                } }
-                                // An open sheet keeps the last plan if its work line folds away.
-                                if (planSheet && anchor != null) SideEffect { sheetPlan = anchor.plan }
-                                if (showJump || planOut) Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = horizontalPadding).padding(bottom = Tokens.Space.s),
-                                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                        if (anchor != null && planOut) {
-                                            val progress = remember(anchor.plan.todos) { planProgress(anchor.plan.todos) }
-                                            val opensSheet = glass && agentChat
-                                            PlanPill(progress.step, progress.total, progress.done, onClick = {
-                                                if (opensSheet) { sheetPlan = anchor.plan; planSheet = true }
-                                                else scope.launch {
-                                                    timeline.freeze(currentItems()); timelineVersion++
-                                                    chatList.scrollToRecord(anchor.lineId)
-                                                }
-                                            }, modifier = Modifier.heightIn(min = Tokens.MinTouch.android),
-                                                spoken = if (opensSheet) planStepText(res, anchor.plan.todos) else null,
-                                                onClickLabel = if (opensSheet) stringResource(R.string.chat_plan_pill_opens) else null)
-                                        }
-                                    }
-                                    if (showJump) ChatJumpToLatest(
-                                        timeline, timelineVersion, snapshot.items, pageReader.newestVisibleItem, readThrough,
-                                        deferCount = snapshot.streamingItemIds.isNotEmpty(), onClick = chatList::returnToLatest)
-                                }
-                            },
-                        ) { listBottomInset ->
-                            val outboxBubble: @Composable (OutboxMessage) -> Unit = { message ->
-                                val delivery = composerDeliveries[message.clientMessageId]
-                                val deliveryState = if (message.state in setOf(DeliveryState.Refused, DeliveryState.Rejected))
-                                    delivery?.state ?: message.state else message.state
-                                val busy = message.clientMessageId in deliveryActions.busyIds
-                                val onAction: ((DeliveryAction) -> Unit)? = if (readOnly) null else { action -> deliveryAction(message, action) }
-                                val failed = deliveryState == DeliveryState.Rejected || deliveryState == DeliveryState.Refused
-                                val receipt = sendReceipts.lastOrNull { it.clientMessageId == message.clientMessageId }
-                                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                                    // Glass: iOS's bubble, its mark and small menu in place of the status line, which still says why
-                                    // one did not go (#4339 C9); a delivery to check keeps the status line.
-                                    if (glass && drawsAsPendingBubble(deliveryState)) {
-                                        // A forward keeps its block here: the bubble draws it as its card (#3901).
-                                        val shown = if (carriesForward(message.text)) message.text else composerMessagePreview(message.text)
-                                        OutboxBubble(shown, message.clientMessageId, deliveryState, busy,
-                                            canSend = canSend, onAction = onAction)
-                                        if (receipt?.processing == true) Text(stringResource(persona.core.designsystem.R.string.designsystem_message_processing),
-                                            Modifier.align(Alignment.End), style = PersonaTheme.type.caption,
-                                            color = PersonaTheme.palette.ink2, maxLines = 1)
-                                        if (failed) PendingBadge(PendingStatus.Refused, Modifier.align(Alignment.End),
-                                            reason = message.copy(error = delivery?.refusal?.code ?: message.error).refusalReason())
-                                    } else {
-                                        UserBubble(message.text, message.clientMessageId, deliveryState)
-                                        OutboxStatus(message.copy(state = deliveryState,
-                                            error = delivery?.refusal?.code ?: message.error),
-                                            busy = busy, onAction = onAction, receipt = receipt, canSend = canSend, onDetails = { statusSheet = true })
-                                    }
-                                    if (!readOnly && failed) {
-                                        // Edit puts the words back in the box and drops the refused bubble (nothing reached the computer).
-                                        ComposerRefusalActions(message, composerService, delivery, terminal, canSend = canSend,
-                                            edit = { deliveryAction(message, DeliveryAction.Edit) }, notice = { notice = it })
-                                    }
-                                }
-                            }
-                            ChatList(state = chatList, modifier = Modifier.fillMaxSize().endSelectionOnTapOutside(messageMenu), contentPadding = PaddingValues(
-                                start = horizontalPadding, end = horizontalPadding,
-                                top = padding.calculateTopPadding() + 12.dp.dense,
-                                bottom = listBottomInset + 12.dp.dense,
-                            )) {
-                                errorLine?.let { error -> item(key = ERROR_ROW, contentType = ERROR_ROW) { ChatSystemLine(error, failed = true) } }
-                                readyLine?.let { words -> item(key = READY_ROW, contentType = READY_ROW) { TypingLine(words) } }
-                                // Newest at the bottom (reverse layout). A failed send sits above the first line written after it.
-                                placed.rest.asReversed().forEach { message ->
-                                    item(key = "outbox-${message.clientMessageId}", contentType = "outbox") { outboxBubble(message) }
-                                }
-                                pendingDay?.let { day -> item(key = PENDING_DAY_ROW, contentType = "day") { DayLine(day, Modifier.testTag("chat-pending-day")) } }
-                                for (line in lines) {
-                                    item(key = line.contentKey, contentType = line.contentType()) {
-                                        ChatSearchHighlight(search, line.contentKey) {
-                                            androidx.compose.runtime.CompositionLocalProvider(LocalAssistantTaskHost provides taskHost,
-                                                LocalTurnErrorFixAction provides fixModel, LocalOpenRecap provides openRecap) {
-                                            ChatLineContent(line, key, loader,
-                                            line.recordedDuration(snapshot.recordedTurnDurations),
-                                            ::toggle, ::expand, folding, foldErrors,
-                                            lastUserId = lastUserId,
-                                            turnFix = turnFix.takeIf { line.contentKey == lines.firstOrNull()?.contentKey },
-                                            turnLauncher = session?.launcher,
-                                            onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = { item ->
-                                            scope.launch {
-                                                try { fullText = repository.fullText(key, item.id) }
-                                                catch (e: CancellationException) { throw e }
-                                                catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
-                                            }
-                                        }, style = renderStyle, agentSession = session, textUpdates = textUpdates,
-                                            liveText = snapshot.liveText, streamingItemIds = snapshot.streamingItemIds,
-                                            userImages = contentUserImages[line.id].orEmpty(),
-                                            imagesInUserBubble = line.id in contentHiddenImages,
-                                            workRunning = (line as? ChatLine.Step)?.let { contentWorkGroups[it.groupId]?.live } == true,
-                                            lastWorkStep = (line as? ChatLine.Step)?.let {
-                                                // A nested subagent's card can come after the line's own last step (Glass).
-                                                if (subagentCards) contentLastSteps[it.groupId] == it.step.id
-                                                else contentWorkGroups[it.groupId]?.steps?.lastOrNull()?.id == it.step.id
-                                            } == true,
-                                            plan = (line as? ChatLine.Step)?.let { contentPlans[it.groupId] },
-                                            showSourceLabel = line.id in contentSourceLabels, waiting = waitingOnYou,
-                                            closeoutReply = closeoutReply, hideTaskPrompts = foldsBackground, onTerminal = agentTerminal)
-                                            }
-                                        }
-                                    }
-                                    placed.before[line.id].orEmpty().asReversed().forEach { message ->
-                                        item(key = "outbox-${message.clientMessageId}", contentType = "outbox") { outboxBubble(message) }
-                                    }
-                                }
-                                if (snapshot.loadingOlder) item(key = "loading-older", contentType = "loading") { JLoading() }
-                                if (snapshot.hasOlder && !snapshot.loadingOlder) item(key = "older", contentType = "older") {
-                                    JTextButton(stringResource(R.string.chat_screen_load_older), { scope.launch { try { repository.loadOlder(key) } catch (e: CancellationException) { throw e } catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) } } })
-                                }
-                            }
-                            val settling = snapshot.loading || projectedFrom == null || (snapshot.items.isNotEmpty() && projectedFrom !== snapshot.items)
-                            val readerPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = listBottomInset)
-                            if (settling && lines.isEmpty() && messages.isEmpty()) {
-                                // An Agent's chat on Glass: iOS's skeleton rows where its newest lines will be; Brief and Board keep the spinner.
-                                if (glass && agentChat) ChatSkeleton(Modifier.align(Alignment.BottomCenter).padding(start = horizontalPadding, end = horizontalPadding,
-                                    bottom = listBottomInset + Tokens.Space.m))
-                                else JLoading(Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))
-                            }
-                            else if (!settling && lines.isEmpty() && messages.isEmpty() && snapshot.error == null)
-                                JEmptyState(stringResource(R.string.chat_screen_empty_title),
-                                    emptyChatHint(res, session, machines.firstOrNull { it.id == key.machineId }?.name, readOnly),
-                                    Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))
-                        }
-                    }
+                    ChatPageReaderContent(pagePaddingValues, closeoutShown, closeoutWork, key, chatList, search, lines, list, listKeys,
+                        foldsHeader, headerScroll, contentPlans, renderStyle, planSheetState, sheetPlanState, glass, agentChat,
+                        scope, timeline, timelineVersionState, currentItems, pageReader.newestVisibleItem, readThrough, snapshot,
+                        deferCount = snapshot.streamingItemIds.isNotEmpty(), placed = placed, pendingDay = pendingDay,
+                        heldRows = held.rows, heldActions = heldActions.takeUnless { readOnly },
+                        undeliveredRows = keptMessages, undeliveredBusy = undeliveredBusy,
+                        onUndeliveredAction = if (readOnly || chrome.actions == null) null else ::undeliveredAction,
+                        composerDeliveries = composerDeliveries, deliveryActions = deliveryActions, readOnly = readOnly,
+                        onDeliveryAction = if (readOnly) null else ::deliveryAction, sendReceipts = sendReceipts, canSend = canSend,
+                        onStatusDetails = { statusSheet = true }, terminal = terminal, composerService = composerService,
+                        composer = composer, repository = repository, feedback = feedback, onNotice = { notice = it },
+                        errorLine = errorLine, readyLine = readyLine, projectedFrom = projectedFrom, messages = messages,
+                        textUpdates = textUpdates, contentUserImages = contentUserImages, contentHiddenImages = contentHiddenImages,
+                        contentWorkGroups = contentWorkGroups, contentLastSteps = contentLastSteps,
+                        contentSourceLabels = contentSourceLabels, waitingOnYou = waitingOnYou,
+                        foldsBackground = foldsBackground, onTerminal = agentTerminal, lastUserId = lastUserId, turnFix = turnFix,
+                        fixModel = fixModel, openRecap = openRecap, taskHost = taskHost, folding = folding, foldErrors = foldErrors,
+                        onToggle = ::toggle, onExpand = ::expand,
+                        onFullText = { item -> scope.launch {
+                            try { fullText = repository.fullText(key, item.id) }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
+                        } }, loader = loader, session = session,
+                        machineName = machines.firstOrNull { it.id == key.machineId }?.name, subagentCards = subagentCards,
+                        messageMenu = messageMenu, turnLauncher = session?.launcher)
                 }
             }
-            // The detail a wide window pushed into this column (#9347): the sheet's page, over the chat it leaves composed.
-            pushedDetail?.let { open ->
-                val host = taskHost ?: return@let
-                Box(Modifier.fillMaxSize()) { AssistantTaskPage(open, host, onDismiss = { host.sheet.value = null }) }
-            }
-            if (search.visible) ChatSearchScreen(search, searchableItems, projection.turns.size, snapshot.hasOlder,
-                repository, key, snapshot.history, onClose = { search.close(chatList) })
-            if (terminalHelp) TerminalHelpDialog { terminalHelp = false }
-            if (activitySheet) session?.takeIf(ChatActivity::shown)?.let { s ->
-                ChatActivitySheet(s, onStop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),
-                    onOpenOutput = chrome.onOpenPath?.let { open -> { path -> activitySheet = false; open(path, null) } },
-                    onDismiss = { activitySheet = false })
-            }
-            // The loop stopped and the background work ended: nothing left for the sheet.
-            val activityShown = ChatActivity.shown(session)
-            LaunchedEffect(activityShown) { if (!activityShown) activitySheet = false }
-            if (statusSheet) ChatStatusSheet(status, session, messages, deliveryActions.busyIds,
-                onAction = if (readOnly) null else ::deliveryAction, onDismiss = { statusSheet = false },
-                replacement = replacement,
-                onOpenReplacement = if (replacement != null && chrome.onOpenSession != null) {
-                    { statusSheet = false; chrome.onOpenSession.invoke(replacement.key) }
-                } else null,
-                onConnectionDetails = chrome.onConnectionDetails, terminal = terminal,
-                recordedDuration = snapshot.turnDurationSeconds, notice = notice ?: snapshot.error,
-                recovery = recovery, machine = machine, draftSaveError = statusBindings.draftSaveError, readOnly = readOnly,
-                onOpenSession = chrome.onOpenSession?.let { open -> { target -> statusSheet = false; open(target) } })
-            fullText?.let { FullTextReader(it, onDismiss = { fullText = null }) }
-            sheetPlan?.takeIf { planSheet }?.let { PlanSheet(it, onDismiss = { planSheet = false }) }
-            ChatMessageActions(key, session, machine, renderStyle, repository, readOnly, composer, messageMenu,
-                quoteTarget = quoteTarget,
+            ChatPageOverlays(pushedDetail, taskHost, search, searchableItems, projection.turns.size, snapshot.hasOlder,
+                repository, key, snapshot.history, terminalHelpState, activitySheetState, session, readOnly, canSend,
+                { send(it) }, chrome.onOpenPath, statusSheetState, status, messages, deliveryActions,
+                if (readOnly) null else ::deliveryAction, replacement, chrome.onOpenSession, chrome.onConnectionDetails,
+                terminal, snapshot.turnDurationSeconds, notice ?: snapshot.error, recovery, machine,
+                statusBindings.draftSaveError, fullTextState, sheetPlanState, planSheetState, renderStyle, composer,
+                messageMenu, quoteTarget,
                 onContext = { text -> linkContexts = linkContexts + messageContext(session?.displayTitle ?: res.getString(R.string.chat_screen_untitled), text, context.resources)
                     notice = res.getString(R.string.chat_screen_added_context) },
                 onNotice = { notice = it }, onFork = onFork, rewindMenu = rewindMenu,
                 onDelete = { target -> messages.firstOrNull { it.clientMessageId == target.id }?.let { message ->
                     deliveryAction(message, if (message.state.allows(DeliveryAction.Cancel)) DeliveryAction.Cancel else DeliveryAction.Delete)
-                } })
-            viewer?.let { request ->
-                ChatImageViewer(request.images, request.index, onDismiss = { viewer = null },
-                    onEdited = if (readOnly) null else ({ attachment -> composer.beginEdit(); composer.attachments += attachment }),
-                    photoLimitReached = composer.attachments.count { it.media } >= MAX_COMPOSER_MEDIA)
-            }
+                } }, viewerState, chatList)
         }
     }
 }
@@ -1316,7 +1230,7 @@ private fun AssistantTrayDetailSheets(
 }
 
 @Composable
-private fun ChatJumpToLatest(
+internal fun ChatJumpToLatest(
     timeline: ChatTimeline,
     timelineVersion: Int,
     items: List<Item>,
@@ -1341,7 +1255,7 @@ internal fun ComposerContextCards(contexts: List<ChatLinkContext>, compact: Bool
 }
 
 /** The rows at the chat's newest end, under your unsent messages: a load error (Glass), then "Claude is getting ready…". */
-private const val ERROR_ROW = "load-error"
-private const val READY_ROW = "getting-ready"
+internal const val ERROR_ROW = "load-error"
+internal const val READY_ROW = "getting-ready"
 /** The day over a first message not in the transcript yet (Glass, Persona's conversation). */
-private const val PENDING_DAY_ROW = "pending-day"
+internal const val PENDING_DAY_ROW = "pending-day"

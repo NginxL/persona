@@ -285,8 +285,12 @@ func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {
 					t.Fatal(err)
 				}
 				m.nodeUpdateConnected(context.Background(), m.peer, info)
-			} else if err := m.startDeploy(); err != nil {
-				t.Fatal(err)
+			} else {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				if err := h.Redeploy(ctx, m.cfg.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			waitMachine(t, m, 10*time.Second, func(s proto.Machine) bool { return !s.Deploying })
 			n.mu.Lock()
@@ -476,12 +480,15 @@ func TestLinkedDeployPreflightFailureEndsConfirmation(t *testing.T) {
 	h, m, n, bin := linkedDeployFixture(t, kindLink)
 	h.opts.Store = newMemStore()
 	n.stayOld = true
-	if err := m.startRPCDeployment(nodePackage{Version: h.hubVersion(), path: bin}, nil); err != nil {
+	run, err := m.startRPCDeploymentRun(nodePackage{Version: h.hubVersion(), path: bin}, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return s.DeployPhase == "confirming" })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
+	outcome := make(chan error, 1)
+	go func() { outcome <- m.waitDeploy(ctx, run) }()
+	waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return s.DeployPhase == "confirming" })
 	for _, failure := range []proto.NodeUpdatePreflightFailure{
 		{ID: "old-update", Error: "stale failure"},
 		{ID: "update-one", Error: "exit status 23"},
@@ -493,6 +500,14 @@ func TestLinkedDeployPreflightFailureEndsConfirmation(t *testing.T) {
 	s := waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return !s.Deploying })
 	if s.DeployPhase != "" || s.DeployError != "exit status 23" || s.NodeVersion != "old-build" || !s.Online {
 		t.Fatalf("snapshot = %+v", s)
+	}
+	select {
+	case err := <-outcome:
+		if err == nil || err.Error() != "exit status 23" {
+			t.Fatalf("redeploy outcome = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("waiting for redeploy outcome: %v", ctx.Err())
 	}
 	var saved nodeDeployRecord
 	found, err := h.opts.Store.Setting(ctx, m.deployRecordKey(), &saved)

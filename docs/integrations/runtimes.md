@@ -95,7 +95,7 @@ Call the SDK when things happen:
 | --- | --- |
 | (no call needed) | The list only needs recent sessions: node still recognizes older unlisted sessions as yours (ones listed before are remembered; ones never listed get one `items` query), and calls are still routed to you, so `send` / `items` must handle sessions not in the list |
 | `rt.sessionsChanged()` | Sessions added or removed, a turn started / ended, a rename |
-| `rt.append(id, {items, fromSeq, toSeq, history})` | New content was persisted (when no one is watching, the SDK just has the list refresh `rev`). `items` can be empty: content not shown in the chat must still advance seq |
+| `rt.append(id, {items, fromSeq, toSeq, history, update})` | New content was persisted (when no one is watching, the SDK just has the list refresh `rev`). `items` can be empty: content not shown in the chat must still advance seq. Set `update: true` to replace existing items by id without advancing seq; a batch keeps the flag if any append sets it. This flag stays inside the runtime-to-node protocol: App `items` events omit it because clients already merge by id and reserve `update` for the hub-update object |
 | `rt.stream(id, text)` / `rt.streamEnd(id)` | The full text being generated / that segment ended (the SDK throttles to at most once every 120 ms) |
 | `rt.workspacesChanged(list)` | Its workspaces changed (one made, renamed or archived, a branch moved): the whole list, which the SDK also tells every node it connects to later. Only with `createWorkspace` and `prepareWorkspace` ("Workspaces" below) |
 | `rt.ask(interaction, {signal})` | A person must decide: the card goes to the phone and waits for an answer. Returns a `Resolution`; `{dismiss: true}` = handed back to the computer (tapped on the phone, expired, no hub), for the runtime's own UI. Meanwhile the session shows "Needs you" automatically |
@@ -129,6 +129,7 @@ Not in the SDK (used by only one runtime, or the two read different things): eac
   with ids `<seq>#<index>`. DSH's event seq starts at 0, so it maps to seq + 1. **Ids are unique only within a session**: across sessions, and especially across two branches split from the same session,
   the same id is different content. Anything a client caches by id (render results, parse results) must key on the session too (#372).
 - **history**: the identity of the session's content (`docs/protocol/protocol.md` ("Continuity of items")). It changes when content is rewritten (branch, reset), and the App refetches the whole page; it stays the same on pure appends. A batch with a new history doesn't need a larger seq (switching back to a branch with the same count, shorter after a rollback); the SDK pushes it anyway and continues from its `toSeq`.
+  An explicit `fromSeq: 0` also resets the cursor, even with the same history; it promises that the batch contains the complete range through `toSeq`. Node and Hub retain the new cursor for reconnects. Catch-up pages report the actual cursor even below `after_seq`. An empty rewind notification retains its positive `from_seq` so clients reload the missing history. Node and Hub pass the known history in internal `session.watch` requests, so a same-length rewrite is reported after reconnect too. An unchanged idle watch sends no empty batch.
 - **Item kinds** follow what the App already has: `text` (user / assistant), `thinking`, `tool_use` (`tool_name`, `tool_input`, `tool_use_id`), `tool_result`
   (`tool_use_id`, `is_error`), `image` (`lazy: true` placeholder, data via `image`), `notice` (system: interrupt, error, compaction).
 - **Tool names match Claude's**: the App draws commands, diffs and files for `Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `TodoWrite`,
@@ -184,9 +185,10 @@ Not in the SDK (used by only one runtime, or the two read different things): eac
   node rejects a second process with the same id (`runtime_conflict`). If a runtime changes its id but still runs the same kind of Agent, set `agent` to that Agent (a renamed DSH sets `dsh`), and session rows carry `agent_label`.
 - Session ids are unique on the machine, at most 128 characters, and can't be paths. `launcher` names shouldn't clash with launchers in `~/.zshrc` (on a clash the shell's wins and the runtime's isn't listed, except where every start goes to the runtime as an engine with `caps.same_kind`: there its own wins);
   if two runtimes' launchers clash, only the one that connected first provides it.
-  The ordinary `agy` executable discovered on PATH is a terminal fallback, not an explicit shell override: its connected
-  companion supplies the launcher, models and assistant support. An actual alias, function or helper definition of that
-  name keeps shell precedence. Discovery provenance stays inside the node and adds no wire field (#9181).
+  A local `agy` launcher supplies the model catalog and starts in a pane when the selected host is herdr (#10237),
+  including when herdr is the default and the node detects the local CLI. The connected companion serves Assistant
+  and terminal-less Agent requests (the node RPC can target `host: "agy"`). A shell alias, function or helper definition
+  named `agy` still has precedence over automatic companion selection (#9181).
 
 ## Minimal example
 
@@ -395,8 +397,8 @@ Lark tokens and gates. node drives it with calls the protocol already has:
 
 | node sends | With (all optional fields; runtimes that don't declare `caps.assistant` never receive them) |
 | --- | --- |
-| `session.start {cwd, assistant: true}` | `cwd` is the assistant directory (`~/.persona/assistant`, containing `AGENTS.md` / `CLAUDE.md` and `.agents/skills/`); no `prompt`. The runtime reports this `cwd` for the chat's whole life (`runtime.sessions`, its cards), not where a tool's `cd` left the shell: the hub places assistant and health chats by that directory exactly (#2368) |
-| `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir}` | `context`: a `<persona-context>` block given to the model before the user's text (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages") |
+| `session.start {cwd, assistant: true, supervision_instructions?}` | `cwd` is the assistant directory (`~/.persona/assistant`, containing `AGENTS.md` / `CLAUDE.md` and `.agents/skills/`); no `prompt`. The runtime reports this `cwd` for the chat's whole life (`runtime.sessions`, its cards), not where a tool's `cd` left the shell: the hub places assistant and health chats by that directory exactly (#2368). `supervision_instructions` is sent only when nonempty and the runtime also declared `caps.supervision_policy` (#11173) |
+| `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir, supervision_instructions?}` | `context`: a `<persona-context>` block given to the model before the user's text (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages"); `supervision_instructions`: sent only when the runtime declared `caps.supervision_policy` (always present, including explicit `""` to clear a prior role on demotion) |
 | `session.interrupt` | Stop on the phone; closing the assistant chat = stopping the running turn, the chat stays in the runtime |
 
 For sessions it starts, the node restores persisted ownership and launcher metadata before publishing runtime rows.
@@ -417,6 +419,7 @@ A runtime that declares `caps.assistant` must:
    it blocks them and says which tool to use (DSH's `onPreExecute`).
 4. Give `context` to the model before the user's text and don't show it in the chat (a `<persona-context>` block without attributes; context quoted from the phone has attributes and is shown as usual).
 5. Set its own permissions per `mode` (plan = read-only); changes inside `memory_dir` aren't asked about outside plan mode.
+6. **Optional supervision policy channel (`supervisionPolicy: true` → `caps.supervision_policy`)** (#11173): only declare this if the runtime can apply `supervision_instructions` on an authoritative channel separate from user message text, persisting across compaction and isolated per session (never rewriting shared `~/.persona/assistant/AGENTS.md` and never leaking policy into concurrent ordinary chats). The runtime must refuse a policy change while the session is busy with `code: "busy"`, clear its per-session policy when `supervision_instructions` is `""` or the session closes, and fail closed with `code: "assistant_supervision_runtime"` (never sending the prompt) if the policy cannot be applied. Runtimes that do not declare `caps.supervision_policy` never receive `supervision_instructions` and keep the existing refusal boundary for supervision deliveries (`docs/assistant/assistant.md` "Role-scoped supervision instructions (#8251)").
 
 The assistant launcher's entry in `launchers` may also carry `assistant_for`: the name of an Agent launcher on the same computer that runs the same agent with the same
 account but can't run the assistant itself (a Paseo provider; the Grok companion's `--assistant-for grok`, `integrations/grok/README.md`). The person setting the runtime up
@@ -438,6 +441,20 @@ end to end in `integrations/dsh/e2e/assistant.mjs`.
 | Antigravity CLI (`antigravity`) | `integrations/antigravity/companion.mjs`: companion process; reads CLI transcripts and runs terminal-less Agent and assistant sessions through `agy acp` | "Antigravity CLI" below |
 | echo (example) | `integrations/runtime-sdk/examples/echo-runtime.mjs` (with `--listen <port>` it's a daemon) | "Minimal example" in this doc, `docs/integrations/daemons.md` |
 
+### Antigravity Desktop (macOS, experimental)
+
+With Antigravity Desktop open and the Persona node running, start the desktop companion from the checkout:
+
+```sh
+node integrations/antigravity/desktop.mjs
+```
+
+It discovers the local desktop hub through the current user's private descriptor under
+`~/.gemini/antigravity/daemon/`, lists existing conversations, watches exported transcript items,
+and forwards text replies and interrupts to the selected Cascade. Start each conversation with a message in the desktop app so replies can reuse its model and tool configuration.
+Handle approvals there as well. The desktop and CLI companions can run together. Override the desktop data directory
+with `--desktop-dir` or the Persona runtime socket with `--socket`. The desktop RPC is private and version dependent.
+
 ### Antigravity CLI
 
 The session's `last_text` preview contains assistant response text after the latest explicit user input. A new user
@@ -454,7 +471,7 @@ fields, including a subscription reset timestamp supplied in native quota metada
 that result. Rejected ACP prompts also publish their failure through the session's error state.
 The history token includes the error format so connected clients refresh items cached before this representation.
 
-The implemented integration is for the **Antigravity CLI (`agy`)**, not the Antigravity desktop app. When `personad node`
+The CLI companion runs the **Antigravity CLI (`agy`)**. When `personad node`
 runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`
 runtime is connected on `runtime.sock`, the node automatically writes out the embedded `persona-antigravity-runtime`
 package and supervises `antigravity/companion.mjs` (passing `--no-update --parent-stdin`), yielding whenever an external
@@ -512,7 +529,9 @@ declared and never the one deferred, however many small tools connectors add (si
 name, description and input schema). The others stay callable through it: `persona_call` with no name lists every tool,
 and those left out with their description and arguments (#10756).
 
-Implementation: `integrations/antigravity/lib/runtime.js` and `integrations/antigravity/lib/acp.js`.
+Implementation: `integrations/antigravity/lib/runtime.js`, `integrations/antigravity/lib/acp.js` and `integrations/antigravity/lib/policy.js`.
+
+For assistant supervision (`caps.supervision_policy`, #11173), the companion stores each supervised session's policy in an isolated directory `<agyDir>/persona-supervision/<rawId>` outside `~/.persona/assistant` and attaches it to that session alone through ACP `additionalDirectories` (verified against `initialize`'s `agentCapabilities.sessionCapabilities.additionalDirectories`). `agy` loads both `AGENTS.md` and `GEMINI.md` from `additionalDirectories` directly into `<user_rules>` on every turn (24,000-byte per-file cap), so policies above 24,000 bytes split cleanly across `AGENTS.md` and `GEMINI.md` up to 48,000 bytes, while shared `~/.persona/assistant/AGENTS.md` and concurrent ordinary chats stay untouched. Policy updates and demotions (`""`) synchronize atomically and reload the session via `session/resume`; busy role changes are refused with `busy`; missing ACP `additionalDirectories` support, unwritable directories or oversized policies fail closed with `assistant_supervision_runtime` before any prompt runs; and `session.close` removes the session's policy directory.
 
 Live text belongs to the ACP prompt currently executing. Queued prompts acquire the stream when they start, with an
 empty boundary. A tool call ends the current text message, so the next message replaces its words in the live slot.

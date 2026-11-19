@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -193,31 +194,22 @@ func (n *Node) memoryMergeRoot(key string) string {
 	return filepath.Join(dir, memoryMergeDirName, key)
 }
 
-// memoryCopies lists the other config directories' memory for the project key, each once by real path.
+// memoryCopies lists the other config directories' memory for the project key, each once. A directory reached by more
+// than one path (a profile's projects linked to another's) is the memory itself or one copy, never two: compared with
+// os.SameFile, because filepath.EvalSymlinks does not resolve a Windows junction (#11277).
 func (n *Node) memoryCopies(key, dir string) []string {
-	real := func(p string) string {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return r
-		}
-		return filepath.Clean(p)
+	var kept []os.FileInfo
+	if st, err := os.Stat(dir); err == nil {
+		kept = append(kept, st)
 	}
-	seen := []string{real(dir)}
 	var out []string
 	for _, p := range n.projectDirs() {
 		c := filepath.Join(p, key, "memory")
-		info, err := os.Stat(c)
-		if err != nil || !info.IsDir() {
+		st, err := os.Stat(c)
+		if err != nil || !st.IsDir() || slices.ContainsFunc(kept, func(k os.FileInfo) bool { return os.SameFile(k, st) }) {
 			continue
 		}
-		r := real(c)
-		dup := false
-		for _, s := range seen {
-			dup = dup || s == r
-		}
-		if dup {
-			continue
-		}
-		seen = append(seen, r)
+		kept = append(kept, st)
 		out = append(out, c)
 	}
 	return out

@@ -117,6 +117,9 @@ type StartParams struct {
 	Space string `json:"space,omitempty"`
 	// Main: it becomes the main conversation (what the old one left goes before Text).
 	Main bool `json:"main,omitempty"`
+	// Public: the first message answers in someone else's chat. It suppresses the owner's live snapshot for this turn
+	// only; never over the bus or accepted from an app's conversation-start request.
+	Public bool `json:"-"`
 	// Untitled: not one of the conversations it names and lists as its own (the inbox's AI twin: its result is the
 	// draft in the inbox).
 	Untitled bool `json:"untitled,omitempty"`
@@ -135,9 +138,8 @@ type StartParams struct {
 	// ClientMsgID: the first message's client_msg_id (with NewSessionID: the node sends it once and its transcript
 	// item carries it, as a send's; without, the node ties it to the new conversation's first line). Never over the bus.
 	ClientMsgID string `json:"-"`
-	// Human: a person's own app opens it, as the hub vouched (HTTPRequest.Human): its first message gets a
-	// client_msg_id (FirstMessageIDPrefix) and counts as theirs, as a send the hub vouched for does (SendParams.Human).
-	// Never over the bus.
+	// Human attributes the first message to an app start vouched for by the hub. It is used for missing replies.
+	// The node adds no client message ID to that input. Never over the bus.
 	Human bool `json:"-"`
 }
 
@@ -158,6 +160,12 @@ type SendParams struct {
 	// the manager's own sends (channels, the inbox, meetings) never set it, and an older hub never sends it. A hand-off's
 	// Always rule spares the card only for a turn of such messages (assistant secret_handoff.go).
 	Human bool `json:"human,omitempty"`
+	// VerbatimText is internal-only: an approval clarification keeps the owner's
+	// exact question instead of expanding workspace mentions or main-chat handoff.
+	VerbatimText bool `json:"-"`
+	// ReplyInput is a direct app send authenticated by the hub's legacy owner credential. It only qualifies for
+	// missing-reply recovery. Internal sends and other roles cannot set it, and it does not authorize a hand-off.
+	ReplyInput bool `json:"reply_input,omitempty"`
 }
 
 // KeepUndeliveredParams is assistant.keep_undelivered's params. Params are the app's message as it came (text, images,

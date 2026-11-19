@@ -428,3 +428,21 @@ On Windows, where herdr restores into PowerShell unless `[terminal] default_shel
   If available but a connection failure appears below, see `docs/integrations/paseo.md` ("Troubleshooting").
 - **Engine selected, no sessions**: verify Claude actually runs in that engine; ordinary-terminal / other-app sessions appear only Not running.
 - **Old node on hub machine** (version mismatch in machine info): old node does not understand switching and uses only herdr; update personad on that computer.
+
+### Botmux display preference
+
+There are two independent switches. A computer's **Also show botmux sessions**
+(`GET/PUT /api/v1/machines/{mid}/botmux`) controls which sessions its node lists to
+Persona. **Show botmux sessions in Agents**, in Web Settings › Agents,
+is the paired hub's shared display preference (`agents.show_botmux`, kept by the
+default manager). It defaults to on. Turning it off excludes botmux rows and
+counts from both complete and paged Web Agents lists; the Lark group quick filter
+is hidden when empty. It does not change node inventory, to-do attribution or
+dispatch. Turn it back on from the same settings row.
+
+A browser's old `persona.agentHideBotmux=1` is migrated only while the shared
+preference is unset. The conditional write cannot replace an explicit choice,
+even from another device at the same time. The browser removes the legacy key
+after a confirmed stored value; failures retain it for retry. Reconnect and the
+next Agents list refresh read the shared value again. Android's use of this
+contract is tracked separately in #10242.

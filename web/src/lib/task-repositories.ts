@@ -1,4 +1,5 @@
-import type { Todo } from "./todos";
+import type { Todo, TodoCreateOptions } from "./todos";
+import { confirmTodoCreate } from "./todos";
 import { api, ApiError, credentialOwner, getToken, pastHub } from "./api";
 import { MANAGER_HEADER } from "./manager-choice";
 import { parseRepository, type RepositoryIdentity } from "./repository-identity";
@@ -390,16 +391,18 @@ export function cleanRepositoryDraft(rows: TaskRepositoryInput[]): TaskRepositor
 }
 
 /** Explicit association creation stays outside the ordinary Todo client's startup path. */
-export async function createTodoWithRepositories(context: RepositoryRequestContext, title: string, notes: string, due: { due_at?: string; due_date?: string } | undefined, bindings: CreateRepositoryBindings, identities: ReadonlyMap<string, RepositoryIdentity>): Promise<Todo> {
+export async function createTodoWithRepositories(context: RepositoryRequestContext, title: string, notes: string, due: { due_at?: string; due_date?: string } | undefined, bindings: CreateRepositoryBindings, identities: ReadonlyMap<string, RepositoryIdentity>, creation?: TodoCreateOptions): Promise<Todo> {
   const repositories = bindings ? cleanRepositoryDraft(bindings.repositories) : [];
   // The form checks this too; the submit guard keeps an invalid optional draft from ever becoming a POST. A missing
   // runtime identity map must fail closed even when a JavaScript caller omits the TypeScript parameter.
   const hasIdentities = !!identities && typeof (identities as { get?: unknown }).get === "function";
   if (!bindings || !revision(bindings.catalog_revision) || !hasIdentities || !validRepositoryDraft(repositories, identities)) throw new Error("Invalid repository association draft");
-  const result = await api<{ todo: Todo }>("/todos", {
-    ...repositoryRequestOptions(context), method: "POST",
-    json: { title: title.trim(), notes: notes.trim() || undefined, ...due, repository_bindings: { ...bindings, repositories } },
+  const withImages = Boolean(creation?.images?.length);
+  const request = repositoryRequestOptions(context);
+  const result = await api<{ todo?: Todo; state?: string }>("/todos", {
+    ...request, method: "POST",
+    headers: withImages ? { ...request.headers, "X-Persona-Op-Id": creation!.operationId! } : request.headers,
+    json: { title: title.trim(), notes: notes.trim() || undefined, ...due, repository_bindings: { ...bindings, repositories }, ...(withImages ? { images: creation!.images } : {}) },
   });
-  if (!context.isCurrent() || !result.todo || typeof result.todo.id !== "string") throw new Error("Invalid Todo creation response");
-  return result.todo;
+  return confirmTodoCreate(result, creation?.images, request);
 }

@@ -1,0 +1,4 @@
+Example ownerが確認し、送信されました（Example ownerが編集。送った本文は以下）：
+原文 sent
+
+相手の返信を待ちます。相手、次の手順、再確認時刻が分かれば inbox_suggest に recap と follow（who、next、check_in または check_at）だけを渡します。who が空なら相手の返信待ちです。不明なら recap だけで要約を更新し、新しい提案は不要。返事が来たらここに届きます。

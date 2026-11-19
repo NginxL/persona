@@ -38,12 +38,12 @@ func TestInboxGroupTiersEachEventByItsOwnActivity(t *testing.T) {
 			h.waitGrouping()
 
 			call := onlyCall(t, model.asked())
-			for _, want := range []string{
-				"分级（tier）看动到之后这件事整体的情况",
-				"分别判断每个事项的整体状态",
-				"归入该事项的新活动及其仍未解决的请求",
-				"不能用其他事项的回复或确认替它结案",
-			} {
+			rules := map[string][]string{
+				"zh-Hans": {"分级（tier）看动到之后这件事整体的情况", "归入该事项的新活动及其仍未解决的请求", "不能用其他事项的回复或确认替它结案"},
+				"en":      {"Choose tier from the whole event after the change", "the new activity assigned to it and any outstanding requests", "a reply resolving another event cannot settle it"},
+				"ja":      {"tier は変更後の案件全体で判断", "その案件に割り当てられた新しい動きと未解決の依頼", "別件の返信・確認だけで案件を完了にしない"},
+			}[locale]
+			for _, want := range rules {
 				if !strings.Contains(call.System, want) {
 					t.Errorf("the grouping criteria lost per-event scope %q", want)
 				}

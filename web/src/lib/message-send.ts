@@ -14,8 +14,9 @@ interface FeedbackDeps {
   onHubEvent(type: string, listener: (msg: Record<string, unknown>) => void): unknown;
   subscribe(listener: () => void): unknown;
   receiptsAllowed?(): boolean;
+  watchCursor?(mid: string, sid: string): number | undefined;
 }
-let deps: Pick<FeedbackDeps, "getSession" | "send" | "receiptsAllowed"> = { getSession: () => undefined, send: () => {} };
+let deps: Pick<FeedbackDeps, "getSession" | "send" | "receiptsAllowed" | "watchCursor"> = { getSession: () => undefined, send: () => {} };
 
 export type SendFeedback = "sending" | "processing" | "unknown" | "";
 type Phase = "sending" | "processing" | "delivered" | "failed" | "unknown";
@@ -53,7 +54,11 @@ function scopedObservation(k: string, owner = scope()) {
 const publish = () => { handoffAuthority(); listeners.forEach((f) => f()); };
 const owned = (e: Flight) => e.scope === scope() && !e.retired;
 const current = (e: Flight) => owned(e) && flights.get(key(e.mid, e.sid, e.id)) === e;
-const reconcile = (e: Flight) => deps.send({ type: "subscribe", machine_id: e.mid, session_id: e.sid, lazy_images: true, fold_work: true });
+function reconcile(e: Flight, openOnly = false) {
+  const cursor = deps.watchCursor?.(e.mid, e.sid);
+  if (openOnly && cursor !== undefined) return;
+  deps.send({ type: "subscribe", machine_id: e.mid, session_id: e.sid, ...(cursor ? { since_seq: cursor } : {}), lazy_images: true, fold_work: true });
+}
 function end(e: Flight) { clearTimeout(e.timer); e.feedback = ""; }
 function wait(e: Flight) {
   clearTimeout(e.timer);
@@ -95,7 +100,7 @@ export function beginMessageSend(mid: string, sid: string, id: string, text?: st
   e.text = text;
   wait(e);
   publish(); // local Sending precedes network and outbox work
-  reconcile(e); // the target must be subscribed before POST, including sends from another page
+  reconcile(e, true); // the target must be subscribed before POST, including sends from another page
   const manager = managerHeaderFor(sessionPath(mid, sid));
   let pending = true;
   const isCurrent = () => pending && owned(e);
@@ -202,7 +207,7 @@ export function configureMessageFeedback(next: FeedbackDeps) {
     if (!Array.isArray(msg.items)) return;
     observeMessageItems(String(msg.machine_id), String(msg.session_id), msg.items as Item[]);
   });
-  next.onHubEvent("hello", () => { for (const e of flights.values()) if (current(e) && e.feedback) reconcile(e); });
+  next.onHubEvent("hello", () => { for (const e of flights.values()) if (current(e) && e.feedback) reconcile(e, true); });
   next.subscribe(() => { if (handoffAuthority()) publish(); });
 }
 function handoffAuthority() {

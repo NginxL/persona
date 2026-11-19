@@ -61,7 +61,7 @@ internal class MessageSendReceiptState(private val now: () -> Long = System::cur
     /** A subscriber can receive another client's receipt, with no local outbox entry at all. */
     @Synchronized fun event(event: MessageSendStateEvent) {
         val at = parseTime(event.at) ?: return
-        if (event.state !in setOf("processing", "delivered", "failed", "unknown")) return
+        if (event.state !in setOf("processing", "delivered", "failed", "unknown", "kept")) return
         val session = SessionKey(event.machineId, event.sessionId)
         val key = session to event.clientMessageId
         val record = records.getOrPut(key) {
@@ -77,14 +77,21 @@ internal class MessageSendReceiptState(private val now: () -> Long = System::cur
         publish()
     }
 
-    /** Successful HTTP delivery removes no Processing gap: runtime or completion evidence takes over instead. */
+    /** Accepted delivery keeps Processing until runtime evidence; kept is terminal and asks the chat to reread its row. */
     @Synchronized fun result(request: MessageRequest, result: MessageTransportResult) {
         val record = records[request.session to request.opId] ?: return
-        val accepted = result == MessageTransportResult.Accepted || (result as? MessageTransportResult.HubError)?.delivered == "yes"
-        record.delivered = record.delivered || accepted
-        if (!accepted && record.echoedUserSeq == null) record.closed = true
-        // A slow socket consumer may deliver Processing after HTTP success. Remove local Sending, not its correlation.
-        if (accepted && record.receipt?.state == "sending") record.receipt = null
+        if (result == MessageTransportResult.Kept || result == MessageTransportResult.Held) {
+            record.receipt = MessageSendReceipt(request.session, record.clientId, "kept", Instant.ofEpochMilli(now()), record.mainTarget)
+            record.latestAt = Instant.ofEpochMilli(now())
+            record.terminal = true
+            record.closed = false
+        } else {
+            val accepted = result == MessageTransportResult.Accepted || (result as? MessageTransportResult.HubError)?.delivered == "yes"
+            record.delivered = record.delivered || accepted
+            if (!accepted && record.echoedUserSeq == null) record.closed = true
+            // A slow socket consumer may deliver Processing after HTTP success. Remove local Sending, not its correlation.
+            if (accepted && record.receipt?.state == "sending") record.receipt = null
+        }
         publish()
     }
 

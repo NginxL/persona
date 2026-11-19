@@ -763,7 +763,7 @@ func (msg relayMsg) source() *proto.MessageSource {
 // deliverRelay sends one message into an assistant conversation and notes the hop it is working on. A quiet task's
 // notice (quiet.go) is its own text, and the work it starts is not a hop of any chain.
 func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg relayMsg) error {
-	if msg.Tool == superviseTool && s.runtimeConversation(ctx, machine, to) {
+	if msg.Tool == superviseTool && s.runtimeWithoutSupervisionPolicy(ctx, machine, to) {
 		return &rpc.Error{Code: assistantwire.CodeSupervisionRuntime,
 			Message: i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_runtime")}
 	}

@@ -60,6 +60,27 @@ drawn after it with the header where it was tapped, and a search for `make step-
 fold. Only the mock's own reads leave the browser; other origins are blocked. Screenshots and `results.json`
 (`results-big.json`) go to the artifact directory; a 240-second watchdog ends the run, and the last line is the verdict.
 
+## Overview's extension cards (#9745)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_OVERVIEW_CARDS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/overview-cards.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+# a hub without the route: the mock with MOCK_NAVIGATION=off; a default manager from before the field: MOCK_NAVIGATION=no-overview
+node web/e2e/overview-cards.mjs <loopback-web-origin> <artifact-directory> --old-hub|--old-manager [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in Simplified Chinese. Four made-up cards (the gateway's usage,
+Quota left, Needs me, Agenda): with nothing arranged they come in the hub's order, two a row; **整理卡片** then drags
+Agenda onto the first card, makes it a full row, moves Needs me earlier with the keyboard and switches Quota left off
+(drawn as its outline while arranging). After **完成**, Agenda spans the row over two half cards, the hub keeps the
+arrangement, a reload and a second browser draw the same and never send the hidden card's render request, and Reset
+with Undo puts the cards back and the arrangement again. `--old-hub` / `--old-manager` check that the arrangement stays
+in the browser, survives a reload and that the edit state says it is kept in this browser only. Light and dark
+screenshots of Overview as it was, the edit state, the arranged result and the edit state with the hidden card at
+1440 × 900, the arranged result and the edit state at 390 × 844, and `results.json`, go to the artifact directory; a
+300-second watchdog ends the run.
+
 ## Sidebar groups (#9071)
 
 ```sh

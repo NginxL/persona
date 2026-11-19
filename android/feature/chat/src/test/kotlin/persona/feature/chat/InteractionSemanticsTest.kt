@@ -82,10 +82,10 @@ class InteractionSemanticsTest {
     @Test fun recordedPlanModeIsShownWithoutConflictingApprovalChoices() {
         var approval: AnswerAction? = null
         show(interaction = recordedPlan("default"), onAnswer = { action, _, _ -> approval = action })
-        rule.onNodeWithText("手动确认", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("默认权限", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("批", useUnmergedTree = true).assertExists().performClick()
         rule.onNodeWithText("批准编辑", useUnmergedTree = true).assertDoesNotExist()
-        rule.onNodeWithText("批准，手动确认", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("批准，默认权限", useUnmergedTree = true).assertDoesNotExist()
         assertEquals(AnswerAction.ApproveStepwise, approval)
         rule.onNodeWithText("打回", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("批准并自动执行", useUnmergedTree = true).assertDoesNotExist()
@@ -95,7 +95,7 @@ class InteractionSemanticsTest {
     @Test fun recordedAutoModeUsesTheGeneralModeNameAndApprovalAction() {
         var approval: AnswerAction? = null
         show(interaction = recordedPlan("auto"), onAnswer = { action, _, _ -> approval = action })
-        rule.onNodeWithText("自动", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("自动审批", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("批", useUnmergedTree = true).assertExists().performClick()
         assertEquals(AnswerAction.ApproveEdits, approval)
         rule.onNodeWithText("批准编辑", useUnmergedTree = true).assertDoesNotExist()
@@ -105,7 +105,7 @@ class InteractionSemanticsTest {
 
     @Test fun recordedBypassShowsOnlyRecordedApproval() {
         show(interaction = recordedPlan("bypassPermissions"))
-        rule.onNodeWithText("全部放行", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("完全访问", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("批", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("批准编辑", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithText("批准，每步确认", useUnmergedTree = true).assertDoesNotExist()

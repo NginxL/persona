@@ -4,9 +4,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.launch
 import persona.core.contracts.Item
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
@@ -36,7 +39,10 @@ internal fun ChatMessageActions(
     onDelete: (MessageTarget) -> Unit,
 ) {
     val resources = LocalResources.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val forwarding = LocalChatForwarding.current
+    val photoReader = LocalChatRowActions.current?.photos
     var forwardDraft by remember(key) { mutableStateOf<ForwardDraft?>(null) }
     val menuTitle = session?.displayTitle ?: stringResource(R.string.chat_screen_untitled)
     MessageMenuSheet(messageMenu, messageMenuWrites(readOnly, session),
@@ -47,7 +53,18 @@ internal fun ChatMessageActions(
         share = shareCardSource(session, LocalPersonaName.current))
     val forwardFrom = forwardDraft
     if (forwardFrom != null && forwarding != null) ForwardSheet(forwardFrom, forwarding,
-        complete = { ForwardMessage.ref(forwardFrom.cut?.let { repository.fullText(key, it) } ?: forwardFrom.raw, forwardFrom.source, resources) },
+        complete = {
+            val raw = forwardFrom.cut?.let { repository.fullText(key, it) } ?: forwardFrom.raw
+            val restored = when {
+                forwardFrom.photos.isEmpty() -> RestoredPhotos()
+                photoReader == null -> RestoredPhotos(lost = forwardFrom.photos.size)
+                else -> forwardedPhotos(context, forwardFrom.photos, photoReader::payload)
+            }
+            ForwardCompletion(ForwardMessage.ref(raw, forwardFrom.source, resources), restored)
+        },
         onDismiss = { forwardDraft = null },
-        onPicked = { target, ref -> deliverForward(target, ref, key, forwarding, resources) })
+        onPicked = { target, completed ->
+            deliverForward(target, completed.ref, key, forwarding, resources, completed.photos,
+                onDuplicate = { handoff -> scope.launch { discardForwardedPhotos(context, handoff) } })
+        })
 }

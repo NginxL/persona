@@ -1,11 +1,18 @@
 package persona.core.designsystem
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -74,6 +81,24 @@ class AgentMarkTest {
         assertEquals(AgentMarkKind.Pi, session("pi", label = "My pi profile").agentMark?.kind)
         assertEquals(AgentMarkKind.Antigravity, Session(sessionId = "s", agent = "agy", launcher = "my-remote-launcher").agentMark?.kind)
         assertEquals(AgentMarkKind.Grok, Session(sessionId = "s", agent = "grok", launcher = "claude").agentMark?.kind)
+    }
+
+    @Test fun decorativeInitialFitsTheSameTileAtMaximumTextSize() {
+        val fontScale = mutableFloatStateOf(1f)
+        rule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.floatValue)) {
+                PersonaTheme { JAgentMark(AgentMarkSpec(null, "studio-runtime", null)) }
+            }
+        }
+        fun initialWidth(): Float {
+            val result = mutableListOf<TextLayoutResult>()
+            val node = rule.onNodeWithText("S", useUnmergedTree = true).fetchSemanticsNode()
+            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(result)
+            return result.single().getBoundingBox(0).width
+        }
+        val normal = initialWidth()
+        rule.runOnIdle { fontScale.floatValue = 2f }
+        assertEquals(normal, initialWidth(), 1f)
     }
 
     @Test fun theClientComesFromAgentSurface() {

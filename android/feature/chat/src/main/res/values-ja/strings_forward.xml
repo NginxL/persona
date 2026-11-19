@@ -28,4 +28,6 @@
     <string name="chat_forward_recent">最近</string>
     <string name="chat_forward_no_match">一致するチャットはありません</string>
     <string name="chat_forward_failed">転送できませんでした：%1$s</string>
+    <string name="chat_forward_photos_lost_one">1 枚の写真を一緒に転送できませんでした</string>
+    <string name="chat_forward_photos_lost_other">%1$d 枚の写真を一緒に転送できませんでした</string>
 </resources>

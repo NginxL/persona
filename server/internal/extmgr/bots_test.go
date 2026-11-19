@@ -166,6 +166,8 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 			reply(map[string]any{"code": 0, "data": map[string]any{"items": items}})
 		case r.Method == "PATCH":
 			reply(map[string]any{"code": 0})
+		case p == "/open-apis/im/v1/message_cot" && r.Method == "POST":
+			reply(map[string]any{"code": 0, "data": map[string]any{"cot_id": fmt.Sprintf("cot_bot%d", n), "message_id": fmt.Sprintf("om_cot_bot%d", n)}})
 		case r.Method == "POST" && strings.HasPrefix(p, "/open-apis/im/v1/messages"):
 			code := 0
 			f.mu.Lock()

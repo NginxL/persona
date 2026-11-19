@@ -696,6 +696,37 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Persona.app/Persona"
         BUNDLE_LOADER: "$(TEST_HOST)"
+  # A separate test-only SwiftUI process for the shared About row's real accessibility tree (#11150).
+  # Neither target is embedded in or linked to Persona; its host has no Hub, route or production dependency.
+  AboutVersionAccessibilityHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: AboutVersionAccessibilityHost
+      - path: PersonaTests/AboutVersionRefractSupport.swift
+      - path: ../android/refract/about/AboutVersionRow.swift
+      - path: Shared/Localization/Localizable.xcstrings
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).about-accessibility-host
+        PRODUCT_NAME: AboutVersionAccessibilityHost
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+  AboutVersionAccessibilityUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AboutVersionAccessibilityUITests
+    dependencies:
+      - target: AboutVersionAccessibilityHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).about-accessibility-uitests
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AboutVersionAccessibilityHost
   # UI tests drive the real app in the simulator against the configured hub (scripts/app/ui-test.sh); not in the
   # default test run, which must work offline.
   PersonaUITests:
@@ -725,6 +756,31 @@ schemes:
       # The tests' expectations and the pixel / layout baselines are the Chinese UI (docs/apple/ios.md「Interface language」).
       language: zh-Hans
       region: CN
+  # Only the app and unit-test bundle: visual evidence never builds PersonaUITests.
+  AboutVersionVisualTests:
+    build:
+      targets:
+        Persona: all
+        PersonaTests: [test]
+    run:
+      config: Debug
+    test:
+      targets: [PersonaTests]
+      language: en
+      region: US
+      environmentVariables:
+        PERSONA_SHOTS: /tmp/persona-agent-11150-scheme-shots
+  AboutVersionAccessibilityHost:
+    build:
+      targets:
+        AboutVersionAccessibilityHost: all
+        AboutVersionAccessibilityUITests: [test]
+    run:
+      config: Debug
+    test:
+      targets: [AboutVersionAccessibilityUITests]
+      language: en
+      region: US
   PersonaWatch:
     build:
       targets:

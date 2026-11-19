@@ -247,7 +247,7 @@ func TestToolSearchRefusalIsRememberedPerLauncherAndModel(t *testing.T) {
 // carry tool search does unless its start turned tool search off in both its environment and its --settings env
 // (always-refuse: whatever its start did), and answers otherwise, a 503 first when 503-first exists. It says it has
 // no background task (tasks names one when that file exists) and keeps what each start had in tool-search.
-const toolSearchCLI = `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
+const toolSearchCLI = fakeCLIAuthStatus + `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 settings=; prev=
 for a in "$@"; do [ "$prev" = --settings ] && settings=$a; prev=$a; done
 off=no
@@ -291,8 +291,8 @@ func toolSearchCLITest(t *testing.T, flags ...string) *cliFixture {
 }
 
 // A turn the endpoint refused for tool search is resent once, unseen, in a new process with every tool loaded (off in
-// its environment and settings), the launcher and model remembered; the same-model and next-model budget stays: a 503
-// after it still gets its own same-model retry (#10365).
+// its environment and settings), the launcher and model remembered. A 503 after that resend is left to the manager's
+// durable scheduler rather than spending another immediate same-model retry (#10365, #10444).
 func TestToolSearchRefusalRetriesOnceWithoutToolSearch(t *testing.T) {
 	for _, then503 := range []bool{false, true} {
 		t.Run(map[bool]string{false: "answers", true: "then a 503"}[then503], func(t *testing.T) {
@@ -305,10 +305,7 @@ func TestToolSearchRefusalRetriesOnceWithoutToolSearch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			users := 2
-			if then503 {
-				users = 3
-			}
+			users := 2 // the original and the tool-search resend; a later 503 waits for manager recovery
 			cliWait(t, "the resend", func() bool { return strings.Count(f.file("user.jsonl"), `"type":"user"`) == users })
 			f.idle(t, id)
 			if got := strings.Split(strings.TrimSpace(f.file("tool-search")), "\n"); !slices.Equal(got, []string{"true no", "false yes"}) {
@@ -318,8 +315,8 @@ func TestToolSearchRefusalRetriesOnceWithoutToolSearch(t *testing.T) {
 			if got := f.file("user.jsonl"); strings.Count(got, "original request") != 1 || strings.Count(got, strings.Trim(string(retry), `"`)) != users-1 {
 				t.Fatalf("the turn was not resent as the retry prompt: %s", got)
 			}
-			if sess := f.session(t, id); sess.TurnError != "" {
-				t.Fatalf("a turn error is left: %q", sess.TurnError)
+			if sess := f.session(t, id); !then503 && sess.TurnError != "" || then503 && !strings.Contains(sess.TurnError, "503") {
+				t.Fatalf("unexpected turn error after tool-search recovery: %q", sess.TurnError)
 			}
 			if p := f.proc(id); p == nil || !p.toolSearch.forceOff {
 				t.Fatalf("the conversation does not run with tool search off: %+v", p)

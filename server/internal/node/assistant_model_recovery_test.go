@@ -193,34 +193,15 @@ func TestRecoveryReturnsToTheConfiguredModelOnTheNextRequest(t *testing.T) {
 	n, sent := recoveryTestNode(t, id, true, false)
 	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
 	n.procs[id] = p
-	if !n.recoverAssistantResult(p, true, "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)", "", assistantRecordKind) {
-		t.Fatal("the quota failure was not recovered")
+	if !n.recoverAssistantResult(p, true, "API Error: safeguards flagged", "", assistantRecordKind) {
+		t.Fatal("safeguards failure not recovered")
 	}
-	// The gateway quota 429 gets one same-model try first (#3788), then the switch.
 	first := waitRecoverySend(t, sent)
-	if first.Model == "primary-model" {
-		p2 := &assistantProc{id: id, agent: "claude", launcher: "claude", model: first}
-		n.mu.Lock()
-		n.procs[id] = p2
-		n.mu.Unlock()
-		waitRecovery(t, "the first attempt to finish", func() bool {
-			n.mu.Lock()
-			defer n.mu.Unlock()
-			r := n.recoveries[id]
-			return r != nil && !r.running
-		})
-		if !n.recoverAssistantResult(p2, true, "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)", "", assistantRecordKind) {
-			t.Fatal("the second quota failure was not recovered")
-		}
-		first = waitRecoverySend(t, sent)
-	}
 	if first.Model != "fallback-model" {
 		t.Fatalf("switched to %q", first.Model)
 	}
 	waitRecovery(t, "the marker", func() bool { r := n.modelRecovery(id); return r != nil && r.To == "fallback-model" })
-	if r := n.modelRecovery(id); r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil {
-		t.Fatalf("quota marker %+v", r)
-	}
+
 	// The fallback answered: the hold starts, as before.
 	fp := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
 	n.mu.Lock()
@@ -294,9 +275,9 @@ func TestDefaultModelRecoveryReturnsAfterProbe(t *testing.T) {
 			st, _ := n.state.get(id)
 			st.Model = requested
 			n.state.put(id, st)
-			p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: requested}}
+			p := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: requested}}
 			n.procs[id] = p
-			const failure = "API Error: 503 no eligible upstream account is currently available"
+			const failure = "API Error: safeguards flagged"
 			if !n.recoverAssistantResult(p, true, failure, "", assistantRecordKind) {
 				t.Fatal("the first default-model failure was not recovered")
 			}
@@ -328,7 +309,7 @@ func TestDefaultModelRecoveryReturnsAfterProbe(t *testing.T) {
 			if st, _ := n.state.get(id); st.ModelRecovery == nil || st.ModelRecovery.From != requested || st.ModelRecovery.ProbeFrom != "primary-model" {
 				t.Fatalf("the default probe identity was not persisted: %+v", st.ModelRecovery)
 			}
-			fp := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
+			fp := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
 			n.mu.Lock()
 			n.procs[id] = fp
 			n.mu.Unlock()
@@ -489,37 +470,21 @@ func TestRecoveryMarkerOnlyForMainAndLeaders(t *testing.T) {
 func TestRecoveryChainExhausted(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
 	models := assistantRecoveryModels
-	n, sent := recoveryTestNode(t, id, true, false)
+	n, _ := recoveryTestNode(t, id, true, false)
 	assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
 		return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}}}, nil // nothing to move to
 	}
 	t.Cleanup(func() { assistantRecoveryModels = models })
 	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
 	n.procs[id] = p
-	const quota = "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)"
-	if !n.recoverAssistantResult(p, true, quota, "", assistantRecordKind) {
-		t.Fatal("not recovered")
-	}
-	if e := waitRecoverySend(t, sent); e.Model != "primary-model" {
-		t.Fatalf("same-model try on %q", e.Model)
-	}
-	waitRecovery(t, "the attempt to finish", func() bool {
-		n.mu.Lock()
-		defer n.mu.Unlock()
-		r := n.recoveries[id]
-		return r != nil && !r.running
-	})
-	if !n.recoverAssistantResult(p, true, quota, "", assistantRecordKind) {
-		t.Fatal("the second failure was not taken")
+	if !n.recoverAssistantResult(p, true, "API Error: safeguards flagged", "", assistantRecordKind) {
+		t.Fatal("safeguards failure not taken")
 	}
 	waitRecovery(t, "the exhausted marker", func() bool { r := n.modelRecovery(id); return r != nil && r.ChainExhausted })
-	r := n.modelRecovery(id)
-	if r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil || r.ResetsAt.UTC().Format("15:04") != "23:59" {
-		t.Fatalf("exhausted marker %+v", r)
-	}
+
 	s := proto.Session{SessionID: id}
 	n.decorateModelRecovery(&s)
-	if s.ModelFallback == nil || !s.ModelFallback.RecoveryExhausted || s.ModelFallback.FallbackModel != "" || s.ModelFallback.RecoveryReset == nil {
+	if s.ModelFallback == nil || !s.ModelFallback.RecoveryExhausted || s.ModelFallback.FallbackModel != "" {
 		t.Fatalf("projection %+v", s.ModelFallback)
 	}
 }
@@ -713,11 +678,13 @@ func TestRecoveryHoldExpiryKeepsStickyFallback(t *testing.T) {
 	if !unavailableKept {
 		t.Fatal("natural expiry cleared the configured model's unavailable record")
 	}
-	if !n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", "", assistantRecordKind) {
-		t.Fatal("the new 429 was not recovered")
+	if n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", "", assistantRecordKind) {
+		t.Fatal("throttling bypassed manager scheduling")
 	}
-	if first := waitRecoverySend(t, sent); first.Model != "fallback-model" {
-		t.Fatalf("the first recovery send used %q, want the sticky fallback without a same-model retry", first.Model)
+	select {
+	case <-sent:
+		t.Fatal("throttling sent an immediate recovery")
+	default:
 	}
 }
 

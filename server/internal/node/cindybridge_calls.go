@@ -30,6 +30,9 @@ func (b *cindyBridge) request(ctx context.Context, method string, params json.Ra
 		OpenElsewhere  bool          `json:"open_elsewhere"`
 	}
 	_ = json.Unmarshal(params, &p)
+	if (method == "session.send" || method == "session.start") && len(p.Images) > 0 {
+		return nil, &rpc.Error{Code: "image_input_unsupported", Message: "Cindy does not support image input"}
+	}
 	ok := map[string]any{"ok": true}
 
 	switch method {

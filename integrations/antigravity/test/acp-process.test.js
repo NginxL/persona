@@ -177,3 +177,62 @@ describe('agy acp process lifecycle', () => {
     })
   }
 })
+
+describe('ACP session recovery', () => {
+  it('ignores every event from a replaced process', () => {
+    const client = new AgyAcpClient()
+    const old = {}
+    client.proc = {}
+    let updates = 0
+    let answers = 0
+    client.on('update', () => updates++)
+    client.pending.set(7, { resolve: () => answers++, reject: () => answers++ })
+    client._onMessage({ method: 'session/update', params: { sessionId: 's1' } }, old)
+    client._onMessage({ id: 7, result: {} }, old)
+    client._onMessage({ id: 7, error: { message: 'stale' } }, old)
+    assert.equal(updates, 0)
+    assert.equal(answers, 0)
+    assert.equal(client.pending.has(7), true)
+    client._onMessage({ id: 7, result: {} }, client.proc)
+    assert.equal(answers, 1)
+  })
+
+  it('resumes a deleted working directory from home', async () => {
+    const client = new AgyAcpClient()
+    client.ensureStarted = async () => {}
+    let request
+    client.call = async (method, params) => { request = { method, params }; return {} }
+    await client.ensureSessionLoaded('s1', '/nonexistent/removed-worktree')
+    assert.equal(request.method, 'session/resume')
+    assert.equal(request.params.cwd, process.env.HOME || '/tmp')
+  })
+
+  for (const message of ['Session not found', 'Invalid session', 'session_not_found', 'invalid_session']) {
+    it(`evicts cached sessions after ${message}`, async () => {
+      const client = new AgyAcpClient()
+      client.ensureStarted = async () => {}
+      client._rawCall = async () => { throw new Error(message) }
+      client.loadedSessions.set('s1', true)
+      await assert.rejects(client.prompt('s1', []), (error) => error.invalidSession === true)
+      assert.equal(client.loadedSessions.has('s1'), false)
+    })
+  }
+
+  it('evicts a cached session when the error code identifies a missing session', async () => {
+    const client = new AgyAcpClient()
+    client.ensureStarted = async () => {}
+    client._rawCall = async () => { throw Object.assign(new Error('Unavailable'), { code: 'SESSION_NOT_FOUND' }) }
+    client.loadedSessions.set('s1', true)
+    await assert.rejects(client.prompt('s1', []), (error) => error.invalidSession === true)
+    assert.equal(client.loadedSessions.has('s1'), false)
+  })
+
+  it('keeps cached sessions on unrelated errors', async () => {
+    const client = new AgyAcpClient()
+    client.ensureStarted = async () => {}
+    client._rawCall = async () => { throw new Error('quota exhausted') }
+    client.loadedSessions.set('s1', true)
+    await assert.rejects(client.prompt('s1', []), /quota exhausted/)
+    assert.equal(client.loadedSessions.has('s1'), true)
+  })
+})

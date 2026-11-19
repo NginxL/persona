@@ -346,6 +346,10 @@ type Agent struct {
 	// PaneID is the pane as a PaneRef string (String): a herdr pane id as is ("@<session>:<id>" for a named herdr
 	// session's, herdr.QualifyID).
 	PaneID string
+	// ParentPaneID is the pane that started this one as a PaneRef string (String), "" when the host says it belongs to
+	// none. A host that knows its panes' parent (herdr-core's terminal.parent) reports it: the node draws the session
+	// under its parent's while both are listed (linkHerdrChildren).
+	ParentPaneID string
 	// TabID, WorkspaceID: the host's slot and space ids.
 	TabID       string
 	WorkspaceID string

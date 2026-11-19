@@ -82,6 +82,40 @@ final class FakeNode: @unchecked Sendable {
     }
 }
 
+/// Raw frames from the phone, recorded independently of ScreenLinkMessage's codec so a new wire type can be tested
+/// before that codec implements it.
+private final class RawNodeLog: @unchecked Sendable {
+    private let end: PipeEnd
+    private let lock = NSLock()
+    private var seen: [(type: UInt8, body: Data)] = []
+
+    init(_ end: PipeEnd) {
+        self.end = end
+        Task { await self.read() }
+    }
+
+    private func read() async {
+        var parser = ScreenVideoParser()
+        while let chunk = try? await end.receive() {
+            guard let raws = try? parser.push(chunk) else { return }
+            lock.withLock { for raw in raws { seen.append((raw.type, raw.body)) } }
+        }
+    }
+
+    func count(type: UInt8, body: Data) -> Int {
+        lock.withLock { seen.filter { $0.type == type && $0.body == body }.count }
+    }
+
+    func wait(type: UInt8, body: Data, count wanted: Int, timeout: Double = 1) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if count(type: type, body: body) >= wanted { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return count(type: type, body: body) >= wanted
+    }
+}
+
 final class ScreenLinkSessionTests: XCTestCase {
     private let paths = ScreenLinkPaths(token: "tok", cert: "pin", port: 4000, candidates: [.init(kind: "lan", addr: "192.0.2.10", prefix: 24)])
 
@@ -167,6 +201,38 @@ final class ScreenLinkSessionTests: XCTestCase {
         let got5 = try await rfb.receive()
         XCTAssertEqual(got5, Data("bye".utf8))
         do { _ = try await rfb.receive(); XCTFail("past the close") } catch {}
+    }
+
+    /// Every received close, including one for an already ended channel, gets close_ack type 14 with the same channel
+    /// and final offset. The ordinary data ack at that offset is a different frame and cannot confirm the close.
+    func testCloseAndRepeatedCloseAreConfirmedAtTheFinalOffset() async throws {
+        let (s, _) = try await open()
+        let (phoneV, nodeV) = PipeEnd.pair()
+        let vnode = FakeNode(nodeV)
+        try await vnode.say(.resumed([ScreenLinkOffset(2, 0)]))
+        let video = try await s.attachVideo(phoneV)
+        let log = RawNodeLog(nodeV)
+        defer { nodeV.close() }
+
+        let bytes = ScreenVideoWire.frame(4, body: Data("bye".utf8))
+        let final = UInt64(bytes.count)
+        try await vnode.say(.data(channel: 2, offset: 0, bytes: bytes))
+        try await vnode.say(.close(channel: 2, offset: final))
+        let received = try await video.receive()
+        XCTAssertEqual(received, bytes)
+        do { _ = try await video.receive(); XCTFail("past the close") } catch {}
+        let body = Data(ScreenLinkMessage.close(channel: 2, offset: final).framed().dropFirst(5))
+        let first = await log.wait(type: 14, body: body, count: 1)
+        XCTAssertTrue(first, "the phone did not confirm close with close_ack(channel: 2, final offset: \(final))")
+        guard first else { return }
+        XCTAssertEqual(log.count(type: 14, body: body), 1)
+        XCTAssertEqual(log.count(type: 2, body: body), 1, "the final-data ack remains a separate, ordinary ack")
+
+        try await vnode.say(.close(channel: 2, offset: final))
+        do { _ = try await video.receive(); XCTFail("a repeated close reopened the channel") } catch {}
+        let second = await log.wait(type: 14, body: body, count: 2)
+        XCTAssertTrue(second, "a repeated close for an ended channel was not confirmed again")
+        XCTAssertEqual(log.count(type: 14, body: body), 2)
     }
 
     func testTheWindowHoldsSendsUntilTheNodeAcknowledges() async throws {

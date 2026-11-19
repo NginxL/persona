@@ -122,6 +122,7 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 - Run release privacy preflight with the actual selected build config (#1245): a scan without `PERSONA_CONFIG` can miss account-specific inputs. Generic provisioning profile labels already published in the default mapping or deployment fixture are not private merely because an account selects them. Classify only those exact literal labels under `app_store.provisioning_profiles`, reading the already published `origin/main` definitions rather than allowing a working-tree or unpublished commit to approve its own new label; keep custom/near-match labels, values under another key and explicit `private-words.txt` entries protected. Parse historical fixture data without executing it, and never work around the failure by dropping signing overrides, renaming registered resources or disabling the source/bundle privacy gates. Compound release commands use `set -euo pipefail` and stop on a rejected preflight before commit, push, archive or upload.
 
+- Signing a raw release binary does not update an archive made before signing (#10128). Recompress every signed binary before calculating `SHA256SUMS` and the manifest. Regression tests must decompress the artifact selected for upload and compare it with the signed raw bytes; command ordering and matching manifest hashes alone can still publish the pre-signing executable.
 - Separate code-signature verification from simulator entitlement context (#6192). An unsigned run had Keychain and saved-pairing failures; the final ad-hoc signed run passed those unchanged assertions. However, its embedded signature and ordinary `.xcent` were empty while `*-Simulated.xcent` contained three configured Keychain access groups. Check both and verify the actual signature; do not infer effective simulator entitlements solely from `codesign -d --entitlements`, or treat a signing difference as a proven root cause. Keep failed evidence, preserve persistence assertions, and do not extend simulator results to production Keychain access-group continuity or change registered profiles.
 - GUI send acceptance needs run-unique messages and appearance-scoped synthetic histories (#6192). Reusing the same old-hub conversation both scrolled the original seed outside the visible tail and left same-name replies that could falsely satisfy a later send assertion. Use fresh synthetic regular/main conversations for each appearance, give sends a unique suffix and retain the exact suffix across the cold relaunch. Keep the no-pairing-reinjection assertion, all history/main checks and previous failure evidence; do not delete old messages or weaken the expected reply.
 - Mirrored transport bytes must be compared from the same envelope (#6192). Calling a computed recording receipt dictionary twice performs two JSON encodings whose object-key ordering may differ. Capture one dictionary, then compare its canonical and compatibility values; separately test decoding and invalid-canonical precedence. Do not change production serialization or relax the same-envelope byte equality assertion.
@@ -1089,9 +1090,11 @@ The Mac-only `test_hub_restart_mac.py` fixture used an empty, non-executable `pe
 
 Use an executable fixture that logs calls and returns the documented result: 0 for a successful switch, 3 for no edge to switch. Assert that success avoids launchd and that the no-edge case restarts only the hub agent, skipping node agents. Run this Mac-only suite on macOS; Linux CI skips it: `cd scripts/test && python3 -B -m unittest -v test_hub_restart_mac`.
 
-## macOS awk stops on bytes that are not UTF-8 (2026-11-10, #2722)
+## macOS awk and sed stop on bytes that are not UTF-8 (2026-11-10, #2722; #11250)
 
 In a UTF-8 locale, `/usr/bin/awk` on macOS (version 20200816) stops at the first invalid byte sequence with `towc: multibyte conversion failure`, prints the record's raw bytes and exits 2; gawk and mawk on Linux read on, so CI never sees it. `install.sh` read every launchd file with awk, and vendors often ship binary property lists: each printed its bytes, and the Python tests reading the script's output with `text=True` crashed with `UnicodeDecodeError`. An awk that reads files it did not write runs with `LC_ALL=C`; plain substring matches mean the same in bytes. The Mac in hand may have no binary plist at all: the regression test writes one with `plistlib` (`FMT_BINARY`) into its own home.
+
+macOS sed (`sed 's/^/  /'`) stops the same way, with `sed: RE error: illegal byte sequence` and nothing after the bad line: check-fast's summary showed no log tail for a failed check whose output held such a byte (#11250). GNU sed reads on, and macOS `grep -q` still finds a match on another line. A sed over a command's output runs with `LC_ALL=C` too.
 
 ## mawk holds a pipe's lines until 4 KiB or EOF (2026-11-19, #11017)
 
@@ -1268,13 +1271,35 @@ that open with a TLS record (first byte `0x16`) and replays that byte before for
   promotes `WriteTo`, which `io.Copy` uses instead of the overriding `Read`, so the replayed byte is silently dropped
   and every forwarded TLS handshake fails.
 
-- A fresh test repository's first branch is whatever the machine's `init.defaultBranch` says (#11017): `main` on one
-  machine, `master` on another. A test that then runs `git branch main` or `git checkout -b master` fails only where
-  the setting matches. Name the first branch (`git init --initial-branch=<name>`, or `git branch -M` after the first
-  commit), and run the suite with `GIT_CONFIG_GLOBAL` pointing at a file that sets `init.defaultBranch` to `main`, then
-  to `master`.
+## A test repository's first branch follows the machine's `init.defaultBranch` (2026-11-19, #11017)
 
-- A test that waits for a signal to end a command must give the command far longer to live than the wait (#11017). A
-  command that sleeps 20 s under a 20 s wait passes when the signal is lost and fails on a slow machine when it was
-  not, so the result says nothing. Let it sleep ten times the wait, keep the wait generous, and on a timeout say which
-  side stalled: the command never got the signal, or it got it and its parent had not exited yet.
+A fresh test repository's first branch is whatever the machine's `init.defaultBranch` says: `main` on one machine,
+`master` on another. A test that then runs `git branch main` or `git checkout -b master` fails only where the setting
+matches. Name the first branch (`git init --initial-branch=<name>`, or `git branch -M` after the first commit), and run
+the suite with `GIT_CONFIG_GLOBAL` pointing at a file that sets `init.defaultBranch` to `main`, then to `master`.
+
+## Signal tests: a command that outlives the wait, a runner that ignores the signal (2026-11-19, #11017, #11026)
+
+- A test that waits for a signal to end a command must give the command far longer to live than the wait (#11017).
+  `test_heavy_slot.py`'s command slept 20 s under a 20 s wait. A lost signal could not pass (the command then exits
+  with its own status and catches nothing, which the test checks), but a timeout said nothing: the command never got
+  the signal and was still sleeping, or it got it and its parent had not exited yet on a slow machine. Let it sleep ten
+  times the wait, keep the wait generous, and on a timeout say which side stalled.
+
+- A signal test passes alone and hangs when its runner started it with that signal ignored (#11026). A non-interactive
+  bash starts its background jobs with SIGINT and SIGQUIT ignored, and `nohup` or a detached shell ignores SIGHUP; a
+  signal ignored when a shell starts can never be trapped there, so the script under test never sees it. GNU `timeout`
+  (coreutils 9.12 measured) passes an ignored SIGINT and SIGHUP on to its command and resets only SIGTERM, so a check
+  run under it keeps them ignored. `test_check_fast.py`'s SIGINT and SIGHUP tests timed out when check-fast ran that
+  suite (each check is a background job under `timeout`; 4 of 6) and passed on their own. They now start check-fast
+  with SIGINT, SIGHUP and SIGTERM at their defaults (`preexec_fn`, as a terminal would), and one test runs them with the
+  runner ignoring the signals (#11250). Do the same in a new signal test before blaming the change.
+
+## A script started with its stderr closed (2026-11-20, #11250)
+
+A caller can close a script's stderr (`2>&-`, some service managers). Every later redirection that copies it (`4>&2`)
+then fails, and whatever the script runs that way does not run: check-fast's jobs all ended "no status". Worse, the
+next file or pipe the script opens takes the free fd 2, and stderr writes land in it: macOS bash 3.2 leaves a process
+substitution's pipe there (`lsof` shows fd 2 as a PIPE after `done < <(…)`), which hid the failure in a run whose plan
+had used one. A script that copies stderr checks it at the start (`: 9>&2 || exec 2>/dev/null`) and goes on without
+what it would have shown there.

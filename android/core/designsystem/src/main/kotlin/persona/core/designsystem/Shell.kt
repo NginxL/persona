@@ -91,6 +91,11 @@ private fun MessageItemState(meta: MessageItemMeta) {
     }
 }
 
+/** The one avatar geometry shared by [MessageItem] and the picture loader its caller provides. */
+object MessageItemTokens {
+    fun avatarSize(prominent: Boolean) = if (prominent) 42.dp else 38.dp
+}
+
 /**
  * An inbox item. Items that need a reply ([status] NeedsYou) are cards of their own in glass and strips with
  * an amber holder on the board; the rest are rows of a group. [extra] holds the draft and its actions. [avatar] is the
@@ -150,7 +155,7 @@ fun MessageItem(
                 JCheckMark(androidx.compose.ui.state.ToggleableState(checked), Modifier.padding(top = Tokens.Space.s))
                 Spacer(Modifier.width(Tokens.Space.m))
             }
-            JAvatar(group ?: sender, size = if (prominent) 42.dp else 38.dp, icon = avatarIcon, badge = badge, badgeColor = badgeColor, image = avatar)
+            JAvatar(group ?: sender, size = MessageItemTokens.avatarSize(prominent), icon = avatarIcon, badge = badge, badgeColor = badgeColor, image = avatar)
             Spacer(Modifier.width(12.dp.dense))
             Column(Modifier.weight(1f)) {
                 val followed = meta != null

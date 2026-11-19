@@ -13,6 +13,30 @@ import UIKit
         #expect(AboutVersionSnapshot(shortVersion: "", buildNumber: "").displayVersion == " ()")
     }
 
+    @Test func theNativeMappingUsesTheProductionLocalizedControl() throws {
+        let mapping = try String(contentsOf: nativeMapping, encoding: .utf8)
+        #expect(mapping.contains("let title: String"))
+        #expect(mapping.contains("title == \"settings.about.version\" ? \"Version\""))
+        #expect(mapping.contains("LabeledContent(title == \"settings.about.version\" ? \"Version\""))
+        #expect(mapping.contains("protocol RefractModel {}"))
+    }
+
+    @Test func theUnchangedProductionPageIsNotRewritten() throws {
+        let source = try String(contentsOf: productionAbout, encoding: .utf8)
+        #expect(source.contains(#"Section { LabeledContent("Version", value: version) }"#))
+        #expect(source.contains(#"Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")"#))
+        #expect(source.contains(#"Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")"#))
+        #expect(!source.contains("AboutVersionRow("))
+    }
+
+    private let productionAbout = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "Persona/Views/Settings/SettingsNavigation.swift")
+    private let nativeMapping = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().appending(path: "AboutVersionRefractSupport.swift")
+}
+
+@MainActor @Suite(.serialized) struct AboutVersionCompactVisualTests {
     nonisolated struct ComparisonCase: Sendable {
         let language: String
         let scheme: ColorScheme
@@ -39,154 +63,232 @@ import UIKit
         let (language, scheme, textSize) = (testCase.language, testCase.scheme, testCase.textSize)
         let snapshot = AboutVersionSnapshot(shortVersion: "1.42.0", buildNumber: "37")
         let stem = "\(language)-\(scheme)-\(textSize == .large ? "standard" : "xxxlarge")"
-        let (native, shared) = try await compare(snapshot: snapshot, language: language,
-                                                 scheme: scheme, textSize: textSize, stem: stem)
-        #expect(shared.png == native.png, "Shared/native pixels differ: \(language), \(scheme), \(textSize)")
-        #expect(shared.height >= Theme.Size.tapTarget && native.height >= Theme.Size.tapTarget)
-        #expect(shared.size == native.size)
-        #expect(shared.nonBackgroundPixelCount > 32)
+        let pair = try await AboutVersionVisualHost.capture(sizeClass: .compact, stem: stem,
+                                                            language: language, scheme: scheme, textSize: textSize)
+        try pair.expectEqual(nonBackgroundPixels: 32)
     }
 
     @Test func theSharedRowMatchesTheActualAboutPageVersionCell() async throws {
         let snapshot = AboutVersionSnapshot(bundle: .main)
-        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        window.rootViewController = UIHostingController(rootView: SettingsForm {
-            Section { SettingsAboutPage() }
-            Section { AboutVersionRow(model: ImmutableAboutVersionModel(snapshot: snapshot)) }
-        }
-            .environment(\.locale, Locale(identifier: "en"))
-            .environment(\.colorScheme, ColorScheme.light)
-            .environment(\.dynamicTypeSize, DynamicTypeSize.large)
-            .environment(AppModel.shared))
-        window.makeKeyAndVisible()
-        defer { window.isHidden = true }
-        for _ in 0..<12 {
-            window.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(25))
-        }
-        let cells = allSubviews(of: window).filter {
-            NSStringFromClass(type(of: $0)).contains("ListCollectionViewCell") && !$0.isHidden && $0.alpha > 0
-        }.sorted { $0.frame.minY < $1.frame.minY }
-        #expect(cells.count >= 2)
-        let production = try capture(cells[0], in: window)
-        let shared = try capture(cells[cells.count - 1], in: window)
-        #expect(shared.png == production.png)
         #expect(snapshot.displayVersion.contains(" ("))
         #expect(!snapshot.displayVersion.hasSuffix(" ()"))
-        try save(native: production.png, shared: shared.png, stem: "actual-about-page-en-light-standard")
+        let pair = try await AboutVersionVisualHost.captureProductionAndShared(sizeClass: .compact,
+                                                                               stem: "actual-about-page-en-light-standard",
+                                                                               snapshot: snapshot)
+        try pair.expectEqual(nonBackgroundPixels: 32)
+    }
+}
+
+@MainActor @Suite(.serialized) struct AboutVersionRegularVisualTests {
+    @Test func theSharedRowMatchesTheNativeControlAtRegularWidth() async throws {
+        let snapshot = AboutVersionSnapshot(shortVersion: "1.42.0", buildNumber: "37")
+        let pair = try await AboutVersionVisualHost.capture(sizeClass: .regular,
+                                                            stem: "regular-width-en-light-standard",
+                                                            language: "en", scheme: .light, textSize: .large)
+        try pair.expectEqual(nonBackgroundPixels: 32)
+    }
+}
+
+@MainActor
+private enum AboutVersionVisualHost {
+    fileprivate struct Pair {
+        let native: Drawing
+        let shared: Drawing
+
+        func expectEqual(nonBackgroundPixels: Int) throws {
+            if native.pixels != shared.pixels {
+                let difference = native.pixelDifference(shared.pixels, width: native.pixelWidth)
+                print("ABOUT_PIXEL_DIFF \(difference)")
+            }
+            #expect(native.pixels == shared.pixels, "native/shared decoded cell pixels differ")
+            #expect(native.scale == shared.scale && native.pixelWidth == shared.pixelWidth)
+            #expect(native.nonBackgroundPixelCount > nonBackgroundPixels)
+            #expect(shared.nonBackgroundPixelCount > nonBackgroundPixels)
+            #expect(native.height >= Theme.Size.tapTarget && shared.height >= Theme.Size.tapTarget)
+        }
     }
 
-    @Test func theNativeMappingUsesTheProductionLocalizedControl() throws {
-        let mapping = try String(contentsOf: nativeMapping, encoding: .utf8)
-        #expect(mapping.contains("let title: String"))
-        #expect(mapping.contains("title == \"settings.about.version\" ? \"Version\""))
-        #expect(mapping.contains("LabeledContent(title == \"settings.about.version\" ? \"Version\""))
-        #expect(mapping.contains("protocol RefractModel {}"))
-        #expect(expectedVersionTitle("en") == "Version")
-        #expect(expectedVersionTitle("zh-Hans") == "版本")
-        #expect(expectedVersionTitle("ja") == "バージョン")
-        // The test host does not expose this List cell as a UIKit accessibility element.
-        // This source-contract check is not a VoiceOver or spoken-label/value verification.
-    }
-
-    @Test func theUnchangedProductionPageIsNotRewritten() throws {
-        let source = try String(contentsOf: productionAbout, encoding: .utf8)
-        #expect(source.contains(#"Section { LabeledContent("Version", value: version) }"#))
-        #expect(source.contains(#"Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")"#))
-        #expect(source.contains(#"Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")"#))
-        #expect(!source.contains("AboutVersionRow("))
-    }
-
-    private let productionAbout = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "Persona/Views/Settings/SettingsNavigation.swift")
-    private let nativeMapping = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().appending(path: "AboutVersionRefractSupport.swift")
-
-    private struct Drawing {
+    fileprivate struct Drawing {
         let png: Data
-        let size: CGSize
+        let pixels: [UInt8]
+        let scale: CGFloat
+        let pixelWidth: Int
         let height: CGFloat
         let nonBackgroundPixelCount: Int
+
+        func pixelDifference(_ other: [UInt8], width: Int) -> String {
+            guard pixels.count == other.count, width > 0 else { return "different buffer sizes" }
+            var first = -1, last = -1, count = 0, minX = width, maxX = -1, minY = Int.max, maxY = -1
+            for i in stride(from: 0, to: pixels.count, by: 4) where pixels[i] != other[i] ||
+                pixels[i + 1] != other[i + 1] || pixels[i + 2] != other[i + 2] || pixels[i + 3] != other[i + 3] {
+                if first < 0 { first = i / 4 }
+                last = i / 4
+                let x = (i / 4) % width, y = (i / 4) / width
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                count += 1
+            }
+            return "differentPixels=\(count) first=\(first) last=\(last) bbox=(\(minX),\(minY))-(\(maxX),\(maxY))"
+        }
     }
 
-    private func compare(snapshot: AboutVersionSnapshot, language: String, scheme: ColorScheme,
-                         textSize: DynamicTypeSize, stem: String) async throws -> (Drawing, Drawing) {
-        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        window.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
-        window.rootViewController = UIHostingController(rootView: SettingsForm {
+    fileprivate static func capture(sizeClass: UIUserInterfaceSizeClass, stem: String,
+                                    language: String, scheme: ColorScheme, textSize: DynamicTypeSize) async throws -> Pair {
+        let snapshot = AboutVersionSnapshot(shortVersion: "1.42.0", buildNumber: "37")
+        let window = try makeWindow(sizeClass: sizeClass)
+        let native = UIHostingController(rootView: SettingsForm {
             Section { LabeledContent("Version", value: snapshot.displayVersion) }
+        }
+            .environment(\.locale, Locale(identifier: language))
+            .environment(\.colorScheme, scheme)
+            .environment(\.dynamicTypeSize, textSize))
+        let shared = UIHostingController(rootView: SettingsForm {
             Section { AboutVersionRow(model: ImmutableAboutVersionModel(snapshot: snapshot)) }
         }
             .environment(\.locale, Locale(identifier: language))
             .environment(\.colorScheme, scheme)
             .environment(\.dynamicTypeSize, textSize))
+        return try await render(window: window, native: native, shared: shared, stem: stem)
+    }
+
+    fileprivate static func captureProductionAndShared(sizeClass: UIUserInterfaceSizeClass, stem: String,
+                                                       snapshot: AboutVersionSnapshot) async throws -> Pair {
+        let window = try makeWindow(sizeClass: sizeClass)
+        let production = UIHostingController(rootView: SettingsAboutPage()
+            .environment(\.locale, Locale(identifier: "en"))
+            .environment(\.colorScheme, ColorScheme.light)
+            .environment(\.dynamicTypeSize, DynamicTypeSize.large)
+            .environment(AppModel.shared))
+        let shared = UIHostingController(rootView: SettingsForm {
+            Section { AboutVersionRow(model: ImmutableAboutVersionModel(snapshot: snapshot)) }
+        }
+            .environment(\.locale, Locale(identifier: "en"))
+            .environment(\.colorScheme, ColorScheme.light)
+            .environment(\.dynamicTypeSize, DynamicTypeSize.large))
+        return try await render(window: window, native: production, shared: shared, stem: stem)
+    }
+
+    private static func makeWindow(sizeClass: UIUserInterfaceSizeClass) throws -> UIWindow {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first {
+            $0.activationState == .foregroundActive && $0.traitCollection.horizontalSizeClass == sizeClass
+        }, "No foreground scene with the suite's real size class")
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
         window.makeKeyAndVisible()
+        #expect(window.windowScene === scene)
+        #expect(window.traitCollection.horizontalSizeClass == sizeClass)
+        #expect(window.frame == scene.screen.bounds)
+        #expect(window.bounds.size == scene.screen.bounds.size)
+        return window
+    }
+
+    private static func render(window: UIWindow, native: UIViewController, shared: UIViewController,
+                               stem: String) async throws -> Pair {
+        let container = UIViewController()
+        for (index, child) in [native, shared].enumerated() {
+            container.addChild(child)
+            child.view.frame = CGRect(x: 0, y: CGFloat(index) * 500, width: window.bounds.width, height: 500)
+            child.view.autoresizingMask = [.flexibleWidth]
+            container.view.addSubview(child.view)
+            child.didMove(toParent: container)
+        }
+        window.rootViewController = container
         defer { window.isHidden = true }
-        for _ in 0..<12 {
+        for _ in 0..<24 {
             window.layoutIfNeeded()
             try await Task.sleep(for: .milliseconds(25))
         }
-        let cells = allSubviews(of: window).filter {
-            NSStringFromClass(type(of: $0)).contains("ListCollectionViewCell") && !$0.isHidden && $0.alpha > 0
-        }.sorted { $0.frame.minY < $1.frame.minY }
-        #expect(cells.count == 2)
-        let native = try capture(cells[0], in: window)
-        let shared = try capture(cells[1], in: window)
-        try save(native: native.png, shared: shared.png, stem: stem)
-        return (native, shared)
+        let nativeCell = try #require(versionCell(in: native.view))
+        let sharedCell = try #require(versionCell(in: shared.view))
+        let windowPNG = try windowFrame(window)
+        let nativeDrawing = try crop(nativeCell, of: window, windowPNG: windowPNG)
+        let sharedDrawing = try crop(sharedCell, of: window, windowPNG: windowPNG)
+        try save(window: window, native: nativeDrawing.png, shared: sharedDrawing.png, stem: stem)
+        return Pair(native: nativeDrawing, shared: sharedDrawing)
     }
 
-    private func capture(_ row: UIView, in window: UIWindow) throws -> Drawing {
-        let parent = try #require(row.superview)
-        let bounds = parent.bounds
-        #expect(bounds.width > 0 && bounds.height >= Theme.Size.tapTarget)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = window.screen.scale
-        let image = UIGraphicsImageRenderer(bounds: bounds, format: format).image { _ in
-            #expect(parent.drawHierarchy(in: bounds, afterScreenUpdates: true))
-        }
-        return try Drawing(png: #require(image.pngData()), size: bounds.size, height: bounds.height,
-                           nonBackgroundPixelCount: try nonBackgroundPixels(image))
+    private static func visibleCells(in host: UIView) -> [UIView] {
+        allSubviews(of: host).filter {
+            NSStringFromClass(type(of: $0)).contains("ListCollectionViewCell") && !$0.isHidden && $0.alpha == 1 &&
+                $0.bounds.width > 0 && $0.bounds.height >= Theme.Size.tapTarget &&
+                $0.convert($0.bounds, to: host).intersects(host.bounds)
+        }.sorted { $0.convert($0.bounds, to: host).minY < $1.convert($0.bounds, to: host).minY }
     }
 
-    private func nonBackgroundPixels(_ image: UIImage) throws -> Int {
-        let cg = try #require(image.cgImage)
-        var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
-        let context = try #require(CGContext(data: &pixels, width: cg.width, height: cg.height,
-                                            bitsPerComponent: 8, bytesPerRow: cg.width * 4,
-                                            space: CGColorSpaceCreateDeviceRGB(),
-                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-        return stride(from: 0, to: pixels.count, by: 4).reduce(into: 0) { count, offset in
+    private static func versionCell(in host: UIView) -> UIView? {
+        visibleCells(in: host).first
+    }
+
+    private static func crop(_ cell: UIView, of window: UIWindow, windowPNG: Data? = nil) throws -> Drawing {
+        let windowPNG = try windowPNG ?? windowFrame(window)
+        let frame = cell.convert(cell.bounds, to: window)
+        #expect(window.bounds.contains(frame))
+        let image = try #require(UIImage(data: windowPNG)?.cgImage)
+        let scale = CGFloat(image.width) / window.bounds.width
+        let crop = frame.applying(CGAffineTransform(scaleX: scale, y: scale))
+        let cropped = try #require(image.cropping(to: crop))
+        let pixels = try rgbaPixels(cropped)
+        let size = CGSize(width: cropped.width, height: cropped.height)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let png = try #require(renderer.image { context in
+            context.cgContext.translateBy(x: 0, y: size.height)
+            context.cgContext.scaleBy(x: 1, y: -1)
+            context.cgContext.draw(cropped, in: CGRect(origin: .zero, size: size))
+        }.pngData())
+        let colored = stride(from: 0, to: pixels.count, by: 4).reduce(into: 0) { count, offset in
             if pixels[offset + 3] > 0, pixels[offset] != pixels[offset + 1] || pixels[offset + 1] != pixels[offset + 2] {
                 count += 1
             }
         }
+        return Drawing(png: png, pixels: pixels, scale: scale, pixelWidth: cropped.width,
+                       height: cell.bounds.height,
+                       nonBackgroundPixelCount: colored)
     }
 
-    private func allSubviews(of view: UIView) -> [UIView] {
-        view.subviews.flatMap { [$0] + allSubviews(of: $0) }
-    }
-
-    private func expectedVersionTitle(_ language: String) -> String {
-        switch language {
-        case "en": "Version"
-        case "zh-Hans": "版本"
-        case "ja": "バージョン"
-        default: "Version"
+    private static func windowFrame(_ window: UIWindow) throws -> Data {
+        window.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window.screen.scale
+        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            #expect(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
         }
+        return try #require(image.pngData())
     }
 
-    private func save(native: Data, shared: Data, stem: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] else { return }
-        let root = URL(fileURLWithPath: directory, isDirectory: true)
+    private static func rgbaPixels(_ image: CGImage) throws -> [UInt8] {
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try #require(CGContext(data: &pixels, width: image.width, height: image.height,
+                                            bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                            space: CGColorSpaceCreateDeviceRGB(),
+                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return pixels
+    }
+
+    private static func saveDiagnostic(window: UIWindow, stem: String) throws {
+        let root = try outputDirectory(stem: "diagnostic-" + stem)
+        try windowFrame(window).write(to: root.appendingPathComponent("window-diagnostic-\(stem).png"))
+        let description = allSubviews(of: window).map { view in
+            let label = (view as? UILabel)?.text ?? ""
+            return "\(NSStringFromClass(type(of: view))) frame=\(view.frame) bounds=\(view.bounds) hidden=\(view.isHidden) alpha=\(view.alpha) label=\(label)"
+        }.joined(separator: "\n")
+        try description.write(to: root.appendingPathComponent("hierarchy-\(stem).txt"), atomically: true, encoding: .utf8)
+    }
+
+    private static func save(window: UIWindow, native: Data, shared: Data, stem: String) throws {
+        let root = try outputDirectory(stem: stem)
+        try windowFrame(window).write(to: root.appendingPathComponent("window.png"))
+        try native.write(to: root.appendingPathComponent("native.png"))
+        try shared.write(to: root.appendingPathComponent("shared.png"))
+    }
+
+    private static func outputDirectory(stem: String) throws -> URL {
+        let directory = try #require(ProcessInfo.processInfo.environment["PERSONA_SHOTS"])
+        let root = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(stem, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try native.write(to: root.appendingPathComponent("native-\(stem).png"))
-        try shared.write(to: root.appendingPathComponent("shared-\(stem).png"))
+        return root
+    }
+
+    private static func allSubviews(of view: UIView) -> [UIView] {
+        view.subviews.flatMap { [$0] + allSubviews(of: $0) }
     }
 }

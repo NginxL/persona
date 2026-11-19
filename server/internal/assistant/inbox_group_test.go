@@ -151,7 +151,7 @@ func newGroupModel(t *testing.T, replies ...string) (*groupModel, *ai.Client) {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		reply := `{"handle":false,"reason":"示例"}`
 		stop := ""
-		if strings.Contains(in.System, "归到「事件」里") {
+		if strings.Contains(in.System, `"assign"`) && strings.Contains(in.System, "messages_around") {
 			m.mu.Lock()
 			c := capturedCall{System: in.System}
 			if len(in.Messages) > 0 {

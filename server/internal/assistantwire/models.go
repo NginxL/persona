@@ -37,7 +37,7 @@ type ConfiguredLauncher struct {
 const (
 	DeviceLaunchersZshrc      = "launchers.zshrc"       // {} → {aliases: [{alias, env, args, command, file}]}: the claude aliases of ~/.zshrc, ~/.bashrc and ~/.bash_aliases with their env (keys too)
 	DeviceLaunchersManaged    = "launchers.managed"     // {launchers: [proto.ManagedLauncher]} → {ok}: with their keys
-	DeviceLaunchersModels     = "launchers.models"      // {name, refresh, configured?, agent_type?} → proto.LauncherModels
+	DeviceLaunchersModels     = "launchers.models"      // {name, refresh, configured?, agent_type?, host?} → proto.LauncherModels
 	DeviceLaunchersModelCheck = "launchers.model.check" // {name, model, configured?} → {agent}
 	DeviceLaunchersShow       = "launchers.show"        // {name} → {definition}
 	DeviceLaunchersCheck      = "launchers.check"       // {name} → proto.LauncherCheck

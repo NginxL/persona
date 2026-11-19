@@ -885,21 +885,27 @@ func TestNodeSessions(t *testing.T) {
 // Keep it in the existing node_model JSON through a real write/read cycle; no schema migration is involved.
 func TestNodeSessionOriginRoundTrip(t *testing.T) {
 	d, ctx := open(t), context.Background()
-	if err := d.PutNodeSession(ctx, "server", "inbox-recovery", NodeSession{Launcher: "claude", Cwd: "/x", Origin: "inbox"}); err != nil {
+	if err := d.PutNodeSession(ctx, "server", "inbox-recovery", NodeSession{Launcher: "claude", Cwd: "/x", Origin: "inbox", OriginKnown: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.PutNodeSession(ctx, "server", "ordinary", NodeSession{Launcher: "claude", Cwd: "/x"}); err != nil {
+	if err := d.PutNodeSession(ctx, "server", "ordinary", NodeSession{Launcher: "claude", Cwd: "/x", OriginKnown: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutNodeSession(ctx, "server", "legacy", NodeSession{Launcher: "claude", Cwd: "/x"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := d.NodeSessions(ctx, "server")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["inbox-recovery"].Origin != "inbox" {
-		t.Fatalf("reloaded Inbox origin=%q, want inbox", got["inbox-recovery"].Origin)
+	if got["inbox-recovery"].Origin != "inbox" || !got["inbox-recovery"].OriginKnown {
+		t.Fatalf("reloaded Inbox origin decision=%+v, want known inbox", got["inbox-recovery"])
 	}
-	if got["ordinary"].Origin != "" {
-		t.Fatalf("ordinary session unexpectedly gained origin %q", got["ordinary"].Origin)
+	if got["ordinary"].Origin != "" || !got["ordinary"].OriginKnown {
+		t.Fatalf("reloaded ordinary origin decision=%+v, want explicitly known", got["ordinary"])
+	}
+	if got["legacy"].OriginKnown {
+		t.Fatal("pre-upgrade record without an origin decision became known")
 	}
 }
 

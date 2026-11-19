@@ -21,7 +21,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -40,11 +39,39 @@ type Client struct {
 // New is a client of the herdr-core server this user's hc would talk to.
 func New() *Client { return &Client{Socket: SocketPath()} }
 
-// SocketPath is where herdr-core listens, by hc's own rules (paths.rs): $HC_SOCKET, else `socket` in
+// SocketPath is where herdr-core listens. On Windows that is a named pipe, \\.\pipe\herdr-core-<user>-<session>.sock
+// (pipeName), not a file. Elsewhere it is a unix socket by hc's own rules (unixSocketPath).
+func SocketPath() string { return socketPath() }
+
+// sessionName is the hc session: $HC_SESSION, "default"; "" when the name could not be part of a path or pipe name.
+func sessionName() string {
+	session := strings.TrimSpace(os.Getenv("HC_SESSION"))
+	if session == "" {
+		session = "default"
+	}
+	if strings.ContainsAny(session, `/\:*?"<>|`) || session == "." || session == ".." {
+		return ""
+	}
+	return session
+}
+
+// pipeName is the named pipe herdr-core serves its API on, on Windows: herdr-core-<user>-<session>.sock in the pipe
+// namespace (the unix socket's file name, prefixed), the user being %USERNAME% (a core of another user or session is
+// another pipe). "" when either is empty. Taken from the Windows build of hc 0.1.21 (it builds the name from USERNAME
+// and the session) and a running core there (`\\.\pipe\herdr-core-alice-default.sock`, beside its holder's
+// `herdr-core-alice-default.holder.<id>.sock`).
+func pipeName(user, session string) string {
+	if user == "" || session == "" {
+		return ""
+	}
+	return `\\.\pipe\herdr-core-` + user + "-" + session + ".sock"
+}
+
+// unixSocketPath is where herdr-core listens off Windows, by hc's own rules (paths.rs): $HC_SOCKET, else `socket` in
 // $XDG_CONFIG_HOME/herdr-core/config.toml, else <session>.sock in the user's runtime directory
 // ($XDG_RUNTIME_DIR/herdr-core, else /run/user/<uid>/herdr-core when that exists), else in the state directory
 // ($XDG_STATE_HOME/herdr-core/<session>, ~/.local/state by default — macOS). The session is $HC_SESSION, "default".
-func SocketPath() string {
+func unixSocketPath() string {
 	if p := os.Getenv("HC_SOCKET"); p != "" {
 		return p
 	}
@@ -63,11 +90,8 @@ func SocketPath() string {
 			return p
 		}
 	}
-	session := strings.TrimSpace(os.Getenv("HC_SESSION"))
+	session := sessionName()
 	if session == "" {
-		session = "default"
-	}
-	if strings.ContainsAny(session, `/\:*?"<>|`) || session == "." || session == ".." {
 		return ""
 	}
 	run := os.Getenv("XDG_RUNTIME_DIR")
@@ -202,20 +226,20 @@ func (c *Client) note(method string, err error) {
 	}
 }
 
-// dial connects within dialTimeout (and ctx). A socket file that is not there fails without a dial.
+// dial connects within dialTimeout (and ctx). A socket (a pipe on Windows) that is not there fails without a dial.
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	if c.Socket == "" {
 		return nil, ErrNoSocket
 	}
-	if _, err := os.Stat(c.Socket); err != nil {
+	if err := socketStat(c.Socket); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoSocket, err)
 	}
 	dctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(dctx, "unix", c.Socket)
+	conn, err := dialSocket(dctx, c.Socket)
 	if err != nil {
 		// Only a socket nobody listens on means not running; a core too busy to accept in time still runs.
-		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+		if socketGone(err) {
 			return nil, fmt.Errorf("%w: %v", ErrNoSocket, err)
 		}
 		return nil, fmt.Errorf("herdr-core: %w", err)

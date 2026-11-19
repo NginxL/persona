@@ -134,7 +134,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		plan, _, _ := s.taskTerminalPlan(ctx, t)
 		if plan.CloseTabOnAccept || plan.TerminalCleanup != "" {
 			s.sendsAccepted(ctx, t.ID, time.Now())
-			return fmt.Sprintf("Task %s is already accepted and closed. Terminal cleanup: %s.", t.ID, terminalCleanupStatus(plan)), nil
+			return fmt.Sprintf("Task %s is already accepted and closed.", t.ID) + terminalCleanupWords(terminalCleanupStatus(plan)), nil
 		}
 	}
 	if err := restated(t, a.Verdict, decision); err != nil {
@@ -346,7 +346,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		authorized := isMain || background || t.Supervision != nil && t.Supervision.Supervisor == self ||
 			t.Supervision == nil && t.Origin == self
 		cleanup := s.finishTaskTerminal(ctx, t, acceptedHere && authorized && a.Outcome != outcomeCannot && !a.UserCheck)
-		against := fmt.Sprintf(" Terminal cleanup: %s.", cleanup) + result.words()
+		against := terminalCleanupWords(cleanup) + result.words()
 		if gaps := result.unsettled(); len(gaps) > 0 {
 			against += " You accepted it with criteria of its brief not shown met: if one no longer applies, say so with task_scope before accepting next time."
 		}
