@@ -134,7 +134,7 @@ class NamingTests(unittest.TestCase):
                 if migration_freeze.NUMBERED_NAME.match(path.name):
                     names.add(directory[len(migration_freeze.MIGRATIONS):] + "/" + path.name)
         self.assertEqual(names, set(migration_freeze.NUMBERED))
-        self.assertEqual(122, len(migration_freeze.NUMBERED))
+        self.assertEqual(123, len(migration_freeze.NUMBERED))
         self.assertIn("manager/0561_model_usage.sql", migration_freeze.NUMBERED)
 
     def test_a_new_file_is_timestamped_or_one_of_the_frozen_numbered_ones(self):

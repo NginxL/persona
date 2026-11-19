@@ -40,6 +40,7 @@ CODEX_CONTEXT = re.compile(r"(?s)^\s*<(environment_context|codex_internal_contex
 # messages carried their source. They match the Chinese prompts the hub sends, so they stay in Chinese.
 FIRST_LINE_KINDS = [
     ("supervision", re.compile(r"^📋 督办：")),
+    ("followup", re.compile(r"^<persona-limit-continue />$")),  # localized usage-limit continuation
     ("followup", re.compile(r"^⏰（Persona 叫你接着做）")),  # limit_continue: the usage limit reset
     ("wake", re.compile(r"^⏰（Persona 叫醒你")),
     ("followup", re.compile(r"^⏰ ")),

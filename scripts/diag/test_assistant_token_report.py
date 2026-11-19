@@ -59,9 +59,14 @@ class ClassifyTests(unittest.TestCase):
 
 
     def test_injected_messages_without_a_source_block(self):
-        limit = rendered("prompts/agents/limit_continue.md")
+        for language in ("en", "ja"):
+            limit = rendered(f"assistant/testdata/prompts/agent_language.limit.{language}.golden")
+            self.assertEqual(report.classify(limit)[0], "followup")
+            # Older transcripts lack the structured source but retain the exact
+            # localized marker, which must still distinguish Persona from the owner.
+            legacy = limit.split("<persona-limit-continue />", 1)[1]
+            self.assertEqual(report.classify("<persona-limit-continue />" + legacy)[0], "followup")
         lost = rendered("prompts/assistant/lost_tasks.md").replace('{{join .Tasks "\\n- "}}', "tail -f build.log")
-        self.assertEqual(report.classify(limit)[0], "followup")
         self.assertEqual(report.classify(SNAPSHOT + lost)[0], "system")
 
     def test_relayed_message_from_another_conversation(self):

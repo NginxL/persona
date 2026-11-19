@@ -595,6 +595,10 @@ fun ChatComposer(
         confirm = stringResource(R.string.chat_composer_open_settings) to { cameraDenied = false; openAppSettings(context) })
 }
 
+/** True when [dispatchComposerSend] opens the permission picker instead of sending the draft. */
+internal fun isPermissionsCommand(state: ChatComposerState, extraContent: Boolean, onPermissions: (() -> Unit)?): Boolean =
+    onPermissions != null && SlashCommand.isPermissions(state.value.text) && state.attachments.isEmpty() && !extraContent
+
 /**
  * Shared send dispatcher for both touch/IME send (`ChatComposer`) and hardware keyboard send (`LargeWindowComposer`):
  * intercepts `/clear` in the main conversation and bare `/permissions` (without attachments or quoted extra content).
@@ -612,10 +616,10 @@ internal fun dispatchComposerSend(
             state.value = TextFieldValue()
             mainClear.clear { state.value = TextFieldValue(SlashCommand.CLEAR, TextRange(SlashCommand.CLEAR.length)) }
         }
-        onPermissions != null && SlashCommand.isPermissions(state.value.text) && state.attachments.isEmpty() && !extraContent -> {
+        isPermissionsCommand(state, extraContent, onPermissions) -> {
             state.beginEdit()
             state.value = TextFieldValue()
-            onPermissions()
+            onPermissions?.invoke()
         }
         else -> onSend()
     }

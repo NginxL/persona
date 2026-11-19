@@ -756,6 +756,8 @@ Off by default: with no leaders, everything above is unchanged and only the main
 - **In the clients** (#4331): the sidebars call leaders **常驻** (en "Pinned"; the code, API and events keep leader / direction) and list them under Persona chats after the main chat, each by its direction's name (on the web the conversation's header says the same name, not the hub's `MMDD | kind | ` title, and so offers no in-place rename of it: ⋯ Rename renames the conversation's own title, as the row's menu does; `useDirectionName`, `web/src/lib/direction-names.ts`) with the direction tree's Working and Waiting on you counts ("The direction tree"), followed by Recent, the most recently active other chats whoever opened them, the ones Persona opened with their source's mark (#4873, #5195; `docs/protocol/protocol.md` "Sidebar (same on every client)"); a conversation's menu has **设为常驻** / **取消常驻** (`…/make` / `…/end`). The clients read the tree again on its `directions` message, so an open sidebar follows a leader made or ended anywhere at once (a sixth leader once stayed hidden until a reload: the clients had read the leaders only when they loaded).
 - **Quiet by default** (#6595): a leader's patrol (定时巡检), supervision (督办) and relayed (`conversation_send`) rounds follow the main chat's folding and visibility rule (`docs/assistant/assistant.md` "Background rounds"), under the same `assistant.main_background_folded` switch. A completed final reply stays visible unless the round finished silent without a user-visible action. The owner can open quiet rounds to inspect the transcript. The hub's interject note (`prompts/assistant/interject.md`, title `插话`) never renders as an owner-bubble quote.
 - **Scheduling**: a leader is woken by its supervision messages; for a standing loop over a to-do pool, give it a recurring `schedule_followup` (`every`).
+- **Protected while it leads** (#11392): a current leader's conversation is kept on its computer's session list however long it is quiet (`keptSessions`, on the computer its direction record names, else the assistant's), like the main chat and the background supervisor, so a direction left alone for a week keeps its Pinned row and its tasks' supervision messages. Keeping the row listed does not keep its transcript file. It cannot be deleted while it leads: `DELETE /api/v1/assistant/conversations/{id}` answers 400 `conversation_protected` with a message that says to unpin it first; once unpinned it deletes as any other conversation. The direction tree still lists a direction whose conversation is not listed or was deleted, with its name and tasks.
+- **Approving the list** (#11392): approving an assistant-proposed `assistant.leaders` compares the whole current list with the one the card was raised against, not the card's text (which clips both lists to 120 characters, so a pin or unpin after the third id went unseen): any difference refuses the approval as stale and changes nothing.
 
 ### Background supervisor (#4927)
 
@@ -1103,9 +1105,20 @@ content, not memory: memory stays one for every conversation (#9440), and a dire
   direction is filed under, to its role policy (`supervision_instructions`, which the node passes as
   `--append-system-prompt` or a Codex thread's developer instructions; template `assistant/direction_notes`). The node
   keeps that policy with the conversation and compares it on every send, so the notes survive a restart, a resume and a
-  compaction, and changing them restarts only that leader's process on its next message: the shared `CLAUDE.md` and
-  every other conversation's prompt cache are untouched. The project's one-line status, which a summary rewrite changes,
-  goes into the leader line of the per-message context instead, so it never restarts the leader.
+  compaction, and changing them restarts only that leader's process: the shared `CLAUDE.md` and every other
+  conversation's prompt cache are untouched. The project's one-line status, which a summary rewrite changes, goes into
+  the leader line of the per-message context instead, so it never restarts the leader.
+- **Applied when the leader is idle** (#11392): saved notes reach the leader's policy on the first send that finds it
+  idle (not working, waiting on the owner, starting, compacting or running background work, as its computer lists it;
+  `notesInEffect`, `leadIdle`). Until then every send keeps the notes block it has, so saving notes while the leader
+  works no longer gets the owner's next message refused (the node refuses a send that would change the policy of a
+  process at work). The block in effect is kept with the direction's record (`assistant.directions`,
+  `notes_in_effect`), so a manager restart does not change it. The node can see work a moment before the manager does;
+  in that moment its refusal stays as the safety net.
+- **Two editors** (#11392): a save may say which `notes_at` it started from (`null`: there were no notes); when the
+  notes changed since, it is refused with 409 `notes_changed` and the stored `notes` and `notes_at`, so a client can
+  show both, and nothing changes. `notes_at` is written at millisecond precision and compared as an instant to the
+  millisecond, so a client that parses the value and writes it again still matches. A save without it is not checked.
 - **New Agents for the direction** get them before the project background (template `todo/direction`): an Agent the
   leader starts (`agent_start`) or supervises (a task it plans, a to-do it supervises handed to a new Agent), and an
   Agent whose directory belongs to the direction's kb project, whoever starts it. At most two directions' notes, the
@@ -1113,7 +1126,8 @@ content, not memory: memory stays one for every conversation (#9440), and a dire
 - **Without notes nothing changes**: the leader's policy and context are byte for byte as before (a project's goal or
   status alone is never added), and no block goes to Agents.
 - **Checks**: `server/internal/assistant/direction_notes_test.go` (the route, the leader's policy and context, new
-  Agents) and the goldens `direction_notes.*` / `todo_direction.*`; the web editor's browser check runs against the mock
+  Agents), `server/internal/assistant/lead_conversations_test.go` (`notes_at`, the idle rule across a restart) and the
+  goldens `direction_notes.*` / `todo_direction.*`; the web editor's browser check runs against the mock
   hub with `MOCK_LEADERS=1`: `node web/e2e/direction-notes.mjs` (desktop and phone width, light and dark).
 
 ### Agent tasks (#3617)

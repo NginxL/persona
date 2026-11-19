@@ -53,9 +53,13 @@ type direction struct {
 	NameBy string `json:"name_by,omitempty"`
 	// Progress: the leader's latest own summary (leader_progress, #3679).
 	Progress *leaderProgress `json:"progress,omitempty"`
-	// Notes: what the owner wrote for this direction (#10086, direction_notes.go), "" none; NotesAt when.
+	// Notes: what the owner wrote for this direction (#10086, direction_notes.go), "" none; NotesAt when, at
+	// millisecond precision (older records: finer).
 	Notes   string     `json:"notes,omitempty"`
 	NotesAt *time.Time `json:"notes_at,omitempty"`
+	// NotesInEffect: the notes block the leader's policy carries now (notesInEffect, #11392), set by the last send that
+	// found the leader idle; nil before any did.
+	NotesInEffect *string `json:"notes_in_effect,omitempty"`
 }
 
 type leaderTold struct {

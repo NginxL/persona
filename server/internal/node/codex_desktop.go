@@ -457,46 +457,63 @@ func slotCodexDesktop(list []proto.Session) {
 type codexTurnMark struct {
 	size   int64
 	status string
+	offset int64
+	mtime  time.Time
 }
 
-// codexDesktopTurn: working while the rollout's last turn has started and not ended, done after; read from the tail
-// and kept until the file grows.
+// codexDesktopTurn follows turn boundaries across the entire rollout. After the first read, only appended
+// complete lines are read: a long running turn must not lose its start when it leaves a bounded tail window.
 func (n *Node) codexDesktopTurn(path string) string {
 	st, err := os.Stat(path)
 	if err != nil {
 		return proto.StatusUnknown
 	}
-	if v, ok := codexTurnMarks.Load(path); ok && v.(codexTurnMark).size == st.Size() {
-		return v.(codexTurnMark).status
-	}
 	status := proto.StatusDone
-	if f, err := os.Open(path); err == nil {
-		const tail = 256 << 10
-		off := max(st.Size()-tail, 0)
-		b := make([]byte, st.Size()-off)
-		_, err = f.ReadAt(b, off)
-		f.Close()
-		if err == nil {
-			for _, line := range bytes.Split(b, []byte("\n")) {
-				var e struct {
-					Type    string `json:"type"`
-					Payload struct {
-						Type string `json:"type"`
-					} `json:"payload"`
-				}
-				if !bytes.Contains(line, []byte(`"event_msg"`)) || json.Unmarshal(line, &e) != nil || e.Type != "event_msg" {
-					continue
-				}
-				switch e.Payload.Type {
-				case "task_started":
-					status = proto.StatusWorking
-				case "task_complete", "turn_aborted":
-					status = proto.StatusDone
-				}
-			}
+	var off int64
+	if v, ok := codexTurnMarks.Load(path); ok {
+		c := v.(codexTurnMark)
+		if c.size == st.Size() && c.mtime.Equal(st.ModTime()) {
+			return c.status
+		}
+		if st.Size() > c.size {
+			status, off = c.status, c.offset
 		}
 	}
-	codexTurnMarks.Store(path, codexTurnMark{size: st.Size(), status: status})
+	f, err := os.Open(path)
+	if err != nil {
+		return proto.StatusUnknown
+	}
+	defer f.Close()
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return proto.StatusUnknown
+	}
+	reader := bufio.NewReader(io.LimitReader(f, st.Size()-off))
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err != io.EOF {
+				return proto.StatusUnknown
+			}
+			break // Retry an unfinished line at the same offset when the rollout grows.
+		}
+		off += int64(len(line))
+		var e struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type string `json:"type"`
+			} `json:"payload"`
+		}
+		if !bytes.Contains(line, []byte(`"event_msg"`)) || json.Unmarshal(line, &e) != nil || e.Type != "event_msg" {
+			continue
+		}
+		switch e.Payload.Type {
+		case "task_started":
+			status = proto.StatusWorking
+		case "task_complete", "turn_aborted":
+			status = proto.StatusDone
+		}
+	}
+	codexTurnMarks.Store(path, codexTurnMark{size: st.Size(), status: status, offset: off, mtime: st.ModTime()})
 	return status
 }
 

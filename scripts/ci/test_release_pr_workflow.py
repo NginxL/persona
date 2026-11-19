@@ -46,6 +46,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(jobs["android"]["steps"][4]["with"]["path"], "${{ runner.temp }}/release-plan")
         self.assertIn('RUNNER_TEMP', str(jobs["android"]))
         self.assertNotIn("Path('release/plan.json')", str(jobs["android"]))
+        self.assertIn('release-pr-plan-${{ needs.plan.outputs.pr }}', str(jobs))
+        self.assertNotIn('release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}', str(jobs))
 
     def test_windows_requires_native_execution_and_authenticode(self):
         text = PR.read_text()

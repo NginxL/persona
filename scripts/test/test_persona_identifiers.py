@@ -50,7 +50,7 @@ class PersonaIdentifiersTest(unittest.TestCase):
             caller = (ROOT / relative).read_text()
             self.assertIn('mainActivityIntent(', caller)
             self.assertNotIn('MainActivity::class.java', caller)
-        self.assertEqual({('persona', 'pair'), ('persona', 'open'), ('persona', 'password-login'),
+        self.assertEqual({('persona', 'pair'), ('persona', 'open'), ('persona', 'password-login'), ('persona', 'provider'),
                           ('@string/compatibility_legacy_scheme', 'pair'),
                           ('@string/compatibility_legacy_scheme', 'open')}, {
             (data.get('{http://schemas.android.com/apk/res/android}scheme'),

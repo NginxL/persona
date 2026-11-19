@@ -148,6 +148,13 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 		done()
 		return nil, n.abandonStart(ctx, created, kind, err)
 	}
+	if kind == agyAgent {
+		// In a folder agy has not trusted (a new worktree), its trust dialog holds the input box (agytrust.go, #11424).
+		if err := n.agyTrustFolder(ctx, pane); err != nil {
+			done()
+			return nil, n.abandonStart(ctx, created, kind, err)
+		}
+	}
 	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model, effort)
 	if prompt != "" {
 		// Typed once, then checked in the background until the agent is seen taking it (workagent_first.go, #11345).

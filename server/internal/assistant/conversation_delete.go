@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -170,6 +171,11 @@ func (s *Service) deleteConversation(ctx context.Context, machine, id string) er
 	cfg := s.settings(ctx)
 	if cfg.Main == id || s.isBackground(ctx, id) {
 		return &rpc.Error{Code: "conversation_protected", Message: i18n.T(s.lang(ctx), "assistant-conversation_delete.protected")}
+	}
+	if slices.Contains(cfg.Leaders, id) {
+		// A current direction's lead conversation (#11392): unpinning it (…/end) ends the direction, after which it
+		// deletes as any other conversation.
+		return &rpc.Error{Code: "conversation_protected", Message: i18n.T(s.lang(ctx), "assistant-conversation_delete.lead_protected")}
 	}
 	c, found := s.session(ctx, machine, id)
 	if !found || !c.Assistant {

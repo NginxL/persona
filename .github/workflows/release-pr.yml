@@ -178,7 +178,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - name: Prepare the public GitHub update source without a personal config
         run: |
@@ -244,7 +244,7 @@ jobs:
           printf '%s\n' "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: ${{ runner.temp }}/release-plan
       - name: Prepare protected Android signing configuration without logging secrets
         env:
@@ -316,7 +316,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - uses: actions/download-artifact@v4
         with:
@@ -529,7 +529,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - uses: actions/download-artifact@v4
         with:

@@ -91,7 +91,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	if slices.Contains(cfg.Leaders, bg) || s.isLeader(ctx, bg) || s.supervises(ctx, bg) {
 		t.Fatal("the background supervisor is a leader")
 	}
-	if !slices.Contains(keptSessions(cfg, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
+	if !slices.Contains(keptSessions(cfg, nil, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
 		t.Fatal("the background supervisor is not kept listed")
 	}
 	if !s.supervising(bg) {

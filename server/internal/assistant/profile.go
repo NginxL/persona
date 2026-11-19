@@ -470,18 +470,20 @@ func (s *Service) profile(ctx context.Context, tasks []TaskView, todos *TodoRepo
 	v := s.effective(ctx, saved)
 	p := &Profile{MachineID: v.MachineID, Main: v.Main, MainMachineID: v.MainMachineID, Launcher: v.Launcher, Timezone: v.Timezone}
 	if tasks != nil && todos != nil {
-		p.Keep = keptSessions(v, tasks, todos.Links)
+		p.Keep = keptSessions(v, tasks, todos.Links, s.leadSessions(ctx, v))
 	}
 	return p
 }
 
 // keptSessions are the conversations their machines list however long they have been quiet: the main conversation,
-// the main ones it replaced, scheduled tasks' own, and the agents of open todos. Otherwise a busy machine's 80 newest
-// transcripts crowd them out of the list and the Persona tab has no main chat (2026-11-01: the main one, quiet for two
-// days, was gone), a weekly task's conversation drops out in between, with the app's link to it and the check that its
-// last run still goes, and an open task whose agent finished and exited shows "Starting Agent" for ever: its todo
-// names a session the list no longer has (#4510).
-func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
+// the main ones it replaced, scheduled tasks' own, the agents of open todos and the current leaders (leads). Otherwise
+// a busy machine's 80 newest transcripts crowd them out of the list and the Persona tab has no main chat (2026-11-01:
+// the main one, quiet for two days, was gone), a weekly task's conversation drops out in between, with the app's link
+// to it and the check that its last run still goes, an open task whose agent finished and exited shows "Starting
+// Agent" for ever: its todo names a session the list no longer has (#4510), and a direction the owner leaves alone for
+// a week loses its Pinned row and its tasks' supervision messages go to the main chat (#11392). Keeping a row listed
+// does not keep its transcript file.
+func keptSessions(v Settings, tasks []TaskView, links []TodoLink, leads []SessionRef) []SessionRef {
 	out := []SessionRef{}
 	add := func(machine, id string) {
 		if machine != "" && id != "" && !slices.Contains(out, SessionRef{MachineID: machine, SessionID: id}) {
@@ -500,6 +502,34 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 	}
 	// The background supervisor: quiet between tasks, still the one their signals go to (supervise_background.go).
 	add(v.BackgroundSupervisorMachineID, v.BackgroundSupervisor)
+	for _, l := range leads {
+		add(l.MachineID, l.SessionID)
+	}
+	return out
+}
+
+// leadSessions are the current leaders' conversations (assistant.leaders without the main one), each on the computer
+// its direction record names, else the assistant's (a leader not recorded yet, or the records unreadable). An ended
+// direction is no longer in assistant.leaders, so its conversation leaves the set.
+func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
+	if len(v.Leaders) == 0 {
+		return nil
+	}
+	b := &s.directions
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	loaded := s.directionsLocked(ctx)
+	out := make([]SessionRef, 0, len(v.Leaders))
+	for _, id := range v.Leaders {
+		if id == "" || id == v.Main {
+			continue
+		}
+		machine := v.MachineID
+		if d := b.m[id]; loaded && d != nil && d.MachineID != "" {
+			machine = d.MachineID
+		}
+		out = append(out, SessionRef{MachineID: machine, SessionID: id})
+	}
 	return out
 }
 

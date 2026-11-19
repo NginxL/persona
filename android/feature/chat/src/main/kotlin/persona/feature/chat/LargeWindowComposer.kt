@@ -108,12 +108,14 @@ fun LargeWindowComposer(
     val hasContent = state.hasContent || extraContent
     val canSend = visible && !covered && enabled && state.ready && !sending && dictate?.active != true
     val sendEnabled = canSend && hasContent && blockedLabel == null
-    val collapseForSend = remember(state) {
+    val collapseForSend = remember(state, extraContent, onPermissions) {
         { collapse: () -> Unit ->
             val focusRequest = state.focusRequest
+            val opensPermissions = isPermissionsCommand(state, extraContent, onPermissions)
             collapse()
             state.focusRequest = focusRequest
-            state.focused = false
+            // The leading mode control owns the requested picker; keep it composed until that picker is dismissed.
+            state.focused = opensPermissions
         }
     }
     val collapseForEscape = remember(state) {
