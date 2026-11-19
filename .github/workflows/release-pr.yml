@@ -245,7 +245,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
-          path: release
+          path: ${{ runner.temp }}/release-plan
       - name: Prepare protected Android signing configuration without logging secrets
         env:
           PERSONA_ANDROID_CERTIFICATE_SHA256: ${{ secrets.PERSONA_ANDROID_CERTIFICATE_SHA256 }}
@@ -267,29 +267,32 @@ jobs:
           python3 scripts/release/android_tag_release.py \
             --config "$RUNNER_TEMP/persona-android/android.json" \
             --worktree "$GITHUB_WORKSPACE" --commit "${{ needs.plan.outputs.commit }}" \
-            --version "${{ needs.plan.outputs.version }}" --receipt release/android-receipt.json
+            --version "${{ needs.plan.outputs.version }}" --receipt "$RUNNER_TEMP/android-receipt.json"
       - name: Verify the signed APK and Android index against the release plan
         run: |
           set -euo pipefail
-          mkdir -p release/downloads
+          mkdir -p release/downloads "$RUNNER_TEMP/release-downloads"
+          cp "$RUNNER_TEMP/android-receipt.json" "$RUNNER_TEMP/release-downloads/android-receipt.json"
           python3 - <<'PY'
           import hashlib,json,os,shutil
           from pathlib import Path
-          plan=json.loads(Path('release/plan.json').read_text())
-          receipt=json.loads(Path('release/android-receipt.json').read_text())
+          plan=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-plan/plan.json').read_text())
+          receipt=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').read_text())
           assert receipt['commit']==plan['commit']
           assert len(receipt['assets'])==2
           for item in receipt['assets']:
               path=Path(item['path'])
               assert path.is_file()
               assert hashlib.sha256(path.read_bytes()).hexdigest()==item['sha256']
-              shutil.copyfile(path,Path('release/downloads')/item['name'])
-          index=json.loads(Path('release/downloads/android.json').read_text())
+              shutil.copyfile(path,Path(os.environ['RUNNER_TEMP']+'/release-downloads')/item['name'])
+          index=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android.json').read_text())
           assert index['version']==plan['version']
           assert index['source_sha']==plan['commit']
           assert index['name'].startswith('Persona-')
-          assert index['sha256']==hashlib.sha256(Path('release/downloads',index['name']).read_bytes()).hexdigest()
-          Path('release/android-receipt.json').unlink()
+          assert index['sha256']==hashlib.sha256(Path(os.environ['RUNNER_TEMP']+'/release-downloads',index['name']).read_bytes()).hexdigest()
+          for name in ('Persona-'+plan['version']+'-android.apk','android.json'):
+              shutil.copyfile(Path(os.environ['RUNNER_TEMP']+'/release-downloads')/name,Path('release/downloads')/name)
+          Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').unlink()
           PY
       - uses: actions/upload-artifact@v4
         with:

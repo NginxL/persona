@@ -44,9 +44,11 @@ describe("the memory", () => {
     expect(r.memory).toEqual({ "m1/a": gitA });
   });
 
-  it("keeps the Background tasks panel at its list, not the run it showed (#5421)", () => {
+  it("keeps the Background tasks panel at its list, without a run or overview origin", () => {
     const bg: SessionPanel = { kind: "background", mid: "m1", sid: "a", run: "w1" };
-    expect(leaving({}, "m1/a", bg)["m1/a"]).toEqual({ kind: "background", mid: "m1", sid: "a" });
+    const listed: SessionPanel = { kind: "background", mid: "m1", sid: "a" };
+    expect(leaving({}, "m1/a", bg)["m1/a"]).toEqual(listed);
+    expect(leaving({}, "m1/a", { ...bg, from: "overview" })["m1/a"]).toEqual(listed);
   });
 
   it("keeps the Changes panel at the selected file", () => {

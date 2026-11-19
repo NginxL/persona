@@ -227,16 +227,9 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err != nil {
 		return nil, err
 	}
-	ws := workspaceID
-	if ws == "" {
-		if ws, err = n.workspaceFor(ctx, launch, cwd); err != nil {
-			return nil, err
-		}
-	} else if _, ok := launch.(*herdrHost); ok {
-		// A start into a workspace it names (a task's worktree) brings back a herdr server that stopped since, as
-		// workspaceFor does for the others: an agent always runs in the engine's terminal (#4754). What herdr then says
-		// is reported as before.
-		_ = n.ensureHerdr(ctx, "start a session in a workspace")
+	ws, err := n.tabSpace(ctx, launch, cwd, workspaceID)
+	if err != nil {
+		return nil, err
 	}
 	if codex && kind != traexAgent { // codex_start.go
 		if resume != "" { // a Codex thread is resumed above: this id is not one
@@ -333,7 +326,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if legs, ok := engineHistoryOf(ctx); ok { // a switch from the other engine starts this one (engine_switch.go)
 		st.EngineHistory = legs
 	}
-	n.state.put(id, st)
+	n.putAgentState(ctx, launch, id, st)
 	n.noteModes(id, mode, effort) // shown before the first prompt writes them down
 	// The fresh shell at rest first: a question its startup files ask would eat the typed line's head (#2570).
 	if err := n.settleShell(ctx, pane); err != nil {

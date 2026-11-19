@@ -54,6 +54,9 @@ type doneSeenAgent struct {
 	// no earlier, so an agent resumed with no message (its last step is old) is not stopped on the next pass.
 	running time.Time
 	stopped bool // seen stopped since the task was done, or stopped by this pass
+	// lastStop is when this pass last confirmed a stop. A stale row older than it is retired for workspace cleanup;
+	// newer activity is a resume and keeps the workspace open.
+	lastStop time.Time
 	// resumed: running again after that. Someone brought it back on purpose (the owner's Resume, a message that
 	// resumed it): this pass leaves it to the idle rule (tasks_idle.go), which covers resumed agents.
 	resumed bool
@@ -160,6 +163,7 @@ func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefu
 	if !s.todosLoaded() {
 		return
 	}
+	defer s.closeDoneTaskSpaces(ctx, time.Now(), seen)
 	agents := s.doneTaskAgents()
 	if len(agents) == 0 {
 		clear(seen)
@@ -198,7 +202,7 @@ func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefu
 		}
 		if s.retireAgent(ctx, refused, "task "+a.todo, a.machine, c, now) {
 			// Stopped by this pass: running again before a pass sees it stopped is a resume too.
-			w.stopped, w.running = true, time.Time{}
+			w.stopped, w.running, w.lastStop = true, time.Time{}, now
 			seen[key] = w
 		}
 	}

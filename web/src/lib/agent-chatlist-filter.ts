@@ -369,6 +369,12 @@ export function scopeHaystacks(s: Session, scope: SearchScope, ctx: EvalContext)
   }
 }
 
+/** Whether the unit at `i` is the second of a character made of two (an emoji): a cut just before it would split it. */
+const isLow = (s: string, i: number) => {
+  const c = s.charCodeAt(i);
+  return c >= 0xdc00 && c <= 0xdfff;
+};
+
 /** Build a role-attributed evidence snippet with highlighted match span when a search query is active. */
 export function buildEvidenceSnippet(s: Session, query: string, scope: SearchScope, ctx: EvalContext): EvidenceSnippet | null {
   const parsed = parseSearchQuery(query);
@@ -396,8 +402,10 @@ export function buildEvidenceSnippet(s: Session, query: string, scope: SearchSco
     for (const term of terms) {
       const idx = text.toLowerCase().indexOf(term.toLowerCase());
       if (idx >= 0) {
-        const start = Math.max(0, idx - 28);
-        const end = Math.min(text.length, idx + term.length + 52);
+        let start = Math.max(0, idx - 28);
+        let end = Math.min(text.length, idx + term.length + 52);
+        if (start > 0 && isLow(text, start)) start--;
+        if (end < text.length && isLow(text, end)) end++;
         const before = (start > 0 ? "…" : "") + text.slice(start, idx);
         const match = text.slice(idx, idx + term.length);
         const after = text.slice(idx + term.length, end) + (end < text.length ? "…" : "");
@@ -407,7 +415,8 @@ export function buildEvidenceSnippet(s: Session, query: string, scope: SearchSco
   }
 
   if (scope === "errors" && sessionHasError(s, ctx.interactions)) {
-    const errCandidate = candidates[0]?.text.replace(/\s+/g, " ").trim().slice(0, 90) || sessionPreview(s);
+    const errText = candidates[0]?.text.replace(/\s+/g, " ").trim() ?? "";
+    const errCandidate = errText.slice(0, isLow(errText, 90) ? 91 : 90) || sessionPreview(s);
     if (errCandidate) {
       return { role: "error", roleLabel: roleLabelOf("error"), before: "", match: errCandidate, after: "" };
     }

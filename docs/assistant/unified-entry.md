@@ -132,7 +132,9 @@ engine answers, not a required directory layout.
 
 The engine registers new workspaces in the existing App/catalog/board view, with its existing project/branch/kind metadata.
 This v1 does not add multi-repository entries, change `agent_start`, or change acceptance semantics.
-After acceptance, workspaces are **silently retained**: no cleanup, recycling, or migration.
+After acceptance, workspaces are **silently retained**: no cleanup, recycling, or migration. This is the Git checkout
+and its branch. A herdr leader task's terminal workspace is separate: it closes after the top-level task and its Agents
+retire, while the checkout is retained (`docs/integrations/engines.md` "Task workspaces").
 
 ### Needs you and In progress: each thing once (#3387)
 

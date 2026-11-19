@@ -178,6 +178,24 @@ describe("structured inline query operators & search scopes", () => {
     expect(errEv?.role).toBe("error");
     expect(errEv?.match.toLowerCase()).toBe("peer");
   });
+
+  it("keeps an emoji whole where the text before the match is cut", () => {
+    // the 28 units before the match start on the second unit of an emoji
+    const ev = buildEvidenceSnippet(mkSession("s1", { asks: "xxxxx😀" + "y".repeat(27) + "needle" + "z".repeat(10) }), "needle", "user", baseCtx);
+    expect(ev?.before).toBe("…😀" + "y".repeat(27));
+  });
+
+  it("keeps an emoji whole where the text after the match is cut", () => {
+    // the 52 units after the match end on the first unit of an emoji
+    const ev = buildEvidenceSnippet(mkSession("s1", { asks: "needle" + "z".repeat(51) + "😀" + "tail" }), "needle", "user", baseCtx);
+    expect(ev?.after).toBe("z".repeat(51) + "😀…");
+  });
+
+  it("keeps an emoji whole where the errors scope's fallback line is cut", () => {
+    // the fallback line is the error text cut at 90 units
+    const ev = buildEvidenceSnippet(mkSession("s1", { turn_error: "e".repeat(89) + "😀" + "tail" }), "nothing-like-it", "errors", baseCtx);
+    expect(ev?.match).toBe("e".repeat(89) + "😀");
+  });
 });
 
 describe("Search as Code compilation, evaluation, and provider hook", () => {

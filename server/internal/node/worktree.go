@@ -310,15 +310,18 @@ func within(p, dir string) bool {
 	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
 }
 
-// worktreeCreate makes the checkout and opens it as a workspace of the host.
-func (n *Node) worktreeCreate(ctx context.Context, kind, workspace, cwd, branch, path string, parents ...string) (proto.WorktreeCreateResult, error) {
+// worktreeCreate makes the checkout and, unless openWorkspace is false for a herdr task, opens it as a workspace of the host.
+func (n *Node) worktreeCreate(ctx context.Context, kind, workspace, cwd, branch, path, parentWorkspace string, openWorkspace *bool) (proto.WorktreeCreateResult, error) {
 	var res proto.WorktreeCreateResult
 	branch = strings.TrimSpace(branch)
 	if rt, runtime, err := n.worktreeRuntime(ctx, kind); runtime { // an engine runtime makes them (runtimeworkspaces.go)
 		if err != nil {
 			return res, err
 		}
-		return n.runtimeWorktreeCreate(ctx, rt, workspace, cwd, branch, path, firstOf(parents...))
+		if openWorkspace != nil && !*openWorkspace {
+			return res, errors.New("open_workspace=false is supported only on herdr")
+		}
+		return n.runtimeWorktreeCreate(ctx, rt, workspace, cwd, branch, path, parentWorkspace)
 	}
 	h, workspace, repo, err := n.repoOfWorkspace(ctx, kind, workspace, cwd)
 	if err != nil {
@@ -335,11 +338,19 @@ func (n *Node) worktreeCreate(ctx context.Context, kind, workspace, cwd, branch,
 		return res, err
 	}
 	var created *host.Created
-	parent := workspace
-	if len(parents) > 0 && parents[0] != "" {
-		parent = parents[0]
+	checkoutOnly := openWorkspace != nil && !*openWorkspace
+	parent := parentWorkspace
+	if parent == "" {
+		parent = workspace
 	}
-	if parent != workspace {
+	if checkoutOnly {
+		if _, ok := h.(*herdrHost); !ok {
+			return res, errors.New("open_workspace=false is supported only on herdr")
+		}
+		// Older herdr versions have no checkout-only RPC. Use the node's existing Git fallback for every
+		// source workspace, then open the Agent's tab in the task workspace instead of opening a new one.
+		created, err = n.worktreeByGit(ctx, h, repo, branch, dest, false)
+	} else if parent != workspace {
 		w, ok := h.(interface {
 			CreateWorktreeUnder(context.Context, string, string, string, string) (*host.Created, error)
 		})
@@ -375,8 +386,10 @@ func (n *Node) worktreeCreate(ctx context.Context, kind, workspace, cwd, branch,
 	// A host that ran git on this computer wrote the links under the home's real path; nothing to do when the host's
 	// git (herdr's, in its own environment) or worktreeByGit already wrote the home's spelling (worktree_links.go).
 	n.portableWorktreeLinks(cmp.Or(created.Path, dest))
-	n.markWorktreeShell(ctx, h, created) // an Agent's worktree: its first shell is Persona's (finished_close.go)
-	_ = n.refreshHosts(ctx, h)           // the new workspace is in the layout the terminal page lists
+	if !checkoutOnly {
+		n.markWorktreeShell(ctx, h, created) // an Agent's worktree: its first shell is Persona's (finished_close.go)
+		_ = n.refreshHosts(ctx, h)           // the new workspace is in the layout the terminal page lists
+	}
 	res = proto.WorktreeCreateResult{WorkspaceID: created.SpaceID, TabID: created.SlotID, Path: dest, Branch: branch}
 	if h.Kind() == host.Orca {
 		res.ParentWorkspaceID = parent
@@ -426,7 +439,7 @@ func (n *Node) worktreeCreateAutomatic(ctx context.Context, kind, workspace, cwd
 			if branchExists(ctx, repo.root, branch) || pathTaken(path) {
 				continue
 			}
-			return n.worktreeCreate(ctx, kind, workspace, cwd, branch, path, parent)
+			return n.worktreeCreate(ctx, kind, workspace, cwd, branch, path, parent, nil)
 		}
 		return res, errors.New("Could not find an unused worktree name")
 	}
@@ -449,9 +462,9 @@ func (n *Node) worktreeCreateAutomatic(ctx context.Context, kind, workspace, cwd
 }
 
 // worktreeByGit is the way for a host that makes no worktrees itself: git adds the checkout (an existing local branch
-// as it is, else a new branch from the repository's HEAD; no --force), then the host opens a workspace in it. When the
-// workspace cannot be opened the checkout stays, and the error says so.
-func (n *Node) worktreeByGit(ctx context.Context, h host.Host, repo worktreeRepo, branch, dest string) (*host.Created, error) {
+// as it is, else a new branch from the repository's HEAD; no --force), then the host opens a workspace in it unless
+// this is a herdr task checkout. When the workspace cannot be opened the checkout stays, and the error says so.
+func (n *Node) worktreeByGit(ctx context.Context, h host.Host, repo worktreeRepo, branch, dest string, open ...bool) (*host.Created, error) {
 	l, ok := h.(host.Launcher)
 	if !ok {
 		return nil, unsupported(h)
@@ -462,6 +475,9 @@ func (n *Node) worktreeByGit(ctx context.Context, h host.Host, repo worktreeRepo
 	}
 	if err := n.addWorktree(ctx, repo.root, dest, args...); err != nil {
 		return nil, err
+	}
+	if len(open) > 0 && !open[0] {
+		return &host.Created{Path: dest, Branch: branch}, nil
 	}
 	c, err := l.CreateSpace(ctx, dest, repo.name)
 	if err != nil {

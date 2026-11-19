@@ -45,6 +45,9 @@ type sessionState struct {
 	OriginKnown             bool            `json:"origin_known,omitempty"` // manager explicitly decided origin; false on pre-upgrade records
 	ConfigDir               string          `json:"config_dir,omitempty"`
 	Cwd                     string          `json:"cwd"`
+	TaskID                  string          `json:"task_id,omitempty"`
+	WorkspaceID             string          `json:"workspace_id,omitempty"`
+	WorkspaceLabel          string          `json:"workspace_label,omitempty"`
 	IsMain                  bool            `json:"is_main,omitempty"`
 	SupervisionInstructions string          `json:"supervision_instructions,omitempty"`
 	StartedAt               time.Time       `json:"started_at"`

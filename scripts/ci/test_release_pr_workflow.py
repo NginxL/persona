@@ -42,6 +42,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("secrets.", str(jobs["cli-web"]))
         self.assertEqual(jobs["android"]["steps"][2]["with"]["packages"], "platform-tools")
         self.assertEqual(jobs["cli-web"]["steps"][5]["env"]["NODE_OPTIONS"], "--max-old-space-size=4096")
+        self.assertIn('--receipt "$RUNNER_TEMP/android-receipt.json"', str(jobs["android"]))
+        self.assertEqual(jobs["android"]["steps"][4]["with"]["path"], "${{ runner.temp }}/release-plan")
+        self.assertIn('RUNNER_TEMP', str(jobs["android"]))
+        self.assertNotIn("Path('release/plan.json')", str(jobs["android"]))
 
     def test_windows_requires_native_execution_and_authenticode(self):
         text = PR.read_text()

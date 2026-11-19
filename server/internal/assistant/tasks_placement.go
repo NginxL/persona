@@ -403,6 +403,11 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if t.WorkspaceResolved != nil && t.WorkspaceResolved.WorkspaceID != "" {
 		params["workspace_id"] = t.WorkspaceResolved.WorkspaceID
 	}
+	ctx, unlockTaskSpace, err := s.withTaskSpaceStart(ctx, *t, m, params)
+	if err != nil {
+		return "", "", err
+	}
+	defer unlockTaskSpace()
 	if t.Model != "" {
 		params["model"] = t.Model
 	}

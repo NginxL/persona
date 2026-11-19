@@ -220,8 +220,9 @@ type Service struct {
 	delayedRecoveryMu        sync.Mutex   // one restore pass; tracks entries already armed by this incarnation
 	delayedReceiptsRecovered bool         // initial receipt-claim requeue has completed for this incarnation
 	delayedRestored          map[string]bool
-	tasks                    tasksState // tasks.go
-	questions                questions  // tools.go (ask_user)
+	tasks                    tasksState    // tasks.go
+	taskSpaces               taskSpaceBook // task_space.go: herdr leader-task placement and ownership
+	questions                questions     // tools.go (ask_user)
 	// deadlineSweeping: a sweep of the decisions past their deadline is running (decision_deadline.go).
 	deadlineSweeping atomic.Bool
 	askTodos         askTodoBook  // ask_todo.go: the questions nobody answered, now to-dos
@@ -568,6 +569,16 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	if p, ok := params.(map[string]any); ok && method == DeviceAssistantSend && !meetingSource(p) {
 		round = s.roundStarting(device, p, roundKind) // read before the send: its conversation is working right after
 	}
+	taskRoot, taskSpaceHeld := taskSpaceRootFromContext(ctx)
+	if taskRoot == "" && (method == DeviceSessionSend || method == deviceTaskStart) {
+		if p, ok := params.(map[string]any); ok && (method == DeviceSessionSend || p["resume_session_id"] != nil) {
+			taskRoot = s.attachTaskSpaceResume(ctx, device, method, p)
+		}
+	}
+	if taskRoot != "" && !taskSpaceHeld && (method == DeviceSessionSend || method == deviceTaskStart) {
+		unlock := s.lockTaskSpace(taskRoot)
+		defer unlock()
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return beforeNodeWrite(method, err)
@@ -576,6 +587,9 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	res, ok, err := s.localFleetDeviceCall(ctx, p) // what the hub answered before the nodes' events were the manager's
 	if !ok {
 		res, err = s.hub.DeviceCall(ctx, p)
+	}
+	if taskRoot != "" && (method == DeviceSessionSend || method == deviceTaskStart) {
+		s.noteTaskSpaceResult(ctx, taskRoot, device, res)
 	}
 	if err == nil && method != DeviceSessionGet && method != "session.unwatch" {
 		err = afterNodeWrite(method, s.conversationParamsAvailable(ctx, device, params))
@@ -975,6 +989,7 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 	s.undeliveredSeen(d)                      // kept owner messages go once their conversation runs again (undelivered.go)
 	s.originsChanged(d.MachineID, d.Sessions) // conversations from before origins were noted (origins.go)
 	s.todosSessionsChanged(ctx, d)
+	s.taskSpacesSessionsChanged(ctx, d)
 	s.todoRunsChanged(d.MachineID) // a to-do's view may file it elsewhere now (todo_view_push.go)
 	s.taskStageSessions(ctx, d)
 	s.nativeArchivesListed(d.MachineID) // agent_archive_native.go

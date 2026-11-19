@@ -90,6 +90,14 @@ describe("navRailPreview", () => {
     expect(out).toHaveLength(NAV_RAIL_PREVIEW_MAX);
     expect(out.endsWith("…")).toBe(true);
   });
+
+  it("cuts on whole characters: an emoji at the cut goes entirely", () => {
+    // the emoji is two UTF-16 units, at NAV_RAIL_PREVIEW_MAX - 2 and NAV_RAIL_PREVIEW_MAX - 1
+    const line = "a".repeat(NAV_RAIL_PREVIEW_MAX - 2) + "😀" + "b".repeat(20);
+    expect(navRailPreview(line)).toBe("a".repeat(NAV_RAIL_PREVIEW_MAX - 2) + "…");
+    // one unit earlier it fits whole
+    expect(navRailPreview("a".repeat(NAV_RAIL_PREVIEW_MAX - 3) + "😀" + "b".repeat(20))).toBe("a".repeat(NAV_RAIL_PREVIEW_MAX - 3) + "😀…");
+  });
 });
 
 describe("navRailExcerpt", () => {
@@ -101,6 +109,14 @@ describe("navRailExcerpt", () => {
 
   it("caps the excerpt at its limit", () => {
     expect(navRailExcerpt("答".repeat(500))).toHaveLength(200);
+  });
+
+  it("cuts on whole characters: an emoji at the limit goes entirely", () => {
+    // the emoji is two UTF-16 units, at 199 and 200; a long answer is read from its head, a short one whole
+    for (const tail of ["b".repeat(20), "b".repeat(1100) + "\nmore"]) {
+      expect(navRailExcerpt("a".repeat(199) + "😀" + tail)).toBe("a".repeat(199));
+      expect(navRailExcerpt("a".repeat(198) + "😀" + tail)).toBe("a".repeat(198) + "😀");
+    }
   });
 });
 

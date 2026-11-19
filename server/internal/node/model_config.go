@@ -83,6 +83,8 @@ type modelExecution struct {
 	Goal string `json:"-"`
 	// InPane is session.start's in_pane: a failed start's kept tab to start in (startremedy.go).
 	InPane string `json:"-"`
+	// taskSpace carries task placement into an asynchronous start; it is not execution or model state.
+	taskSpace *taskSpace `json:"-"`
 }
 
 // supervisionDeliveryKey marks a send that is the manager's own supervision message (message_source "supervision").
