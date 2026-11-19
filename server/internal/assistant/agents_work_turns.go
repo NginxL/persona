@@ -238,7 +238,7 @@ func (s *Service) workTurnSettled(ctx context.Context, machine, sid string) {
 
 // triageTurn works out where c stands after its turn and acts on it. Once per turn.
 func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c proto.Session) {
-	if c.Assistant && !turnErrorTransient(c) || c.Status == proto.StatusOffline || c.Status == proto.StatusWorking || c.Starting {
+	if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) || c.Status == proto.StatusOffline || c.Status == proto.StatusWorking || c.Starting {
 		return
 	}
 	if s.isReviewer(machine, c.SessionID) {

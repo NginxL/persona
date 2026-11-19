@@ -1,6 +1,204 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Hidden Agent Folders" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hidden Agent Folders"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非表示のエージェントフォルダ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏 Agent 目录"
+          }
+        }
+      }
+    },
+    "Folder path or glob" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder path or glob"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダのパスまたは glob"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目录路径或 glob"
+          }
+        }
+      }
+    },
+    "Add hidden folder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add hidden folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非表示フォルダを追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加隐藏目录"
+          }
+        }
+      }
+    },
+    "Hide directory matches" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide directory matches"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダに一致するセッションを隠す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏匹配目录的会话"
+          }
+        }
+      }
+    },
+    "Show hidden sessions" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show hidden sessions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非表示のセッションを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示隐藏会话"
+          }
+        }
+      }
+    },
+    "Sessions working in these folders, with any Agent, stay recorded but leave Agents and the assistant's view. A path covers that folder and everything in it; ~ is this computer's home; *name* matches a folder name anywhere. Active supervised tasks stay visible. Turn a rule off to show its sessions again, or show them for a moment from the Agents menu. To stop collecting a Claude Code config folder altogether, use Blocked Config Folders in Claude Code Settings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessions working in these folders, with any Agent, stay recorded but leave Agents and the assistant's view. A path covers that folder and everything in it; ~ is this computer's home; *name* matches a folder name anywhere. Active supervised tasks stay visible. Turn a rule off to show its sessions again, or show them for a moment from the Agents menu. To stop collecting a Claude Code config folder altogether, use Blocked Config Folders in Claude Code Settings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これらのフォルダ内で作業するセッション（どの Agent でも）は記録され続けますが、Agents とアシスタントのビューには表示されません。パスはそのフォルダと中身すべてを対象にします。~ はこのコンピュータのホーム、*name* は任意の場所のフォルダ名に一致します。監督中のタスクは表示されたままです。ルールをオフにするとセッションが再び表示され、Agents メニューから一時的に表示することもできます。Claude Code の設定フォルダ自体を収集しない場合は、Claude Code 設定の「ブロックした設定フォルダ」を使ってください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这些文件夹中工作的会话（任何 Agent）会继续记录，但不会出现在 Agents 和助手的视图中。路径包含该文件夹及其所有子文件夹；~ 表示这台电脑的主目录；*name* 匹配任意位置的文件夹名。正在督办的任务仍然可见。关闭规则即可重新显示其中的会话，也可以在 Agents 菜单中临时显示。若要完全不收集某个 Claude Code 配置文件夹，请使用 Claude Code 设置中的“屏蔽的配置文件夹”。"
+          }
+        }
+      }
+    },
+    "Can't hide the whole home or root folder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't hide the whole home or root folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホームやルートフォルダ全体は非表示にできません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不能隐藏整个主目录或根目录"
+          }
+        }
+      }
+    },
+    "Start with / or ~/, or * for a folder name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start with / or ~/, or * for a folder name"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/ または ~/ で始めるか、フォルダ名には * を使ってください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 / 或 ~/ 开头，或用 * 匹配文件夹名"
+          }
+        }
+      }
+    },
+    "Already in the list" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already in the list"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すでにリストにあります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在列表中"
+          }
+        }
+      }
+    },
     "" : {
       "shouldTranslate" : false,
       "localizations" : {

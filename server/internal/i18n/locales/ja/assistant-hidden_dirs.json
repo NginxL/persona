@@ -1,0 +1,8 @@
+{
+  "title": "非表示の Agent フォルダ",
+  "hide": "{machine} の {path} にある Agent セッションを Agents と Persona のビューから隠します（セッションは動作を続け、記録も続きます。監督中のタスクは表示されたままです）",
+  "add_off": "{machine} に非表示フォルダ {path} をオフのまま追加します（オンにするまで何も隠れません）",
+  "switch_on": "{machine} の非表示フォルダ {path} をオンにします（そのセッションは Agents と Persona のビューから外れます）",
+  "switch_off": "{machine} の非表示フォルダ {path} をオフにします（そのセッションは再び表示され、ルールは残ります）",
+  "remove": "{machine} の非表示フォルダ {path} を削除します（そのセッションは再び表示されます）"
+}

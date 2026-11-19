@@ -255,29 +255,30 @@ func sessionSpaceKey(machineID string, c proto.Session) string {
 
 // ensureTodosLoaded reads the todos from the store the first time; an error says why they can't be read.
 func (s *Service) ensureTodosLoaded(ctx context.Context) error {
-	b := &s.todos
-	b.mu.RLock()
-	if b.loaded {
-		b.mu.RUnlock()
-		return nil
-	}
-	b.mu.RUnlock()
-
-	b.mu.Lock()
-	if b.loaded {
-		b.mu.Unlock()
-		return nil
-	}
-	err := s.loadTodosLocked(ctx)
-	loaded := b.loaded
-	b.mu.Unlock()
+	loaded, err := s.loadTodoInventory(ctx)
 	if loaded {
-		// The links as read are the ones the marks go by from now on: one that goes away later syncs its machine
-		// again (syncLinkedTodoTokens), even before any of the links changed.
 		s.syncLinkedTodoTokens()
-		s.sweepSourceReports() // a todo that closed while the assistant was away still tells where it came from
+		s.sweepSourceReports()
 	}
 	return err
+}
+
+// loadTodoInventory reads durable state without publishing session lists.
+func (s *Service) loadTodoInventory(ctx context.Context) (bool, error) {
+	b := &s.todos
+	b.mu.RLock()
+	loaded := b.loaded
+	b.mu.RUnlock()
+	if loaded {
+		return false, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.loaded {
+		return false, nil
+	}
+	err := s.loadTodosLocked(ctx)
+	return b.loaded, err
 }
 
 func (s *Service) loadTodosLocked(ctx context.Context) error {

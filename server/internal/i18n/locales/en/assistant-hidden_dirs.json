@@ -1,0 +1,8 @@
+{
+  "title": "Hidden Agent folders",
+  "hide": "Hide Agent sessions in {path} on {machine} from Agents and Persona's view (they keep running and stay recorded; active supervised tasks stay visible)",
+  "add_off": "Add hidden folder {path} on {machine}, switched off (nothing is hidden until you switch it on)",
+  "switch_on": "Switch on hidden folder {path} on {machine} (its sessions leave Agents and Persona's view)",
+  "switch_off": "Switch off hidden folder {path} on {machine} (its sessions show again; the rule stays)",
+  "remove": "Delete hidden folder {path} on {machine} (its sessions show again)"
+}

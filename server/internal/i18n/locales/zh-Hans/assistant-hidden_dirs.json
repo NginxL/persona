@@ -1,0 +1,8 @@
+{
+  "title": "隐藏的 Agent 文件夹",
+  "hide": "在 {machine} 上隐藏 {path} 中的 Agent 会话，不在 Agents 和 Persona 的视图中显示（会话照常运行并继续记录；正在督办的任务仍然可见）",
+  "add_off": "在 {machine} 上添加隐藏文件夹 {path}，先保持关闭（打开前不会隐藏任何会话）",
+  "switch_on": "打开 {machine} 上的隐藏文件夹 {path}（其中的会话不再出现在 Agents 和 Persona 的视图中）",
+  "switch_off": "关闭 {machine} 上的隐藏文件夹 {path}（其中的会话重新显示，规则保留）",
+  "remove": "删除 {machine} 上的隐藏文件夹 {path}（其中的会话重新显示）"
+}

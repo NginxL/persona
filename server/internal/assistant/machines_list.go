@@ -177,7 +177,7 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 			} else {
 				count := 0
 				for _, c := range list {
-					if !c.Assistant && !c.Archived && c.State == proto.StateWorking {
+					if !c.HiddenByDirectory() && !c.Assistant && !c.Archived && c.State == proto.StateWorking {
 						count++
 					}
 				}

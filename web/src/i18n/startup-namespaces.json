@@ -273,6 +273,7 @@
   "disconnect",
   "extensions-extensionslots",
   "herdr-notice",
+  "hidden-agent-dirs.inspect",
   "home",
   "hubs",
   "lib-add-computer",

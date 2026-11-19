@@ -125,7 +125,7 @@ func (s *Service) workspaceBlock(ctx context.Context, attrs map[string]string) (
 		cancel()
 		if err == nil {
 			loc := s.location(ctx)
-			for _, ss := range workspaceSessions(list, cwd) {
+			for _, ss := range workspaceSessions(visibleDirectorySessions(list), cwd) {
 				ws := prompts.WorkspaceSession{Title: clip(oneLine(firstNonEmpty(ss.Title, path.Base(ss.Cwd))), 80), Agent: firstNonEmpty(ss.AgentLabel, ss.Agent, "claude"),
 					Status: ss.Status, ID: ss.SessionID}
 				if !ss.UpdatedAt.IsZero() {

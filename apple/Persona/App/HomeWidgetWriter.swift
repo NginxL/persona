@@ -288,6 +288,7 @@ extension AppModel {
         let look = fleetLook
         s.look = .init(name: persona.name, package: look.package)
         let sessions = scoped(allSessions)
+        let cardRow = cardSessionResolver()
         let byKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         let names = Dictionary(machines.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         let tasks = TasksStore.shared
@@ -295,7 +296,8 @@ extension AppModel {
             TabBadges.place(key, session: byKey[key], quiet: isQuiet(key), mutes: pinsStore(key.group)?.mutes)
         }
         s.agents = HomeAgents.build(
-            needsYou: AgentsNeedsYou.rows(cards: scopedInteractions, waiting: AgentsNeedsYou.waiting(sessions)),
+            // waiting sessions through the cards' projection, as the Agents badge counts them (`countBadges`)
+            needsYou: AgentsNeedsYou.rows(cards: scopedInteractions, waiting: AgentsNeedsYou.waiting(waitingRows(sessions, reading: cardRow))),
             sessions: sessions, place: place, session: { byKey[$0] }, machineName: { names[$0] },
             isTask: { tasks.task(of: $0) != nil })
         // Persona answering in one of its own conversations: the face thinks (`FleetPersona`'s `assistant`).

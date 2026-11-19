@@ -168,6 +168,8 @@ type Machine struct {
 	opened hubOpened
 	// claudeDirsMu serializes the read-modify-writes of the remembered and blocked Claude config dirs (claudedirs.go).
 	claudeDirsMu sync.Mutex
+	// hiddenDirs is the machine's hidden Agent folders, cached (agentdirs.go).
+	hiddenDirs hiddenDirsCache
 	// nodeCmd replaces the node command (tests).
 	nodeCmd func(context.Context) *exec.Cmd
 	// localNote is why the last start of a local node passed a program beside it over (localNode), said once until it

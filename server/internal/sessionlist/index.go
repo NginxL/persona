@@ -41,6 +41,8 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
+	// HiddenByDirectory remains indexed for explicit inspection, but is excluded by default.
+	HiddenByDirectory bool
 	// Assistant marks a Persona conversation, excluded from the Agents list and active Agent aggregate.
 	Assistant bool
 	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
@@ -113,6 +115,8 @@ type Options struct {
 	// NoPrivate leaves the Private items out of the rows, the totals and every count; like Manager it is the adapter's
 	// to set (who asks), not a key Parse reads, and it binds a cursor as the other filters do.
 	NoPrivate bool
+	// IncludeHidden opts into directory-hidden rows without changing the stored rules.
+	IncludeHidden bool
 	// AgentsOnly excludes assistant and health-space conversations from the filtered view.
 	AgentsOnly bool
 	// Places (place=["<machine>","<project>"], repeatable) selects the items at any of these machine and project
@@ -212,8 +216,8 @@ type journalEntry struct {
 type filters struct {
 	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource, JustFinished string
 	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
-	Places, Spaces               string
-	Roots, NoPrivate, AgentsOnly bool
+	Places, Spaces                              string
+	Roots, NoPrivate, IncludeHidden, AgentsOnly bool
 }
 
 type binding struct {
@@ -361,13 +365,17 @@ func (i *Index) ReplaceOwned(source, owner string, items []Item) {
 	}
 	for id, c := range changes {
 		if c.before != nil {
-			addCount(&i.counts, c.before.item, false, -1)
+			if !c.before.item.HiddenByDirectory {
+				addCount(&i.counts, c.before.item, false, -1)
+			}
 			if c.before.searchDocument == nil {
 				i.undecoded--
 			}
 		}
 		if c.after != nil {
-			addCount(&i.counts, c.after.item, false, 1)
+			if !c.after.item.HiddenByDirectory {
+				addCount(&i.counts, c.after.item, false, 1)
+			}
 			i.undecoded++ // a new record: its document is decoded by the first search that reads it
 		}
 		if c.after == nil {

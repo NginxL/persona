@@ -86,6 +86,9 @@ type Options struct {
 	Event func(machine, event string, params json.RawMessage) (forward bool)
 	// Detached: a machine's node connection ended (not for another one taking over): what waited on it ends.
 	Detached func(machine string)
+	// HiddenAgentDirsChanged is told after a machine's hidden Agent folders changed (agentdirs.go), outside every
+	// lock of the devices: the assistant shows the sessions again by the new rules.
+	HiddenAgentDirsChanged func(machine string)
 	// Location is the user's time zone ("today" of the token usage); nil: the machine's.
 	Location func() *time.Location
 	// PromptLanguage is the owner language for newly generated node-side prompt wrappers.
@@ -849,7 +852,7 @@ func (d *Devices) List() []Summary {
 func (d *Devices) summaryOf(m *Machine) Summary {
 	m.mu.Lock()
 	s := Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-		DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}
+		HomeReal: m.info.HomeReal, DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}
 	m.mu.Unlock()
 	s.Trust = d.machineTrust(m)
 	s.Reachable = m.reachable()
@@ -950,7 +953,9 @@ func (d *Devices) Relist(ctx context.Context, id string) error {
 // Summary is one machine for the assistant (assistantwire.Device).
 type Summary struct {
 	ID, Name, Kind, SSHHost, Home, DataDir, Trust string
-	Online, Reachable                             bool
+	// HomeReal is Home with its links followed, when the node says it is another path (proto.NodeInfo.HomeReal).
+	HomeReal          string
+	Online, Reachable bool
 }
 
 // Has reports whether id is one of the machines (an entry another one absorbed included).

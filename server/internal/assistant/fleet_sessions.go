@@ -593,6 +593,7 @@ func (s *Service) decoratedSession(machine, sid string) (proto.Session, bool) {
 	if !ok {
 		return proto.Session{}, false
 	}
+	row.SetHiddenByDirectory(s.hiddenByDirectory(machine, row))
 	one := []proto.Session{row}
 	s.foldSubset(machine, one) // what the last complete list folded it as, as for a row the node lists
 	return one[0], true
@@ -612,7 +613,9 @@ func (s *Service) listedSession(machine, sid string) (proto.Session, bool) {
 	if len(list) == 0 {
 		return proto.Session{}, false // an unreadable deletion ledger hides assistant rows rather than exposing them
 	}
-	return list[0], true
+	row = list[0]
+	row.SetHiddenByDirectory(s.hiddenByDirectory(machine, row))
+	return row, true
 }
 
 // listedSessions are the sessions machine's node lists, each as the apps get it (listedSession, for the whole list,
@@ -631,6 +634,9 @@ func (s *Service) listedSessions(ctx context.Context, machine string) ([]proto.S
 	list, err := s.archivedListed(context.Background(), m.ID, s.decorateInventory(m.ID, s.nodeSessions(m.ID), true), mark)
 	if err != nil {
 		s.logf("load agent archives: %v", err)
+	}
+	for i := range list {
+		list[i].SetHiddenByDirectory(s.hiddenByDirectory(m.ID, list[i]))
 	}
 	s.foldSubset(m.ID, list) // never stored: the fold is the complete list's, archive rows and all (foldInventory)
 	return list, nil

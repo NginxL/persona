@@ -459,6 +459,8 @@ export interface Session {
   /** An assistant conversation moved out of the list (docs/assistant/assistant.md "Managing its own conversations"), or
    *  an archived agent (docs/protocol/protocol.md "Agent session archives": only the Archived list has those). */
   archived?: boolean;
+  /** Manager-owned visibility policy; recording and direct session access remain available. */
+  hidden_by_directory?: boolean;
   /** The user-defined labels of an assistant conversation (docs/assistant/assistant.md "Conversation tags"), newest
    *  write first's provenance aside; omitted when it carries none. An older hub never sends it. */
   tags?: string[];

@@ -318,7 +318,8 @@ nonisolated struct AgentListProjection: Sendable {
     var hasSearchResults: Bool { !base.isEmpty || !tree.isEmpty }
 
     static func preparedSessions(_ input: Input) -> [Session] {
-        ChildSessions.fold(SideFold.fold(input.sessions, groups: input.settings.sideFold).listed, asks: input.asks)
+        let visible = input.sessions.filter { input.settings.listQuery.includeHidden || $0.hiddenByDirectory != true }
+        return ChildSessions.fold(SideFold.fold(visible, groups: input.settings.sideFold).listed, asks: input.asks)
     }
 
     /// The hub's paged totals for the same immutable space, with manager routing and hub scoping preserved.

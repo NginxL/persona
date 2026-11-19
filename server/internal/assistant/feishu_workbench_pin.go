@@ -139,7 +139,7 @@ func (s *Service) workbenchRefresh(ctx context.Context) {
 func (s *Service) workbenchBringCard(ctx context.Context, id string) {
 	var ix proto.Interaction
 	found := false
-	for _, p := range s.pendingInteractions() {
+	for _, p := range s.visiblePendingInteractions() {
 		if p.ID == id {
 			ix, found = p, true
 			break

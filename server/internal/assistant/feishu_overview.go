@@ -33,7 +33,7 @@ func (s *Service) tasksOverview(ctx context.Context) []overviewCard {
 	}
 
 	label("assistant-reports.decide")
-	if ixs := s.pendingInteractions(); len(ixs) > 0 {
+	if ixs := s.visiblePendingInteractions(); len(ixs) > 0 {
 		for _, ix := range ixs {
 			where := transcript.Title(ix.SessionTitle)
 			if where == "" {

@@ -240,6 +240,7 @@ kb.read              GET /api/v1/kb/{kind}/{id}
 machines.read        GET /api/v1/machines
 machines.read        GET /api/v1/machines/{id}/metrics
 machines.read        GET /api/v1/machines/{id}/usage
+-                    GET /api/v1/machines/{mid}/agent-dirs/hidden
 -                    GET /api/v1/machines/{mid}/agy-settings
 -                    GET /api/v1/machines/{mid}/botmux
 -                    GET /api/v1/machines/{mid}/browser
@@ -702,6 +703,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/launchers/{name}
 -                    PUT /api/v1/looks/current
 -                    PUT /api/v1/machines/{id}/name
+-                    PUT /api/v1/machines/{mid}/agent-dirs/hidden
 -                    PUT /api/v1/machines/{mid}/agy-settings
 -                    PUT /api/v1/machines/{mid}/botmux
 -                    PUT /api/v1/machines/{mid}/browser

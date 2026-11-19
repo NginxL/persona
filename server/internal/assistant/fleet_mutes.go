@@ -41,6 +41,9 @@ func (s *Service) loadMutes(context.Context) Pins {
 
 // muted reports whether pushes about this session are off (the agent or its space is muted).
 func (s *Service) muted(machineID, sessionID string) bool {
+	if s.directoryHiddenSession(machineID, sessionID) {
+		return true
+	}
 	space := ""
 	if sess, ok := s.nodeSession(machineID, sessionID); ok {
 		space = sess.SpaceName

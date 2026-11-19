@@ -34,30 +34,37 @@ struct AgentsListMenu: View {
     @Environment(AppModel.self) private var model
     var actions: Actions
 
-    /// Kept current by the list (`update`), read when an item is tapped.
-    @MainActor final class Actions {
-        private(set) var sections: [String] = []
-        private var foldAll: ([String]) -> Void = { _ in }
-        private var unfoldAll: () -> Void = {}
+    /// Kept current by the list (`update`), read when an item is tapped. Only `showingHidden` is observed: the menu's
+    /// reveal item names what a tap does next, and nothing else here redraws it (the menu stays out of each push's redraw).
+    @Observable @MainActor final class Actions {
+        @ObservationIgnored private(set) var sections: [String] = []
+        @ObservationIgnored private var foldAll: ([String]) -> Void = { _ in }
+        @ObservationIgnored private var unfoldAll: () -> Void = {}
         /// Not `openMonitor` / `openMachines`: a stored property's name is in the Release binary, and those are DEBUG
         /// launch arguments the release check looks for (TestFlight 50 stopped on one).
-        private var onMachines: () -> Void = {}
-        private var onTerminals: () -> Void = {}
+        @ObservationIgnored private var onMachines: () -> Void = {}
+        @ObservationIgnored private var onTerminals: () -> Void = {}
+        private(set) var showingHidden = false
+        @ObservationIgnored private var toggleHidden: () -> Void = {}
 
         /// `sections`: the fold ids of what the list shows now.
         func update(sections: [String], foldAll: @escaping ([String]) -> Void, unfoldAll: @escaping () -> Void,
-                    onMachines: @escaping () -> Void, onTerminals: @escaping () -> Void = {}) {
+                    onMachines: @escaping () -> Void, onTerminals: @escaping () -> Void = {},
+                    showingHidden: Bool = false, toggleHidden: @escaping () -> Void = {}) {
             self.sections = sections
             self.foldAll = foldAll
             self.unfoldAll = unfoldAll
             self.onMachines = onMachines
             self.onTerminals = onTerminals
+            if self.showingHidden != showingHidden { self.showingHidden = showingHidden }
+            self.toggleHidden = toggleHidden
         }
 
         func collapse() { foldAll(sections) }
         func expand() { unfoldAll() }
         func machinesPage() { onMachines() }
         func terminalsPage() { onTerminals() }
+        func toggleHiddenSessions() { toggleHidden() }
     }
 
     @StoredValue("dev.machineFilter") private var machineFilter = ""
@@ -138,6 +145,9 @@ struct AgentsListMenu: View {
                     }
                 }
             }
+            Button(actions.showingHidden ? String(localized: "Hide directory matches") : String(localized: "Show hidden sessions")) {
+                actions.toggleHiddenSessions()
+            }.lineLimit(1)
             Picker("Machines", selection: $machineFilter) {
                 Label("All Machines", systemImage: Theme.Icon.allMachines).tag("")
                 ForEach(machines.filter { m in HubFilter.matches(hubFilter, MachineRef(path: m.id).group) }) { m in

@@ -9,6 +9,7 @@ nonisolated struct SessionListQuery: Hashable, Sendable {
     /// Client-only selection of the complete collection (the view groups, filters and sorts every row itself); never
     /// sent as a made-up server filter. On a paging hub it is read as complete pages and then followed by `since`.
     var legacy = false
+    var includeHidden = false
     var state: String = ""
     var machine: String = ""
     var project: String = ""
@@ -34,6 +35,7 @@ nonisolated struct SessionListQuery: Hashable, Sendable {
                              ("manager", manager)] where !value.isEmpty {
             out[key] = value
         }
+        if includeHidden { out["include_hidden"] = "1" }
         return out
     }
 
@@ -82,6 +84,7 @@ extension APIClient {
                 return SessionListPage(sessions: try await sessions(), remove: [], hasMore: nil, nextCursor: nil, revision: nil, total: nil)
             }
             parameters = ["summary": "0", "limit": String(SessionListQuery.completePageSize)]
+            if query.includeHidden { parameters["include_hidden"] = "1" }
         }
         if let cursor { parameters["cursor"] = cursor }
         if let since { parameters["since"] = since }

@@ -439,6 +439,12 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // Its rows, seeing a task on opening it and the tray's empty line come with the tray's first opening, in the chunk of
 // the Parked rows (FinishedTaskRows.tsx through ParkedTaskRow.tsx: no lazy entry of their own), which also took
 // lib/todo-seen.ts off the first screen; on it they cost 228 B. Main had 4,653 B of room; the budget stays.
+// #8578: directory-hidden Agents and their pending cards leave the lists, counts and attention events (lib/sessions.ts
+// directoryVisible / directoryVisibleCards, lib/attention.ts) and the Agents page gets its Hidden sessions button; the
+// inspection dialog and its hint (key temporary_view, outside the startup prefix "inspect") are a chunk of its own
+// (views/HiddenAgentSessionsDialog.tsx); pending cards' sessions are looked up until each is known (lib/store.ts
+// cardSessionRow). 549 B in ja, measured in one environment against main 0c97da818c (ja 479,051 B to 479,600 B; en
+// 476,160 B to 476,701 B, zh-Hans 476,915 B to 477,472 B), 3,131 B of room. The budget stays.
 // Keep the stricter existing limit while combining these changes.
 // #10904: the overview's task cards name who works on each task, the lead Agent's computer, model and effort and "+N"
 // for the others (lib/home-tasks.ts leadAgent; views/Home.tsx taskAgentLine over the model pill's pillView, modelList and
